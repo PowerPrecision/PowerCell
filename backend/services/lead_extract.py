@@ -400,6 +400,15 @@ async def run_create_lead_from_url(
             }]
         }
 
+        # Carimbo multi-tenant (Dashboard, ponto 1) — ver `lead_crud`.
+        # Os DOIS sítios de escrita carimbam: carimbar só um deixaria as
+        # leads do outro caminho visíveis à rede de omissão para sempre.
+        from services.tenant_network import resolve_tenant_stamp
+
+        carimbo = await resolve_tenant_stamp(user)
+        if carimbo:
+            lead_dict.update(carimbo)
+
         # Inserir na base de dados
         await db.property_leads.insert_one(lead_dict)
 

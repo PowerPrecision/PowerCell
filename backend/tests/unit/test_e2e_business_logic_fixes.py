@@ -248,9 +248,13 @@ class TestBug2NotificationPrivacy:
             side_effect=AssertionError("não deve queryar admins")
         )
 
+        # O `manager` deixou de ser importado aqui: a presença passou a
+        # vir do Redis (`services/presenca.py`) e a entrega do
+        # `realtime_delivery`. Patchá-lo agora levantava AttributeError —
+        # e esse erro é informação: significa que o módulo já não fala
+        # com a memória local deste worker.
         with patch.object(rt, "send_realtime_notification", fake_send), \
-             patch.object(rt, "db", trap_db), \
-             patch.object(rt, "manager", MagicMock(broadcast=AsyncMock())):
+             patch.object(rt, "db", trap_db):
             await rt.notify_process_update(
                 process_id="proc-2",
                 action="assigned",

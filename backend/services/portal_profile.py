@@ -12,7 +12,8 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from database import db
-from services.process_status import DELETED_STATUS_VALUES
+from services.process_status import DELETED_STATUS_VALUES, LEAD_STATUS_VALUES
+from services.workflow_phases import carregar_fases
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,39 @@ PROFILE_UPDATABLE_PERSONAL_FIELDS = {
     "sexo",
 }
 
+
+
+def construir_query_de_processo_a_trancar(
+    process_ids: list, fases: list,
+) -> dict:
+    """Processo que já saiu da recolha de documentos (PACOTE CQ).
+
+    O perfil do cliente tranca quando o processo AVANÇA para além da
+    fase de recolha. A regra estava escrita à mão em DOIS sítios, com
+    `clientes_espera` e `documentacao` cravados — o primeiro é a fase
+    inicial do seed e o segundo nem existe no motor. Bastava o admin
+    renomear a fase inicial para o perfil trancar no dia em que o
+    cliente se regista.
+
+    Hoje: não tranca enquanto o processo estiver na macro-fase `novo`
+    (recolha), for uma lead, estiver perdido ou eliminado. Um processo
+    numa fase que o motor não conhece TRANCA — é o lado seguro: melhor
+    um perfil trancado a mais do que dados a serem alterados debaixo de
+    uma análise a decorrer.
+    """
+    from services.workflow_phases import nomes_por_macro
+
+    nao_tranca = (
+        list(LEAD_STATUS_VALUES)
+        + nomes_por_macro(fases, "novo")
+        + nomes_por_macro(fases, "perdido")
+        + list(DELETED_STATUS_VALUES)
+    )
+    return {
+        "id": {"$in": process_ids},
+        "is_deleted": {"$ne": True},
+        "status": {"$nin": nao_tranca},
+    }
 
 async def carregar_campos_editaveis() -> dict:
     """Campos que o Portal pode gravar, derivados do formulário interno.
@@ -294,14 +328,9 @@ async def run_get_client_profile(client_data: dict):
         # Fix: Normalize process status filters — inclui ambas as
         # variações (singular/plural) de "eliminado" e "desistência".
         active_process = await db.processes.find_one(
-            {
-                "id": {"$in": process_ids},
-                "is_deleted": {"$ne": True},
-                "status": {"$nin": [
-                    "pre_registo", None, "clientes_espera", "documentacao",
-                    "desistencia", "desistencias", "desistido",
-                ] + DELETED_STATUS_VALUES}
-            },
+            construir_query_de_processo_a_trancar(
+                process_ids, await carregar_fases(),
+            ),
             {"_id": 0, "id": 1, "is_data_confirmed": 1}
         )
         has_process = active_process is not None
@@ -405,14 +434,9 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
         # Fix: Normalize process status filters — inclui ambas as
         # variações (singular/plural) de "eliminado" e "desistência".
         active_process = await db.processes.find_one(
-            {
-                "id": {"$in": process_ids},
-                "is_deleted": {"$ne": True},
-                "status": {"$nin": [
-                    "pre_registo", None, "clientes_espera", "documentacao",
-                    "desistencia", "desistencias", "desistido",
-                ] + DELETED_STATUS_VALUES}
-            },
+            construir_query_de_processo_a_trancar(
+                process_ids, await carregar_fases(),
+            ),
             {"_id": 0, "id": 1}
         )
         if active_process:

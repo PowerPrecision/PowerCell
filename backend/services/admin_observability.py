@@ -638,7 +638,10 @@ async def run_get_team_performance(user: dict, start_date: Optional[str] = None,
     if start_dt >= end_dt:
         raise HTTPException(status_code=422, detail="start_date deve ser anterior a end_date")
 
-    report = await generate_weekly_team_report(db, period_start=start_dt, period_end=end_dt)
+    # `user=` restringe o relatório à rede de quem pede (Dashboard, ponto 1).
+    report = await generate_weekly_team_report(
+        db, period_start=start_dt, period_end=end_dt, user=user,
+    )
 
     return {
         "period_start": report["period_start"],

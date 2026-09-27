@@ -177,12 +177,12 @@ const ProcessDetailsModal = memo(({
       valor_avaliacao: crData.valuation_value || crData.valor_avaliacao || '',
       status: process.status || '',
       prioridade: process.prioridade || process.priority || 'media',
-      notes: (() => {
-        const lastObs = Array.isArray(process.observation_notes)
-          ? process.observation_notes[process.observation_notes.length - 1]
-          : null;
-        return process.notes || lastObs?.text || process.observations || '';
-      })(),
+      // Ponto 14: este campo edita o ESCALAR `notes`. Pré-preenchê-lo
+      // com a última nota do FEED (`observation_notes`) fazia com que
+      // mexer noutro campo qualquer e gravar copiasse a nota de outra
+      // pessoa para aqui — sem autor e sem data. O feed lê-se no Resumo,
+      // não se edita por baixo da mesa.
+      notes: process.notes || process.observations || '',
     };
     setEditProcess(processState);
     originalProcessRef.current = processState;

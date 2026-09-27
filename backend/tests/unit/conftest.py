@@ -127,6 +127,23 @@ class FakeAsyncCollection:
         current[parts[-1]] = value
 
     @staticmethod
+    def _igual(value, expected) -> bool:
+        """Igualdade com a semântica do Mongo sobre ARRAYS.
+
+        No Mongo, ``{"campo": x}`` casa quando o campo É ``x`` **ou** quando
+        é um array que CONTÉM ``x``. O fake comparava só por identidade, pelo
+        que `{"assigned_consultor_ids": "u1"}` não casava com
+        `["u1", "u2"]` — o oposto do servidor real. Um teste sobre uma query
+        de atribuição (que são todas sobre arrays) provava assim o contrário
+        do que se passa em produção.
+        """
+        if value == expected:
+            return True
+        if isinstance(value, (list, tuple)) and not isinstance(expected, (list, tuple)):
+            return expected in value
+        return False
+
+    @staticmethod
     def _matches(doc: dict, query: dict) -> bool:
         """Matcher: igualdade, ``$ne``, ``$in``, ``$regex``, ``$exists``,
         ``$or``/``$and`` recursivos (PACOTE 8 — os filtros do Webmail usam
@@ -150,16 +167,22 @@ class FakeAsyncCollection:
                 matched_operator = False
                 if "$ne" in expected:
                     matched_operator = True
-                    if value == expected["$ne"]:
+                    if FakeAsyncCollection._igual(value, expected["$ne"]):
                         return False
                 if "$in" in expected:
                     matched_operator = True
-                    if value not in expected["$in"]:
+                    if not any(
+                        FakeAsyncCollection._igual(value, alvo)
+                        for alvo in expected["$in"]
+                    ):
                         return False
                 # PACOTE 11 — $nin (queries como {"logo_url": {"$nin": [None, ""]}})
                 if "$nin" in expected:
                     matched_operator = True
-                    if value in expected["$nin"]:
+                    if any(
+                        FakeAsyncCollection._igual(value, alvo)
+                        for alvo in expected["$nin"]
+                    ):
                         return False
                 if "$exists" in expected:
                     matched_operator = True
@@ -197,9 +220,9 @@ class FakeAsyncCollection:
                             return False
                     except re.error:
                         return False
-                if not matched_operator and value != expected:
+                if not matched_operator and not FakeAsyncCollection._igual(value, expected):
                     return False
-            elif value != expected:
+            elif not FakeAsyncCollection._igual(value, expected):
                 return False
         return True
 
@@ -319,6 +342,128 @@ class FakeAsyncCollection:
     async def count_documents(self, query: dict) -> int:
         return sum(1 for doc in self.docs if self._matches(doc, query))
 
+    @classmethod
+    def _avaliar(cls, expressao, doc: dict):
+        """Avalia uma expressão de agregação sobre um documento.
+
+        SUPORTE MÍNIMO E DELIBERADO: `$switch`, `$in`, `$ifNull`,
+        `$literal` e caminhos `"$campo"` / `"$a.b"`.
+
+        Acrescentado para o BI por macro-fase (Dashboard, Camada 2). A
+        ponte `status -> macro_fase` é um `$switch` construído pelo
+        resolvedor, e é ELA que faz os processos gravados como `cpcv` ou
+        `"Concluidos "` contarem na macro certa. Testar isso contra um
+        ciclo em Python provava o ciclo, não o pipeline que corre em
+        produção — e era exactamente o defeito que se quer apanhar.
+
+        O que não está aqui não é suportado de propósito: um `$facet` ou um
+        `$bucket` meio-implementados dariam confiança falsa. Os pipelines
+        que os usam são construtores PUROS, afirmados pela forma.
+        """
+        if isinstance(expressao, str) and expressao.startswith("$"):
+            return cls._lookup_path(doc, expressao[1:])
+        if not isinstance(expressao, dict):
+            return expressao
+
+        if "$literal" in expressao:
+            return expressao["$literal"]
+        if "$ifNull" in expressao:
+            valor, alternativa = expressao["$ifNull"]
+            lido = cls._avaliar(valor, doc)
+            return cls._avaliar(alternativa, doc) if lido is None else lido
+        if "$in" in expressao:
+            alvo, conjunto = expressao["$in"]
+            return cls._avaliar(alvo, doc) in cls._avaliar(conjunto, doc)
+        if "$switch" in expressao:
+            spec = expressao["$switch"]
+            for ramo in spec.get("branches", []):
+                if cls._avaliar(ramo.get("case"), doc):
+                    return cls._avaliar(ramo.get("then"), doc)
+            return cls._avaliar(spec.get("default"), doc)
+        return expressao
+
+    def aggregate(self, pipeline: list, **kwargs):
+        """Pipeline mínimo: `$match`, `$project` e `$group` com `$sum`.
+
+        Acrescentado para a contagem de utilizadores por empresa (ponto
+        11), que mata um N+1 com uma agregação. Testar isso contra um
+        ciclo em Python provaria outra coisa que não o que corre em
+        produção. Cresceu no Dashboard (Camada 2) com o `$project` e as
+        expressões que a ponte de macro-fases usa — ver `_avaliar`.
+
+        `**kwargs` absorve o `allowDiskUse` e afins: são opções do motor
+        real que não têm significado aqui, e rejeitá-las fazia um teste
+        falhar por causa de uma opção de desempenho.
+        """
+        docs = [dict(d) for d in self.docs]
+        grupos = None
+
+        for etapa in pipeline or []:
+            if "$match" in etapa:
+                docs = [d for d in docs if self._matches(d, etapa["$match"])]
+            elif "$project" in etapa:
+                spec = etapa["$project"]
+                projectados = []
+                for doc in docs:
+                    saida = {}
+                    if spec.get("_id", 1):
+                        saida["_id"] = doc.get("_id")
+                    for nome, expressao in spec.items():
+                        if nome == "_id":
+                            continue
+                        if expressao in (1, True):
+                            saida[nome] = doc.get(nome)
+                        else:
+                            saida[nome] = self._avaliar(expressao, doc)
+                    projectados.append(saida)
+                docs = projectados
+            elif "$group" in etapa:
+                spec = etapa["$group"]
+                chave_spec = spec.get("_id")
+                grupos = {}
+                for doc in docs:
+                    if isinstance(chave_spec, dict):
+                        chave = {
+                            nome: doc.get(str(campo).lstrip("$"))
+                            for nome, campo in chave_spec.items()
+                        }
+                        assinatura = tuple(sorted(chave.items(), key=lambda kv: kv[0]))
+                    else:
+                        chave = doc.get(str(chave_spec).lstrip("$")) if chave_spec else None
+                        assinatura = chave
+                    linha = grupos.setdefault(assinatura, {"_id": chave})
+                    for nome, acumulador in spec.items():
+                        if nome == "_id" or not isinstance(acumulador, dict):
+                            continue
+                        if "$sum" in acumulador:
+                            incremento = acumulador["$sum"]
+                            if isinstance(incremento, str):
+                                incremento = doc.get(incremento.lstrip("$"), 0) or 0
+                            linha[nome] = linha.get(nome, 0) + incremento
+                docs = list(grupos.values())
+
+        return FakeAsyncCursor(docs, None)
+
+    async def distinct(self, key: str, query: dict = None):
+        """Valores distintos de um campo, achatando listas como o Mongo.
+
+        Acrescentado para o catálogo de etiquetas (ponto 15): a alternativa
+        era ler a colecção inteira em Python, que em produção seria outra
+        coisa da que o teste prova.
+        """
+        vistos = []
+        for doc in self.docs:
+            if query and not self._matches(doc, query):
+                continue
+            valor = doc.get(key)
+            if valor is None:
+                continue
+            candidatos = valor if isinstance(valor, list) else [valor]
+            for item in candidatos:
+                if item not in vistos:
+                    vistos.append(item)
+        return vistos
+
     def find(self, query: dict, projection: dict = None):
         """Cursor com sort/skip/limit/to_list (PACOTE 8) — matcher igualdade/$ne/$in."""
         matched = [dict(doc) for doc in self.docs if self._matches(doc, query)]
@@ -368,3 +513,24 @@ def fake_async_db() -> FakeAsyncDatabase:
         stored = await fake_async_db.minha_colecao.find_one({...})
     """
     return FakeAsyncDatabase()
+
+
+@pytest.fixture(autouse=True)
+def _limpar_cache_de_fases():
+    """Esquece as fases do workflow antes e depois de CADA teste.
+
+    O `workflow_phases.carregar_fases` guarda as fases 30s num cache
+    local ao processo. Sem esta limpeza, um teste que patche o `db` com
+    um `fake_async_db` herdava as fases do teste anterior — e o
+    resultado passava a depender da ORDEM em que o pytest recolhe os
+    ficheiros. É a mesma armadilha do `from database import db` ao nível
+    do módulo (ver AGENTS.md): verde isolado, vermelho na suite.
+
+    Autouse de propósito: quem escrever um teste novo não tem de saber
+    que a cache existe.
+    """
+    from services.workflow_phases import invalidar_cache_de_fases
+
+    invalidar_cache_de_fases()
+    yield
+    invalidar_cache_de_fases()

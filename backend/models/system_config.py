@@ -203,6 +203,31 @@ class DSTIConfig(BaseModel):
     critical_risk_threshold: float = 50.0
 
 
+class DashboardSlaConfig(BaseModel):
+    """Limiares de SLA por macro-fase, em DIAS.
+
+    ZERO HARDCODING: nenhum limiar de "está atrasado" vive no código dos
+    endpoints de BI. Quantos dias um processo pode ficar em Análise antes
+    de ser um gargalo é uma decisão de negócio que muda com o mercado, e
+    um número cravado obrigava a um deploy para a mudar.
+
+    As macro-fases TERMINAIS (`concluido`, `perdido`) não têm limiar de
+    propósito: um processo concluído não demora em concluído, fica lá. Ver
+    `services/process_phase_clock.MACROS_SEM_PERMANENCIA`.
+
+    A configuração é por EMPRESA (o `SystemConfig` já o é), o que resolve
+    metade da comparação entre redes: a Domus pode ter SLAs diferentes da
+    Power sem que "está atrasado" signifique coisas diferentes no mesmo
+    gráfico.
+    """
+
+    enabled: bool = True
+    # Dias até um processo nesta macro-fase contar como atrasado.
+    novo: int = 7
+    analise: int = 15
+    aprovado: int = 30
+
+
 class FinancialSimulatorConfig(BaseModel):
     """Motor de Simulação Financeira Automatizada (DSTI & Cenários).
 
@@ -377,6 +402,7 @@ class SystemConfig(BaseModel):
     document_recipients: DocumentRecipientsConfig = DocumentRecipientsConfig()
     dsti_analysis: DSTIConfig = DSTIConfig()
     financial_simulator: FinancialSimulatorConfig = FinancialSimulatorConfig()
+    dashboard_slas: DashboardSlaConfig = DashboardSlaConfig()
     auto_draft: AutoDraftConfig = AutoDraftConfig()
     audit_trail: AuditTrailConfig = AuditTrailConfig()
     system_smtp: SystemSMTPConfig = SystemSMTPConfig()

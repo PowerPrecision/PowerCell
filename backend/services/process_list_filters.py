@@ -26,6 +26,7 @@ from utils.search_filters import (
     create_accent_insensitive_regex,
     build_multiword_search_filter,
 )
+from services.process_labels import build_labels_condition
 
 
 def normalize_id_for_match(value: Any) -> Optional[str]:
@@ -389,13 +390,39 @@ def build_company_scope_condition(company_id: Optional[str]) -> Optional[dict]:
     ]}
 
 
+def _arquivadas(terminais: Optional[list[str]] = None) -> list[str]:
+    """Fases de ARQUIVO: terminadas, mas não eliminadas.
+
+    O `eliminado` é um soft-delete gerido pela flag `is_deleted`, não uma
+    fase do workflow — e o histórico ("Concluídos e Desistências") nunca
+    o quis lá dentro. Derivar em vez de manter uma segunda lista evita
+    que as duas divirjam quando o admin fecha uma fase nova.
+    """
+    if not terminais:
+        return ARCHIVED_STATUSES
+    eliminados = set(DELETED_STATUS_VALUES)
+    return [n for n in terminais if n not in eliminados]
+
+
 def build_view_mode_status_conditions(
     *,
     status: Optional[str],
     view_mode: Optional[str],
+    terminais: Optional[list[str]] = None,
 ) -> list[dict]:
     """
     Filtros de view_mode + status explícito (exceto eliminado/eliminados).
+
+    ``terminais`` vem do MOTOR (`workflow_phases.nomes_terminais`), que
+    é quem sabe que fases estão fechadas — a flag `is_active` da fase,
+    não uma lista cravada. Sem ele mantém-se `INACTIVE_STATUSES`, que
+    deixou de ser a definição de terminal e passou a ser o RESÍDUO
+    legado (`perdido`/`cancelado`/`arquivo`, que existem em dados reais
+    e não são fases).
+
+    Injecção e não `async`: estas funções são PURAS e é isso que as
+    torna testáveis sem Mongo no `backend-fast`. Quem resolve as fases é
+    o chamador, que já é assíncrono.
 
     Fix: Normalize process status filters to handle legacy singular and
     plural values. Um filtro de status explícito (ex.: status="concluidos")
@@ -406,13 +433,15 @@ def build_view_mode_status_conditions(
     """
     conditions: list[dict] = []
     is_deleted_status = status in DELETED_STATUS_VALUES
+    fechadas = list(terminais) if terminais else INACTIVE_STATUSES
+    arquivadas = _arquivadas(terminais)
 
     if is_deleted_status:
         pass
     elif view_mode == "active_only":
-        conditions.append({"status": {"$nin": INACTIVE_STATUSES}})
+        conditions.append({"status": {"$nin": fechadas}})
     elif view_mode == "historical":
-        conditions.append({"status": {"$in": ARCHIVED_STATUSES}})
+        conditions.append({"status": {"$in": arquivadas}})
 
     if status and not is_deleted_status:
         conditions.append({"status": {"$in": expand_status_values(status)}})
@@ -483,7 +512,10 @@ def build_process_list_query(
     assigned_user_ids: Optional[Union[str, Sequence[str]]] = None,
     assigned_logic: Optional[str] = "OR",
     process_type: Optional[str] = None,
+    labels: Optional[Union[str, Sequence[str]]] = None,
+    labels_logic: Optional[str] = "OR",
     tenant_condition: Optional[dict] = None,
+    terminais: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """
     Query MongoDB completa para listagens de processos.
@@ -540,7 +572,9 @@ def build_process_list_query(
             if company_cond:
                 and_conditions.append(company_cond)
     and_conditions.extend(
-        build_view_mode_status_conditions(status=status, view_mode=view_mode)
+        build_view_mode_status_conditions(
+            status=status, view_mode=view_mode, terminais=terminais,
+        )
     )
     and_conditions.extend(build_is_indexed_conditions(is_indexed))
 
@@ -555,6 +589,14 @@ def build_process_list_query(
     type_cond = build_process_type_condition(process_type)
     if type_cond:
         and_conditions.append(type_cond)
+
+    # Etiquetas (ponto 15). Junta-se em $and como todos os outros: um
+    # filtro novo nunca pode anular o isolamento de rede que entrou
+    # primeiro. `None` = não filtrar — um ramo sempre presente esconderia
+    # os processos sem etiqueta nenhuma, que são a maioria.
+    labels_cond = build_labels_condition(labels, labels_logic)
+    if labels_cond:
+        and_conditions.append(labels_cond)
 
     search_cond = build_process_search_condition(search, mode=search_mode)
     if search_cond:
@@ -696,6 +738,7 @@ def build_kanban_view_mode_filter(
     view_mode: Optional[str] = "all",
     completed_days: Optional[int] = 30,
     now: Optional[Any] = None,
+    terminais: Optional[list[str]] = None,
 ) -> Optional[dict]:
     """
     Filtro de view_mode do Kanban.
@@ -703,9 +746,23 @@ def build_kanban_view_mode_filter(
     - active_only: exclui concluídos/desistências
     - all + completed_days > 0: activos OU inactivos recentes
     - all + completed_days == 0: sem filtro extra
+
+    ``terminais`` vem do MOTOR (`workflow_phases.nomes_terminais`), que
+    é quem sabe que fases estão fechadas — a flag `is_active` da fase,
+    não uma lista cravada. Sem ele mantém-se `INACTIVE_STATUSES`, que
+    deixou de ser a definição de terminal e passou a ser o RESÍDUO
+    legado (`perdido`/`cancelado`/`arquivo`, que existem em dados reais
+    e não são fases).
+
+    Injecção e não `async`: estas funções são PURAS e é isso que as
+    torna testáveis sem Mongo no `backend-fast`. Quem resolve as fases é
+    o chamador, que já é assíncrono.
     """
+    fechadas = list(terminais) if terminais else INACTIVE_STATUSES
+    arquivadas = _arquivadas(terminais)
+
     if view_mode == "active_only":
-        return {"status": {"$nin": INACTIVE_STATUSES}}
+        return {"status": {"$nin": fechadas}}
 
     if completed_days and completed_days > 0:
         from datetime import datetime, timezone, timedelta
@@ -713,10 +770,10 @@ def build_kanban_view_mode_filter(
         cutoff_date = (ref - timedelta(days=completed_days)).isoformat()
         return {
             "$or": [
-                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"status": {"$nin": fechadas}},
                 {
                     "$and": [
-                        {"status": {"$in": ARCHIVED_STATUSES}},
+                        {"status": {"$in": arquivadas}},
                         {"updated_at": {"$gte": cutoff_date}},
                     ]
                 },
@@ -736,9 +793,22 @@ def build_kanban_query(
     parceiro_id: Optional[str] = None,
     view_mode: Optional[str] = "all",
     completed_days: Optional[int] = 30,
+    labels: Optional[Union[str, Sequence[str]]] = None,
+    labels_logic: Optional[str] = "OR",
+    tenant_condition: Optional[dict] = None,
+    terminais: Optional[list[str]] = None,
 ) -> dict:
-    """Query MongoDB completa para o board Kanban."""
+    """Query MongoDB completa para o board Kanban.
+
+    ``tenant_condition`` é o isolamento por Rede (Lote 5, ponto 1). Este
+    construtor é SEPARADO do das listagens e por isso ficou de fora do
+    Lote 4 — um utilizador de uma empresa isolada não via processos na
+    lista e via-os todos aqui. Vem sempre de `services/tenant_network.py`.
+    """
     query = build_kanban_role_base_query(user, role, show_all=show_all)
+
+    if tenant_condition:
+        query = merge_query_and(query, tenant_condition)
 
     assignee_filters = build_kanban_assignee_filters(
         consultor_id=consultor_id,
@@ -754,9 +824,17 @@ def build_kanban_query(
 
     view_filter = build_kanban_view_mode_filter(
         view_mode=view_mode, completed_days=completed_days,
+        terminais=terminais,
     )
     if view_filter:
         query = merge_query_and(query, view_filter)
+
+    # Etiquetas (ponto 15). O quadro tem construtor SEPARADO — foi assim
+    # que ficou de fora do isolamento do Lote 4 e do Lote 5 ponto 1.
+    # Inventariar os sítios que LISTAM, não só a condição.
+    labels_cond = build_labels_condition(labels, labels_logic)
+    if labels_cond:
+        query = merge_query_and(query, labels_cond)
 
     # Pré-registo sempre excluído do Kanban (todos os roles)
     query = merge_query_and(query, {"status": {"$nin": LEAD_STATUS_VALUES}})
@@ -790,6 +868,7 @@ def build_my_clients_process_query(
     user_id: str,
     user_email: str,
     role: str,
+    terminais: Optional[list[str]] = None,
 ) -> dict:
     """
     Query de processos para GET /processes/my-clients.
@@ -799,6 +878,8 @@ def build_my_clients_process_query(
     + status activo). Pré-registo é sempre excluído nesta vista.
     Admin / CEO / Indexação devolvem query vazia (sem carteira).
     """
+    fechadas = list(terminais) if terminais else INACTIVE_STATUSES
+
     if not role_has_client_portfolio(role):
         return EMPTY_PORTFOLIO_QUERY
 
@@ -814,7 +895,7 @@ def build_my_clients_process_query(
                     {"assigned_consultor_id": user_id},
                 ]},
                 {"is_active": {"$ne": False}},
-                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"status": {"$nin": fechadas}},
                 {"is_deleted": {"$ne": True}},
             ]
         }
@@ -827,7 +908,7 @@ def build_my_clients_process_query(
                     {"created_by": user_email},
                 ]},
                 {"is_active": {"$ne": False}},
-                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"status": {"$nin": fechadas}},
                 {"is_deleted": {"$ne": True}},
             ]
         }

@@ -231,3 +231,38 @@ async def marcar_reatribuidas(process_id: str, *, atribuidos: set[str]) -> int:
             process_id, exc,
         )
         return 0
+
+
+@dataclass(frozen=True)
+class DiffDeResponsaveis:
+    """Quem entrou e quem saiu de uma tarefa."""
+
+    entraram: list[str]
+    sairam: list[str]
+
+    @property
+    def mudou(self) -> bool:
+        return bool(self.entraram or self.sairam)
+
+
+def diff_de_responsaveis(*, antes: Any, depois: Any) -> DiffDeResponsaveis:
+    """Diferença entre os responsáveis de uma tarefa (ponto 10).
+
+    Normaliza os DOIS lados antes de comparar. `run_update_task` fazia
+    `set(task_data.assigned_to) - set(task.get("assigned_to", []))` e
+    `set("u1")` em Python é `{'u', '1'}` — itera os CARACTERES. O ponto
+    12 do Lote 4 documentou que o motor de automação gravava escalares e
+    acrescentou a normalização à LEITURA; este caminho ficou de fora, e
+    reatribuir uma tarefa de automação notificava letras.
+
+    A ordem é a de entrada (não a de um `set`), para que a mensagem ao
+    utilizador e o registo no histórico saiam sempre iguais.
+    """
+    lista_antes = normalizar_assigned_to(antes)
+    lista_depois = normalizar_assigned_to(depois)
+    conjunto_antes = set(lista_antes)
+    conjunto_depois = set(lista_depois)
+    return DiffDeResponsaveis(
+        entraram=[u for u in lista_depois if u not in conjunto_antes],
+        sairam=[u for u in lista_antes if u not in conjunto_depois],
+    )

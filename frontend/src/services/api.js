@@ -50,6 +50,7 @@ import {
   isSessionInvalid,
 } from "./sessionExpiry";
 import { BACKEND_URL as RESOLVED_BACKEND_URL } from "../utils/apiBaseUrl";
+import { normalizarCabecalhosDeFormData } from "../utils/formDataTransport";
 
 // ====================================================================
 // CONFIGURAÇÃO
@@ -64,6 +65,11 @@ const api = axios.create({
   baseURL: API_URL,
   timeout: 90000, // 90 segundos - aumentado para operações longas como sincronização de email
   headers: {
+    // ATENÇÃO: esta predefinição aplica-se TAMBÉM aos pedidos com FormData,
+    // e nesse caso o `transformRequest` do Axios converte o FormData em
+    // JSON — o ficheiro vira `{}` e o servidor devolve 422. É por isso que
+    // o interceptor abaixo anula este cabeçalho quando o corpo é FormData.
+    // Ver `utils/formDataTransport.js`.
     "Content-Type": "application/json",
   },
 });
@@ -154,6 +160,12 @@ api.interceptors.request.use(
     if (isSessionInvalid()) {
       return Promise.reject(new axios.CanceledError("Session expired"));
     }
+
+    // FormData: anular o `Content-Type` para o browser gerar o `boundary`.
+    // Omitir NÃO chega — a predefinição da instância é `application/json` e
+    // o Axios converteria o FormData em JSON. Ponto único de propósito:
+    // três funções tinham este defeito e nenhuma parecia errada.
+    normalizarCabecalhosDeFormData(config);
 
     // Adicionar token de autenticação se existir
     const token = localStorage.getItem("token");
@@ -560,6 +572,13 @@ export const isAuthenticated = () => {
 
 // Processes
 export const getProcesses = (params = {}) => api.get("/processes", { params });
+
+/**
+ * Catálogo de etiquetas em uso (ponto 15) — alimenta o `datalist` do
+ * editor e o filtro das listagens. O âmbito de rede é aplicado no
+ * servidor: uma lista de etiquetas sem isolamento seria uma fuga nova.
+ */
+export const getProcessLabels = () => api.get("/processes/labels");
 export const getMyProcesses = (params = {}) => api.get("/processes/me", { params });
 export const getProcessesPaginated = (params = {}) => api.get("/processes/paginated", { params });
 export const getProcess = (id) => api.get(`/processes/${id}`);
@@ -567,6 +586,17 @@ export const createProcess = (data) => api.post("/processes", data);
 export const searchClients = (q, limit = 10) => api.get("/clients/search", { params: { q, limit } });
 export const createClientProcess = (data) => api.post("/processes/create-client", data);
 export const updateProcess = (id, data) => api.put(`/processes/${id}`, data);
+/**
+ * Ponto 17 — vizinhos de um processo na listagem de origem (Camada 3).
+ *
+ * Só é chamado na FRONTEIRA da página: dentro da página aberta o
+ * contexto que veio da listagem já responde sem pedido nenhum.
+ * `params` é um `URLSearchParams` e vai INTACTO — um
+ * `Object.fromEntries` perderia as chaves repetidas (`labels`), e a
+ * vizinhança passaria a ser calculada sobre outro filtro, em silêncio.
+ */
+export const getProcessNeighbours = (id, params) =>
+  api.get(`/processes/${id}/neighbours`, { params });
 export const assignProcess = (id, {
   consultorIds,
   mediadorIds,
@@ -594,7 +624,23 @@ export const assignProcess = (id, {
   }
   return api.post(`/processes/${id}/assign`, null, { params });
 };
-export const getKanbanBoard = () => api.get("/processes/kanban");
+/**
+ * Quadro Kanban.
+ *
+ * Passa pelo cliente Axios de propósito: o interceptor injecta
+ * `X-Company-Id` e `X-Active-Role`, sem os quais o backend responde
+ * sobre o papel BASE do utilizador e não sobre o perfil ACTIVO. Três
+ * `fetch` crus chamavam este endpoint — quinta instância do incidente
+ * de 2026-09-21. Guarda: `components/kanbanTransport.test.js`.
+ *
+ * @param {URLSearchParams|object} [params] — filtros do quadro.
+ */
+export const getKanbanBoard = (params) =>
+  // `URLSearchParams` segue INTACTO: o Axios serializa-o como está. Um
+  // `Object.fromEntries` aqui perdia as chaves repetidas — e `labels`
+  // é enviado uma vez por etiqueta, pelo que o filtro do ponto 15
+  // passaria a ver só a última.
+  api.get("/processes/kanban", { params });
 export const moveProcessKanban = (processId, newStatus) => 
   api.put(`/processes/kanban/${processId}/move`, null, {
     params: { new_status: newStatus }
@@ -679,6 +725,25 @@ export const setPrimaryEmailAccount = (accountId) =>
 export const getStats = () => api.get("/stats");
 export const getCommunicationsFeed = () => api.get("/stats/communications");
 
+/**
+ * BI por macro-fase (Dashboard, Camada 2).
+ *
+ * TUDO POR AXIOS, ZERO `fetch`. O `StatisticsPage` chamava `/stats/leads` e
+ * `/stats/conversion` com `fetch` cru, e um `fetch` cru não leva o
+ * `X-Active-Role` que o interceptor injecta — o `resolve_capability` do
+ * servidor decidia a permissão pelo papel do JWT em vez do PERFIL ACTIVO.
+ * É a quinta instância do incidente de 2026-09-21, agora numa página de
+ * estatísticas. Ver `FRONTEND_GUIDELINES` § 37.
+ *
+ * Estes quatro substituem a agregação que a página fazia no browser sobre
+ * os 12.450 processos crus.
+ */
+export const getStatsFunil = (params = {}) => api.get("/stats/funil", { params });
+export const getStatsSla = () => api.get("/stats/sla");
+export const getStatsRedes = () => api.get("/stats/redes");
+export const getStatsLeads = () => api.get("/stats/leads");
+export const getStatsConversion = () => api.get("/stats/conversion");
+
 // Team Performance (Admin/CEO) — desempenho da equipa por período
 export const getTeamPerformance = (params = {}) => api.get("/admin/team-performance", { params });
 
@@ -744,8 +809,10 @@ export const getProcessS3Files = (processId) =>
   api.get(`/documents/client/${processId}/files`, { skipErrorToast: true });
 export const uploadProcessS3File = (processId, formData) =>
   api.post(`/documents/client/${processId}/upload`, formData, {
-    // Content-Type deliberadamente ausente: o Axios tem de o gerar com o
-    // `boundary` do FormData. Escrevê-lo à mão parte o multipart.
+    // O `Content-Type` é tratado pelo interceptor (`formDataTransport`):
+    // omiti-lo aqui NÃO bastava, porque a predefinição da instância é
+    // `application/json` e o Axios convertia o FormData em JSON — era esta
+    // a origem do 422 `Field required` em `file` e `category`.
     skipErrorToast: true,
   });
 export const deleteProcessS3File = (processId, filePath) =>
@@ -762,6 +829,39 @@ export const bulkDownloadS3Files = (payload) =>
     responseType: "blob",
     skipErrorToast: true,
   });
+
+// ── Explorador global de ficheiros (`/ficheiros`) ──
+// Reaberto ao staff no Épico 10, com isolamento por rede decidido no
+// servidor (`services/s3_explorer_scope.py`). Passou a falar por Axios: um
+// `fetch` cru perde o `X-Company-Id` / `X-Active-Role` (incidente de
+// 2026-09-21), e num endpoint cujo resultado depende do contexto isso
+// deixou de ser um detalhe.
+//
+// `skipErrorToast` nas seis: a página mostra o erro LOCALIZADO (403 sem
+// permissões, 404 pasta fora do âmbito, 503 S3 por configurar), e um toast
+// global por cima seria a mesma informação duas vezes, a segunda sem
+// contexto.
+export const getS3FolderContents = (folderPath) =>
+  api.get("/admin/s3-folder-contents", {
+    params: { folder_path: folderPath || "" },
+    skipErrorToast: true,
+  });
+export const uploadS3ExplorerFile = (formData) =>
+  // Sem `Content-Type`: o interceptor anula-o para o browser gerar o
+  // `boundary` (ver `utils/formDataTransport.js`).
+  api.post("/admin/s3-upload", formData, { skipErrorToast: true });
+export const downloadS3ExplorerFile = (path) =>
+  api.get("/admin/s3-download", {
+    params: { path },
+    responseType: "blob",
+    skipErrorToast: true,
+  });
+export const renameS3ExplorerEntry = (payload) =>
+  api.post("/admin/s3-rename", payload, { skipErrorToast: true });
+export const deleteS3ExplorerEntry = (payload) =>
+  api.post("/admin/s3-delete", payload, { skipErrorToast: true });
+export const createS3ExplorerFolder = (payload) =>
+  api.post("/admin/s3-create-folder", payload, { skipErrorToast: true });
 
 // ── Proxy de conteúdo (é o que evita o CORS do S3) ──
 // NUNCA substituir por um URL pré-assinado do bucket: o download directo
@@ -864,7 +964,10 @@ export const uploadVoiceNote = (processId, file, onProgress) => {
   const formData = new FormData();
   formData.append("file", file);
   return api.post(`/processes/${processId}/voice-notes`, formData, {
-    headers: { "Content-Type": "multipart/form-data" },
+    // Sem `Content-Type` à mão: o interceptor anula-o e o browser gera o
+    // `boundary`. Escrever "multipart/form-data" sem boundary só funcionava
+    // porque o Axios o limpava lá dentro — depender disso é depender de um
+    // pormenor interno da biblioteca.
     onUploadProgress: (evento) => {
       if (!onProgress || !evento.total) return;
       onProgress(Math.round((evento.loaded * 100) / evento.total));
@@ -877,11 +980,10 @@ export const getVoiceNotes = (processId) =>
 // S3 Document Storage (Current)
 export const getClientS3Files = (processId) => 
   api.get(`/documents/client/${processId}/files`);
-export const uploadClientS3File = (processId, formData, onProgress) => 
-  api.post(`/documents/client/${processId}/upload`, formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-    onUploadProgress: onProgress
-  });
+// `uploadClientS3File` foi REMOVIDA: duplicava `uploadProcessS3File` para o
+// mesmo endpoint, não tinha um único chamador (nem na história do
+// repositório) e escrevia o `Content-Type` à mão. Uma segunda porta para o
+// mesmo sítio é onde o defeito seguinte se instala sem ser visto.
 export const deleteClientS3File = (processId, filePath) => 
   api.delete(`/documents/client/${processId}/file`, { params: { file_path: filePath } });
 export const getS3DownloadUrl = (processId, filePath) => 
@@ -952,6 +1054,17 @@ export const getAdminUsers = (role, { forAssignment } = {}) =>
 /** Lista completa para a Tab Utilizadores da Administração (Pacote EB).
  *  Sem `for_assignment` — inclui admin, indexação e inativos. */
 export const getAllAdminUsers = () => api.get("/admin/users");
+
+/**
+ * Painel de administração: utilizadores paginados, com pesquisa
+ * server-side por nome, email ou empresa (ponto 11).
+ *
+ * Endpoint SEPARADO de `/admin/users` de propósito — esse serve também
+ * as dropdowns de atribuição, que precisam da lista inteira. Paginar o
+ * partilhado partia-as em silêncio.
+ */
+export const getAdminUsersPaginated = (params = {}) =>
+  api.get("/admin/users/paginated", { params });
 export const createAdminUser = (data) => api.post("/admin/users", data);
 export const updateAdminUser = (id, data) => api.put(`/admin/users/${id}`, data);
 export const deleteAdminUser = (id) => api.delete(`/admin/users/${id}`);
@@ -1003,9 +1116,85 @@ export const deleteAutoDraft = (draftId) => api.delete(`/emails/drafts/${draftId
 export const createAutoDraft = (processId, docType) =>
   api.post("/emails/drafts/create", { process_id: processId, doc_type: docType });
 
-// Webmail Stats (per-user, isolated). Pass box='personal' to filter personal emails only.
-export const getWebmailStats = (box) =>
-  api.get("/emails/webmail-stats", { params: box ? { box } : {} });
+// ====================================================================
+// WEBMAIL (Ponto 8, Fase 2) — TUDO pelo Axios, zero `fetch` cru
+// ====================================================================
+//
+// O `WebmailPage` tinha 28 chamadas `fetch` com um `webmailHeaders()` a
+// escrever `Authorization`, `X-Company-Id` e `X-Active-Role` à mão —
+// SEXTA instância do incidente de 2026-09-21. O interceptor que injecta
+// esses cabeçalhos vive no cliente Axios; um `fetch` cru só leva o que
+// lhe escreverem, e o que lá faltar muda silenciosamente a conta de
+// email usada e o âmbito da caixa.
+//
+// `company_id` (Fase 1) vai em `params` como qualquer outro filtro: é o
+// separador que manda, não o header.
+
+export const getWebmailEmails = (params) =>
+  api.get("/emails/webmail", { params });
+
+// `box`/`company_id` opcionais. Mantém a assinatura antiga (uma string
+// solta = a caixa) para não partir os chamadores que já existiam.
+export const getWebmailStats = (boxOuParams) => {
+  const params =
+    typeof boxOuParams === "string"
+      ? (boxOuParams ? { box: boxOuParams } : {})
+      : (boxOuParams || {});
+  return api.get("/emails/webmail-stats", { params });
+};
+
+/** Ponto 8 — as empresas do utilizador: um separador por cada. */
+export const getWebmailCompanies = () => api.get("/emails/webmail/companies");
+
+export const syncWebmail = (params) =>
+  api.post("/emails/webmail/sync", null, { params });
+export const syncWebmailUser = (params) =>
+  api.post("/emails/webmail/sync-user", null, { params });
+export const getEmailJobStatus = (jobId) => api.get(`/emails/jobs/${jobId}`);
+
+export const getPersonalEmailAccounts = () =>
+  api.get("/users/me/email-accounts", { params: { scope: "all" } });
+
+// ── Etiquetas e pastas ──
+export const getEmailLabels = () => api.get("/emails/labels");
+export const getEmailFolders = () => api.get("/emails/folders");
+export const createEmailFolder = (data) => api.post("/emails/folders", data);
+export const updateEmailFolder = (folderId, data) =>
+  api.put(`/emails/folders/${folderId}`, data);
+export const deleteEmailFolder = (folderId) =>
+  api.delete(`/emails/folders/${folderId}`);
+export const moveEmailsToFolder = (data) =>
+  api.post("/emails/emails/move-to-folder", data);
+export const applyEmailLabels = (data) => api.post("/emails/labels/apply", data);
+
+// ── Um email ──
+export const getWebmailEmail = (emailId) => api.get(`/emails/${emailId}`);
+export const markEmail = (emailId, data) =>
+  api.post(`/emails/${emailId}/mark`, data);
+export const deleteEmailPermanent = (emailId) =>
+  api.delete(`/emails/${emailId}/permanent`);
+export const associateEmailToProcess = (data) =>
+  api.post("/emails/associate", data);
+
+// ── Envio ──
+export const sendWebmailEmail = (payload, account) =>
+  api.post("/emails/send", payload, { params: account ? { account } : {} });
+export const cancelEmailSend = (sendId) =>
+  api.post(`/emails/${sendId}/cancel-send`);
+
+// O Content-Type é deliberadamente omitido: o Axios tem de o gerar com o
+// `boundary` — ver `utils/formDataTransport.js` e o interceptor de pedido.
+export const uploadEmailAttachment = (formData) =>
+  api.post("/emails/attachments/upload", formData);
+
+// `responseType: "blob"` faz o corpo de ERRO vir também como Blob — ler
+// com `readBlobErrorBody`, senão a mensagem do servidor desaparece.
+export const downloadWebmailAttachment = (attachmentId, params) =>
+  api.get(`/webmail/attachments/${encodeURIComponent(attachmentId)}`, {
+    params,
+    responseType: "blob",
+    skipErrorToast: true,
+  });
 
 // Clients
 export const getClients = (params = {}) => {
@@ -1370,8 +1559,20 @@ export const deleteAutomationRule = (id) => api.delete(`/admin/automation/rules/
 // Sinais vitais do motor de background (leitura).
 export const getAutomationsEngineStatus = () => api.get("/automations");
 
-export const getCompanies = (search) =>
-  api.get("/admin/companies", { params: search ? { search } : {} });
+/**
+ * Empresas do âmbito do utilizador (a sua REDE), paginadas.
+ *
+ * O `page`/`size` fecha o tecto de 200 que truncava em silêncio: à
+ * empresa 201 a UI respondia que ela não existe (ponto 11).
+ */
+export const getCompanies = (search, { page, size } = {}) =>
+  api.get("/admin/companies", {
+    params: {
+      ...(search ? { search } : {}),
+      ...(page ? { page } : {}),
+      ...(size ? { size } : {}),
+    },
+  });
 export const getCompany = (id) => api.get(`/admin/companies/${id}`);
 export const createCompany = (data) => api.post("/admin/companies", data);
 export const updateCompany = (id, data) => api.put(`/admin/companies/${id}`, data);
@@ -1380,9 +1581,7 @@ export const deleteCompany = (id) => api.delete(`/admin/companies/${id}`);
 export const uploadCompanyLogo = (id, file) => {
   const formData = new FormData();
   formData.append("file", file);
-  return api.post(`/admin/companies/${id}/logo`, formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
+  return api.post(`/admin/companies/${id}/logo`, formData);
 };
 
 // ===== USER COMPANY ROLES (UCR — acessos multi-empresa) =====

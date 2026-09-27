@@ -11,21 +11,30 @@ from services.redis_cache import (
     cache_get, cache_set,
     STATS_GLOBAL_CONVERSION_KEY,
 )
+from services.stats_scope import com_ambito, resolver_ambito
 
 async def run_get_conversion_stats(user: dict):
     """
     Estatísticas de tempo de conversão de leads.
     Calcula o tempo médio desde criação até proposta.
     """
-    # O13 - Redis cache: chave global hierárquica
+    # ISOLAMENTO DE REDE (Dashboard, ponto 1)
+    # ====================================================================
+    # A chave era `stats:global:conversion` — GLOBAL. Mesmo depois de
+    # filtrar, o primeiro pedido semeava a cache para todos e quem
+    # pedisse a seguir recebia o tempo de conversão da outra rede vindo
+    # do Redis, com o filtro a funcionar perfeitamente.
+    ambito = await resolver_ambito(user)
+
+    # O13 - Redis cache: chave global hierárquica, agora por âmbito
     # TTL longo (24h) porque invalidação cirúrgica garante fresh data
-    cache_key = STATS_GLOBAL_CONVERSION_KEY
+    cache_key = ambito.chave(STATS_GLOBAL_CONVERSION_KEY)
     cached = await cache_get(cache_key)
     if cached:
         return cached
-    
+
     pipeline = [
-        {"$match": {"status": {"$in": ["proposta", "reservado"]}}},
+        {"$match": com_ambito({"status": {"$in": ["proposta", "reservado"]}}, ambito)},
         {"$project": {
             "created_at": 1,
             "updated_at": 1,

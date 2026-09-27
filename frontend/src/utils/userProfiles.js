@@ -251,3 +251,48 @@ export function collectUserRoles(user) {
   const all = [normalizeRole(user.role), ...extra, ...fromCompanies];
   return [...new Set(all.filter(Boolean))];
 }
+
+/**
+ * Nome da empresa ACTIVA do utilizador, para mostrar no ecrã.
+ *
+ * Ponto 12 (Lote 5, Secção B). A cadeia vivia dentro do
+ * `ContextSwitcher`, que devolve `null` quando o utilizador tem um só
+ * perfil E uma só empresa — ou seja, quem tem uma empresa só, que é a
+ * maioria, nunca via o nome dela em lado nenhum. Extraída para aqui
+ * para o menu a poder usar sempre: duplicar a cadeia daria dois sítios
+ * a divergir, que é a raiz do incidente de 2026-09-21.
+ *
+ * `user.company` é o NOME (e `company_id` é o id) — a confusão entre os
+ * dois é esse mesmo incidente. Um `company_id` nunca sai daqui como se
+ * fosse nome: vale mais não dizer nada do que pôr a empresa errada no
+ * ecrã.
+ *
+ * @param {object} [user]
+ * @param {string} [effectiveCompanyId] - Empresa activa (id canónico).
+ * @returns {string} Nome, ou `""` quando não se sabe.
+ */
+export function resolveActiveCompanyName(user, effectiveCompanyId) {
+  if (!user || typeof user !== "object") return "";
+
+  const doUtilizador = typeof user.company === "string" ? user.company.trim() : "";
+
+  if (effectiveCompanyId) {
+    // `normalizeCompanyRecord` e NÃO `getDistinctCompanies`: este último
+    // faz `company_name || company_id`, ou seja, um UCR sem nome mostra
+    // o ID EM BRUTO como se fosse nome. Na dropdown do switcher isso
+    // passa por um nome estranho; num rótulo permanente é a confusão
+    // id/nome de 2026-09-21 a aparecer no ecrã todos os dias.
+    const registo = getUserCompanyRecords(user)
+      .map((c) => normalizeCompanyRecord(c))
+      .find((c) => c && c.company_id === effectiveCompanyId);
+    const nome =
+      typeof registo?.company_name === "string" ? registo.company_name.trim() : "";
+    if (nome) return nome;
+    // Sem nome explícito, o do utilizador é o único NOME de que
+    // dispomos — e nos UCRs antigos, em que o id É o nome, é o mesmo.
+    // Só ele: um id nunca sai daqui.
+    return registo ? doUtilizador : "";
+  }
+
+  return doUtilizador;
+}

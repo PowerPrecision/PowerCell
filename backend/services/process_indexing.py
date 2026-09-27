@@ -10,6 +10,10 @@ import logging
 from typing import Any, Optional  # Any used by side-effect helpers
 
 from database import db
+from services.process_phase_clock import (
+    montar_update,
+    transicao_de_fase,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -427,6 +431,7 @@ async def broadcast_assignment_delta(
             assigned_mediador_ids=fresh.get("assigned_mediador_ids"),
             mediador_names=fresh.get("mediador_names"),
             updated_at=fresh.get("updated_at"),
+            process=fresh or process,
         )
     except Exception as ws_err:
         logger.debug(
@@ -469,6 +474,7 @@ async def run_mark_indexed_side_effects(
             status=next_status or current_status,
             old_status=current_status,
             updated_at=now,
+            process=process,
         )
     except Exception as ws_err:
         logger.debug(f"Erro ao broadcast indexação concluída via WS: {ws_err}")
@@ -584,9 +590,20 @@ async def run_mark_process_indexed(
     now = datetime.now(timezone.utc).isoformat()
     update_set = build_indexacao_update_set(user, now, next_status)
 
+    # RELÓGIO DE FASES (Camada 1) — o salto dinâmico da indexação.
+    #
+    # Este é o caminho onde o relógio sem ator se justifica melhor: o
+    # registo em `history` aqui é silenciado quando é a Indexação a
+    # concluir (`track_history: role != "indexacao"`), e é assim que o
+    # produto quer que se trabalhe. O cronómetro avança de qualquer
+    # maneira, porque não pergunta quem move.
+    #
+    # `next_status` pode ser `None` (fim do pipeline): a transição sai
+    # vazia e o `montar_update` devolve só o `$set` original.
+    transicao = await transicao_de_fase(process, next_status)
     result = await db.processes.update_one(
         {"id": process_id},
-        {"$set": update_set},
+        montar_update(update_set, transicao),
     )
 
     if result.matched_count == 0:
@@ -727,6 +744,7 @@ async def run_set_process_indexed_flag(
             status=process.get("status"),
             old_status=process.get("status"),
             updated_at=now,
+            process=process,
         )
     except Exception as ws_err:
         logger.debug(f"Erro ao broadcast reversão de indexação via WS: {ws_err}")

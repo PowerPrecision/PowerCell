@@ -169,6 +169,46 @@ O Portal do Cliente **nunca** substitui ficheiros previamente carregados pelo cl
 - **Frontend**: o input de ficheiro tem `multiple={true}` e está **sempre visível** (o botão não se esconde após o primeiro upload — muda o label para "➕ Adicionar ficheiros"). A lista de ficheiros anexados é mostrada numa `ScrollArea` com `Badge`s (filename + tamanho + botão de download por ficheiro).
 - **Presigned URLs**: o upload usa o padrão presigned S3 (client → S3 direto, backend nunca recebe bytes). **Não** usar `List[UploadFile]` — seria uma regressão arquitetural.
 
+### O `file_key` do upload é do SERVIDOR, e a resposta do `confirm-upload` não traz URL (Incidente P0, Set 2026)
+
+O upload do Portal é presigned (client → S3 directo) e **isso mantém-se**, mas o contrato mudou em dois pontos que o frontend tem de respeitar:
+
+- **O `file_key` a enviar no `confirm-upload` é, sem excepção, o que veio no `upload-url`.** O `confirm-upload` valida-o agora contra o prefixo S3 do processo/cliente e devolve **403** a qualquer outro. Não construir, derivar, concatenar nem "corrigir" a chave no cliente — um `file_key` calculado no browser é indistinguível de um ataque e vai ser recusado. O `ClientPortal.jsx` já faz o correcto (`const { upload_url, file_key } = await urlRes.json()` e devolve esse `file_key` tal e qual).
+- **A resposta do `confirm-upload` já não traz `temporary_url`.** Era um URL pré-assinado de *leitura* devolvido no mesmo pedido que nomeava a chave — a carga útil de uma vulnerabilidade de path traversal. O campo nunca foi lido pelo Portal (o `doUpload` devolve só `{ success, filename }`), pelo que nada quebrou; **não o reintroduzir**. Se um ecrã precisar de mostrar o ficheiro logo após o upload, o caminho é `GET /portal/download-url?file_key=…`, que verifica a posse antes de assinar.
+
+Os três endpoints do Portal passaram também a ter limite de pedidos (`20/minute` nos de upload, `60/minute` no download). Um lote grande de ficheiros pode por isso apanhar **429** — o tratamento de erro do upload tem de mostrar o `detail` da resposta em vez de assumir falha de rede, e nunca fazer *retry* imediato em ciclo (é o comportamento que o limite existe para travar). Detalhes e diagnóstico completo em `ARCHITECTURE.md` → "Incidente P0 — o `file_key` do Portal do Cliente não era de confiança".
+
+### O `confirm-upload` do Portal pode agora recusar o ficheiro (quarentena, Set 2026)
+
+Os bytes passaram a ser validados **depois** de chegarem ao S3 (`HEAD` + `Range` de 2 KB → magic bytes). O upload pré-assinado mantém-se exactamente como está, mas o passo 3 do fluxo deixou de ser uma formalidade e o tratamento de erro tem de acompanhar:
+
+- **400** — o ficheiro foi recusado e **já foi apagado do S3**. O `detail` traz a razão em português (formato não permitido, demasiado grande, vazio) e é o que se mostra ao cliente. Não vale a pena repetir o pedido: o objecto já não existe. Reenviar significa recomeçar do passo 1 (`/upload-url`).
+- **503** — não foi possível **verificar** o ficheiro (S3 em baixo). O objecto **continua lá** e a confirmação pode ser repetida tal e qual. É o único caso em que faz sentido oferecer "tentar novamente" sobre o mesmo `file_key`.
+- **429** — limite de pedidos (ver acima). Mostrar o `detail`, nunca fazer *retry* imediato em ciclo.
+
+Distinguir 400 de 503 no `catch` é o que separa "o teu ficheiro não serve" de "tenta outra vez dentro de um minuto" — e dizer a primeira coisa quando a verdade é a segunda faz o cliente desistir de um upload que estava bom.
+
+#### O que NÃO se faz com o evento `portal_message`
+
+**Não inserir o payload na lista de mensagens.** O servidor trunca o conteúdo a 200 caracteres (`content[:200]`): inserido como registo, uma mensagem longa fica truncada no ecrã **para sempre**, até um refetch acidental. O evento é um **sinal** — quem tem a verdade é o `GET /portal/messages`.
+
+É deliberadamente diferente do `utils/webmailRealtime.js`, que insere a linha **sem** GET. Lá o evento transporta o registo completo; aqui não. A diferença está no payload, não na preferência — e é por isso que está escrita nos dois sítios.
+
+**Não filtrar o eco por `sender_type`.** O cliente recebe a sua própria mensagem de volta (o `portal_client_messages` difunde sem `exclude_user_id`, ao contrário do caminho do staff). O reflexo de ignorar `sender_type === "client"` parece certo e está errado: um processo pode ter **dois titulares** com magic links próprios, ambos `client`, e esse filtro fazia o titular 2 deixar de ver as mensagens do titular 1 — com o polling parado, silenciosamente. A desduplicação é por **id da mensagem**: a minha já está na lista (o POST refez o fetch), a do meu co-titular não.
+
+O `file_size` e o `content_type` que o cliente envia no `confirm-upload` continuam a ser aceites no corpo por retrocompatibilidade, mas **são ignorados**: o que fica gravado é o que o S3 e os magic bytes dizem. Não construir UI que assuma que o tipo declarado é o que ficou (um `.pdf` que é na verdade um PNG aparecerá como `image/png` na lista de documentos, e está correcto).
+
+### O Portal tem WebSocket próprio: `/api/ws/portal` (Set 2026)
+
+**Ligado** desde a iteração `ws-portal-ui`: `hooks/usePortalRealtime.js` (a ligação) + `utils/portalRealtime.js` (a decisão, pura e testada), consumidos pelo `ClientPortal`. Estas são as regras do contrato, e nenhuma é negociável do lado do cliente:
+
+- **Endpoint próprio.** `/api/ws/portal?token=<magic token do Portal>` — **não** o `/api/ws/notifications` da equipa, que recusa tokens de Portal com o código de fecho `4002`. O token é o mesmo que o Portal já usa nas chamadas REST (`getPortalToken()`).
+- **Não enviar `join_process_room`.** A sala é derivada do token **no servidor** e um pedido de sala é ignorado e registado como sondagem. Não há nada a subscrever: a ligação já está na sala do processo do cliente.
+- **A única mensagem a enviar é `{"type":"ping"}`**, de 30 em 30s — é ela que renova a presença. Tudo o mais é descartado em silêncio.
+- **Dois eventos, e só dois:** `portal_message` (mensagem do consultor) e `portal_gov_progress` (`{process_id, source, estado, documents_count}` no sucesso; `{process_id, source, estado:"falhou", motivo}` na falha, onde `motivo` ∈ `credenciais_invalidas` / `confirmacao_necessaria` / `confirmacao_expirada` / `confirmacao_incorreta` / `indisponivel`). Qualquer outro evento da sala do processo é retido no servidor por uma lista de permissão — **não** escrever handlers para eventos internos (`process_updated`, `document_uploaded`, …): eles nunca chegam, e um handler para eles é código morto que sugere que chegam.
+- **Códigos de fecho:** `4001` sessão expirada (pedir novo magic link), `4002` acesso inválido. Em ambos, **não** reconectar em ciclo.
+- **O polling FICA como recurso** — a regra do Épico 10: para quando `isConnected`, retoma quando o WS cai. Apagá-lo deixa o Portal sem mensagens quando o WebSocket não liga.
+
 ### Documentos legais gerados — sempre pré-preenchidos do backend
 
 Documentos legais gerados pelo sistema (RGPD, Minuta, CPCV) **devem** vir pré-preenchidos com os dados reais do cliente/processo quando o staff os descarrega para assinatura manual. O backend é a única fonte de verdade para os dados — o frontend não pré-preenche nada.
@@ -636,3 +676,635 @@ Os três botões de extracção (vista de lista, grelha "Todos", grelha por
 categoria) levam `aria-label={`Extrair dados de ${file.name}`}`. Sem ele
 não há nome acessível — é um bug de acessibilidade e um teste impossível
 (§ 20). Com ele, o teste consulta por papel e nome, como deve.
+
+## 24. A UI nunca é uma segunda verdade (Lote 5, P0, Set 2026)
+
+Duas interceções críticas, o mesmo padrão: um ecrã que sabe mais do que o
+motor lhe disse, ou que não diz o que sabe.
+
+### 24.1 O silêncio não é um desfecho
+
+Uma operação que o utilizador lançou **tem** de acabar em palavras. A análise
+em lote de documentos tinha um quarto caminho — não abria o diálogo, não dava
+erro, não dava aviso — e ficava indistinguível da aplicação avariada.
+
+Regras:
+
+- **`{}` é truthy.** `if (resposta.dados)` não prova que há dados. Quando o
+  que interessa é haver CONTEÚDO, conta-se: `Object.keys(x).length > 0`.
+- **Um `if` que decide se o utilizador vê alguma coisa precisa de `else`.**
+  Um `return` sem mensagem, dentro de um componente grande, é invisível na
+  revisão e invisível em produção.
+- **Uma voz por evento.** Se o componente filho já celebrou, o pai não tem
+  como desdizer: o verde fica no ecrã por cima do diálogo que não abriu.
+  Quem sabe o desfecho é quem anuncia.
+- **A decisão vive num módulo puro**, não no componente: `sucesso` / `aviso` /
+  `erro` é testável (`utils/analiseEmLoteFeedback.js`), e um teste afirma que
+  não há um quarto valor possível.
+
+### 24.2 Contagens: dizer o que se está a contar
+
+`documents_count` contava os documentos ENVIADOS e a UI lia-o como
+"processados". Com a IA em baixo, "3 documento(s) processado(s)" era
+literalmente falso. **Um número no ecrã tem de nomear o que mede**; quando
+há dois números (enviados vs. lidos), a resposta traz os dois.
+
+### 24.3 Mapeamentos: o motor manda, o alias é recurso
+
+As fases vêm de `workflow_statuses` e são configuráveis. Um mapa de nomes
+antigos cravado no frontend **só** se aplica quando o motor não conhece o
+original **e** conhece o destino. Aplicá-lo sempre faz o ecrã reescrever uma
+fase que existe mesmo — e nada dá erro.
+
+Corolários:
+
+- **Aplicar a normalização aos DOIS lados ou a nenhum.** Normalizar o estado
+  actual e o histórico, mas não a lista de fases, garante que um dia deixam
+  de casar.
+- **`?.campo || 0` não distingue "zero" de "não existe".** Use-se `null` para
+  o desconhecido: com 0, tudo o que vem depois parece futuro.
+- **Um agrupamento que o motor não sabe fazer não se inventa.** Derivar
+  macro-fases da `order` seria outra mentira, com ar automático. Os grupos
+  ficam como classificação conhecida e o que não couber é DITO ("Outras
+  fases"), nunca deitado fora. Há um teste a afirmar que a soma do gráfico é
+  o total de itens.
+
+### 24.4 Quando o texto procurado existe em dois sítios, a asserção nomeia o sítio
+
+Terceira ocorrência do padrão "mutação perdida ≠ teste fraco". Um
+`expect(cartão).toHaveTextContent("CPCV")` passava com a fase actual já
+reescrita, porque "CPCV" também era etiqueta de um nó da timeline. A
+asserção tem de apontar ao elemento cujo conteúdo a regra decide
+(`data-testid="fase-actual"`), não ao contentor que por acaso o inclui.
+
+## 25. Etiquetas e texto livre (Lote 5, Secção B, Set 2026)
+
+### 25.1 Vários escritores, um leitor: juntar, não escolher
+
+Quando o mesmo conceito tem mais do que um campo na base de dados —
+porque foi crescendo — o leitor não pode escolher um. O texto livre do
+processo vivia em `observation_notes`, `notes`/`observations` e
+`ai_extracted_notes`, e o Resumo lia o primeiro "se não estiver vazio".
+Bastava uma nota nova para o que tinha sido escrito noutro ecrã
+desaparecer.
+
+- **Juntar, deduplicar pelo valor normalizado, marcar a origem.** Nada
+  desaparece, e quem lê sabe de onde veio cada coisa.
+- **Marcar só as origens que surpreendem.** O caso normal não leva
+  crachá; se tudo for marcado, nada está marcado.
+- **Um campo escalar não se pré-preenche com o conteúdo de outro.** O
+  modal do Kanban semeava a textarea de `notes` com a última nota do
+  feed: gravar copiava a nota de outra pessoa, sem autor nem data.
+
+### 25.2 Derivar em vez de guardar
+
+A cor de uma etiqueta deriva do seu texto (hash → paleta de tokens
+semânticos). A alternativa era uma colecção de definições de etiqueta ou
+mudar o campo para objectos, migrando dados e projecções — para garantir
+uma coisa que a derivação garante de graça: "VIP" é da mesma cor em todos
+os ecrãs porque é a mesma palavra, não porque alguém a configurou igual
+em dois sítios.
+
+A paleta usa tokens do Shadcn (`bg-primary/10`, `bg-destructive/10`, …) e
+nunca cores Tailwind cruas — há um teste a afirmá-lo, porque a regra
+ESLint do PACOTE 11 é `warn` e o CI só falha em `error`.
+
+### 25.3 Normalizar à escrita, espelhar no cliente
+
+"VIP", "vip" e " VIP " são a mesma etiqueta para quem segmenta e três
+para a base de dados. A normalização vive na escrita, no backend, em
+**todos** os caminhos — e o frontend espelha-a, senão o editor aceita o
+que a API recusa.
+
+### 25.4 Um filtro novo liga-se em todos os sítios que LISTAM
+
+O Kanban tem construtor de query separado do das listagens. Foi assim que
+ficou de fora do isolamento por rede duas vezes. Um filtro novo precisa
+de um inventário de superfícies e de um teste por cada, **nos dois
+sentidos**: com o filtro filtra, sem o filtro não ganha ramo nenhum. Um
+ramo sempre presente esconde os registos sem valor — que costumam ser a
+maioria.
+
+E o filtro vai no URL: partilhar um link já filtrado é metade da
+utilidade da segmentação.
+
+### 25.5 Perguntar só o que tem significado
+
+O selector AND/OR só aparece com duas ou mais etiquetas escolhidas.
+"Corresponder a todas" de uma só etiqueta é a mesma coisa que "qualquer
+uma": a escolha não muda nada e só dá ao utilizador uma decisão a tomar
+sem consequência.
+
+## 26. Contexto de empresa/perfil e transporte (Lote 5, Secção B, Set 2026)
+
+### 26.1 Quinta instância: `fetch` cru continua a aparecer
+
+O Kanban chamava `/processes/kanban` por `fetch` em três sítios, com
+`Authorization` e mais nada. O interceptor que injecta `X-Company-Id` e
+`X-Active-Role` vive no cliente **Axios**; um `fetch` só leva o que lhe
+escreverem à mão.
+
+**Qualquer chamada que dependa de contexto de empresa ou de perfil vai
+pelo `api` do Axios.** Não é uma preferência de estilo — é a diferença
+entre o backend responder sobre o perfil activo ou sobre o papel base.
+Os sintomas desta família são sempre os mesmos: funciona para quem tem
+um perfil só, e falha silenciosamente para quem tem vários.
+
+Quando um endpoint ganha uma função em `services/api.js`, o
+`URLSearchParams` passa **intacto** — um `Object.fromEntries` perde as
+chaves repetidas, e filtros multi-valor (etiquetas, ids atribuídos)
+passam a ver só a última.
+
+### 26.2 Um componente que se esconde não serve de fonte
+
+O `ContextSwitcher` resolvia o nome da empresa activa, mas devolve
+`null` quando não há nada para alternar — ou seja, exactamente para quem
+tem uma empresa só. Reutilizar lógica de um componente com regras de
+visibilidade próprias é reutilizar também o seu silêncio: a lógica sobe
+para `utils/`, o componente fica com a apresentação.
+
+### 26.3 Um id nunca aparece no ecrã como se fosse nome
+
+`getDistinctCompanies` faz `company_name || company_id` — um UCR sem
+nome mostra o identificador em bruto. Numa dropdown passa por um nome
+estranho; num rótulo permanente é a confusão id/nome de 2026-09-21 à
+vista todos os dias. **Vale mais não mostrar nada do que mostrar um
+identificador**, e melhor ainda cair para outro campo que seja
+comprovadamente um nome.
+
+### 26.4 Quem perde o trabalho também é avisado
+
+Reatribuir uma tarefa notificava quem entrava e não quem saía. A pessoa
+anterior ficava com ela na lista até ao refresh seguinte, sem saber que
+deixou de ser dela. **Uma transferência tem dois lados** — e o registo no
+histórico tem de dizer o que mudou (o responsável), não repetir o título
+da tarefa, senão reatribuir e renomear ficam indistinguíveis.
+
+## 27. Listagens que crescem, e erros que se disfarçam (Lote 5, Set 2026)
+
+### 27.1 A ordem dos ramos é parte da correção
+
+Acrescentar um ramo de erro **depois** do estado vazio não corrige nada:
+
+```jsx
+{lista.length === 0 ? <Vazio/> : erro ? <Erro/> : <Lista/>}   // continua a mentir
+{erro ? <Erro/> : lista.length === 0 ? <Vazio/> : <Lista/>}   // certo
+```
+
+Uma leitura falhada quase sempre devolve zero itens, por isso o estado
+vazio à frente engole o erro. É o defeito do "VLM no Escuro" escrito
+noutra forma — e escrevi-o mal à primeira, num ecrã onde o estava
+precisamente a corrigir.
+
+### 27.2 Ações destrutivas pedem confirmação, e dizem o que se perde
+
+Apagar uma regra de negócio fazia-se com um clique. A confirmação diz o
+NOME do que vai desaparecer e a consequência ("as automações que
+dependem dela param"), não um "Tem a certeza?" genérico.
+
+### 27.3 Paginação: o total é do âmbito, e a página fora do intervalo é um caso
+
+- **Mostrar sempre o total** ("1–25 de 132"). Sem ele, o utilizador não
+  distingue "são estes" de "são os primeiros" — que era o defeito do
+  tecto silencioso de 200.
+- **O total é o do âmbito do utilizador**, nunca o da coleção: um total
+  global diz a uma rede quantos registos a outra tem.
+- **Apertar a pesquisa estando numa página alta** devolve uma lista
+  vazia que parece "não há resultados". Reiniciar a página a cada
+  mudança de filtro, e `calcularPaginacao` devolve `foraDoIntervalo`
+  para quem precise de reagir.
+- **`placeholderData: (anterior) => anterior`** ao mudar de página —
+  sem isso a tabela pisca toda para o esqueleto a cada clique.
+
+### 27.4 Filtrar no cliente o que o servidor já filtrou esconde resultados
+
+A pesquisa de utilizadores era `users.filter(...)` sobre a página
+inteira trazida de uma vez. Ao passar a pesquisa para o servidor, o
+filtro em memória tem de SAIR: aplicado por cima de uma lista já
+paginada, esconde correspondências que o servidor colocou noutra página.
+
+E uma pesquisa de pessoas procura por **empresa** também, não só por
+nome e email — é assim que um administrador procura alguém.
+
+## 28. Edição inline e navegação contígua (Lote 5, Secção B, Set 2026)
+
+### 28.1 Um controlo dentro de uma linha clicável começa por travar o clique
+
+A linha da tabela de processos navega para os Detalhes no seu `onClick`.
+Qualquer controlo posto dentro dela — dropdown, checkbox, botão — tem de
+fazer `stopPropagation`, ou abrir o controlo leva o utilizador embora
+antes de ele chegar a usá-lo. É um defeito que não dá erro nenhum: só
+parece que "o dropdown não funciona".
+
+```jsx
+<div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+  <Select …/>
+</div>
+```
+
+O `onKeyDown` também, e pela mesma razão: quem navega por teclado abre o
+dropdown com Enter, e o Enter subiria para a linha.
+
+### 28.2 Editar em linha usa o endpoint oficial, não um atalho
+
+Um controlo pequeno convida a um endpoint pequeno. Não. A gravação
+inline chama exactamente o que a página de Detalhes chama — é lá que
+vivem o histórico, a auditoria, as automações e as regras de silêncio
+por perfil. Um endpoint "leve" só para a listagem seria uma porta das
+traseiras a todos eles, e ninguém daria por isso durante meses.
+
+### 28.3 A permissão de um controlo inline espelha o backend — e num campo só
+
+Mostrar um controlo a quem o servidor vai recusar com 403 é prometer uma
+acção que não existe. Mas a resposta certa quando o frontend e o backend
+resolvem a permissão por campos DIFERENTES não é exigir os dois: é
+**corrigir a divergência**.
+
+Foi o que aconteceu aqui. A edição inline nasceu a exigir o perfil
+activo **e** o papel base do JWT, porque o `PUT /processes/{id}` decidia
+pelo segundo. Assim que o backend passou a seguir `get_effective_role`
+como o resto do produto, a dupla condição deixou de ser prudência e
+passou a **esconder uma acção legítima** — a de quem é indexador numa
+empresa e consultor noutra. Uma permissão espelha-se num sítio só.
+
+A lição: uma condição defensiva montada por cima de uma divergência tem
+de ser removida quando a divergência desaparece. Ficar lá "por
+segurança" é código morto que mente ao utilizador.
+
+### 28.4 Uma actualização optimista desfaz-se quando o servidor recusa
+
+Deixar o valor novo no ecrã depois de um erro é a pior das saídas: o
+utilizador sai convencido de que gravou. O valor anterior guarda-se
+ANTES de mutar o estado e repõe-se no `catch`.
+
+### 28.5 Uma seta que pode apontar para o sítio errado não se desenha
+
+Nas setas Anterior/Seguinte dos Detalhes, a ausência de contexto de
+navegação (o processo foi aberto por pesquisa global, por link, por
+notificação) resolve-se **escondendo o controlo**, não adivinhando.
+Adivinhar aqui é pior do que não oferecer: não dá erro, não deixa rasto,
+e o utilizador só percebe depois de editar a ficha errada.
+
+Já um vizinho que *existe* mas está do outro lado da página desenha-se
+**desactivado**, não ausente — esconder o botão fá-lo-ia saltar de sítio
+no primeiro e no último processo, e perder o alvo do rato a meio de uma
+revisão de 40 processos é o atrito que a funcionalidade veio remover.
+
+### 28.6 Estado que atravessa páginas: `state` do router, sessão, e só depois a rede
+
+Por esta ordem, e nunca ao contrário:
+
+1. `location.state` — o que a página de origem sabe, de graça.
+2. `sessionStorage` — a mesma coisa, a sobreviver a um F5. Sobrevive ao
+   refresh e **não** sobrevive a um separador novo, que é exactamente o
+   comportamento certo.
+3. Um pedido ao servidor — só para o que nenhuma das duas pode saber.
+
+O `state` manda sobre a sessão: uma sessão velha de outra listagem não
+pode sequestrar a navegação da listagem de onde o utilizador acabou de
+vir. E toda a leitura/escrita de `sessionStorage` vai dentro de
+`try/catch`: janela privada, quota cheia e cookies bloqueados são
+normais, e um controlo de conveniência nunca pode impedir a página de
+abrir.
+
+### 28.7 Filtros de vários valores viajam em `URLSearchParams`, nunca num objecto
+
+`labels` é `List[str]` no backend. Um `{labels: ["VIP","Urgente"]}`
+serializado por omissão dá `labels=VIP,Urgente` e o servidor procura uma
+etiqueta chamada "VIP,Urgente" — zero resultados, zero erros. É o mesmo
+defeito que o `Object.fromEntries` ia introduzindo no Kanban. Constrói-se
+o `URLSearchParams` com `append` por valor e passa-se **intacto**.
+
+## 29. Formulários que o cliente preenche sozinho (Ponto 9, Set 2026)
+
+### 29.1 "Obrigatório" tem UMA fonte, e é a que bloqueia
+
+Um formulário com uma lista de campos obrigatórios para validar e outra
+para a barra de progresso vai divergir — não é uma hipótese, é uma
+questão de tempo. E quando diverge, a barra exige coisas que o botão
+deixa passar, ou promete um avanço que o botão recusa. A fonte é a
+configuração que o `validateStep` lê; tudo o resto deriva dela.
+
+### 29.2 Esconder um campo que continua a bloquear é pior do que mostrá-lo
+
+Divulgação progressiva num formulário público só funciona se o que fica
+escondido for mesmo opcional. Caso contrário o cliente carrega em
+"Próximo", recebe um erro sobre um campo que não está a ver, e não tem
+como o encontrar. Por isso a divisão deriva da MESMA flag que bloqueia,
+e não de uma lista de "campos que me parecem secundários".
+
+### 29.3 Um passo sem obrigatórios mostra tudo
+
+Se a divisão fosse cega, um passo em que todos os campos são opcionais
+abria visualmente vazio, com a totalidade atrás de um botão. Um ecrã em
+branco assusta mais do que uma lista longa: não há nada a esconder
+quando não há nada a exigir.
+
+### 29.4 Quem retomou um rascunho vê o que escreveu
+
+O painel de campos adicionais abre já aberto quando algum dos campos lá
+dentro tem valor. Esconder o que o cliente escreveu na sessão anterior
+lê-se como trabalho perdido.
+
+### 29.5 O convite diz o que se ganha, nunca o que falta
+
+Nada de "obrigatório", "em falta", "tem de", "erro". O rótulo diz o que
+aqueles campos servem, e o corpo diz, por palavras, que se pode
+continuar sem eles. Há um teste a varrer as palavras proibidas — porque
+copy é comportamento, e regride tão facilmente como código.
+
+## 30. Separadores que representam um âmbito de dados (Ponto 8, Set 2026)
+
+### 30.1 Um separador solitário nunca se desenha
+
+Se só há uma opção, não há escolha — há uma linha de ecrã desperdiçada e
+um controlo que não faz nada. Mostra-se o rótulo (saber onde se está não
+é ruído) e a barra desaparece. A regra vive num módulo puro, testada nos
+dois sentidos, e não num `length > 1` dentro do JSX.
+
+### 30.2 O âmbito do separador viaja em cada pedido
+
+Um separador que mude só o que está no ecrã, sem mudar o que se pede ao
+servidor, é uma ilusão. O identificador do âmbito vai como **parâmetro**
+de cada chamada — e não como header, nem como estado global — para que a
+autorização do lado do servidor tenha alguma coisa em que pegar.
+
+### 30.3 A lista de separadores vem de quem autoriza
+
+Derivá-la do contexto do cliente (o utilizador em sessão) parece
+equivalente e não é: o cliente pode mostrar um separador que o servidor
+recusa, e o utilizador fica com uma caixa vazia sem explicação. A lista
+vem do mesmo sítio que decide o 404.
+
+### 30.4 Um âmbito pedido que já não existe cai no primeiro
+
+URLs antigos e sessões guardadas sobrevivem a acessos revogados.
+Insistir no identificador pedido dá um erro do servidor onde devia haver
+uma caixa; cair no primeiro âmbito válido é o comportamento que o
+utilizador espera.
+
+### 30.5 Uma operação de fundo não merece um painel
+
+Sincronizar, importar, recalcular: usa-se uma vez por sessão e o
+resultado interessa mais do que o botão. Uma linha de estado no
+cabeçalho ("Actualizado há 5 min") com um ícone ao lado substitui um
+painel permanente — e o estado "ainda não correu" não se pinta de
+alarme, porque é o estado normal ao abrir a página.
+
+### 30.6 Prop que deixou de ser usada sai do contrato
+
+Quando o comportamento muda de componente, as props que o serviam saem
+do que ficou para trás — da assinatura, do JSDoc e dos testes. Uma prop
+morta é um contrato que mente, e o próximo a ler acredita nele.
+
+## 31. Eventos de tempo real: o que o cliente pode e não pode assumir (Épico 10, Set 2026)
+
+Até ao Épico 10, um evento de processo chegava por `manager.broadcast()` — a
+**todos** os sockets ligados. O `useKanbanRealtime` inseria o cartão que lhe
+chegasse, e por isso um processo da Power aparecia, com o nome do cliente, no
+quadro de quem estava na Domus. O filtro passou a existir no servidor
+(`services/realtime_audience.py`); estas regras existem para que o cliente não
+volte a depender de não haver filtro nenhum.
+
+**31.1 — Um evento que chega já foi autorizado; um evento que não chega não é
+um erro.** O servidor entrega a quem a audiência do processo alcança. Um
+quadro que receba menos eventos do que antes está correcto, não partido. Nunca
+compensar uma ausência com um pedido extra "para o caso de".
+
+**31.2 — O tempo real não é a fonte da verdade, é um atalho.** O delta traz
+campos leves (`client_name`, `status`, `updated_at`), nunca o processo. Quem
+precisa do processo pede-o ao HTTP, que reverifica as permissões a cada
+pedido. Não alargar o payload de um evento para evitar um `GET`: seria pôr
+dados de negócio a atravessar um canal que não faz query nenhuma.
+
+**31.3 — Ignorar o eco do próprio utilizador é responsabilidade do cliente.**
+O `PROCESS_MOVED` deixou de excluir o autor no servidor (a audiência inclui-o,
+naturalmente). O `useKanbanRealtime` já faz `if (payload.user_id === userId)
+return;` porque a actualização optimista tratou do assunto. Quem escrever um
+handler novo tem de fazer o mesmo — caso contrário o cartão salta duas vezes.
+
+**31.4 — `event_id` serve para desduplicar.** Cada envelope traz um `id`, e o
+cliente pode recebê-lo duas vezes numa reconexão. Handlers de inserção têm de
+ser idempotentes (procurar antes de inserir), como os do Kanban já são.
+
+**31.5 — O polling continua a ser o recurso, e ainda não foi cortado.** As
+Fases 1 e 2 arrumaram a entrega; a Fase 3 é que suspende os intervalos. O
+padrão é o do Webmail e do `TasksContext`: parar quando `isConnected` e
+retomar quando o WS cai — nunca apagar o intervalo.
+
+**31.6 — Um indicador de presença mente com vários workers.** `is_online` vem
+de `manager.is_user_connected`, que só conhece o worker que atendeu o pedido.
+Não construir funcionalidade em cima dele (atribuir só a quem está online, por
+exemplo) enquanto não houver um registo de presença partilhado.
+
+## 32. Uploads: o `Content-Type` e a predefinição da instância (Set 2026)
+
+**32.1 — Omitir o `Content-Type` num upload NÃO é limpá-lo.** A instância
+Axios declara `application/json` por omissão, e o `transformRequest` do Axios
+converte um `FormData` em JSON quando vê esse cabeçalho: o ficheiro vira `{}` e
+o servidor devolve 422 `Field required` em TODOS os campos do formulário. Três
+funções tinham este defeito e nenhuma parecia errada.
+
+**32.2 — Não escrever `Content-Type` nenhum em chamadas com FormData.** O
+interceptor de `utils/formDataTransport.js` anula-o. Escrever
+`"multipart/form-data"` à mão funciona por acidente (o Axios limpa-o lá
+dentro), e um acidente não é uma regra.
+
+**32.3 — Passar um objecto com `multipart/form-data` é outra coisa, e é
+legítima.** O Axios converte o objecto em FormData. `createTempLink` usa-o de
+propósito; o interceptor não lhe toca porque, nesse momento, `config.data`
+ainda não é FormData.
+
+**32.4 — Duas funções para o mesmo endpoint é uma a mais.** `uploadClientS3File`
+duplicava `uploadProcessS3File`, nunca teve chamador e guardava o defeito
+enquanto a irmã era corrigida. Antes de acrescentar um helper de API, procurar
+o endpoint no ficheiro.
+
+**32.5 — Um teste de transporte vale contra um servidor a sério.** 
+`services/__tests__/formDataTransport.test.js` corre em `// @vitest-environment
+node`, levanta um `http.createServer` e lê os bytes que chegam. Um duplo do
+adaptador do Axios teria "confirmado" o comportamento errado, porque o defeito
+está no `transformRequest` — antes do adaptador.
+
+## 33. Explorador de Ficheiros: o que a UI pode e não pode assumir (Épico 10, Set 2026)
+
+**33.1 — A lista que chega já vem filtrada.** O servidor devolve só as pastas da
+rede de quem pede (`services/s3_explorer_scope.py`). A UI não filtra, não conta
+"quantas faltam" e não oferece um "ver tudo" — não há tudo para ver.
+
+**33.2 — 404 não é "erro", é "não é sua".** Uma pasta de outra rede responde
+404, como se não existisse. Mostrar "sem permissões" nesse caso confirmaria que
+a pasta existe, e o nome da pasta é o nome do cliente. A mensagem é *"Pasta não
+encontrada"*, igual à de uma pasta que de facto não existe — a indistinção é
+intencional.
+
+**33.3 — 403 continua a existir e significa outra coisa:** o perfil não entra na
+página. Os dois ramos são distintos no `catch` e têm de continuar a sê-lo.
+
+**33.4 — Renomear é uma operação de dados, não de cosmética.** O servidor move
+os objectos no S3 **e** reaponta o mapeamento do processo, os metadados dos
+documentos e os pedidos do Portal. A resposta traz `relink` com as contagens;
+se aparecer `relink.erro`, os ficheiros moveram-se e as ligações ficaram
+partidas — vale a pena dizê-lo ao utilizador em vez de celebrar sucesso.
+
+**33.5 — O menu e a rota têm de concordar.** A lista de papéis do item
+"Ficheiros" no `DashboardLayout` e as `allowedRoles` da rota em `App.js` são
+lidas e cruzadas por `App.rotasMenu.test.js`. Abrir um sem o outro dá um item de
+menu que redirecciona — o produto a contradizer-se, sem erro em lado nenhum.
+
+---
+
+## 34. Nomes de fases do workflow no frontend (Épico 10, Set 2026)
+
+As fases do processo são **configuráveis pelo administrador**. O frontend não
+tem autoridade sobre elas — tem, hoje, três listas que fingem o contrário.
+
+**34.1 — Uma lista de nomes de fases no frontend é dívida, não configuração.**
+Existem três: `ALIASES_LEGADOS` (`utils/processTimeline.js`), `MACRO_FASES`
+(`utils/funilDeFases.js`) e os literais `'concluidos'` / `'desistencias'`
+espalhados pelo `KanbanBoard`, `KanbanColumn`, `KanbanCard` e
+`useKanbanCompletedQuery`. Nenhuma cresce: quem lê fases novas é o motor.
+**Código novo não acrescenta a nenhuma delas.**
+
+**34.2 — A regra do alias, quando for preciso aplicá-la.** Um nome antigo só
+vence quando o motor **não** conhece o nome gravado **e** conhece o destino.
+Nunca ao contrário — basta o admin criar uma fase com o nome antigo para a
+tradução passar a reescrever processos correctos. Está escrita no cabeçalho do
+`processTimeline.js` e vale para toda a gente.
+
+**34.3 — `ALIASES_LEGADOS` tem agora um gémeo em Python.**
+`services/workflow_status_coverage.py` porta a mesma tabela para a medição de
+produção, e `tests/unit/test_workflow_status_coverage.py` lê o ficheiro JS e
+exige que os dois sejam o mesmo conjunto. **Editar um obriga a editar o
+outro** — até a Parte 2, que muda a fonte para a base de dados e mata a
+duplicação.
+
+**34.4 — Uma fase que nenhum grupo cobre aparece; não desaparece.** É a regra
+do `agruparEmFunil` e mantém-se: o que não couber vai para "Outras fases", com
+o nome, em vez de ser deitado fora em silêncio. Um agrupamento que perde
+processos mente com ar de relatório.
+
+**34.5 — Terminal não se decide por lista.** Uma fase é terminal quando o
+motor diz `is_active: false`. Um `status === 'concluidos'` num componente é a
+mesma dívida do 34.1 com outra forma.
+
+---
+
+## 35. A coluna de reconciliação do Kanban (Épico 10, Parte 3)
+
+O quadro deixou de perder cartões. Os processos cujo `status` gravado o
+motor não reconhece deixam de desaparecer e passam a juntar-se numa coluna
+própria — `reconciliacao: true` no objecto da coluna.
+
+**35.1 — Não é uma fase; é uma caixa de entrada.** Vem no fim, não mostra
+número de passo, e **não aceita cartões**: `onDragOver` e `onDrop` são
+ignorados quando `column.reconciliacao === true`. Largar lá um cartão seria
+pedir ao servidor um estado que não existe — ele responde **400 "Estado
+inválido"** e o utilizador leva um erro por uma acção que a UI lhe deixou
+fazer. Os cartões só **saem** dela, para uma fase a sério, e é isso que
+reconcilia o processo.
+
+**35.2 — A comparação é estrita (`=== true`).** `reconciliacao` ausente não
+é `false`: uma coluna normal nunca pode cair neste ramo por omissão.
+
+**35.3 — Esconder a coluna não é esconder o problema.** Só `ADMIN`/`CEO` a
+recebem, mas `total_desconhecidos` vem na resposta do `/kanban` para toda a
+gente. Se alguma vez for preciso mostrar o número a outros perfis, o dado já
+lá está — o que não pode acontecer é o número deixar de existir.
+
+**35.4 — `status_resolvido_de` diz que o cartão está ali por tradução.** Um
+processo gravado como `escriturado` aparece na coluna `concluidos` com
+`status_resolvido_de: "escriturado"`, e o `status` continua `escriturado`. A
+resolução é de leitura; o campo existe para a UI poder dizê-lo e para um
+diagnóstico não ter de refazer a conta.
+
+**35.5 — Continua a valer a regra 34.1.** Os literais `'concluidos'` /
+`'desistencias'` que ainda existem no `KanbanBoard`, `KanbanColumn`,
+`KanbanCard` e `useKanbanCompletedQuery` **não cresceram** nesta parte e
+continuam a ser dívida. Código novo não lhes acrescenta nada.
+
+---
+
+## 36. O grupo do funil é uma lista fechada (Épico 10, Parte 2)
+
+**36.1 — Cinco grupos, `<Select>`, nunca `<Input>`.** `novo`, `analise`,
+`aprovado`, `concluido`, `perdido`. Texto livre criaria um grupo novo com
+uma gralha (`aprovdo`) e o funil partia-se em silêncio: os processos dessa
+fase saíam do grupo certo e apareciam num grupo de um só, com ar de
+categoria legítima. O backend recusa ao gravar; a UI tem de recusar antes,
+senão o utilizador só descobre no submit.
+
+**36.2 — "Sem grupo" é uma opção, e tem de existir.** Obrigar a escolher é
+obrigar a inventar. Uma fase sem grupo cai em «Outras fases», com o nome à
+vista — nunca desaparece. Atenção ao detalhe do Radix: `<SelectItem>` não
+aceita `value=""`, por isso a opção usa uma chave interna
+(`__sem_grupo__`) que é traduzida para `""` **antes** do payload. Se
+escapasse, o backend recusava-a pelo enum.
+
+**36.3 — A lista de fases saiu do `funilDeFases.js`.** Ficaram as
+etiquetas e as cores dos grupos. Quem classifica é `macro_fase`, vindo do
+motor com as `workflow_statuses`. O `CLASSIFICACAO_DE_RECURSO` só socorre
+uma fase que o motor ainda não classificou, perde sempre para ele, e **não
+cresce** — uma fase nova classifica-se na UI, não neste ficheiro.
+
+**36.4 — `statuses` de um grupo é o que caiu lá, não o que foi declarado.**
+Mudou de significado na Parte 2. É o que serve para clicar num segmento do
+funil e filtrar a lista.
+
+**36.5 — As duas listas do frontend e o enum do backend são cruzados por
+testes.** `workflowEditorMacroFase.test.js` compara o `<Select>` com o
+`MACRO_FASES` do funil; do lado do Python, `test_macro_fase.py` lê os dois
+ficheiros JS e compara-os com o enum. Mexer numa obriga a mexer nas outras.
+
+## 37. Páginas de BI: quem agrega é o servidor (Dashboard, Set 2026)
+
+**37.1 — Uma página de estatísticas não puxa a colecção para contar.** O
+`StatisticsPage` faz `getProcesses()` sem filtro e conta em JavaScript. Com
+12.450 processos em produção, isso é a base de dados inteira pela rede para
+desenhar um gráfico de barras — e o risco de desempenho do BI não está no
+Mongo, está aqui. Contagens, médias e distribuições vêm de um endpoint que
+as calcula numa agregação; a página recebe números, não registos.
+
+**37.2 — Nunca agrupar pelo valor CRU de `status`. FEITO.** Estas três linhas
+estavam no `StatisticsPage` e foram removidas na Camada 2:
+
+```javascript
+filteredProcesses.filter(p => !['concluidos', 'desistencias'].includes(p.status))
+filteredProcesses.filter(p => p.status === 'concluidos')
+acc[p.status] = (acc[p.status] || 0) + 1        // agrupava pelo valor cru
+```
+
+Eram listas cravadas de nomes de fases — exactamente o que o Épico 10 implodiu
+no backend — e o agrupamento pelo valor cru punha os 205 processos em
+`cpcv`/`escriturado` e as 12 gralhas `"Concluidos "` em barras próprias. O
+quadro resolvia-os para a coluna certa e o gráfico não: **duas verdades sobre
+os mesmos dados no mesmo produto**.
+
+Hoje a página consome `GET /stats/funil` e `GET /stats/sla`, onde a ponte com o
+motor de workflow garante que uma barra conta o mesmo que uma coluna. As
+transformações que restam são apresentação e vivem em `utils/statsFunil.js`,
+puras e testadas. **Nada neste ficheiro pode voltar a saber nomes de fases** —
+quem sabe isso é o motor, no servidor.
+
+**37.2.1 — Dois campos que a página lia errados, e ninguém viu.** O filtro por
+utilizador comparava `p.assigned_consultor` (os canónicos são
+`assigned_consultor_id` / `consultor_id` / `consultant_id`) e o gráfico de
+prioridades contava `p.priority === 'high'` (o campo é `prioridade` e os valores
+são `baixa`/`media`/`alta`). Nenhum dos dois dava erro: um esvaziava todos os
+gráficos ao escolher um utilizador, o outro mostrava zero desde sempre. **Um
+campo que não existe lê-se como `undefined` e compara-se em silêncio** — é por
+isto que o filtro passou para o servidor, onde a condição canónica já existe e
+está testada.
+
+A guarda de listas cravadas do Épico 10 varre `backend/services/` e por isso
+não apanhou nada disto. Quem apanhou foi o teste de integração da página
+(`pages/__tests__/StatisticsPage.test.jsx`), que afirma por COMPORTAMENTO que
+`getProcesses` não é chamado.
+
+**37.3 — Um número estimado tem de se ver que é estimado.** O relógio de
+fases só começa a contar no dia em que o carimbo entrar; os processos
+anteriores levam uma estimativa marcada com `fase_desde_estimado`. Um gráfico
+que misture medido com estimado sem o dizer é pior do que um gráfico vazio —
+a resposta do servidor traz as duas amostras separadas e a UI tem de as
+distinguir (nota de rodapé, cor diferente, o que for), nunca somá-las em
+silêncio.

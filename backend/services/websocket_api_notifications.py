@@ -12,6 +12,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from database import db
 from services.websocket_manager import manager, WSEventType, create_ws_message
+from services.realtime_delivery import entregar_as_redes, entregar_na_sala
+from services.ws_client_identity import sem_clientes
 from services.websocket_api_helpers import (
     verify_websocket_token,
     is_disconnect_error,
@@ -46,23 +48,55 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
         from services.email_realtime import join_user_email_room
         join_user_email_room(user_id)
 
+        # Presença GLOBAL (Ponto 2). Marca já, sem esperar pelo primeiro
+        # `ping`: são 30s em que um utilizador acabado de entrar apanhava
+        # push no telemóvel por parecer offline.
+        from services.presenca import marcar_online
+
+        await marcar_online(user_id)
+
+        # Âmbito de tenant da ligação (Épico 10, Fase 2): resolvido UMA vez,
+        # aqui, e não por evento — é o que torna o encaminhamento por
+        # audiência gratuito. O âmbito vem do JWT (lado servidor); um chapéu
+        # activo declarado pelo cliente só poderia ESTREITAR a vista, nunca
+        # alargá-la, pelo que não é aceite neste ponto.
+        try:
+            from services.tenant_network import resolve_tenant_scope
+
+            manager.register_scope(
+                user_id,
+                await resolve_tenant_scope(user),
+                role=user.get("role") or "",
+            )
+        except Exception as exc:
+            # Sem âmbito, esta ligação não recebe eventos por audiência
+            # (falha fechada). Os eventos dirigidos continuam a chegar.
+            logger.warning(
+                "[WS] Falha a resolver o âmbito de %s (%s) — esta ligação "
+                "não receberá eventos por audiência.", user_id, exc,
+            )
+
         await websocket.send_json(create_ws_message(
             WSEventType.CONNECTION_STATUS,
             {
                 "status": "connected",
                 "user_id": user_id,
                 "user_name": user.get("name", ""),
-                "connected_users": len(manager.get_connected_users())
+                # Sem os sockets do Portal: são ligações do MESMO
+                # `ConnectionManager`, e contá-las aqui mostrava à equipa um
+                # número de "utilizadores online" inflacionado por clientes.
+                "connected_users": len(sem_clientes(manager.get_connected_users()))
             }
         ))
 
         if user.get("role") in ["admin", "ceo"]:
-            await manager.broadcast(
-                create_ws_message(
-                    WSEventType.USER_ONLINE,
-                    {"user_id": user_id, "user_name": user.get("name", "")}
-                ),
-                exclude_user=user_id
+            # Épico 10: era um `broadcast` e levava o NOME de uma pessoa a
+            # todos os sockets, incluindo os de outra rede. Hoje fica
+            # dentro das redes do próprio.
+            await entregar_as_redes(
+                manager.get_scope(user_id)[0] if manager.get_scope(user_id) else None,
+                WSEventType.USER_ONLINE,
+                {"user_id": user_id, "user_name": user.get("name", "")},
             )
 
         while connected:
@@ -90,6 +124,11 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
                 msg_type = data.get("type")
 
                 if msg_type == "ping":
+                    # O batimento do cliente (30s) é o que renova a
+                    # presença: sem temporizador novo e sem tarefa de
+                    # fundo. Nunca falha o `pong` — a presença é
+                    # acessória à ligação, não o contrário.
+                    await marcar_online(user_id)
                     try:
                         await websocket.send_json(create_ws_message(
                             WSEventType.HEARTBEAT,
@@ -132,35 +171,29 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
                 elif msg_type == "process_locked":
                     process_id = data.get("process_id")
                     if process_id and await authorize_process_room_access(user, process_id):
-                        lock_message = create_ws_message(
+                        await entregar_na_sala(
+                            process_room_name(process_id),
                             WSEventType.PROCESS_LOCKED,
                             {
                                 "process_id": process_id,
                                 "user_id": str(user.get("id", "")),
                                 "user_name": user.get("name", "Unknown"),
-                            }
-                        )
-                        await manager.broadcast_to_room(
-                            process_room_name(process_id),
-                            lock_message,
-                            exclude_user=str(user.get("id", "")),
+                            },
+                            exclude_user_id=str(user.get("id", "")),
                         )
 
                 elif msg_type == "process_unlocked":
                     process_id = data.get("process_id")
                     if process_id and await authorize_process_room_access(user, process_id):
-                        unlock_message = create_ws_message(
+                        await entregar_na_sala(
+                            process_room_name(process_id),
                             WSEventType.PROCESS_UNLOCKED,
                             {
                                 "process_id": process_id,
                                 "user_id": str(user.get("id", "")),
                                 "user_name": user.get("name", "Unknown"),
-                            }
-                        )
-                        await manager.broadcast_to_room(
-                            process_room_name(process_id),
-                            unlock_message,
-                            exclude_user=str(user.get("id", "")),
+                            },
+                            exclude_user_id=str(user.get("id", "")),
                         )
 
                 elif msg_type == "join_process_room":
@@ -239,16 +272,17 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
             logger.error(f"Erro WebSocket (outer) {user_id}: {type(e).__name__}: {e}")
 
     finally:
+        # O âmbito tem de ser lido ANTES do disconnect: é ele que o apaga,
+        # e sem âmbito não haveria fronteira para endereçar o evento.
+        registo_do_ambito = manager.get_scope(user_id)
         manager.disconnect(websocket)
 
         if user.get("role") in ["admin", "ceo"]:
             try:
-                await manager.broadcast(
-                    create_ws_message(
-                        WSEventType.USER_OFFLINE,
-                        {"user_id": user_id, "user_name": user.get("name", "")}
-                    ),
-                    exclude_user=user_id
+                await entregar_as_redes(
+                    registo_do_ambito[0] if registo_do_ambito else None,
+                    WSEventType.USER_OFFLINE,
+                    {"user_id": user_id, "user_name": user.get("name", "")},
                 )
             except Exception:
                 pass

@@ -11,9 +11,15 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from database import db
+from services.process_phase_clock import (
+    montar_update,
+    transicao_de_fase,
+)
 from models.auth import UserRole
 from services.encryption import generate_nif_hash, generate_email_hash
+from services.auth import get_effective_role, resolve_concrete_role
 from services.process_status import INACTIVE_STATUSES
+from services.process_labels import normalizar_etiquetas
 
 logger = logging.getLogger(__name__)
 
@@ -344,22 +350,37 @@ def merge_field_metadata(existing: Optional[dict], incoming: dict) -> dict:
 # legadas singular/plural (ver services/process_status.py), para que um
 # processo com status="concluido" (singular legado) fique bloqueado para
 # edição tal como "concluidos".
-TERMINAL_PROCESS_STATUSES = tuple(INACTIVE_STATUSES)
+# ÉPICO 10, PONTO 1 — deixou de ser constante de import. Uma fase
+# fechada pelo admin passava a bloquear a edição só no deploy seguinte.
+async def terminal_process_statuses() -> tuple[str, ...]:
+    from services.workflow_phases import carregar_fases, nomes_terminais
+
+    return tuple(nomes_terminais(await carregar_fases()))
 FINANCE_RELEVANT_STATUSES = ("concluidos", "escritura", "escritura_agendada")
 VALID_PRIORIDADES = ("baixa", "media", "alta")
 
 
-def assert_process_editable_for_role(status: Optional[str], role: str) -> None:
+def assert_process_editable_for_role(
+    status: Optional[str],
+    role: str,
+    terminais: Optional[tuple[str, ...]] = None,
+) -> None:
     """
     Bloqueia edição em estados terminais (exceto admin/CEO).
+
+    ``terminais`` vem do MOTOR. Continua SÍNCRONA e pura de propósito: é
+    uma regra de permissão, o sítio onde um teste tem de poder afirmar o
+    comportamento sem base de dados nenhuma. Quem resolve as fases é o
+    chamador, que já é assíncrono.
 
     Raises:
         HTTPException(403)
     """
     from fastapi import HTTPException
 
+    fechadas = tuple(terminais) if terminais else tuple(INACTIVE_STATUSES)
     is_admin_or_ceo = role in [UserRole.ADMIN, UserRole.CEO]
-    if status in TERMINAL_PROCESS_STATUSES and not is_admin_or_ceo:
+    if status in fechadas and not is_admin_or_ceo:
         raise HTTPException(
             status_code=403,
             detail=(
@@ -478,7 +499,10 @@ def apply_cpcv_and_metadata_fields(update_data: dict, data: Any) -> None:
             )
         update_data["prioridade"] = data.prioridade
     if data.labels is not None:
-        update_data["labels"] = data.labels
+        # Ponto 15: normalizar à ESCRITA. "VIP", "vip" e " VIP " são a
+        # mesma etiqueta para quem segmenta e três para o Mongo; com a
+        # normalização na leitura, cada filtro teria de a repetir.
+        update_data["labels"] = normalizar_etiquetas(data.labels)
     # PACOTE 5 (Fast-Track / Via Verde) — bypass à fase de Indexação:
     # permite ativar/desativar o flag num processo existente (ex.: qualificar
     # um Lead em pré-registo com Via Verde). None/omisso mantém o valor atual.
@@ -717,6 +741,7 @@ async def run_process_update_side_effects(
         priority=updated.get("prioridade") or updated.get("priority"),
         prioridade=updated.get("prioridade"),
         updated_at=updated.get("updated_at"),
+        process=updated,
     )
 
     if data.status and can_update_status:
@@ -875,7 +900,24 @@ async def run_update_process(
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
     process = decrypt_process_doc_or_500(process, process_id, decrypt_fn)
-    role = user["role"]
+
+    # O PERFIL ACTIVO manda, não o papel do JWT.
+    #
+    # Isto lia `user["role"]` e era uma brecha de permissões: quem
+    # trocasse para o perfil de Indexação no ContextSwitcher continuava a
+    # escrever com os direitos do papel base (mudar a fase, editar
+    # secções de negócio, passar por cima do bloqueio de estado
+    # terminal), apesar de o produto inteiro — menus, botões, Kanban,
+    # regras de silêncio do histórico — já decidir pelo chapéu posto.
+    # Mesmo padrão fechado no Kanban (ponto 12) e no `_is_stealth_user`
+    # (Lote 4); aqui era pior, porque não era ver a mais, era escrever.
+    #
+    # `get_effective_role` é fail-closed: sem cache UCR a validar, o
+    # header `X-Active-Role` só vale se coincidir com o papel do JWT —
+    # um header inventado nunca alarga. E `resolve_concrete_role` colapsa
+    # o perfil "Todos" (`__all_roles__`) no papel base, porque não existe
+    # união de permissões que faça sentido num PUT.
+    role = resolve_concrete_role(get_effective_role(request, user), user)
 
     raw_body = {}
     try:
@@ -907,7 +949,9 @@ async def run_update_process(
         log_audit_event_fn=log_audit_event_fn,
     )
 
-    assert_process_editable_for_role(process.get("status"), role)
+    assert_process_editable_for_role(
+        process.get("status"), role, await terminal_process_statuses(),
+    )
     update_data = seed_update_data(
         process=process,
         client_id_before=client_id,
@@ -921,7 +965,17 @@ async def run_update_process(
     can_update_status = perms["can_update_status"]
 
     assert_cliente_owns_process(process, user)
-    if role != cliente_role:
+    # O ramo do staff olha para a CONTA e não só para o chapéu: uma
+    # conta de cliente do Portal nunca tem perfis de staff, e o perfil
+    # activo passou agora a poder diferir do papel do JWT. Se um dia uma
+    # cache de perfil ficasse errada, isto impede que o caminho de
+    # escrita de negócio abra a um cliente. Mesmo critério de
+    # `assert_cliente_owns_process`, que também lê a conta: a identidade
+    # de um cliente é a conta dele, não um chapéu que ele escolha.
+    e_conta_de_cliente = (
+        role == cliente_role or user.get("role") == cliente_role
+    )
+    if not e_conta_de_cliente:
         await apply_staff_business_updates(
             process=process,
             process_id=process_id,
@@ -940,7 +994,23 @@ async def run_update_process(
     inject_cdc_fn(update_data, user)
     attach_field_metadata_if_present(update_data, process, raw_body)
 
-    await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    # RELÓGIO DE FASES (Camada 1).
+    #
+    # A fase nova lê-se do `update_data` e NÃO do `data.status` pedido: o
+    # `apply_staff_business_updates` só lá põe o estado quando o papel o
+    # pode mudar e a fase existe no motor. O `update_data` é o que vai ser
+    # escrito; o pedido é só um pedido.
+    #
+    # Um `PUT` com o MESMO estado devolve transição vazia e não reinicia o
+    # cronómetro — sem essa guarda, cada gravação punha a permanência a
+    # zero e nenhum processo aparecia preso.
+    #
+    # `status` não é um campo encriptado (ver `encrypt_sensitive_data`),
+    # por isso lê-se igual depois do `encrypt_process_update_payload`.
+    transicao = await transicao_de_fase(process, update_data.get("status"))
+    await db.processes.update_one(
+        {"id": process_id}, montar_update(update_data, transicao),
+    )
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
 
     await run_process_update_side_effects(

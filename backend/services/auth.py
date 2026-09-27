@@ -164,6 +164,20 @@ def needs_rehash(hashed: str) -> bool:
     return not (hashed.startswith("$2b$") or hashed.startswith("$2a$"))
 
 
+def tipo_de_token_do_crm() -> str:
+    """O valor da claim `type` dos tokens do CRM, vindo do ponto ÚNICO.
+
+    Import TARDIO de propósito: o `ws_client_identity` importa o
+    `websocket_manager` (para o `WSEventType`) e um import no topo deste módulo
+    fecharia um ciclo — o `services/__init__` começa por importar o `auth`.
+    Duplicar aqui o literal `"staff"` seria a alternativa, e seria a forma de
+    os dois lados divergirem sem ninguém dar por isso.
+    """
+    from services.ws_client_identity import TIPO_DO_STAFF
+
+    return TIPO_DO_STAFF
+
+
 def create_token(user_id: str, email: str, role: str) -> str:
     """Cria um token JWT com os dados essenciais do utilizador autenticado.
 
@@ -186,6 +200,12 @@ def create_token(user_id: str, email: str, role: str) -> str:
         "sub": user_id,
         "email": email,
         "role": role,
+        # Claim `type` do CRM — o MESMO valor que o
+        # `refresh_token_service.create_access_token` (o produtor do
+        # `/auth/login-v2`) estampa desde sempre. Os TRÊS produtores de tokens
+        # do CRM têm de concordar: é isso que permite ao validador recusar os
+        # tipos ESTRANHOS (Portal, `gov_auth`) sem recusar os próprios.
+        "type": tipo_de_token_do_crm(),
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -197,6 +217,10 @@ def create_access_token(data: Dict[str, Any]) -> str:
     Usado para impersonate e outros cenários especiais.
     """
     payload = {
+        # O `type` vem primeiro para que um `data` que o traga possa
+        # sobrepor-se — mas nenhum chamador o faz, e o valor por omissão é o
+        # mesmo dos outros dois produtores do CRM.
+        "type": tipo_de_token_do_crm(),
         **data,
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
     }
@@ -347,6 +371,26 @@ async def get_current_user(
     """
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+
+        # A claim `type` é AUTORITATIVA. Um token do Portal do Cliente (ou um
+        # `gov_auth`) é recusado aqui EXPLICITAMENTE, mesmo que o `sub` viesse
+        # a casar com um utilizador — até este lote, o que os separava era
+        # apenas o `sub` de um token de Portal ser um `process_id`.
+        # `None` é aceite de propósito: os tokens de staff emitidos antes desta
+        # alteração não têm a claim, e recusá-los invalidava todas as sessões
+        # abertas no deploy (ver `ws_client_identity`).
+        from services.ws_client_identity import tipo_de_token_e_de_staff
+
+        if not tipo_de_token_e_de_staff(payload.get("type")):
+            logger.warning(
+                "[AUTH] Token de tipo '%s' recusado na API de staff (sub=%s)",
+                payload.get("type"), payload.get("sub"),
+            )
+            raise HTTPException(
+                status_code=401,
+                detail="Este token não tem permissão para acessar a API.",
+            )
+
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
         if not user:
             raise HTTPException(status_code=401, detail="Utilizador não encontrado")
@@ -536,6 +580,33 @@ def get_effective_role(request: Request, user: dict) -> str:
         jwt_role,
     )
     return jwt_role
+
+
+def resolve_concrete_role(effective_role, user: dict) -> str:
+    """
+    Colapsa o perfil ACTIVO num papel concreto, para decisões de permissão.
+
+    `get_effective_role` pode devolver `__all_roles__` — o perfil "Todos"
+    do ContextSwitcher. Isso é um conceito das LISTAGENS (onde
+    `all_roles=` faz a UNIÃO das visibilidades) e não significa nada para
+    quem tem de decidir se uma escrita é permitida: não há "união de
+    permissões" que faça sentido num PUT.
+
+    Nesse caso recua para o papel do JWT, que é a identidade base do
+    utilizador. A escolha conservadora nunca alarga — e alargar aqui era
+    exactamente o risco: quem tem `indexacao` como papel base passaria a
+    escrever como gestão só por ter o ContextSwitcher em "Todos".
+
+    Ponto ÚNICO desta regra. O quadro Kanban
+    (`resolver_papel_do_quadro`) delega aqui; qualquer superfície nova
+    que decida permissões pelo perfil activo faz o mesmo em vez de
+    reescrever a condição — foi ter a regra em três sítios que deixou
+    `document_portal_request` a ignorar `track_history=False`.
+    """
+    papel = str(effective_role or "").strip()
+    if not papel or papel == "__all_roles__":
+        return str((user or {}).get("role") or "")
+    return papel
 
 
 def get_all_user_roles(user: dict) -> list:

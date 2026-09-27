@@ -16,6 +16,30 @@ from services.auth import get_user_companies, get_active_company_id_async
 logger = logging.getLogger(__name__)
 
 
+async def _anexar_assinatura_efectiva(response: dict, user: dict, active_company_id) -> None:
+    """Acrescenta a assinatura que o envio usaria, e de onde vem.
+
+    Nunca levanta: uma falha a resolver a assinatura não pode impedir o
+    utilizador de abrir o seu perfil.
+    """
+    try:
+        from services.email_service import resolve_email_signature
+
+        assinatura, origem = await resolve_email_signature(
+            created_by=user.get("id"),
+            active_company_id=active_company_id,
+        )
+        response["email_signature_effective"] = assinatura
+        response["email_signature_source"] = origem
+    except Exception as exc:  # noqa: BLE001 — degradação graciosa
+        logger.warning(
+            "[Perfil] Falha a resolver a assinatura efectiva de %s: %s",
+            user.get("id"), exc,
+        )
+        response["email_signature_effective"] = None
+        response["email_signature_source"] = "erro"
+
+
 async def run_get_me(request, user: dict):
     """Retorna o utilizador atual incluindo info de impersonate e permissões se aplicável.
 
@@ -189,6 +213,7 @@ async def run_get_me(request, user: dict):
         # ── MERGE: Sobrepõe nome global com display_name da empresa activa ──
         if active_assoc.get("display_name"):
             response["name"] = active_assoc["display_name"]
+
     else:
         # Fallback: sem associação activa ou sem empresas
         response["active_company_role"] = active_role_header or user.get("role")
@@ -197,6 +222,14 @@ async def run_get_me(request, user: dict):
         response["active_company_professional_phone"] = None
         response["active_company_job_title"] = None
         response["active_company_display_name"] = None
+
+    # Lote 5, ponto 5 — a Área Pessoal tem de mostrar a assinatura que
+    # SAI MESMO nos emails. Mostrava o UCR da empresa activa, mas o envio
+    # tem uma cadeia com mais degraus: o utilizador via vazio e recebia
+    # emails assinados. Resolver aqui pela MESMA função do envio é o que
+    # impede as duas respostas de voltarem a divergir — duplicar a regra
+    # na UI seria recriar o problema com outro nome.
+    await _anexar_assinatura_efectiva(response, user, active_company_id)
 
     # Incluir informação de impersonate se presente
     if user.get("is_impersonated"):

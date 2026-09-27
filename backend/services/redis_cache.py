@@ -157,6 +157,17 @@ ALL_GLOBAL_KEYS: List[str] = [
     STATS_GLOBAL_CONVERSION_KEY,
 ]
 
+#: Padrões das chaves globais, para invalidação.
+#:
+#: PORQUE PADRÃO E NÃO NOMES EXACTOS (Dashboard, ponto 1)
+#:   As chaves globais passaram a levar o SUFIXO DO ÂMBITO de rede
+#:   (`stats:global:conversion:a1<resumo>`), porque uma chave partilhada
+#:   entre redes servia os números de uma à outra. Apagar por nome exacto
+#:   deixava de acertar em nenhuma delas: a invalidação cirúrgica ficava
+#:   silenciosamente sem efeito e as estatísticas ficavam 24h desactualizadas
+#:   depois de cada mutação. O padrão apanha a chave base E as por âmbito.
+GLOBAL_KEY_PATTERNS: List[str] = ["stats:global:*"]
+
 
 def build_user_kpi_key(user_id: str) -> str:
     """Build cache key for user-level KPIs."""
@@ -359,14 +370,18 @@ async def invalidate_stats_cache(user_id: str = None) -> int:
     total_deleted = 0
 
     # 1. Invalidar sempre o cache GLOBAL
-    # Qualquer mutação afecta os KPIs da direcção
-    for key in ALL_GLOBAL_KEYS:
+    # Qualquer mutação afecta os KPIs da direcção.
+    # Por PADRÃO: as chaves globais levam o sufixo do âmbito de rede
+    # (ver `GLOBAL_KEY_PATTERNS`) e o nome exacto já não acerta em nenhuma.
+    for pattern in GLOBAL_KEY_PATTERNS:
         try:
-            deleted = await redis.delete(key)
-            total_deleted += (deleted or 0)
+            global_keys = await redis.keys(pattern)
+            if global_keys:
+                await redis.delete(*global_keys)
+                total_deleted += len(global_keys)
         except Exception as e:
             if not _is_dev_mode():
-                logger.warning(f"Redis DELETE error for global key={key}: {e}")
+                logger.warning(f"Redis DELETE pattern error for {pattern}: {e}")
                 _redis_available = False
             break
 

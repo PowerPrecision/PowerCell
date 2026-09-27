@@ -50,6 +50,15 @@ import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home
 import { toast } from "sonner";
 import axios from "axios";
 import * as Sentry from "@sentry/react";
+// Ponto 9 — Portal stress-free: divulgação progressiva no formulário
+// público. Os campos que BLOQUEIAM ficam à vista; os restantes entram
+// num painel fechado. A separação lê uma fonte só — o `form_config`.
+import CamposDoPasso from "../components/portal/CamposDoPasso";
+import {
+  separarCamposPorPrioridade,
+  contarProgressoObrigatorios,
+  estaPreenchido,
+} from "../utils/formularioPublicoCampos";
 import { cn, safeDateStr } from "../lib/utils";
 import { validateNIF as validateNIFShared } from "../utils/validateNIF";
 
@@ -700,27 +709,23 @@ export default function PublicClientForm({ previewMode = false }) {
     }
   }, [isStepVisible, step, getNextRealStep, maxStepNum]);
 
-  // ─── Campos obrigatórios hardcoded (por passo) ────────────────────────────
-  // Estes campos são sempre obrigatórios, independentemente do config do backend.
-  // Os campos condicionais (ex: titular2) só contam se o passo estiver visível.
-  const HARDCODED_REQUIRED_BY_STEP = useMemo(() => ({
-    1: ["name", "email", "phone", "nif", "documento_id", "data_validade_cc",
-        "naturalidade", "nacionalidade", "morada_fiscal", "birth_date",
-        "estado_civil", "compra_tipo"],
-    2: ["titular2_name", "titular2_email", "titular2_nif",
-        "titular2_documento_id", "titular2_naturalidade",
-        "titular2_nacionalidade", "titular2_phone", "titular2_morada_fiscal",
-        "titular2_birth_date", "titular2_estado_civil"],
-    3: ["finalidade", "tipo_imovel", "localizacao"],
-    4: ["employment_type", "employer_name", "salario_liquido"],
-    5: [], // Bancos — nenhum obrigatório por defeito
-    6: ["consent_data", "consent_contact"],
-  }), []);
-
-  // Dynamic required fields derived from allFieldsConfig
+  // ─── Campos que BLOQUEIAM o avanço — uma fonte de verdade só ──────────────
+  //
+  // Ponto 9. Havia aqui uma lista fixa de campos obrigatórios por passo,
+  // somada em UNIÃO com a do `form_config`. As duas divergiam em quase
+  // todos os passos: o do 2º titular tem ZERO campos obrigatórios no
+  // config e a lista fixa declarava 10; o dos bancos tem 3 no config e a
+  // lista fixa declarava nenhum. Resultado: a barra de progresso exigia
+  // campos que o `validateStep` não bloqueia, e ignorava outros que
+  // bloqueiam. Era essa a origem de metade da ansiedade do formulário —
+  // o produto a mentir sobre o que falta.
+  //
+  // O `validateStep` sempre validou a partir do config. A barra passa a
+  // ler o mesmo, e a lista fixa desapareceu.
   const dynamicRequiredFields = useMemo(() => {
     if (allFieldsConfig.length === 0) {
-      // Config not loaded yet — return empty so progress bar doesn't show wrong data
+      // Config ainda a carregar — devolver vazio para a barra não
+      // mostrar dados errados durante o arranque.
       return [];
     }
     return allFieldsConfig
@@ -728,64 +733,31 @@ export default function PublicClientForm({ previewMode = false }) {
       .map(f => f.field_key);
   }, [allFieldsConfig]);
 
-  // Lista completa de campos obrigatórios visíveis (hardcoded + dinâmicos)
-  // Apenas inclui campos de passos que estão visíveis (respeita depends_on)
+  // Obrigatórios de passos VISÍVEIS, respeitando `depends_on`.
   const allRequiredVisibleFields = useMemo(() => {
     const fields = new Set();
 
-    // 1. Adicionar campos hardcoded de passos visíveis
-    for (const [stepNum, stepFields] of Object.entries(HARDCODED_REQUIRED_BY_STEP)) {
-      if (isStepVisible(Number(stepNum))) {
-        stepFields.forEach(f => fields.add(f));
-      }
-    }
-
-    // 2. Adicionar campos dinâmicos obrigatórios (que não estão já nos hardcoded)
     dynamicRequiredFields.forEach(f => {
-      // Verificar se o campo está num passo visível
       const fieldConfig = allFieldsConfig.find(fc => fc.field_key === f);
-      if (fieldConfig) {
-        const fieldStep = fieldConfig.step || 1;
-        if (isStepVisible(fieldStep)) {
-          // Respeitar depends_on do campo individual (se existir)
-          if (fieldConfig.depends_on) {
-            if (checkDependsOn(fieldConfig.depends_on)) {
-              fields.add(f);
-            }
-          } else {
-            fields.add(f);
-          }
-        }
-      } else {
-        // Campo dinâmico sem step definido — incluir se não está nos hardcoded
-        if (!fields.has(f)) {
-          fields.add(f);
-        }
+      if (!fieldConfig) return;
+      const fieldStep = fieldConfig.step || 1;
+      if (!isStepVisible(fieldStep)) return;
+      if (fieldConfig.depends_on && !checkDependsOn(fieldConfig.depends_on)) return;
+      if (fieldConfig.depends_on_all && Array.isArray(fieldConfig.depends_on_all)) {
+        if (!fieldConfig.depends_on_all.every(cond => checkDependsOn(cond))) return;
       }
+      fields.add(f);
     });
 
     return Array.from(fields);
-  }, [HARDCODED_REQUIRED_BY_STEP, dynamicRequiredFields, isStepVisible, allFieldsConfig, checkDependsOn]);
+  }, [dynamicRequiredFields, isStepVisible, allFieldsConfig, checkDependsOn]);
 
-  // Calcular campos preenchidos para progresso
-  // Lógica: (campos_preenchidos / total_campos_obrigatórios_visíveis) * 100
-  // Inicia estritamente a 0% e termina a 100%
+  // Progresso contado SÓ sobre o que bloqueia mesmo.
   const calculateProgress = useCallback(() => {
-    if (allRequiredVisibleFields.length === 0) {
-      return { completed: 0, total: 0 };
-    }
-    let filled = 0;
-    allRequiredVisibleFields.forEach(field => {
-      const val = formData[field];
-      // Contar como preenchido se tem valor não-vazio
-      // Campos booleanos (consent_data, consent_contact): true conta como preenchido
-      if (typeof val === 'boolean') {
-        if (val === true) filled++;
-      } else if (val && val !== "" && !(Array.isArray(val) && val.length === 0)) {
-        filled++;
-      }
-    });
-    return { completed: filled, total: allRequiredVisibleFields.length };
+    const { completos, total } = contarProgressoObrigatorios(
+      allRequiredVisibleFields, formData,
+    );
+    return { completed: completos, total };
   }, [formData, allRequiredVisibleFields]);
 
   const progress = calculateProgress();
@@ -1859,6 +1831,37 @@ export default function PublicClientForm({ previewMode = false }) {
   };
 
 
+  /**
+   * Ponto 9 — desenha um passo com divulgação progressiva.
+   *
+   * Primário = o que BLOQUEIA o avanço, e quem o decide é o
+   * `form_config` do administrador, via `isFieldRequired` (que honra os
+   * overrides). É a MESMA fonte que o `validateStep` usa: era tê-la
+   * duplicada que punha a barra a exigir campos que não bloqueiam nada.
+   *
+   * O painel abre já aberto quando o cliente retomou o formulário e já
+   * lá tinha escrito alguma coisa — esconder o que ele escreveu dava a
+   * sensação de ter perdido o trabalho.
+   */
+  const renderCamposDoPasso = useCallback((stepFields) => {
+    const { primarios, secundarios } = separarCamposPorPrioridade(
+      stepFields,
+      (campo) => isFieldRequired(campo.field_key, campo.is_required),
+    );
+    const jaPreencheuAlgumSecundario = secundarios.some(
+      (campo) => estaPreenchido(formData[campo.field_key]),
+    );
+
+    return (
+      <CamposDoPasso
+        primarios={primarios}
+        secundarios={secundarios}
+        renderCampo={renderDynamicField}
+        abertoPorOmissao={jaPreencheuAlgumSecundario}
+      />
+    );
+  }, [renderDynamicField, isFieldRequired, formData]);
+
   // Step 1: Dados Pessoais - Titular (dynamic from allFieldsConfig)
   const renderStep1 = () => {
     const stepFields = getFieldsForStep(1);
@@ -1871,9 +1874,7 @@ export default function PublicClientForm({ previewMode = false }) {
           <p className="text-muted-foreground">Informações do titular principal</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {stepFields.map(field => renderDynamicField(field))}
-        </div>
+        {renderCamposDoPasso(stepFields)}
       </div>
     );
   };
@@ -1895,9 +1896,7 @@ export default function PublicClientForm({ previewMode = false }) {
         </div>
 
         {stepFields.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {stepFields.map(field => renderDynamicField(field))}
-          </div>
+          renderCamposDoPasso(stepFields)
         ) : (
           <div className="text-center py-8 bg-muted/50 rounded-lg">
             <p className="text-muted-foreground">
@@ -1921,9 +1920,7 @@ export default function PublicClientForm({ previewMode = false }) {
           <p className="text-muted-foreground">Indique a finalidade do seu pedido</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {stepFields.map(field => renderDynamicField(field))}
-        </div>
+        {renderCamposDoPasso(stepFields)}
       </div>
     );
   };
@@ -1940,9 +1937,7 @@ export default function PublicClientForm({ previewMode = false }) {
           <p className="text-muted-foreground">Informações sobre a sua situação financeira</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {stepFields.map(field => renderDynamicField(field))}
-        </div>
+        {renderCamposDoPasso(stepFields)}
       </div>
     );
   };
@@ -1959,9 +1954,7 @@ export default function PublicClientForm({ previewMode = false }) {
           <p className="text-muted-foreground">Informações sobre créditos e capital disponível</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {stepFields.map(field => renderDynamicField(field))}
-        </div>
+        {renderCamposDoPasso(stepFields)}
       </div>
     );
   };

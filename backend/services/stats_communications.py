@@ -8,8 +8,21 @@ import logging
 
 from database import db
 from models.auth import UserRole
+from services.stats_scope import com_ambito, processos_no_ambito, resolver_ambito
 
 logger = logging.getLogger(__name__)
+
+
+async def _processos_com_pendentes(coleccao, filtro: dict, ambito) -> list[str]:
+    """Dos processos com itens pendentes, os que são da rede de quem pede.
+
+    O sentido barato: `distinct` sobre a colecção PEQUENA (mensagens não
+    lidas, emails não lidos) dá dezenas de processos, e só esses se
+    verificam contra a rede. Trazer os processos da rede para um `$in`
+    seria doze mil identificadores por pedido.
+    """
+    ids = [i for i in await coleccao.distinct("process_id", filtro) if i]
+    return sorted(await processos_no_ambito(ids, ambito))
 
 async def run_get_communications_feed(user: dict):
     """
@@ -38,8 +51,23 @@ async def run_get_communications_feed(user: dict):
     if role == UserRole.CLIENTE:
         return {"portal_messages": [], "unread_emails": [], "portal_unread_count": 0, "email_unread_count": 0}
 
-    # ── Determinar process_ids do utilizador (para filtragem por role) ──
-    process_ids = None  # None = sem filtro (vê tudo)
+    # ====================================================================
+    # ISOLAMENTO DE REDE (Dashboard, ponto 1)
+    # ====================================================================
+    # Este era o pior dos seis endpoints: para admin/ceo/administrativo/
+    # diretor, `process_ids` ficava `None` e não havia filtro NENHUM. E o
+    # que este feed devolve não é uma contagem — são os primeiros 150
+    # caracteres do que os clientes escreveram no Portal, os assuntos dos
+    # emails não lidos e os endereços de quem os enviou. Uma Diretora da
+    # Domus lia as mensagens dos clientes da Power.
+    #
+    # `None` deixa de significar "sem filtro": significa "sem restrição
+    # por ATRIBUIÇÃO". A fronteira de REDE aplica-se sempre, aos dois
+    # ramos — é isso que o `permitidos` abaixo faz.
+    ambito = await resolver_ambito(user)
+
+    # ── Determinar process_ids do utilizador (filtragem por atribuição) ──
+    process_ids = None  # None = sem restrição por atribuição
 
     if role not in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         # Consultores/Intermediários/Indexação: apenas os seus processos
@@ -53,7 +81,9 @@ async def run_get_communications_feed(user: dict):
             or_conditions = [{"assigned_indexacao_id": user_id}]
 
         my_processes = await db.processes.find(
-            {"$or": or_conditions, "is_deleted": {"$ne": True}},
+            com_ambito(
+                {"$or": or_conditions, "is_deleted": {"$ne": True}}, ambito,
+            ),
             {"id": 1, "_id": 0}
         ).to_list(1000)
         process_ids = [p["id"] for p in my_processes]
@@ -62,6 +92,14 @@ async def run_get_communications_feed(user: dict):
     portal_query = {"read_by_staff": False}
     if process_ids is not None:
         portal_query["process_id"] = {"$in": process_ids}
+    else:
+        # Sem restrição por atribuição, a rede é a única fronteira — e
+        # tem de estar na query ANTES do `limit(15)`: filtrar depois
+        # devolveria uma lista curta (ou vazia) porque as mensagens da
+        # outra rede tinham gasto as quinze posições.
+        portal_query["process_id"] = {"$in": await _processos_com_pendentes(
+            db.portal_messages, {"read_by_staff": False}, ambito,
+        )}
 
     portal_cursor = db.portal_messages.find(
         portal_query,
@@ -89,6 +127,16 @@ async def run_get_communications_feed(user: dict):
     email_query = {"is_read": False}
     if process_ids is not None:
         email_query["process_id"] = {"$in": process_ids}
+    else:
+        # `db.emails` NÃO é carimbada com a rede (oito sítios de escrita
+        # mais o sync IMAP/Gmail — fica para o lote do webmail), por isso
+        # o âmbito resolve-se pelo PROCESSO do email. Consequência
+        # assumida: um email sem processo deixa de aparecer aqui a estes
+        # papéis. Era o que já acontecia aos consultores, e um email que
+        # não se consegue atribuir a uma rede não se pode mostrar a uma.
+        email_query["process_id"] = {"$in": await _processos_com_pendentes(
+            db.emails, {"is_read": False}, ambito,
+        )}
 
     # A coleção de emails pode variar — verificar se existe 'emails'
     email_cursor = db.emails.find(

@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 import uuid
 
 from database import db
-from services.websocket_manager import manager, WSEventType, create_ws_message
+from services.websocket_manager import WSEventType
+from services.realtime_delivery import entregar_a_processo, entregar_a_utilizador
 from services.push_notifications import send_push_notification
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,6 @@ async def send_realtime_notification(
         "link": link,
         "process_id": process_id,
         "read": False,
-        "is_notified": False,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -123,24 +123,29 @@ async def send_realtime_notification(
         # Remover _id para resposta
         notification.pop("_id", None)
     
-    # Enviar via WebSocket se o utilizador estiver conectado
-    if manager.is_user_connected(user_id):
-        await manager.send_personal_message(
-            create_ws_message(WSEventType.NEW_NOTIFICATION, notification),
-            user_id
-        )
-        logger.info(f"Notificação enviada via WebSocket para {user_id}")
-        
-        # Mark as notified to prevent re-emission on next poll/sync
-        if save_to_db:
-            try:
-                await db.notifications.update_one(
-                    {"id": notification["id"]},
-                    {"$set": {"is_notified": True}}
-                )
-            except Exception as e:
-                logger.warning(f"Erro ao marcar notificação {notification['id']} como notificada: {e}")
-    else:
+    # ÉPICO 10, FASE 1 — a entrega passa pelo Redis, não pela memória.
+    # Este ponto fazia `if manager.is_user_connected(user_id)`, e essa
+    # pergunta MENTE com vários workers: um utilizador com o socket no
+    # worker B lê como desligado no worker A, o evento morria em silêncio e
+    # quem entregava a notificação era, de facto, o polling de 30s do
+    # `NotificationsDropdown`. Por isso o polling não era redundância — era
+    # suporte de vida, e desligá-lo antes desta migração apagaria metade das
+    # notificações em produção.
+    await entregar_a_utilizador(user_id, WSEventType.NEW_NOTIFICATION, notification)
+
+    # PRESENÇA GLOBAL (Ponto 2) — era aqui que a mentira custava dinheiro.
+    #
+    # Esta pergunta era `manager.is_user_connected(user_id)`, memória
+    # LOCAL. Com dois workers, um utilizador com o socket no worker B
+    # lia-se como desligado no worker A e levava um push no telemóvel
+    # **enquanto estava a olhar para a aplicação**.
+    #
+    # O `is_notified` que se escrevia neste ramo foi REMOVIDO: era
+    # escrito e não era lido em lado nenhum. Não prevenia re-emissão
+    # nenhuma, ao contrário do que o comentário original afirmava.
+    from services.presenca import esta_online
+
+    if not await esta_online(user_id):
         logger.info(f"Utilizador {user_id} não conectado. Notificação guardada na DB.")
         # Enviar push notification quando o utilizador não está conectado via WebSocket
         await send_push_notification(
@@ -264,18 +269,21 @@ async def notify_process_update(
             process_id=process_id
         )
     
-    # Broadcast evento WebSocket (sincronização de UI — payload leve, sem
-    # dados sensíveis; o sino/notificações continua estritamente dirigido)
-    await manager.broadcast(create_ws_message(
+    # ÉPICO 10, FASE 2 — isto era um `manager.broadcast()`, e o comentário
+    # que o acompanhava dizia "sem dados sensíveis" apesar de o payload
+    # levar o `client_name`. Levava-o para TODOS os sockets ligados,
+    # incluindo os de outra rede. Hoje vai para a audiência do processo.
+    await entregar_a_processo(
+        process,
         event_type,
         {
             "process_id": process_id,
             "client_name": client_name,
             "action": action,
             "actor": actor_name,
-            "details": details
-        }
-    ))
+            "details": details,
+        },
+    )
 
 
 def _collect_process_assignee_ids(process: dict) -> set:
@@ -328,21 +336,20 @@ async def notify_deadline_reminder(deadline: dict, minutes_before: int = 30):
             link="/calendario"
         )
         
-        # Enviar evento específico via WebSocket
-        if manager.is_user_connected(user_id):
-            await manager.send_personal_message(
-                create_ws_message(
-                    WSEventType.DEADLINE_REMINDER,
-                    {
-                        "deadline_id": deadline.get("id"),
-                        "title": deadline.get("title"),
-                        # PACOTE DH — usar due_date (campo correcto) com fallback para date (legacy).
-                        "date": deadline.get("due_date") or deadline.get("date"),
-                        "minutes_before": minutes_before
-                    }
-                ),
-                user_id
-            )
+        # Dirigido, e por isso atravessa a fronteira do worker (Fase 1):
+        # o `is_user_connected` que aqui estava fazia este lembrete morrer
+        # sempre que o socket vivesse no outro processo uvicorn.
+        await entregar_a_utilizador(
+            user_id,
+            WSEventType.DEADLINE_REMINDER,
+            {
+                "deadline_id": deadline.get("id"),
+                "title": deadline.get("title"),
+                # PACOTE DH — usar due_date (campo correcto) com fallback para date (legacy).
+                "date": deadline.get("due_date") or deadline.get("date"),
+                "minutes_before": minutes_before,
+            },
+        )
 
 
 async def notify_process_status_change(

@@ -52,6 +52,10 @@ logger = logging.getLogger(__name__)
 # Pacote EB — a Tab de Utilizadores da Administração precisa da lista completa
 # (admin, indexação, inativos, parceiros). Sem paginação curta (ex. limit=10).
 ADMIN_USERS_LIST_LIMIT = 10000
+#: Página do PAINEL de administração (ponto 11). A lista completa
+#: continua a existir para as dropdowns de atribuição.
+ADMIN_USERS_PAGE_SIZE = 25
+ADMIN_USERS_MAX_PAGE_SIZE = 100
 
 
 DEFAULT_NOTIFICATION_PREFS = {
@@ -107,10 +111,28 @@ async def run_get_users(
         filter_assignment_staff,
     )
 
+    from services.admin_users_scope import (
+        build_users_scope_query,
+        empresas_do_ambito,
+    )
+
     query = {}
     if role:
         query = build_deep_role_query(query, role=role)
     query = apply_assignment_staff_filter(query, for_assignment)
+
+    # Isolamento por Rede (ponto 11). Ser "admin" é ser admin da SUA
+    # rede, não do sistema. `users` não tem `network_id`: o que os liga
+    # à rede são os UCRs e o campo legado `users.company` (o NOME), por
+    # isso o âmbito resolve-se em dois passos — rede → empresas →
+    # utilizadores dessas empresas.
+    #
+    # Aplica-se também ao `for_assignment`: atribuir um processo a
+    # alguém de outra rede seria a mesma fuga pela porta do lado.
+    ambito = await empresas_do_ambito(user or {})
+    scope_query = await build_users_scope_query(ambito)
+    if scope_query:
+        query = {"$and": [query, scope_query]} if query else scope_query
 
     users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(
         ADMIN_USERS_LIST_LIMIT
@@ -118,6 +140,78 @@ async def run_get_users(
     if for_assignment:
         users = filter_assignment_staff(users)
     return [UserResponse(**u) for u in users]
+
+
+async def run_get_users_paginated(
+    user: dict,
+    *,
+    search: Optional[str] = None,
+    role: Optional[str] = None,
+    company_id: Optional[str] = None,
+    page: int = 1,
+    size: int = ADMIN_USERS_PAGE_SIZE,
+):
+    """Utilizadores para o PAINEL de administração, paginados.
+
+    Endpoint separado de `/admin/users` de propósito: esse serve também
+    as dropdowns de atribuição, que precisam da lista inteira. Paginar o
+    partilhado partia-as em silêncio.
+
+    A pesquisa é SERVER-SIDE e cobre nome, email e empresa. Era feita no
+    cliente, sobre `name`/`email`, depois de trazer a tabela toda — e
+    não procurava por empresa, que é como um administrador procura
+    alguém.
+    """
+    from services.admin_users_scope import (
+        build_users_scope_query,
+        build_users_search_condition,
+        empresas_do_ambito,
+    )
+    from services.role_query import build_deep_role_query
+
+    condicoes: list[dict] = []
+
+    ambito = await empresas_do_ambito(user or {})
+    scope_query = await build_users_scope_query(ambito)
+    if scope_query:
+        condicoes.append(scope_query)
+
+    if role:
+        condicoes.append(build_deep_role_query({}, role=role))
+
+    if company_id:
+        # Filtrar por UMA empresa dentro do âmbito — nunca fora dele: o
+        # `$and` com o scope garante que pedir o id de outra rede
+        # devolve vazio em vez de a revelar.
+        condicoes.append({"$or": [
+            {"company": company_id},
+            {"company_name": company_id},
+            {"company_id": company_id},
+        ]})
+
+    pesquisa = build_users_search_condition(search)
+    if pesquisa:
+        condicoes.append(pesquisa)
+
+    query = {"$and": condicoes} if len(condicoes) > 1 else (condicoes[0] if condicoes else {})
+
+    tamanho = max(1, min(int(size or ADMIN_USERS_PAGE_SIZE), ADMIN_USERS_MAX_PAGE_SIZE))
+    pagina = max(1, int(page or 1))
+
+    total = await db.users.count_documents(query)
+    users = (
+        await db.users.find(query, {"_id": 0, "password": 0})
+        .sort("name", 1)
+        .skip((pagina - 1) * tamanho)
+        .limit(tamanho)
+        .to_list(tamanho)
+    )
+    return {
+        "users": [UserResponse(**u).model_dump() for u in users],
+        "total": total,
+        "page": pagina,
+        "size": tamanho,
+    }
 
 
 async def run_create_user(data: UserCreate, user: dict):

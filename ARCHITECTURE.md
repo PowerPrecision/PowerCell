@@ -3289,3 +3289,2860 @@ que distingue "tudo passa" de "metade nem correu".
 Mutação (quatro, quatro mataram): um job desligado passar a avariado; o limiar
 de atraso deixar de disparar; o batimento engolir a excepção do ciclo; a guarda
 voltar a ignorar o perfil activo.
+
+---
+
+## Lote 5, Secção A — furos de isolamento encontrados no UAT (Set 2026)
+
+### 4. Atribuição Fantasma: o gatilho não falhou, foi enganado
+
+O gatilho do Lote 4 corria. O que ele calculava é que estava errado.
+
+`ids_atribuidos_do_processo` lê **todos** os campos canónicos, incluindo
+`consultor_id` e `consultant_id`. Mas `build_clear_consultor_fields` limpava
+só quatro dos seis:
+
+```
+ATRIBUÍDO  → ['u-rita']
+REMOVIDO   → ['u-rita']       ← devia ser []
+campos que sobraram: ['consultor_id', 'consultant_id']
+```
+
+`removidos = antes − depois` dava conjunto vazio e a limpeza nunca era
+chamada. **E era maior do que as tarefas:** `process_list_filters` usa
+`consultant_id` em "Os Meus Processos" — o consultor removido continuava a
+ver o processo. Não é uma tarefa pendurada, é acesso a dados.
+
+**Porque é que o meu teste do Lote 4 não apanhou:** construí os documentos à
+mão, com os campos coerentes, em vez de os passar pelo construtor real. A
+regra que fica: os testes desta área usam **sempre** os construtores de
+produção.
+
+Hoje o `set` e o `clear` derivam da **mesma** constante
+(`CONSULTOR_ID_FIELDS` / `MEDIADOR_ID_FIELDS`) — era a divergência entre os
+dois, não o esquecimento, o defeito.
+
+### 1. Kanban e Ficheiros: o isolamento nunca lá chegou
+
+**Kanban:** tem um construtor de query **separado** (`build_kanban_query`).
+O Lote 4 ligou a condição de rede ao `build_process_list_query` e ao
+`run_get_processes*`; o Kanban não passa por nenhum dos dois. Um utilizador
+de uma empresa isolada não via processos na lista e via-os todos no quadro.
+
+A lição é de método: fiz um ponto único para a **condição** e não fiz o
+inventário dos sítios que **listam**. `test_kanban_files_isolation.py` é
+também esse inventário, com um teste por superfície.
+
+**Ficheiros (`/ficheiros`):** o explorador navega o bucket inteiro, e o
+bucket está organizado por pasta de **cliente**, não por empresa — não há
+`network_id` num prefixo S3. Decisão do dono: restringir a Admin e CEO e
+adiar o filtro por pasta; as empresas comuns chegam aos ficheiros pela ficha
+do processo (`/documents/*`), que mantém o âmbito. A rota tinha ainda a lista
+de papéis escrita **à mão**, mais larga do que a constante ao lado dela.
+
+### 3. Notificações: o eixo do filtro estava errado
+
+As notificações **têm `user_id`** — quem as deve receber — e
+`run_get_notifications` nunca o usava. Filtrava por **visibilidade de
+processo** e isentava admin/CEO/diretor (`query = {}`).
+
+Consequências: a gestão recebia tudo o que existia na colecção; um consultor
+via as notificações dirigidas ao mediador do mesmo processo; e
+`{"process_id": None}` mandava os avisos sem processo para toda a gente.
+
+Decisão do dono: **corta tudo o que não seja dirigido ao utilizador.** Um
+administrador prefere não ver avisos de sistema avulsos a arriscar que um
+consultor leia as notificações de quem está do outro lado da parede da rede.
+
+**Segundo defeito, encontrado a corrigir o primeiro:**
+`run_mark_notification_read` não recebia utilizador nenhum — com um id,
+qualquer pessoa marcava a notificação de outra como lida. O caminho WebSocket
+(`mark_all_read`) já filtrava por `user_id`; o REST não. Devolve 404 e não
+403: distinguir "não existe" de "não é tua" confirmaria o id a quem não tem
+nada que ver com ele.
+
+### 2. Rede: de texto livre a autocomplete
+
+O campo era um `Input` — e fui eu que o pus assim. `grupo_power` em vez de
+`grupo_power_precision` não dá erro: cria silenciosamente uma rede nova de
+uma empresa só. O isolamento quebra **ao contrário**, escondendo dados de
+quem os devia ver, e o sintoma aparece dias depois sem nada que o ligue ao
+engano.
+
+`<datalist>` (nativo, acessível, não impede escrever uma rede nova) mais um
+aviso sobre o efeito do valor actual. **É o aviso, não a lista, que apanha a
+gralha:** o utilizador vê "rede nova" onde esperava "junta-se a 2 empresas".
+O valor é aparado no `onChange` — um espaço à direita é outra rede, e a
+diferença é invisível no ecrã.
+
+### 6. Context Switch: trocar de empresa funcionava, trocar de perfil não
+
+`switchActiveCompany` termina em `window.location.reload()`. `switchActiveRole`
+escrevia no storage e no estado e **não tocava no TanStack Query** — o
+comentário no código chegava a prometer que as páginas voltavam a pedir a API
+"sem hard-reload", mas nada as fazia pedir.
+
+`queryClient.clear()` e **não** `invalidateQueries()`: invalidar continua a
+*mostrar* os dados antigos enquanto o novo pedido não chega, e numa troca de
+perfil isso é renderizar dados de outro âmbito. A limpeza vem **depois** de
+gravar o perfil novo, para o refetch partir com os headers certos.
+
+### 5. A assinatura: o campo global atravessava empresas
+
+`ProfileRoleTab` grava nos **dois** sítios (UCR da empresa activa e
+`users.email_signature`, "backward compat") e lê **só um**. Configurar a
+assinatura na Power enchia também a global; ao mudar para a Precision, a UI
+mostrava vazio e o envio caía no nível 2, assinando um email da Precision com
+a identidade da Power. É o `ucr_any` que o Lote 1 fechou, a entrar pela porta
+do campo global.
+
+**A regra:** com empresa activa, a global só vale se o utilizador **nunca**
+tiver configurado uma assinatura por empresa — aí ela é mesmo a única dele, e
+não a de outro perfil. Sem isso, quem já usa o sistema por empresa não herda
+nada de lado nenhum, e quem só tem a global não sofre regressão.
+
+**A transparência:** `/auth/me` devolve agora `email_signature_effective` e
+`email_signature_source`, resolvidos pela **mesma função do envio**. Duplicar
+a cadeia na UI seria recriar o problema com outro nome.
+
+### Uma lacuna na minha própria guarda
+
+`App.rotasMenu.test.js` (Lote 3) só iterava diretor, consultor e
+intermediário. **Admin e CEO não têm ramo `if`** — o menu deles é o
+fall-through no fim da função — e o extractor devolvia lista vazia para os
+dois. Como não estavam no ciclo, a lacuna era invisível. Cobertos agora, e o
+extractor aprendeu a terceira forma de declarar um item (spread condicional
+dentro de um grupo partilhado), com contraprova: o item restrito **aparece** a
+quem o pode abrir e **desaparece** de quem não pode.
+
+### Cobertura
+
+| Ficheiro | Casos |
+|---|---|
+| `tests/unit/test_assignment_canonical_fields.py` | 11 |
+| `tests/unit/test_notifications_scope.py` | 12 |
+| `tests/unit/test_kanban_files_isolation.py` | 7 |
+| `test_email_signature_fallback.py` (+3) | 16 |
+| `CompanyNetworkField.test.jsx` | 9 |
+| `AuthContext.switchRole.test.jsx` | 3 |
+
+Mutação (sete, sete mataram): o campo legado por limpar; o Kanban sem filtro
+de rede; o consultor a recuperar o explorador; as notificações sem
+destinatário; marcar a notificação de outro; a global a atravessar empresas;
+a troca de perfil sem limpar a cache.
+
+### Ponto 7 (IMAP) — por confirmar
+
+`geral@precisioncredito.pt` é a **Caixa Geral**, e essa conta não lê a
+password da base de dados: vem de `PRECISION_PASSWORD` / `PRECISION_IMAP_SERVER`
+no ambiente do Render. Não há desencriptação a falhar — não há nada
+encriptado neste caminho.
+
+A segunda hipótese é plausível ao mesmo tempo: a classificação do erro é por
+substring, e muitos servidores IMAP respondem `[AUTHENTICATIONFAILED]` ao
+**bloquear um IP** por excesso de ligações — uma conta bloqueada é reportada
+como password errada. A carga justifica-o: `email_auto_sync` a cada 60 s no
+processo web (duas caixas por ciclo, ≈120 ligações/hora) mais o
+`webmail_worker_sync` de 10 em 10 minutos no worker.
+
+Fica por tocar até o dono confirmar as variáveis no Render.
+
+## Lote 5, Prioridade 0 — duas interceções críticas + fecho do ponto 7 (Set 2026)
+
+### Ponto 7 (IMAP) — confirmado e fechado
+
+O dono confirmou `PRECISION_PASSWORD` / `PRECISION_IMAP_SERVER` no Render. A
+segunda hipótese era a boa: **rate limit / bloqueio de IP** em alojamento
+partilhado, reportado como `[AUTHENTICATIONFAILED]`.
+
+A cadência vive agora em `services/email_sync_cadence.py` — módulo LEVE, de
+propósito. Precisam do mesmo número dois sítios que não se podem importar um
+ao outro: o laço que dorme (`scheduled_tasks.run_email_auto_sync`, módulo
+pesado) e o `JOBS_DECLARADOS` do Monitor de Sinais Vitais, importado no
+arranque do `server.py` **e** do `worker.py`.
+
+- Omissão **60 s → 300 s**; clamp **30–300 → 120–1800**. O chão é a
+  protecção: uma variável mal posta reabriria o bloqueio que isto veio fechar.
+- Jitter **proporcional** (até 1/4 do ciclo) em vez do tecto fixo de 15 s —
+  5 % de um ciclo de 5 minutos não desencontra dois workers que arranquem
+  juntos, que é precisamente o caso que o alojamento lê como abuso.
+- O `webmail_worker_sync` do worker fica nos 10 minutos: as duas cadências
+  estão deliberadamente desencontradas.
+
+**O efeito cruzado que quase passou.** `estado_do_job` lia o intervalo de
+`JOBS_DECLARADOS` — uma CONSTANTE. Abrandar o laço sem mexer nela punha o
+painel do ponto 14 a declarar `atrasado` um job que está a cumprir o horário
+novo (limiar de 2×60 s contra ciclos de 5 min). **Regra: o intervalo do
+BATIMENTO manda, o declarado é recurso** (`_intervalo_efectivo`) — o
+batimento traz o valor que o laço usou de facto; o declarado só vale para
+quem nunca bateu. Sem isto, abrandar o motor era ensinar o monitor a mentir.
+
+### Bug 1 — "VLM no Escuro": a análise em lote acabava em silêncio
+
+Clicar em "Analisar Documentos" processava e não devolvia nada à UI: toast
+**verde** ("Análise completa! 3 documento(s) processado(s)") e o Diálogo de
+Revisão Humana calado. Sem erro, sem aviso, sem nada para dizer ao suporte.
+
+Três pontos a engolir, e **nenhum errado sozinho**:
+
+1. `ai_document_analyzer.analyze_multiple_documents` — o documento cuja
+   análise devolve `{"success": False, "error": …}` (chave da OpenAI em
+   falta, quota esgotada, formato recusado) era SALTADO, com o motivo a ir só
+   para o log de importação. O agregado voltava vazio, sem excepção.
+2. `document_ai_analyze.run_analysis_on_documents` — `"success": True`
+   escrito à mão e `documents_count: len(documents)`, os documentos
+   **ENVIADOS**. Para o frontend, três documentos falhados eram
+   indistinguíveis de três sem nada a preencher.
+3. Frontend — `if (onAIDataExtracted && result.extracted_data)`, e **`{}` é
+   truthy em JavaScript**, por isso o resultado vazio passava a porta e
+   apanhava o toast verde. Do outro lado, `commitAIExtractedData` tinha um
+   `return` mudo à cabeça e um `if (revisao) { … }` **sem `else`**.
+
+**A resposta passa a dizer a verdade**: `documents_succeeded` (o que a IA leu
+mesmo) e `documents_failed` (`[{file_name, error}]`). O contrato
+`success: True` mantém-se — o pedido HTTP correu bem; o que falhou foi o
+trabalho, e isso é conteúdo da resposta, não código de estado.
+
+**Três desfechos, nunca quatro.** `utils/analiseEmLoteFeedback.js`
+(`resumirAnaliseEmLote`) decide: `sucesso` (leu e há o que rever) · `aviso`
+(correu mas não há nada para preencher, ou parte falhou) · `erro` (não leu
+nada). O silêncio não é um valor possível, e há um teste a afirmá-lo. Quem
+ANUNCIA é o `ProcessDetails` — o `S3FileManager` deixou de celebrar por conta
+própria, porque duas vozes sobre o mesmo evento davam um verde por cima de um
+diálogo que nunca abriu.
+
+Cobertura: `tests/unit/test_vlm_nao_fica_no_escuro.py`,
+`utils/analiseEmLoteFeedback.test.js`,
+`pages/processDetails/vlmSilencioGuard.test.js` (guarda sobre o código-fonte,
+com contraprova ao lado).
+
+### Bug 2 — "UI de Fases Mentirosa": o motor estava certo, a UI é que inventava
+
+As fases vêm de `workflow_statuses` (o admin cria, renomeia, reordena,
+apaga). A UI recebia-as e passava-lhes por cima. Três defeitos:
+
+**(a) Aliases a mandar no motor.** `ProcessTimeline` tinha um mapa cravado
+(`cpcv → fase_escritura`, `escriturado → concluidos`, …) aplicado ao estado
+ACTUAL e ao histórico, e **nunca** à lista de fases. Basta o admin criar uma
+fase chamada `cpcv` — nome natural num CRM de crédito — para o processo que
+lá está ser reescrito para outra: a fase actual deixava de existir no mapa, o
+crachá do cabeçalho sumia e, porque `currentPhaseInfo?.order || 0` caía para
+0, **todas** as fases passavam a ler-se como futuras. **Regra: o alias é um
+RECURSO para dados antigos — só se aplica quando o motor não conhece o
+original E conhece o destino. Nunca ao contrário.**
+
+**(b) Os dias eram sempre contra HOJE.** `differenceInDays(agora, entrada)`
+para cada fase concluída: uma fase que durou 2 dias há seis meses mostrava
+"180d", e o cabeçalho somava tudo ("5 fases • 812 dias" num processo com 6
+meses). Uma fase dura da sua entrada até à entrada na **seguinte**; só a
+última conta até hoje.
+
+**(c) O funil do dashboard deitava processos fora.** `FUNNEL_MACRO` era uma
+lista cravada no `ConsultorDashboard` e a contagem um `filter` por grupo: um
+processo numa fase que nenhum grupo listasse **não contava para lado nenhum**
+— a soma das colunas ficava abaixo do total, sem nada no ecrã a dizê-lo, e um
+consultor com processos numa fase nova via o funil a dizer que não tinha
+trabalho. `escritura` estava ainda em DOIS grupos.
+
+A lógica saiu dos componentes para `utils/processTimeline.js` e
+`utils/funilDeFases.js`, onde se testa. O funil mantém os grupos como
+**classificação conhecida** (o motor não tem campo de macro-fase; derivá-la da
+`order` seria outra mentira, com ar automático) e o que a classificação não
+cobre cai em "Outras fases" — que só aparece quando tem conteúdo. Há um teste
+a afirmar que **a soma do funil é sempre o total de processos**.
+
+Cobertura: `utils/processTimeline.test.js`, `utils/funilDeFases.test.js`,
+`components/__tests__/ProcessTimeline.test.jsx`.
+
+### Terceira ocorrência: mutação perdida ≠ mutação que não matou
+
+A mutação que repunha o alias a vencer o motor matou **1** teste de 2. O
+teste de componente afirmava `expect(cartão).toHaveTextContent("CPCV")` — e
+"CPCV" também aparece como **etiqueta de um nó**, por isso a asserção passava
+com a fase actual já reescrita. Corrigido com um marcador no crachá
+(`data-testid="fase-actual"`), que é o elemento cujo conteúdo a regra decide.
+**Quando o texto procurado existe em mais do que um sítio do ecrã, a asserção
+tem de nomear o sítio.**
+
+### Mutação
+
+Seis, seis mataram: a falha por documento a morrer dentro do ciclo; a porta
+truthy do `{}`; o ramo sem revisão outra vez mudo; o alias a vencer o motor
+(depois de corrigido o teste fraco); os dias a contar sempre até hoje; o
+funil a deitar fora o que não conhece.
+
+## Lote 5, Secção B — pontos 14 e 15 (Set 2026)
+
+### Ponto 14 — há TRÊS campos de texto livre e o Resumo lia um e meio
+
+O cartão `ProcessObservationsCard` já estava no Resumo. O problema não
+era a falta de cartão: era o texto estar espalhado por três campos com um
+só leitor, que escolhia em vez de juntar.
+
+| Campo | Quem escreve | Aparecia no Resumo? |
+|---|---|---|
+| `observation_notes` (feed) | Cartão do Resumo | sim |
+| `notes` / `observations` (escalar) | **Modal do Kanban** | só com o feed VAZIO |
+| `ai_extracted_notes` | IA | **nunca** — só no modal do Kanban |
+
+`resolveProcessObservationNotes` fazia `if (feed.length > 0) return feed;`
+— tratava o escalar como FALLBACK. Bastava alguém acrescentar uma nota no
+Resumo para o que tinha sido escrito no Kanban desaparecer de vez. Não se
+apagava nada; deixava-se de ler.
+
+**Regra: juntar, não escolher.** Cada nota diz de onde vem (`origin`:
+`feed` / `legacy` / `ai`), a duplicação é apanhada pelo texto normalizado
+e nada é descartado em silêncio. O cartão marca as origens que
+surpreendem (crachás "Quadro" e "IA"); o feed, que é o caso normal, não
+leva crachá — marcar tudo seria ruído.
+
+**Caminho de corrupção fechado ao mesmo tempo.** O modal do Kanban
+pré-preenchia a textarea de `notes` com `process.notes || últimaNota.text`.
+Abrir o modal num processo sem `notes`, mexer noutro campo qualquer e
+gravar **copiava a nota de outra pessoa** para o campo escalar, sem autor
+e sem data. O feed lê-se no Resumo; não se edita por baixo da mesa.
+
+### Ponto 15 — Sistema de Etiquetas: o armazenamento existia, faltava tudo o resto
+
+`labels: Optional[List[str]]` está no modelo do processo desde sempre,
+persiste em `process_update` e vem nas projecções. O que **não** existia:
+
+- **Editor nenhum.** O comentário no `ProcessDetails` dizia que a edição
+  tinha sido "movida para um Dialog accionado pelo botão +" — esse Dialog
+  nunca foi construído. O PACOTE DD removeu o cartão de Etiquetas e o
+  substituto ficou por fazer, o que deixou o campo só acessível pela API.
+  O comentário era uma promessa deixada para trás por um refactor.
+- **Filtragem nenhuma**: nem `build_process_list_query` nem
+  `build_kanban_query` conheciam o campo.
+
+**Continuam a ser strings.** Passar a objectos obrigava a migrar os dados
+e a mexer em todas as projecções, e a única coisa que davam a mais era a
+cor — que se deriva do texto, deterministicamente
+(`utils/processLabels.corDaEtiqueta`). "VIP" é da mesma cor em todos os
+ecrãs porque é a mesma palavra, não porque alguém a configurou igual em
+dois sítios. A paleta usa tokens semânticos do Shadcn: um crachá com
+`bg-blue-500` fica ilegível em dark mode.
+
+**Normalizar à ESCRITA, nunca à leitura.** "VIP", "vip" e " VIP " são a
+mesma etiqueta para quem segmenta e três para o Mongo. Com a normalização
+na leitura, cada filtro teria de a repetir — e o primeiro que se
+esquecesse devolvia uma lista a menos sem ninguém reparar. Os **dois**
+caminhos de escrita (`process_update` e `process_service`) normalizam, com
+guarda sobre o código-fonte e contraprova.
+
+**O catálogo tem âmbito de tenant, e isso não é opcional.** Para filtrar é
+preciso saber que etiquetas existem, e a fonte honesta é o que está nos
+processos. Um `distinct` sem a condição de rede seria uma fuga nova, da
+família das do Lote 4/5: o nome de uma campanha da concorrência no
+dropdown de quem não a devia ver. `GET /processes/labels` usa o mesmo
+`build_tenant_condition` das listagens — o âmbito é do UTILIZADOR (a
+rede), não da empresa activa, que é uma vista.
+
+**O filtro foi ligado nos DOIS construtores.** O Kanban tem construtor de
+query separado — foi assim que ficou de fora do isolamento no Lote 4 e no
+Lote 5 ponto 1. Inventariar os sítios que LISTAM, não só a condição; há um
+teste por cada, nos dois sentidos (com etiquetas filtra, sem etiquetas não
+ganha ramo nenhum — um filtro sempre presente esconderia os processos sem
+etiqueta, que são a maioria).
+
+`labels_logic` (AND/OR) espelha o `assigned_logic` que já existia no
+ficheiro. A UI só pergunta a lógica com duas ou mais etiquetas
+seleccionadas: "corresponder a todas" de uma só é a mesma coisa que
+"qualquer uma", e a escolha só confundiria.
+
+### Achado lateral por tratar: o Kanban fala por `fetch` cru
+
+`hooks/queries/useKanbanQuery.js`, `useKanbanCompletedQuery.js` e
+`pages/KanbanPage.js` chamam `/processes/kanban` com
+`headers: { Authorization }` e mais nada — **quinta instância** do
+incidente de 2026-09-21. O isolamento por rede aguenta (vem de
+`build_tenant_condition(user)`, que não depende do header), mas
+`X-Company-Id` e `X-Active-Role` não seguem. Junta-se a isso que
+`get_kanban_board` usa `user["role"]` em vez de `get_effective_role`: quem
+tem vários perfis vê o quadro do papel BASE, não do activo. Fica anotado
+como trabalho próprio — não se alarga este commit.
+
+### Mutação
+
+Quatro, quatro mataram: o catálogo sem isolamento de rede; o Kanban a
+ignorar as etiquetas; a normalização fora de cada um dos dois caminhos de
+escrita.
+
+## Lote 5, Secção B — bug do Kanban + pontos 12 e 10 (Set 2026)
+
+### O Kanban ignorava o perfil activo — DUAS causas independentes
+
+Sintoma reportado: utilizadores multi-perfil trocam de cargo no
+ContextSwitcher e o quadro não acompanha.
+
+1. **`get_kanban_board` era o ÚNICO endpoint de listagem a ler
+   `user["role"]`** — o papel do JWT. Todos os outros (`/processes`,
+   `/processes/me`, `/processes/paginated`, `/my-clients`) já usavam
+   `get_effective_role(request, user)`. O handler nem recebia `request`.
+2. **O frontend chamava `/processes/kanban` por `fetch` cru em três
+   sítios** (`useKanbanQuery`, `useKanbanCompletedQuery`, `KanbanPage`),
+   com `Authorization` e mais nada — **quinta instância** do incidente de
+   2026-09-21. O interceptor que injecta `X-Company-Id` / `X-Active-Role`
+   vive no cliente Axios.
+
+Corrigir só uma não resolvia nada: sem header o backend não tem o que
+ler; sem `get_effective_role` o header não é lido. Guarda:
+`components/kanbanTransport.test.js` (os três ficheiros, com contraprova
+de que continuam a chamar o Kanban).
+
+**`__all_roles__` não é um papel, e no quadro não pode passar.** O perfil
+"all" do ContextSwitcher resolve para `__all_roles__`, que as LISTAGENS
+entendem (`all_roles=` faz a união das visibilidades).
+`build_kanban_role_base_query` não o conhece: cairia no ramo de gestão,
+sem filtro nenhum. Para quem tem `indexacao` como papel base isso era um
+**alargamento** — hoje vê a fila da Indexação, passaria a ver o quadro
+inteiro. O quadro não sabe unir âmbitos, por isso
+`resolver_papel_do_quadro` recua para o papel do JWT: a escolha
+conservadora nunca alarga.
+
+**`getKanbanBoard(params)` recebe o `URLSearchParams` INTACTO.** Um
+`Object.fromEntries` ali perdia as chaves repetidas — e `labels` é
+enviado uma vez por etiqueta, pelo que o filtro do ponto 15 passaria a
+ver só a última. Apanhado antes de sair.
+
+### Ponto 12 — o nome da empresa activa no menu
+
+O `ContextSwitcher` já resolvia o nome, mas **devolve `null` quando o
+utilizador tem um só perfil E uma só empresa** — ou seja, quem tem uma
+empresa só, que é a maioria, nunca via o nome dela em lado nenhum. A
+cadeia mudou para `utils/userProfiles.resolveActiveCompanyName`, ponto
+único usado pelo switcher e pelo menu lateral.
+
+**Não herda o fallback do `getDistinctCompanies`.** Esse faz
+`company_name || company_id`: um UCR sem nome mostra o **id em bruto**
+como se fosse nome. Na dropdown do switcher passa por um nome estranho;
+num rótulo permanente é a confusão id/nome de 2026-09-21 a aparecer no
+ecrã todos os dias. `resolveActiveCompanyName` usa
+`normalizeCompanyRecord` directamente e, sem nome explícito, cai para
+`user.company` (que é o NOME) — nunca para o id. Vale mais não dizer
+nada do que pôr a empresa errada no ecrã.
+
+### Ponto 10 — reatribuição de tarefas
+
+O backend **já aceitava** `assigned_to` no `PUT /tasks/{id}` e notificava
+os novos responsáveis. Faltava a UI — o diálogo da tarefa mostrava
+"Atribuído a" como TEXTO, e uma tarefa que caísse na pessoa errada só se
+resolvia apagando-a e criando outra, o que perde o histórico e o prefixo
+`[PROC-012]`. E faltavam três coisas no backend:
+
+1. **A bomba do Lote 4 estava por desarmar neste caminho.**
+   `set(task_data.assigned_to) - set(task.get("assigned_to", []))` —
+   `set("u1")` em Python é `{'u','1'}`, itera os CARACTERES. O ponto 12
+   do Lote 4 normalizou a LEITURA e pôs o motor de automação a gravar
+   lista; `run_update_task` continuava a gravar o que lhe dessem e a
+   fazer o diff com `set` cru. Hoje: `normalizar_assigned_to` na escrita
+   e `diff_de_responsaveis` (que normaliza os DOIS lados) no diff.
+2. **Quem sai não era avisado.** O novo responsável recebia notificação;
+   o anterior ficava com a tarefa na lista até ao refresh seguinte e sem
+   saber que deixou de ser dele. Numa equipa é trabalho a cair no chão.
+   Novo tipo `task_unassigned`.
+3. **A reatribuição não deixava rasto.** `log_history` registava
+   "Atualizou tarefa" com o TÍTULO em old/new — mudar o responsável e
+   renomear a tarefa eram indistinguíveis. Hoje "Reatribuiu tarefa" com
+   os nomes de quem saiu e de quem entrou. O rasto passa por
+   `log_history`, que já aplica a regra de ouro do perfil Indexação.
+
+### Uma lacuna na minha própria cobertura
+
+O ramo do histórico só corre quando a tarefa tem `process_id`. Os meus
+testes usavam todos `process_id: None` e por isso nunca o exercitavam —
+a bateria ficou **verde sobre código que rebentava em produção**
+(`get_user_names` não estava importado). Foi o **flake8** (`F821`) que o
+denunciou, não os testes. Uma tarefa de processo é o caso NORMAL: está
+coberta desde então, nos dois sentidos.
+
+### Mutação
+
+Cinco, cinco mataram — mas uma delas só depois de eu corrigir a guarda.
+
+**Quarta ocorrência de "mutação perdida ≠ teste fraco".** A mutação que
+repunha `role=user["role"]` no Kanban não matou nada, por DUAS razões
+somadas: (a) a guarda comparava `role=user["role"]` com aspas duplas e o
+`ast.unparse` normaliza-as para simples — **terceira vez que caio nisto**;
+(b) o `ast.unparse` colapsa a chamada numa linha só, e a minha janela de
+1600 caracteres a partir do `def` apanhava o endpoint SEGUINTE, que
+também chama `get_effective_role`. A guarda passa agora a extrair os
+argumentos de UMA chamada contando parênteses, e compara sem aspas.
+
+## Lote 5, Secção B — pontos 13 e 11 (Set 2026)
+
+### Ponto 13 — o CRUD existia; o que faltava era deixar de mentir
+
+Rotas, serviços e UI de edição/eliminação estavam todos lá. O que fazia
+o ecrã parecer avariado eram **três silêncios**:
+
+1. `fetchRules` tinha `catch { /* silent */ }` seguido de
+   `setLoading(false)`. Uma leitura falhada — 403, rede, o que fosse —
+   caía no estado vazio **"Criar primeira regra"**: o administrador via
+   "não há regras" e concluía que o CRUD não funcionava. É o padrão do
+   Bug 1 (VLM no Escuro) noutro ecrã: **um erro renderizado como sucesso
+   vazio**.
+2. `handleToggle` engolia o erro; o interruptor saltava para trás sem
+   explicação.
+3. `handleDelete` apagava uma regra de NEGÓCIO com um clique, sem
+   confirmação, e descartava a mensagem do backend.
+
+**A ORDEM DOS RAMOS É PARTE DA CORREÇÃO.** Acrescentar um ramo de erro
+depois de `rules.length === 0` não resolve nada: uma leitura falhada
+continua a dizer "Nenhuma regra criada". O erro vem PRIMEIRO. (Escrevi-o
+mal à primeira e foi o teste novo que o apanhou.)
+
+### Ponto 13 — as regras pertencem à REDE
+
+Decisão do dono: "A Domus é uma ilha. O Administrador da Domus nunca
+pode ver nem tocar nas regras do grupo Power/Precision."
+
+`list_rules` fazia `find(query)` sem filtro e `create_rule` não
+carimbava nada. E o efeito atravessa mesmo a fronteira: uma regra não é
+um registo decorativo — **cria TAREFAS em processos**, pelo que uma
+regra da rede A visível à rede B punha trabalho de uma empresa na lista
+de outra.
+
+- `list_rules(tenant_condition=...)` — **opcional de propósito**. O
+  caminho de EXECUÇÃO (`check_trigger_conditions`) corre a partir de um
+  processo concreto, sem utilizador: não há âmbito de sessão para
+  aplicar, e exigir a condição daria um motor que não dispara em
+  background.
+- `_regra_no_ambito` guarda o editar e o apagar, e devolve **404 e não
+  403**: confirmar que existe já diria à Domus que a Power tem uma regra
+  com aquele id (mesma escolha do Lote 5, ponto 3).
+- O carimbo é `None` sem contexto de empresa. Carimbar a rede errada é
+  pior do que não carimbar — a regra ficaria visível à rede errada para
+  sempre.
+
+### Ponto 11 — três defeitos distintos
+
+**O N+1.** `_count_company_users` era chamado DENTRO do ciclo da
+listagem: uma query por empresa. 50 empresas = 51 idas à base; 200 =
+201. Passou a `contar_utilizadores_por_empresa`, uma agregação com
+`$group` que conta pelo `company_id` **e** pelo `company_name` (os UCRs
+antigos guardam o nome; ignorá-los diria "0 utilizadores" numa empresa
+cheia).
+
+**O tecto silencioso.** `.to_list(200)` sem paginação e sem dizer que
+truncou: à empresa 201 a UI respondia que ela não existe. Há agora
+`page`/`size` e um `total` contado **dentro do âmbito** — um total
+global diria à Domus quantas empresas a Power tem.
+
+**A pesquisa dos utilizadores era no cliente.** `filteredUsers`
+filtrava em memória sobre `name`/`email`, depois de trazer a tabela
+inteira (`ADMIN_USERS_LIST_LIMIT = 10000`), e não procurava por
+EMPRESA — que é como um administrador procura alguém.
+
+### Ponto 11 — porque é que o utilizador se filtra pelas EMPRESAS
+
+A colecção `users` não tem `network_id` e nunca teve. O que liga um
+utilizador à rede são os UCRs (`user_company_roles.company_id`) e o
+campo legado `users.company`, que é o **NOME** (a confusão id/nome de
+2026-09-21 mora aqui). O âmbito resolve-se em dois passos: **rede →
+empresas → utilizadores dessas empresas**.
+
+Aplicar `{"network_id": ...}` directamente a `users` devolveria SEMPRE
+vazio — e um painel vazio parece uma base de dados vazia, não um filtro
+errado. Seria um defeito silencioso do pior tipo.
+
+O âmbito aplica-se também ao `for_assignment=True`: atribuir um processo
+a alguém de outra rede seria a mesma fuga pela porta do lado.
+
+**Endpoint SEPARADO para o painel.** `/admin/users` serve também as
+dropdowns de atribuição, que precisam da lista inteira; paginar o
+partilhado parti-las-ia em silêncio. O painel usa
+`/admin/users/paginated`.
+
+### Uma lacuna do meu próprio desenho, apanhada antes de sair
+
+Filtrar `users` pelas empresas do âmbito deixava de fora quem **não tem
+empresa nenhuma** — tipicamente contas de administração antigas,
+exactamente as que a Atribuição Rápida do Lote 4 veio impedir de nascer.
+E o defeito fechava-se sobre si mesmo: uma conta que desaparece do
+painel nunca mais pode ser associada a uma empresa, porque deixa de se
+ver. A pilha por carimbar segue agora a MESMA regra dos documentos:
+pertence a quem detém a rede de omissão (`inclui_sem_empresa`).
+
+### Fail-closed, mas alto
+
+`empresas_do_ambito` **não** tem `try/except`. Engolir a falha devolvia
+um âmbito vazio, o âmbito vazio devolve zero utilizadores (fail-closed),
+e o painel ficava em branco sem dizer porquê — a falha de leitura
+disfarçada de "não há nada", que é o defeito do ponto 13 noutro sítio.
+Numa fronteira de segurança, falhar alto é o correcto.
+
+### Mutação
+
+Três, três mataram: o âmbito vazio a deixar de ser fail-closed; o guarda
+de rede fora do `delete` das regras; o total a voltar a ser o da página
+em vez do do âmbito.
+
+## Lote 5, Secção B — pontos 16 e 17 (Set 2026)
+
+### Ponto 16 — Edição Inline de Fases: o endpoint é o oficial, sempre
+
+Mudar a fase de um processo obrigava a abrir os Detalhes, gravar e
+voltar atrás. A coluna da fase na listagem passou a ser um dropdown
+(`components/processes/ProcessPhaseCell.jsx`), **mas a gravação continua
+a ser `PUT /processes/{id}`** — o mesmo dos Detalhes.
+
+Isso não é uma preferência de estilo. É esse endpoint que:
+
+- escreve no histórico por `log_history` (e portanto respeita as regras
+  de silêncio do perfil `indexacao`, fechadas no Lote 4);
+- escreve no `audit_trail_service`;
+- dispara `process_trigger("process_status_changed", …)`;
+- notifica o cliente por email.
+
+Um `update_one` directo, ou um endpoint novo "só para a listagem",
+furava os quatro de uma vez — e em silêncio, que é a parte pior.
+
+**A permissão segue o perfil activo, dos dois lados.** À entrega deste
+ponto havia uma divergência: o produto decidia pelo perfil ACTIVO mas o
+`run_update_process` resolvia `can_update_status` por `user["role"]`.
+Foi fechada logo a seguir (ver a secção seguinte); `inlinePhaseEdit.js`
+espelha agora um único papel — o activo.
+
+A listagem **não recarrega** depois de gravar, salvo nos dois casos em
+que a linha deixou de pertencer à listagem aberta
+(`precisaDeRecarregar`): saiu do filtro de estado activo, ou passou a
+terminal numa vista só de activos. Manter a linha visível nesses casos
+seria mentir sobre o filtro.
+
+### Ponto 17 — Navegação Contígua: três camadas, zero pedidos no caso comum
+
+**O achado que desenhou tudo o resto:** `ProcessesPage` **não usa o
+TanStack Query**. Guarda os resultados em `useState` e vai buscá-los à
+mão com um `AbortController`. A `queryKeys.processes.list` existe na
+fábrica mas ninguém a usa nesta página. Não há, portanto, cache de
+listagem para ler — a opção óbvia não existia.
+
+| Camada | Onde vive | Cobre | Custo |
+|---|---|---|---|
+| 1 | `location.state` | dentro da página aberta | **zero pedidos** |
+| 2 | `sessionStorage` | o mesmo, depois de um F5 | **zero pedidos** |
+| 3 | `GET /processes/{id}/neighbours` | a fronteira da página | 1 pedido, 2 ids |
+
+A camada 2 sobrevive ao refresh e **não** sobrevive a um separador novo,
+que é o comportamento certo: quem abre o link directo não veio de
+listagem nenhuma. Quando nenhuma camada se aplica, as setas **não
+aparecem** — nunca se mostra uma seta que possa levar ao sítio errado.
+
+**`services/process_navigation.py` reaproveita `build_process_list_query`
+e `sort_process_list`.** As duas, não uma:
+
+1. A query tem de ser a mesma para os filtros e o **isolamento por Rede**
+   serem os mesmos. Um construtor próprio repetiria o defeito do Kanban
+   (Lote 4/5), que teve o seu e ficou meses fora do isolamento.
+2. A ordenação tem de ser a mesma porque **a listagem não ordena no
+   Mongo** — ordena em Python, por peso de prioridade + ordem do
+   workflow + nome. Um vizinho calculado por ordem natural do Mongo
+   estaria errado sem dar erro.
+
+`PROCESS_NAV_PROJECTION` é a projecção mínima que preserva essa
+ordenação: `id` mais os campos que `sort_process_list` e
+`get_priority_weight` lêem — **incluindo `prioridade` (PT) e `priority`
+(EN), que são campos distintos e ambos usados em produção**. Há um teste
+que o prova por equivalência (ordena a lista completa e a lista reduzida
+e exige a mesma sequência de ids), e não por uma lista de campos escrita
+à mão, que envelheceria mal.
+
+O endpoint devolve **404** para um processo fora do âmbito, não 403 —
+mesma regra do CRUD de automações (Lote 5, ponto 13): distinguir "não
+existe" de "não é teu" confirmaria a existência de processos de outra
+Rede.
+
+
+## Permissões de escrita seguem o PERFIL ACTIVO (Set 2026)
+
+`run_update_process` resolvia `role = user["role"]` — o papel base do
+JWT — e daí tirava `build_role_update_permissions` (incluindo
+`can_update_status`) e `assert_process_editable_for_role`. Quem trocasse
+para o perfil de **Indexação** no ContextSwitcher continuava a escrever
+com os direitos do papel base: mudar a fase, editar secções de negócio e
+passar por cima do bloqueio de estado terminal.
+
+É o terceiro sítio com o mesmo padrão — o Kanban (Lote 5, ponto 12) e o
+`_is_stealth_user` (Lote 4) foram os anteriores — e o mais grave dos
+três: nos outros era ver a mais, aqui era **escrever**.
+
+Hoje: `role = resolve_concrete_role(get_effective_role(request, user), user)`.
+
+**`services/auth.resolve_concrete_role` é o PONTO ÚNICO** que colapsa o
+perfil activo num papel concreto. `__all_roles__` (o perfil "Todos") é
+um conceito das LISTAGENS — lá `all_roles=` faz a união das
+visibilidades — e não significa nada para decidir uma escrita: não
+existe união de permissões num PUT. Recua para o papel do JWT, que nunca
+alarga. `resolver_papel_do_quadro` (Kanban) delega aqui em vez de manter
+a sua cópia; foi ter a mesma condição em três sítios que deixou
+`document_portal_request` a ignorar `track_history=False`.
+
+Duas propriedades que não se podem perder:
+
+1. **Fail-closed por construção.** `get_effective_role` só honra o
+   header `X-Active-Role` quando a cache UCR o validou, ou quando
+   coincide com o papel do JWT. Um header inventado **nunca** alarga —
+   recua para o papel base e regista um `warning`. O único caminho para
+   um papel diferente do JWT é um perfil realmente detido.
+2. **A conta de cliente não é um chapéu.** O ramo que aplica alterações
+   de negócio testa `role == cliente_role or user["role"] == cliente_role`
+   — a CONTA, não só o perfil activo. Mesmo critério de
+   `assert_cliente_owns_process`, que já lia a conta: a identidade de um
+   cliente do Portal é a conta dele, e uma cache de perfil errada não a
+   pode transformar em staff.
+
+Cobertura: `tests/unit/test_process_update_perfil_activo.py`, incluindo
+guarda sobre o código-fonte de que a permissão não volta a ler
+`user["role"]` — com a comparação feita **sem aspas**, porque o
+`ast.unparse` as normaliza e a guarda escrita com aspas duplas passava
+com a brecha aberta.
+
+## Lote 5, Secção B — ponto 9: Portal do Cliente stress-free (Set 2026)
+
+### Havia TRÊS listas de "obrigatório", e divergiam
+
+O formulário público (`PublicClientForm.js`, 64 campos em 6 passos)
+decidia "obrigatório" em três sítios:
+
+1. **`form_config` do administrador** (`is_required`) — o que BLOQUEIA
+   mesmo. É o que `validateStep` e `canProceed` sempre leram.
+2. **`HARDCODED_REQUIRED_BY_STEP`** — uma lista fixa no ficheiro, usada
+   **só** pela barra de progresso.
+3. A **união** das duas, que era o que a barra realmente contava.
+
+As duas primeiras não concordavam em quase nenhum passo:
+
+| Passo | Obrigatórios no config | A barra contava |
+|---|---|---|
+| 2 — 2.º titular | **0** | **10** |
+| 3 — Imóvel | 1 | 3 |
+| 4 — Profissional | inclui `chave_movel_digital` | inclui `employer_name` |
+| 5 — Bancos | 3 | **0** |
+
+Um cliente que comprasse com outra pessoa via a barra a exigir dez
+campos do 2.º titular que **não bloqueiam nada**. Metade da ansiedade do
+formulário era o produto a mentir sobre o que faltava. A lista fixa foi
+apagada; a barra lê agora a mesma fonte que bloqueia.
+
+### Divulgação progressiva: primário = o que bloqueia
+
+`utils/formularioPublicoCampos.js` é a regra pura, e é uma só:
+**primário = obrigatório no `form_config`**. Não é uma lista nova —
+é o painel que o administrador já controla, e é o mesmo campo que
+`RequiredLabel` lê para desenhar (ou não) o asterisco. Por construção,
+**um campo no painel secundário nunca tem asterisco**.
+
+`components/portal/CamposDoPasso.jsx` desenha os primários à vista e os
+restantes num `Collapsible` fechado. Duas regras que não se podem perder:
+
+- **Um passo sem campos obrigatórios mostra tudo.** É o caso do 2.º
+  titular (10 campos, zero obrigatórios): escondê-los todos deixava o
+  ecrã em branco, e um ecrã vazio assusta mais do que uma lista longa.
+- **O painel abre já aberto quando o cliente retomou o rascunho e já lá
+  tinha escrito.** Esconder o que ele escreveu dava a sensação de ter
+  perdido o trabalho.
+
+O texto (`textoDoPainelSecundario`) nunca diz "obrigatório", "em falta"
+nem "tem de", e diz explicitamente que nada ali impede de continuar —
+há um teste a afirmá-lo sobre as palavras proibidas.
+
+### O backend pede quatro campos
+
+`PublicClientRegistration` exige `name`, `email`, `phone` e
+`process_type`; `personal_data`, `real_estate_data`, `titular2_data` e
+`custom_fields` são todos `Optional`. A rede de segurança já existia: o
+processo só nasce quando a `mandatory_checklist` fica completa, e o
+Portal recolhe o resto depois. Tornar os secundários não-bloqueantes não
+tem, por isso, risco de negócio — e não foi preciso mexer no backend.
+
+### O perfil do Portal já cumpria a regra
+
+`portal_profile_schema` deriva `is_primary = is_required` — a mesma
+regra, escolhida no Lote 3 (ponto 7). O `PortalProfileFields` só ganhou
+o texto do convite, partilhado com o formulário público: as duas
+superfícies que o cliente vê passam a falar igual.
+
+## Ponto 8, Fase 1 — o Webmail entra na Parede de Betão (Set 2026)
+
+### O buraco
+
+`services/email_webmail.py` não tinha **uma única** ocorrência de
+`network_id` ou `tenant`. O Webmail ficou inteiramente fora do
+isolamento multi-tenant erguido no Lote 4 — e é a superfície mais
+sensível de todas, porque o corpo de um email traz tudo.
+
+Pior do que a ausência: `resolve_ucr_mailbox_filter` devolvia `None` em
+**três** caminhos (caixa `general`, caixa `shared_indexacao`, e âmbito
+sem cláusulas) e o chamador fazia `if ucr_filter:`. Ali, `None` não
+significava "sem empresa" — significava **sem filtro nenhum**. Com o
+`can_see_all = effective_role in (ADMIN, CEO, DIRETOR)` por cima, e com
+`query = {}` quando não sobrava nenhuma condição, uma Diretora da Domus
+a abrir a Caixa Geral lia a colecção `emails` inteira.
+
+É exactamente o `None` = "sem filtro" que o `build_network_scope_condition`
+foi escrito para nunca produzir (Lote 4, ponto 10).
+
+### A regra: um separador é uma empresa
+
+`services/webmail_scope.py` é o ponto único. O âmbito de um separador é,
+no máximo:
+
+```
+company_id == <empresa>
+OU  (account ∈ <contas dessa empresa>  E  sem company_id)
+```
+
+O segundo ramo existe só para a **pilha por carimbar** — o
+`email_service` grava `company_id` condicionalmente (`if company_id:`),
+por isso há emails cuja única prova de pertença é o endereço da caixa
+que os sincronizou. Exige `sem company_id` de propósito: **um carimbo
+explícito manda sempre sobre a dedução pelo endereço**, senão um email
+carimbado para a Domus apareceria no separador da Power sempre que o
+mesmo endereço estivesse configurado nas duas.
+
+`build_company_mailbox_condition` **nunca devolve `None`**: um âmbito
+vazio devolve `CONDICAO_IMPOSSIVEL`, e há um teste com a contraprova de
+que essa condição não casa com documento nenhum — sem ela, bastaria a
+constante ser `{}` para o teste passar com a porta escancarada.
+
+### A Caixa Geral não atravessa empresas
+
+Regra de tolerância zero, confirmada pelo dono do produto: o
+administrador da Domus, no separador da Domus, vê `geral@domus.pt` e
+**nunca** `geral@power.pt`, mesmo que tenha cargo de gestão nas duas
+redes. `build_webmail_scope(..., box="general")` resolve a Caixa Geral
+**daquela** empresa e de mais nenhuma.
+
+### Porque NÃO se junta aqui o `build_tenant_condition`
+
+Seria redundante e, pior, perigoso:
+
+1. Um separador **é** uma empresa, e uma empresa pertence a uma rede.
+   Filtrar por empresa é **estritamente mais apertado** do que filtrar
+   por rede.
+2. A empresa pedida é validada contra os UCRs do utilizador
+   (`assert_empresa_no_ambito` → **404**, não 403: um 403 confirmaria
+   que aquele id de empresa existe). Nenhum separador pode sequer nomear
+   uma empresa de outra rede.
+3. Juntar a condição de rede por cima só acrescentaria um caso —
+   esconder a pilha por carimbar a quem não detém a rede de omissão, ou
+   seja, emails cujo endereço da conta **já prova** a que empresa
+   pertencem.
+
+O isolamento de rede fica garantido por construção e transitivamente, e
+nenhum email legítimo desaparece. Há testes para as duas metades.
+
+### Superfície nova
+
+- `GET /emails/webmail/companies` — as empresas do utilizador (os
+  separadores). É esta lista que define o que ele pode **pedir**.
+- `GET /emails/webmail?company_id=` e `/webmail-stats?company_id=` — o
+  âmbito passa a ser um **parâmetro explícito do separador**, não o
+  header `X-Company-Id`. Deixa de depender do Context Switcher, que era
+  metade do problema de UX do Ponto 8.
+- Sem `company_id`, o comportamento legado mantém-se (clientes por
+  migrar). As Fases 2/3 passam a enviá-lo sempre.
+
+**Atenção ao `run_webmail_stats`:** o filtro só era resolvido dentro de
+`if request is not None`. O âmbito por empresa não depende do pedido
+HTTP — deixá-lo lá dentro mantinha o buraco aberto para qualquer
+chamador interno.
+
+### Migração
+
+`scripts/backfill_email_company_id.py`, no molde do
+`backfill_network_id.py`. Deduz o dono pelo `account` (a prova mais
+forte: o email entrou por aquela caixa) e, só depois, pela empresa de um
+utilizador que tenha **uma só**. Um endereço configurado em duas
+empresas **não é dedutível** e fica por resolver — carimbar por maioria
+prenderia o email à empresa errada para sempre, porque o carimbo passa a
+mandar sobre a dedução.
+
+## Ponto 8, Fase 2 — o Webmail fala por Axios (Set 2026)
+
+**Sexta instância do incidente de 2026-09-21.** `WebmailPage.jsx` fazia
+**28** chamadas `fetch` cruas e o `useWebmailEmails` mais uma. Todas
+passavam por um `webmailHeaders()` que escrevia `Authorization`,
+`X-Company-Id` e `X-Active-Role` à mão — **uma função inteira a
+reimplementar o interceptor do Axios**, que é o sinal mais claro de que
+o transporte estava no sítio errado.
+
+No Webmail o custo é maior do que nas cinco instâncias anteriores: sem
+`X-Company-Id`, `get_active_company_id_async` cai em `user.company` (o
+NOME da empresa, não o id), a config de email por empresa não é
+encontrada, e a caixa mostrada passa a ser a de outro perfil. Foi
+exactamente esse o sintoma do incidente original — o email de teste
+funcionava (ia por Axios) e o envio para balcões falhava (ia por
+`fetch`), com a mesma conta.
+
+Hoje: **zero `fetch`** na página e no hook, `webmailHeaders()` apagado,
+e `const API_URL = process.env.REACT_APP_BACKEND_URL` (sem fallback
+nenhum — um build sem a variável pedia a `undefined/api/...`) também.
+As ~22 funções vivem em `services/api.js`.
+
+Três detalhes que não se podem perder:
+
+1. **`downloadWebmailAttachment` pede `responseType: "blob"`**, e por
+   isso o corpo de ERRO vem também como Blob: é lido com
+   `readBlobErrorBody`, senão a mensagem do servidor ("Anexo não
+   encontrado") desaparecia.
+2. **`uploadEmailAttachment` não escreve `Content-Type`** — o Axios tem
+   de o gerar com o `boundary` do FormData.
+3. **`cancelEmailSend` devolve o rascunho a restaurar** no composer. A
+   primeira versão da migração deixou cair a resposta e o ESLint apanhou
+   o `res` órfão.
+
+`getWebmailStats` mantém a assinatura antiga (uma string solta = a
+caixa) e aceita também um objecto, para os chamadores que já existiam
+não partirem.
+
+**Guarda:** `src/pages/webmailTransport.test.js` afirma sobre o
+código-fonte — um teste de comportamento com o transporte falseado não
+vê a diferença entre um `fetch` e um `api.get`, e a diferença é o ponto.
+Ignora comentários de propósito: senão a explicação da regra fazia o
+guarda ficar vermelho.
+
+**Consequência no teste de integração:** a fronteira falsa do
+`WebmailPage.test.jsx` era o `globalThis.fetch`. Sem `fetch` na página,
+o stub deixou de interceptar e o jsdom tentava ligar-se ao
+`localhost:8001` a sério. A fronteira passou a ser o módulo
+`services/api` — que é onde ela sempre devia ter estado.
+
+## Ponto 8, Fase 3 — a Caixa de Correio Dedicada (Set 2026)
+
+### A empresa é o sítio onde se está, não um estado escondido
+
+O Webmail misturava as empresas num dropdown de contas e obrigava a
+trocar de perfil no Context Switcher para chegar à caixa certa — um
+estado invisível, no cabeçalho do CRM, a decidir o que se via no ecrã.
+`components/webmail/WebmailCompanyTabs.jsx` põe a empresa ao nível mais
+alto: clica-se no separador e a caixa é aquela.
+
+A lista vem de `GET /emails/webmail/companies` (Fase 1) e **não** do
+`user.companies` do AuthContext, de propósito: é o mesmo cálculo que
+autoriza os pedidos (`assert_empresa_no_ambito` → 404), e derivá-la no
+cliente abria a porta a mostrar um separador que o servidor recusa.
+
+O separador activo vive no **URL** (`?company_id=`): sobrevive a um F5 e
+um link leva alguém à caixa certa.
+
+### Zero ruído, e a regra não está solta no JSX
+
+Com uma empresa só, `deveMostrarSeparadores` devolve `false` e a barra
+não desenha separador nenhum — fica só o nome, discreto. Um separador
+solitário é uma escolha que não existe, e rouba uma linha de ecrã à
+caixa. A decisão vive no módulo puro (`utils/webmailEmpresas.js`), não
+num `length > 1` no meio do JSX.
+
+`resolverEmpresaActiva` recusa uma empresa pedida que já não conste da
+lista e cai na primeira: um `company_id` guardado de um acesso revogado
+levaria a pedidos que o backend devolve com 404, e o utilizador via uma
+caixa vazia sem perceber porquê.
+
+### Fim do painel intrusivo
+
+O botão **"Sincronizar"** de largura total que ocupava a barra lateral,
+e a linha "Última sinc." no rodapé, saíram do `FolderNavigation`. A
+sincronização é uma operação de FUNDO: o que interessa saber é se a
+caixa está actualizada, e isso cabe numa linha no cabeçalho do separador
+(`estadoDaSincronizacao` → "Actualizado há 5 min" / "A sincronizar…" /
+"Por sincronizar"), com um ícone de 28px ao lado.
+
+**"Por sincronizar" não se pinta de alarme.** É o estado normal ao abrir
+a página, e um indicador que grita ensina toda a gente a ignorá-lo — a
+lição do Monitor de Sinais Vitais (Lote 4, ponto 14).
+
+As props `syncing` / `lastSyncTime` / `onSync` foram **removidas** do
+`FolderNavigation`, e não deixadas a apodrecer: um contrato de props que
+menciona o que já não existe é um contrato que mente.
+
+### Notas
+
+- As estatísticas (`/webmail-stats`) levam o mesmo `company_id` da
+  lista. Contagens de um separador sobre os emails de outro seriam uma
+  fuga por outra porta — mais discreta, e por isso pior.
+- `minutosDesde` pode devolver negativos (relógio do cliente adiantado)
+  e isso cai de propósito no ramo "Actualizado agora". Tive ali uma
+  guarda `diff < 0 → 0` que **nenhuma mutação conseguia matar**, porque
+  não mudava nada: `minutos < 1` já o cobria. Código defensivo que nenhum
+  teste pode derrubar é código morto, e código morto mente sobre o que o
+  programa faz.
+
+## Épico 10, Fases 1 e 2 — a Parede no Envelope (Set 2026)
+
+### O tempo real tinha duas condutas, e a blindada levava 2 de 35 emissores
+
+O Épico 4 (`task_*`) e o Épico 5 (`new_email`) passaram a emitir por
+`redis_pubsub.publish_event`. Mais nada foi. Os outros **33 pontos de emissão,
+em 12 módulos**, continuaram a escrever directamente no `ConnectionManager`
+em memória — e `render.yaml` fixa `UVICORN_WORKERS=2`. Um evento emitido no
+worker A para um socket no worker B não chega, e não dá erro nenhum: é a
+mesma falésia do Épico 5, que nunca foi generalizada.
+
+Consequência que explica todo o resto: **o polling das notificações não era
+redundância, era suporte de vida.** `send_realtime_notification` decidia a
+entrega por `manager.is_user_connected(user_id)`, uma pergunta que mente com
+vários workers; quem entregava a notificação, na prática, era o `setInterval`
+de 30 s do `NotificationsDropdown`. Cortar o polling antes desta migração
+teria apagado metade das notificações em produção, com ar de melhoria de
+performance.
+
+### A fuga: `manager.broadcast()` não conhece a Parede de Betão
+
+`broadcast_process_delta` dizia-o na própria docstring — *"broadcast a
+lightweight process delta to **all connected WebSocket clients**"*. O delta
+transporta `client_name` e `process_number`. A cadeia completa:
+
+```
+process_kanban_move   manager.broadcast(moved_message)      # sem filtro
+useKanbanRealtime     handleProcessCreated(payload)
+                      processes.unshift({client_name: …})
+                      onNotification(`Novo processo: ${client_name}`)
+```
+
+Um processo criado na Power inseria um cartão, com o nome do cliente, no
+Kanban de quem estivesse ligado na **Domus**, e disparava um toast com esse
+nome. O isolamento do Lote 4/5 vive inteiro nas *queries*; o WebSocket não faz
+query nenhuma, e foi por aí que passou. `realtime_notifications` tinha o mesmo
+defeito, com um comentário ao lado a garantir "sem dados sensíveis" sobre um
+payload que levava o `client_name`.
+
+### A regra: o evento declara audiência, o socket decide
+
+Um desenho ingénuo pergunta "quem pode ver este processo?" e paga uma query
+por cartão arrastado. Este inverte a pergunta:
+
+```
+emissor → audiencia_do_processo(process)   ← 0 I/O: o carimbo do Lote 4 já
+                                             está no documento que ele leu
+        → publish_event(…, audiencia=)     ← UM envelope, não N
+        → alcanca(aud, ambito_em_cache)    ← 0 I/O, em cada worker
+```
+
+O custo passa de *uma query por evento* para **uma query por ligação**:
+`resolve_tenant_scope` corre uma vez no handshake
+(`websocket_api_notifications`) e o `TenantScope` — um `frozen dataclass` —
+fica em `manager.user_scopes`, saindo com a última ligação.
+
+### Duas camadas, e têm de passar ambas
+
+`services/realtime_audience.py`:
+
+1. **Rede** — a fronteira de segurança. Espelha
+   `tenant_network.build_network_scope_condition`.
+2. **Necessidade de saber** — espelha
+   `process_list_filters.build_kanban_role_base_query`. Não é segurança: é
+   impedir que apareça no quadro de um consultor um cartão que o `GET` nunca
+   lhe devolveria e que desapareceria ao recarregar.
+
+São um **E**: estar atribuído não fura a rede, e pertencer à rede não dá
+acesso à carteira alheia.
+
+### Dois dialectos da mesma regra — e um teste que os alinha
+
+`alcanca` fala Python; `build_network_scope_condition` +
+`build_kanban_role_base_query` falam Mongo. Uma divergência silenciosa reabre
+a fuga, por isso `TestOsDoisDialectos` corre **as duas** sobre a mesma matriz
+(9 processos × 5 âmbitos × 7 papéis = 315 casos) e exige o mesmo veredicto,
+com contraprova de que a matriz exercita os dois valores — uma matriz só de
+`False` alinharia por acaso.
+
+Única diferença legítima, escrita no teste para ninguém a "corrigir":
+`is_deleted` é retirado do lado Mongo. Filtra o que o quadro **lista**, não
+quem tem direito a **saber**; quem via o processo tem de receber o evento que
+o apaga, senão fica com um cartão fantasma até ao F5.
+
+**Este teste apanhou um defeito real à primeira execução:**
+`str(UserRoleEnum.CONSULTOR)` devolve `'UserRoleEnum.CONSULTOR'` no Python
+3.11, não `'consultor'`. A normalização do papel destruía-o e `alcanca`
+devolvia `False` para toda a gente — falha fechada, mas o tempo real ficava
+mudo. `_texto` desembrulha Enums desde então.
+
+### Três formas de endereço, e nenhuma é "toda a gente"
+
+A invariante do transporte foi **alargada**, que é o ponto mais sensível do
+Épico:
+
+```
+antes:  entregável ⇔ user_id
+agora:  entregável ⇔ user_id  OU  audience  OU  room     (nunca nenhum)
+```
+
+| Forma | Quando | Quem decide |
+|---|---|---|
+| `user_id` | destinatário único (tarefas, email novo) | `send_personal_message` |
+| `audience` | quem tem direito a ver aquele processo | `_route_por_audiencia`, em memória |
+| `room` | quem está naquele ecrã | `_route_por_sala`; a ACL já foi feita à ENTRADA |
+
+As salas eram o terceiro caso escondido: `broadcast_to_room` entrega à lista
+de membros, que é **local a cada worker** — a mesma falésia noutra forma.
+
+O que mantém isto fechado é `build_event_envelope` **não gravar uma audiência
+sem alcance**: uma `Audiencia()` vazia nunca chega ao `is_deliverable` como
+endereço válido. Sem isso, bastava um emissor distraído para reabrir o
+broadcast por omissão de campo. É a mesma lei do `CONDICAO_IMPOSSIVEL` e do
+`resolve_ucr_mailbox_filter` que devolvia `None`.
+
+### Dois casos que a audiência do documento não cobria sozinha
+
+* **Quem sai da equipa** (`extra_user_ids`). A audiência sai do documento
+  *novo*; o consultor acabado de remover já não está lá e seria o único a não
+  saber que saiu, ficando com um cartão fantasma. `process_staff_assignment`
+  passa `tambem_para=removidos`. Dispensa a Camada 2, **nunca** a Camada 1.
+* **Presença** (`toda_a_rede`). `USER_ONLINE`/`USER_OFFLINE` levavam o *nome*
+  de um admin/CEO a todos os sockets, incluindo os de outra rede.
+  `entregar_as_redes` emite uma audiência por rede do próprio; sem rede
+  resolvida não emite nada. O âmbito é lido **antes** do `disconnect`, que é
+  quem o apaga.
+
+### A conduta única, e a guarda que a mantém
+
+`services/realtime_delivery.py` é o ponto por onde todos os emissores passam
+(`entregar_a_utilizador` / `entregar_a_processo` / `entregar_a_audiencia` /
+`entregar_na_sala` / `entregar_as_redes`). `tests/unit/test_realtime_delivery.py`
+afirma sobre o **código-fonte** dos 12 módulos que nenhum volta a escrever em
+`manager.*`, com a contraprova ao lado (cada um importa mesmo a conduta) —
+sem ela, apagar a entrega satisfaria a guarda. A guarda ignora comentários de
+propósito: vários destes ficheiros explicam hoje "isto era um
+`manager.broadcast()`", e uma guarda que lesse comentários tornaria essa
+explicação vermelha.
+
+### O socket não tem chapéu
+
+Não há `X-Active-Role` num handshake WebSocket. O âmbito de segurança vem do
+**JWT**, lado servidor; um perfil activo declarado pelo cliente só poderia
+ESTREITAR a vista, nunca alargá-la — a mesma regra do `resolve_concrete_role`
+que fechou a brecha do `can_update_status`.
+
+### Limitações conhecidas (deliberadas, não esquecidas)
+
+* **O âmbito em cache envelhece.** Um UCR revogado com o socket aberto só
+  produz efeito na reconexão. Atenuantes: trocar de empresa já faz `reload()`
+  (Lote 5, ponto 6), e o delta leva `client_name`, não o processo — o conteúdo
+  continua a vir pelo HTTP, que reverifica sempre. Um TTL no âmbito é o passo
+  seguinte.
+* **A presença local continua a mentir.** `chat_presence` usa
+  `manager.is_user_connected` para o indicador "online", e a decisão de enviar
+  *push* em `send_realtime_notification` também. Um registo de presença
+  partilhado resolveria ambos; não foi feito aqui para não mudar o
+  comportamento do push sem pedido. Não é regressão: é o que já acontecia.
+* **`is_notified`** é escrito em `db.notifications` e **não é lido em lado
+  nenhum** — o comentário original prometia prevenir re-emissão no polling, e
+  não previne nada. Fica assinalado.
+
+### Fase 3 (cortar o polling) NÃO foi feita
+
+É o passo seguinte, e só é seguro agora que a conduta existe: suspender o
+`setInterval` quando `isConnected` e retomá-lo se o WS cair, como o Webmail e
+o `TasksContext` já fazem.
+
+## Épico 10, Fase 3 — o polling volta a ser recurso (Set 2026)
+
+Só agora é seguro. Até às Fases 1 e 2, `send_realtime_notification` decidia a
+entrega por `manager.is_user_connected`, que mente com `UVICORN_WORKERS=2`:
+quem entregava metade das notificações era o `setInterval` de 30 s do
+`NotificationsDropdown`. Com a entrega pelo Redis, o intervalo pode dormir.
+
+**O intervalo não foi apagado, foi adormecido.** `utils/realtimeFallback.js`
+(puro): `intervaloEfectivo({isConnected})` devolve `null` com o socket de pé e
+o intervalo quando ele cai. Um valor inválido cai no base — falhar para "sem
+rede de segurança" seria o pior dos dois lados.
+
+**O Kanban não tinha polling para cortar.** Vive de `staleTime: 60s` +
+`refetchOnWindowFocus`; não havia `setInterval` nenhum. O que lhe faltava era o
+outro lado: os eventos emitidos enquanto o socket esteve em baixo perderam-se e
+**nada os repete**. `precisaDeRecuperar({anterior, actual})` dispara uma
+invalidação única na volta da ligação — sem ela o quadro fica calado E
+desactualizado, que é pior do que estar visivelmente offline: parece funcionar.
+A primeira ligação não conta (a montagem já leu).
+
+---
+
+## O cabeçalho que destruía os uploads (Set 2026)
+
+**Sintoma:** `POST /api/documents/client/{id}/upload` devolvia **422** com
+`Field required` para `body.file` **e** `body.category`. Os dois campos ao
+mesmo tempo é a assinatura de um corpo que o servidor não conseguiu analisar
+como multipart — não de um campo esquecido.
+
+**Causa.** A instância Axios de `services/api.js` declara
+`Content-Type: application/json` como predefinição, e o `transformRequest` do
+Axios 1.x faz, literalmente:
+
+```js
+if (isFormData) {
+  return hasJSONContentType ? JSON.stringify(formDataToJSON(data)) : data;
+}
+```
+
+Com JSON no cabeçalho, **o FormData é convertido em JSON** e o ficheiro vira
+`{}`. Só depois, já dentro do adaptador, é que o Axios limparia o cabeçalho
+para o browser gerar o `boundary` — e a essa altura já não há FormData. **A
+ordem é que decide.** Verificado contra um servidor HTTP real:
+
+```
+Content-Type: application/json
+{"file":{},"category":"Financeiros"}
+```
+
+**A lição inverte a regra que seguíamos.** "Não escrever o `Content-Type` à
+mão" é necessário, mas **NÃO é suficiente**: omitir não limpa nada, deixa
+entrar a predefinição da instância. É preciso ANULÁ-LO. E, ironicamente, as
+funções que escreviam `multipart/form-data` à mão funcionavam — porque o Axios
+o limpa lá dentro quando o corpo é FormData num browser. Depender disso é
+depender de um pormenor interno da biblioteca.
+
+**Três funções estavam partidas**, todas saídas das refactorizações
+recentes: `uploadProcessS3File` (Épico 8), `aiAnalyzeS3Documents` (Épico 8) e
+`uploadEmailAttachment` (Ponto 8, Fase 2). Cada uma omitia o cabeçalho, que
+era o que se julgava correcto.
+
+**A correcção é um interceptor, não uma emenda por função**
+(`utils/formDataTransport.js` + `api.interceptors.request`). Uma regra que
+depende de cada autor se lembrar dela já falhou três vezes; num ponto único
+não há onde falhar. Excepção legítima preservada: `createTempLink` passa um
+**objecto** e deixa o Axios convertê-lo por causa do cabeçalho — no momento
+do interceptor ainda não é FormData, por isso não lhe tocamos, e há um teste
+a afirmá-lo.
+
+`uploadClientS3File` foi **removida**: duplicava `uploadProcessS3File` para o
+mesmo endpoint, nunca teve um único chamador (nem na história do repositório)
+e carregava o mesmo defeito. Uma segunda porta para o mesmo sítio é onde o
+defeito seguinte se instala sem ser visto.
+
+## Gestor de Ficheiros S3 — Passos 1 e 2 (Set 2026)
+
+### O que estava aberto era pior do que travessia de caminho
+
+O raio-x começou por apontar `_resolve_explorer_path`, que só fazia
+`path.startswith("Documentação Clientes")` — e portanto dava por bom
+`Documentação Clientes/../backups` (o `..` nunca era resolvido) e
+`Documentação Clientes_outro/` (prefixo de TEXTO não é fronteira de SEGMENTO).
+
+Ao ler as seis operações, o quadro era mais grave: **três delas nem sequer
+passavam por essa função.**
+
+| Operação | O que recebia | Consequência |
+|---|---|---|
+| `run_s3_download(path)` | chave crua → `get_object` | `backups/dump.gz` — a base de dados inteira, em streaming |
+| `run_s3_delete(data.path)` | prefixo cru | `path="backups/"` + `is_folder=True` apagava todos os backups |
+| `run_s3_rename(old_path)` | prefixo cru | mover qualquer coisa para qualquer sítio |
+
+Não era preciso `../`: bastava escrever `backups/`. Os backups da base de
+dados vivem no mesmo bucket (`services/backup.py`, prefixo `backups/`).
+
+Enquanto a página esteve trancada a `[ADMIN, CEO]` isto ficou contido — mas um
+engano de quem escreve um caminho apagava os backups, e abrir a página a
+utilizadores normais sem fechar isto seria pôr a fechadura depois da porta.
+
+### A contenção: fronteira de segmento, não prefixo de texto
+
+`services/s3_explorer_paths.py` (puro). Todo o caminho é normalizado
+(`posixpath.normpath` resolve `.`, `..` e barras repetidas) e tem de cair
+dentro da raiz **depois** de resolvido.
+
+A propriedade é **"não SAIR da raiz"**, não "recusar tudo o que pareça
+suspeito". Um caminho relativo como `backups/dump.gz` é prefixado e fica
+contido em `Documentação Clientes/backups/dump.gz` — uma chave inexistente
+dentro da área de clientes, inofensiva, e é o comportamento que `create` e
+`upload` já tinham. Só é recusado (400) quem **sobe** acima da raiz ou entra
+por caminho absoluto.
+
+`rename` ganhou ainda a regra de que o nome novo é um **segmento**: com `/`
+era outra forma de escrever uma chave arbitrária.
+
+`tests/unit/test_s3_explorer_containment.py` é também o **inventário das seis
+operações**, uma asserção por cada — a lição do Lote 5, ponto 1, onde o Kanban
+tinha construtor próprio e ficou de fora do isolamento por não haver
+inventário. As asserções são sobre as **chaves que chegam ao cliente S3**, não
+sobre o código de estado: um teste que só verificasse o 400 não provaria que,
+no caminho que passa, a chave certa é usada.
+
+### A listagem não paginava
+
+`list_objects_v2` devolve no máximo 1000 entradas. O `delete` e o `rename` já
+seguiam o `ContinuationToken`; a **listagem**, que é a que toda a gente vê,
+fazia uma só chamada. Uma raiz com mais de mil pastas ficava truncada em
+silêncio — e, com o filtro por rede do Passo 3 por cima, essa truncagem
+passaria a parecer isolamento a funcionar. Corrigido, com defesa contra um
+`IsTruncated` sem cursor (listagem incompleta com aviso, nunca um pedido que
+não termina).
+
+### Passo 2 — medir antes de isolar
+
+`services/s3_folder_coverage.py` (puro) + `scripts/medir_cobertura_s3.py`.
+
+O isolamento resolve-se por pasta → `processes.s3_folder` →
+`processes.network_id`. Uma pasta que nenhum processo reclame não tem rede e
+**falha fechada**: invisível a todos menos admin/CEO. Correcto em segurança,
+potencialmente péssimo em produto — daí medir primeiro.
+
+| Número | O que significa |
+|---|---|
+| **pastas no S3** | o denominador real, não o que a BD julga |
+| **mapeadas** | com pelo menos um processo a apontar-lhes |
+| **órfãs** | invisíveis após o Passo 3 — o número que decide |
+| **ambíguas** | reclamadas por processos de redes DIFERENTES |
+| **ligações partidas** | `s3_folder` aponta para pasta inexistente (sintoma de `rename`) |
+
+Uma pasta ambígua não pode ser mostrada a **nenhuma** das redes: mostrar à
+"primeira" seria escolher à sorte qual das redes vê os documentos da outra.
+Dois processos da MESMA rede são o caso normal e não são ambiguidade; um
+processo **por carimbar** também não — ausência de carimbo não é "outra rede".
+
+O `--aplicar` preenche `s3_folder` apenas onde o nome do cliente corresponde a
+**um único** processo sem pasta. Recusa-se a escolher entre vários — mesma
+regra do `rede_consensual` do Lote 4: um mapeamento errado torna a pasta
+visível à rede errada, e a execução seguinte aceitá-lo-ia como verdade. Nunca
+apaga, nunca reescreve um mapeamento existente, nunca toca no S3.
+
+O script **recusa-se a correr sem S3 configurado** em vez de reportar zeros:
+um relatório de cobertura falso levaria a uma decisão de produto errada.
+
+## Gestor de Ficheiros S3 — Passos 3 e 4: a Parede e o religamento (Set 2026)
+
+### A página reabriu, e a razão do tranco desapareceu
+
+O Lote 5, ponto 1 trancou `/ficheiros` a `[ADMIN, CEO]` porque o bucket está
+arrumado por pasta de CLIENTE e não havia `network_id` num prefixo S3 — era
+isolamento **por ausência de utilizadores**, não por desenho. A ponte
+(`processes.s3_folder` → `processes.network_id`) existe desde o Lote 4; faltava
+consultá-la.
+
+### A decisão pertence ao primeiro segmento, e só a ele
+
+`services/s3_explorer_scope.py`. Tudo abaixo de
+`Documentação Clientes/Joao_Silva/` é do Joao_Silva, pelo que navegar cinco
+níveis custa a mesma decisão que navegar um:
+
+```
+listar a raiz  → 1 chamada S3 (paginada) + 1 query em LOTE   (12.450 pastas)
+listar fundo   → 1 chamada S3 + 1 query de um documento
+```
+
+Nunca N+1. Índices novos: `idx_s3_folder` (a ponte) e `idx_network_id` (lido em
+quase todas as listagens desde o Lote 4, e nunca teve índice próprio).
+
+### Só a Camada 1 — e um dialecto só
+
+Decisão de produto: o Explorador é ferramenta de arrumação documental da
+empresa, não uma vista de carteira. Um consultor da Domus vê as pastas de todos
+os clientes da Domus, incluindo as dos colegas.
+
+O predicado é **o mesmo** do tempo real: `realtime_audience.passa_a_rede`, que
+passou de privado a público em vez de ser reescrito. `TestOsDoisDialectos`
+cobre-o agora para os dois usos.
+
+### Órfãs e ambíguas: os números decidiram
+
+Medição em produção: **12.450 pastas, 9.800 mapeadas, 2.650 órfãs** (2.400
+resolúveis por backfill), **45 ambíguas**, **205 ligações partidas**.
+
+| Caso | Quem vê |
+|---|---|
+| Pasta com uma rede | quem tem essa rede no âmbito |
+| Pasta **órfã** (sem dono) | só ADMIN/CEO, para reconciliar |
+| Pasta **ambígua** (>1 rede) | só ADMIN/CEO — nunca nenhuma das redes |
+
+A excepção é de **reconciliação, não de hierarquia**: um director não entra
+nela, porque veria pastas cuja rede não se sabe qual é. Duas *empresas* da mesma
+rede não são ambiguidade — a Power e a Precision partilham dados.
+
+**404, nunca 403.** O nome da pasta É o nome do cliente: um 403 confirmaria a
+carteira da concorrência. A mensagem também não repete o caminho pedido.
+
+**Falha fechada em três pontos**, os três provados por mutação: pasta
+desconhecida (`None`) não é visível; âmbito ausente não é visível; e uma
+**leitura falhada** da base de dados torna todas as pastas órfãs — invisíveis a
+quem não reconcilia. Uma leitura falhada não pode abrir o que a leitura bem
+sucedida fecharia.
+
+### Papéis em três níveis
+
+| Nível | Quem | Porquê |
+|---|---|---|
+| **Ver / descarregar / carregar / criar pasta** | todo o staff | reversível |
+| **Renomear / apagar** | admin, ceo, diretor, administrativo | apagar uma pasta de cliente leva o histórico documental inteiro |
+| — | `parceiro` e `cliente` ficam fora dos dois | conta fantasma; o cliente tem o Portal |
+
+O isolamento por rede aplica-se a **todos**, admin/CEO incluídos. O que eles têm
+a mais é ver as órfãs e ambíguas.
+
+### Passo 4 — o `rename` move a chave E o mapeamento
+
+`services/s3_folder_relink.py`. O `rename` copiava os objectos, apagava os
+antigos e não tocava em nada na base de dados. Com o isolamento, isso passou de
+incómodo a **cegueira auto-infligida**: um `s3_folder` a apontar para o nome
+antigo torna a pasta órfã, logo invisível. Renomear era apagar do mundo.
+
+São **quatro** coisas a mover, não uma:
+
+1. `processes.s3_folder` — o mapeamento (só quando se renomeia a pasta do
+   CLIENTE; renomear `Financeiros` não o muda).
+2. `document_metadata.s3_path` — sustenta o separador Documentos, o badge IA,
+   as validades e a análise. Sem isto os ficheiros somem da ficha.
+3. `documents.s3_path` e `attached_files` — os pedidos do Portal. O cliente
+   ficava a ver um documento que já não está onde diz.
+
+**Fronteira de segmento, sempre:** `Joao_Silva_2` começa pelo mesmo texto e é
+OUTRO cliente — e o sufixo `_2` é precisamente como o sistema desambigua
+homónimos, portanto é o caso comum.
+
+**Nunca bloqueia.** Quando corre, os objectos JÁ se moveram no S3; levantar aqui
+mostraria um erro sobre uma operação bem sucedida. Mesma lei do
+`document_portal_revoke`.
+
+O `rename` de pasta também não paginava: acima de 1000 objectos movia alguns e
+apagava-os, deixando o resto para trás. É a origem mecânica das 205 ligações
+partidas.
+
+### O inventário das seis operações
+
+`tests/unit/test_s3_explorer_isolation.py` tem uma asserção por operação, e
+acrescentar uma sétima obriga a acrescentá-la lá — a lição do Lote 5, ponto 1,
+onde o Kanban tinha construtor próprio e ficou de fora por não haver inventário
+das superfícies. As asserções são sobre comportamento observável (404, chaves
+que chegam ao S3, pastas devolvidas), não sobre o código-fonte.
+
+### O frontend deixou o `fetch` cru
+
+Sétima instância do incidente de 2026-09-21. Enquanto a página era só de admin
+não pesava; num endpoint cujo RESULTADO depende do contexto, pesa. Seis funções
+em `services/api.js`, guarda em `pages/filesExplorerTransport.test.js`. A página
+distingue **404** (pasta fora da rede) de **403** (sem acesso à página): dizer
+"sem permissões" a um 404 confirmaria que a pasta existe.
+
+---
+
+## Estado do processo × workflow × Kanban — o retrato (Set 2026)
+
+### O campo `status` é o eixo, e continua a ser
+
+`processes.status` é lido em ~94 sítios e está indexado (`idx_status` +
+`idx_status_consultor`, `idx_status_mediador`, `idx_status_created`). Mover a
+verdade para um campo novo seria uma migração de raio inaceitável. O que muda
+não é onde a verdade vive: é **quem tem direito a ter uma lista de nomes de
+fases**.
+
+### As fases são configuráveis — e cinco sítios fingem que não
+
+| Fonte | Declara |
+|---|---|
+| `workflow_statuses` (motor) | as fases reais, por `order` |
+| `process_status.STATUS_VALUE_ALIASES` | singular/plural dos terminais |
+| `utils/processTimeline.js::ALIASES_LEGADOS` | 10 nomes antigos |
+| `utils/funilDeFases.js::MACRO_FASES` | 4 grupos do funil |
+| `stats_branches`, `scheduled_tasks`, `admin_dev_ops` | um vocabulário que **não existe no motor** |
+
+O último é o que custa dinheiro: o dashboard BI de balcões procura
+`concluido`/`arquivo` quando a fase terminal se chama `concluidos`, e o tempo
+médio de fecho sai de um conjunto vazio. **Uma métrica de negócio medida
+contra fases inexistentes não é imprecisa — é sobre nada.**
+
+"Terminal" também tem três definições em simultâneo: a flag dinâmica
+`is_active` (Kanban/move — a correcta), `INACTIVE_STATUSES` (Portal) e
+`ARCHIVED_STATUSES` (filtro de vista do Kanban).
+
+### O quadro perde cartões que o contador conta
+
+`group_processes_by_status` agrupa por igualdade EXACTA da string;
+`build_kanban_columns` só lê as chaves com fase configurada. O contador do
+cabeçalho conta por `$in` **com** os aliases. Um processo em `concluido`
+(singular), numa fase apagada, ou com um espaço a mais, fica **invisível no
+quadro** e continua a somar para o número por cima dele. Sem erro, sem log.
+
+A origem mecânica está em `run_delete_workflow_status`: move os processos com
+`update_many({"status": nome_exacto})` — as variantes ficam para trás — e não
+dispara automação nenhuma nem escreve `is_active`. Uma mudança de estado em
+massa, invisível ao motor.
+
+### `services/workflow_status_coverage.py` + `scripts/medir_status_producao.py`
+
+A medição, antes de qualquer intervenção. O serviço é **puro** e funde as duas
+tabelas de alias que vivem em lados opostos da aplicação. A regra do alias é a
+que a timeline já usa e é a única segura: **um alias só vence quando o motor
+não conhece o nome gravado E conhece o destino** — e com mais do que um
+destino possível não se escolhe, a disciplina do `rede_consensual` (Lote 4) e
+do `_propor_correspondencias` (Gestor S3).
+
+Classifica cada órfão em **resolúvel / ambíguo / desconhecido**, separa
+gralhas invisíveis (capitalização, espaço à direita, hífen) dos nomes
+legítimos antigos, e mede as listas cravadas **importando-as dos módulos
+reais, privadas incluídas** — uma cópia local mediria a cópia.
+
+O script é **só leitura** e não vai ter `--aplicar`: o passo seguinte é uma
+decisão de produto (que macro-fase leva cada fase), não uma correspondência
+que uma máquina feche sozinha. Não chama o `env_guard` de propósito — esse
+guarda existe para impedir um seed de escrever em produção, e é contra
+produção que este script tem de correr. O que o torna seguro é a guarda sobre
+o código-fonte que afirma que nenhuma operação de escrita aparece no ficheiro,
+com contraprova de que lê mesmo as duas colecções.
+
+### O desenho aprovado (por executar)
+
+1. **`macro_fase` passa a campo da fase**, com enum fechado
+   (`novo|analise|aprovado|concluido|perdido`) editável no `WorkflowEditor`.
+   Fechado porque texto livre cria um grupo novo com uma gralha e o funil
+   parte-se em silêncio — a lição do Campo de Rede (Lote 5, ponto 2). Semeado
+   uma vez pelo padrão idempotente do `ensure_workflow_purpose_flags_backfill`:
+   a semântica fica **na base de dados**, o runtime só lê.
+2. **Um resolvedor, um dialecto** (`workflow_phases.py`). As cinco listas
+   passam a ler dali; as duas tabelas de alias fundem-se numa.
+3. **Coluna "Fases desconhecidas"** no Kanban, visível a `ADMIN`/`CEO` — a
+   mesma política das pastas S3 órfãs: não adivinhar, mostrar a quem
+   reconcilia. Invariante em teste: **soma dos cartões = contador do
+   cabeçalho**.
+4. **`run_delete_workflow_status` recusa apagar uma fase com processos.** Um
+   `update_many` que dispare automações em centenas de processos é um acidente
+   pior do que uma recusa; o administrador move-os no quadro, e aí o motor
+   reage como deve.
+
+**A macro-fase é para LEITURA** (funil, Portal, BI). As `trigger_*` continuam
+a ser a única coisa que as automações lêem — fundi-las faria uma edição do
+funil mudar o que dispara.
+
+---
+
+## O resolvedor de fases — a Parte 1 executada (Set 2026)
+
+O retrato de produção deu os números: **12.450 processos, 342 invisíveis
+no quadro** — 205 com nome antigo, 12 com gralha, 125 em fases que o motor
+não tem. E `stats_branches._COMPLETED_STATUSES` a apanhar **0 de 12.450**.
+
+### `services/workflow_phases.py` — o ponto único dos NOMES
+
+O `workflow_lookup` já era o ponto único das FLAGS de propósito. Faltava o
+dos nomes. A ordem da resolução é fixa e cada degrau tem uma razão:
+
+| # | Motivo | O que é |
+|---|---|---|
+| 1 | `exacto` | o nome gravado É uma fase |
+| 2 | `gralha` | normaliza (maiúsculas, espaços, hífen) para UMA fase |
+| 3 | `alias` | nome legítimo de uma versão anterior do produto |
+| 4 | `desconhecido` | não se adivinha |
+
+**A gralha vem antes do alias** de propósito: `"Concluidos "` não é uma
+fase de outra época, é a mesma fase mal gravada. É o caso mais
+determinístico dos dois e não deve ficar refém de uma tabela de nomes
+antigos.
+
+**A regra do alias mantém-se:** só vence quando o motor NÃO conhece o nome
+gravado E conhece o destino; com mais do que um candidato, ninguém escolhe.
+Basta o admin criar uma fase chamada `cpcv` para a tradução ter de
+calar-se — é o teste `test_uma_fase_chamada_cpcv_nao_e_traduzida`.
+
+**A resolução é de LEITURA.** O cartão aparece na coluna certa e o `status`
+gravado fica como está, numa cópia rasa com `status_resolvido_de`.
+Reescrever 205 processos em massa dispararia automações sobre processos que
+ninguém tocou — exactamente o defeito do `run_delete_workflow_status`. Quem
+muda a fase é o `run_move_process_kanban`, um de cada vez, com o motor a
+reagir.
+
+### `nomes_terminais` — porque é que a lista legada não morreu toda
+
+A verdade é a flag `is_active: False`. Duas ressalvas, ambas a preservar
+comportamento:
+
+- Fase configurada **sem** a flag cai na lista legada — a mesma regra de
+  fallback do `resolve_workflow_purpose_flags`, para não mudar o
+  significado de uma instalação que ainda não correu o backfill.
+- Nomes da lista legada que **não são fases** (`perdido`, `cancelado`,
+  `arquivo` — os 125 do retrato) continuam terminais. Deixá-los de fora
+  fá-los-ia aparecer como ACTIVOS, que é pior do que aparecerem órfãos.
+
+`INACTIVE_STATUSES` deixou de ser a **definição** de terminal e passou a ser
+o **resíduo legado**. É uma mudança de estatuto, não de conteúdo.
+
+### A coluna de reconciliação
+
+`FASE_DESCONHECIDA` recolhe o que não resolve. Só `ADMIN`/`CEO` a recebem
+(pelo papel **efectivo**), mas **esconder a coluna não é esconder o
+problema**: `total_desconhecidos` vai na resposta para toda a gente. No
+frontend não aceita cartões — largar lá um seria pedir ao servidor um
+estado que não existe (400) —, só os deixa sair, e não mostra número de
+passo porque não é um passo.
+
+### As listas imploduídas
+
+| Módulo | Antes | Agora |
+|---|---|---|
+| `stats_branches` | 3 listas, 0/2 nomes existiam | `nomes_por_macro` / `nomes_activos`, por pedido |
+| `scheduled_tasks` | 12 nomes no relatório mensal | `nomes_activos` |
+| `portal_status` | `INACTIVE_STATUSES` | `nomes_terminais(all_statuses)` |
+| `portal_profile` | a regra escrita à mão em DOIS sítios | `construir_query_de_processo_a_trancar` |
+| `alerts` | 3 nomes na contagem + 3 títulos | macro-fase `aprovado` + `label` do motor |
+
+A cache do BI passou a `stats:branches:v2`: servir a antiga seria mostrar
+durante mais uma hora o número medido sobre fases inexistentes.
+
+**Guarda:** `tests/unit/test_listas_de_fases_implodidas.py` afirma, módulo a
+módulo, que nenhum serviço tem três ou mais nomes de fases cravados. A lista
+`COM_DIREITO` tem cinco entradas e cada uma diz porquê. Ignora comentários —
+senão a explicação da lista implodida fazia a guarda ficar vermelha.
+
+### `macro_fase`: o campo antes do campo
+
+`macro_da_fase(fase)` lê **primeiro** `fase["macro_fase"]` e só depois o mapa
+de omissão. O runtime já está pronto para a Parte 2: quando o campo existir
+na base de dados e for editável no `WorkflowEditor`, nada aqui muda. Um valor
+fora do enum é ignorado e registado — um grupo inventado parte o funil em
+silêncio, que é o que o enum fechado evita.
+
+---
+
+## `macro_fase`: o campo que faltava (Épico 10, Parte 2 — Set 2026)
+
+A Parte 1 deixou o runtime pronto (`macro_da_fase` já lia o campo antes de
+ele existir). A Parte 2 criou-o.
+
+### O enum é fechado, e há três defesas
+
+| Onde | O quê |
+|---|---|
+| `models/workflow.py` | `MacroFase(str, Enum)` — o Pydantic recusa ao gravar (422) |
+| `workflow_phases.macro_da_fase` | valor fora do enum é ignorado **ao ler** |
+| `WorkflowEditor` | `<Select>` com cinco opções, nunca um `<Input>` |
+
+A defesa de leitura não é redundante: um documento gravado antes do campo
+existir, ou por um script, pode trazer qualquer coisa. O modelo protege o
+que entra hoje; `macro_da_fase` protege o que já lá está.
+
+**`MACRO_FASES_VALIDAS` deriva do Enum** (`tuple(m.value for m in MacroFase)`),
+não é uma cópia. E circula sempre `str` simples: com o mixin `str` o
+`MacroFase.NOVO in {"novo"}` até é verdadeiro, mas essa igualdade depende
+inteiramente do mixin — tirar `str` da declaração é uma linha inocente que
+partia o agrupamento sem um único erro. Há um teste a afirmar o mixin.
+
+### O backfill, e porque é que pode correr em todos os arranques
+
+`ensure_macro_fase_backfill()` corre no `server.py`, a seguir ao das flags.
+
+- Só escreve onde `macro_fase` está **ausente ou `None`**. Uma fase que o
+  administrador classificou nunca é tocada — sem isto, cada reinício do
+  servidor repunha a omissão por cima da decisão humana, e ninguém
+  perceberia porquê.
+- A condição de ausência está **na query**, não num `if` em Python: entre
+  ler e escrever há uma janela, e o Mongo resolve-a.
+- O que o mapa não cobre fica **por classificar**. `None` é uma resposta:
+  a fase aparece em «Outras fases», com o nome à vista. Inventar um grupo
+  seria pior do que não ter nenhum.
+
+### Quem lê
+
+- **Funil de BI** — `funilDeFases.js` perdeu a lista de fases. Ficaram as
+  etiquetas e cores dos cinco grupos; quem classifica é o motor. O
+  `CLASSIFICACAO_DE_RECURSO` sobrevive para uma fase ainda não classificada
+  e **perde sempre** para o campo — a mesma regra dos aliases da timeline.
+  O `statuses` de cada grupo passou a ser o que **realmente** caiu lá
+  dentro, não a lista declarada: é o que serve para clicar e filtrar.
+- **Portal** — cada passo do stepper e o estado actual levam `macro_fase`.
+  O Portal passa a poder agrupar sem inventar uma segunda classificação,
+  que era como as duas vistas divergiam no princípio deste épico.
+
+### Paridade entre linguagens
+
+O `<Select>` e o enum são a mesma lista escrita duas vezes. Se divergirem, o
+administrador escolhe um grupo e leva um 422 — ou um grupo válido desaparece
+da UI e a fase fica impossível de classificar. Dois testes cruzam os
+ficheiros: um compara `macroFaseOptions` com `MacroFase`, outro compara
+`MACRO_FASES` do funil com o mesmo enum.
+
+### O funil deixou de perder as desistências
+
+No agrupamento anterior não havia grupo `perdido`: as desistências caíam em
+«Outras fases». Num funil de negócio o processo perdido é informação — é a
+taxa de conversão — e não sobra.
+
+---
+
+## O fim do `INACTIVE_STATUSES` como definição (Épico 10, Ponto 1 — Set 2026)
+
+### A dívida era menor do que eu tinha declarado
+
+Escrevi "~30 sítios, quase todos construtores síncronos". Contei por AST:
+
+| | |
+|---|---|
+| Usos já dentro de `async def` | **13** |
+| Usos em funções síncronas | **19 linhas**, em **5 funções**, **2 módulos** |
+| Constantes derivadas no import | **6** |
+
+### Injecção, não conversão para `async`
+
+Os cinco construtores são funções **puras** que montam dicionários de query,
+e é isso que as mantém testáveis sem Mongo no `backend-fast`. Ganharam
+`terminais: Optional[list[str]] = None`; quem resolve é o chamador, que já
+era assíncrono. A omissão mantém `INACTIVE_STATUSES` — nada muda por
+acidente.
+
+É o mesmo padrão do `build_active_inactive_count_queries` (Parte 1).
+`assert_process_editable_for_role` seguiu-o também: é uma regra de
+permissão, o sítio onde um teste tem de poder afirmar o comportamento sem
+base de dados nenhuma.
+
+`_arquivadas(terminais)` **deriva** o histórico dos terminais, tirando o
+`eliminado` (soft-delete gerido pela flag `is_deleted`, não uma fase). Uma
+segunda lista divergiria da primeira assim que o admin fechasse uma fase.
+
+### As seis constantes derivadas eram o pior caso
+
+`set(INACTIVE_STATUSES) | {...}` calculado **no import** congela o motor no
+arranque do processo. Com um servidor de pé durante dias, uma fase fechada
+pelo administrador só passava a contar no deploy seguinte — e ninguém ligava
+as duas coisas. Passaram a funções resolvidas no pedido; os extras locais
+(`pre_registo`, `fila_espera`, `arquivado`) sobrevivem como conjuntos à
+parte, porque não são fases e nunca serão.
+
+### A cache, e o que ela custa
+
+`carregar_fases()` tem TTL de **30s, local ao processo**. Com
+`UVICORN_WORKERS=2` cada worker tem a sua: uma edição invalida a de quem
+gravou e o outro fica até 30s desactualizado. Para "que fases são terminais"
+isso é inofensivo e cura-se sozinho — e é por isso que o TTL é curto.
+
+Duas decisões que não são óbvias:
+
+- **Uma leitura falhada NÃO fica em cache.** Guardar `[]` por 30s
+  transformava um soluço do Mongo em meio minuto de listagens vazias e um
+  quadro sem colunas nenhumas.
+- **Um `autouse` no `conftest` limpa a cache entre testes.** Sem ele, um
+  teste que patche o `db` herdava as fases do anterior e o resultado passava
+  a depender da ORDEM de recolha do pytest — a mesma armadilha do
+  `from database import db` ao nível do módulo.
+
+### A cadeia de `db` cresceu — e apanhou-me
+
+`workflow_phases` importa `db` no topo. O primeiro teste vermelho depois
+desta mudança foi um do isolamento por rede: patchava `kanban.db` e
+`tenant_network.db`, não `workflow_phases.db`. O `carregar_fases` falava com
+o proxy real, a excepção era engolida pela degradação graciosa, devolvia
+`[]` — e o quadro vinha **sem colunas**, com o teste a apontar para o
+isolamento quando o problema era o `db`.
+
+O helper `_tenant_db` passou a patchar os três. **Uma cadeia nova de `db`
+entra aí**, e o docstring di-lo.
+
+---
+
+## Presença global no Redis (Limpeza Estrutural, Pontos 2 e 3 — Set 2026)
+
+### O defeito custava um push no bolso
+
+`manager.is_user_connected` responde pela memória DESTE processo. Com
+`UVICORN_WORKERS=2`, um utilizador com o socket no worker B lê-se como
+desligado no worker A. Em `realtime_notifications` isso decidia o **push no
+telemóvel**: quem estava a olhar para a aplicação levava notificação no
+telefone porque a emissão calhou no worker vizinho.
+
+### A estrutura: um ZSET
+
+`presenca:online` — membro = `user_id`, score = **instante de expiração**.
+
+| Pergunta | Comando | Custo |
+|---|---|---|
+| está online? | `ZSCORE` > agora | O(1) |
+| quem está online? | `ZRANGEBYSCORE agora +inf` | **uma** chamada |
+| estes 50 estão? | o mesmo `ZRANGEBYSCORE` | **uma** chamada |
+
+O lote é o ponto: `chat_presence` e `chat_conversations` perguntavam **dentro
+de um ciclo**, um por utilizador. Passou a uma leitura — ficou mais barato do
+que a memória local que substituiu.
+
+### O batimento já existia
+
+O `useWebSocket` manda `ping` de 30 em 30s e o `websocket_api_notifications`
+já o tratava. É aí que se renova, com TTL de **90s** (3×, tolera um ping
+perdido). Sem temporizador novo e sem tarefa de fundo. A ligação marca
+**logo**, sem esperar pelo primeiro ping — senão eram 30s em que quem acabou
+de entrar apanhava push.
+
+### Porque é que a desconexão NÃO remove
+
+Se o worker A removesse ao fechar o seu socket, o worker B — que ainda tem um
+separador aberto do mesmo utilizador — só repunha no batimento seguinte, e
+nesse intervalo o utilizador apanhava push estando online: o defeito que isto
+vem corrigir, de volta pela porta das traseiras.
+
+Deixando expirar, a entrada só morre quando **nenhum** worker a renova. Zero
+fantasmas depois de um crash (o que um `SET` simples nunca resolve), ao preço
+de até 90s de "online" a mais depois do último separador fechar. Esse erro é
+para o lado seguro: **push a menos**, e a notificação fica na base de dados.
+
+A higiene (`ZREMRANGEBYSCORE`) boleia no `background_job_monitor` que já
+existia. As leituras já filtram por score, portanto não corrige nada — só
+impede o conjunto de crescer com todos os que alguma vez se ligaram.
+
+### A degradação é ABERTA, e de propósito
+
+Redis em baixo → responde o `ConnectionManager` local, que é o comportamento
+de hoje. É o contrário da regra que sigo no isolamento por rede e no
+Explorador de ficheiros, e a razão está escrita no módulo: **presença não é
+fronteira de segurança** — nenhum dado muda de dono por causa dela. Uma
+leitura falhada que respondesse "ninguém está online" partia o Chat e enchia
+telemóveis de push. Não "corrigir" isto para fail-closed.
+
+Há ainda um caso subtil: quando o `ZSCORE` devolve `None`, o serviço consulta
+**na mesma** o manager local. Uma ligação acabada de abrir cuja escrita no
+Redis falhou existe de facto — dizer "offline" mandava push a quem está
+mesmo online.
+
+### Como é que a falésia se testa sem dois processos
+
+Não se simula o processo: simula-se o que o distingue. Cada "worker" tem o
+**seu** `ConnectionManager` e os dois partilham **um** Redis falso. Trocar
+qual está activo é exactamente a diferença entre atender o pedido no worker A
+ou no B — e é a única coisa de que o defeito dependia.
+`tests/unit/test_presenca_global.py` afirma o defeito **e** a correcção.
+
+### Ponto 3 — `is_notified` extinto
+
+Escrito em dois sítios, lido em zero. Não prevenia re-emissão nenhuma, ao
+contrário do que o comentário original afirmava. A escrita saiu do código; o
+`$unset` dos documentos antigos vive em `scripts/limpar_is_notified.py`, que
+**só conta** sem `--aplicar` e trabalha em lotes — um `update_many` sobre
+centenas de milhares de documentos segura o servidor, e esta colecção é lida
+pelo sino das notificações de toda a gente.
+
+Uma guarda sobre o código-fonte varre `services/`, `routes/` e `models/` a
+afirmar que ninguém volta a escrever nem a ler o campo.
+
+## O relógio de fases e o isolamento do BI (Dashboard, Passo Zero + Ponto 1 — Set 2026)
+
+### Não existia relógio
+
+Nenhum processo sabia quando entrou na fase em que está. Há dois instantes
+gravados, `created_at` e `updated_at`, e o segundo muda com **qualquer**
+escrita: um comentário, uma nota de voz, um documento carregado.
+
+O `stats_branches` calculava o "tempo médio de fecho" como
+`updated_at - created_at`. Isso não é o tempo de fecho — é o tempo entre a
+criação e o último toque em qualquer campo. Um documento carregado hoje num
+processo escriturado há um ano acrescentava 365 dias ao tempo médio daquele
+balcão. O número era plausível, o que o tornava pior do que um erro visível.
+
+### Porque é que o `history` não pode ser a fonte dos SLAs
+
+Foi a primeira hipótese: reconstruir as permanências a partir da colecção
+`history`, que grava `field="status"`, `old_value`, `new_value` e `created_at`.
+O inventário dos **seis** caminhos que escrevem `status` fecha a hipótese:
+
+| Caminho | Registo em `history` |
+|---|---|
+| `process_update` ("Alterou estado") | sim — filtrado por stealth |
+| `process_kanban_move` ("Moveu processo") | sim — filtrado por stealth |
+| `process_indexing` (salto dinâmico) | `track_history: role != "indexacao"` |
+| `portal_onboarding_advance` (auto-avanço) | `track_history: False` — silenciado |
+| `workflow_engine.change_status` (automação) | **nenhum** |
+| `admin_workflow` (fase eliminada) | um registo agregado, `process_id: None` |
+
+Metade das transições é invisível, e **a invisibilidade é a regra de ouro do
+perfil `indexacao` a funcionar**, não uma falha a corrigir. Um SLA medido
+sobre o histórico ficava sistematicamente enviesado a favor de quem tem de ser
+invisível: o tempo em Análise aparecia inflacionado sempre que fosse a
+Indexação a fazer avançar o processo, porque o cronómetro só parava na
+transição seguinte feita por alguém com rasto.
+
+O `audit_trail` (deliberadamente fora do stealth) também não serve: o caminho
+do Kanban não escreve auditoria nenhuma — só o `process_update` o faz — e a
+retenção é configurável pelo admin, pelo que o histórico de SLAs encolheria em
+silêncio quando alguém lhe mexesse.
+
+**Daí o desenho: o relógio é estado do PROCESSO, não rasto de um utilizador.**
+Sem ator, funciona exactamente onde o rasto não pode existir.
+
+### `phase_clock_coverage` — medir antes de intervir
+
+O carimbo só começa a contar no dia em que entrar. Para os 12.450 processos
+que já existem o melhor aproximado é o `updated_at`, e
+`services/phase_clock_coverage.py` existe para dizer **quão mau** é esse
+aproximado e **em que sentido erra**:
+
+- `nunca_tocado` (`updated_at == created_at`) → a estimativa cai na data de
+  criação e **sobrestima** a permanência.
+- `tocado_apos_fecho` (macro terminal, tocado há ≤30d, criado há ≥90d) →
+  **subestima**: parece ter entrado na fase esta semana.
+
+A análise é pura e recebe `agora` **injectado**: uma medição que dependa do
+relógio da máquina não se afirma num teste.
+
+As bandas de permanência (`0-7`, `8-15`, `16-30`, `31-60`, `61+`) são as mesmas
+que o `$bucket` do futuro endpoint de SLAs vai usar. Se fossem diferentes, o
+retrato e o gráfico contavam histórias distintas sobre os mesmos dados.
+
+A macro-fase de cada linha vem do **resolvedor** (`resolver_muitos` +
+`macro_da_fase`), não do valor cru: os 205 processos em `cpcv`/`escriturado` e
+as 12 gralhas `"Concluidos "` contam na macro certa, como já contam no quadro.
+Reimplementar a resolução em expressões `$switch` dava duas verdades sobre os
+mesmos 217 processos.
+
+`scripts/medir_relogio_de_fases.py` é só leitura — não tem `--aplicar` e não
+chama o `env_guard`, porque é contra produção que tem de correr. Há uma guarda
+sobre o código-fonte a afirmar que nenhuma operação de escrita aparece lá, com
+contraprova de que lê mesmo as duas colecções e de que a projecção não toca em
+`personal_data`.
+
+### O isolamento que faltava: zero filtro de rede em TODAS as estatísticas
+
+`grep "tenant\|network_id"` nos seis módulos de estatísticas e no
+`analytics_service`: **zero ocorrências**. O Lote 4 fechou as listagens e as
+pesquisas, o Lote 5 acrescentou o quadro Kanban e o explorador de ficheiros; o
+Dashboard nunca entrou nesse inventário. É a lição do Lote 5, ponto 1 — um
+ponto único para a CONDIÇÃO não chega, é preciso inventariar os sítios que
+**agregam**.
+
+| Superfície | O que atravessava a rede |
+|---|---|
+| `stats_overview` | `process_query = {}` + filtro por PAPEL; admin/ceo/administrativo/diretor sem filtro nenhum. Seis contagens sobre `db.users` inteira |
+| `stats_branches` | volume financiado, taxa de aprovação e tempo de fecho de todos os bancos de todas as redes |
+| `stats_communications` | **conteúdo**: 150 caracteres do que os clientes escreveram no Portal, assuntos e remetentes dos emails não lidos |
+| `stats_leads` / `stats_conversion` | a colecção `property_leads` inteira |
+| `analytics_service` → Desempenho da Equipa | nome, email e produtividade de cada pessoa das duas redes |
+
+### A cache era metade do problema
+
+`stats:branches:v2` e `stats:global:conversion` são chaves **globais**. Mesmo
+com o filtro posto, o primeiro pedido a chegar semeava a cache para todos:
+quem pedisse a seguir recebia os números da outra rede vindos do Redis, com o
+filtro a funcionar perfeitamente. **Um filtro sobre uma cache partilhada é
+teatro.**
+
+As chaves por utilizador (`stats:user:{id}:kpis`, `:leads`) já eram seguras por
+construção — o âmbito é função do utilizador. Só as globais precisavam do
+sufixo.
+
+### `stats_scope` — o ponto único do âmbito de BI
+
+```python
+ambito = await resolver_ambito(user)      # TenantScope + condição + sufixo
+query  = com_ambito(query, ambito)        # $and, nunca fusão de dicionários
+chave  = ambito.chave("stats:branches:v3")
+ids    = await processos_no_ambito(candidatos, ambito)
+```
+
+- **`com_ambito` usa `$and`** e não uma actualização de chaves: a query de
+  negócio pode já trazer um `$or` (as visibilidades por papel trazem) e fundir
+  os dicionários apagaria um deles em silêncio — o pior resultado possível,
+  porque a query continuava válida e devolvia **mais**.
+- **O sufixo é um resumo do âmbito COMPLETO** (redes, empresas, bandeira da
+  rede de omissão), ordenado antes de resumir: as associações chegam do Mongo
+  na ordem que ele quiser e sem ordenar a mesma pessoa teria duas chaves em
+  pedidos consecutivos. Duas pessoas na mesma rede mas em empresas diferentes
+  têm condições **diferentes** e não podem partilhar a entrada da cache.
+- **`processos_no_ambito` inverte o sentido da pergunta.** O natural seria
+  "dá-me os processos da minha rede" e filtrar prazos/mensagens por esse
+  conjunto — mas `processes` é a colecção grande (12.450 e a crescer) e um
+  `$in` com doze mil identificadores por pedido de dashboard funciona hoje e
+  morre à primeira multiplicação de volume. O conjunto de partida vem da
+  colecção **pequena** (prazos abertos, mensagens não lidas, via `distinct`) e
+  a verificação é um `$in` limitado por esse número. O custo acompanha o que
+  se está mesmo a mostrar.
+
+### Duas mudanças de significado, deliberadas
+
+1. **Prazos pessoais.** O cartão da Direção somava os lembretes pessoais de
+   todos os utilizadores de todas as redes — um número que não era de ninguém.
+   Passa a contar os prazos dos processos da rede **mais os pessoais do
+   próprio**, a mesma regra que o ramo dos consultores já aplicava.
+2. **Emails sem processo.** `db.emails` não é carimbada com a rede (oito
+   sítios de escrita mais o sync IMAP/Gmail — fica para o lote do webmail),
+   por isso o âmbito do feed resolve-se pelo **processo** do email. Um email
+   sem processo deixa de aparecer aos papéis privilegiados. Era já o que
+   acontecia aos consultores, e um email que não se consegue atribuir a uma
+   rede não se pode mostrar a uma.
+
+### As leads passam a ser carimbadas na escrita
+
+`property_leads` não tinha campo de empresa nenhum — a mesma fuga que os
+processos tinham antes do Lote 4, com outro nome. Os **dois** sítios de
+`insert_one` resolvem agora `resolve_tenant_stamp`, e há uma guarda sobre o
+código-fonte a afirmá-lo nos dois: **um carimbo parcial é pior do que nenhum**,
+porque a metade sem marca fica visível ao grupo incumbente para sempre.
+
+### O que fica de fora, e é dito
+
+O email automático de Segunda ao CEO (`scheduled_tasks` →
+`generate_weekly_team_report` sem utilizador) mantém o âmbito global: decidir
+se passa a ser um email **por rede** é uma decisão de produto. Não fica em
+silêncio — há um `logger.warning` no caminho e um teste a afirmar que ele sai.
+
+## O cronómetro sem ator (Dashboard, Camada 1 — Set 2026)
+
+### O que a medição de produção provou
+
+O retrato do relógio sobre os 12.450 processos reais fechou a discussão sobre
+se o `updated_at` servia de aproximado:
+
+| Sinal | Processos | Sentido do erro |
+|---|---|---|
+| `nunca_tocado` (`updated_at == created_at`) | 3.105 | **sobrestima** — a estimativa cai na data de criação |
+| `tocado_apos_fecho` | 1.840 | **subestima** — parece ter entrado na fase esta semana |
+
+Quase 5.000 aproximações falsas, e 3.200 processos na banda `61+` de
+`concluido`: um processo concluído não "demora" em concluído, fica lá. Daí
+`MACROS_SEM_PERMANENCIA` — quem lê o relógio para encontrar gargalos exclui as
+macro-fases terminais, senão o painel grita sobre processos que estão
+exactamente onde devem estar.
+
+### Os campos
+
+```
+fase_desde                    instante de entrada na FASE actual
+fase_desde_estimado           o carimbo acima veio do backfill?
+macro_fase_desde              instante de entrada na MACRO-FASE actual
+macro_fase_desde_estimado     idem, para o carimbo da macro
+tempos_macro                  {macro: segundos} acumulado À SAÍDA
+```
+
+**Duas bandeiras e não uma.** Cada uma diz respeito ao seu carimbo: um
+movimento dentro da mesma macro-fase torna o `fase_desde` medido e deixa o
+`macro_fase_desde` como estava. Uma bandeira só não conseguia dizer isso sem
+mentir sobre metade — e a transição seguinte acumulava segundos estimados.
+
+**`macro_fase_desde` só reinicia quando a macro muda.** Mover de
+`fase_documental` para `fase_escritura` não sai da Análise; se reiniciasse,
+medir o gargalo passava a contar só a última sub-fase e o número ficava bonito
+à custa de ser falso.
+
+**A `macro_fase` NÃO é desnormalizada no processo.** Seria uma cópia da verdade
+do motor em 12.450 documentos, desactualizada no dia em que o administrador
+reclassificasse uma fase no `<Select>` da Parte 2 — o `INACTIVE_STATUSES` outra
+vez, com outro nome. As chaves de `tempos_macro`, pelo contrário, são **factos
+históricos**: o tempo foi passado enquanto aquela fase pertencia àquela macro.
+É essa a diferença entre memória e dívida.
+
+### Porque o relógio não tem ator
+
+Dos seis caminhos que escrevem `status`, dois são filtrados pelo stealth, o
+`process_indexing` silencia-se quando é a Indexação a avançar, o
+`portal_onboarding_advance` grava com `track_history: False` e o
+`workflow_engine.change_status` não grava nada. Metade das transições é
+invisível **porque a regra de ouro do perfil `indexacao` assim manda**.
+
+O relógio é por isso **estado do processo**: não recebe `user`, não sabe quem
+move, não escreve em `history` nem em `activities`. Funciona exactamente onde o
+rasto não pode existir. Há uma guarda sobre o código-fonte a afirmar que nenhuma
+noção de utilizador (`user`, `user_id`, `created_by`, `track_history`,
+`_is_stealth_user`, `log_history`, `effective_role`, `audit`, `activities`)
+entra no módulo, com contraprova de que ele faz mesmo o trabalho.
+
+### O acumulador, e porque não uma colecção de transições
+
+Um processo que volta de `aprovado` para `renegociacao` passa por Análise DUAS
+vezes, e o que interessa é a soma. Com o `$inc` no documento:
+
+- A média por macro-fase é um `$avg` sobre um campo que já existe — sem
+  colecção nova, sem `$lookup`, sem pipeline sobre strings de histórico.
+- O código **nunca lê o total para o reescrever**, por isso não há corrida.
+
+**O acumulador só leva tempo MEDIDO.** Um carimbo marcado como estimado nunca
+entra no `tempos_macro`: misturar medido com estimado é o erro que este épico
+existe para não cometer. A transição que sai de um carimbo estimado limpa a
+bandeira e a seguinte já acumula.
+
+Três casos em `_segundos_na_macro`, e o terceiro é o que interessa:
+
+1. Carimbo **estimado** → `None`, não acumula.
+2. Carimbo presente e legível → a diferença.
+3. **Sem carimbo nenhum** → recurso ao `created_at`. Para um processo nascido
+   depois deste código, a entrada na primeira fase É a criação: exacto, não
+   estimado. É isto que dispensa editar os cinco sítios de criação de
+   processos, presentes e futuros.
+   Um carimbo presente mas **ilegível** não cai neste recurso: o `created_at`
+   daria a idade total do processo, um valor credível e falso, que é o pior
+   resultado possível num acumulador.
+
+Um carimbo no futuro (relógios dessincronizados) também não acumula: um `$inc`
+negativo **subtrai** tempo já medido de outras passagens pela mesma macro-fase.
+
+### Uma escrita, não duas
+
+`montar_update(conjunto, transicao)` devolve `{"$set": ..., "$inc": ...}` e
+omite o `$inc` vazio (o Mongo recusa um operador sem campos, e a transição
+dentro da mesma macro produz exactamente isso). Os cinco caminhos passaram a
+usá-lo **na mesma** `update_one` que já escrevia o `status`: duas escritas
+separadas deixavam uma janela com a fase nova e o relógio da antiga, e se a
+segunda falhasse ficava assim para sempre.
+
+### Inventário dos seis caminhos
+
+| Caminho | Relógio |
+|---|---|
+| `process_update` | sim — lê a fase do `update_data`, não do pedido |
+| `process_kanban_move` | sim |
+| `process_indexing` (salto dinâmico) | sim |
+| `portal_onboarding_advance` | sim |
+| `workflow_engine.change_status` | sim — e é o único sítio onde esse movimento fica medido |
+| `admin_workflow` (fase eliminada) | **não, por decisão** |
+
+E dois que não são transições de fase: **soft-delete e restauro** escrevem
+`status` (`eliminado` e de volta) e são ciclo de vida. Apagar e restaurar um
+processo não pode limpar a prova de que esteve 90 dias em Análise. Os três
+casos têm teste — a omissão deliberada precisa de teste mais do que a presença,
+senão alguém "corrige" a falta de boa fé daqui a seis meses.
+
+### Guardar sem mudar de fase devolve transição VAZIA
+
+Um `PUT` com o mesmo `status` não é uma transição. Sem esta guarda, cada
+gravação reiniciava o cronómetro e **nenhum processo aparecia preso** — um
+defeito invisível, porque os números continuavam a existir.
+
+### Ordem de operações em produção
+
+O recurso ao `created_at` é exacto para processos nascidos depois do deploy e
+uma sobre-estimativa para um legado que o backfill ainda não tocou. O backfill
+corre por isso na mesma janela do deploy: o que ele carimba fica marcado como
+estimado e deixa de acumular.
+
+## O BI por macro-fase (Dashboard, Camada 2 — Set 2026)
+
+### A ponte entre o `status` gravado e a macro-fase
+
+A `macro_fase` vive nos 14 documentos de `workflow_statuses`; o `status` vive
+nos 12.450 processos. Para agrupar por macro-fase numa agregação faltava a
+ponte, e as duas formas óbvias eram ambas más:
+
+1. `$lookup` por processo — doze mil junções para ler uma colecção de catorze.
+2. Reimplementar a resolução (`cpcv`, `escriturado`, `"Concluidos "`) em
+   expressões `$switch`. Seria uma **segunda** implementação do `resolver_nome`,
+   e as duas divergiam no primeiro alias novo.
+
+`stats_macro_bridge.construir_ponte` faz um `$distinct` sobre `status` (campo
+indexado), passa os valores reais pelo resolvedor **real** e devolve um mapa
+`valor gravado → macro-fase` que se traduz num `$switch` com listas literais.
+Uma consulta indexada barata, a regra num só sítio, e os 205 processos de alias
+mais as 12 gralhas a contar na macro-fase certa — a mesma coluna que o quadro
+lhes desenha.
+
+O `default` do `$switch` é a coluna de reconciliação: um valor que o motor não
+conhece **nunca** é somado a um grupo onde não está. Uma ponte vazia devolve
+`{"$literal": …}` em vez de um `$switch` sem ramos, que é inválido no Mongo — um
+dashboard que rebenta porque a colecção de fases está vazia é pior do que um que
+diz "nada classificado".
+
+### `/api/stats/funil`
+
+`$match` (rede + não eliminados) → `$project` (macro via `$switch`, valores) →
+`$group`. O `$match` é o **primeiro** estágio: depois do `$group` já teria somado
+os processos da outra rede.
+
+**A conversão assume monotonia.** `alcancaram(etapa)` soma quem está nessa etapa
+ou numa posterior — um processo em `aprovado` passou necessariamente por
+`analise`. O `perdido` fica **fora** dessa soma: um processo perde-se de
+qualquer etapa e não se sabe de qual; contá-lo em `alcancaram(novo)` inflacionava
+o denominador da primeira conversão. Vai à parte, com o número à vista.
+
+Quando o relógio tiver história (`tempos_macro` preenchido por transições reais)
+esta soma pode ser substituída por "passou mesmo por aqui". Hoje `tempos_macro`
+está vazio em toda a parte e a substituição não acrescentava informação.
+
+### `/api/stats/sla` — duas perguntas, dois números
+
+- **Quem está preso agora**: `agora - macro_fase_desde` (recurso ao
+  `created_at`), em histograma `$bucket`.
+- **Quanto demorou em média**: o acumulador `tempos_macro`, que só tem
+  transições **medidas**.
+
+Misturar as duas num só número era o erro fácil: a primeira mede o que está a
+acontecer, a segunda o que aconteceu.
+
+**`$bucket` dentro de `$facet`**, um por macro-fase: o `$bucket` agrupa por uma
+chave numérica e não sabe agrupar também por macro. As etapas partilhadas
+(`$match`, `$project`) correm uma vez. As bandas são as **mesmas** do script de
+medição — bandas diferentes fariam o retrato de produção e o gráfico contar
+histórias distintas sobre os mesmos dados.
+
+**A média nunca vai sozinha.** Num gargalo mente sempre no mesmo sentido: um
+processo esquecido há 400 dias arrasta-a e esconde que 80% passa em 9 dias. Vai
+com o histograma e com a **banda** mediana — um intervalo, que é o que se sabe
+sem ordenar todas as permanências.
+
+**As macro-fases terminais não entram.** A medição mostra 3.200 processos na
+banda `61+` de `concluido`: incluí-las fazia o painel gritar sobre processos que
+estão exactamente onde devem estar, e um painel que grita sem razão ensina toda
+a gente a ignorá-lo (a lição do `desactivado ≠ em baixo`).
+
+**As estimativas aberrantes ficam fora das médias** (`nunca_tocado`,
+`tocado_apos_fecho`) e a resposta di-lo, para a UI poder explicar qual é o
+universo medido.
+
+Os limiares vêm do `SystemConfig.dashboard_slas`, por EMPRESA — o que resolve
+metade da comparação entre redes: a Domus pode ter SLAs diferentes da Power sem
+que "está atrasado" signifique coisas diferentes no mesmo gráfico. Um limiar
+inválido cai no anterior e regista; zero dias é recusado (marcava todos os
+processos como atrasados no dia 1).
+
+### `/api/stats/redes`
+
+Um `$group` por rede **e** macro-fase: a matriz é o que a comparação precisa, e
+uma segunda passagem pela colecção para os totais por rede era trabalho a dobrar.
+
+Compara **as redes que o utilizador já pode ver**, pelo mesmo
+`resolve_tenant_scope` de todas as listagens. Sem cláusula de excepção, sem
+papel que veja tudo, sem parâmetro que amplie o âmbito. Uma conta com uma só
+rede vê **uma** linha, e a resposta traz `redes_no_ambito` para ninguém
+interpretar isso como falta de dados.
+
+Só agregados: nunca um processo, nunca um cliente, nunca um nome. Há um teste a
+afirmar que as chaves da resposta são uma **lista fechada** — procurar nomes
+concretos não afirmava a forma, e um campo acrescentado "só para depurar"
+passava por baixo.
+
+**A taxa de conclusão é sobre os DECIDIDOS** (concluídos + perdidos) e não sobre
+o total: com o total no denominador, uma carteira jovem com muitos processos em
+curso parecia pior do que uma antiga — media a idade da carteira, não a
+eficiência.
+
+### A base de dados falsa dos testes cresceu
+
+`FakeAsyncCollection` ganhou `$project` e um avaliador mínimo de expressões
+(`$switch`, `$in`, `$ifNull`, `$literal`). A ponte é um `$switch`, e é ele que
+faz os processos gravados como `cpcv` contarem na macro certa: testar isso contra
+um ciclo em Python provava o ciclo, não o pipeline que corre em produção.
+
+O que **não** está lá é deliberado: `$facet` e `$bucket` meio-implementados
+dariam confiança falsa. Os pipelines que os usam são construtores **puros**,
+afirmados pela forma (fronteiras do `$bucket`, facetas presentes, condição de
+rede no primeiro `$match`).
+
+---
+
+## Incidente P0 — o `file_key` do Portal do Cliente não era de confiança (Set 2026)
+
+### O defeito
+
+`POST /portal/confirm-upload` recebia o `file_key` do **corpo do pedido** e
+validava-o com uma única verificação:
+
+```python
+file_key = data.get("file_key")          # ← escolhido pelo cliente
+if not s3_service.file_exists(file_key):
+    raise HTTPException(400, "Ficheiro não encontrado…")
+```
+
+Um cliente autenticado no Portal (um titular legítimo, com o seu magic link)
+conseguia, **num único pedido**, nomear qualquer chave do bucket e:
+
+1. receber de volta um URL pré-assinado de leitura (`temporary_url` na
+   resposta) — a fuga e o pedido eram o mesmo;
+2. deixar em `db.documents` um registo com esse `s3_path` ancorado ao **seu**
+   processo, o que fazia o `GET /portal/download-url` (esse, bem guardado)
+   passar a autorizar a mesma chave para sempre.
+
+O bucket é partilhado por prefixos irmãos: os documentos de **todos** os
+clientes de **todas** as redes, os `backups/*.zip` e os `companies/*`. Não
+havia limite de pedidos em nenhum dos três endpoints do Portal — o
+`/public/client-registration`, ao lado, tem `5/hour` desde sempre.
+
+### Porque é que passou
+
+As duas guardas que impedem exactamente isto existem desde o **Épico 9**
+(`services/document_process_resolve.py`), e a docstring de
+`assert_path_within_document_root` descreve o ataque palavra por palavra. Mas
+foram ligadas apenas aos endpoints do **CRM**. O **Portal** — a única
+superfície exposta a utilizadores externos — ficou fora da parede.
+
+**Cada camada validava; a combinação não.** É a mesma forma do placebo do
+Lote 4 (`build_company_scope_condition`): um ponto único que não é usado no
+sítio que mais precisa dele não é um ponto único, é uma biblioteca.
+
+### O fecho
+
+`portal_upload_ops.assert_portal_file_key_e_do_cliente(file_key, process=, client=)`
+é o ponto único do Portal, ligado aos **dois** caminhos:
+
+| Caminho | Porquê |
+|---|---|
+| `run_confirm_portal_upload` (escrita) | fecha a porta |
+| `run_get_portal_download_url` (leitura) | fecha o **resíduo**: qualquer exploração anterior deixou já o registo em `db.documents`, e este endpoint autoriza pela existência dele. Sem a guarda na leitura, fechar a escrita não fecha o que já foi escrito. |
+
+**São duas guardas e nenhuma é redundante — mas o motivo da primeira não é o
+óbvio, e só uma mutação o mostrou.** `assert_s3_file_belongs_to_process`
+deriva prefixos que começam sempre por `Documentação Clientes/`, logo *já
+implica* a raiz: apagar a guarda da raiz não matava, à primeira, nenhum teste.
+O trabalho real dela é outro — é a defesa contra um **prefixo de dono
+envenenado**: se o `s3_folder` do processo apontar para fora da árvore de
+documentos (ex.: `backups`), a guarda de posse autoriza tudo o que estiver lá,
+porque do ponto de vista dela aquela *é* a pasta do cliente. O cliente não
+consegue escrever `s3_folder` (campo protegido no `PUT /portal/me`), mas a
+equipa e o `ensure_client_folder_mapping` conseguem, e um valor mau grava-se
+uma vez e vale para sempre. **A raiz vem primeiro porque é a que não confia no
+prefixo do dono.**
+
+Três decisões que acompanham o fecho:
+
+- **A guarda corre ANTES do `s3_service.file_exists`.** Se corresse depois, o
+  código de resposta passava a depender do conteúdo do bucket (403 para uma
+  chave estranha que existe, 400 para uma que não existe) — um **oráculo de
+  mapeamento**: o atacante perdia a leitura mas mantinha a capacidade de
+  adivinhar nomes de backups e ler a diferença nos códigos.
+- **Sem dono, recusa-se.** `_dono_do_prefixo_s3` devolve `None` quando nem o
+  processo nem o cliente têm `s3_folder` ou nome. O degradado de
+  `assert_s3_file_belongs_to_process` com nome vazio aceita toda a raiz
+  `Documentação Clientes/`: num ecrã do CRM é um incómodo, no Portal era a
+  fuga a entrar pela porta que a devia fechar. O processo tem precedência
+  sobre o cliente porque é a pasta que o `upload-url` escolhe quando há
+  processo, e as duas podem divergir.
+- **O `temporary_url` SAIU da resposta do `confirm-upload`.** Era a carga útil
+  do ataque, e não serve a ninguém: o cliente acabou de enviar o ficheiro, já
+  o tem, e o `ClientPortal.jsx` lê apenas `success`/`detail` — nunca tocou no
+  campo. Sem ele, mesmo que uma guarda regrida um dia, deixa de haver fuga de
+  conteúdo no mesmo pedido; o atacante teria de furar **também** o
+  `/portal/download-url`.
+
+**O que NÃO se acrescentou, e porquê:** rejeitar `..` no `file_key`. As chaves
+S3 são opacas, o serviço não normaliza `..`, e a assinatura pré-assinada fica
+presa à chave exacta — a verificação não previne nada. Uma guarda que não
+previne nada é um placebo, e este projecto já pagou por um.
+
+### Limites de pedidos
+
+Os três endpoints passaram a ter `@limiter.limit` (`20/minute` nos dois de
+upload, `60/minute` no download). O `_get_rate_limit_key` do limiter resolve a
+chave pelo `sub` do JWT — e no Portal o `sub` **é** o `process_id`, pelo que o
+limite fica por **processo** e não por IP partilhado, que é o âmbito certo:
+vários titulares atrás do mesmo NAT não se prejudicam, e um varrimento do
+bucket a partir de uma sessão é travado em ~20 tentativas.
+
+### Cobertura
+
+`backend/tests/unit/test_portal_upload_path_traversal.py` (29 testes). Os de
+`TestAExploracao` são o ataque escrito na linguagem do código de produção —
+ficaram **vermelhos** no código vulnerável (`DID NOT RAISE`, seis vezes) antes
+de ficarem verdes. Ao lado, `TestOUploadLegitimoContinuaAFuncionar` e as
+contraprovas dos guardas impedem a "correcção" que recusa tudo. Nove mutações
+aplicadas; as duas que sobreviveram à primeira ronda (a guarda da raiz e a
+ordem face ao `file_exists`) eram **testes fracos** e não mutantes
+equivalentes, e estão cobertas em `TestAGuardaDaRaizNaoERedundante` e
+`TestAOrdemDaGuardaNaoEDetalhe`.
+
+### Superfície que fica aberta (lotes seguintes, já desenhados)
+
+- **A parede de magic bytes não cobre o Portal.** `services/file_validation.py`
+  é chamado por `routes/documents.py`, `ai_bulk_analyze` e
+  `async_jobs_api_session` — nunca pelo Portal, e não pode ser: com
+  pre-signed PUT os bytes vão do browser para o S3 sem passar pelo backend. O
+  `file_size` e o `content_type` gravados são os **declarados** pelo cliente.
+  Desenho aprovado: validação a posteriori no `confirm-upload` (HEAD +
+  `Range: bytes=0-2047` → `validate_file_content`), com o registo a nascer só
+  depois de passar, e o tamanho/tipo lidos do HEAD e não do cliente.
+- **O namespace dos WebSockets está fechado por coincidência, não por regra.**
+  `verify_websocket_token` decifra com o mesmo `JWT_SECRET`, lê `sub` e nunca
+  verifica a claim `type`; os tokens do Portal declaram `type` mas só o
+  `get_current_client` o verifica. O que hoje os impede de entrar é o `sub`
+  ser um `process_id` que não existe em `db.users`. Decisão tomada: tornar o
+  `type` **autoritativo nos dois lados** antes de abrir o namespace (segredos
+  separados ficam para lote próprio, para não invalidar magic links em
+  trânsito).
+- `services/gov_auth_api_helpers.py:20` —
+  `os.environ.get("GOV_AUTH_JWT_SECRET", "dev-secret-change-in-prod")`: um
+  segredo com valor por omissão em código. O `gov_token` carrega
+  `verified_by_gov: True`.
+
+---
+
+## Quarentena de conteúdo do Portal — validar os bytes depois de eles chegarem (Set 2026)
+
+Segundo passo do Caminho 4, imediatamente após o hotfix P0. O P0 fechou a
+pergunta **"esta chave é dele?"**; a quarentena fecha a pergunta
+**"estes bytes são o que dizem ser?"**.
+
+### O problema que o pré-assinado cria
+
+`services/file_validation.py` valida magic bytes contra uma whitelist e a sua
+própria docstring avisa que "NUNCA se deve confiar apenas na extensão". É
+chamada pelo `routes/documents.py`, pelo `ai_bulk_analyze` e pelo
+`async_jobs_api_session` — todos caminhos em que os bytes **atravessam** o
+backend.
+
+O Portal não pode chamá-la no mesmo ponto, e não é distracção: com upload
+pré-assinado os bytes vão do browser **directamente** para o S3 e o backend
+nunca os vê. Foi para isso que o pré-assinado existe — foi precisamente para
+tirar ficheiros de clientes do event loop, a mesma razão que levou o
+`send_email` para `asyncio.to_thread`.
+
+Resultado, até aqui: o cliente carregava o que quisesse (um `.exe` renomeado,
+HTML com script, um SVG com JavaScript, 5 GB) e o `file_size`/`content_type`
+gravados em `db.documents` eram os que ele **declarou** no corpo do pedido.
+
+### O desenho
+
+`services/s3_content_quarantine.py` — validação **a posteriori**, entre o
+upload e o registo:
+
+```
+confirm-upload
+  ├─ 1. guarda de posse (403)            ← sem tocar no S3
+  ├─ 2. HEAD  (asyncio.to_thread)        ← tamanho e tipo REAIS
+  ├─ 3. GET Range: bytes=0-2047          ← a assinatura
+  ├─ 4. validate_file_content(amostra)   ← whitelist do CRM
+  │      reprova → DELETE do objecto + 400, sem registo
+  │      ilegível → 503, objecto MANTIDO
+  └─ 5. registo em db.documents, com o tamanho/tipo do HEAD
+```
+
+`exigir_conteudo_valido(file_key, filename=…)` é o ponto único a chamar de um
+`confirm-upload`: quando devolve, o objecto foi visto e aprovado; quando
+levanta, já não está no bucket (excepto na reprovação transitória, que não
+apaga nada).
+
+### As quatro decisões que sustentam isto
+
+**1. O tamanho vem do `HEAD`, nunca da amostra.** O `validate_file_content`
+também verifica tamanho — mas a partir do `len()` do que lhe dermos, e nós
+damos-lhe 2 KB. Essa verificação é, no nosso caso, **vácua**: 2 KB passa
+sempre. Confiar nela dava uma parede que valida o tipo e carimba qualquer
+tamanho — um placebo, exactamente como o `build_company_scope_condition` do
+Lote 4. A amostra responde "o que é isto?"; o `HEAD` responde "que tamanho
+tem?". Nenhuma responde à pergunta da outra. Os limites por tipo saem do mesmo
+`ALLOWED_MIME_TYPES` do CRM (PNG 20 MB, PDF 50 MB); um tipo sem limite
+declarado cai num tecto absoluto, nunca em "sem limite".
+
+**2. Falha de infraestrutura NÃO é reprovação.** Se o `HEAD` ou o `GET`
+falharem (rede, credenciais, 5xx, `libmagic` em falta), não sabemos o que lá
+está — e apagar o objecto por não o conseguirmos ler destruiria o upload
+legítimo de um cliente por causa de um soluço do S3. Esses casos são
+`Veredicto.transitorio` → **503, sem apagar**, e a reconfirmação resolve. Só
+uma reprovação de **conteúdo** apaga. É a decisão mais importante do módulo e
+tem um teste em cada sentido.
+
+**3. Reprovar é apagar E não gravar.** Apagar sem impedir o registo deixava um
+documento a apontar para o vazio; gravar sem apagar deixava o objecto mau num
+bucket cujos prefixos são servidos por URL pré-assinado. A inspecção corre
+antes dos **dois** ramos do `confirm-upload` (documento novo **e**
+`document_id` do checklist) — uma guarda só no primeiro deixava o segundo
+aberto, que é o caminho que o Portal usa mais.
+
+**4. A ordem é posse → conteúdo.** Se se invertesse, o backend passava a
+descarregar 2 KB de qualquer chave do bucket que um cliente nomeasse: um
+oráculo de conteúdo construído com a própria parede de segurança.
+
+### Primitivas de chave EXACTA (`s3_storage.py`)
+
+`head_object_metadata` e `get_object_prefix` são novas e têm duas diferenças
+deliberadas face ao `get_file_content`:
+
+- **Chave exacta, sem variações.** O `get_file_content` tenta variantes do
+  caminho (underscore ↔ espaço) para sobreviver a dados legados. Numa parede de
+  segurança isso seria fatal: inspeccionavam-se os bytes de **uma** chave e
+  gravava-se **outra** no registo.
+- **Nunca descarregam o ficheiro inteiro.** Um upload de 5 GB não pode passar
+  pela RAM do worker só para se lerem os primeiros 2 KB.
+
+`head_object_metadata` devolve um estado de **três** valores
+(`"ok"` / `"ausente"` / `"erro"`) porque a pergunta tem três respostas e
+confundi-las é o que transforma uma falha de infraestrutura numa acusação ao
+utilizador — ou o contrário.
+
+### Fora do event loop
+
+Todo o I/O do `boto3` (`HEAD`, `Range`, `DELETE`) vai por `asyncio.to_thread`:
+o `boto3` é síncrono e chamá-lo de uma corotina pára o event loop do worker
+**inteiro** enquanto a rede não responder — é o incidente do `smtplib` no
+`send_email` (CI 2026-09-21) com outro nome. São dois saltos de thread por
+upload. O `magic.from_buffer` fica em linha: 2 KB são microssegundos e um salto
+de thread custaria mais do que poupa.
+
+Pelo caminho, o `run_confirm_portal_upload` **perdeu** o
+`s3_service.file_exists(file_key)`: era a mesma chamada `head_object`, feita de
+forma **bloqueante** e a responder a menos perguntas. Fazer as duas era pagar
+dois acessos pela mesma resposta — e deixar a alguém, mais tarde, a escolha de
+apagar a errada. O `file_exists` do `run_get_portal_download_url` também passou
+para `asyncio.to_thread` (mesma família de defeito, mesma linha de correcção).
+
+### O que esta parede NÃO faz
+
+Magic bytes provam o **formato**, não a inocência. Está documentado em código e
+com testes, para ninguém concluir que o bucket está limpo:
+
+- **Um ZIP renomeado passa como documento Office.** `.docx`/`.xlsx` *são* ZIPs
+  (`PK\x03\x04`) e `application/zip` está na whitelist. Distinguir exigiria
+  abrir o arquivo e procurar o `[Content_Types].xml` — o que precisa do ficheiro
+  inteiro, não dos primeiros 2 KB.
+- **Um PDF válido com JavaScript dentro é um PDF.** A parede não o abre.
+- Quem quiser mais do que isto precisa de antivírus/sandbox: outro lote.
+
+**Achado sobre as duas listas do `file_validation`:** um executável de Linux
+(`application/x-executable`) bate na **blacklist** `DANGEROUS_MIME_TYPES` e
+dispara log `critical`; um executável de **Windows** é detectado como
+`application/x-dosexec`, que **não** está nessa lista (ela tem
+`application/x-msdos-program` e `application/x-msdownload`) — é a **whitelist**
+que o recusa, com log `warning`. O resultado para o cliente é o mesmo 400, e é
+a arquitectura fail-closed que salva o caso; mas quem contar com a blacklist
+para **alertar** sobre executáveis de Windows não vai ver nada. Fixado em
+`TestQualParedeApanhaOQue`.
+
+### Cobertura
+
+`backend/tests/unit/test_s3_content_quarantine.py` (56) +
+`TestAQuarentenaNoFluxoDoPortal` em
+`test_portal_upload_path_traversal.py` (7 ponta a ponta pelo `confirm-upload`).
+Treze mutações; as **duas** que sobreviveram à primeira ronda estavam ambas nas
+primitivas novas do `s3_storage` — apagar o cabeçalho `Range` e confundir
+`"ausente"` com `"erro"` — e sobreviveram porque todos os testes usavam um S3
+falseado que implementava ele próprio o corte dos bytes e os três estados. **O
+duplo de teste escondia a única coisa que aquelas funções fazem.** Estão agora
+cobertas com um cliente `boto3` falseado ao nível da chamada, com asserções
+sobre os parâmetros que saem.
+
+### Por fazer (mesma lacuna, outro caminho)
+
+`services/document_direct_upload.py` — o `confirm-upload` **do CRM** — tem o
+mesmo pré-assinado e a mesma ausência de validação a posteriori. O risco é
+menor (utilizadores internos autenticados, não a Internet) mas a lacuna é
+idêntica e o `exigir_conteudo_valido` serve-lhe tal como está. Fica registado,
+não feito.
+
+---
+
+## WebSockets externos — ligar o cliente à rede sem lhe dar a rede (Set 2026)
+
+Terceiro passo do Caminho 4. O namespace dos WebSockets era interno; este lote
+abre-o aos clientes do Portal e a pergunta que resolve é a de sempre com outra
+forma: **estar na sala não é ter direito a tudo o que a sala transporta.**
+
+### A coincidência que passou a regra
+
+O `verify_websocket_token` decifrava com o **mesmo** `JWT_SECRET` dos tokens do
+Portal, lia o `sub`, procurava em `db.users` e **nunca** olhava para a claim
+`type`. O que impedia um token do Portal de abrir o socket interno era o `sub`
+de um token de Portal ser um `process_id` que não existe em `db.users` — um
+acidente de namespaces, não uma decisão. Abrir o namespace sem mudar isto
+transformava esse acidente em autorização por omissão.
+
+Hoje a claim `type` é **autoritativa dos dois lados**
+(`services/ws_client_identity.py`):
+
+| Lado | Regra | Forma |
+|---|---|---|
+| Staff (`/ws/notifications`, `get_current_user`) | recusa tipos **estranhos** (`magic_link`, `verified_session`, `access_code_session`, `gov_auth`); aceita `staff` e `None` | deny-list + `None` tolerado |
+| Cliente (`/ws/portal`) | aceita **só** os três tipos do `portal_security`, e exige `role == client_portal` | allow-list nos dois eixos |
+
+O `None` do lado do staff é deliberado: o `create_token` só passou a estampar
+`type: "staff"` neste lote e recusar `None` invalidava todas as sessões abertas
+no deploy. A segurança está no outro lado — um tipo estranho é recusado — e a
+tolerância tem data de morte registada (`TECHNICAL_DEBT.md` D-5).
+
+### Endpoint separado, e não um ramo
+
+`/ws/portal` é um endpoint próprio (`services/websocket_api_portal.py`). O laço
+do staff trata seis tipos de mensagem (`mark_notification_read`,
+`mark_all_read`, `process_locked`, `process_unlocked`, `join_process_room`,
+`leave_process_room`); meter um cliente externo lá dentro obrigava a semear
+`if é_cliente:` por cada ramo, e a segurança passava a depender de **nenhum ramo
+novo se esquecer da guarda**. O laço do cliente aceita **uma** mensagem: `ping`.
+Não há ramo que esquecer porque não há ramos.
+
+### O prefixo `cliente:` paga três coisas de uma vez
+
+A identidade do socket de um cliente é `cliente:<process_id>`, nunca o
+`process_id` cru. O `ConnectionManager` e o ZSET de presença são indexados por
+`user_id`, e essa decisão única resolve:
+
+- **Presença** — o "quem está online" interno (`chat_presence` →
+  `presenca.todos_online`) lê o ZSET inteiro; sem namespace, um cliente do
+  Portal aparecia na lista de consultores activos do Chat da equipa. O filtro
+  (`sem_clientes`) vive **dentro** do `todos_online`, não em cada chamador: um
+  chamador novo herda a regra em silêncio, que é a direcção certa para a
+  omissão.
+- **Reconhecimento** — a camada de entrega precisa de saber, olhando só para o
+  identificador de um membro da sala, se aquele socket é de um cliente. Sem
+  isso não há onde aplicar a lista de permissão.
+- **Imunidade a eventos dirigidos** — os envelopes endereçados a `user_id` usam
+  ids de `db.users`; nenhum emissor escreve `cliente:...`. Nenhum evento
+  dirigido pode alcançar um cliente, nem por colisão de ids.
+
+### Nunca `register_scope` — e a exclusão é estrutural
+
+Um cliente não tem UCRs, e o `resolve_tenant_scope` de um utilizador sem
+empresa devolve a **rede de omissão** — a do grupo incumbente. O encaminhamento
+por audiência (`entregar_a_processo`, `entregar_as_redes`) casa por
+`network_id`: um socket de cliente com âmbito receberia **todos** os deltas de
+processo dessa rede, com `client_name` e `process_number` dentro.
+
+O endpoint do cliente não chama `register_scope`. O `_route_por_audiencia` já
+faz `if not registo: continue` — a exclusão não é uma verificação que alguém
+tenha de lembrar, é a consequência de não haver âmbito.
+
+### A lista é de PERMISSÃO, e é aplicada na ENTREGA
+
+A sala `process_<id>` é de staff: transporta deltas do processo, bloqueios de
+edição, progresso interno dos scrapers e mensagens do Portal, emitidos de sete
+módulos diferentes — e vai crescer.
+
+Com uma lista de **bloqueio**, um emissor novo fuga por omissão. Com uma lista
+de **permissão** aplicada na **entrega** (`websocket_manager._route_por_sala` →
+`ws_client_identity.pode_entregar`), um emissor novo **não chega ao cliente até
+alguém decidir que deve**. É na entrega porque é o único ponto por onde todos os
+emissores passam; na emissão seria uma regra a repetir em sete módulos.
+
+Permitidos hoje, e só estes:
+
+- `portal_message` — a conversa com o consultor, a razão de ser da ligação;
+- `portal_gov_progress` — o progresso dos scrapers do Estado.
+
+**Porque é que `document_uploaded` NÃO está na lista**, apesar de ser o evento
+que os scrapers emitiam: o comentário na origem dizia "Notificar **equipa** via
+WebSocket". É um evento genérico, com nome genérico, e nada impede que amanhã um
+upload da equipa o emita com o **nome do ficheiro** no payload — e nesse dia o
+cliente passaria a ver nomes de documentos internos, em silêncio. Um evento
+próprio tem um contrato próprio: `_notificar_recolha` emite **dois** eventos, o
+da equipa (com o classificador interno) e o do cliente
+(`{process_id, source, estado, documents_count}` — uma lista fechada de chaves,
+asserida por um teste).
+
+O motivo de falha que chega ao cliente passa por um **mapa fechado**:
+`credenciais_invalidas` e os `mfa_*` passam traduzidos (são acções DELE, sobre
+as credenciais que introduziu); `scraper_unavailable` e `unexpected_error`
+colapsam em `indisponivel`. Um motivo novo do lado do scraper aparece como
+"indisponível" até alguém decidir que o cliente o deve ver.
+
+### A sala é ditada pelo servidor
+
+O `sub` do token **é** o `process_id`; a sala é calculada no handshake. Uma
+mensagem `join_process_room` enviada pelo cliente é **ignorada e registada** —
+vindo de um cliente é uma sondagem, porque não existe interface que a envie.
+
+### Cobertura
+
+`backend/tests/unit/test_ws_portal_isolation.py` (84 testes). As duas provas
+que o dono do produto pediu, ambas contra o `ConnectionManager` e o
+`route_system_event` **reais**:
+
+1. **O cliente A não escuta o processo de B** — com a contra-asserção de que B
+   recebe, para o teste não passar por a entrega estar simplesmente quebrada.
+2. **O cliente A não ouve os eventos internos do SEU processo** — 18 tipos de
+   evento, parametrizados, cada um com um socket de **staff** na mesma sala a
+   receber o mesmo evento. Sem essa metade, o teste passava por a sala estar
+   vazia e não pela barreira.
+
+Mais a contraprova (o que o cliente **pode** ouvir chega mesmo) e um evento
+**inventado** (`relatorio_de_risco_interno`), que nenhuma lista de bloqueio
+previa e que a de permissão retém.
+
+Dezoito mutações. **Cinco** sobreviveram à primeira ronda e nenhuma era mutante
+equivalente:
+
+- acrescentar `register_scope` ao endpoint e tirar-lhe o `join_room` não
+  matavam nada, porque o helper do teste **reimplementa** o handshake para
+  deixar a ligação aberta — a mesma lição do lote da quarentena, noutra roupa.
+  Corrigido com um teste um nível abaixo, que corre o endpoint verdadeiro e
+  **espia as chamadas ao `ConnectionManager`**, mais uma guarda de código-fonte
+  a afirmar que o duplo não divergiu do original;
+- tirar a verificação do `role` no socket do Portal não matava nada, porque o
+  token de staff do meu teste também falha o `type` — coberto agora com um
+  token **forjado** (tipo de Portal + role de staff);
+- `todos_online` a devolver clientes não matava nada, porque o meu teste só
+  cobria o ramo **sem** Redis e a mutação vivia no ramo **com** Redis;
+- o `get_current_user` não tinha teste nenhum — endureci-o e não o provei.
+
+---
+
+## O Portal do Cliente em tempo real — o lado do browser (Set 2026)
+
+Fecha o Caminho 4. A fronteira de segurança estava montada e testada; este lote
+liga os cabos do lado do cliente e **fecha a dívida D-9**.
+
+### A forma: contentor + hook + módulo puro
+
+Segue a divisão que o Épico 4/5 já usa (`hooks/useTaskEvents.js` +
+`utils/taskEvents.js`):
+
+| Peça | Responsabilidade |
+|---|---|
+| `utils/portalRealtime.js` | **Puro.** O URL do socket, a decisão por evento, os textos. É o que se testa sem abrir sockets. |
+| `hooks/usePortalRealtime.js` | A **ligação**: handshake, `ping`, backoff, `isConnected`. Não guarda mensagens. |
+| `pages/ClientPortal.jsx` | O **estado** e os efeitos. Decide o que o `isConnected` implica. |
+
+O hook não guarda a conversa: diz "vai buscar" e "estou ligado". É a mesma
+fronteira do Webmail — o tempo real não atravessa para dentro do componente de
+apresentação.
+
+### O polling não foi apagado, foi condicionado
+
+```js
+// PARA quando o socket liga; RETOMA sozinho quando cai, porque
+// `tempoRealLigado` é a única dependência deste efeito além da sessão.
+useEffect(() => {
+  if (!isVerified || tempoRealLigado) return undefined;
+  const interval = setInterval(…, 15000);
+  return () => clearInterval(interval);
+}, [isVerified, tempoRealLigado, …]);
+```
+
+É a regra do Épico 10 e não é cerimónia: um browser atrás de um proxy que
+bloqueia WebSockets, ou um socket que morre a meio de uma conversa, deixaria o
+cliente sem mensagens **sem dar erro nenhum**. A primeira leitura corre sempre,
+ligado ou não — o socket avisa do que *chega* a partir da ligação; o que já
+existia vem do GET.
+
+### Duas armadilhas que o payload impõe
+
+**1. O evento `portal_message` não é a mensagem.** O servidor trunca o conteúdo
+a 200 caracteres (`content[:200]`, nos dois emissores). Inserido na lista como
+registo, uma mensagem longa ficava truncada no ecrã **para sempre**, até um
+refetch acidental. O evento é um **sinal**; a verdade é o
+`GET /portal/messages`.
+
+Isto é deliberadamente **diferente** do `utils/webmailRealtime.js`, que insere a
+linha sem GET. Lá o evento transporta o registo completo. A diferença está no
+payload, não na preferência — e está escrita nos dois sítios para que ninguém
+"unifique" os dois padrões.
+
+**2. O cliente recebe o eco da sua própria mensagem.** O
+`portal_client_messages` difunde para a sala **sem** `exclude_user_id` (ao
+contrário do caminho do staff). O reflexo é filtrar `sender_type === "client"`
+— e está errado: um processo pode ter **dois titulares** com magic links
+próprios, ambos `client`, e esse filtro fazia o titular 2 deixar de ver as
+mensagens do titular 1, em silêncio, com o polling parado. A desduplicação é
+por **id da mensagem**: a minha já está na lista (o POST refez o fetch), a do
+co-titular não.
+
+### O resto das decisões
+
+- **Recuperação da lacuna.** Ao (re)ligar faz-se **uma** leitura: enquanto o
+  socket estava em baixo podem ter chegado mensagens e o polling estava parado.
+  Sem isto, reconectar deixava a conversa desactualizada até à mensagem
+  *seguinte*.
+- **4001/4002 não reconectam.** São veredictos sobre o **token**; insistir com o
+  mesmo token repetia-os para sempre e transformava um erro de autenticação num
+  ciclo de pedidos. `isConnected` fica `false` e o polling volta a ser o
+  caminho.
+- **`https` → `wss`, sempre** (`construirUrlDoSocket`). Um `ws://` a partir de
+  uma página `https` é recusado pelo browser com "insecure WebSocket" — e isso
+  só aparece no browser do cliente.
+- **Os motivos de falha do Estado têm texto pt-PT** vindo de um mapa fechado, e
+  um motivo desconhecido cai no genérico: um `motivo` novo do backend nunca
+  aparece cru no ecrã de um cliente. O backend já colapsa os erros internos em
+  `indisponivel`; aqui só se traduz.
+- **As callbacks vivem numa ref.** Uma função nova a cada render do contentor,
+  nas dependências do efeito que abre o socket, fecharia e reabriria a ligação a
+  **cada tecla** escrita na caixa de mensagem. A lista de mensagens entra como
+  função (`() => messagesRef.current`) pela mesma razão.
+
+### Cobertura, e porque é que a página é montada
+
+- `utils/portalRealtime.test.js` (37) — a decisão pura, incluindo as duas
+  armadilhas e o mapa de motivos.
+- `hooks/__tests__/usePortalRealtime.test.jsx` (25) — o ciclo de vida da
+  ligação, com um `WebSocket` falso ao nível da API do browser: nunca envia
+  `join_process_room`, `ping` é a única mensagem que sai, backoff, e o
+  não-reconectar em 4001/4002.
+- `pages/__tests__/ClientPortal.tempoReal.test.jsx` (11) — **a página montada a
+  sério**, a contar os GETs. É o único que prova que o polling **para** quando o
+  socket liga e **retoma** quando cai.
+
+A página é montada em vez de um componente de teste que reproduza a ligação
+porque **um duplo que reimplementa a lógica valida o duplo** — a lição que este
+projecto pagou duas vezes, nos lotes da quarentena e dos WebSockets. A prova de
+que o polling para tem de correr contra os efeitos verdadeiros do
+`ClientPortal`.
+
+Onze mutações, todas mortas — incluindo tirar a condição do polling, invertê-la,
+apagar o polling, tirar a leitura de recuperação, reconectar em 4001/4002,
+enviar `join_process_room`, desduplicar por `sender_type`, mandar o motivo
+interno cru para o ecrã e produzir `ws://` a partir de `https`.
+
+### Uma armadilha do ambiente de testes, corrigida no caminho
+
+`TypeError: Canvas.Image is not a constructor`, num stack só de `react-dom` sem
+uma palavra sobre imagens. O `package.json` aponta
+`"canvas": "npm:empty-npm-package@1.0.0"` para não compilar o módulo nativo — e
+é aí que está: o `require("canvas")` do jsdom **tem sucesso**, logo o
+`if (!Canvas) return;` dele não dispara e rebenta em `new Canvas.Image()`.
+Apanha **qualquer** teste que monte uma página com um logótipo; este foi o
+primeiro. Um stub em `window.Image` não serve (o jsdom usa a sua referência
+interna); `src/test/setup.js` acrescenta a classe ao objecto de exports do
+módulo vazio, que é o mesmo que o jsdom capturou.
+
+### O contrato, verificado ponta a ponta
+
+O caminho que a função **real** do frontend constrói foi usado para ligar à app
+ASGI **real**:
+
+```
+frontend construiu ...... ws://localhost:8001/api/ws/portal?token=<jwt>
+✓ ligado: connection_status → {'status': 'connected', 'process_id': '…'}
+✓ identidade no manager .. cliente:proc-do-cliente
+✓ sala ................... {'process_proc-do-cliente'}
+✓ âmbito de rede ......... None
+  recebe ................. portal_message · portal_gov_progress
+  não recebe ............. process_updated · document_uploaded · new_chat_message
+✓ ping → heartbeat (pong)
+```
+
+---
+
+## Correcção pós-CI — o tipo dos tokens do CRM é `"access"`, e há três produtores
+
+O lote dos WebSockets externos foi escrito sobre uma premissa **errada**, e vale
+a pena deixá-la registada porque a forma do erro repete-se.
+
+### O que eu afirmei, e porque estava errado
+
+Afirmei que "os tokens de staff não declaram `type`" — e cheguei lá depois de
+ler **um** produtor, o `services/auth.create_token`. Essa função não é a que o
+`/auth/login-v2` chama. O login de produção mina por
+`services/refresh_token_service.create_access_token`, que estampa
+`"type": "access"` **desde sempre**, num literal escondido nesse módulo.
+
+Inventar um tipo `"staff"` e torná-lo autoritativo no `get_current_user` fez o
+validador recusar **todos** os tokens reais: 401 em cada chamada de cada
+utilizador autenticado. Uma regressão total da API, com uma mensagem minha na
+resposta.
+
+### Porque é que os testes não viram
+
+Os 96 testes do lote passavam porque **forjavam** os tokens com o tipo que eu
+tinha inventado. O `backend-full` do CI — que passa pelo `/auth/login-v2` a
+sério — foi o único a ver: **25 testes vermelhos**, todos com
+`{"detail":"Este token não tem permissão para acessar a API."}`.
+
+É a falha do Lote 5 do lado da **escrita**. A regra que já estava escrita —
+*"inventariar os sítios que LISTAM, não só a condição"* — vale igual para quem
+PRODUZ: inventariar um produtor e concluir sobre a regra é o mesmo erro com o
+sinal trocado.
+
+### O inventário completo
+
+| Produtor | Usado por | `type` antes | agora |
+|---|---|---|---|
+| `refresh_token_service.create_access_token` | `/auth/login-v2`, `/auth/refresh` | `"access"` (literal local) | `tipo_de_token_do_crm()` |
+| `auth.create_token` | `/auth/register` | nenhum | `tipo_de_token_do_crm()` |
+| `auth.create_access_token` | *impersonate* (2 sítios em `admin_users`) | nenhum | `tipo_de_token_do_crm()` |
+
+O valor canónico é **`"access"`** e não um nome novo: é o que a produção já
+estampava e o que está dentro de cada token em circulação. Escolher um nome novo
+obrigava a migrar todos — e foi exactamente ao fazê-lo que parti o login.
+
+`ws_client_identity.TIPO_DO_STAFF = "access"` é o ponto único;
+`auth.tipo_de_token_do_crm()` é o acessor (import tardio, para não fechar o ciclo
+`auth` → `ws_client_identity` → `websocket_manager`).
+
+### A cobertura que faltava
+
+`TestTodosOsProdutoresDeTokenDoCRM` corre **cada produtor real** — nunca um
+token forjado — contra o `get_current_user` **real**:
+
+- o tipo estampado é aceito pelo validador;
+- os três estampam o **mesmo** tipo;
+- o `get_current_user` devolve o utilizador para o token de cada um;
+- o valor canónico é o que a produção já estampava;
+- guarda de fonte: nenhum produtor usa um literal próprio (era a
+  invisibilidade do literal que produzia o defeito), com a contraprova de que
+  o produtor estampa mesmo um `type`.
+
+O helper `token_de_staff()` dos testes passou a usar o **produtor de produção**
+por omissão. Forjar era o que escondia o defeito.
+
+**A mutação fiel** — pôr o literal de volta no `refresh_token_service` a
+divergir da constante do validador — é apanhada por **cinco** destes testes,
+incluindo o que atravessa o `get_current_user`. Mutar só a constante partilhada
+não serve como prova: move os dois lados ao mesmo tempo, e o defeito original era
+uma **divergência**, não um valor errado.
+
+### Estado
+
+`pytest` com o comando e o ambiente exactos do `backend-full`: **4079 passed, 13
+skipped** (o CI tinha 25 failed / 4042 passed). `flake8` nos selectores
+bloqueantes: 0.

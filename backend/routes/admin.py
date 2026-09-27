@@ -51,6 +51,7 @@ from services.admin_users import (
     run_get_all_notification_preferences,
     run_get_notification_preferences,
     run_get_users,
+    run_get_users_paginated,
     run_impersonate_user,
     run_stop_impersonate,
     run_update_notification_preferences,
@@ -234,6 +235,25 @@ async def get_users(
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO])),
 ):
     return await run_get_users(user, role, for_assignment=for_assignment)
+
+
+@router.get("/users/paginated")
+async def get_users_paginated(
+    search: Optional[str] = Query(None, description="Nome, email ou empresa"),
+    role: Optional[str] = None,
+    company_id: Optional[str] = Query(None, description="Filtrar por empresa"),
+    page: int = Query(1, ge=1),
+    size: int = Query(25, ge=1, le=100),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO])),
+):
+    """Painel de administração: utilizadores paginados e com pesquisa.
+
+    Separado de `/admin/users` de propósito — esse serve também as
+    dropdowns de atribuição, que precisam da lista inteira.
+    """
+    return await run_get_users_paginated(
+        user, search=search, role=role, company_id=company_id, page=page, size=size,
+    )
 
 
 @router.post("/users", response_model=UserResponse)

@@ -26,8 +26,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryClient';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import { getKanbanBoard } from '../../services/api';
 
 /**
  * Fetcher function para dados dos Concluídos
@@ -62,23 +61,30 @@ const fetchKanbanCompletedData = async (token, filters) => {
     params.append('parceiro_id', parceiroFilter === 'none' ? 'none' : parceiroFilter);
   }
 
-  const response = await fetch(`${API_URL}/api/processes/kanban?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!response.ok) {
-    // PACOTE AE-2: extrair a mensagem de erro do backend para diagnóstico
-    let errorDetail = 'Failed to fetch completed kanban data';
-    try {
-      const errorData = await response.json();
-      errorDetail = errorData?.detail || errorData?.message || errorDetail;
-    } catch {
-      errorDetail = `${response.status} ${response.statusText}`;
-    }
-    throw new Error(errorDetail);
+  // Ponto 15 — etiquetas. O Kanban tem construtor de query SEPARADO no
+  // backend (foi assim que ficou de fora do isolamento no Lote 4), por
+  // isso o filtro tem de ser ligado aqui de propósito: inventariar os
+  // sítios que LISTAM, não só a condição.
+  for (const etiqueta of filters.labels || []) {
+    params.append('labels', etiqueta);
+  }
+  if ((filters.labels || []).length > 1 && filters.labelsLogic === 'AND') {
+    params.append('labels_logic', 'AND');
   }
 
-  return response.json();
+  // Pelo cliente Axios: o interceptor injecta `X-Company-Id` e
+  // `X-Active-Role`, sem os quais o backend responde sobre o papel BASE.
+  try {
+    const { data } = await getKanbanBoard(params);
+    return data;
+  } catch (error) {
+    const corpo = error?.response?.data;
+    throw new Error(
+      corpo?.detail || corpo?.message ||
+      (error?.response ? `${error.response.status} ${error.response.statusText}` : null) ||
+      'Failed to fetch completed kanban data'
+    );
+  }
 };
 
 /**

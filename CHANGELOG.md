@@ -3,6 +3,23 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-24] (13) — Fechar os furos encontrados nos testes de aceitação
+
+### Segurança
+- **O quadro Kanban passa a respeitar o isolamento entre empresas.** Um utilizador de uma empresa isolada não via processos na listagem mas via-os todos no quadro.
+- **As notificações passam a ser só de quem as recebe.** O sino mostrava a administradores, CEOs e diretores as notificações de toda a gente, e aos restantes as dos colegas que partilhavam processo. Passa a mostrar apenas as dirigidas a cada pessoa.
+- **Deixa de ser possível marcar como lida a notificação de outra pessoa.**
+- **A assinatura de e-mail deixa de atravessar empresas.** Quem tinha assinatura configurada numa empresa via os e-mails de outra saírem assinados com ela, sem que isso aparecesse em lado nenhum na Área Pessoal.
+- **O Explorador de Ficheiros global fica reservado a Administradores e CEO.** Navega o armazenamento inteiro. O acesso aos ficheiros de cada processo continua igual para toda a gente, pela ficha do processo.
+
+### Corrigido
+- **Remover um consultor do processo passa a ter efeito completo.** O consultor removido continuava a ver o processo em "Os Meus Processos" e as tarefas dele ficavam atribuídas na mesma.
+- **Trocar de perfil atualiza a lista.** Passar de Consultor para Diretor mudava o cabeçalho mas não os dados no ecrã.
+
+### Alterado
+- **O campo "Rede / Grupo Empresarial" passa a sugerir as redes existentes.** Era texto livre: uma gralha criava silenciosamente um grupo novo com uma empresa só, e ninguém dava por isso. Passa a completar automaticamente e a dizer, por baixo, o que vai acontecer — "junta-se a 2 empresas" ou "rede nova".
+- **A Área Pessoal mostra a assinatura que sai mesmo nos e-mails**, quando não há uma configurada para a empresa atual.
+
 ## [2026-09-23] (12) — Espelho de Automações: ver o motor a trabalhar
 
 ### Adicionado

@@ -11,6 +11,7 @@ from fastapi import Request
 
 from database import db
 from models.auth import UserRole
+from services.workflow_phases import carregar_fases, nomes_terminais
 from services.my_clients_api_helpers import (
     LEADS_PROJECTION,
     PROCESS_LIST_PROJECTION,
@@ -50,6 +51,7 @@ async def run_get_my_clients(request: Request, user: dict):
         user_email=user_email,
         role=role,
         wants_deleted=wants_deleted,
+        terminais=nomes_terminais(await carregar_fases()),
     )
     query = apply_pre_registo_exclusion(query)
 

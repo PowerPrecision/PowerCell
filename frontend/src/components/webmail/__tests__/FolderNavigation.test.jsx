@@ -35,15 +35,12 @@ const props = (overrides = {}) => ({
   unreadCount: 0,
   folderCounts: {},
   totalEmails: 0,
-  lastSyncTime: null,
-  syncing: false,
   onSelectFolder: vi.fn(),
   onSelectLabel: vi.fn(),
   onSelectCustomFolder: vi.fn(),
   onOpenFolderMenu: vi.fn(),
   onCreateFolder: vi.fn(),
   onCompose: vi.fn(),
-  onSync: vi.fn(),
   onMailboxChange: vi.fn(),
   ...overrides,
 });
@@ -177,24 +174,25 @@ describe("FolderNavigation — pastas personalizadas", () => {
 });
 
 describe("FolderNavigation — acções do topo", () => {
-  it("Nova Mensagem e Sincronizar chamam os callbacks", async () => {
+  it("Nova Mensagem chama o callback", async () => {
     const utilizador = userEvent.setup();
     const onCompose = vi.fn();
-    const onSync = vi.fn();
 
-    render(<FolderNavigation {...props({ onCompose, onSync })} />);
+    render(<FolderNavigation {...props({ onCompose })} />);
     await utilizador.click(screen.getByRole("button", { name: /Nova Mensagem/ }));
-    await utilizador.click(screen.getByRole("button", { name: /Sincronizar/ }));
 
     expect(onCompose).toHaveBeenCalledTimes(1);
-    expect(onSync).toHaveBeenCalledTimes(1);
   });
 
-  it("a sincronizar, o botão bloqueia e anuncia-o", () => {
-    render(<FolderNavigation {...props({ syncing: true })} />);
+  it("já NÃO tem o botão de sincronizar de largura total", () => {
+    // Ponto 8, Fase 3 — o comportamento não desapareceu, MUDOU DE SÍTIO:
+    // vive agora no cabeçalho do separador da empresa
+    // (`WebmailCompanyTabs`), como indicador discreto. Ocupar uma fatia
+    // permanente da barra lateral com uma acção usada uma vez por sessão
+    // era o "painel intrusivo" que este ponto veio remover.
+    render(<FolderNavigation {...props()} />);
 
-    const botao = screen.getByRole("button", { name: /A sincronizar/ });
-    expect(botao).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /sincronizar/i })).toBeNull();
   });
 
   it("o rodapé conta os emails", () => {

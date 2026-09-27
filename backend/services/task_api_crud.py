@@ -17,7 +17,11 @@ from models.task import TaskCreate, TaskUpdate, TaskResponse
 from services.history import log_history
 from services.realtime_notifications import send_realtime_notification
 from utils.input_sanitization import sanitize_string
-from services.task_api_helpers import _block_parceiro, enrich_task
+from services.task_api_helpers import _block_parceiro, enrich_task, get_user_names
+from services.task_assignment_hygiene import (
+    diff_de_responsaveis,
+    normalizar_assigned_to,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -242,18 +246,44 @@ async def run_update_task(task_id: str, task_data: TaskUpdate, current_user: dic
         update_data["title"] = sanitize_string(task_data.title, max_length=300) if task_data.title else task_data.title
     if task_data.description is not None:
         update_data["description"] = sanitize_string(task_data.description, max_length=2000) if task_data.description else task_data.description
+    diff = None
     if task_data.assigned_to is not None:
-        update_data["assigned_to"] = task_data.assigned_to
-        # Notificar novos utilizadores
-        new_assignees = set(task_data.assigned_to) - set(task.get("assigned_to", []))
-        for user_id in new_assignees:
+        # Ponto 10: gravar SEMPRE lista. O Lote 4 (ponto 12) normalizou a
+        # leitura e pôs o motor de automação a gravar lista; este caminho
+        # ficou a gravar o que lhe dessem, e um escalar aqui repõe a
+        # bomba que faz `enrich_task` responder `$in needs an array`.
+        update_data["assigned_to"] = normalizar_assigned_to(task_data.assigned_to)
+        # E o diff normaliza os DOIS lados: `set("u1")` é `{'u','1'}`.
+        diff = diff_de_responsaveis(
+            antes=task.get("assigned_to"), depois=task_data.assigned_to
+        )
+        link = "/tasks" if not task.get("process_id") else f"/process/{task['process_id']}"
+
+        for user_id in diff.entraram:
             if user_id != current_user["id"]:
                 await send_realtime_notification(
                     user_id=user_id,
                     title="📋 Nova Tarefa Atribuída",
                     message=f"{current_user['name']} atribuiu-lhe uma tarefa: {task['title']}",
                     notification_type="task_assigned",
-                    link="/tasks" if not task.get("process_id") else f"/process/{task['process_id']}",
+                    link=link,
+                    process_id=task.get("process_id")
+                )
+
+        # Quem SAI também é avisado (ponto 10): sem isto a tarefa some da
+        # lista dele no próximo refresh e ninguém lhe disse porquê — numa
+        # equipa é trabalho a cair no chão.
+        for user_id in diff.sairam:
+            if user_id != current_user["id"]:
+                await send_realtime_notification(
+                    user_id=user_id,
+                    title="📋 Tarefa Reatribuída",
+                    message=(
+                        f"{current_user['name']} passou a tarefa "
+                        f"\"{task['title']}\" para outra pessoa."
+                    ),
+                    notification_type="task_unassigned",
+                    link=link,
                     process_id=task.get("process_id")
                 )
 
@@ -261,7 +291,21 @@ async def run_update_task(task_id: str, task_data: TaskUpdate, current_user: dic
 
     # ── Audit Trail ──
     if task.get("process_id"):
-        await log_history(task["process_id"], current_user, "Atualizou tarefa", "tarefa", task.get("title"), update_data.get("title") or task.get("title"))
+        if diff is not None and diff.mudou:
+            # Ponto 10: registar a MUDANÇA DE MÃOS, não o título. Antes,
+            # reatribuir e renomear a tarefa eram indistinguíveis no
+            # histórico. (O rasto passa por `log_history`, que já aplica
+            # a regra de ouro do perfil Indexação.)
+            nomes = await get_user_names(diff.sairam + diff.entraram)
+            antes = ", ".join(nomes.get(u, u) for u in diff.sairam) or "ninguém"
+            depois = ", ".join(nomes.get(u, u) for u in diff.entraram) or "ninguém"
+            await log_history(
+                task["process_id"], current_user,
+                "Reatribuiu tarefa", f"responsável da tarefa \"{task.get('title')}\"",
+                antes, depois,
+            )
+        else:
+            await log_history(task["process_id"], current_user, "Atualizou tarefa", "tarefa", task.get("title"), update_data.get("title") or task.get("title"))
 
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     enriched = await enrich_task(updated_task)

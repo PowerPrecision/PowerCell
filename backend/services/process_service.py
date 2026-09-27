@@ -20,6 +20,7 @@ from typing import Optional, Tuple
 from database import db
 from models.process import ProcessCreate, ProcessUpdate
 from services.encryption import encryption_service, generate_nif_hash, generate_email_hash, generate_telefone_hash
+from services.process_labels import normalizar_etiquetas
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +324,9 @@ async def update_process_document(
     
     # Labels (lista — substituição completa)
     if data.labels is not None:
-        update_data["labels"] = data.labels
+        # Ponto 15: os DOIS caminhos de escrita normalizam. Só num deles
+        # dava a mesma etiqueta gravada de duas formas conforme o ecrã.
+        update_data["labels"] = normalizar_etiquetas(data.labels)
         changes.append({"field": "labels", "old": "...", "new": "atualizado"})
 
 

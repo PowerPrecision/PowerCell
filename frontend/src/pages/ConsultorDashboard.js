@@ -47,43 +47,9 @@ import { safeDateStr } from "../lib/utils";
 import { sanitizeHtml } from "../utils/sanitize";
 import { markdownToHtml } from "../utils/markdown";
 import { getDraftNavigationTarget, PROCESS_DRAFT_STATUSES } from "../utils/draftNavigation";
+import { agruparEmFunil } from "../utils/funilDeFases";
 import AgendaCalendar from "../components/calendar/AgendaCalendar";
 import { isTeamCalendarRole } from "../utils/agendaCalendar";
-
-/** Macro-fases do funil (agrupam estados finos do workflow) */
-const FUNNEL_MACRO = [
-  {
-    key: "novo",
-    label: "Novo",
-    statuses: ["clientes_espera", "fase_documental", "fase_documental_ii", "documentacao"],
-    color: "hsl(var(--chart-4))",
-  },
-  {
-    key: "analise",
-    label: "Em Análise",
-    statuses: [
-      "enviado_bruno", "enviado_luis", "enviado_bcp_rui", "entradas_precision",
-      "fase_bancaria", "fase_visitas", "analise", "pre_aprovacao",
-    ],
-    color: "hsl(var(--chart-1))",
-  },
-  {
-    key: "aprovado",
-    label: "Aprovado",
-    statuses: [
-      "ch_aprovado", "fase_escritura", "escritura_agendada",
-      "credito_aprovado", "pedido_avaliacao", "avaliacao", "cpcv", "minuta", "escritura",
-      "aprovado",
-    ],
-    color: "hsl(var(--chart-2))",
-  },
-  {
-    key: "concluido",
-    label: "Concluído",
-    statuses: ["concluidos", "concluido", "escritura"],
-    color: "hsl(var(--chart-3))",
-  },
-];
 
 const DRAFT_STATUSES = PROCESS_DRAFT_STATUSES;
 
@@ -194,20 +160,16 @@ const ConsultorDashboard = () => {
       .slice(0, 5);
   }, [deadlines]);
 
-  const funnelData = useMemo(() => {
-    const list = processes || [];
-    return FUNNEL_MACRO.map((phase) => {
-      const statusSet = new Set(phase.statuses);
-      const count = list.filter((p) => statusSet.has(p.status)).length;
-      return {
-        key: phase.key,
-        name: phase.label,
-        value: count,
-        color: phase.color,
-        statuses: phase.statuses,
-      };
-    });
-  }, [processes]);
+  // "UI de Fases Mentirosa" (Lote 5, P0): o funil era uma lista cravada
+  // aqui e um `filter` por grupo — um processo numa fase que o admin
+  // tivesse criado não contava para lado NENHUM, e a soma das colunas
+  // ficava abaixo do total sem nada no ecrã a dizê-lo. O agrupamento
+  // mudou para `utils/funilDeFases.js`, onde há um teste a afirmar que
+  // a soma é sempre o total.
+  const funnelData = useMemo(
+    () => agruparEmFunil(processes, workflowStatuses),
+    [processes, workflowStatuses],
+  );
 
   const handleFunnelClick = (entry) => {
     if (!entry?.statuses?.length) return;

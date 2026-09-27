@@ -250,3 +250,70 @@ class TestSemFallbacksIndevidos:
         codigo = _codigo_sem_comentarios(com_fallback)
         assert "system_fallback" in codigo
         assert "ucr_any" not in codigo
+
+
+# ════════════════════════════════════════════════════════════════════
+# LOTE 5, ponto 5 — "O Mistério da Assinatura"
+#
+# O `ProfileRoleTab` grava nos DOIS sítios: `signature` (UCR da empresa
+# activa) e `email_signature` (global, "backward compat"). Mas LÊ só um:
+# `active_company_signature`.
+#
+# Logo: configura-se a assinatura na Power → escreve nos dois. Muda-se
+# para a Precision, onde o UCR não tem assinatura → a UI mostra VAZIO e
+# o envio cai no nível 2, usando a global, que é a da Power.
+#
+# Não é só falta de transparência: é a assinatura de uma empresa a sair
+# num email de outra — exactamente a fuga que o `ucr_any` do Lote 1
+# fechou, a entrar de novo pela porta do campo global.
+#
+# A REGRA: com empresa activa, a global só vale se o utilizador NUNCA
+# tiver configurado uma assinatura por empresa. Aí ela é mesmo a única
+# assinatura dele, e não a de outro perfil. Quem já usa o sistema por
+# empresa não herda nada de lado nenhum.
+# ════════════════════════════════════════════════════════════════════
+class TestGlobalNaoAtravessaEmpresas:
+    @pytest.mark.asyncio
+    async def test_quem_so_tem_a_global_continua_a_usa_la(self):
+        """Sem regressão para quem nunca usou assinatura por empresa."""
+        fake = _db(
+            utilizador={"email_signature": ASSINATURA_GLOBAL, "company": "power"},
+            ucrs=[],
+        )
+        assinatura, origem = await _resolver(
+            fake, created_by="u-1", active_company_id="cmp-power",
+        )
+        assert assinatura == ASSINATURA_GLOBAL
+        assert origem == "user_global"
+
+    @pytest.mark.asyncio
+    async def test_quem_TEM_assinatura_noutra_empresa_nao_herda_a_global(self):
+        """A fuga. A global foi escrita ao gravar a da Power; usá-la na
+        Precision assina um email de uma empresa com a identidade de
+        outra."""
+        fake = _db(
+            utilizador={"email_signature": ASSINATURA_POWER, "company": "power"},
+            ucrs=[{"company_id": "cmp-power", "signature": ASSINATURA_POWER}],
+        )
+        assinatura, origem = await _resolver(
+            fake, created_by="u-1", active_company_id="cmp-precision",
+        )
+        assert assinatura is None, (
+            "a assinatura da Power saiu num email da Precision"
+        )
+        assert origem == "none"
+
+    @pytest.mark.asyncio
+    async def test_a_empresa_activa_com_assinatura_propria_ganha_sempre(self):
+        """Contraprova: cortar a global não pode cortar o caso normal."""
+        fake = _db(
+            utilizador={"email_signature": ASSINATURA_POWER, "company": "power"},
+            ucrs=[
+                {"company_id": "cmp-power", "signature": ASSINATURA_POWER},
+                {"company_id": "cmp-precision", "signature": ASSINATURA_PRECISION},
+            ],
+        )
+        assinatura, _ = await _resolver(
+            fake, created_by="u-1", active_company_id="cmp-precision",
+        )
+        assert assinatura == ASSINATURA_PRECISION

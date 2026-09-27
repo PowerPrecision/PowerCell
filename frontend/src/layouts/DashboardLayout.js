@@ -69,6 +69,7 @@ import { useWebSocket } from "../hooks/useWebSocket";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateEmailQueries } from "../hooks/useNewEmailRealtime";
 import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS, canAccessOrgAdmin } from "../utils/roleUtils";
+import { resolveActiveCompanyName } from "../utils/userProfiles";
 import ErrorBoundary from "../components/ErrorBoundary";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -87,7 +88,11 @@ const roleColors = ROLE_SIDEBAR_COLORS;
 const EMPTY_HANDLERS = {};
 
 const DashboardLayout = ({ children, title }) => {
-  const { user, logout, effectiveRole, isImpersonating } = useAuth();
+  const { user, logout, effectiveRole, isImpersonating, effectiveCompanyId } = useAuth();
+  // Ponto 12 — resolvido pela MESMA função do ContextSwitcher: duplicar
+  // a cadeia daria dois sítios a divergir, que é a raiz do incidente de
+  // 2026-09-21.
+  const nomeDaEmpresaActiva = resolveActiveCompanyName(user, effectiveCompanyId);
   const { toggleTheme, isDark } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -313,11 +318,18 @@ const DashboardLayout = ({ children, title }) => {
         },
         // PACOTE BU — Menu temporariamente oculto:
         // { label: "Minutas", icon: FileArchive, href: "/minutas" },
-        {
-          label: "Ficheiros",
-          icon: Database,
-          href: "/ficheiros",
-        },
+        // Explorador do bucket, reaberto ao staff no Épico 10 com
+        // isolamento por rede decidido no servidor. Esta lista TEM de
+        // casar com as `allowedRoles` da rota em App.js: um item de menu
+        // que leva a um redireccionamento é o produto a contradizer-se
+        // — ver `App.rotasMenu.test.js`.
+        ...(["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"].includes(userRole)
+          ? [{
+              label: "Ficheiros",
+              icon: Database,
+              href: "/ficheiros",
+            }]
+          : []),
         // PACOTE DD — movido para Sheet global (ícone de Calculadora no header)
         // {
         //   label: "Calculadoras",
@@ -729,6 +741,20 @@ const DashboardLayout = ({ children, title }) => {
                     </span>
                   )}
                 </div>
+                {/* Ponto 12 — a empresa activa, sempre. O ContextSwitcher
+                    já resolvia o nome, mas esconde-se por inteiro quando
+                    há um só perfil e uma só empresa: quem tem uma empresa
+                    só nunca via o nome dela em lado nenhum. */}
+                {nomeDaEmpresaActiva && (
+                  <p
+                    className="text-[11px] text-slate-400 truncate flex items-center gap-1 mt-0.5"
+                    title={nomeDaEmpresaActiva}
+                    data-testid="empresa-activa"
+                  >
+                    <Building2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    {nomeDaEmpresaActiva}
+                  </p>
+                )}
               </div>
             </div>
           </div>

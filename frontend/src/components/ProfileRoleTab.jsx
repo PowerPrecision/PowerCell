@@ -60,6 +60,7 @@ const ProfileRoleTab = ({ companyId, role, companyName, roleData, onUpdate }) =>
   const [professionalPhone, setProfessionalPhone] = useState(roleData?.professional_phone ?? "");
   const [jobTitle, setJobTitle] = useState(roleData?.job_title ?? "");
   const [emailSignature, setEmailSignature] = useState(roleData?.signature ?? "");
+  const [assinaturaEfectiva, setAssinaturaEfectiva] = useState(null);
   const [savingSignature, setSavingSignature] = useState(false);
   const [savingCompanyFields, setSavingCompanyFields] = useState(false);
   const [savedCompanyFields, setSavedCompanyFields] = useState(false);
@@ -91,6 +92,13 @@ const ProfileRoleTab = ({ companyId, role, companyName, roleData, onUpdate }) =>
         setProfessionalPhone(u.active_company_professional_phone ?? "");
         setJobTitle(u.active_company_job_title ?? "");
         setEmailSignature(u.active_company_signature ?? "");
+        // Lote 5, ponto 5: o backend diz qual a assinatura que SAI MESMO
+        // nos emails, resolvida pela mesma função do envio. Era esta a
+        // discrepância — o campo aqui vazio e os emails assinados.
+        setAssinaturaEfectiva({
+          html: u.email_signature_effective ?? "",
+          origem: u.email_signature_source ?? "none",
+        });
 
         // 2) Carregar info de config de email para ESTE UCR
         try {
@@ -347,6 +355,26 @@ const ProfileRoleTab = ({ companyId, role, companyName, roleData, onUpdate }) =>
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-muted-foreground">Pré-visualização</p>
               <RichTextViewer html={emailSignature} />
+            </div>
+          )}
+          {/* A assinatura que sai nos emails pode não ser a deste campo:
+              sem assinatura nesta empresa, o envio pode usar a global.
+              Mostrá-la aqui é o que acaba com o "de onde veio isto?". */}
+          {!htmlToText(emailSignature || "").trim()
+            && assinaturaEfectiva?.html
+            && htmlToText(assinaturaEfectiva.html).trim() && (
+            <div
+              className="space-y-1.5 rounded-md border border-border p-3"
+              data-testid="assinatura-efectiva"
+            >
+              <p className="text-xs font-medium">
+                Sem assinatura nesta empresa, os seus emails saem com esta:
+              </p>
+              <RichTextViewer html={assinaturaEfectiva.html} />
+              <p className="text-xs text-muted-foreground">
+                É a sua assinatura geral. Preencha o campo acima para usar
+                uma assinatura específica desta empresa.
+              </p>
             </div>
           )}
           <div className="flex items-center justify-between">

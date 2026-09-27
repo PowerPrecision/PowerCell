@@ -96,6 +96,8 @@ import {
   restoreProcess,
   // ÉPICO 7 — nota de voz do consultor
   uploadVoiceNote,
+  // Ponto 15 — catálogo de etiquetas para as sugestões do editor
+  getProcessLabels,
 } from "../services/api";
 import ProcessDomainTabsList from "../components/processDetails/ProcessDomainTabsList";
 import AIReviewDialog from "../components/processDetails/dialogs/AIReviewDialog";
@@ -103,6 +105,7 @@ import {
   aplicarDecisaoNaRevisao,
   prepararRevisaoDaExtraccao,
 } from "../utils/documentExtraction";
+import { resumirAnaliseEmLote } from "../utils/analiseEmLoteFeedback";
 import RGPDRequestDialog from "../components/processDetails/dialogs/RGPDRequestDialog";
 import TitularChoiceDialog from "../components/processDetails/dialogs/TitularChoiceDialog";
 import useTaskEvents from "../hooks/useTaskEvents";
@@ -195,8 +198,14 @@ import PortalMessagesTab from "../components/processDetails/tabs/PortalMessagesT
 import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
 import HistoryTab from "../components/processDetails/tabs/HistoryTab";
 import ProcessObservationsCard from "../components/processDetails/ProcessObservationsCard";
+import ProcessLabelsEditor from "../components/processDetails/ProcessLabelsEditor";
 import ProcessSummaryTimeline from "../components/processDetails/ProcessSummaryTimeline";
 import { PageHeader } from "../components/shared/PageHeader";
+// Ponto 17 — Navegação Contígua. O hook resolve os vizinhos a partir do
+// contexto que a listagem trouxe (zero pedidos) e só pergunta ao
+// servidor na fronteira da página.
+import ProcessNavigator from "../components/processDetails/ProcessNavigator";
+import { useProcessNeighbours } from "../hooks/useProcessNeighbours";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { resolveProcessTabsFromQuery } from "../utils/processDeepLink";
 
@@ -210,6 +219,16 @@ const ProcessDetails = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, token, effectiveRole } = useAuth();
   const queryClient = useQueryClient();
+
+  // Ponto 17 — vizinhos na listagem de origem.
+  const vizinhos = useProcessNeighbours(id);
+  const irParaProcesso = useCallback((destinoId) => {
+    // O contexto viaja com a seta: sem isto, o primeiro clique
+    // consumia-o e o segundo já não teria vizinhança nenhuma.
+    navigate(`/process/${destinoId}`, {
+      state: { contextoDeNavegacao: vizinhos.contexto },
+    });
+  }, [navigate, vizinhos.contexto]);
 
   // Live TanStack queries (process + client + side panels)
   const processBundle = useProcessFullData(id);
@@ -794,8 +813,36 @@ const ProcessDetails = () => {
    * (a decidir) e o que vai preencher campos vazios (a confirmar).
    */
   const commitAIExtractedData = async (payload, targetTitular) => {
-    const { extractedData, fieldConfidence, conflicts, documentsProcessed } = payload;
-    if (!extractedData) return;
+    const {
+      extractedData,
+      fieldConfidence,
+      conflicts,
+      documentsProcessed,
+      documentsSucceeded,
+      documentsFailed,
+    } = payload;
+
+    // "VLM no Escuro" (Lote 5, P0): aqui havia um `return` mudo. Com a
+    // chave da OpenAI em falta a resposta chegava com `extracted_data`
+    // vazio, este `if` disparava e a UI ficava sem nada — depois de um
+    // toast VERDE dado pelo `S3FileManager`. Um desfecho sem palavra
+    // nenhuma é indistinguível de a aplicação estar avariada.
+    const dizerODesfecho = (temRevisao) => {
+      const { tipo, texto } = resumirAnaliseEmLote({
+        documentsCount: documentsProcessed,
+        documentsSucceeded,
+        documentsFailed,
+        temRevisao,
+      });
+      if (tipo === "erro") toast.error(texto);
+      else if (tipo === "aviso") toast.warning(texto);
+      else toast.success(texto);
+    };
+
+    if (!extractedData || Object.keys(extractedData).length === 0) {
+      dizerODesfecho(false);
+      return;
+    }
 
     if (targetTitular === "ignore") {
       // Só os campos partilhados (imóvel) — nada de identidade nem de
@@ -813,6 +860,11 @@ const ProcessDetails = () => {
         documentsProcessed,
       });
 
+      // O segundo `return` mudo vivia aqui: sem `else`, um `revisao`
+      // nulo (a IA leu mas não reconheceu campo nenhum) não abria o
+      // diálogo nem dizia porquê.
+      dizerODesfecho(!!revisao);
+
       if (revisao) {
         setAiConflicts(revisao.conflicts);
         setRevisaoPendente(revisao);
@@ -822,6 +874,8 @@ const ProcessDetails = () => {
             `${revisao.conflicts.length} conflito(s) detectado(s). Reveja os valores.`,
           );
         }
+      } else {
+        return;
       }
     }
 
@@ -1454,6 +1508,39 @@ const ProcessDetails = () => {
       throw error;
     } finally {
       setSavingObservations(false);
+    }
+  };
+
+  // ── Etiquetas (ponto 15) ───────────────────────────────────────────
+  // O catálogo alimenta as sugestões do editor. Falhar a lê-lo não é
+  // motivo para bloquear nada: sem sugestões continua a poder escrever-se
+  // a etiqueta à mão.
+  const [sugestoesDeEtiquetas, setSugestoesDeEtiquetas] = useState([]);
+  const [aGravarEtiquetas, setAGravarEtiquetas] = useState(false);
+
+  useEffect(() => {
+    let cancelado = false;
+    getProcessLabels()
+      .then((res) => {
+        if (!cancelado) setSugestoesDeEtiquetas(res?.data?.labels || []);
+      })
+      .catch(() => {
+        if (!cancelado) setSugestoesDeEtiquetas([]);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, []);
+
+  const handleGuardarEtiquetas = async (etiquetas) => {
+    setAGravarEtiquetas(true);
+    try {
+      // `handleSaveOrganization` já trata do `allowEmptyArrays: ["labels"]`
+      // — limpar todas as etiquetas tem de chegar ao servidor como [].
+      setProcess((anterior) => (anterior ? { ...anterior, labels: etiquetas } : anterior));
+      await handleSaveOrganization({ labels: etiquetas });
+    } finally {
+      setAGravarEtiquetas(false);
     }
   };
 
@@ -2155,6 +2242,23 @@ const ProcessDetails = () => {
           <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Voltar" className="mt-0.5 shrink-0">
             <ArrowLeft className="h-5 w-5" />
           </Button>
+          {/* Ponto 17 — setas Anterior/Seguinte. Só aparecem quando há
+              mesmo uma listagem de origem: um processo aberto por
+              pesquisa global ou por link não tem vizinhos, e uma seta a
+              apontar para os vizinhos de outra lista seria pior do que
+              seta nenhuma. */}
+          {vizinhos.disponivel && (
+            <div className="mt-0.5">
+              <ProcessNavigator
+                anteriorId={vizinhos.anteriorId}
+                seguinteId={vizinhos.seguinteId}
+                posicao={vizinhos.posicao}
+                total={vizinhos.total}
+                aCarregar={vizinhos.aCarregar}
+                onNavegar={irParaProcesso}
+              />
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <PageHeader
               title={`Processo #${safeString(process?.process_number || "")}`}
@@ -2191,11 +2295,17 @@ const ProcessDetails = () => {
                     </a>
                   ) : null}
                   {headerConsultor ? <span>Consultor: {headerConsultor}</span> : null}
-                  {Array.isArray(process?.labels) && process.labels.map((label, idx) => (
-                    <Badge key={`lbl-${idx}`} variant="secondary" className="text-xs">
-                      {safeString(label)}
-                    </Badge>
-                  ))}
+                  {/* Ponto 15 — as etiquetas deixam de ser só crachás.
+                      O PACOTE DD removeu o cartão de Etiquetas e prometeu
+                      um Dialog no botão "+" que nunca foi construído: o
+                      campo ficou só acessível pela API. É este. */}
+                  <ProcessLabelsEditor
+                    labels={process?.labels}
+                    sugestoes={sugestoesDeEtiquetas}
+                    disabled={isViewMode || isProcessLocked}
+                    saving={aGravarEtiquetas}
+                    onChange={handleGuardarEtiquetas}
+                  />
                 </span>
               }
               actions={

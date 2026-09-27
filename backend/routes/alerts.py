@@ -95,4 +95,4 @@ async def mark_notification_read(
     user: dict = Depends(get_current_user)
 ):
     """Marcar notificação como lida."""
-    return await run_mark_notification_read(notification_id)
+    return await run_mark_notification_read(notification_id, user)

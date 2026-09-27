@@ -29,7 +29,7 @@ import {
   getCompanies,
   getUserCompanyRoles,
   getUserRoles,
-  getAllAdminUsers,
+  getAdminUsersPaginated,
   updateUser,
 } from "../../services/api";
 import { queryKeys } from "../../lib/queryClient";
@@ -60,6 +60,10 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Input } from "../ui/input";
+import Paginacao from "../shared/Paginacao";
+
+/** Ponto 11 — espelha a omissão do backend. */
+const TAMANHO_DA_PAGINA = 25;
 import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
 import {
@@ -108,18 +112,48 @@ export default function UsersAccessAdminTab() {
   const [removeError, setRemoveError] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Ponto 11 — paginação e pesquisa SERVER-SIDE. A pesquisa era feita
+  // em memória, sobre `name`/`email`, depois de trazer a tabela inteira
+  // (`ADMIN_USERS_LIST_LIMIT = 10000`) — e não procurava por EMPRESA,
+  // que é como um administrador procura alguém.
+  const [pagina, setPagina] = useState(1);
+  const [pesquisaAdiada, setPesquisaAdiada] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setPesquisaAdiada(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Apertar a pesquisa estando numa página alta devolvia uma lista
+  // VAZIA, que parece "não há resultados" e não "estás na página
+  // errada".
+  useEffect(() => {
+    setPagina(1);
+  }, [pesquisaAdiada]);
+
   const {
-    data: users = [],
+    data: pagemento,
     isLoading: usersLoading,
     isError: usersError,
   } = useQuery({
-    queryKey: queryKeys.orgAdmin.users(),
+    queryKey: queryKeys.orgAdmin.usersPaginated(pesquisaAdiada, pagina),
     queryFn: async () => {
-      // Pacote EB — GET /admin/users (lista global, sem for_assignment).
-      const res = await getAllAdminUsers();
-      return Array.isArray(res.data) ? res.data : res.data?.users || [];
+      const res = await getAdminUsersPaginated({
+        ...(pesquisaAdiada ? { search: pesquisaAdiada } : {}),
+        page: pagina,
+        size: TAMANHO_DA_PAGINA,
+      });
+      return {
+        utilizadores: Array.isArray(res.data?.users) ? res.data.users : [],
+        total: Number(res.data?.total) || 0,
+      };
     },
+    // Sem isto, mudar de página pisca a tabela toda para o esqueleto.
+    placeholderData: (anterior) => anterior,
   });
+
+  const users = pagemento?.utilizadores ?? [];
+  const totalUtilizadores = pagemento?.total ?? 0;
 
   const {
     data: roles = [],
@@ -175,14 +209,10 @@ export default function UsersAccessAdminTab() {
     return name ? { ...ucr, company_name: name } : ucr;
   };
 
-  const filteredUsers = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return users;
-    return users.filter((u) => {
-      const hay = `${u.name || ""} ${u.email || ""}`.toLowerCase();
-      return hay.includes(term);
-    });
-  }, [users, search]);
+  // Ponto 11 — a lista já vem filtrada e paginada do servidor. Filtrar
+  // outra vez aqui esconderia resultados de OUTRAS páginas que o
+  // servidor já considerou correspondentes.
+  const filteredUsers = users;
 
   const selectedRoles = selectedUser
     ? (userSheetRoles ?? rolesByUser[selectedUser.id] ?? []).map(enrichUcr)
@@ -433,7 +463,7 @@ export default function UsersAccessAdminTab() {
         <div className="relative max-w-sm w-full">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Pesquisar utilizador..."
+            placeholder="Pesquisar por nome, email ou empresa..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -566,6 +596,15 @@ export default function UsersAccessAdminTab() {
           </Table>
         </div>
       )}
+
+      {/* Ponto 11 — o total é o do ÂMBITO da rede, não o da colecção. */}
+      <Paginacao
+        total={totalUtilizadores}
+        page={pagina}
+        size={TAMANHO_DA_PAGINA}
+        onPageChange={setPagina}
+        etiqueta="utilizadores"
+      />
 
       <UserCreateDialog
         open={createOpen}

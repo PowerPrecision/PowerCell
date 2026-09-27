@@ -14,8 +14,33 @@ from services.redis_cache import (
     cache_get, cache_set,
     build_user_kpi_key,
 )
+from services.stats_scope import com_ambito, resolver_ambito
 
 logger = logging.getLogger(__name__)
+
+async def _contar_prazos_do_ambito(user_id: str, ambito) -> int:
+    """Prazos abertos dos processos da rede, mais os pessoais do próprio.
+
+    Duas consultas pequenas e uma contagem exacta: os `process_id`
+    distintos dos prazos abertos, quais deles são da rede, e a contagem
+    final sobre esse conjunto. Nunca uma estimativa — é um cartão de KPI,
+    e um número aproximado num KPI é pior do que nenhum.
+    """
+    from services.stats_scope import processos_no_ambito
+
+    ids = [i for i in await db.deadlines.distinct(
+        "process_id", {"completed": False},
+    ) if i]
+    permitidos = sorted(await processos_no_ambito(ids, ambito))
+
+    ramos: list[dict] = [
+        {"created_by": user_id, "process_id": None, "completed": False},
+    ]
+    if permitidos:
+        ramos.append({"process_id": {"$in": permitidos}, "completed": False})
+
+    return await db.deadlines.count_documents({"$or": ramos})
+
 
 async def run_get_stats(user: dict):
     """Get statistics based on user role. Staff see only their assigned processes.
@@ -26,7 +51,14 @@ async def run_get_stats(user: dict):
     """
     # O13 - Redis cache: chave hierárquica por user
     # TTL longo (24h) porque invalidação cirúrgica garante fresh data
-    cache_key = build_user_kpi_key(user['id'])
+    # A chave leva o SUFIXO DO ÂMBITO (Dashboard, ponto 1). Por utilizador
+    # já era segura — o âmbito é função do utilizador —, mas o TTL é de 24h
+    # e tirar alguém de uma empresa só fazia efeito no dia seguinte. Com o
+    # sufixo, uma mudança de âmbito estreia uma chave nova no primeiro
+    # pedido, e a antiga expira sozinha. O padrão de invalidação
+    # (`stats:user:{id}:*`) continua a apanhá-la.
+    ambito = await resolver_ambito(user)
+    cache_key = f"{build_user_kpi_key(user['id'])}:{ambito.sufixo}"
     cached = await cache_get(cache_key)
     if cached:
         return cached
@@ -34,10 +66,22 @@ async def run_get_stats(user: dict):
     stats = {}
     role = user["role"]
     user_id = user["id"]
-    
+
+    # ====================================================================
+    # ISOLAMENTO DE REDE (Dashboard, ponto 1)
+    # ====================================================================
+    # Antes disto a query base era `{}` mais um filtro por PAPEL, e para
+    # admin/ceo/administrativo/diretor não havia filtro nenhum: uma
+    # Diretora da Domus lia os totais, os concluídos e as desistências da
+    # Power no seu próprio Dashboard. O filtro por papel nunca foi uma
+    # fronteira de tenant — restringe por ATRIBUIÇÃO, e quem vê tudo não
+    # tem atribuição que o restrinja.
+    #
+    # O `ambito` já foi resolvido acima, para a chave de cache.
+
     # Build query based on role
     process_query = {}
-    
+
     # ====================================================================
     # FILTRO DE INTEGRIDADE: is_deleted
     # Processos eliminados NUNCA entram nas estatísticas
@@ -53,8 +97,11 @@ async def run_get_stats(user: dict):
         process_query["assigned_indexacao_id"] = user_id
     elif role == UserRole.INTERMEDIARIO:
         process_query["assigned_mediador_id"] = user_id
-    # Admin, CEO, Administrativo e Diretor see all (no additional filter)
-    
+    # Admin, CEO, Administrativo e Diretor vêem tudo O QUE É DA SUA REDE —
+    # é o `com_ambito` abaixo que passou a dizer o que "tudo" significa.
+
+    process_query = com_ambito(process_query, ambito)
+
     # Process status breakdown
     # NOTA: Estatísticas DEVEM incluir concluídos e desistências para métricas precisas
     # Fix: Normalize process status filters — inclui as variações legadas
@@ -93,12 +140,25 @@ async def run_get_stats(user: dict):
     
     # ── DEADLINES: depende do role ──
     if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
-        # Admin vê todos os prazos — query simples em paralelo com user counts
-        pending_deadlines_coro = db.deadlines.count_documents({"completed": False})
+        # ISOLAMENTO (Dashboard, ponto 1) — era `{"completed": False}`, ou
+        # seja os prazos abertos de TODAS as redes.
+        #
+        # O âmbito vem pelo sentido barato: `distinct` sobre os prazos
+        # abertos dá as dezenas de processos com prazo, e só esses se
+        # verificam contra a rede. O contrário — trazer os processos da
+        # rede para um `$in` — seria um filtro com doze mil
+        # identificadores em cada pedido de dashboard.
+        #
+        # MUDANÇA DE SIGNIFICADO, deliberada: os prazos PESSOAIS (sem
+        # processo) passam a contar só os do próprio, a mesma regra que o
+        # ramo dos consultores já aplicava. Antes, o cartão da Direção
+        # somava os lembretes pessoais de todos os utilizadores de todas
+        # as redes — um número que não era de ninguém.
+        pending_deadlines_coro = _contar_prazos_do_ambito(user_id, ambito)
     elif role == UserRole.CLIENTE:
         # Clientes: buscar IDs dos processos primeiro
         my_process_docs = await db.processes.find(
-            {"client_id": user_id}, {"id": 1, "_id": 0}
+            com_ambito({"client_id": user_id}, ambito), {"id": 1, "_id": 0}
         ).to_list(1000)
         my_process_ids = [p["id"] for p in my_process_docs]
         if my_process_ids:
@@ -110,12 +170,12 @@ async def run_get_stats(user: dict):
     else:
         # Consultores/Intermediários: buscar IDs dos processos atribuídos
         my_process_docs = await db.processes.find(
-            {"$or": [
+            com_ambito({"$or": [
                 {"assigned_consultor_id": user_id},
                 {"consultor_id": user_id},
                 {"assigned_mediador_id": user_id},
                 {"intermediario_id": user_id}
-            ]},
+            ]}, ambito),
             {"id": 1, "_id": 0}
         ).to_list(1000)
         my_process_ids = [p["id"] for p in my_process_docs]
@@ -134,6 +194,28 @@ async def run_get_stats(user: dict):
     # ── USER STATS (Admin/CEO): executar em paralelo com deadlines ──
     if role in [UserRole.ADMIN, UserRole.CEO]:
         from services.role_query import deep_role_filter, deep_role_in_filter
+        from services.admin_users_scope import (
+            build_users_scope_query,
+            empresas_do_ambito,
+        )
+
+        # ISOLAMENTO (Dashboard, ponto 1) — as seis contagens eram sobre
+        # `db.users` INTEIRA. "Ser Admin significa ser Admin da sua REDE"
+        # (decisão do dono, Lote 5): o painel de administração já contava
+        # assim e o cartão do Dashboard contradizia-o.
+        #
+        # Reutiliza o `admin_users_scope`, que resolve rede → empresas →
+        # utilizadores. `users` não tem `network_id` e nunca teve; aplicar
+        # a condição de rede a esta colecção devolveria sempre zero.
+        # FALHA ALTO de propósito: o `empresas_do_ambito` não engole a
+        # excepção de leitura (política dele, Lote 5). Um Dashboard com um
+        # erro visível é melhor do que um Dashboard com os números errados.
+        escopo_utilizadores = await build_users_scope_query(
+            await empresas_do_ambito(user)
+        )
+
+        def _users(extra: dict) -> dict:
+            return {"$and": [escopo_utilizadores, extra]} if extra else escopo_utilizadores
 
         (
             pending_deadlines_count,
@@ -145,12 +227,12 @@ async def run_get_stats(user: dict):
             intermediarios_count,
         ) = await asyncio.gather(
             pending_deadlines_coro,
-            db.users.count_documents({}),
-            db.users.count_documents({"is_active": {"$ne": False}}),
-            db.users.count_documents({"is_active": False}),
-            db.users.count_documents(deep_role_filter(UserRole.CLIENTE)),
-            db.users.count_documents(deep_role_in_filter([UserRole.CONSULTOR, UserRole.DIRETOR])),
-            db.users.count_documents(deep_role_in_filter([UserRole.INTERMEDIARIO, UserRole.DIRETOR])),
+            db.users.count_documents(_users({})),
+            db.users.count_documents(_users({"is_active": {"$ne": False}})),
+            db.users.count_documents(_users({"is_active": False})),
+            db.users.count_documents(_users(deep_role_filter(UserRole.CLIENTE))),
+            db.users.count_documents(_users(deep_role_in_filter([UserRole.CONSULTOR, UserRole.DIRETOR]))),
+            db.users.count_documents(_users(deep_role_in_filter([UserRole.INTERMEDIARIO, UserRole.DIRETOR]))),
         )
         
         stats["total_users"] = total_users

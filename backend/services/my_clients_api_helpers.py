@@ -5,6 +5,8 @@ Constants mirror the my-clients dedicated route behaviour.
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import Request
 
 from models.auth import UserRole
@@ -77,8 +79,19 @@ def build_my_clients_process_query(
     user_email: str,
     role: str,
     wants_deleted: bool,
+    terminais: Optional[list[str]] = None,
 ) -> dict:
-    """Build Mongo query for processes in GET /my-clients."""
+    """Build Mongo query for processes in GET /my-clients.
+    ``terminais`` vem do MOTOR (`workflow_phases.nomes_terminais`): é a
+    flag `is_active` da fase que diz o que está fechado, não uma lista
+    cravada. Sem ele mantém-se `INACTIVE_STATUSES`, que hoje é o RESÍDUO
+    legado e não a definição.
+
+    Injecção e não `async`: estas funções são PURAS, e é isso que as
+    torna testáveis sem Mongo no `backend-fast`.
+    """
+    fechadas = list(terminais) if terminais else INACTIVE_STATUSES
+
     if not role_has_client_portfolio(role):
         return EMPTY_PORTFOLIO_QUERY
 
@@ -122,7 +135,7 @@ def build_my_clients_process_query(
                     {"assigned_consultor_id": user_id},
                 ]},
                 {"is_active": {"$ne": False}},
-                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"status": {"$nin": fechadas}},
                 {"is_deleted": {"$ne": True}},
             ]
         }
@@ -135,7 +148,7 @@ def build_my_clients_process_query(
                     {"created_by": user_email},
                 ]},
                 {"is_active": {"$ne": False}},
-                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"status": {"$nin": fechadas}},
                 {"is_deleted": {"$ne": True}},
             ]
         }
@@ -144,7 +157,7 @@ def build_my_clients_process_query(
         UserRole.ADMINISTRATIVO,
     ]:
         return {
-            "status": {"$nin": INACTIVE_STATUSES},
+            "status": {"$nin": fechadas},
             "is_active": {"$ne": False},
         }
     return EMPTY_PORTFOLIO_QUERY
@@ -168,8 +181,19 @@ def build_my_clients_stats_query(
     user_id: str,
     user_email: str,
     role: str,
+    terminais: Optional[list[str]] = None,
 ) -> dict:
-    """Build Mongo query for GET /my-clients/stats (no deleted / pre_registo variants)."""
+    """Build Mongo query for GET /my-clients/stats (no deleted / pre_registo variants).
+    ``terminais`` vem do MOTOR (`workflow_phases.nomes_terminais`): é a
+    flag `is_active` da fase que diz o que está fechado, não uma lista
+    cravada. Sem ele mantém-se `INACTIVE_STATUSES`, que hoje é o RESÍDUO
+    legado e não a definição.
+
+    Injecção e não `async`: estas funções são PURAS, e é isso que as
+    torna testáveis sem Mongo no `backend-fast`.
+    """
+    fechadas = list(terminais) if terminais else INACTIVE_STATUSES
+
     if not role_has_client_portfolio(role):
         return EMPTY_PORTFOLIO_QUERY
     if role == UserRole.CONSULTOR:
@@ -180,7 +204,7 @@ def build_my_clients_stats_query(
                     {"assigned_consultor_id": user_id},
                 ]},
                 {"is_active": {"$ne": False}},
-                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"status": {"$nin": fechadas}},
                 {"is_deleted": {"$ne": True}},
             ]
         }
@@ -193,7 +217,7 @@ def build_my_clients_stats_query(
                     {"created_by": user_email},
                 ]},
                 {"is_active": {"$ne": False}},
-                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"status": {"$nin": fechadas}},
                 {"is_deleted": {"$ne": True}},
             ]
         }
@@ -202,7 +226,7 @@ def build_my_clients_stats_query(
         UserRole.ADMINISTRATIVO,
     ]:
         return {
-            "status": {"$nin": INACTIVE_STATUSES},
+            "status": {"$nin": fechadas},
             "is_active": {"$ne": False},
         }
     return EMPTY_PORTFOLIO_QUERY

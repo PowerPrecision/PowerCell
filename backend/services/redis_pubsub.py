@@ -218,38 +218,87 @@ def build_event_envelope(
     event_type: str,
     payload: dict,
     *,
-    user_id: str,
+    user_id: Optional[str] = None,
     company_id: Optional[str] = None,
+    audiencia: Any = None,
+    room: Optional[str] = None,
+    exclude_user_id: Optional[str] = None,
 ) -> dict:
     """Constrói o envelope canónico de um evento de sistema.
 
-    O ``user_id`` é o **destinatário**, não o autor: é por ele que o router
-    decide para que ligações WebSocket o evento vai. Sem ele o evento não é
-    entregável e será descartado a jusante.
+    Um envelope endereça o seu evento de UMA de duas formas, nunca de
+    nenhuma:
+
+    * ``user_id`` — o **destinatário**, quando ele é conhecido e é um só
+      (uma tarefa em background, um email novo). O router entrega-lhe
+      directamente.
+    * ``audiencia`` — uma ``services.realtime_audience.Audiencia``, quando o
+      evento diz respeito a um conjunto que seria caro enumerar (o delta de
+      um processo pode interessar a dezenas de pessoas). O router decide em
+      cada worker, contra o âmbito que cada ligação trouxe do handshake —
+      sem query nenhuma.
+    * ``room`` — uma sala (``process_<id>``), quando o evento é para quem
+      está a ver aquele ecrã. A autorização da sala já foi feita à ENTRADA
+      (``authorize_process_room_access``); o que faltava era a sala
+      atravessar a fronteira do worker, porque a sua lista de membros é
+      local a cada processo uvicorn.
+
+    Uma audiência **sem alcance** não é gravada: vale o mesmo que não a
+    passar, e o envelope resultante é recusado a jusante. É o que impede que
+    um emissor distraído reabra o broadcast por omissão de campo.
 
     Returns:
-        ``{"id", "type", "user_id", "company_id", "payload", "published_at"}``
+        ``{"id", "type", "user_id", "company_id", "audience", "payload",
+        "published_at"}``
     """
+    audiencia_serializada = None
+    if audiencia is not None:
+        try:
+            if audiencia.tem_alcance():
+                audiencia_serializada = audiencia.para_envelope()
+        except AttributeError:  # pragma: no cover — tipo inesperado
+            logger.warning(
+                "[PUBSUB] Audiência de tipo inesperado em '%s' — ignorada "
+                "(o envelope fica sem endereço e será recusado)",
+                event_type,
+            )
+
     return {
         "id": uuid.uuid4().hex,
         "type": event_type,
         "user_id": str(user_id) if user_id else None,
         "company_id": str(company_id) if company_id else None,
+        "audience": audiencia_serializada,
+        "room": str(room) if room else None,
+        "exclude_user_id": str(exclude_user_id) if exclude_user_id else None,
         "payload": payload or {},
         "published_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
 def is_deliverable(envelope: dict) -> bool:
-    """True se o envelope tem destinatário e tipo — requisito de tenant-safety.
+    """True se o envelope tem TIPO e ENDEREÇO — requisito de tenant-safety.
 
-    Um envelope sem ``user_id`` não é difundido para todos: é descartado.
-    Esta é a garantia de que um evento do utilizador A nunca aparece no
-    WebSocket do utilizador B por omissão de campo.
+    Endereço é ``user_id`` (um destinatário), ``audience`` (um predicado
+    que o router avalia por ligação) ou ``room`` (quem está naquele ecrã).
+    Um envelope sem nenhum dos três é descartado, nunca difundido: é a
+    garantia de que um evento do utilizador A não aparece no WebSocket do
+    utilizador B por omissão de campo.
+
+    Esta condição foi ALARGADA no Épico 10 (era só ``user_id``) e é o ponto
+    mais sensível de toda a camada. O que a mantém fechada é
+    ``build_event_envelope`` não gravar uma audiência sem alcance — uma
+    ``Audiencia()`` vazia nunca chega aqui como endereço válido.
     """
     if not isinstance(envelope, dict):
         return False
-    return bool(envelope.get("user_id")) and bool(envelope.get("type"))
+    if not envelope.get("type"):
+        return False
+    return bool(
+        envelope.get("user_id")
+        or envelope.get("audience")
+        or envelope.get("room")
+    )
 
 
 def serialize_envelope(envelope: dict) -> Optional[str]:
@@ -354,8 +403,11 @@ async def publish_event(
     event_type: str,
     payload: dict,
     *,
-    user_id: str,
+    user_id: Optional[str] = None,
     company_id: Optional[str] = None,
+    audiencia: Any = None,
+    room: Optional[str] = None,
+    exclude_user_id: Optional[str] = None,
     deliver_locally: bool = True,
 ) -> bool:
     """Publica um evento de sistema para um destinatário.
@@ -377,16 +429,22 @@ async def publish_event(
         ``True`` se seguiu pelo Redis; ``False`` se degradou (entrega local
         ou perdido). O chamador não precisa de reagir ao resultado.
     """
-    if not user_id:
+    envelope = build_event_envelope(
+        event_type,
+        payload,
+        user_id=user_id,
+        company_id=company_id,
+        audiencia=audiencia,
+        room=room,
+        exclude_user_id=exclude_user_id,
+    )
+
+    if not is_deliverable(envelope):
         logger.warning(
-            f"[PUBSUB] Evento '{event_type}' sem user_id — descartado "
-            "(um evento sem destinatário nunca é difundido)"
+            f"[PUBSUB] Evento '{event_type}' sem destinatário, audiência ou "
+            "sala — descartado (um evento sem endereço nunca é difundido)"
         )
         return False
-
-    envelope = build_event_envelope(
-        event_type, payload, user_id=user_id, company_id=company_id
-    )
 
     published = await publish_envelope(envelope)
     if published:

@@ -14,7 +14,8 @@ from fastapi import HTTPException
 from database import db
 from services.portal_assigned_users import get_all_assigned_user_ids as _get_all_assigned_user_ids
 from services.notification_service import send_notification_with_preference_check
-from services.websocket_manager import manager, WSEventType, create_ws_message
+from services.websocket_manager import WSEventType
+from services.realtime_delivery import entregar_na_sala, sala_do_processo
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ async def _notify_assigned_team_message(process: dict, process_id: str, client_n
     
     # ── Broadcast para a sala WebSocket do processo ──
     try:
-        ws_message = create_ws_message(WSEventType.PORTAL_MESSAGE, {
+        await entregar_na_sala(sala_do_processo(process_id), WSEventType.PORTAL_MESSAGE, {
             "id": message_doc.get("id"),
             "process_id": process_id,
             "sender_type": "client",
@@ -76,7 +77,6 @@ async def _notify_assigned_team_message(process: dict, process_id: str, client_n
             "content": message_doc.get("content", "")[:200],
             "created_at": message_doc.get("created_at"),
         })
-        await manager.broadcast_to_room(f"process_{process_id}", ws_message)
     except Exception as ws_err:
         logger.debug(f"Erro ao broadcast mensagem do portal via WebSocket: {ws_err}")
     

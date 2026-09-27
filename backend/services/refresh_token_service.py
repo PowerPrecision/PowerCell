@@ -49,11 +49,19 @@ def create_access_token(
     """
     Cria access token JWT com duração de 2 horas.
     """
+    # O `type` vem do ponto ÚNICO (`ws_client_identity.TIPO_DO_STAFF`, via
+    # `services.auth`) e não de um literal aqui. Este é o produtor do
+    # `/auth/login-v2` e do `/auth/refresh` — ou seja, o de TODOS os tokens do
+    # CRM em circulação. Foi por o literal viver só aqui, invisível a quem
+    # lesse o `services/auth.create_token`, que o validador dos WebSockets
+    # nasceu a recusar o tipo real (`backend-full` vermelho, 401 em tudo).
+    from services.auth import tipo_de_token_do_crm
+
     payload = {
         "sub": user_id,
         "email": email,
         "role": role,
-        "type": "access",
+        "type": tipo_de_token_do_crm(),
         "exp": datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
         "iat": datetime.now(timezone.utc),
     }

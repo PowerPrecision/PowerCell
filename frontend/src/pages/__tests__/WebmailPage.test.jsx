@@ -8,9 +8,16 @@
  * O que é falso aqui, e porquê:
  * - `DashboardLayout` — arrastava a app inteira (sidebar, notificações,
  *   WebSockets); um passthrough chega para o que se testa;
- * - `AuthContext`, `useWebmailEmails`, `useNewEmailRealtime` e o `fetch` —
- *   são as fronteiras de rede/sessão. Falsear estas quatro é o suficiente:
- *   o estado, os handlers e TODOS os componentes extraídos são os reais.
+ * - `AuthContext`, `useWebmailEmails`, `useNewEmailRealtime` e
+ *   `services/api` — são as fronteiras de rede/sessão. Falsear estas
+ *   quatro é o suficiente: o estado, os handlers e TODOS os componentes
+ *   extraídos são os reais.
+ *
+ * NOTA (Ponto 8, Fase 2): a fronteira era o `globalThis.fetch`. Com a
+ * migração para o cliente Axios deixou de haver `fetch` nenhum na
+ * página, e um stub dele já não interceptava nada — o jsdom tentava
+ * ligar-se ao `localhost:8001` a sério. A fronteira passou a ser o
+ * módulo de transporte, que é onde ela sempre devia ter estado.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -61,6 +68,46 @@ vi.mock("../../hooks/useNewEmailRealtime", () => ({
   invalidateEmailQueries: vi.fn(),
 }));
 
+// ── O transporte (Ponto 8, Fase 2) ───────────────────────────────────
+// Tudo devolve `{ data: {} }` por omissão; cada teste substitui o que
+// precisa. `chamadasDaApi` regista o que foi pedido, para os testes que
+// afirmam sobre a chamada e não sobre o ecrã.
+const apiFalsa = vi.hoisted(() => ({ chamadas: [] }));
+
+vi.mock("../../services/api", () => {
+  const vazio = () => Promise.resolve({ data: {} });
+  const registar = (nome) => vi.fn((...args) => {
+    apiFalsa.chamadas.push({ nome, args });
+    return (apiFalsa[nome] || vazio)(...args);
+  });
+  return {
+    getWebmailStats: registar("getWebmailStats"),
+    getWebmailCompanies: registar("getWebmailCompanies"),
+    getEmailJobStatus: registar("getEmailJobStatus"),
+    getPersonalEmailAccounts: registar("getPersonalEmailAccounts"),
+    getEmailLabels: registar("getEmailLabels"),
+    getEmailFolders: registar("getEmailFolders"),
+    createEmailFolder: registar("createEmailFolder"),
+    updateEmailFolder: registar("updateEmailFolder"),
+    deleteEmailFolder: registar("deleteEmailFolder"),
+    moveEmailsToFolder: registar("moveEmailsToFolder"),
+    applyEmailLabels: registar("applyEmailLabels"),
+    getWebmailEmail: registar("getWebmailEmail"),
+    markEmail: registar("markEmail"),
+    deleteEmail: registar("deleteEmail"),
+    deleteEmailPermanent: registar("deleteEmailPermanent"),
+    associateEmailToProcess: registar("associateEmailToProcess"),
+    sendWebmailEmail: registar("sendWebmailEmail"),
+    cancelEmailSend: registar("cancelEmailSend"),
+    uploadEmailAttachment: registar("uploadEmailAttachment"),
+    downloadWebmailAttachment: registar("downloadWebmailAttachment"),
+    syncWebmail: registar("syncWebmail"),
+    syncWebmailUser: registar("syncWebmailUser"),
+    getProcesses: registar("getProcesses"),
+    readBlobErrorBody: vi.fn(async () => ({})),
+  };
+});
+
 import WebmailPage from "../WebmailPage";
 
 // ── Dados ────────────────────────────────────────────────────────────
@@ -87,26 +134,36 @@ const respostaDaLista = (emails, extra = {}) => ({
   refetch: vi.fn(),
 });
 
-function montar() {
+function montar(rota = "/webmail") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/webmail"]}>
+      <MemoryRouter initialEntries={[rota]}>
         <WebmailPage />
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
+const DUAS_EMPRESAS = {
+  data: {
+    companies: [
+      { company_id: "power", company_name: "Power Real Estate", roles: ["consultor"] },
+      { company_id: "domus", company_name: "Domus", roles: ["consultor"] },
+    ],
+  },
+};
+
 beforeEach(() => {
   estadoDaLista.valor = respostaDaLista([email()]);
   estadoDaLista.ultimosFiltros = null;
   // Qualquer chamada de rede que escape responde vazio em vez de rebentar.
-  globalThis.fetch = vi.fn(() =>
-    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
-  );
+  apiFalsa.chamadas.length = 0;
+  for (const chave of Object.keys(apiFalsa)) {
+    if (chave !== "chamadas") delete apiFalsa[chave];
+  }
 });
 
 afterEach(() => {
@@ -145,20 +202,10 @@ describe("WebmailPage — as três colunas ligadas", () => {
 describe("WebmailPage — abrir um email (lista → painel de leitura)", () => {
   it("clicar na conversa carrega o detalhe e mostra-o", async () => {
     const utilizador = userEvent.setup();
-    globalThis.fetch = vi.fn((url) => {
-      if (String(url).includes("/api/emails/e1")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () =>
-            Promise.resolve({
-              ...email(),
-              body: "Confirmamos a pré-aprovação do crédito.",
-            }),
-        });
-      }
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
-    });
+    apiFalsa.getWebmailEmail = () =>
+      Promise.resolve({
+        data: { ...email(), body: "Confirmamos a pré-aprovação do crédito." },
+      });
 
     montar();
     await utilizador.click(await screen.findByText("Proposta do banco"));
@@ -175,18 +222,16 @@ describe("WebmailPage — abrir um email (lista → painel de leitura)", () => {
     const utilizador = userEvent.setup();
     estadoDaLista.valor = respostaDaLista([email({ is_read: false })]);
 
-    const chamadas = [];
-    globalThis.fetch = vi.fn((url, opcoes) => {
-      chamadas.push({ url: String(url), metodo: opcoes?.method || "GET" });
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(email()) });
-    });
+    apiFalsa.getWebmailEmail = () => Promise.resolve({ data: email() });
 
     montar();
     await utilizador.click(await screen.findByText("Proposta do banco"));
 
     await waitFor(() =>
       expect(
-        chamadas.some((c) => c.url.includes("/mark") && c.metodo === "POST"),
+        apiFalsa.chamadas.some(
+          (c) => c.nome === "markEmail" && c.args[1]?.type === "read",
+        ),
       ).toBe(true),
     );
   });
@@ -285,5 +330,81 @@ describe("WebmailPage — paginação", () => {
     await utilizador.click(await screen.findByRole("button", { name: "Seguinte" }));
 
     await waitFor(() => expect(estadoDaLista.ultimosFiltros.page).toBe(2));
+  });
+});
+
+
+describe("WebmailPage — separadores por Empresa (Ponto 8, Fase 3)", () => {
+  it("desenha um separador por empresa do utilizador", async () => {
+    apiFalsa.getWebmailCompanies = () => Promise.resolve(DUAS_EMPRESAS);
+    montar();
+
+    expect(
+      await screen.findByRole("tab", { name: /Power Real Estate/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Domus/ })).toBeInTheDocument();
+  });
+
+  it("a empresa do separador viaja em cada pedido da lista", async () => {
+    // É o que torna o isolamento da Fase 1 efectivo: sem o `companyId`
+    // nos filtros, o backend caía no caminho legado (header) e o
+    // separador não mandava em nada.
+    apiFalsa.getWebmailCompanies = () => Promise.resolve(DUAS_EMPRESAS);
+    montar("/webmail?company_id=domus");
+
+    await waitFor(() =>
+      expect(estadoDaLista.ultimosFiltros?.companyId).toBe("domus"),
+    );
+  });
+
+  it("trocar de separador muda a empresa dos pedidos", async () => {
+    const utilizador = userEvent.setup();
+    apiFalsa.getWebmailCompanies = () => Promise.resolve(DUAS_EMPRESAS);
+    montar();
+
+    await waitFor(() =>
+      expect(estadoDaLista.ultimosFiltros?.companyId).toBe("power"),
+    );
+    await utilizador.click(screen.getByRole("tab", { name: /Domus/ }));
+
+    await waitFor(() =>
+      expect(estadoDaLista.ultimosFiltros?.companyId).toBe("domus"),
+    );
+  });
+
+  it("uma empresa pedida que já não existe cai na primeira", async () => {
+    // Acesso revogado ou link antigo: insistir no id dava 404 no
+    // backend e uma caixa vazia sem explicação nenhuma.
+    apiFalsa.getWebmailCompanies = () => Promise.resolve(DUAS_EMPRESAS);
+    montar("/webmail?company_id=empresa-que-saiu");
+
+    await waitFor(() =>
+      expect(estadoDaLista.ultimosFiltros?.companyId).toBe("power"),
+    );
+  });
+
+  it("com UMA empresa não desenha separador nenhum", async () => {
+    apiFalsa.getWebmailCompanies = () =>
+      Promise.resolve({
+        data: { companies: [DUAS_EMPRESAS.data.companies[0]] },
+      });
+    montar();
+
+    expect(await screen.findByTestId("webmail-empresa-unica")).toHaveTextContent(
+      "Power Real Estate",
+    );
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+  });
+
+  it("o indicador de sincronização substitui o painel da barra lateral", async () => {
+    apiFalsa.getWebmailCompanies = () => Promise.resolve(DUAS_EMPRESAS);
+    montar();
+
+    expect(await screen.findByTestId("webmail-estado-sinc")).toBeInTheDocument();
+    // E na barra lateral já não há botão de largura total.
+    const barraLateral = screen.getByTestId("webmail-folder-pane");
+    expect(
+      within(barraLateral).queryByRole("button", { name: /^sincronizar$/i }),
+    ).toBeNull();
   });
 });

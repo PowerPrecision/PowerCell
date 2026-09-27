@@ -19,7 +19,7 @@ from services.portal_status_helpers import (
     _get_rgpd_status,
     _get_team_info,
 )
-from services.process_status import INACTIVE_STATUSES
+from services.workflow_phases import macro_da_fase, nomes_terminais
 
 logger = logging.getLogger(__name__)
 
@@ -120,16 +120,24 @@ async def run_get_portal_status(client_data: dict):
 
     # Determinar label e cor do status atual
     # Usar portal_label se disponível (client-facing)
+    current_macro_fase = None
     for s in all_statuses:
         if s.get("name") == current_status:
             current_status_label = s.get("portal_label") or s.get("label", current_status)
             current_status_color = s.get("color", "#94a3b8")
+            current_macro_fase = macro_da_fase(s)
             break
 
     # Excluir statuses terminais E ocultos no portal
     # Fix: Normalize process status filters — reutiliza a constante central
     # (com variações singular/plural) em vez de uma lista local.
-    terminal_statuses = INACTIVE_STATUSES
+    # Terminal é o que o MOTOR diz (`is_active: False`), não uma lista.
+    # O Portal tinha a sua própria definição e divergia do Kanban: uma
+    # fase que o admin fechasse continuava a aparecer no stepper do
+    # cliente, e `perdido`/`cancelado`/`arquivo` — que existem em dados
+    # reais mas não são fases — contavam como passos por percorrer.
+    # `all_statuses` já está carregado; isto não custa uma leitura nova.
+    terminal_statuses = nomes_terminais(all_statuses)
     active_steps = [
         s for s in all_statuses
         if s.get("name") not in terminal_statuses
@@ -167,6 +175,11 @@ async def run_get_portal_status(client_data: dict):
             "description": status.get("portal_description") or status.get("description", ""),
             "is_current": is_current,
             "is_completed": is_completed,
+            # Épico 10, Parte 2 — o mesmo agrupamento que o funil interno
+            # usa, para o Portal poder juntar os passos sem inventar uma
+            # segunda classificação. `None` é uma resposta: o passo
+            # aparece na mesma, só não pertence a grupo nenhum.
+            "macro_fase": macro_da_fase(status),
         })
 
     # ── Documentos solicitados (REQUESTED/PENDING) ──
@@ -372,6 +385,7 @@ async def run_get_portal_status(client_data: dict):
             "status": current_status,
             "status_label": current_status_label,
             "status_color": current_status_color,
+            "macro_fase": current_macro_fase,
             "process_type": process.get("process_type", "credito_habitacao"),
             "created_at": process.get("created_at"),
             "updated_at": process.get("updated_at"),

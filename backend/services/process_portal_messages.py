@@ -229,20 +229,22 @@ async def broadcast_staff_portal_message_ws(
     exclude_user_id: Optional[str],
 ) -> None:
     try:
-        from services.websocket_manager import manager, WSEventType, create_ws_message
-        ws_message = create_ws_message(WSEventType.PORTAL_MESSAGE, {
-            "id": message_doc["id"],
-            "process_id": process_id,
-            "sender_type": "staff",
-            "sender_id": message_doc.get("sender_id", ""),
-            "sender_name": message_doc.get("sender_name", "Staff"),
-            "content": content[:200],
-            "created_at": message_doc.get("created_at"),
-        })
-        await manager.broadcast_to_room(
-            f"process_{process_id}",
-            ws_message,
-            exclude_user=exclude_user_id,
+        from services.websocket_manager import WSEventType
+        from services.realtime_delivery import entregar_na_sala, sala_do_processo
+
+        await entregar_na_sala(
+            sala_do_processo(process_id),
+            WSEventType.PORTAL_MESSAGE,
+            {
+                "id": message_doc["id"],
+                "process_id": process_id,
+                "sender_type": "staff",
+                "sender_id": message_doc.get("sender_id", ""),
+                "sender_name": message_doc.get("sender_name", "Staff"),
+                "content": content[:200],
+                "created_at": message_doc.get("created_at"),
+            },
+            exclude_user_id=exclude_user_id,
         )
     except Exception as ws_err:
         logger.debug(

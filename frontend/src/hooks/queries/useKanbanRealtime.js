@@ -20,6 +20,7 @@ import { useEffect, useCallback, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryClient';
 import { useWebSocket, WSEventType } from '../useWebSocket';
+import { precisaDeRecuperar } from '../../utils/realtimeFallback';
 
 /**
  * Hook para sincronização em tempo real do Kanban
@@ -242,6 +243,22 @@ export function useKanbanRealtime(options = {}) {
     onProcessUpdate: handleProcessUpdate,
     autoConnect: true,
   });
+
+  // ÉPICO 10, FASE 3 — o Kanban NÃO tinha polling para cortar: vive de
+  // `staleTime` + `refetchOnWindowFocus`. O que lhe faltava era o outro
+  // lado da moeda — os eventos emitidos enquanto o socket esteve em baixo
+  // perderam-se, e nada os repete. Sem esta invalidação na volta da
+  // ligação, o quadro fica calado E desactualizado, que é pior do que
+  // estar visivelmente offline: parece estar a funcionar.
+  const ligacaoAnteriorRef = useRef(null);
+  useEffect(() => {
+    if (precisaDeRecuperar({ anterior: ligacaoAnteriorRef.current, actual: isConnected })) {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.processes.kanban(filtersRef.current),
+      });
+    }
+    ligacaoAnteriorRef.current = isConnected;
+  }, [isConnected, queryClient]);
 
   // Subscrever aos eventos do WebSocket
   useEffect(() => {

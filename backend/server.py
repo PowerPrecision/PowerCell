@@ -810,6 +810,23 @@ async def background_job_monitor():
 
                 await _tratar_jobs_bloqueados(stuck_jobs, STUCK_THRESHOLD_HOURS)
 
+                # Higiene do ZSET de presença (Ponto 2). As LEITURAS já
+                # filtram por score, portanto isto não corrige nada — só
+                # impede o conjunto de crescer com todos os utilizadores
+                # que alguma vez se ligaram. Boleia neste ciclo em vez de
+                # um temporizador novo; corre em todos os workers e é
+                # idempotente (quem já saiu, já saiu).
+                try:
+                    from services.presenca import limpar_expirados
+
+                    saidos = await limpar_expirados()
+                    if saidos:
+                        logger.debug(
+                            f"[PRESENCA] {saidos} entrada(s) expirada(s) removida(s)"
+                        )
+                except Exception:
+                    pass
+
         except (IOError, OSError, ValueError, KeyError) as monitor_err:
             logger.error(f"Erro no background job monitor: {monitor_err}")
 
@@ -1067,6 +1084,11 @@ async def startup():
     try:
         from services.workflow_lookup import ensure_workflow_purpose_flags_backfill
         await ensure_workflow_purpose_flags_backfill()
+        # Épico 10, Parte 2 — semeia `macro_fase` nas fases que ainda não
+        # a têm. Idempotente: nunca toca numa fase já classificada pelo
+        # administrador, por isso pode correr em todos os arranques.
+        from services.workflow_phases import ensure_macro_fase_backfill
+        await ensure_macro_fase_backfill()
     except (ImportError, ValueError, KeyError) as wf_err:
         logger.warning(f"⚠️ Backfill de flags do workflow falhou (não fatal): {wf_err}")
     

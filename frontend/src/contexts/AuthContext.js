@@ -37,6 +37,7 @@
  */
 import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
 import api, { setAuthToken, clearAuthToken, syncAuthContextHeaders, getRefreshedToken } from "../services/api";
+import { useQueryClient } from "@tanstack/react-query";
 import { hasRole } from "../utils/roleUtils";
 import { collectUserRoles, getUserCompanyRecords, resolveCompanyIdFromUser } from "../utils/userProfiles";
 // PACOTE DI — helper centralizado para rotas públicas (/portal, /rgpd, /upload, /download)
@@ -66,6 +67,9 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [isImpersonating, setIsImpersonating] = useState(false);
   const [originalAdminName, setOriginalAdminName] = useState(null);
+  // O `AuthProvider` vive DENTRO do `QueryClientProvider` (ver App.js),
+  // por isso pode pedir o cliente para limpar a cache ao trocar de perfil.
+  const queryClient = useQueryClient();
   const [activeRole, setActiveRole] = useState(null);
   const [activeCompanyId, setActiveCompanyId] = useState(null);
   const refreshTimeoutRef = useRef(null);
@@ -462,6 +466,22 @@ export function AuthProvider({ children }) {
   const switchActiveRole = useCallback((newRole, newCompanyId = null) => {
     if (!newRole) return;
 
+    // Lote 5, ponto 6 — a cache tem de ir abaixo.
+    //
+    // O comentário acima prometia que as páginas voltavam a pedir a API
+    // "sem depender de hard-reload", mas nada as fazia pedir: os headers
+    // mudavam para o pedido SEGUINTE e o TanStack não fazia nenhum (os
+    // dados não estavam stale e ninguém os invalidou).
+    //
+    // `clear()` e não `invalidateQueries()`: invalidar continua a MOSTRAR
+    // os dados antigos enquanto o novo pedido não chega — numa troca de
+    // perfil isso é renderizar dados de outro âmbito, ainda que por
+    // instantes. É o mesmo raciocínio que já justificava o reload na
+    // troca de empresa: primeiro esvaziar, depois pedir.
+    //
+    // A limpeza vem DEPOIS de gravar o perfil novo (abaixo), para que o
+    // refetch que se segue parta já com os headers certos.
+
     const resolvedCompanyId = resolveCompanyIdFromUser(
       user,
       newCompanyId,
@@ -483,7 +503,9 @@ export function AuthProvider({ children }) {
       }
       persistActiveCompany(resolvedCompanyId, newRole);
     }
-  }, [user, persistActiveCompany]);
+
+    queryClient.clear();
+  }, [user, persistActiveCompany, queryClient]);
 
   // Context Switching - Múltiplas Empresas
   const switchActiveCompany = useCallback(async (companyId) => {

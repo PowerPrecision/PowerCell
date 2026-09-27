@@ -19,6 +19,9 @@ from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, Workflow
 from models.email_config import EmailConfigCreate, EmailConfigResponse
 from services.auth import hash_password, require_roles, get_current_user
 from services.admin_helpers import _safe_float, _audit_log
+# A cache das fases é local ao processo: quem escreve uma fase tem de a
+# esquecer, senão o próprio admin continua a ver a versão antiga.
+from services.workflow_phases import invalidar_cache_de_fases
 from services.permissions import (
     get_default_permissions_for_role,
     get_all_available_permissions,
@@ -102,9 +105,14 @@ async def run_create_workflow_status(data: WorkflowStatusCreate, user: dict):
         "trigger_countdown": data.trigger_countdown,
         "trigger_property_check": data.trigger_property_check,
         "trigger_deed_reminder": data.trigger_deed_reminder,
+        # Épico 10, Parte 2 — agrupamento no funil. `.value` porque o
+        # Pydantic entrega o membro do Enum e o que fica gravado tem de
+        # ser a `str`, igual ao que vem da BD em todos os outros sítios.
+        "macro_fase": data.macro_fase.value if data.macro_fase else None,
     }
 
     await db.workflow_statuses.insert_one(status_doc)
+    invalidar_cache_de_fases()
     return WorkflowStatusResponse(**{k: v for k, v in status_doc.items() if k != "_id"})
 
 
@@ -154,9 +162,12 @@ async def run_update_workflow_status(status_id: str, data: WorkflowStatusUpdate,
         update_data["trigger_property_check"] = data.trigger_property_check
     if data.trigger_deed_reminder is not None:
         update_data["trigger_deed_reminder"] = data.trigger_deed_reminder
+    if data.macro_fase is not None:
+        update_data["macro_fase"] = data.macro_fase.value
 
     if update_data:
         await db.workflow_statuses.update_one({"id": status_id}, {"$set": update_data})
+        invalidar_cache_de_fases()
 
     updated = await db.workflow_statuses.find_one({"id": status_id}, {"_id": 0})
     return WorkflowStatusResponse(**updated)
@@ -203,6 +214,18 @@ async def run_delete_workflow_status(status_id: str, user: dict):
         target_label = target_status.get("label", target_name)
         
         # Mover todos os processos para a fase de destino
+        #
+        # SEM RELÓGIO DE FASES, de propósito (decisão do dono, Camada 1):
+        # "mover um processo entre colunas porque uma fase foi apagada é
+        # uma reestruturação do funil, não um avanço operacional. O tempo
+        # continua a contar como antes; não queremos esconder ineficiência
+        # reiniciando os SLAs à força."
+        #
+        # Um processo parado há 90 dias continua a mostrar 90 dias depois
+        # desta operação. Há um teste em `test_process_phase_clock.py` a
+        # afirmar que este `update_many` não toca em `fase_desde` nem em
+        # `macro_fase_desde` — é o género de decisão que alguém "corrige"
+        # de boa fé daqui a seis meses.
         result = await db.processes.update_many(
             {"status": status_name},
             {"$set": {"status": target_name, "updated_at": datetime.now(timezone.utc).isoformat()}}
@@ -225,6 +248,7 @@ async def run_delete_workflow_status(status_id: str, user: dict):
     
     # Eliminar a fase
     await db.workflow_statuses.delete_one({"id": status_id})
+    invalidar_cache_de_fases()
     
     return {
         "message": f"Fase '{status.get('label', status_name)}' eliminada",

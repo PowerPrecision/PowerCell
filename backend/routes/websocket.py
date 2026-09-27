@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, WebSocket, Query
 
 from services.auth import require_admin
 from services.websocket_api_notifications import run_websocket_notifications
+from services.websocket_api_portal import run_portal_websocket
 from services.websocket_api_status import run_websocket_status
 
 router = APIRouter(tags=["WebSocket"])
@@ -22,6 +23,20 @@ async def websocket_notifications(
 ):
     """Endpoint WebSocket para receber notificações em tempo real."""
     await run_websocket_notifications(websocket, token)
+
+
+@router.websocket("/ws/portal")
+async def websocket_portal(
+    websocket: WebSocket,
+    token: str = Query(...)
+):
+    """WebSocket do CLIENTE do Portal — endpoint SEPARADO do de staff.
+
+    Separado de propósito: o laço do staff trata seis tipos de mensagem e meter
+    um cliente externo lá dentro faria a segurança depender de nenhum ramo novo
+    se esquecer da guarda. Aqui só existe `ping`.
+    """
+    await run_portal_websocket(websocket, token)
 
 
 @router.get("/ws/status")

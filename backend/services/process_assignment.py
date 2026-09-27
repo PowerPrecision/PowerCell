@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from typing import Optional, Tuple, Dict, List
 
 from database import db
-from services.process_status import INACTIVE_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -27,17 +26,37 @@ MAX_ACTIVE_PROCESSES_PER_INDEXER = 15
 # (todas as variações legadas singular/plural) em vez de apenas as formas
 # plurais, para não sobrecarregar indexadores com processos legados cujo
 # `status` foi gravado no singular.
-INDEXER_INACTIVE_STATUSES = set(INACTIVE_STATUSES) | {
+# ÉPICO 10, PONTO 1 — deixou de ser CONSTANTE.
+#
+# `set(INACTIVE_STATUSES) | {...}` calculado no IMPORT congela o motor no
+# arranque do processo: uma fase fechada pelo admin a seguir continuava a
+# contar como carga do indexador até ao próximo deploy. Passa a função,
+# resolvida no pedido, com as fases do motor.
+_EXTRA_INDEXADOR = {
     "pre_registo",  # pré-registo não conta como carga real do indexador
 }
+
+
+async def indexer_inactive_statuses() -> set[str]:
+    """Estados que NÃO contam como carga do indexador."""
+    from services.workflow_phases import carregar_fases, nomes_terminais
+
+    return set(nomes_terminais(await carregar_fases())) | _EXTRA_INDEXADOR
 
 
 # ==== BUGFIX (E2E, Set 2026 — transição dinâmica do workflow) ====
 # Estados que NÃO são fases reais de trabalho do Kanban: o auto-avanço e a
 # atribuição de indexador devem saltá-los ao calcular a fase alvo dinâmica.
-_WORKFLOW_START_EXCLUDED = set(INACTIVE_STATUSES) | {
+_EXTRA_FORA_DO_WORKFLOW = {
     "pre_registo", "fila_espera", "recusado", "lead",
 }
+
+
+async def workflow_start_excluded() -> set[str]:
+    """Estados que não são fases reais de trabalho do Kanban."""
+    from services.workflow_phases import carregar_fases, nomes_terminais
+
+    return set(nomes_terminais(await carregar_fases())) | _EXTRA_FORA_DO_WORKFLOW
 
 
 async def _resolve_dynamic_indexer_status(process: dict) -> Optional[str]:
@@ -79,8 +98,9 @@ async def _resolve_dynamic_indexer_status(process: dict) -> Optional[str]:
 
     # 1) Lead / pré-registo / sem status → 1ª fase real do Kanban
     if current_status in (None, "", "pre_registo", "lead"):
+        fora_do_workflow = await workflow_start_excluded()
         for name in pipeline:
-            if name and name not in _WORKFLOW_START_EXCLUDED:
+            if name and name not in fora_do_workflow:
                 return name
         # Fallback: 1ª fase que não seja pre_registo
         for name in pipeline:
@@ -448,7 +468,7 @@ async def _count_active_processes_for_indexer(indexer_id: str) -> int:
     """
     active_query = {
         "assigned_indexacao_id": indexer_id,
-        "status": {"$nin": list(INDEXER_INACTIVE_STATUSES)},
+        "status": {"$nin": list(await indexer_inactive_statuses())},
         "$or": [
             {"is_indexed": {"$ne": True}},
             {"is_indexed": {"$exists": False}},
@@ -810,7 +830,11 @@ async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tupl
 # Status que NÃO contam como processos ativos para o consultor/intermediário
 # Fix: Normalize process status filters — reutiliza a constante central
 # (todas as variações legadas singular/plural).
-CONSULTANT_INACTIVE_STATUSES = set(INACTIVE_STATUSES)
+async def consultant_inactive_statuses() -> set[str]:
+    """Estados que NÃO contam como processos activos do consultor."""
+    from services.workflow_phases import carregar_fases, nomes_terminais
+
+    return set(nomes_terminais(await carregar_fases()))
 
 # PACOTE 12 (Eixo 3 — least-busy ESTRITO): perfis de gestão EXCLUÍDOS da
 # auto-atribuição "menos ocupado". Um admin/ceo/diretor com
@@ -869,7 +893,7 @@ async def _count_active_processes_for_consultant(consultant_id: str) -> int:
             # não subestimar o consultor e equilibrar a distribuição.
             {"assigned_consultor_ids": consultant_id},
         ],
-        "status": {"$nin": list(CONSULTANT_INACTIVE_STATUSES)},
+        "status": {"$nin": list(await consultant_inactive_statuses())},
     }
 
     count = await db.processes.count_documents(active_query)

@@ -11,7 +11,8 @@ from models.system_config import (
     SystemConfig, StorageConfig, EmailConfig, AIConfig, 
     SystemSettings, StorageProvider, CreditServicesConfig,
     DocumentRecipientsConfig, DSTIConfig, AutoDraftConfig, AuditTrailConfig,
-    SystemSMTPConfig, SystemWebmailConfig, MandatoryDocumentsConfig
+    SystemSMTPConfig, SystemWebmailConfig, MandatoryDocumentsConfig,
+    DashboardSlaConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -271,6 +272,21 @@ async def update_config_section(section: str, data: Dict[str, Any], company_id: 
                     # Formato separado por vírgulas: "irs, recibo_vencimento, cc"
                     current["eligible_doc_types"] = [s.strip() for s in raw.split(",") if s.strip()]
         config.auto_draft = AutoDraftConfig(**current)
+    elif section == "dashboard_slas":
+        current = config.dashboard_slas.model_dump()
+        current.update(filtered_data)
+        # Os limiares chegam do formulário como texto. Um valor inválido cai
+        # no anterior em vez de rebentar — é a regra do `SMTP_CONNECT_TIMEOUT`.
+        for chave in ("novo", "analise", "aprovado"):
+            try:
+                current[chave] = max(1, int(current[chave]))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "[SystemConfig] Limiar de SLA inválido para %r: %r — "
+                    "mantido o anterior.", chave, current.get(chave),
+                )
+                current[chave] = getattr(config.dashboard_slas, chave)
+        config.dashboard_slas = DashboardSlaConfig(**current)
     elif section == "dsti_analysis":
         current = config.dsti_analysis.model_dump()
         current.update(filtered_data)

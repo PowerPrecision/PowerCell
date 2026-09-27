@@ -138,8 +138,14 @@ async def check_pre_approval_countdown(process: dict) -> Dict[str, Any]:
     credit_data = process.get("credit_data", {}) or {}
     approval_date_str = credit_data.get("bank_approval_date")
     
-    # Verificar se está em estado de aprovação
-    if process.get("status") not in ["ch_aprovado", "fase_escritura", "escritura_agendada"]:
+    # Estado de aprovação = macro-fase `aprovado`, ditada pelo motor
+    # (Épico 10, Parte 3). Eram três nomes cravados: uma fase de
+    # aprovação nova nunca contava para o prazo da pré-aprovação, que é
+    # precisamente o alerta que impede um crédito de caducar.
+    from services.workflow_phases import carregar_fases, nomes_por_macro
+
+    fases_aprovadas = nomes_por_macro(await carregar_fases(), "aprovado")
+    if process.get("status") not in fases_aprovadas:
         return {"type": ALERT_TYPES["PRE_APPROVAL_COUNTDOWN"], "active": False}
     
     if not approval_date_str:
@@ -467,18 +473,35 @@ async def notify_cpcv_or_deed_document_check(process: dict, new_status: str):
     
     Args:
         process: Dados do processo
-        new_status: O novo estado do processo (cpcv, fase_escritura, escritura_agendada)
+        new_status: O novo estado do processo (nome de uma fase do motor)
     """
     from services.realtime_notifications import send_realtime_notification
-    
-    # Determinar mensagem baseada no estado
-    status_messages = {
-        "fase_escritura": ("📋 CPCV/Escritura", "O processo entrou em fase de escritura"),
-        "escritura_agendada": ("📝 Escritura Agendada", "A escritura foi agendada"),
-        "ch_aprovado": ("✅ CH Aprovado", "O crédito habitação foi aprovado"),
-    }
-    
-    title, description = status_messages.get(new_status, ("📋 Mudança de Fase", "O processo mudou de fase"))
+    from services.workflow_phases import carregar_fases, resolver_nome
+
+    # O TÍTULO VEM DO MOTOR (Épico 10, Parte 3).
+    #
+    # Eram três pares título/descrição presos a três nomes de fases. Uma
+    # fase de aprovação nova caía no genérico "Mudança de Fase" — e o
+    # admin, que lhe tinha dado um nome no WorkflowEditor, não percebia
+    # porque é que a notificação o ignorava.
+    #
+    # O `label` da fase é exactamente o texto que o administrador
+    # escreveu. Usá-lo faz a notificação falar a língua do produto sem
+    # ninguém ter de a manter.
+    fases = await carregar_fases()
+    resolucao = resolver_nome(new_status, fases)
+    fase_doc = next(
+        (f for f in fases if f.get("name") == resolucao.fase), None,
+    ) if resolucao.resolvida else None
+
+    if fase_doc:
+        title = f"📋 {fase_doc.get('label') or resolucao.fase}"
+        description = (
+            fase_doc.get("description")
+            or f"O processo entrou em «{fase_doc.get('label') or resolucao.fase}»"
+        )
+    else:
+        title, description = "📋 Mudança de Fase", "O processo mudou de fase"
     
     # Obter utilizadores envolvidos
     user_ids = set()

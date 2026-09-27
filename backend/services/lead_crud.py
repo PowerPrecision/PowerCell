@@ -66,6 +66,19 @@ async def run_create_lead(
         if consultant.get("email"):
             consultant["email"] = sanitize_email(consultant["email"])
 
+    # Carimbo multi-tenant (Dashboard, ponto 1): a lead nasce a saber a
+    # que rede pertence. `/stats/leads` e `/stats/conversion` mediam a
+    # colecção INTEIRA porque não havia campo por onde filtrar — a mesma
+    # fuga que os processos tinham antes do Lote 4, com outro nome.
+    #
+    # Sem contexto de empresa o documento fica POR CARIMBAR em vez de
+    # levar uma rede adivinhada: um carimbo errado é permanente.
+    from services.tenant_network import resolve_tenant_stamp
+
+    carimbo = await resolve_tenant_stamp(user)
+    if carimbo:
+        lead_dict.update(carimbo)
+
     await db.property_leads.insert_one(lead_dict)
     return lead_dict
 

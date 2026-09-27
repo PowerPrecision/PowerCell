@@ -71,7 +71,17 @@ async def test_admin_get_users_includes_admin_index_and_inactive():
     mock_db = MagicMock()
     mock_db.users.find = MagicMock(return_value=_Cursor())
 
-    with patch.object(au, "db", mock_db):
+    # Ponto 11: a lista passou a ter âmbito de Rede. Aqui o âmbito é
+    # falseado como ABERTO — o teste é sobre quem entra na lista
+    # (admin, indexação, inactivos), não sobre o isolamento, que tem a
+    # sua própria bateria em `test_admin_escalabilidade.py`.
+    from services import admin_users_scope as escopo
+
+    async def _ambito_aberto(_user):
+        return escopo.EmpresasDoAmbito(ids=[], nomes=[], fechado=False)
+
+    with patch.object(au, "db", mock_db), \
+            patch.object(escopo, "empresas_do_ambito", _ambito_aberto):
         result = await au.run_get_users({"id": "caller", "role": "admin"})
 
     query = mock_db.users.find.call_args[0][0]
@@ -97,7 +107,13 @@ async def test_admin_get_users_for_assignment_excludes_admin_includes_index():
     mock_db = MagicMock()
     mock_db.users.find = MagicMock(return_value=_Cursor())
 
-    with patch.object(au, "db", mock_db):
+    from services import admin_users_scope as escopo
+
+    async def _ambito_aberto(_user):
+        return escopo.EmpresasDoAmbito(ids=[], nomes=[], fechado=False)
+
+    with patch.object(au, "db", mock_db), \
+            patch.object(escopo, "empresas_do_ambito", _ambito_aberto):
         result = await au.run_get_users(
             {"id": "caller", "role": "admin"},
             for_assignment=True,

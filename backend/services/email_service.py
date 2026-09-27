@@ -584,9 +584,26 @@ async def resolve_email_signature(
             if ucr_active and ucr_active.get("signature"):
                 return ucr_active["signature"], f"ucr_active({active_company_id})"
 
-        # 2. Assinatura global do próprio utilizador.
+        # 2. Assinatura global do próprio utilizador — mas SÓ se ele
+        #    nunca tiver configurado uma assinatura por empresa.
+        #
+        #    Lote 5, ponto 5: o `ProfileRoleTab` grava nos dois sítios
+        #    (UCR da empresa activa E campo global) e lê só o primeiro.
+        #    Configurar a assinatura na Power enchia também o global;
+        #    ao mudar para a Precision, a UI mostrava vazio e o envio
+        #    caía aqui, assinando um email da Precision com a identidade
+        #    da Power. É o `ucr_any` que o Lote 1 fechou, a entrar pela
+        #    porta do campo global.
+        #
+        #    Quem só tem a global nunca usou assinaturas por empresa: aí
+        #    ela é mesmo a única dele, não a de outro perfil.
         if sender_user and sender_user.get("email_signature"):
-            return sender_user["email_signature"], "user_global"
+            usa_assinatura_por_empresa = await db.user_company_roles.find_one(
+                {"user_id": created_by, "signature": {"$nin": [None, ""]}},
+                {"_id": 0, "signature": 1},
+            )
+            if not (tem_empresa_activa and usa_assinatura_por_empresa):
+                return sender_user["email_signature"], "user_global"
 
         # 3. UCR da empresa por omissão — SÓ sem empresa activa. Com uma
         #    empresa activa escolhida, ir buscar a assinatura de outra

@@ -1,4 +1,33 @@
 ---
+Task ID: lote-5-seccao-a
+Agent: Cloud Agent
+Task: Lote 5, Secção A — furos de isolamento e bugs críticos do UAT (pontos 4, 3, 1, 2, 6, 5)
+
+Date: 2026-09-24
+
+Work Log:
+- PONTO 4, e é falha minha do Lote 4. O gatilho corria; o que ele calculava é que estava errado. `ids_atribuidos_do_processo` lê todos os campos canónicos (incluindo `consultor_id`/`consultant_id`) mas o `build_clear_consultor_fields` limpava só quatro dos seis. `removidos = antes - depois` dava vazio e a limpeza nunca era chamada. Provei em bruto antes de mexer.
+- E é maior do que as tarefas: `process_list_filters` usa `consultant_id` em "Os Meus Processos", portanto o consultor removido continuava a VER o processo. Não é uma tarefa pendurada, é acesso.
+- PORQUE É QUE O MEU TESTE DO LOTE 4 NÃO APANHOU: construí os documentos à mão com os campos coerentes, em vez de os passar pelo construtor real. A regra que fica no ficheiro novo: os testes desta área usam SEMPRE os construtores de produção. O `set` e o `clear` derivam agora da mesma constante — era a divergência entre os dois, não o esquecimento, o defeito.
+- PONTO 1. O Kanban não vazou: o isolamento nunca lá chegou. Tem um construtor de query SEPARADO que não passa pelo `build_process_list_query` nem pelo `run_get_processes*`. A lição é de método — fiz um ponto único para a CONDIÇÃO e não fiz o inventário dos sítios que LISTAM. O ficheiro de teste novo é também esse inventário.
+- Ficheiros: decisão do dono (restringir a Admin/CEO, adiar o filtro por pasta). A rota tinha ainda a lista de papéis escrita À MÃO, mais larga do que a constante ao lado dela — passou a usar a constante, com guarda.
+- PONTO 3. O campo que diz o destinatário (`user_id`) existia e era ignorado. O filtro era por VISIBILIDADE DE PROCESSO, com isenção para admin/ceo/diretor (`query = {}`). Corrigido o eixo. A corrigir isto encontrei um segundo defeito: `run_mark_notification_read` não recebia utilizador nenhum — com um id, qualquer pessoa marcava a notificação de outra. Devolve 404 e não 403 de propósito.
+- PONTO 2. O campo de rede era texto livre e fui eu que o pus assim. `datalist` + aviso do efeito. É o AVISO, não a lista, que apanha a gralha: vê-se "rede nova" onde se esperava "junta-se a 2 empresas".
+- PONTO 6. `switchActiveCompany` faz hard reload e funciona; `switchActiveRole` não tocava no TanStack — o comentário no código até prometia o contrário. `clear()` e não `invalidate()`: invalidar continua a MOSTRAR os dados do outro âmbito enquanto o novo pedido não chega.
+- PONTO 5. O `ProfileRoleTab` grava nos dois sítios e lê só um. A global, escrita ao gravar a da Power, saía nos emails da Precision — o `ucr_any` do Lote 1 a entrar pela porta do campo global. Regra: com empresa activa, a global só vale se o utilizador NUNCA tiver configurado assinatura por empresa (aí é mesmo a única dele). Sem regressão para quem só tem a global.
+- Transparência do ponto 5: `/auth/me` devolve a assinatura efectiva resolvida pela MESMA função do envio. Duplicar a cadeia na UI seria recriar o problema com outro nome.
+- LACUNA NA MINHA PRÓPRIA GUARDA: o `App.rotasMenu.test.js` do Lote 3 só iterava diretor/consultor/intermediário. Admin e CEO não têm ramo `if` (o menu deles é o fall-through) e o extractor devolvia lista vazia — como não estavam no ciclo, a lacuna era invisível. Cobertos agora.
+- TRÊS ERROS MEUS nos testes desta sessão, todos apanhados pelas contraprovas:
+  (1) O teste do Kanban passou com o quadro VAZIO — faltava semear as colunas; a contraprova denunciou.
+  (2) Dois testes do campo de rede mediam uma letra: o componente é controlado e o teste não devolvia o valor. " grupo_domus " começa por espaço, `"".trim()` é `""`, e a asserção dava-se por satisfeita.
+  (3) O extractor novo do menu podia tirar itens a mais e ficar cego — acrescentei a contraprova nos dois sentidos.
+- PONTO 7 não tocado, como combinado: a Caixa Geral lê a password de `PRECISION_PASSWORD` no Render, não da BD (não há desencriptação a falhar). E a classificação do erro é por substring: muitos servidores respondem `[AUTHENTICATIONFAILED]` ao BLOQUEAR um IP, portanto uma conta bloqueada aparece como password errada. Fica à espera da confirmação do dono.
+- Testes: 33 novos no backend, 16 no frontend. Sete mutações, sete mortes.
+- Suites: backend 2159 passed / 8 skipped (era 2126/8); frontend 723 (era 707); eslint --quiet limpo.
+
+---
+
+---
 Task ID: limpeza-final-lote-4-ponto-14
 Agent: Cloud Agent
 Task: Lote 4 (3/3) — Espelho de Automações (batimento dos jobs) + regra de ouro do perfil Indexação
@@ -4975,3 +5004,2456 @@ O primeiro `find_one` estendido do conftest aplicava projecções literalmente �
 ## Commit
 
 `Fix: Comprehensive UX polish, email rendering fixes, strict RBAC, and assignment logic refinement`
+
+---
+
+# Iteração — Lote 5, Prioridade 0: VLM no Escuro, UI de Fases, cadência IMAP (Set 2026)
+
+## Contexto
+
+Duas interceções críticas reportadas pelo dono depois da Secção A, mais o
+fecho do ponto 7 (IMAP) com as variáveis do Render já confirmadas.
+
+## Ponto 7 — cadência do IMAP
+
+**Diagnóstico confirmado:** não era autenticação. Era rate limit / bloqueio
+de IP em alojamento partilhado, que muitos servidores IMAP reportam como
+`[AUTHENTICATIONFAILED]` — uma password certa a falhar repetidamente.
+
+- **NOVO** `services/email_sync_cadence.py` — ponto único da cadência.
+  Omissão 60 s → **300 s**; clamp 30–300 → **120–1800**; jitter proporcional
+  (até 1/4 do ciclo) em vez do tecto fixo de 15 s.
+- `scheduled_tasks.py` re-exporta (os chamadores antigos não mudam);
+  `random` deixou de ser usado lá.
+- `job_heartbeat.py`: **`_intervalo_efectivo`** — o intervalo do BATIMENTO
+  vence o declarado. Sem isto, abrandar o laço punha o Monitor de Sinais
+  Vitais a gritar `atrasado` a um job que está a cumprir o horário novo.
+  `JOBS_DECLARADOS["email_auto_sync"]` deriva agora da mesma função do laço.
+- `.env.example`: `EMAIL_AUTO_SYNC_INTERVAL_SECONDS` documentado com o motivo.
+- Guardas antigas (`test_email_realtime.py`) actualizadas: afirmavam a
+  cadência anterior.
+
+## Bug 1 — VLM no Escuro
+
+Toast verde + diálogo de revisão calado. Três pontos a engolir a falha:
+
+- `ai_document_analyzer.analyze_multiple_documents`: **NOVO**
+  `results["documents_failed"]` — a falha por documento deixa de morrer no
+  ciclo (ia só para o log de importação).
+- `document_ai_analyze`: **NOVO** `resumo_da_analise()`; a resposta ganha
+  `documents_succeeded` + `documents_failed`. `documents_count` continua a
+  contar os ENVIADOS — é o que o utilizador seleccionou.
+- **NOVO** `utils/analiseEmLoteFeedback.js` (`resumirAnaliseEmLote`): três
+  desfechos, nunca quatro. O silêncio não é um valor possível.
+- `S3FileManager`: porta deixa de ser `result.extracted_data` (`{}` é truthy);
+  encaminha os campos novos; deixou de dar o toast (duas vozes sobre o mesmo
+  evento).
+- `ProcessDetails.commitAIExtractedData`: os dois `return` mudos passam a
+  anunciar o desfecho.
+
+## Bug 2 — UI de Fases Mentirosa
+
+- **NOVO** `utils/processTimeline.js` (`normalizarEstado` /
+  `construirTimeline`): o alias legado só se aplica quando o motor **não**
+  conhece o original e conhece o destino; a duração de cada fase mede-se até
+  à entrada na seguinte; `null` (e não 0) quando a fase actual é desconhecida.
+- `ProcessTimeline.js`: 200 → ~150 linhas, delega tudo; `data-testid`
+  `fase-actual` / `fase-saltada`.
+- **NOVO** `utils/funilDeFases.js` (`agruparEmFunil`): nenhum processo
+  desaparece (grupo "Outras fases", só quando tem conteúdo); `escritura`
+  deixa de estar em dois grupos.
+- `ConsultorDashboard.js`: `FUNNEL_MACRO` sai do ficheiro.
+
+## Testes
+
+- **NOVO** `tests/unit/test_imap_cadencia.py` (9)
+- **NOVO** `tests/unit/test_vlm_nao_fica_no_escuro.py` (6)
+- **NOVO** `utils/analiseEmLoteFeedback.test.js` (8)
+- **NOVO** `pages/processDetails/vlmSilencioGuard.test.js` (8, com contraprova)
+- **NOVO** `utils/processTimeline.test.js` (14)
+- **NOVO** `utils/funilDeFases.test.js` (10)
+- **NOVO** `components/__tests__/ProcessTimeline.test.jsx` (4)
+
+## Erros meus, reportados
+
+1. Aritmética errada num teste (11 Mar → 23 Set são 196 dias, não 195). O
+   código estava certo.
+2. O teste de componente contou a legenda ("Saltada" aparece lá também).
+3. **Teste fraco**, terceira ocorrência do padrão: a asserção sobre o cartão
+   inteiro passava com a fase actual já reescrita pelo alias, porque "CPCV"
+   também é etiqueta de um nó. A mutação matou 1 de 2 — foi isso que o
+   denunciou.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **1987 passed** (baseline 1972 + 15 novos).
+- `yarn test` → **767 passed / 69 ficheiros** (baseline 723 / 65).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- flake8 gate CI (`E9,F63,F7,F82`) → 0.
+- Mutação: **seis, seis mataram** (depois de corrigido o teste fraco).
+
+---
+
+# Iteração — Lote 5, Secção B: pontos 14 (Resumo) e 15 (Etiquetas) (Set 2026)
+
+## Ponto 14 — texto livre no Resumo
+
+**Diagnóstico:** o cartão já existia; havia três campos e um leitor que
+escolhia em vez de juntar.
+
+- `utils/processObservationNotes.js` reescrito: JUNTA `observation_notes`
+  + `notes`/`observations` + `ai_extracted_notes`, deduplica pelo texto
+  normalizado, marca a origem e ordena cronologicamente.
+- `ProcessObservationsCard`: crachás "Quadro" / "IA" nas origens que
+  surpreendem (o feed não leva crachá — marcar tudo é ruído).
+- `kanban/ProcessDetailsModal.jsx`: deixa de pré-preencher `notes` com a
+  última nota do feed — mexer noutro campo e gravar copiava a nota de
+  outra pessoa para o escalar, sem autor nem data.
+
+## Ponto 15 — Sistema de Etiquetas
+
+**Diagnóstico:** `labels` já existia no modelo e persistia; faltava o
+editor (o Dialog que o PACOTE DD prometeu e nunca construiu) e a
+filtragem (zero ocorrências nos dois construtores de query).
+
+Backend:
+- **NOVO** `services/process_labels.py`: `normalizar_etiquetas`,
+  `build_labels_condition`, `listar_etiquetas_em_uso`,
+  `run_get_process_labels`. Catálogo com âmbito de rede.
+- `process_list_filters.py`: `labels` + `labels_logic` em
+  `build_process_list_query` **e** `build_kanban_query`.
+- `process_update.py` / `process_service.py`: normalização nos DOIS
+  caminhos de escrita.
+- `routes/processes.py`: `GET /processes/labels` (antes de
+  `/{process_id}`) + parâmetros nos 4 endpoints de listagem/quadro.
+- `tests/unit/conftest.py`: `distinct` no `FakeAsyncCollection`.
+
+Frontend:
+- **NOVO** `utils/processLabels.js` (normalização espelho do backend, cor
+  derivada do texto com tokens semânticos, `podeAcrescentar` com motivo).
+- **NOVO** `components/processDetails/ProcessLabelsEditor.jsx` (Dialog,
+  Progressive Disclosure, `datalist` de sugestões).
+- **NOVO** `components/processDetails/ProcessLabelFilter.jsx` (partilhado
+  pela Lista e pelo Kanban).
+- `ProcessDetails.js`: crachás read-only → editor ligado ao
+  `handleSaveOrganization` (`allowEmptyArrays: ["labels"]`).
+- `ProcessesPage.js`: filtro no URL (partilhar um link já filtrado).
+- `KanbanBoard.js` / `KanbanHeader.jsx` / `useKanbanQuery` /
+  `useKanbanCompletedQuery`: filtro + entrada na queryKey.
+- `services/api.js`: `getProcessLabels`.
+
+## Testes
+
+- **NOVO** `tests/unit/test_process_labels.py` (28)
+- **NOVO** `utils/processLabels.test.js` (18)
+- **NOVO** `ProcessLabelsEditor.test.jsx` (10)
+- **NOVO** `ProcessLabelFilter.test.jsx` (9)
+- `utils/processObservationNotes.test.js`: 3 → 13, migrado de
+  `node:test` para Vitest.
+
+## Erros meus, reportados
+
+1. O import do `build_labels_condition` caiu dentro de um bloco
+   `from ... import (` multi-linha e partiu o módulo.
+2. Uma guarda sobre o código-fonte comparava `@router.get("/labels")` com
+   aspas — `ast.unparse` normaliza-as (o AGENTS.md avisa disto).
+3. O teste do `datalist` consultou o `container`; o Dialog do Radix
+   renderiza num PORTAL.
+
+## Achado lateral (não tratado neste commit)
+
+O Kanban chama `/processes/kanban` por `fetch` cru em três sítios, sem
+`X-Company-Id` nem `X-Active-Role` — 5.ª instância do incidente de
+2026-09-21. E `get_kanban_board` usa `user["role"]` em vez de
+`get_effective_role`. Documentado no `ARCHITECTURE.md`.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2015 passed** (baseline 1987 + 28).
+- `yarn test` → **814 passed / 72 ficheiros** (baseline 767 / 69).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- flake8 gate CI → 0.
+- Mutação: **quatro, quatro mataram**.
+
+---
+
+# Iteração — Lote 5, Secção B: bug do Kanban, pontos 12 e 10 (Set 2026)
+
+## 1. Bug lateral do Kanban (crítico) — duas causas independentes
+
+Sintoma reportado pelo dono: multi-perfil troca de cargo e o quadro não
+acompanha.
+
+- `routes/processes.py`: `get_kanban_board` recebe `request` e usa
+  `get_effective_role(request, user)`. Era o ÚNICO endpoint de listagem
+  a ler `user["role"]`.
+- **NOVO** `process_kanban_enrichment.resolver_papel_do_quadro`:
+  `__all_roles__` recua para o papel do JWT. O
+  `build_kanban_role_base_query` não o conhece e cairia no ramo de
+  gestão — quem tem `indexacao` como base passaria a ver o quadro
+  inteiro. Alargamento evitado.
+- `services/api.js`: `getKanbanBoard(params)` aceita `URLSearchParams`
+  e passa-o INTACTO (um `Object.fromEntries` perdia as chaves repetidas
+  e partia o filtro de etiquetas do ponto 15).
+- `useKanbanQuery` / `useKanbanCompletedQuery` / `KanbanPage`:
+  `fetch` cru → Axios. Quinta instância do incidente de 2026-09-21.
+
+## 2. Ponto 12 — nome da empresa no menu
+
+- **NOVO** `utils/userProfiles.resolveActiveCompanyName` — ponto único.
+  O `ContextSwitcher` já resolvia o nome mas esconde-se por inteiro
+  quando há um só perfil e uma só empresa: quem tem uma empresa só nunca
+  via o nome dela.
+- **Não herda** o `company_name || company_id` do `getDistinctCompanies`
+  (um UCR sem nome mostrava o ID em bruto). Sem nome explícito cai para
+  `user.company`, que é o NOME; um id nunca sai dali.
+- `DashboardLayout.js`: linha com ícone e nome, por baixo do perfil.
+- `ContextSwitcher.jsx`: passa a usar a mesma função.
+
+## 3. Ponto 10 — reatribuição de tarefas
+
+Backend (já aceitava `assigned_to`; faltavam três coisas):
+- **NOVO** `task_assignment_hygiene.diff_de_responsaveis` +
+  `DiffDeResponsaveis` — normaliza os DOIS lados. `set("u1")` é
+  `{'u','1'}`: a bomba do Lote 4 estava por desarmar neste caminho.
+- `task_api_crud.run_update_task`: grava lista normalizada, avisa quem
+  SAI (`task_unassigned`) e regista "Reatribuiu tarefa" no histórico com
+  os nomes — antes era indistinguível de renomear a tarefa.
+
+Frontend:
+- **NOVO** `utils/taskAssignees.agruparResponsaveis` (equipa do processo
+  primeiro; equipa por confirmar é DITA, regra do Lote 4 ponto 13).
+- **NOVO** `components/tasks/TaskAssigneeDialog.jsx`.
+- `TasksPanel.js`: "Atribuído a" ganha botão "Mudar".
+
+## Testes
+
+- **NOVO** `tests/unit/test_kanban_perfil_activo.py` (9)
+- **NOVO** `tests/unit/test_task_reatribuicao.py` (15)
+- **NOVO** `components/kanbanTransport.test.js` (8)
+- **NOVO** `utils/taskAssignees.test.js` (8)
+- **NOVO** `tasks/__tests__/TaskAssigneeDialog.test.jsx` (9)
+- `utils/userProfiles.test.js`: 14 → 20
+
+## Erros meus, reportados
+
+1. **Teste fraco, quarta ocorrência.** A mutação que repunha
+   `role=user["role"]` não matou nada: a guarda comparava aspas que o
+   `ast.unparse` normaliza (**terceira vez** que caio nisto) e a janela
+   de 1600 caracteres apanhava o endpoint seguinte. Guarda reescrita a
+   contar parênteses.
+2. **Lacuna na minha cobertura.** Os testes do ponto 10 usavam todos
+   `process_id: None`, pelo que o ramo do histórico nunca corria — a
+   bateria ficou verde sobre código que rebentava (`get_user_names` sem
+   import). Foi o **flake8** (F821) que o denunciou. Coberto desde então.
+3. `Object.fromEntries` no `getKanbanBoard` perdia as chaves repetidas —
+   apanhado antes de sair, mas teria partido o filtro do ponto 15.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2036 passed** (baseline 2015 + 24 − 3
+  substituídos).
+- `yarn test` → **845 passed / 75 ficheiros** (baseline 814 / 72).
+- `eslint --quiet src/` → 0 erros. `vite build` verde. flake8 gate → 0.
+- Mutação: **cinco, cinco mataram** (uma só depois de corrigir a guarda).
+
+---
+
+# Iteração — Lote 5, Secção B: pontos 13 (Automações) e 11 (Admin) (Set 2026)
+
+## Ponto 13 — CRUD de Automações
+
+**Diagnóstico:** o CRUD existia inteiro (rotas, serviços, botões). O que
+fazia o ecrã parecer avariado eram três silêncios e a falta de isolamento.
+
+- `AutomationPage.js`: `fetchRules` deixa de engolir o erro (mostrava
+  "Criar primeira regra" numa leitura falhada); `handleToggle` diz o que
+  correu mal; `handleDelete` exige `AlertDialog` de confirmação.
+  **A ordem dos ramos importa**: o erro vem ANTES do estado vazio.
+- `workflow_engine.list_rules(tenant_condition=...)` — opcional, porque
+  o caminho de execução corre sem utilizador.
+- `automation_api_rules`: `_regra_no_ambito` (404, nunca 403) guarda o
+  editar e o apagar; `run_create_rule` carimba `network_id`.
+- `routes/automation.py`: `user` propagado aos quatro handlers.
+
+## Ponto 11 — Escalabilidade e isolamento do Admin
+
+- **NOVO** `services/admin_users_scope.py`: `empresas_do_ambito`,
+  `build_users_scope_query`, `build_users_search_condition`.
+- `companies_crud_api_list`: **NOVO** `contar_utilizadores_por_empresa`
+  (agregação `$group` — mata o N+1); `run_list_companies` ganha
+  isolamento, `page`/`size` e `total` do ÂMBITO.
+- `admin_users`: isolamento em `run_get_users` (inclui `for_assignment`)
+  + **NOVO** `run_get_users_paginated` com pesquisa por nome, email e
+  empresa.
+- `routes/admin.py`: **NOVO** `GET /admin/users/paginated` (separado do
+  partilhado, que as dropdowns precisam inteiro).
+- **NOVO** `utils/paginacao.js` + `components/shared/Paginacao.jsx`.
+- `CompaniesAdminTab` / `UsersAccessAdminTab`: paginação, pesquisa
+  server-side, `placeholderData` para não piscar o esqueleto.
+- `tests/unit/conftest.py`: `aggregate` (`$match` + `$group`) no duplo.
+
+## Testes
+
+- **NOVO** `tests/unit/test_automation_rules_tenant.py` (9)
+- **NOVO** `tests/unit/test_admin_escalabilidade.py` (19)
+- **NOVO** `src/pages/__tests__/AutomationPage.test.jsx` (8)
+- **NOVO** `src/utils/paginacao.test.js` (10)
+- Guardas antigas actualizadas: `test_admin_extraction_helpers.py` (2),
+  `test_companies_crud_extraction_helpers.py`, `queryClient.orgAdmin`.
+
+## Erros meus, reportados
+
+1. A troca de ordem dos ramos no `AutomationPage` **não chegou a
+   aplicar-se** — o teste novo apanhou-o. O ramo de erro estava escrito
+   depois do estado vazio, portanto nunca aparecia.
+2. **Lacuna de desenho:** filtrar `users` pelas empresas do âmbito
+   escondia as contas SEM empresa, e uma conta escondida nunca mais
+   podia ser associada a uma. Corrigido com `inclui_sem_empresa`.
+3. Patchei `automation_api_rules.db` mas `delete_rule` usa
+   `workflow_engine.db` — "Event loop is closed". É a regra do AGENTS.md
+   sobre patchar CADA módulo da cadeia, que eu saltei.
+4. `escape_regex` vive em `utils/input_sanitization`, não em
+   `utils/search_filters`.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2067 passed** (baseline 2039).
+- `yarn test` → **863 passed / 77 ficheiros** (baseline 845 / 75).
+- `eslint --quiet src/` → 0 erros. `vite build` verde. flake8 gate → 0.
+- Mutação: **três, três mataram**.
+
+---
+
+# Iteração — Lote 5, Secção B: pontos 16 e 17 (Set 2026)
+
+## Diagnóstico antes de tocar em código
+
+**Ponto 16 — o endpoint importa mais do que o dropdown.** O `PUT
+/processes/{id}` é quem escreve o histórico (e portanto respeita o
+silêncio do perfil `indexacao`), o audit trail, dispara
+`process_status_changed` e notifica o cliente. Qualquer atalho furava os
+quatro em silêncio. A edição inline chama-o tal e qual.
+
+**Ponto 17 — o raio-x mudou o plano.** `ProcessesPage` **não usa o
+TanStack Query**: `const [processes, setProcesses] = useState([])` e
+fetch manual. Não havia cache de listagem para ler. Daí as três camadas
+(`state` → `sessionStorage` → endpoint de fronteira), com zero pedidos
+no caso comum.
+
+**E um segundo achado, dentro do 17:** a listagem **não ordena no
+Mongo** — `run_get_processes` traz até 5000 documentos e ordena em
+Python (`sort_process_list`: peso de prioridade → ordem do workflow →
+nome). O plano inicial de projectar `{id: 1}` no endpoint de vizinhos
+estava **errado**: daria a ordem natural do Mongo e a seta apontaria ao
+processo errado, sem erro nenhum. A projecção passou a ser a mínima que
+preserva a ordenação, e a ordenação é a **mesma função** da listagem.
+
+## O que mudou
+
+### Ponto 16
+
+- **NOVO** `frontend/src/utils/inlinePhaseEdit.js` — `podeEditarFase`
+  (perfil activo **e** papel base), `opcoesDeFase`, `deveGravarNovaFase`,
+  `precisaDeRecarregar`.
+- **NOVO** `frontend/src/components/processes/ProcessPhaseCell.jsx`.
+- `ProcessesPage` — `handleMudarFase` optimista com reversão no erro;
+  catálogo de fases pela `useWorkflowStatusesQuery` já existente (sem
+  pedido novo, `staleTime` de 5 min, degrada para lista vazia).
+
+### Ponto 17
+
+- **NOVO** `backend/services/process_navigation.py` —
+  `PROCESS_NAV_PROJECTION`, `vizinhos_na_lista`,
+  `run_get_process_neighbours` (reaproveita `build_process_list_query`,
+  `build_tenant_condition` e `sort_process_list`; **404**, não 403).
+- `backend/routes/processes.py` — `GET /{process_id}/neighbours`.
+- **NOVO** `frontend/src/utils/processNavigation.js` — as três camadas.
+- **NOVO** `frontend/src/hooks/useProcessNeighbours.js`.
+- **NOVO** `frontend/src/components/processDetails/ProcessNavigator.jsx`.
+- `services/api.js` — `getProcessNeighbours` (params **intactos**).
+
+## Testes
+
+- **NOVO** `tests/unit/test_process_navigation.py` (35)
+- **NOVO** `src/utils/inlinePhaseEdit.test.js` (31)
+- **NOVO** `src/utils/processNavigation.test.js` (32)
+- **NOVO** `src/hooks/__tests__/useProcessNeighbours.test.jsx` (9)
+- **NOVO** `src/components/processes/__tests__/ProcessPhaseCell.test.jsx` (9)
+- **NOVO** `src/components/processDetails/__tests__/ProcessNavigator.test.jsx` (6)
+
+## Erros meus, reportados
+
+1. **TESTE FRACO, 5.ª ocorrência.** "Não chama `onChange` ao reescolher a
+   mesma fase" passava com o guarda **removido** — é o Radix que não
+   reemite o item já seleccionado. O teste provava a biblioteca, não o
+   produto. A regra mudou-se para `deveGravarNovaFase` no módulo puro,
+   onde é atacável de frente, e o teste de componente foi renomeado para
+   dizer o que realmente prova.
+2. **TESTE FRACO, 6.ª ocorrência.** A mutação que apagava `prioridade`
+   de `PROCESS_NAV_PROJECTION` **sobreviveu**: os meus processos de teste
+   só tinham `priority` (EN) e nunca `prioridade` (PT), que
+   `get_priority_weight` lê primeiro. A amostra passou a alternar os dois
+   campos; a mutação passou a matar 20 testes.
+3. **Aritmética minha, duas vezes.** `asc["position"] + desc["position"]
+   == total + 1` — falso, porque `sort_process_list` aplica um segundo
+   sort estável por prioridade que domina o campo escolhido; e `(8-1)*3
+   + 1 + 1` é 23, não 22. Nos dois casos o código estava certo e o teste
+   errado; a expectativa passou a derivar da própria função de ordenação
+   em vez de uma conta minha.
+4. `codigo_da_funcao_sem_comentarios` recebe a **função**, não
+   `(caminho, nome)`.
+5. Uma das minhas mutações rebentou a sintaxe do módulo e a "morte" não
+   contou como tal — repetida em condições válidas.
+6. A suite completa do backend correu em paralelo com o laço de mutações
+   e leu o ficheiro ainda mutado (8 falsos negativos). Repetida limpa.
+
+## Achado lateral — por decidir
+
+`run_update_process` resolve `can_update_status` por `user["role"]` (o
+papel base do JWT) e **não** por `get_effective_role`. Para um
+utilizador multi-perfil isso diverge nos dois sentidos: quem entra COMO
+Indexação com papel base de consultor **pode** mudar a fase pela API,
+apesar de o produto dizer que está de outro chapéu; e o inverso também.
+É o mesmo padrão que foi fechado no Kanban (ponto 12) e no
+`_is_stealth_user` (Lote 4). Não foi alterado aqui: é uma decisão de
+produto/segurança, não um defeito de implementação. A UI da edição
+inline exige **os dois** papéis, portanto nunca promete o que o servidor
+recusa — mas a API continua aberta ao primeiro caso.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2102 passed** (baseline 2067).
+- `yarn test` → **950 passed / 82 ficheiros** (baseline 863 / 77).
+- `eslint --quiet src/` → 0 erros. `vite build` verde. flake8 gate → 0.
+- Mutação: **22 aplicadas** — 8 no `process_navigation.py` (isolamento,
+  ordenação, projecção, 404, índices), 7 no `inlinePhaseEdit`/
+  `ProcessPhaseCell`, 4 no `processNavigation.js`, 3 no
+  `useProcessNeighbours`. **Duas sobreviveram** (as duas descritas em
+  "Erros meus"); depois de corrigidos os testes, **as 22 mataram**.
+
+---
+
+# Iteração — Brecha de permissões: escrita seguia o papel do JWT (Set 2026)
+
+Fecho do achado lateral reportado no fim dos pontos 16/17, por decisão
+explícita: **o sistema respeita sempre o chapéu posto**.
+
+## O que estava errado
+
+`run_update_process` fazia `role = user["role"]` e daí tirava
+`build_role_update_permissions` (incluindo `can_update_status`) e
+`assert_process_editable_for_role`. Um consultor que trocasse para o
+perfil de **Indexação** continuava a poder, pela API, mudar a fase de um
+processo, editar secções de negócio e passar por cima do bloqueio de
+estado terminal.
+
+Terceiro sítio com o mesmo padrão (Kanban ponto 12, `_is_stealth_user`
+Lote 4) e o mais grave: nos outros era ver a mais, aqui era escrever.
+
+## O que mudou
+
+- `services/auth.py` — **NOVO** `resolve_concrete_role`: ponto ÚNICO que
+  colapsa o perfil activo num papel concreto. `__all_roles__` recua para
+  o papel do JWT (não existe união de permissões num PUT).
+- `services/process_kanban_enrichment.py` — `resolver_papel_do_quadro`
+  passa a DELEGAR nessa função em vez de manter a sua cópia da regra.
+- `services/process_update.py` —
+  `role = resolve_concrete_role(get_effective_role(request, user), user)`.
+- `services/process_update.py` — o ramo do staff passa a olhar para a
+  CONTA (`role == cliente_role or user["role"] == cliente_role`), não só
+  para o chapéu.
+- `frontend/src/utils/inlinePhaseEdit.js` — **removida** a dupla condição
+  que eu tinha posto no ponto 16.
+
+## Descoberta durante o teste
+
+`get_effective_role` já era **fail-closed**: sem cache UCR, o header
+`X-Active-Role` só é honrado quando COINCIDE com o papel do JWT — um
+header inventado recua para o papel base e regista um `warning`. O meu
+primeiro teste simulava a troca de perfil pelo header e, por isso,
+testava um cenário impossível. O caminho real (e o único em que a brecha
+era alcançável) é a cache UCR em `request.state`, escrita pelo
+`get_current_user` depois de validar o perfil na base de dados. Os
+testes passaram a usar os dois caminhos, e a distinguí-los.
+
+## Efeito colateral que tive de desfazer
+
+A dupla condição do ponto 16 (exigir perfil activo **e** papel base)
+fazia sentido enquanto os dois lados divergiam. Com a divergência
+fechada, passou a **esconder uma acção legítima**: quem é indexador numa
+empresa e consultor noutra deixava de ver o dropdown apesar de o
+servidor aceitar. Removida. Uma condição defensiva montada por cima de
+uma divergência tem de morrer com ela.
+
+## Erros meus, reportados
+
+1. A guarda de código-fonte `'user["role"]' not in fonte` **passou com a
+   brecha aberta**: o `ast.unparse` normaliza as aspas e o que lá está é
+   `user['role']`. É a armadilha que o AGENTS.md documenta e em que já
+   tropecei antes. Comparação passou a ser sem aspas nenhumas.
+2. Lancei o laço de mutações em segundo plano e editei o mesmo ficheiro
+   entretanto — a restauração final do laço apagou a minha edição.
+   Reaplicada e reverificada. (Segunda vez que misturo mutações com
+   trabalho em paralelo no mesmo ficheiro; da primeira foi a suite
+   completa a ler o ficheiro mutado.)
+3. Uma substituição por índices no ficheiro de testes duplicou três
+   blocos `describe` em vez de os trocar. Apanhado pelos próprios testes.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2121 passed** (baseline 2102).
+- `yarn test` → **949 passed / 82 ficheiros**.
+- `eslint --quiet src/` → 0 erros. flake8 gate → 0.
+- Mutação: **5 aplicadas, 5 mataram** (papel do JWT de volta, perfil
+  activo sem o colapso do `__all_roles__`, `__all_roles__` sem recuo,
+  bloqueio terminal pelo papel base, ramo do staff sem a conta).
+
+---
+
+# Iteração — Lote 5, Secção B: ponto 9 (Portal do Cliente stress-free)
+
+## Diagnóstico antes de tocar em código
+
+**1. Havia TRÊS listas de "obrigatório", e divergiam.** O que bloqueia
+vem do `form_config` (`is_required`), lido por `validateStep` e
+`canProceed`. Mas a barra de progresso somava, em UNIÃO, uma lista fixa
+no ficheiro (`HARDCODED_REQUIRED_BY_STEP`). As duas não concordavam em
+quase nenhum passo — o do 2.º titular tem **zero** obrigatórios no
+config e a lista fixa declarava **dez**; o dos bancos tem três e a lista
+declarava nenhum. Metade da ansiedade era o produto a mentir sobre o
+que faltava. Não era estética: era defeito.
+
+**2. O backend pede quatro campos.** `PublicClientRegistration` exige
+`name`, `email`, `phone`, `process_type`; o resto é `Optional`. E o
+processo só nasce quando a `mandatory_checklist` fica completa, com o
+Portal a recolher o resto depois. Logo, nenhum risco de negócio em
+tornar os secundários não-bloqueantes — e nenhuma alteração ao backend.
+
+**3. Esconder sem desbloquear seria pior.** Daí a regra não precisar de
+decisão nova: **primário = obrigatório no `form_config`**, a mesma flag
+que bloqueia e a mesma que o `RequiredLabel` lê para o asterisco. Por
+construção, um campo no painel nunca tem asterisco.
+
+## O que mudou
+
+- **NOVO** `frontend/src/utils/formularioPublicoCampos.js` —
+  `separarCamposPorPrioridade`, `estaPreenchido`,
+  `contarProgressoObrigatorios`, `textoDoPainelSecundario`.
+- **NOVO** `frontend/src/components/portal/CamposDoPasso.jsx` —
+  primários à vista, restantes num `Collapsible` fechado.
+- `PublicClientForm.js` — os cinco passos passam por `CamposDoPasso`;
+  **apagada** a `HARDCODED_REQUIRED_BY_STEP`; barra de progresso a ler a
+  mesma fonte que bloqueia.
+- `PortalProfileFields.jsx` — já fazia divulgação progressiva com a
+  MESMA regra (`is_primary = is_required`, Lote 3 ponto 7); ganhou o
+  texto do convite, partilhado com o formulário público.
+
+Duas regras que só aparecem quando se testa a sério: um passo **sem**
+obrigatórios mostra tudo (senão abria em branco), e o painel abre já
+aberto quando o cliente retomou um rascunho com dados lá dentro.
+
+## Testes
+
+- **NOVO** `src/utils/formularioPublicoCampos.test.js` (18)
+- **NOVO** `src/components/portal/__tests__/CamposDoPasso.test.jsx` (7)
+- **NOVO** `src/pages/__tests__/PublicClientForm.stressFree.test.jsx` (6)
+  — monta a PÁGINA, porque é só aí que se prova o que interessa ao
+  cliente: que **se avança sem preencher nada do painel**.
+- `PortalProfileFields.test.jsx` — guardas do Lote 3 actualizadas ao
+  novo nome do expansor (mudança deliberada) + 2 testes novos sobre as
+  palavras proibidas no convite.
+
+## Erros meus, reportados
+
+1. No teste do painel escrevi `/não.*impede.*continuar/` e o texto real
+   é "Nada aqui o impede de continuar". Expectativa minha errada, não o
+   código.
+2. Procurei o botão por `/seguinte|continuar/` quando se chama
+   "Próximo". Idem.
+
+## Validação
+
+- `yarn test` → **982 passed / 85 ficheiros** (baseline 949 / 82).
+- `pytest tests/unit --no-cov` → **2121 passed** (sem alterações ao
+  backend neste ponto).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- Mutação: **7 aplicadas, 7 mataram** (5 no módulo puro, 2 na página —
+  painel colapsado para "tudo primário" e separação a ignorar o config).
+
+---
+
+# Iteração — Ponto 8, Fase 1: a Parede de Betão no Webmail (Set 2026)
+
+## O buraco, em números
+
+`services/email_webmail.py`: **zero** ocorrências de `network_id` ou
+`tenant`. E `resolve_ucr_mailbox_filter` devolvia `None` em **três**
+caminhos, com o chamador a fazer `if ucr_filter:` — ali `None` não era
+"sem empresa", era **sem filtro nenhum**. Somado ao `can_see_all` de
+admin/ceo/diretor e ao `query = {}` quando não sobrava condição
+nenhuma, a Diretora da Domus a abrir a Caixa Geral lia a colecção
+`emails` inteira.
+
+É o mesmo `None` que o `build_network_scope_condition` foi escrito para
+nunca produzir (Lote 4, ponto 10). Terceira superfície da família, a
+seguir ao Kanban (ponto 1) e às notificações (ponto 3) — e a mais
+sensível das três.
+
+## O que mudou
+
+- **NOVO** `backend/services/webmail_scope.py` — ponto único do âmbito:
+  `empresas_do_webmail`, `assert_empresa_no_ambito` (**404**),
+  `contas_pessoais_da_empresa`, `conta_da_caixa_geral`,
+  `build_company_mailbox_condition` (**nunca `None`**),
+  `build_webmail_scope`.
+- `services/email_webmail.py` — `resolve_ucr_mailbox_filter`,
+  `run_webmail_list` e `run_webmail_stats` aceitam `company_id`; com ele,
+  o âmbito é obrigatório e não há `None`.
+- `routes/emails.py` — `company_id` nos dois endpoints + **NOVO**
+  `GET /emails/webmail/companies` (os separadores).
+- **NOVO** `scripts/backfill_email_company_id.py`.
+
+## Três decisões que vale a pena guardar
+
+1. **O carimbo explícito manda sobre a dedução pelo endereço.** O ramo
+   que resgata a pilha por carimbar exige `sem company_id`. Sem isso, um
+   email carimbado para a Domus aparecia no separador da Power sempre
+   que o mesmo endereço estivesse nas duas empresas.
+2. **Não juntei o `build_tenant_condition`** — e isso é deliberado, não
+   esquecimento. Um separador É uma empresa, e a empresa é validada
+   contra os UCRs (404): é estritamente mais apertado do que a rede.
+   Juntá-lo só acrescentaria um caso — esconder emails por carimbar cujo
+   endereço já prova a que empresa pertencem. Está documentado no topo
+   do módulo para ninguém "corrigir" a ausência.
+3. **O `run_webmail_stats` tinha um furo à parte**: o filtro só era
+   resolvido dentro de `if request is not None`. O âmbito por empresa
+   não precisa do pedido HTTP — lá dentro, qualquer chamador interno
+   passava sem filtro.
+
+## Erros meus, reportados
+
+1. Afirmei sobre o **texto** da query (`"geral@precision.pt" in repr(...)`)
+   e o `re.escape` escapa o ponto. Passei a afirmar sobre o
+   COMPORTAMENTO (o documento casa ou não casa) — que é o que interessa
+   e não parte quando a query muda de forma.
+2. Os meus emails de teste não tinham `is_general`/`shared_role`, que a
+   caixa `general` exige. Amostra minha errada, não o código.
+
+## Testes
+
+- **NOVO** `tests/unit/test_webmail_tenant_isolation.py` (29) — inclui
+  o teste do ENDPOINT a sério: com o separador da Power, nem o email
+  carimbado nem o por carimbar da Domus aparecem.
+- **NOVO** `tests/unit/test_backfill_email_company.py` (10)
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2160 passed** (baseline 2121).
+- flake8 gate → 0.
+- Mutação: **5 aplicadas, 5 mataram** (`None` de volta no construtor;
+  ramo do `account` sem exigir "por carimbar"; `assert_empresa_no_ambito`
+  a aceitar tudo; `company_id` ignorado no resolvedor; Caixa Geral a cair
+  nas contas pessoais).
+
+## A seguir
+
+Fase 2 — os **28 `fetch` crus** do `WebmailPage` (6.ª instância do
+incidente de 2026-09-21) e o `API_URL = process.env.REACT_APP_BACKEND_URL`
+sem passar pelo `utils/apiBaseUrl.js`. Fase 3 — os separadores.
+
+---
+
+# Iteração — Ponto 8, Fase 2: o Webmail fala por Axios (Set 2026)
+
+## O que mudou
+
+- `services/api.js` — bloco novo com ~22 funções de transporte do
+  Webmail (lista, stats, empresas, sync, jobs, etiquetas, pastas, marcar,
+  enviar, cancelar, anexos, associar).
+- `pages/WebmailPage.jsx` — **28 `fetch` → 0**. `webmailHeaders()` e
+  `API_URL` apagados.
+- `hooks/useWebmailEmails.js` — o pedido mais importante do ecrã (a
+  lista) também passou a Axios; já aceitava `companyId`, que agora vai
+  como parâmetro para o âmbito da Fase 1.
+- **NOVO** `src/pages/webmailTransport.test.js` (16) — guarda sobre o
+  código-fonte, com contraprova de que as funções existem mesmo.
+- `pages/__tests__/WebmailPage.test.jsx` — a fronteira falsa deixou de
+  ser o `globalThis.fetch` e passou a ser `services/api`.
+
+## Erros meus, reportados
+
+1. Na migração do "cancelar envio" deixei cair a resposta, que traz o
+   rascunho a restaurar no composer — ficou um `res` órfão. O ESLint
+   (`no-undef`) apanhou-o antes de qualquer teste.
+2. O teste de integração da página passou a tentar ligar-se ao
+   `localhost:8001` a sério: o stub do `fetch` deixou de interceptar
+   quando deixou de haver `fetch`. Não é regressão do produto, é a
+   fronteira do teste a ter de acompanhar — mas só dei por isso ao
+   correr o teste, não ao planear a migração.
+
+## Validação
+
+- `yarn test` → **998 passed / 86 ficheiros** (baseline 982 / 85).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- Mutação: **3 aplicadas, 3 mataram** (marcar-lido sem chamada;
+  `responseType: "blob"` removido; `getWebmailCompanies` apagada).
+
+---
+
+# Iteração — Ponto 8, Fase 3: a Caixa de Correio Dedicada (Set 2026)
+
+## O que mudou
+
+- **NOVO** `frontend/src/utils/webmailEmpresas.js` — `deveMostrarSeparadores`,
+  `resolverEmpresaActiva`, `rotuloDaEmpresa`, `estadoDaSincronizacao`.
+- **NOVO** `frontend/src/components/webmail/WebmailCompanyTabs.jsx` —
+  a barra de Empresas + o indicador de sincronização.
+- **NOVO** `frontend/src/hooks/queries/useWebmailCompaniesQuery.js` —
+  lê `GET /emails/webmail/companies` (staleTime 10 min, degrada para
+  lista vazia).
+- `lib/queryClient.js` — chave `emails.companies()`, **fora** do prefixo
+  `webmail`: um email novo invalida a LISTA, não a lista de empresas.
+- `pages/WebmailPage.jsx` — a empresa passa a vir do separador
+  (`?company_id=` no URL) e não do Context Switcher; vai também nas
+  estatísticas.
+- `components/webmail/FolderNavigation.jsx` — **removido** o botão
+  "Sincronizar" de largura total e a linha "Última sinc." do rodapé,
+  com as props `syncing`/`lastSyncTime`/`onSync` a sair do contrato.
+
+## Erro meu — e desta vez a correcção foi no CÓDIGO
+
+Uma mutação **sobreviveu**: apagar a guarda `diff < 0 → return 0` de
+`minutosDesde` não partia teste nenhum. Fui ver porquê e a resposta não
+era um teste fraco: a guarda era **redundante**, porque o ramo
+`minutos < 1` já apanhava todos os negativos. Era código defensivo que
+nenhum teste podia derrubar — ou seja, código morto a mentir sobre o que
+o programa faz. Removi-o, e a nova mutação (fazer o ramo `< 1` deixar de
+aceitar negativos) morre.
+
+Foi a primeira vez nesta série em que a mutação sobrevivente apontou
+para o código e não para o teste. Vale a pena guardar a distinção:
+mutação que não mata = ou o teste é fraco, ou a linha não faz nada.
+
+## Testes que mudaram de sítio (não desapareceram)
+
+Dois testes do `FolderNavigation` cobriam o botão de sincronizar. O
+comportamento não foi removido — mudou de componente. Os testes foram
+substituídos por um que afirma que aquele botão **já não está ali**, com
+o porquê, e a cobertura do comportamento vive agora no
+`WebmailCompanyTabs.test.jsx`.
+
+## Testes
+
+- **NOVO** `src/utils/webmailEmpresas.test.js` (20)
+- **NOVO** `src/components/webmail/__tests__/WebmailCompanyTabs.test.jsx` (8)
+- `src/pages/__tests__/WebmailPage.test.jsx` — +6 com a PÁGINA montada:
+  os separadores, a empresa a viajar nos filtros da lista, a troca de
+  separador, o `company_id` inválido a cair na primeira empresa, a
+  empresa única sem barra, e o indicador a substituir o painel.
+
+## Validação
+
+- `yarn test` → **1032 passed / 88 ficheiros** (baseline 998 / 86).
+- `pytest tests/unit --no-cov` → **2160 passed** (sem alterações ao
+  backend nesta fase).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- Mutação: **9 aplicadas, 9 mataram** (4 no módulo puro — incluindo a
+  que obrigou a apagar código morto —, 2 no componente, 3 na ligação da
+  página).
+
+## Ponto 8 fechado — as três fases
+
+| Fase | O que fez |
+|---|---|
+| 1 | A Parede: `webmail_scope.py`, `None` eliminado, 404 por empresa, backfill |
+| 2 | 28 `fetch` → 0, `webmailHeaders()` e `API_URL` apagados |
+| 3 | Separadores por Empresa, painel intrusivo → indicador discreto |
+
+---
+
+# Iteração — Épico 10, Fases 1 e 2: a Parede no Envelope (Set 2026)
+
+## Diagnóstico
+
+Raio-x ao tempo real antes de escrever código. Três achados:
+
+1. **Duas condutas, e a blindada levava 2 de 35 emissores.** Só os `task_*`
+   (Épico 4) e o `new_email` (Épico 5) passavam pelo Redis. Os outros **33
+   pontos, em 12 módulos**, escreviam no `ConnectionManager` em memória, e
+   `render.yaml` fixa `UVICORN_WORKERS=2`: metade dos eventos morria na
+   fronteira do worker, sem erro nenhum.
+
+2. **`manager.broadcast()` não conhecia a Parede de Betão.** O delta de
+   processo leva `client_name` e ia para TODOS os sockets. Segui a cadeia até
+   ao ecrã: `process_kanban_move:272` → `useKanbanRealtime.handleProcessCreated`
+   → `processes.unshift({client_name})` + toast. Um processo da Power inseria
+   um cartão com o nome do cliente no Kanban de quem estivesse na **Domus**.
+
+3. **O polling das notificações não era redundância, era suporte de vida.**
+   `send_realtime_notification` decidia por `manager.is_user_connected`, que
+   mente com vários workers; quem entregava era o `setInterval` de 30 s.
+   Cortá-lo primeiro — o Ponto 1 do roteiro — teria apagado metade das
+   notificações em produção.
+
+Ordem acordada: **conduta → parede → corte**. As Fases 1 e 2 estão feitas; a
+Fase 3 (cortar o polling) fica para o passo seguinte, e só agora é segura.
+
+## O desenho
+
+O evento não sabe para quem vai: **declara a audiência**, e quem decide é o
+socket, que conhece o seu `TenantScope` desde o handshake. O custo passa de
+*uma query por evento* para **uma query por ligação**, porque o emissor já tem
+o documento do processo em mãos (o carimbo do Lote 4 está lá) e o socket já
+tem o `user` do `verify_websocket_token`.
+
+Três formas de endereço, nenhuma delas "toda a gente": `user_id`, `audience`,
+`room`. As salas eram o terceiro caso escondido — a lista de membros é local
+a cada worker, a mesma falésia noutra forma.
+
+## O que se fez
+
+**Módulos novos:** `services/realtime_audience.py` (puro — `Audiencia`,
+`audiencia_do_processo`, `alcanca`) e `services/realtime_delivery.py` (a
+conduta única).
+
+**Transporte:** `build_event_envelope` ganha `audiencia` / `room` /
+`exclude_user_id`; `is_deliverable` passa de `user_id` para
+`user_id OU audience OU room`; `route_system_event` ganha
+`_route_por_audiencia` e `_route_por_sala`; o `ConnectionManager` guarda o
+`TenantScope` por ligação (`register_scope` / `get_scope` / `clear_scope`), e
+o handshake resolve-o uma vez.
+
+**33 pontos migrados**, em 12 módulos: `process_broadcast`,
+`process_kanban_move`, `realtime_notifications`, `chat_messages` (10),
+`chat_groups` (4), `chat_presence` (2), `portal_gov_fetch` (4),
+`portal_client_messages`, `portal_client_visits`, `process_portal_messages`,
+`visit_helpers`, `websocket_api_notifications` (4). Zero `manager.broadcast*`
+ou `send_personal_message` fora do gestor.
+
+## Erros meus, e o que os apanhou
+
+**O `FakeAsyncCollection` não era fiel ao Mongo, e isso teria feito o teste
+central mentir.** `{"assigned_consultor_ids": "u1"}` casa, no Mongo real,
+quando o array **contém** o valor; o fake comparava por identidade e dava
+`False`. Como a Camada 2 é toda sobre campos de atribuição (arrays), o
+alinhamento dos dialectos ter-se-ia "confirmado" sobre uma semântica falsa.
+Corrigido em `_igual` (igualdade, `$in`, `$nin`, `$ne`), com a bateria inteira
+antes e depois: **2160 → 2160**, zero regressões.
+
+**O teste dos dois dialectos apanhou um defeito meu à primeira execução.**
+`str(UserRoleEnum.CONSULTOR)` devolve `'UserRoleEnum.CONSULTOR'` no Python
+3.11, não `'consultor'`. A minha normalização destruía o papel e `alcanca`
+devolvia `False` para toda a gente: 105 dos 315 casos da matriz falharam de
+imediato. Falha fechada, mas o tempo real ficaria mudo. `_texto` desembrulha
+Enums desde então.
+
+**Uma guarda de código-fonte do Pacote FG ficou vermelha, e com razão.**
+`test_lock_events_broadcast_to_process_room_not_globally` afirmava
+`broadcast_to_room` nos blocos dos locks. A intenção ("vai à sala, nunca ao
+mundo, e só depois da ACL") não mudou; mudou o mecanismo. Actualizei o nome e
+**apertei** a guarda: hoje afirma também que `manager.broadcast(` não existe
+em lado nenhum do ficheiro.
+
+**Quatro mutações sobreviveram à primeira passagem, e três eram lacunas
+minhas** — comportamentos que escrevi e não afirmei: a presença a alcançar
+quem não tem carteira (`toda_a_rede`), o âmbito ausente a falhar fechado, e a
+exclusão do autor numa sala. Testes acrescentados. A quarta era uma mutação
+**preservadora de comportamento**: a guarda do registo e a guarda de `scope
+is None` protegem a mesma coisa em camadas, e substituir uma por um valor
+válido não produz defeito nenhum. Reformulada para provar que pelo menos uma
+das duas é mesmo necessária.
+
+## Dois casos que a audiência do documento não cobria
+
+- **Quem sai da equipa** (`extra_user_ids`): a audiência sai do documento
+  *novo* e o consultor removido seria o único a não saber que saiu.
+  `process_staff_assignment` passa `tambem_para=removidos`. Dispensa a Camada
+  2, nunca a Camada 1.
+- **Presença** (`toda_a_rede`): `USER_ONLINE`/`USER_OFFLINE` levavam o nome de
+  um admin/CEO a todos os sockets. Hoje ficam dentro das redes do próprio; o
+  âmbito é lido **antes** do `disconnect`, que é quem o apaga.
+
+## Achados laterais (assinalados, não corrigidos)
+
+- **`is_notified`** é escrito em `db.notifications` e não é lido em lado
+  nenhum. O comentário prometia prevenir re-emissão no polling; não previne.
+- **A presença local mente com vários workers** (`chat_presence.is_online`, e
+  a decisão de enviar *push*). Precisa de um registo de presença partilhado.
+- **O âmbito em cache envelhece** até à reconexão. Um TTL é o passo seguinte;
+  o conteúdo continua a vir pelo HTTP, que reverifica sempre.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2551 passed** (baseline 2160, +391).
+- `yarn test` → **1032 passed / 88 ficheiros**, baseline intacta (sem
+  alterações ao frontend nestas fases).
+- `flake8 services/ routes/ tests/unit/ --select=E9,F63,F7,F82` → 0.
+- Mutação: **13 aplicadas, 12 mortas.** A sobrevivente (`M11b`) é
+  **preservadora de comportamento**, não um defeito: substituir a guarda
+  `if not registo: continue` por um valor válido não muda nada, porque o
+  `scope is None` de jusante devolve `False` na mesma — e esse está provado
+  vivo pela `M9b`, que morreu. Duas camadas sobre o mesmo risco: uma evita
+  desempacotar `None`, a outra falha fechada. Nenhuma é morta.
+
+## Nota de método
+
+Corri a bateria completa com o laço de mutação ainda activo e apanhei uma
+falha que não era real: o laço tinha o `redis_pubsub.py` mutado nesse
+instante. **Segunda vez que faço isto nesta série.** A bateria de validação
+só vale com o laço parado e os `.bak` todos restaurados — foi assim que os
+2551 acima foram obtidos.
+
+---
+
+# Iteração — Épico 10, Fase 3 + o cabeçalho que destruía os uploads (Set 2026)
+
+## Fase 3 — o polling volta a ser recurso
+
+`utils/realtimeFallback.js` (puro, testado): com o WebSocket de pé não há
+intervalo nenhum; quando ele cai, o intervalo regressa. **Não foi apagado —
+adormeceu.** Um WebSocket cai (rede móvel, portátil a adormecer, deploy), e
+ficar sem rede de segurança seria trocar um defeito por outro.
+
+**Correcção ao roteiro: o Kanban não tinha polling para cortar.** Vive de
+`staleTime: 60s` + `refetchOnWindowFocus`; não existia `setInterval` nenhum.
+O que lhe faltava era o oposto — os eventos emitidos com o socket em baixo
+perderam-se e nada os repete. `precisaDeRecuperar` dispara uma invalidação
+única na volta da ligação. Sem ela o quadro fica calado E desactualizado, que
+é pior do que estar visivelmente offline: parece funcionar.
+
+Medido no teste que monta o componente real: dez minutos de relógio simulado
+com o WS ligado passaram de **20 pedidos a 0**.
+
+## O bug do upload — e a hipótese estava invertida
+
+O diagnóstico partia de "falta o cabeçalho `multipart/form-data`". É o
+contrário: **é a predefinição da instância que o destrói.**
+
+O `transformRequest` do Axios 1.x converte um `FormData` em JSON quando vê
+`application/json` no cabeçalho — e a nossa instância declara-o por omissão.
+Provei contra um `http.createServer` real: o corpo chegava como
+`{"file":{},"category":"Financeiros"}`, o ficheiro reduzido a `{}`. Daí os
+**dois** campos em falta no 422, que é a assinatura de um corpo não analisável,
+não de um campo esquecido.
+
+**Três funções partidas, e as três saíram das minhas refactorizações:**
+`uploadProcessS3File` e `aiAnalyzeS3Documents` (Épico 8) e
+`uploadEmailAttachment` (Ponto 8, Fase 2). Todas omitiam o cabeçalho — que era
+exactamente o que eu tinha escrito em comentário como sendo a forma correcta.
+O comentário estava errado e propagou-se.
+
+Mais irónico ainda: as funções que escreviam `multipart/form-data` à mão
+**funcionavam**, porque o Axios o limpa lá dentro quando o corpo é FormData num
+browser. O padrão que parecia errado era o que estava a salvar-nos.
+
+Correcção num **interceptor**, não função a função: uma regra que depende de
+cada autor se lembrar dela já falhou três vezes. Excepção preservada e testada:
+`createTempLink` passa um objecto e deixa o Axios convertê-lo.
+
+`uploadClientS3File` removida — duplicava `uploadProcessS3File` para o mesmo
+endpoint, nunca teve chamador (confirmei com `git log -S`) e guardava o mesmo
+defeito enquanto a irmã era corrigida.
+
+## Erros meus
+
+- **O comentário que eu próprio escrevi no Épico 8** ("Content-Type
+  deliberadamente ausente: o Axios tem de o gerar com o boundary") estava
+  errado, e foi copiado para o Ponto 8 Fase 2. Omitir não limpa a predefinição
+  da instância. A regra do `AGENTS.md` sobre FormData é necessária mas
+  incompleta, e ficou agora corrigida nos documentos.
+- **Uma mutação sobreviveu** (`F8`): apagar os `delete` do cabeçalho não partia
+  nada, porque o `setContentType` já fazia o trabalho. Fui verificar qual das
+  linhas carregava o peso e **ambas funcionavam sozinhas** — redundância a
+  fingir de defesa. Separei em `if/else` por forma de cabeçalho, com um teste
+  para cada ramo; as duas mutações passaram a morrer.
+- O `src/test/setup.js` assumia `window` e rebentava a RECOLHA de qualquer
+  ficheiro em ambiente `node`, com uma mensagem sobre `matchMedia` que aponta
+  para o sítio errado. Passou a ser tolerante.
+
+## Validação
+
+- `yarn test` → **1064 passed / 93 ficheiros** (baseline 1032 / 88).
+- `pytest tests/unit --no-cov` → **2551 passed** (inalterado; sem backend nesta
+  iteração).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- Mutação: **12 aplicadas, 12 mortas** (5 no recurso de polling, 4 no
+  transporte de FormData, 1 no interceptor, 1 no Kanban, 1 no sino).
+
+---
+
+# Iteração — Gestor de Ficheiros S3, Passos 1 e 2 (Set 2026)
+
+## Correcção ao meu próprio raio-x
+
+Reportei "travessia de caminho por `../`". Ao ler as seis operações, a
+realidade era mais simples e mais grave: **três delas nem passavam pela
+função de resolução.** `run_s3_download`, `run_s3_delete` e `run_s3_rename`
+recebiam uma chave S3 **crua**. Não era preciso `../` — bastava escrever
+`backups/`, e os backups da base de dados vivem no mesmo bucket.
+
+O download fazia `get_object(Key=path)` sem contenção nenhuma: a base de dados
+inteira, em streaming, para quem escrevesse o caminho.
+
+## Passo 1 — contenção e paginação
+
+`services/s3_explorer_paths.py` (puro): normaliza (`.`, `..`, barras
+repetidas) e exige que o resultado caia dentro da raiz. Fronteira de
+**segmento**, não prefixo de texto — `Documentação Clientes_outro` deixou de
+passar por parecença.
+
+A propriedade é "não SAIR da raiz", não "recusar o que pareça suspeito":
+`backups/dump.gz` relativo é prefixado e fica contido numa chave inofensiva;
+só sobe-acima-da-raiz e caminho absoluto são recusados com 400. Ligada às
+**seis** operações, com `rename` a exigir que o nome novo seja um segmento.
+
+A listagem passou a paginar. O `delete` e o `rename` já o faziam; a listagem,
+que é a que toda a gente vê, fazia uma só chamada e truncava em silêncio acima
+de 1000 entradas.
+
+## Passo 2 — o medidor
+
+`services/s3_folder_coverage.py` + `scripts/medir_cobertura_s3.py`. Conta
+pastas no S3, mapeadas, órfãs, ambíguas e ligações partidas. O `--aplicar` só
+mapeia onde há **um único** candidato.
+
+## Erros meus
+
+- **Escrevi os testes de contenção com a especificação errada.** Pedi recusa
+  (400) para `backups/dump.gz` relativo, quando a contenção já basta e é o
+  comportamento que não parte o uso legítimo. Seis testes vermelhos, e o
+  código é que estava certo. Reescrevi a classe para afirmar a propriedade
+  real: a chave que chega ao S3 nunca é a do backup.
+- Repeti o mesmo engano em duas asserções do inventário (`../backups` é
+  recusado, não contido).
+
+## O que NÃO consigo entregar daqui
+
+**Os números da cobertura.** Este ambiente não tem credenciais S3 nem base de
+dados viva — dev opera com mocks por desenho, e é regra do projecto não tentar
+resolver rede de serviços externos aqui. O script recusa-se a correr e diz
+porquê, em vez de reportar zeros: um relatório de cobertura falso levaria a
+uma decisão de produto errada.
+
+Os números têm de sair do ambiente real, com o comando documentado no
+cabeçalho do script.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2603 passed** (baseline 2551, +52).
+- `flake8 --select=E9,F63,F7,F82` → 0. `yarn test` → **1071 passed / 93 ficheiros**
+  (inalterado — não toquei em código do frontend).
+- Mutação: **13 aplicadas, 13 mortas** (5 na contenção, 5 no explorador
+  incluindo a paginação, 3 na medição).
+
+---
+
+# Iteração — Gestor de Ficheiros S3, Passos 3 e 4 (Set 2026)
+
+## Os números que decidiram
+
+Medição em produção: **12.450 pastas, 9.800 mapeadas, 2.650 órfãs** (2.400
+resolúveis), **45 ambíguas**, **205 ligações partidas**. As 205 provam
+empiricamente o diagnóstico do `rename`.
+
+Uma precisão sobre as categorias, porque muda o que fica invisível: as 45
+ambíguas **estão mapeadas** (têm donos, só que de redes diferentes), e as 205
+ligações partidas são **processos** a apontar para o vazio, não pastas. Depois
+do backfill ficam ~250 pastas órfãs + 45 ambíguas invisíveis ao staff normal —
+e as 205 ligações partidas provavelmente apontam para pastas que estão entre
+essas órfãs, porque foram renomeadas.
+
+## Passo 3 — a Parede
+
+`services/s3_explorer_scope.py`: decisão no **primeiro segmento**, uma query em
+LOTE por página, nunca N+1. Índices `idx_s3_folder` e `idx_network_id`.
+
+Só a Camada 1, e com **um dialecto só**: `realtime_audience.passa_a_rede`
+passou de privado a público em vez de ser reescrito.
+
+Órfãs e ambíguas só para ADMIN/CEO — excepção de **reconciliação, não de
+hierarquia** (um director não entra). 404, nunca 403.
+
+Papéis em três níveis: ver/carregar para todo o staff; renomear/apagar na
+gestão (apagar uma pasta de cliente leva o histórico inteiro); `parceiro` e
+`cliente` fora dos dois.
+
+## Passo 4 — o religamento
+
+São **quatro** coisas a mover, não uma: `processes.s3_folder`,
+`document_metadata.s3_path` (que sustenta o separador Documentos, o badge IA e
+as validades) e `documents.s3_path` + `attached_files` (pedidos do Portal).
+Fronteira de segmento — `Joao_Silva_2` é outro cliente, e o sufixo `_2` é
+exactamente como o sistema desambigua homónimos. Nunca bloqueia: os objectos já
+se moveram.
+
+O `rename` de pasta também não paginava — acima de 1000 objectos movia alguns e
+apagava-os. É a origem mecânica das 205 ligações partidas.
+
+## Guardas do Lote 5 que ficaram obsoletas — e o que fiz com elas
+
+Quatro testes afirmavam a página trancada a admin/ceo. Não os apaguei:
+reescrevi-os para a invariante NOVA (staff entra, `parceiro`/`cliente` não;
+apagar fica na gestão) e acrescentei uma guarda que afirma que **as seis
+operações resolvem o âmbito** — reabrir os papéis sem a parede seria o Lote 5 ao
+contrário.
+
+## Erros meus
+
+- **Duas mutações sobreviveram** e as duas eram lacunas reais: propriedades que
+  escrevi em comentário e nunca afirmei. Uma pasta desconhecida (`None`) não ser
+  visível, e uma **leitura falhada** da base de dados esconder tudo em vez de
+  abrir. A segunda é a mais séria: uma leitura falhada não pode abrir o que a
+  leitura bem sucedida fecharia.
+- **Uma terceira sobreviveu por o meu teste não cobrir o ramo do ficheiro
+  solto** no `rename` — só testei o de pasta.
+- A minha própria guarda de transporte ficou vermelha por causa do comentário
+  que explica a regra; era exactamente o caso que ela existe para evitar.
+- A transformação automática dos `fetch` deixou dois `catch` seguidos (JS
+  inválido) e um bloco `else` órfão. Apanhados pelo ESLint, não por mim.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2660 passed** (baseline 2603, +57).
+- `yarn test` → **1071 passed / 95 ficheiros** (baseline 1064 / 93).
+- `flake8 --select=E9,F63,F7,F82` → 0. `eslint --quiet` → 0. `vite build` verde.
+- Mutação: **13 aplicadas, 13 mortas** (7 no âmbito, 3 no religamento, 3 no
+  explorador).
+
+---
+
+# Iteração — Estado & Workflow, Passo Zero: medir antes de tocar (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+Épico 10, Parte 3. O pedido era refinar o agrupamento das fases no funil de
+negócio. O raio-x mostrou que o funil não era o problema — o vocabulário é.
+
+## A premissa que estava errada
+
+`workflow_statuses` **não tem campo de macro-fase**. Sabe `name`, `label`,
+`order`, `color`, `portal_label`, `visible_in_portal` e cinco flags de
+comportamento. As macro-fases vivem numa lista cravada em
+`frontend/src/utils/funilDeFases.js`, e o cabeçalho desse ficheiro — escrito
+por mim no Lote 5 — diz exactamente isso. O agrupamento não é um refinamento
+de configuração: é um campo que ainda não existe.
+
+## Cinco vocabulários de fases, dois deles inexistentes
+
+| Onde | O que declara |
+|---|---|
+| Motor (`seed.py`) | 14 fases reais |
+| `STATUS_VALUE_ALIASES` (backend) | singular/plural dos terminais |
+| `ALIASES_LEGADOS` (`utils/processTimeline.js`) | 10 nomes antigos |
+| `MACRO_FASES` (`utils/funilDeFases.js`) | 4 grupos |
+| `stats_branches` + `scheduled_tasks` + `admin_dev_ops` | `documentacao`, `analise`, `pre_aprovacao`, `credito_aprovado`, `cpcv`, `minuta`, `escritura`… |
+
+A última linha é a séria: o **dashboard BI de balcões** mede sobre nomes que o
+motor não tem. `_COMPLETED_STATUSES = ["concluido", "arquivo"]` quando a fase
+terminal do produto se chama `concluidos`. O tempo de fecho estava a ser
+calculado sobre conjunto vazio.
+
+Também há três definições simultâneas de "terminal": a flag dinâmica
+`is_active` (Kanban/move, a correcta), `INACTIVE_STATUSES` (Portal) e
+`ARCHIVED_STATUSES` (filtro de vista do Kanban).
+
+Uma nota justa: `status` **já está indexado** — `idx_status` mais três
+compostos em `db_indexes.py`. Essa preocupação já estava resolvida.
+
+## O quadro perde cartões que o contador conta
+
+`group_processes_by_status` agrupa por igualdade EXACTA; o contador do
+cabeçalho (`build_active_inactive_count_queries`) conta por `$in` **com** os
+aliases. Um processo em `concluido` (singular), numa fase apagada ou com um
+espaço a mais no nome não aparece em coluna nenhuma e continua a somar para o
+número lido por cima do quadro. Sem erro, sem log.
+
+`tests/unit/test_kanban_cartoes_perdidos.py` prende o defeito. Afirma o
+comportamento **errado**, que é o que está em produção hoje, com contraprova
+ao lado; quando a Parte 1 fechar o buraco, estas asserções invertem-se — e a
+inversão é a prova de que a correcção mordeu.
+
+## O que este passo entrega
+
+- `services/workflow_status_coverage.py` — lógica **pura** da medição.
+  Funde as duas tabelas de alias que hoje vivem em lados opostos da aplicação
+  (`escriturado` do frontend e `concluido` do backend passam a ser o mesmo
+  grupo). Classifica cada status órfão em **resolúvel / ambíguo /
+  desconhecido** pela disciplina do `rede_consensual`: mais do que um
+  candidato → ninguém escolhe. Detecta gralhas invisíveis (capitalização,
+  espaço à direita, hífen) e mede as listas cravadas importando-as dos
+  módulos **reais**, privadas incluídas — uma cópia local mediria a cópia.
+- `scripts/medir_status_producao.py` — script fino, **só leitura**. Sem
+  `--aplicar` e sem o vir a ter: o passo seguinte é uma decisão de produto,
+  não uma correspondência inequívoca. Uma agregação única sobre `idx_status`.
+  Não chama o `env_guard` de propósito — o guarda existe para impedir um seed
+  de escrever em produção, e é contra produção que isto tem de correr; o que o
+  torna seguro é a guarda sobre o código-fonte que afirma que nenhuma operação
+  de escrita aparece no ficheiro, com contraprova de que lê mesmo as duas
+  colecções.
+- Guarda de paridade: a cópia portada de `ALIASES_LEGADOS` é comparada com o
+  original em `processTimeline.js`. Duas cópias da mesma tabela em linguagens
+  diferentes divergem em silêncio; a Parte 1 mata a duplicação, até lá fica
+  vigiada.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2725 passed** (baseline 2660, +65).
+- `flake8 --select=E9,F63,F7,F82` → 0. `yarn test` → **1071 passed / 93 ficheiros**
+  (inalterado — não toquei em código do frontend).
+- Ensaio ponta-a-ponta contra Mongo local com dados sintéticos (órfão
+  resolúvel, órfão desconhecido, gralha, leads sem status, eliminados):
+  relatório e JSON corridos, base de ensaio apagada no fim.
+
+## O que ainda não sabemos
+
+Os números de produção. O motor diz 14 fases, o `stats_branches` diz outras
+13, e o ambiente de dev é mockado — recusei-me a inventar a distribuição, pela
+mesma razão que recusei inventar a cobertura do S3. O backfill das macro-fases
+parte do JSON que o script devolver, não do seed.
+
+---
+
+# Iteração — Estado & Workflow, Parte 1: o Resolvedor (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+O retrato de produção deu os números e desbloqueou a intervenção:
+**12.450 processos, 342 invisíveis no quadro** (205 com nome antigo, 12 com
+gralha, 125 em fases que o motor não tem) e o BI de balcões a apanhar
+**0 de 12.450**.
+
+## Um ponto do JSON que não podia ter saído do script
+
+O retorno trazia `cpcv → fase_documental`. A tabela do produto
+(`processTimeline.js`, escrita antes de mim) diz `cpcv → fase_escritura`, e
+o código não tem caminho nenhum de `cpcv` para `fase_documental` — verifiquei
+antes de escrever uma linha.
+
+Não apliquei o destino do JSON. Um CPCV acontece **depois** do crédito
+aprovado e antes da escritura: mandá-lo para a fase documental moveria 120
+processos para TRÁS no funil, de quase-fechados para o início do trabalho.
+Implementei o mecanismo com a tabela do produto e há um teste com esse nome
+(`test_cpcv_vai_para_a_escritura_e_nao_para_a_documental`). Fica para
+confirmação.
+
+## O que foi feito
+
+- **`services/workflow_phases.py`** — o ponto único dos NOMES (o
+  `workflow_lookup` já era o das FLAGS). Ordem fixa: `exacto` → `gralha` →
+  `alias` → `desconhecido`. A gralha vem antes do alias porque
+  `"Concluidos "` não é uma fase de outra época, é a mesma fase mal gravada.
+- **O quadro deixou de perder cartões.** O agrupamento passa pelo resolvedor
+  e o que sobra vai para a coluna `Fases desconhecidas`, visível a
+  `ADMIN`/`CEO` pelo papel **efectivo**. A resolução é de LEITURA: o cartão
+  muda de coluna, o `status` gravado não muda. Reescrever 205 processos em
+  massa dispararia automações sobre processos que ninguém tocou — o defeito
+  do `run_delete_workflow_status`.
+- **Cinco módulos varridos:** `stats_branches` (3 listas), `scheduled_tasks`
+  (12 nomes), `portal_status` (terminal por lista), `portal_profile` (a
+  mesma regra à mão em DOIS sítios) e `alerts` (3 nomes na contagem da
+  pré-aprovação + 3 títulos de notificação, que agora vêm do `label` que o
+  admin escreveu).
+- Cache do BI para `stats:branches:v2` — servir a antiga mostraria durante
+  mais uma hora o número medido sobre fases inexistentes.
+- `macro_da_fase` lê **primeiro** `fase["macro_fase"]`: o runtime já está
+  pronto para a Parte 2 sem mudar nada.
+
+## Os testes a inverter
+
+| Ficheiro | Antes | Agora |
+|---|---|---|
+| `test_kanban_cartoes_perdidos.py` | 2 processos → 1 cartão | 2 → 2, e nada desaparece |
+| `test_stats_extraction_helpers.py` | as 3 listas existem | as 3 listas desapareceram |
+| `test_workflow_status_coverage.py` | o BI mede fases inexistentes | tudo o que o BI mede existe |
+| idem (gralha) | gralha fica órfã | gralha resolve (directriz 2) |
+| idem (macro) | a proposta não mexe no resto | só alarga, nunca remove |
+
+## Erros meus
+
+**Três mutações sobreviveram, e as três eram lacunas reais.**
+
+- **M8** — o enum fechado de macro-fases era desenho e comentário, nunca
+  afirmação: uma fase podia declarar `macro_fase: "inventado"` e passar. É
+  o ponto todo do agrupamento aprovado.
+- **M10** — `pode_ver_desconhecidas(None)`. Testei admin, ceo e consultor e
+  não testei o papel que não se resolve. A propriedade que interessa não é
+  "o admin vê", é que quem não se identifica **não** vê.
+- **M14 — teste fraco, não mutação perdida.** Afirmei que `concluidos`
+  estava no `$in` e `clientes_espera` não. Isso é verdade TAMBÉM com a
+  lista legada: escolhi dois nomes em que os dois dialectos concordam, e
+  portanto não testei nada. A asserção que distingue precisa de uma fase
+  terminal PARA O MOTOR e ausente da lista legada.
+
+Também tinha decidido deixar passar os três títulos de notificação do
+`alerts.py` por serem "cosméticos" — a guarda que eu próprio escrevi
+apanhou-os. Corrigi em vez de abrandar a guarda.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3226 passed, 5 skipped** (baseline 2725).
+- `yarn test` → **1077 passed / 94 ficheiros** (baseline 1071 / 93).
+- `flake8 --select=E9,F63,F7,F82` → 0. `eslint --quiet` → 0. `vite build` verde.
+- Mutação dirigida ao resolvedor, ao quadro e ao Portal: **15 aplicadas, 15
+  mortas** (3 sobreviveram à primeira passagem — ver acima).
+
+## O que NÃO foi feito, e porquê
+
+`INACTIVE_STATUSES` continua a ser lido em ~30 sítios, quase todos
+construtores de query **síncronos**. Deixou de ser a **definição** de
+terminal (essa é a flag `is_active`) e passou a ser o **resíduo legado** —
+mudança de estatuto, não de conteúdo. Convertê-los todos obrigaria a tornar
+assíncronos os construtores de listagem e é um lote próprio, não uma nota
+de rodapé deste.
+
+---
+
+# Iteração — Estado & Workflow, Parte 2: as Macro-Fases (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+A Parte 1 deixou o runtime pronto — `macro_da_fase` já lia o campo antes de
+ele existir. A Parte 2 criou-o.
+
+## `cpcv → fase_escritura` confirmado
+
+O lapso do JSON foi reconhecido e o mapeamento original fica. Os 120
+processos em CPCV continuam a resolver para a antecâmara da escritura, não
+para o início do funil.
+
+## O enum fechado tem TRÊS defesas, não uma
+
+| Onde | O quê |
+|---|---|
+| `models/workflow.py` | `MacroFase(str, Enum)` — Pydantic recusa ao gravar |
+| `workflow_phases.macro_da_fase` | valor fora do enum ignorado **ao ler** |
+| `WorkflowEditor` | `<Select>` de cinco opções, nunca `<Input>` |
+
+A defesa de leitura não é redundante: um documento gravado antes do campo
+existir, ou por um script, pode trazer qualquer coisa. O modelo protege o
+que entra hoje; `macro_da_fase` protege o que já lá está.
+
+**`MACRO_FASES_VALIDAS` deriva do Enum**, não é cópia. E circula sempre
+`str` simples — com o mixin `str`, `MacroFase.NOVO in {"novo"}` até é
+verdadeiro, mas depende inteiramente do mixin: tirar `str` da declaração é
+uma linha inocente que partia o agrupamento sem um único erro. Há um teste
+a afirmar o mixin.
+
+Uma correcção minha: escrevi primeiro que a pertença falharia com o mixin
+(`enum.Enum.__hash__` é o do nome). Verifiquei e é falso — o `str.__hash__`
+ganha. Corrigi o comentário no código: uma afirmação de facto errada no
+código-fonte é pior do que nenhuma.
+
+## O backfill pode correr em todos os arranques
+
+Só escreve onde `macro_fase` está ausente ou `None`, e a condição está **na
+query**, não num `if` em Python. Uma fase que o administrador classificou
+nunca é tocada — sem isso, cada reinício do servidor repunha a omissão por
+cima da decisão humana e ninguém perceberia porquê.
+
+O que o mapa não cobre fica **por classificar**. Inventar um grupo seria
+pior do que não ter nenhum.
+
+## O funil deixou de perder as desistências
+
+No agrupamento anterior não havia grupo `perdido` e as desistências caíam em
+«Outras fases». Num funil de negócio o processo perdido é informação — é a
+taxa de conversão — e não sobra.
+
+O `funilDeFases.js` perdeu a lista de fases; ficaram as etiquetas e as cores
+dos cinco grupos. O `statuses` de cada grupo passou a ser o que REALMENTE
+caiu lá dentro, não a lista declarada: é o que serve para clicar e filtrar.
+
+## Erros meus
+
+**Três mutações sobreviveram, e uma nem chegou a aplicar** (o padrão da N1
+não casava — corrigido e re-corrida).
+
+- **N8 e N9 — lacunas reais.** Testei o modelo e testei o resolvedor, e não
+  testei **a costura**: o handler que pega no que o Pydantic validou e o
+  grava. Entre os dois havia duas maneiras de falhar em silêncio — gravar o
+  membro do Enum em vez do valor, e ignorar o campo no `update`. A segunda
+  é a pior: o `<Select>` da UI ficava decorativo, o administrador escolhia,
+  gravava, recebia 200 e nada mudava.
+- **N6 — nem teste fraco nem código morto.** A condição de ausência na query
+  do `update_one` protege de uma corrida entre a leitura e a escrita do
+  backfill, e essa corrida não se reproduz num só fio. Afirmei a forma da
+  query e disse porquê, em vez de fingir um teste de comportamento.
+
+E a minha própria fixture de teste construía fases sem `color`, que faz
+parte do contrato do `WorkflowStatusResponse` — o handler de actualização
+rebentou a devolver a fase. É a lição do Lote 5, ponto 4 (usar os
+construtores reais), outra vez.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3270 passed, 5 skipped** (baseline 3226).
+- `yarn test` → **1093 passed / 95 ficheiros** (baseline 1077 / 94).
+- `flake8 --select=E9,F63,F7,F82` → 0. `eslint --quiet` → 0. `vite build` verde.
+- Mutação dirigida ao modelo, ao backfill, ao CRUD do admin e ao Portal:
+  **12 aplicadas, 12 mortas** (3 sobreviveram à primeira passagem).
+
+## A fazer em produção
+
+O backfill corre sozinho no arranque seguinte. Confirmar nos logs a linha
+`[WORKFLOW-PHASES] Backfill de macro-fases:` — e o número de `sem proposta`,
+que são as fases que ficam à espera de classificação na UI.
+
+---
+
+# Iteração — Limpeza Estrutural, Ponto 1: o fim do `INACTIVE_STATUSES` (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+## A dívida era menor do que eu declarei
+
+Escrevi "~30 sítios, quase todos construtores síncronos". Contei por AST antes
+de tocar em código:
+
+| | |
+|---|---|
+| Já dentro de `async def` | **13** |
+| Em funções síncronas | **19 linhas**, em **5 funções**, **2 módulos** |
+| Constantes derivadas no import | **6** |
+
+## Injecção, não conversão para `async`
+
+Os cinco construtores são **puros** — é isso que os mantém testáveis sem
+Mongo no `backend-fast`. Ganharam `terminais: Optional[list[str]] = None`;
+quem resolve é o chamador, que já era assíncrono. A omissão mantém
+`INACTIVE_STATUSES`, portanto nada muda por acidente.
+
+`_arquivadas(terminais)` **deriva** o histórico dos terminais tirando o
+`eliminado` (soft-delete, não uma fase). Uma segunda lista divergiria da
+primeira assim que o admin fechasse uma fase.
+
+## As 6 constantes derivadas eram o pior caso
+
+`set(INACTIVE_STATUSES) | {...}` calculado **no import** congela o motor no
+arranque do processo. Com um servidor de pé durante dias, uma fase fechada
+pelo administrador só passava a contar no deploy seguinte — e ninguém ligava
+as duas coisas.
+
+## A cache
+
+TTL de 30s, local ao processo. Duas decisões que não são óbvias:
+
+- **Uma leitura falhada não fica em cache.** Guardar `[]` por 30s
+  transformava um soluço do Mongo em meio minuto de listagens vazias.
+- **Um `autouse` no `conftest` limpa-a entre testes.** Sem ele, um teste que
+  patche o `db` herdava as fases do anterior e o resultado dependia da ORDEM
+  de recolha do pytest.
+
+## O primeiro teste vermelho não era o que parecia
+
+`workflow_phases` importa `db` no topo, e o helper `_tenant_db` patchava
+`kanban.db` e `tenant_network.db` mas não este. O `carregar_fases` falava com
+o proxy real, a excepção era engolida pela degradação graciosa, devolvia `[]`
+— e o quadro vinha **sem colunas**, com um teste de ISOLAMENTO a ficar
+vermelho por causa do `db`. Uma cadeia nova entra no helper, e o docstring
+di-lo agora.
+
+## Erros meus
+
+**Três mutações sobreviveram. Duas eram testes fracos meus, do mesmo tipo
+que já me apanhou no M14.**
+
+- **P8** — o teste do TTL aquecia a cache DEPOIS de inserir a segunda fase e
+  afirmava que via duas. A cache já tinha duas: o valor em cache e o fresco
+  eram iguais, portanto a expiração era invisível. `agora < expira_em` →
+  `True` passava à mesma.
+- **P10** — afirmei que `usar_cache=False` devolve dados frescos, e nunca que
+  **não escreve** na cache. Se escrevesse, continuava verdade — e a leitura
+  seguinte passava a servir o que uma chamada de "não uses cache" lá deixou.
+- **P11 — lacuna real: nunca testei a costura.** Testei os construtores um a
+  um e não o `run_get_kanban_board` a resolver as fases e a passá-las. Com
+  `terminais=None` as colunas vinham do motor e o FILTRO da lista legada —
+  os dois dialectos outra vez, agora dentro do mesmo pedido.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3310 passed, 5 skipped** (baseline 3270).
+- `flake8 --select=E9,F63,F7,F82` → 0.
+- Mutação dirigida à injecção, às constantes e à cache: **11 aplicadas**.
+
+## O que fica
+
+`INACTIVE_STATUSES` continua a existir e está certo assim: deixou de ser a
+**definição** de terminal (essa é a flag `is_active`) e é o **resíduo
+legado** — `perdido`/`cancelado`/`arquivo`, que existem em dados reais e não
+são fases. Os 13 usos que já eram `async` e os que sobram lêem-no por omissão
+quando ninguém injecta, o que é o comportamento correcto e não dívida.
+
+---
+
+# Iteração — Limpeza Estrutural, Pontos 2 e 3: presença global e o campo morto (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+## O defeito custava um push no bolso
+
+`manager.is_user_connected` responde pela memória DESTE processo. Com
+`UVICORN_WORKERS=2`, um utilizador com o socket no worker B lê-se como
+desligado no worker A — e em `realtime_notifications` era essa a pergunta que
+decidia o **push no telemóvel**. Quem estava a olhar para a aplicação levava
+notificação no telefone porque a emissão calhou no worker vizinho.
+
+## `services/presenca.py` — um ZSET
+
+`presenca:online`, membro = `user_id`, score = instante de expiração.
+
+- `esta_online` → `ZSCORE` > agora, O(1)
+- `online_entre` / `todos_online` → **um** `ZRANGEBYSCORE`
+
+O lote é o ponto: `chat_presence` e `chat_conversations` perguntavam **dentro
+de um ciclo**. Ficou mais barato do que a memória local que substituiu — há
+um teste a contar as idas ao Redis para 50 utilizadores: **uma**.
+
+O batimento já existia (`ping` de 30s do `useWebSocket`); TTL de 90s tolera
+um ping perdido. A ligação marca logo, sem esperar pelo primeiro ping.
+
+**A desconexão não remove**, de propósito: se o worker A removesse, o worker
+B — que ainda tem um separador aberto — só repunha no batimento seguinte, e
+nesse intervalo o utilizador apanhava push estando online. Deixando expirar,
+a entrada só morre quando NENHUM worker a renova: zero fantasmas depois de um
+crash, ao preço de até 90s de "online" a mais. O erro é para o lado seguro.
+
+## A degradação é ABERTA, ao contrário da minha regra habitual
+
+Redis em baixo → responde o manager local. É o contrário do que faço no
+isolamento por rede, e a razão está escrita no módulo: presença **não é
+fronteira de segurança**. Uma leitura falhada que respondesse "ninguém está
+online" partia o Chat e enchia telemóveis de push.
+
+Um caso subtil: quando o `ZSCORE` devolve `None`, consulta-se **na mesma** o
+manager local — uma ligação acabada de abrir cuja escrita falhou existe de
+facto, e dizer "offline" mandava push a quem está mesmo online.
+
+## A falésia, simulada
+
+Não simulei o processo: simulei o que o distingue. Cada "worker" tem o SEU
+`ConnectionManager` e os dois partilham UM Redis falso. Trocar qual está
+activo é exactamente a diferença entre atender no worker A ou no B. O
+ficheiro afirma o **defeito** e a **correcção**.
+
+## Ponto 3 — `is_notified` extinto
+
+Escrito em dois sítios, lido em zero. A escrita saiu; o `$unset` dos
+documentos antigos vive em `scripts/limpar_is_notified.py`, que só conta sem
+`--aplicar` e trabalha em lotes — um `update_many` sobre centenas de milhares
+de documentos segura o servidor, e esta colecção é lida pelo sino de toda a
+gente.
+
+## Erros meus
+
+- **Q13 — guarda fraca.** Escrevi uma guarda a procurar
+  `manager.is_user_connected`, uma **grafia**. A mutação escreveu
+  `_m.is_user_connected` — outro nome para o mesmo objecto — e passou por
+  baixo. Uma guarda sobre o código-fonte que casa um nome de variável está a
+  testar ortografia. Apertei-a para o método, e acrescentei os testes de
+  **comportamento** de `run_get_chat_users` e `run_get_online_users`, que era
+  o que faltava de verdade.
+- Deixei uma linha sem sentido num teste
+  (`await presenca.markar_online if False else None`) — resíduo de edição,
+  removida.
+- Voltei a cair na normalização de aspas do `ast.unparse` numa guarda de
+  código-fonte. Está escrito no `AGENTS.md`, escrito por mim.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3352 passed, 5 skipped** (baseline 3310).
+- `flake8 --select=E9,F63,F7,F82` → 0.
+- Mutação dirigida ao serviço, aos consumidores e ao ponto de ligação:
+  **14 aplicadas, 14 mortas** (1 sobreviveu à primeira passagem).
+
+## A fazer em produção
+
+`python -m scripts.limpar_is_notified` (conta) e depois `--aplicar`. A
+presença entra sozinha no arranque seguinte; se `REDIS_URL` não estiver
+definido, tudo continua a funcionar pela memória local, como hoje.
+
+# Iteração — o relógio de fases medido e o BI isolado (Dashboard, Passo Zero + Ponto 1)
+
+## O que o raio-x encontrou antes de eu escrever código
+
+**Não existe relógio.** Nenhum processo sabe quando entrou na fase em que
+está. O `stats_branches` calculava "tempo médio de fecho" como
+`updated_at - created_at` — que é o tempo entre a criação e o último toque em
+**qualquer** campo. Um documento carregado hoje num processo escriturado há um
+ano acrescentava 365 dias ao tempo médio daquele balcão. O número era
+plausível, e é isso que o torna pior do que um erro visível.
+
+**O `history` não pode ser a fonte dos SLAs, e não é um defeito.** Inventariei
+os seis caminhos que escrevem `status`: dois são filtrados por stealth, o
+`process_indexing` silencia-se quando é a Indexação a avançar, o
+`portal_onboarding_advance` grava com `track_history: False` e o
+`workflow_engine.change_status` não escreve nada. Metade das transições é
+invisível **porque a regra de ouro do perfil `indexacao` assim manda**. Um SLA
+medido sobre o histórico ficava enviesado a favor de quem tem de ser invisível.
+Daí o desenho aprovado: o relógio é estado do processo, sem ator — funciona
+exactamente onde o rasto não pode existir.
+
+**Zero filtro de rede em todas as estatísticas.** `grep tenant\|network_id` nos
+seis módulos e no `analytics_service`: zero ocorrências. O pior não é uma
+contagem — o `stats_communications` devolvia a admin/ceo/administrativo/diretor
+os primeiros 150 caracteres do que os clientes escreveram no Portal e os
+assuntos dos emails não lidos, de todas as redes.
+
+## Passo Zero — `medir_relogio_de_fases`
+
+Leitura crua, sem `--aplicar`, sem `env_guard` (corre contra produção de
+propósito). Responde a cinco perguntas: processos por macro-fase **resolvidos
+pelo motor**, cobertura do relógio, distribuição de permanência nas bandas que
+o `$bucket` vai usar, onde é que o `updated_at` mente e **em que sentido**, e
+que carimbo de rede existe.
+
+Duas decisões de desenho que me interessam:
+
+- **A macro-fase vem do resolvedor, não do valor cru.** Os 205 processos em
+  `cpcv`/`escriturado` e as 12 gralhas contam na macro certa, como já contam no
+  quadro. Agrupar por `status` numa agregação era mais rápido e dava duas
+  verdades sobre os mesmos 217 processos.
+- **`agora` é injectado.** Uma medição que dependa do relógio da máquina não se
+  afirma num teste, e há uma guarda sobre o código-fonte a proibir
+  `datetime.now` no módulo.
+
+## Ponto 1 — a blindagem
+
+`services/stats_scope.py` é o ponto único: `resolver_ambito`, `com_ambito`,
+`ambito.chave(...)` e `processos_no_ambito`. Ligado aos cinco endpoints, às
+contagens de utilizadores (pelo `admin_users_scope` que já existia) e ao
+relatório de Desempenho da Equipa.
+
+**A cache era metade do problema.** `stats:branches:v2` e
+`stats:global:conversion` eram chaves globais: com o filtro posto, o primeiro
+pedido semeava a cache para todos. Um filtro sobre uma cache partilhada é
+teatro. As chaves por utilizador já eram seguras por construção.
+
+**O sentido barato.** `processos_no_ambito` parte da colecção **pequena** (via
+`distinct` sobre prazos abertos e mensagens não lidas) e verifica esses poucos
+ids contra a rede. O contrário — trazer os processos da rede para um `$in` —
+funcionava hoje com 12.450 e morria à primeira multiplicação de volume.
+
+**As leads passam a ser carimbadas nos DOIS sítios de escrita**, com guarda de
+código-fonte: um carimbo parcial é pior do que nenhum, porque a metade sem
+marca fica visível ao grupo incumbente para sempre.
+
+## Duas mudanças de significado que assumo
+
+1. O cartão de prazos da Direção somava os lembretes **pessoais** de todos os
+   utilizadores de todas as redes. Passa a contar os prazos dos processos da
+   rede mais os pessoais do próprio — a regra que o ramo dos consultores já
+   aplicava.
+2. Um email **sem processo** deixa de aparecer no feed aos papéis
+   privilegiados. `db.emails` não é carimbada (oito sítios de escrita mais o
+   sync IMAP/Gmail) e um email que não se consegue atribuir a uma rede não se
+   pode mostrar a uma.
+
+## Erros meus
+
+- **Dois sobreviventes de mutação eram lacunas reais, não mutantes
+  equivalentes.** (a) `tocado == criado` contra `tocado <= criado`: uma data
+  invertida — dado corrompido, já contado em `datas_invalidas` — era somada
+  também em `nunca_tocado`, inflacionando o número pelo qual se decide se a
+  estimativa serve. (b) A janela de `tocado_apos_fecho` tinha o limite
+  **superior** por testar: um processo terminal tocado há 200 dias tem no
+  `updated_at` uma data de entrada plausível e não devia ser marcado como
+  suspeito. Os dois têm agora teste.
+- **Um terceiro sobrevivente é mutante equivalente, e verifiquei-o em vez de o
+  assumir:** `if valor is None or valor == ""` contra `if valor is None` — o
+  `fromisoformat("")` levanta de qualquer maneira e o ramo de excepção devolve
+  `None` igualmente. Nenhum teste o pode matar. Escrevi no código que aquele
+  `if` é **atalho** e não guarda de correcção, que é o que faltava para um
+  leitor seguinte não se enganar.
+- **Dois erros meus nos próprios testes.** Comparei `chaves_domus[0]` com
+  `chaves_power[0]` quando as duas variáveis apontavam para a **mesma lista**
+  acumulada pela fixture — a asserção era trivialmente falsa e foi o teste a
+  denunciá-la. E patchei um `cache_get` em `stats_communications`, que não tem
+  cache nenhuma; o `AttributeError` é informação.
+- **O inventário de módulos de estatísticas apanhou-me.** O
+  `test_stats_modules_exist` ficou vermelho com o `stats_scope.py` novo — a
+  guarda a fazer o seu trabalho. Actualizei a lista com a razão escrita ao
+  lado, em vez de a relaxar.
+- **O cenário de tenant estava a caminho de ser duplicado.** Extraí-o para
+  `tests/unit/helpers_tenant.py` e apontei o ficheiro do Lote 4 para lá: duas
+  cópias divergem na primeira empresa que alguém acrescente a uma delas.
+- **Quase estraguei a invalidação da cache ao corrigi-la.** Pôr o sufixo do
+  âmbito nas chaves globais fez o `invalidate_stats_cache` deixar de acertar em
+  nenhuma delas — apagava por NOME EXACTO, e o nome exacto passou a não
+  existir. A invalidação cirúrgica ficava silenciosamente sem efeito e as
+  estatísticas ficavam 24h desactualizadas depois de cada mutação. Apanhei-o a
+  reler o meu próprio diff, não num teste. Passou a apagar por PADRÃO, com
+  testes nos dois sentidos (apanha as chaves com sufixo, **não** apanha as de
+  utilizador — o padrão errado deitava fora a cache de toda a gente).
+- **Mais dois testes fracos meus, apanhados por mutação.** (a) A contagem de
+  prazos não tinha teste NENHUM: o mutante que trocava
+  `processos_no_ambito(ids, ambito)` por `ids` passava porque nunca semeei
+  prazos. (b) Escrevi um teste da chave de cache que comparava a chave do Bruno
+  com a da Ana — utilizadores diferentes já tinham chaves diferentes **sem
+  sufixo nenhum**, portanto a asserção era verdadeira também no código antigo.
+  Reescrito para o que interessa: o MESMO utilizador, dois âmbitos, depois de
+  lhe mudar a empresa.
+- **Um terceiro sobrevivente era contrato de CUSTO, não de resultado.** Trocar
+  o filtro do `distinct` dos prazos por `{}` não muda a contagem — muda o
+  tamanho do conjunto que vai para o `$in` da verificação de rede. Afirmei-o
+  como contrato de custo, o mesmo género de teste que o "uma chamada para 50
+  utilizadores" da presença global.
+- **Voltei a deixar uma linha sem sentido num teste** (`ss.resolve_tenant_scope`
+  como expressão solta, resíduo de edição). É a segunda vez; removida.
+- **Um teste meu passava isolado e rebentava na bateria completa.** O
+  `admin_users_scope` importa `db` no topo e eu não o tinha na cadeia de
+  patches do helper — o teste do utilizador órfão (que é admin) falava com o
+  proxy real e só dava `Event loop is closed` com a suite toda. É exactamente o
+  defeito de ordem de import que está escrito no `AGENTS.md`, e a cadeia de
+  `db` que cresce a cada lote: acrescentei-a ao helper, que agora recebe os
+  módulos por parâmetro para a próxima não ficar esquecida.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3494 passed, 5 skipped** (baseline 3352).
+- `yarn test` → **1093 passed / 95 ficheiros** (inalterado; não toquei no
+  frontend neste lote).
+- `flake8 --select=E9,F63,F7,F82` sobre `services/ scripts/ tests/ routes/` → 0.
+- Mutação dirigida, em quatro passagens: **21 na medição** (18 + 3 de
+  reforço) e **28 na blindagem** (22 + 6 de reforço). Uma sobreviveu e
+  fica registada como **mutante equivalente**, verificada em vez de assumida:
+  `if valor is None or valor == ""` contra `if valor is None`, porque o
+  `fromisoformat("")` levanta de qualquer maneira. Escrevi no código que aquele
+  `if` é atalho e não guarda de correcção.
+
+## O que fica de fora, e é dito
+
+O email automático de Segunda ao CEO mantém âmbito global — não tem utilizador
+a pedir, e decidir se passa a ser um email **por rede** é decisão de produto.
+Fica um `logger.warning` no caminho e um teste a afirmar que ele sai.
+
+`db.emails` continua sem carimbo de rede (oito sítios de escrita + sync). O
+conteúdo está fechado pelo processo; a contagem de não lidos segue a mesma
+regra. O carimbo próprio pertence ao lote do webmail.
+
+## A fazer em produção
+
+```bash
+python -m scripts.medir_relogio_de_fases --json relogio.json
+```
+
+E o índice `{network_id: 1, is_deleted: 1, status: 1}` em `processes` deixou de
+ser opcional: todas as agregações do BI passam a filtrar por rede.
+
+# Iteração — o cronómetro sem ator (Dashboard, Camada 1)
+
+## O que a medição de produção decidiu
+
+O `relogio.json` sobre os 12.450 processos reais: **3.105 nunca tocados** (a
+estimativa cairia na data de criação — sobrestima) e **1.840 tocados depois de
+fechar** (subestima). Quase 5.000 aproximações falsas. E 3.200 processos na
+banda `61+` de `concluido`, que não é um gargalo: um processo concluído não
+demora em concluído, fica lá. Daí `MACROS_SEM_PERMANENCIA` — quem procurar
+gargalos exclui as terminais, senão o painel grita sobre processos que estão
+exactamente onde devem estar.
+
+`dependencia_tenant_default: 0` é boa notícia à parte: não há pilha por
+carimbar, portanto o isolamento que entrou no lote anterior é exacto e não
+depende da variável de ambiente para os processos.
+
+## O desenho, e as duas decisões que não são óbvias
+
+**Duas bandeiras de estimativa, não uma.** `fase_desde_estimado` e
+`macro_fase_desde_estimado`. Um movimento dentro da mesma macro-fase torna o
+`fase_desde` medido e deixa o `macro_fase_desde` como estava; com uma bandeira
+só, limpá-la ali fazia a transição SEGUINTE acumular segundos estimados.
+
+**O recurso ao `created_at` dispensa editar os cinco sítios de criação.** Para
+um processo nascido depois deste código, a entrada na primeira fase É a
+criação — exacto, não estimado. Um carimbo presente mas ILEGÍVEL não cai neste
+recurso: o `created_at` daria a idade total do processo, um valor credível e
+falso, que é o pior resultado possível num acumulador.
+
+**Uma escrita, não duas.** `montar_update` mete o `$inc` na mesma `update_one`
+que já escrevia o `status`. Duas escritas separadas deixavam uma janela com a
+fase nova e o relógio da antiga, e se a segunda falhasse ficava assim para
+sempre. O `$inc` vazio é omitido — o Mongo recusa um operador sem campos, e é
+exactamente o que uma transição entre sub-fases produz.
+
+## O que NÃO carimba, e tem teste por isso
+
+- `admin_workflow` (fase eliminada): decisão do dono. Reestruturar o funil não
+  é avançar.
+- Soft-delete e restauro: ciclo de vida. Apagar e restaurar um processo não
+  pode limpar a prova de que esteve 90 dias em Análise.
+
+A omissão deliberada precisa de teste mais do que a presença — sem ele, alguém
+"corrige" a falta de boa fé daqui a seis meses.
+
+## Erros meus
+
+- **Terceira vez que uma guarda minha casa uma GRAFIA em vez de um
+  comportamento.** Escrevi `assert "PROJECCAO_DO_RELOGIO" in fonte` e a linha
+  do `import` satisfazia-a: a mutação que trocava a projecção por `{"_id": 0}`
+  passou por baixo. Passou a ser uma guarda por AST sobre a CHAMADA
+  `find_one`. Depois de Q13 e da guarda das leads, isto já não é acidente —
+  procurar um nome num módulo prova que ele é mencionado, não que é usado onde
+  importa.
+- **Uma mutação que nenhum teste podia matar era sinal de que o facto estava no
+  sítio errado.** Tirar o `status` da projecção fazia o cronómetro carimbar sem
+  nunca acumular, e era invisível porque a base de dados falsa IGNORA
+  projecções (contrato documentado no `conftest`). Em vez de a aceitar como
+  "só observável contra o Mongo real", movi o facto para uma constante
+  (`PROJECCAO_DO_RELOGIO`) — e uma constante afirma-se.
+- **Um teste meu passava por acidente de calendário.** A mutação que fazia um
+  instante ilegível devolver "agora" sobrevivia porque o `agora` injectado nos
+  testes está no PASSADO em relação ao relógio da máquina, e o resultado caía
+  na guarda dos segundos negativos. Passei a testar a leitura de instantes
+  directamente, onde não depende de mais nada.
+- **Escrevi uma mutação inútil e quase a contei como sobrevivente.** `None or
+  await find_one(...)` é semanticamente idêntico ao original. Substituí-a por
+  uma que muda mesmo o comportamento (ler um processo vazio), e essa morre.
+- Os dois primeiros testes de ponta a ponta falharam por eu não ter injectado
+  o `agora_utc` do módulo — comparavam com o relógio da máquina. É para isso
+  que ele está isolado.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3575 passed, 5 skipped** (baseline 3494).
+- `yarn test` → **1093 passed / 95 ficheiros** (inalterado).
+- `flake8 --select=E9,F63,F7,F82` → 0.
+- Mutação em quatro passagens: **24 aplicadas, 24 mortas**. Inclui a costura
+  (o documento na base de dados a mudar pelo caminho da automação, que é o
+  único dos seis que não escreve nada em `history`) e as três omissões
+  deliberadas.
+
+## A fazer em produção
+
+O backfill estimado corre na MESMA janela do deploy. Até correr, a primeira
+transição de um processo legado acumula um intervalo derivado do `created_at`,
+que sobrestima; o que o backfill carimba fica marcado como estimado e deixa de
+acumular.
+
+# Iteração — o BI por macro-fase e o backfill (Dashboard, Camadas 1.5 e 2)
+
+## O backfill: três níveis em vez de um booleano
+
+3.105 processos `nunca_tocado` e 1.840 `tocado_apos_fecho`. Um `estimado: true`
+cego obrigava o BI a escolher entre ignorar 12.450 processos e desenhar médias
+sobre cinco mil valores aberrantes.
+
+São **dois** aberrantes e não um porque erram para lados opostos: juntá-los numa
+classe perdia exactamente a informação que permite excluí-los, e em média não se
+anulam — anulam-se na aparência, e cada gráfico fica errado de uma maneira
+diferente.
+
+A bandeira e a qualidade são campos SEPARADOS:
+`macro_fase_desde_estimado` diz ao relógio para não acumular;
+`fase_desde_qualidade` diz ao BI o que pode mostrar. Juntá-las obrigava um dos
+dois a interpretar a intenção do outro.
+
+**Uma classificação, duas utilizações.** `classificar_estimativa` é usada pela
+medição (que conta) e pelo backfill (que carimba), com um teste a cruzar as
+duas: se divergissem, o `relogio.json` que se lê antes de aplicar deixava de
+descrever o que fica na base de dados.
+
+## A ponte: o que faz o gráfico contar o mesmo que o quadro
+
+`$distinct` sobre `status` (indexado) → resolvedor REAL → `$switch` com listas
+literais. As duas alternativas eram piores: `$lookup` por processo (doze mil
+junções para ler catorze documentos) ou reimplementar a resolução em expressões
+de agregação (segunda implementação do `resolver_nome`, divergente no primeiro
+alias novo).
+
+## Três endpoints, três decisões de leitura
+
+- **Funil:** a conversão assume monotonia e o `perdido` fica FORA da cadeia — um
+  processo perde-se de qualquer etapa e não se sabe de qual.
+- **SLA:** duas perguntas diferentes, dois números. "Preso agora"
+  (`macro_fase_desde`) e "demorou em média" (`tempos_macro`, só medido). A média
+  nunca vai sozinha: vai com o histograma `$bucket` e com a BANDA mediana.
+- **Redes:** compara as redes que o utilizador JÁ pode ver. Uma conta com uma
+  rede vê uma linha, e a resposta di-lo (`redes_no_ambito`) para ninguém
+  interpretar isso como falta de dados.
+
+## Dois campos que a página lia errados
+
+Encontrados a integrar o frontend, e nenhum dava erro:
+
+- O filtro por utilizador comparava `p.assigned_consultor` — campo que não
+  existe nos processos. Escolher um utilizador **esvaziava todos os gráficos**,
+  e como `selectedUser` arrancava com o próprio `user.id`, a página abria VAZIA
+  para um administrador.
+- O gráfico de prioridades contava `p.priority === 'high'`. O campo é
+  `prioridade` e os valores são `baixa`/`media`/`alta`: mostrava **zero desde
+  sempre**.
+
+Um campo que não existe lê-se como `undefined` e compara-se em silêncio.
+
+## Erros meus
+
+- **Um teste meu passava pela razão errada.** `test_os_eliminados_nao_entram`
+  afirmava `analise == 0` e sobrevivia à remoção do filtro `is_deleted` do
+  funil: a PONTE também filtra os eliminados, pelo que o status do processo
+  morto nem chegava ao `$switch` e ele caía na reconciliação em vez da etapa.
+  Verde, e a deixar passar um funil que contava processos eliminados. Passou a
+  afirmar o TOTAL.
+- **Escrevi outra mutação inútil** e quase a contei como sobrevivente: pôr as
+  linhas cruas da agregação na resposta de redes não leva fuga nenhuma, porque
+  as linhas já são agregados. Mas o exercício apanhou um teste fraco meu — eu
+  procurava duas cadeias de caracteres em vez de afirmar a FORMA da resposta.
+  Passou a ser uma lista fechada de chaves, que apanha qualquer campo novo.
+- **Uma mutação ficou registada como equivalente**, com o contrato afirmado pelo
+  custo e não pelo resultado: incluir os eliminados no `distinct` da ponte não
+  muda a saída (nenhum documento alcança o ramo extra do `$switch`), muda o
+  tamanho da expressão e a coerência com o `$match` do funil.
+- O inventário `test_stats_modules_exist` apanhou-me outra vez, agora com quatro
+  módulos novos — e a lista tem de estar por ordem alfabética, que é como se
+  compara. A guarda a fazer o seu trabalho duas vezes no mesmo épico.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3701 passed, 5 skipped** (baseline 3575).
+- `yarn test` → **1122 passed / 97 ficheiros** (baseline 1093 / 95).
+- `eslint --quiet` → 0 erros. `yarn build` → OK.
+- `flake8 --select=E9,F63,F7,F82` → 0.
+- Mutação: **31 aplicadas, 31 mortas** (2 passagens; 2 sobreviventes reais
+  corrigidos, 1 registada como equivalente com contrato de custo).
+
+## A fazer em produção
+
+```bash
+python -m scripts.semear_relogio_de_fases            # simula
+python -m scripts.semear_relogio_de_fases --aplicar  # escreve
+```
+
+Na MESMA janela do índice `{network_id: 1, is_deleted: 1, status: 1}`. Os
+limiares de SLA (`dashboard_slas`: novo 7, análise 15, aprovado 30 dias) estão
+no painel de admin e são por empresa — vale a pena confirmá-los antes de olhar
+para a coluna "acima do limiar".
+
+---
+
+## Iteração hotfix-p0 — Path traversal no `confirm-upload` do Portal do Cliente (Set 2026)
+
+Lote isolado, à frente do resto do Caminho 4, por decisão do dono do produto:
+o raio-x ao Portal encontrou uma vulnerabilidade **viva em produção** e ela
+não devia esperar por uma ronda de desenho.
+
+### Diagnóstico
+
+`POST /portal/confirm-upload` aceitava o `file_key` do corpo do pedido e
+validava-o apenas com `s3_service.file_exists(file_key)`. Um cliente
+autenticado no Portal enviava `file_key: "backups/dump-2026-09-01.zip"` e
+recebia, na resposta HTTP 200, um URL pré-assinado para descarregar o backup
+completo da base de dados — mais um registo em `db.documents` que passava a
+autorizar a mesma chave no `/portal/download-url` daí para a frente. Nenhum
+dos três endpoints do Portal tinha limite de pedidos.
+
+As duas guardas que impedem isto existem desde o Épico 9 e a docstring de
+`assert_path_within_document_root` descreve o ataque palavra por palavra —
+mas estavam ligadas só ao CRM. **O Portal, a única superfície externa, ficou
+fora da parede.**
+
+### O teste que morde, primeiro
+
+`tests/unit/test_portal_upload_path_traversal.py`, escrito **antes** da
+correcção e contra o código vulnerável. Seis caminhos de ataque, seis
+`DID NOT RAISE`:
+
+```
+FAILED TestAExploracao::test_o_backup_da_base_de_dados_e_recusado
+FAILED TestAExploracao::test_nenhum_registo_fica_na_base_de_dados
+FAILED TestAExploracao::test_a_pasta_de_um_cliente_de_outra_rede_e_recusada
+FAILED TestAExploracao::test_o_logotipo_da_empresa_e_recusado
+FAILED TestAExploracao::test_o_fluxo_sem_processo_tambem_esta_fechado
+FAILED TestAExploracao::test_satisfazer_um_pedido_do_checklist_nao_e_porta_de_serviço
+```
+
+E a resposta real que o cliente recebia:
+
+```json
+{ "success": true, "s3_path": "backups/dump-2026-09-01.zip",
+  "temporary_url": "https://…/backups/dump-2026-09-01.zip?X-Amz-Signature=…",
+  "process_id": "proc-1" }
+```
+
+Os dois ramos do código estão cobertos de propósito: o do documento novo **e**
+o do `document_id` (satisfazer um pedido do checklist), que é o caminho que o
+Portal usa mais — uma guarda só no primeiro deixava o segundo aberto.
+
+### O fecho
+
+- `assert_portal_file_key_e_do_cliente` — ponto único do Portal, reutiliza as
+  **duas** guardas do Épico 9 e acrescenta a precondição de que exista um dono
+  (sem `s3_folder` nem nome, recusa: o degradado da guarda partilhada
+  aceitaria toda a raiz de documentos).
+- Ligada aos **dois** caminhos: escrita (`confirm-upload`) e leitura
+  (`download-url`). A leitura não é zelo a mais — é o que neutraliza os
+  registos que qualquer exploração anterior já deixou na colecção.
+- A guarda corre **antes** do `file_exists`, para o código de resposta não se
+  tornar um oráculo do conteúdo do bucket.
+- `temporary_url` **fora** da resposta do `confirm-upload` (o
+  `ClientPortal.jsx` nunca o leu; era só a carga útil do ataque).
+- `@limiter.limit` nos três endpoints. O `sub` do JWT do Portal é o
+  `process_id`, logo o limite é por processo — o âmbito certo.
+
+### Prova ponta a ponta, contra o servidor a correr
+
+Com um magic token real (`role: client_portal`) e o backend em `:8001`:
+
+```
+POST /api/portal/confirm-upload  {"file_key":"backups/dump-2026-09-01.zip"}      → 403
+POST /api/portal/confirm-upload  {"file_key":"…/Cliente Da Domus/Index/irs.pdf"} → 403
+POST /api/portal/confirm-upload  {"file_key":"…/Ana Legitima/Index/recibo.pdf"}  → 400
+25 tentativas seguidas → 403×17, 429×8
+```
+
+O **400** na chave legítima é o detalhe que importa: significa que a guarda a
+deixou passar e o pedido só falhou na sondagem ao S3 (desligado em dev). As
+chaves estranhas dão o **mesmo 403** exista o objecto ou não — sem oráculo.
+
+### Erros meus, apanhados por mutação
+
+Nove mutações. Duas sobreviveram à primeira ronda e **nenhuma era mutante
+equivalente** — eram testes fracos meus:
+
+1. **Apagar `assert_path_within_document_root` não matava nada.** Pareceu
+   redundância (a guarda de posse deriva prefixos que já começam pela raiz).
+   Não é: a guarda da raiz é a defesa contra um `s3_folder` **envenenado** que
+   aponte para fora da árvore de documentos — aí a posse autoriza tudo o que
+   estiver lá, porque do ponto de vista dela é a pasta do cliente. Coberto em
+   `TestAGuardaDaRaizNaoERedundante`, e a docstring da função passou a explicar
+   o motivo certo (o primeiro que escrevi estava errado).
+2. **Mover a guarda para depois do `file_exists` não matava nada.** É o
+   oráculo de mapeamento descrito acima. Coberto em
+   `TestAOrdemDaGuardaNaoEDetalhe`, nos dois sentidos (403 para a chave
+   estranha inexistente, 400 para a legítima inexistente).
+
+Também tropecei na regra de ordem de imports do AGENTS.md: o ramo do
+`document_id` passa por `document_portal_counts`, que faz
+`from database import db` no topo e não estava na cadeia de `patch` — o teste
+rebentava com `Event loop is closed`, verde ou vermelho conforme a ordem de
+recolha do pytest.
+
+### Estado
+
+- `tests/unit`: **3730 passed, 5 skipped** (0 regressões; 3701 antes + 29).
+- `flake8` nos selectores bloqueantes do CI (`E9,F63,F7,F82`) sobre
+  `services/`, `routes/` e `tests/unit/`: **0**.
+- App arranca, os três endpoints registam, OpenAPI gera (631 caminhos).
+
+### Continua aberto (desenho já aprovado, lote seguinte)
+
+Quarentena de magic bytes no `confirm-upload` (HEAD + `Range: bytes=0-2047`,
+registo só depois de validar, tamanho/tipo do HEAD e não do cliente) e `type`
+autoritativo nos JWTs antes de abrir o namespace dos WebSockets aos clientes.
+Fica também registado o `GOV_AUTH_JWT_SECRET` com valor por omissão em código.
+
+---
+
+## Iteração quarentena — Magic bytes pós-upload no Portal do Cliente (Set 2026)
+
+Segundo passo do Caminho 4. O hotfix P0 fechou *"esta chave é dele?"*; este
+lote fecha *"estes bytes são o que dizem ser?"*.
+
+### O problema
+
+Com upload pré-assinado os bytes vão do browser para o S3 **sem passar pelo
+backend** — logo a parede de magic bytes (`file_validation.py`) não pode ser
+chamada no ponto de entrada, e não é esquecimento: é a razão de ser do
+pré-assinado. O cliente carregava o que quisesse e o `file_size`/`content_type`
+gravados eram os que ele **declarou**.
+
+### O desenho
+
+`services/s3_content_quarantine.py`: `HEAD` (tamanho e tipo reais) + `GET` com
+`Range: bytes=0-2047` (assinatura) → `validate_file_content` → só então nasce o
+registo. Reprovação de conteúdo apaga o objecto e devolve 400; falha de leitura
+devolve 503 e **mantém** o objecto.
+
+Quatro decisões, todas com teste:
+
+1. **O tamanho vem do `HEAD`, nunca da amostra.** O `validate_file_content`
+   também verifica tamanho, mas contra o `len()` dos 2 KB que lhe damos — essa
+   verificação é vácua e confiar nela dava uma parede que valida o tipo e
+   carimba qualquer tamanho. Os limites por tipo saem do `ALLOWED_MIME_TYPES` do
+   CRM, não de uma tabela nova que divergiria.
+2. **Falha de infraestrutura não é reprovação.** S3 em baixo → 503 **sem
+   apagar**. Apagar aqui destruía o upload legítimo de um cliente por causa de
+   um soluço da rede.
+3. **Reprovar é apagar E não gravar**, e antes dos **dois** ramos do
+   `confirm-upload` (documento novo e `document_id` do checklist).
+4. **Posse antes de conteúdo.** Invertido, o backend passava a ler 2 KB de
+   qualquer chave que um cliente nomeasse — um oráculo feito com a própria
+   parede.
+
+Novas primitivas em `s3_storage.py`: `head_object_metadata` (estado de **três**
+valores: `ok`/`ausente`/`erro`) e `get_object_prefix` (`Range`). Ambas de chave
+**exacta**, sem as variações underscore↔espaço do `get_file_content` — numa
+parede de segurança, inspeccionar uma chave e gravar outra é a forma mais
+discreta de a parede não valer nada.
+
+### Fora do event loop
+
+Todo o `boto3` (`HEAD`/`Range`/`DELETE`) por `asyncio.to_thread`. Pelo caminho:
+
+- o `confirm-upload` **perdeu** o `s3_service.file_exists()` — era a mesma
+  chamada `head_object`, bloqueante e a responder a menos perguntas;
+- o `file_exists` do `download-url` passou para `to_thread` (era um
+  `head_object` síncrono numa corotina — a família do `smtplib`).
+
+### A quarentena em acção
+
+Com o `S3Service` real e só a rede falseada:
+
+```
+recibo.pdf    HEAD -> 4,009 bytes   GET Range: bytes=0-2047   → ACEITE
+foto.png      HEAD -> 69 bytes      GET Range: bytes=0-2047   → ACEITE (tipo corrigido p/ image/png)
+IRS_2025.pdf  HEAD -> 192 bytes     GET Range: bytes=0-2047   → 400 + DELETE  (x-executable)
+enorme.pdf    HEAD -> 524,288,000 bytes  (sem GET)            → 400 + DELETE  (500 MB > 50 MB)
+vazio.pdf     HEAD -> 0 bytes       (sem GET)                 → 400 + DELETE
+
+Registos criados: 2 de 5.  recibo.pdf tamanho=4,009  ·  foto.png tipo=image/png
+```
+
+O `enorme.pdf` e o `vazio.pdf` são recusados **sem se lerem bytes** — o `HEAD`
+já os condena. E o `foto.png` mostra o ponto todo: o cliente declarou
+`application/pdf`, ficou gravado `image/png`.
+
+### Erros meus, apanhados por mutação
+
+Treze mutações. As **duas** que sobreviveram à primeira ronda estavam ambas nas
+primitivas novas do `s3_storage` — apagar o cabeçalho `Range` (passaria a
+descarregar o objecto inteiro) e confundir `"ausente"` com `"erro"` (passaria a
+apagar ficheiros legítimos). Sobreviveram porque **todos** os meus testes usavam
+um S3 falseado que implementava ele próprio o corte dos bytes e os três
+estados: o duplo de teste escondia a única coisa que aquelas funções fazem.
+Terceira variante da mesma lição no projecto (mutação perdida vs teste fraco) e
+a primeira em que o culpado é o duplo ser demasiado esperto. Cobertas agora com
+um cliente `boto3` falseado ao nível da chamada, a afirmar sobre os parâmetros
+que saem.
+
+Também tive de refazer as amostras de teste: um `b"\x89PNG..."` seguido de lixo
+é detectado como `application/octet-stream`, pelo que o meu primeiro "teste do
+PNG aceite" provava que o genérico é recusado — não que um PNG passa.
+
+### Achado sobre o `file_validation`
+
+Um executável de **Linux** (`application/x-executable`) bate na blacklist
+`DANGEROUS_MIME_TYPES` (log `critical`). Um de **Windows** é detectado como
+`application/x-dosexec`, que **não** está lá — é a whitelist que o recusa (log
+`warning`). Mesmo 400 para o cliente, e é o fail-closed que salva o caso; mas
+quem contar com a blacklist para alertar sobre `.exe` de Windows não vê nada.
+Fixado em `TestQualParedeApanhaOQue`.
+
+### Limites honestos da parede (com teste)
+
+Um ZIP renomeado passa como `.docx` (`.docx` *é* um ZIP e `application/zip` está
+na whitelist); um PDF com JavaScript dentro é um PDF. Magic bytes provam
+formato, não inocência — antivírus/sandbox é outro lote.
+
+### Estado
+
+- `tests/unit`: **3794 passed, 5 skipped** (0 regressões; 3730 antes, +64).
+- `flake8` nos selectores bloqueantes do CI sobre `services/`, `routes/` e
+  `tests/unit/`: **0**.
+
+### Por fazer
+
+`services/document_direct_upload.py` (o `confirm-upload` do **CRM**) tem o mesmo
+pré-assinado e a mesma ausência de validação a posteriori. Risco menor
+(utilizadores internos) mas lacuna idêntica, e o `exigir_conteudo_valido` serve
+tal como está. Registado, não feito.
+
+---
+
+## Iteração ws-externos — Abrir o WebSocket aos clientes do Portal (Set 2026)
+
+Terceiro passo do Caminho 4, depois do hotfix P0 e da quarentena.
+
+### Diagnóstico
+
+O que impedia um token do Portal de abrir o WebSocket interno era uma
+**coincidência**: o `verify_websocket_token` decifrava com o MESMO `JWT_SECRET`,
+lia o `sub` e nunca olhava para a claim `type` — e o `sub` de um token de
+Portal é um `process_id` que não existe em `db.users`. Abrir o namespace sem
+mudar isto transformava o acidente em autorização por omissão.
+
+### As quatro regras implementadas
+
+1. **`type` autoritativo nos dois lados.** Staff recusa tipos estranhos
+   (`magic_link`/`verified_session`/`access_code_session`/`gov_auth`) e aceita
+   `staff` ou `None`; o `/ws/portal` aceita **só** os três tipos do Portal e
+   exige `role == client_portal`. O `None` do lado do staff é deliberado — o
+   `create_token` só passou a estampar `type` agora, e recusá-lo deslogava a
+   equipa no deploy (dívida D-5, com data de morte: 24h).
+2. **Nunca `register_scope`.** Um cliente não tem UCRs e o
+   `resolve_tenant_scope` dar-lhe-ia a **rede de omissão**; o encaminhamento
+   por audiência casa por `network_id` e ele receberia os deltas de processo de
+   toda a rede incumbente. Sem âmbito, o `_route_por_audiencia` salta-o — a
+   exclusão é **estrutural**, não uma verificação a lembrar.
+3. **Lista de PERMISSÃO na ENTREGA** (`_route_por_sala` → `pode_entregar`).
+   `portal_message` e `portal_gov_progress`, e mais nada. Na entrega e não na
+   emissão porque é o único ponto por onde os sete módulos emissores passam.
+4. **Presença com namespace** — `cliente:<process_id>`, e o filtro
+   (`sem_clientes`) dentro do `todos_online` e não em cada chamador.
+
+Endpoint **separado** (`/ws/portal`): o laço do staff trata seis tipos de
+mensagem e meter um cliente lá dentro faria a segurança depender de nenhum ramo
+novo se esquecer da guarda. O laço do cliente aceita `ping` e mais nada.
+
+### A decisão que não estava no pedido
+
+`document_uploaded` **não** entrou na lista de permissão, apesar de ser o evento
+que os scrapers do Estado emitiam. O comentário na origem dizia "Notificar
+**equipa** via WebSocket": é genérico, e nada impede que amanhã um upload da
+equipa o emita com o nome do ficheiro no payload — e nesse dia o cliente veria
+nomes de documentos internos, em silêncio. Criei o `PORTAL_GOV_PROGRESS`, com
+contrato próprio e uma lista fechada de chaves, e os quatro sítios dos scrapers
+passaram por um `_notificar_recolha` que emite os **dois** eventos.
+
+O motivo de falha que chega ao cliente passa por um mapa fechado:
+`credenciais_invalidas` e os `mfa_*` passam traduzidos (são acções dele);
+`scraper_unavailable` e `unexpected_error` colapsam em `indisponivel`.
+
+### As duas provas, ao vivo pelo ASGI real
+
+```
+┌─ HANDSHAKE ─────────────────────────────────────────────────
+│ ✓ token de STAFF  → /ws/portal         RECUSADO
+│ ✓ token de PORTAL → /ws/notifications  RECUSADO
+├─ ESTADO DO MANAGER ─────────────────────────────────────────
+│ identidade de A .... cliente:proc-cliente-A
+│ salas de A ......... {'process_proc-cliente-A'}
+│ ÂMBITO de rede de A  None
+├─ PROVA 1: A não escuta o processo de B ─────────────────────
+│ B recebeu: portal_message → "Ola Sr. B, o seu credito foi aprovado..."
+│ A recebeu: nada
+├─ PROVA 2: A não ouve os eventos internos do SEU processo ───
+│ process_updated · process_status_changed · process_locked
+│ document_uploaded · new_chat_message · relatorio_de_risco_interno
+│ A não recebeu NENHUM dos 6
+├─ O QUE A PODE OUVIR (contraprova) ──────────────────────────
+│ portal_message · portal_gov_progress
+├─ A SALA É DITADA PELO SERVIDOR ─────────────────────────────
+│ A pediu a sala de B; salas de A continuam {'process_proc-cliente-A'}
+└─────────────────────────────────────────────────────────────
+```
+
+Na bateria, os 18 tipos de evento interno estão parametrizados, **cada um com
+um socket de staff na mesma sala a receber o mesmo evento** — sem essa metade o
+teste passava por a sala estar vazia e não pela barreira.
+
+### Erros meus, apanhados por mutação
+
+Dezoito mutações; **cinco** sobreviveram à primeira ronda e nenhuma era mutante
+equivalente:
+
+1. **`register_scope` acrescentado ao endpoint não matava nada** e
+2. **tirar-lhe o `join_room` também não** — porque o meu helper de teste
+   **reimplementa** o handshake (para deixar a ligação aberta enquanto disparo
+   eventos). É a lição do lote anterior outra vez: um duplo que reimplementa a
+   lógica valida o duplo. Corrigido com um teste um nível abaixo, que corre o
+   endpoint verdadeiro e **espia as chamadas ao `ConnectionManager`**, mais uma
+   guarda de código-fonte a afirmar que o duplo não divergiu.
+3. **Tirar a verificação do `role`** no socket do Portal não matava nada: o
+   token de staff do meu teste também falha o `type`. Coberto com um token
+   forjado (tipo de Portal + role de staff).
+4. **`todos_online` a devolver clientes** não matava nada: o meu teste só cobria
+   o ramo **sem** Redis e a mutação vivia no ramo **com** Redis.
+5. **O `get_current_user` não tinha teste nenhum** — endureci-o e não o provei.
+   É a metade REST da decisão do `type`, e a mais importante.
+
+O guarda-inventário dos módulos `websocket_api_*` disparou (terceira vez no
+projecto) — lista actualizada com o motivo, em ordem alfabética.
+
+### Estado
+
+- `tests/unit`: **3880 passed, 5 skipped** (0 regressões; 3794 antes, +86).
+- `flake8` nos selectores bloqueantes do CI sobre `services/`, `routes/` e
+  `tests/unit/`: **0**.
+- App arranca; `/api/ws/portal` registado ao lado de `/ws/notifications`.
+
+### Novo: `TECHNICAL_DEBT.md`
+
+Dívida conhecida deixou de viver só em comentários de código. Nove entradas com
+o que está mal, porque foi adiado, quem é atingido e o que fecha cada uma —
+incluindo o `document_direct_upload.py` (D-1), a separação física dos segredos
+JWT (D-2) e o resíduo `INACTIVE_STATUSES` (D-6). O `AGENTS.md` aponta para lá.
+
+### Por fazer (D-9)
+
+O hook `useProcessPortalMessages` continua em polling de 30s: a fronteira de
+segurança está feita e testada, mas a **subscrição do frontend não está
+ligada**. Não a misturei no mesmo commit de propósito — é trabalho de UI com o
+seu próprio risco, e o polling continua a ser o recurso por desenho.
+
+---
+
+## Iteração ws-portal-ui — O Portal do Cliente em tempo real (Set 2026)
+
+Fecha o Caminho 4 e a dívida **D-9**. A fronteira de segurança estava montada;
+este lote liga os cabos do lado do browser.
+
+### O que mudou
+
+| Ficheiro | Papel |
+|---|---|
+| `utils/portalRealtime.js` (novo) | Puro: URL do socket, decisão por evento, textos pt-PT |
+| `hooks/usePortalRealtime.js` (novo) | A ligação: handshake, `ping`, backoff, `isConnected` |
+| `pages/ClientPortal.jsx` | Consome o hook; o polling de 15s passou a condicional |
+
+O hook não guarda a conversa — diz "vai buscar" e "estou ligado". Mesma
+fronteira do `useTaskEvents`/`utils/taskEvents`.
+
+### O polling não foi apagado
+
+```js
+if (!isVerified || tempoRealLigado) return undefined;   // ← para quando liga
+```
+
+Retoma sozinho quando a ligação cai, porque `tempoRealLigado` é a única
+dependência do efeito além da sessão. Não é cerimónia: um browser atrás de um
+proxy que bloqueia WebSockets ficaria sem mensagens **sem erro nenhum**.
+
+### Duas armadilhas que o payload impõe
+
+1. **O evento `portal_message` não é a mensagem** — o servidor trunca o conteúdo
+   a 200 caracteres. Inserido como registo, uma mensagem longa ficava truncada
+   no ecrã para sempre. É um SINAL; a verdade é o GET. Deliberadamente diferente
+   do `webmailRealtime.js`, que insere sem GET porque lá o evento traz a linha
+   completa — a diferença está no payload, não na preferência.
+2. **O cliente recebe o eco da sua própria mensagem** (o
+   `portal_client_messages` difunde sem `exclude_user_id`). O reflexo é filtrar
+   `sender_type === "client"` e está **errado**: um processo pode ter dois
+   titulares com magic links próprios, ambos `client`, e o filtro fazia o
+   titular 2 deixar de ver as mensagens do titular 1 — em silêncio, com o
+   polling parado. A desduplicação é por **id**.
+
+### As outras decisões
+
+- **Recuperação da lacuna:** ao (re)ligar, uma leitura. Sem ela, reconectar
+  deixava a conversa desactualizada até à mensagem seguinte.
+- **4001/4002 não reconectam** — veredictos sobre o token; insistir repetia-os
+  para sempre. `isConnected` fica `false` e o polling volta a ser o caminho.
+- **`https` → `wss` sempre**: um `ws://` a partir de uma página `https` é
+  recusado pelo browser, e isso só aparece no browser do cliente.
+- **Callbacks numa ref**: uma função nova por render, nas dependências do efeito
+  do socket, reabria a ligação a cada tecla escrita na caixa de mensagem.
+
+### Cobertura, e porque é que a página é montada
+
+`utils/portalRealtime.test.js` (37) + `hooks/__tests__/usePortalRealtime.test.jsx`
+(25) + **`pages/__tests__/ClientPortal.tempoReal.test.jsx` (11)**.
+
+O terceiro monta a página **a sério** e conta os GETs — é o único que prova que
+o polling para e retoma. Montei a página em vez de escrever um componente de
+teste que reproduzisse a ligação porque **um duplo que reimplementa a lógica
+valida o duplo**: foi a lição paga duas vezes, nos lotes da quarentena e dos
+WebSockets, e não a ia pagar uma terceira.
+
+Onze mutações, todas mortas: tirar a condição do polling, invertê-la, apagar o
+polling, tirar a leitura de recuperação, reconectar em 4001/4002, enviar
+`join_process_room`, desduplicar por `sender_type`, mandar o motivo interno cru
+para o ecrã, produzir `ws://` a partir de `https`, recarregar com zero
+documentos e não fechar o socket ao desmontar.
+
+### Dois erros meus
+
+1. **`waitFor` com temporizadores falseados** — ele faz polling com
+   temporizadores REAIS e os meus estavam `vi.useFakeTimers()`: dois testes
+   pendurados a 5s de timeout. As actualizações de estado já chegam dentro do
+   `act`, logo a asserção é directa.
+2. **Inventei a forma do `/portal/status`** no mock. A real é **aninhada**
+   (`{process: {client_name}}`); a minha, achatada, fazia a página rebentar no
+   render — e **sem render os efeitos do polling nunca instalavam**, pelo que as
+   contagens ficavam a 1 e quatro testes "provavam" o contrário do que queriam.
+   Um mock com a forma errada é pior do que nenhum: passa a testar o caminho de
+   erro sem o dizer.
+
+### Uma armadilha do ambiente de testes, corrigida no caminho
+
+`TypeError: Canvas.Image is not a constructor`, num stack só de `react-dom` sem
+uma palavra sobre imagens. O `package.json` aponta o `canvas` para um pacote
+**vazio** (para não compilar o módulo nativo) — e o `require("canvas")` do jsdom
+**tem sucesso**, pelo que o `if (!Canvas) return;` dele não dispara. Apanha
+qualquer teste que monte uma página com um logótipo; este foi o primeiro.
+`src/test/setup.js` dá ao módulo vazio a única classe que o jsdom lhe pede.
+
+Um primeiro stub meu em `window.Image` **não resolvia nada** (o jsdom usa a sua
+referência interna) — apaguei-o em vez de o deixar: um stub que não previne o
+defeito que diz prevenir é um placebo, e este projecto já tem um no historial.
+
+### Estado
+
+- `yarn test`: **1195 passed** em 100 ficheiros (baseline 1122 em 97 — exactamente
+  +73 em +3 ficheiros, nenhum ficheiro silenciosamente não recolhido).
+- `eslint --quiet` (gate do CI): **0 erros**.
+- `vite build`: OK.
+- `pytest tests/unit`: **3880 passed, 5 skipped** (backend intocado).
+
+### O contrato, verificado ponta a ponta
+
+O caminho que a função **real** do frontend constrói, usado para ligar à app
+ASGI **real**:
+
+```
+frontend construiu ...... ws://localhost:8001/api/ws/portal?token=<jwt>
+✓ ligado · identidade cliente:proc-do-cliente · sala process_… · âmbito None
+  recebe ....... portal_message · portal_gov_progress
+  não recebe ... process_updated · document_uploaded · new_chat_message
+✓ ping → heartbeat (pong)
+```
+
+---
+
+## Iteração correcção-tipo-token — O `type` dos tokens do CRM é `"access"` (Set 2026)
+
+Correcção de uma regressão que **eu** introduzi no lote dos WebSockets externos
+e que o `backend-full` do CI apanhou: **25 testes vermelhos**, todos com
+`{"detail":"Este token não tem permissão para acessar a API."}` — a minha própria
+mensagem.
+
+### O erro
+
+Afirmei que "os tokens de staff não declaram `type`". Cheguei lá depois de ler
+**um** produtor (`services/auth.create_token`) e não verifiquei qual a função que
+o `/auth/login-v2` chama. O login de produção mina por
+`refresh_token_service.create_access_token`, que estampa `"type": "access"`
+**desde sempre**, num literal escondido nesse módulo.
+
+Inventar um `"staff"` e validá-lo fazia o `get_current_user` recusar **todos** os
+tokens reais: 401 em cada chamada de cada utilizador. Regressão total da API.
+
+**Os testes não viram porque forjavam os tokens** com o tipo que eu inventei — 96
+verdes sobre uma produção partida. É a falha do Lote 5 do lado da ESCRITA:
+inventariar um produtor e concluir sobre a regra.
+
+### A correcção
+
+Três produtores, um valor:
+
+| Produtor | Usado por |
+|---|---|
+| `refresh_token_service.create_access_token` | `/auth/login-v2`, `/auth/refresh` |
+| `auth.create_token` | `/auth/register` |
+| `auth.create_access_token` | *impersonate* |
+
+Todos estampam `auth.tipo_de_token_do_crm()` → `TIPO_DO_STAFF = "access"`. O
+valor é o que a produção **já** usava, não um nome novo: escolher um nome novo
+obrigava a migrar todos os tokens em circulação, e foi fazê-lo que partiu tudo.
+
+### A cobertura que faltava
+
+`TestTodosOsProdutoresDeTokenDoCRM`: cada produtor **real** contra o
+`get_current_user` **real**, mais uma guarda de fonte contra o literal voltar e
+a contraprova de que o produtor estampa mesmo um `type`. O helper
+`token_de_staff()` passou a usar o produtor de produção — **forjar era o que
+escondia o defeito**.
+
+A mutação fiel (literal de volta no `refresh_token_service`, a divergir da
+constante) é apanhada por **cinco** destes testes. Mutar só a constante
+partilhada não serve: move os dois lados ao mesmo tempo, e o defeito era uma
+**divergência**.
+
+### Estado
+
+- `pytest` com o comando e o ambiente exactos do `backend-full`: **4079 passed,
+  13 skipped** (CI tinha 25 failed / 4042 passed).
+- `flake8` nos selectores bloqueantes: **0**.
