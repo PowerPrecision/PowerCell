@@ -43,6 +43,8 @@ import {
   companiesForNewAccess,
   rolesForNewAccess,
   isUcrComboTaken,
+  removerUtilizadorDaPagina,
+  reporUtilizadorNaPagina,
   LAST_UCR_DELETE_MESSAGE,
 } from "../../utils/organizationAdmin";
 import {
@@ -167,7 +169,11 @@ export default function UsersAccessAdminTab() {
   });
 
   const { data: companies = [] } = useQuery({
-    queryKey: queryKeys.orgAdmin.companies(""),
+    // Chave PRÓPRIA — ver `queryKeys.orgAdmin.companiesSelector`. Com
+    // `companies("")` partilhava-se a entrada com o separador Empresas, que
+    // lá escreve `{empresas, total}`, e o `for (const company of companies)`
+    // abaixo rebentava com `companies is not iterable`.
+    queryKey: queryKeys.orgAdmin.companiesSelector(),
     queryFn: async () => {
       const res = await getCompanies();
       return normalizeCompaniesPayload(res.data);
@@ -195,7 +201,14 @@ export default function UsersAccessAdminTab() {
 
   const companyNameById = useMemo(() => {
     const map = {};
-    for (const company of companies) {
+    // SEGUNDA linha de defesa, não a correcção: o que resolveu a colisão foi
+    // a chave própria acima. Isto está aqui porque um `for...of` sobre o que
+    // vier da cache transforma qualquer forma inesperada num ecrã em branco
+    // com um TypeError — e o custo de sobreviver é uma linha. Um `|| []`
+    // SOZINHO seria pior do que o erro: escondia o TypeError e deixava o
+    // administrador com o selector de empresas vazio e nenhuma mensagem.
+    const lista = Array.isArray(companies) ? companies : [];
+    for (const company of lista) {
       if (company.id && company.name) map[company.id] = company.name;
       if (company.name) map[company.name] = company.name;
     }
@@ -231,9 +244,16 @@ export default function UsersAccessAdminTab() {
     queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
   };
 
-  const setUsersCache = (updater) =>
-    queryClient.setQueryData(queryKeys.orgAdmin.users(), (prev = []) =>
-      typeof updater === "function" ? updater(prev) : updater,
+  // Escrever na cache exige chave EXACTA — e a que o ecrã LÊ é a
+  // paginada. Escrever em `users()` criava uma entrada fantasma: a
+  // remoção optimista e o "Desfazer" não mexiam no ecrã, e só o
+  // `clearTimeout` é que salvava o utilizador de ser apagado. Com o
+  // prefixo, todas as páginas em cache são actualizadas — a lista pode
+  // estar aberta na página 3 e a pesquisa activa.
+  const actualizarPaginasEmCache = (transformar) =>
+    queryClient.setQueriesData(
+      { queryKey: queryKeys.orgAdmin.usersPaginatedAll() },
+      (pagina) => (pagina ? transformar(pagina) : pagina),
     );
 
   const openAccessSheet = (user) => {
@@ -346,11 +366,11 @@ export default function UsersAccessAdminTab() {
   const handleDeleteUser = (user) => {
     if (!user?.id) return;
     const restoreUser = () =>
-      setUsersCache((prev) =>
-        [...prev, user].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
-      );
+      actualizarPaginasEmCache((pagina) => reporUtilizadorNaPagina(pagina, user));
 
-    setUsersCache((prev) => prev.filter((u) => u.id !== user.id));
+    actualizarPaginasEmCache((pagina) =>
+      removerUtilizadorDaPagina(pagina, user.id),
+    );
 
     const commitTimer = setTimeout(async () => {
       try {

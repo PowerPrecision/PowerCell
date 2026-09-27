@@ -254,11 +254,33 @@ export const queryKeys = {
     companiesAll: () => [...queryKeys.orgAdmin.all, 'companies'],
     companies: (search, page) =>
       [...queryKeys.orgAdmin.companiesAll(), search ?? '', page ?? 1],
+    // O selector de empresas do separador Utilizadores pede TODAS as
+    // empresas, sem paginação — é uma pergunta diferente da lista paginada
+    // e por isso tem chave própria.
+    //
+    // Partilhava a chave `companies('')`, que é a MESMA que
+    // `companies('', 1)`: os dois separadores vivem no mesmo painel, logo no
+    // mesmo QueryClient, e escreviam formas incompatíveis lá — um array e um
+    // `{empresas, total}`. Quem chegava primeiro decidia a forma, e o
+    // separador Utilizadores rebentava com `companies is not iterable` em
+    // produção. Chaves iguais exigem VALORES iguais; formas diferentes são
+    // perguntas diferentes.
+    //
+    // Continua a descender de `companiesAll()` de propósito: a invalidação
+    // por prefixo que o CRUD de empresas faz tem de refrescar o selector
+    // também.
+    companiesSelector: () => [...queryKeys.orgAdmin.companiesAll(), 'selector'],
     users: () => [...queryKeys.orgAdmin.all, 'users'],
+    // O PREFIXO de todas as páginas. Existe porque escrever na cache
+    // exige chave EXACTA: `setQueryData(users(), …)` criava uma entrada
+    // fantasma que ninguém lia (a invalidação funcionava por casar em
+    // prefixo, e foi isso que escondeu o defeito). Quem escreve usa
+    // `setQueriesData` com este prefixo e apanha todas as páginas.
+    usersPaginatedAll: () => [...queryKeys.orgAdmin.users(), 'paginated'],
     // Ponto 11 — a página e a pesquisa ENTRAM na chave: sem isso o
     // TanStack serve a página anterior enquanto o pedido novo não chega.
     usersPaginated: (search, page, companyId) =>
-      [...queryKeys.orgAdmin.all, 'users', 'paginated', search ?? '', page ?? 1, companyId ?? ''],
+      [...queryKeys.orgAdmin.usersPaginatedAll(), search ?? '', page ?? 1, companyId ?? ''],
     ucrs: () => [...queryKeys.orgAdmin.all, 'ucrs'],
     ucrByUser: (userId) => [...queryKeys.orgAdmin.ucrs(), userId],
   },

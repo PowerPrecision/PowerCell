@@ -1902,6 +1902,8 @@ queryKeys.orgAdmin.ucrByUser(userId)
 
 **Query (amostra, colecção `processes` / `clients`):** `idx_status`, `idx_consultor` / `idx_mediador`, compostos `status+assigned_*`, `idx_process_type`, `idx_client_assigned_to`, blind indexes `*_hash` (nunca no NIF/email em claro).
 
+**`idx_network_scope` = `{network_id, is_deleted, status}` — o âmbito do BI, e um índice que era tarefa MANUAL.** Desde o Lote 4 nenhuma listagem ou agregação corre sem filtrar por rede, e quase todas juntam-lhe `is_deleted` e `status` (`stats_funnel`, `stats_branches`, `stats_overview`). O `worklog` registou-o como um comando a correr "na mesma janela do backfill" — e uma tarefa manual é uma tarefa que se esquece: os logs do arranque de produção de 2026-09-27 mostram `idx_network_id` e `idx_s3_folder` a nascerem sozinhos e este a faltar. Declarado agora em `db_indexes.py` como os outros, nasce no arranque e é idempotente. A **ordem das chaves** é do prefixo mais presente para o menos (`network_id` está em todas as consultas, `status` só em algumas): é o que deixa o Mongo servir com o mesmo índice uma consulta que traga só os dois primeiros campos. Guarda: `tests/unit/test_db_indexes.py::test_indice_do_bi_por_rede_esta_declarado`. **Um índice que a aplicação precisa declara-se aqui, nunca num passo de operações** — criar à mão em produção deixa dev e CI sem ele, que é onde as consultas são escritas.
+
 **TTL nativo (`expireAfterSeconds`)** — o mongod apaga documentos automaticamente. O campo **tem** de ser BSON Date (`datetime` Python), não ISO string. Serviços que escrevem dados efémeros carimbam `*_dt` (ex.: `stamp_draft_ttl_fields` em `email_draft_service.py`).
 
 | Colecção | Campo | TTL | Nome | Notas |

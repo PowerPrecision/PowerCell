@@ -100,16 +100,21 @@ def tipo_de_token_e_do_portal(tipo: Optional[str]) -> bool:
 
 
 def tipo_de_token_e_de_staff(tipo: Optional[str]) -> bool:
-    """`True` para um token do CRM — incluindo os legados sem `type`.
+    """`True` só para um token do CRM que DECLARE o seu tipo.
 
-    Aceitar `None` não é frouxidão: dois dos três produtores não estampavam
-    tipo nenhum (o `/auth/register` e o *impersonate*), e recusar `None`
-    invalidava as sessões abertas no momento do deploy. O que importa para a
-    segurança é o outro lado: um tipo ESTRANHO (um token de Portal, um
-    `gov_auth`) é recusado, e é por aí que a fuga entraria.
+    Houve uma janela em que `None` era aceite, e tinha razão de ser: dois dos
+    três produtores (`/auth/register` e o *impersonate*) não estampavam tipo
+    nenhum, e recusar `None` no momento do deploy deslogava a equipa inteira.
+    Era uma tolerância com prazo — `TECHNICAL_DEBT.md` D-5 — e o prazo era
+    `JWT_EXPIRATION_HOURS` (24h): passadas essas, o token sem `type` mais
+    longevo já expirou e não pode existir mais nenhum.
+
+    Mantê-la depois disso deixava de ser compatibilidade e passava a ser uma
+    porta: quem conseguisse forjar um token sem a claim tinha-a a valer tanto
+    como uma legítima, e a claim deixava de ser autoritativa para ser
+    opcional. Fechada em 2026-09-27, 24h após o deploy que unificou os três
+    produtores em `auth.tipo_de_token_do_crm()`.
     """
-    if tipo is None or tipo == "":
-        return True
     return tipo == TIPO_DO_STAFF
 
 

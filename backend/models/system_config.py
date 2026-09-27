@@ -215,10 +215,16 @@ class DashboardSlaConfig(BaseModel):
     propósito: um processo concluído não demora em concluído, fica lá. Ver
     `services/process_phase_clock.MACROS_SEM_PERMANENCIA`.
 
-    A configuração é por EMPRESA (o `SystemConfig` já o é), o que resolve
-    metade da comparação entre redes: a Domus pode ter SLAs diferentes da
-    Power sem que "está atrasado" signifique coisas diferentes no mesmo
-    gráfico.
+    **O ARMAZENAMENTO é por empresa; a LEITURA não.** O `SystemConfig` aceita
+    `company_id`, mas quem lê estes limiares — `stats_sla._limiares` — chama
+    `get_system_config()` SEM argumento, logo lê sempre a configuração
+    `default`. Escrever "por empresa" aqui era uma promessa que o leitor não
+    cumpria, e foi por isso que o ecrã de administração (`SlaThresholdsSection`)
+    é deliberadamente GLOBAL e o diz ao utilizador: um selector de empresa
+    faria o administrador editar a Power e o painel continuar a usar a global,
+    que é o incidente de 2026-09-21 outra vez (escrever numa chave, ler de
+    outra). Fechar isto exige passar o âmbito ao leitor — registado em
+    `TECHNICAL_DEBT.md` D-12.
     """
 
     enabled: bool = True

@@ -98,6 +98,19 @@ const MENSAGENS = [
   { id: "m1", sender_type: "staff", content: "Bom dia", created_at: "2026-09-27T09:00:00Z" },
 ];
 
+// O PRIMEIRO `montarPortal()` paga o `await import("../ClientPortal")`:
+// a transformação da árvore INTEIRA da página, medida em ~4,9s contra os
+// ~50ms dos testes seguintes, que já encontram o módulo em cache. Com o
+// limite por omissão de 5s isto passava ou falhava conforme a carga da
+// máquina — passou numa execução e estourou na seguinte, na mesma suite.
+//
+// O limite sobe em vez de se partir o teste em dois porque o custo é de
+// ARRANQUE e não de espera: não há aqui nenhum `setTimeout` a ser
+// aguardado, e encurtar a asserção não tiraria um milissegundo ao
+// `import`. É o preço de montar a página a sério — que é exactamente o
+// que este ficheiro existe para fazer.
+vi.setConfig({ testTimeout: 20000 });
+
 beforeEach(() => {
   sockets = [];
   chamadas = {};

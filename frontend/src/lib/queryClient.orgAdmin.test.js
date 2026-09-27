@@ -45,7 +45,27 @@ describe("Pacote FJ org-admin query factory", () => {
     assert.doesNotMatch(companiesTabSource, /\["org-admin-companies"/);
     assert.match(usersTabSource, /queryKeys\.orgAdmin\.users\(/);
     assert.match(usersTabSource, /queryKeys\.orgAdmin\.ucrs\(/);
-    assert.match(usersTabSource, /queryKeys\.orgAdmin\.companies\(""\)/);
+    // ERA `companies("")` — e essa asserção CRISTALIZAVA o defeito: é a mesma
+    // chave que `companies("", 1)` do separador Empresas, que lá escreve
+    // `{empresas, total}` em vez de um array. Os dois separadores vivem no
+    // mesmo QueryClient e o segundo a montar recebia a forma do primeiro:
+    // `TypeError: companies is not iterable` em produção.
+    //
+    // Chave própria para o selector, e a guarda passou a afirmar as DUAS
+    // coisas — que a nova é usada e que a antiga não voltou.
+    assert.match(queryClientSource, /companiesSelector:\s*\(\)\s*=>/);
+    assert.match(usersTabSource, /queryKeys\.orgAdmin\.companiesSelector\(\)/);
+    assert.doesNotMatch(
+      usersTabSource,
+      /queryKeys\.orgAdmin\.companies\(/,
+      "o selector não pode voltar a partilhar a chave da lista paginada",
+    );
+    // E a chave própria tem de DESCENDER de `companiesAll()`, senão a
+    // invalidação por prefixo do CRUD de empresas deixa de a refrescar.
+    assert.match(
+      queryClientSource,
+      /companiesSelector:\s*\(\)\s*=>\s*\[\.\.\.queryKeys\.orgAdmin\.companiesAll\(\)/,
+    );
     assert.doesNotMatch(usersTabSource, /USERS_QUERY_KEY/);
     assert.doesNotMatch(usersTabSource, /UCR_QUERY_KEY/);
   });
