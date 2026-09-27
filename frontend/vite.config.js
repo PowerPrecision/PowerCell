@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import { sentryVitePlugin } from '@sentry/vite-plugin'
 import path from 'path'
 import { resolveBuildTimeBackendUrl } from './src/utils/apiBaseUrl.js'
+import { resolverSourcemapDoBuild, avisoDoSourcemap } from './src/utils/buildSourcemap.js'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -16,6 +17,15 @@ export default defineConfig(({ mode }) => {
   const sentryOrg = process.env.SENTRY_ORG || env.SENTRY_ORG || 'power-precision'
   const sentryProject = process.env.SENTRY_PROJECT || env.SENTRY_PROJECT || 'powercell-frontend'
   const sentryRelease = process.env.SENTRY_RELEASE || env.SENTRY_RELEASE || `powercell@${Date.now()}`
+
+  // D-11 — os .map só se geram se houver como os enviar ao Sentry E apagá-los
+  // do artefacto. A regra vive em `utils/buildSourcemap.js` (testada): sem
+  // token, um build de produção sai SEM mapas, porque `'hidden'` não impede o
+  // browser de os descarregar — só apaga a referência.
+  const contextoDoSourcemap = { isProduction, temTokenDoSentry: Boolean(sentryAuthToken) }
+  const sourcemapDoBuild = resolverSourcemapDoBuild(contextoDoSourcemap)
+  const avisoDosMapas = avisoDoSourcemap(contextoDoSourcemap)
+  if (avisoDosMapas) console.warn(avisoDosMapas)
 
   // URL do backend embebido no bundle. A regra está centralizada para que um
   // build de dev sem REACT_APP_BACKEND_URL não fale, em silêncio, com produção.
@@ -117,9 +127,11 @@ export default defineConfig(({ mode }) => {
     // Build configuration
     build: {
       outDir: 'dist',
-      // Source Maps: 'hidden' gera os .map mas NÃO os referencia no JS final.
-      // O ficheiro .map é gerado e enviado ao Sentry, mas o browser nunca o descarrega.
-      sourcemap: isProduction ? 'hidden' : true,
+      // Source Maps — ver `utils/buildSourcemap.js`. O comentário que aqui
+      // estava afirmava que "o browser nunca o descarrega": é FALSO, e foi
+      // essa crença que manteve os mapas de produção publicamente acessíveis.
+      // `'hidden'` remove a referência no JS; o ficheiro continua servido.
+      sourcemap: sourcemapDoBuild,
       minify: true,
       chunkSizeWarningLimit: 1000,
       rollupOptions: {

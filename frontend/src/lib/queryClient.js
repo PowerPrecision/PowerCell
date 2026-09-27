@@ -254,6 +254,22 @@ export const queryKeys = {
     companiesAll: () => [...queryKeys.orgAdmin.all, 'companies'],
     companies: (search, page) =>
       [...queryKeys.orgAdmin.companiesAll(), search ?? '', page ?? 1],
+    // O selector de empresas do separador Utilizadores pede TODAS as
+    // empresas, sem paginação — é uma pergunta diferente da lista paginada
+    // e por isso tem chave própria.
+    //
+    // Partilhava a chave `companies('')`, que é a MESMA que
+    // `companies('', 1)`: os dois separadores vivem no mesmo painel, logo no
+    // mesmo QueryClient, e escreviam formas incompatíveis lá — um array e um
+    // `{empresas, total}`. Quem chegava primeiro decidia a forma, e o
+    // separador Utilizadores rebentava com `companies is not iterable` em
+    // produção. Chaves iguais exigem VALORES iguais; formas diferentes são
+    // perguntas diferentes.
+    //
+    // Continua a descender de `companiesAll()` de propósito: a invalidação
+    // por prefixo que o CRUD de empresas faz tem de refrescar o selector
+    // também.
+    companiesSelector: () => [...queryKeys.orgAdmin.companiesAll(), 'selector'],
     users: () => [...queryKeys.orgAdmin.all, 'users'],
     // O PREFIXO de todas as páginas. Existe porque escrever na cache
     // exige chave EXACTA: `setQueryData(users(), …)` criava uma entrada

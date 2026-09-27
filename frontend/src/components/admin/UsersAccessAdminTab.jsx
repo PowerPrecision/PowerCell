@@ -169,7 +169,11 @@ export default function UsersAccessAdminTab() {
   });
 
   const { data: companies = [] } = useQuery({
-    queryKey: queryKeys.orgAdmin.companies(""),
+    // Chave PRÓPRIA — ver `queryKeys.orgAdmin.companiesSelector`. Com
+    // `companies("")` partilhava-se a entrada com o separador Empresas, que
+    // lá escreve `{empresas, total}`, e o `for (const company of companies)`
+    // abaixo rebentava com `companies is not iterable`.
+    queryKey: queryKeys.orgAdmin.companiesSelector(),
     queryFn: async () => {
       const res = await getCompanies();
       return normalizeCompaniesPayload(res.data);
@@ -197,7 +201,14 @@ export default function UsersAccessAdminTab() {
 
   const companyNameById = useMemo(() => {
     const map = {};
-    for (const company of companies) {
+    // SEGUNDA linha de defesa, não a correcção: o que resolveu a colisão foi
+    // a chave própria acima. Isto está aqui porque um `for...of` sobre o que
+    // vier da cache transforma qualquer forma inesperada num ecrã em branco
+    // com um TypeError — e o custo de sobreviver é uma linha. Um `|| []`
+    // SOZINHO seria pior do que o erro: escondia o TypeError e deixava o
+    // administrador com o selector de empresas vazio e nenhuma mensagem.
+    const lista = Array.isArray(companies) ? companies : [];
+    for (const company of lista) {
       if (company.id && company.name) map[company.id] = company.name;
       if (company.name) map[company.name] = company.name;
     }

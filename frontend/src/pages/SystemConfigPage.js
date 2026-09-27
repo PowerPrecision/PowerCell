@@ -42,6 +42,7 @@ import { ConfigSection, SECTION_ICONS, getSectionNavLabel } from "./systemConfig
 import PortalSettingsSection from "./systemConfig/PortalSettingsSection";
 import MandatoryDocumentsSection from "./systemConfig/MandatoryDocumentsSection";
 import ChangelogSection from "./systemConfig/ChangelogSection";
+import SlaThresholdsSection from "./systemConfig/SlaThresholdsSection";
 import {
   Select,
   SelectContent,
@@ -58,6 +59,7 @@ import {
   Wrench,
   FileEdit,
   MessageSquare,
+  Gauge,
   Megaphone,
 } from "lucide-react";
 
@@ -320,6 +322,20 @@ const SystemConfigPage = ({ embedded = false }) => {
                       <span className="truncate">Atualizações</span>
                       {activeTab === "changelog" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("dashboard_slas")}
+                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
+                        activeTab === "dashboard_slas"
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                      data-testid="nav-dashboard-slas"
+                    >
+                      <Gauge className={`h-4 w-4 shrink-0 ${activeTab === "dashboard_slas" ? "text-primary" : ""}`} />
+                      <span className="truncate">Limiares de SLA</span>
+                      {activeTab === "dashboard_slas" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+                    </button>
                   </nav>
                 </CardContent>
               </Card>
@@ -435,6 +451,7 @@ const SystemConfigPage = ({ embedded = false }) => {
             )}
             {activeTab === "maintenance" && <MaintenanceSection token={token} user={user} />}
             {activeTab === "changelog" && <ChangelogSection token={token} />}
+            {activeTab === "dashboard_slas" && <SlaThresholdsSection />}
           </main>
         </div>
       </div>

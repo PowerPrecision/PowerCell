@@ -936,6 +936,61 @@ repetidas, total incoerente, payload aninhado em vez de array). Essa
 tabela escreve-se a ler os normalizadores e a perguntar, por cada `||`,
 o que acontece quando nenhum dos lados existe.
 
+### 27.7 Chaves de cache iguais exigem VALORES iguais
+
+O erro de produção que fechou este lote:
+
+```js
+// CompaniesAdminTab   companies(pesquisa, pagina) → {empresas, total}
+// UsersAccessAdminTab companies("")               → array
+// e companies(s, p) = [...companiesAll(), s ?? '', p ?? 1]
+//   logo companies("") === companies("", 1) — A MESMA CHAVE
+```
+
+Os dois separadores vivem no mesmo `SystemAdminPanel`, logo no mesmo
+`QueryClient`. Quem monta primeiro decide a forma; o segundo recebe a do
+outro. `TypeError: companies is not iterable`.
+
+**Regras:**
+
+- **Perguntas diferentes, chaves diferentes.** "Todas as empresas para um
+  selector" e "página N da lista de empresas" não são a mesma pergunta,
+  mesmo que a fonte seja o mesmo endpoint. A chave do selector
+  (`companiesSelector()`) **desce** de `companiesAll()` para a invalidação
+  por prefixo do CRUD continuar a alcançá-la.
+- **Uma chave com argumentos por omissão colide com a explícita.**
+  `companies("")` e `companies("", 1)` são iguais porque `page ?? 1`. Uma
+  chave com omissões é uma armadilha para quem a chama com menos
+  argumentos do que o autor imaginou.
+- **`|| []` não protege contra isto**, e a razão é contra-intuitiva: um
+  objecto é *truthy*, logo `companies || []` devolve o objecto. Medido:
+  com a colisão presente e o `|| []` no sítio, o erro passa a
+  `(companies || []).filter is not a function` — **muda de sítio em vez de
+  desaparecer**. Só `Array.isArray` distingue, e o consumidor seguinte sem
+  guarda volta a rebentar. **A correcção é a chave; a guarda é segunda
+  linha de defesa e não substitui a correcção.**
+- **Só um teste que monte os DOIS componentes na MESMA cache reproduz
+  isto.** Os testes que montam um componente sozinho, com um
+  `QueryClient` próprio, passam com o defeito presente — os meus passaram.
+
+### 27.8 Ler uma configuração e escrevê-la têm de usar o MESMO âmbito
+
+O ecrã dos limiares de SLA (`SlaThresholdsSection`) é deliberadamente
+**global** e di-lo no cartão, porque o leitor
+(`services/stats_sla._limiares`) chama `get_system_config()` sem
+`company_id`. O `SystemConfig` aceita âmbito por empresa e o modelo até o
+prometia na docstring — mas a promessa não estava cumprida do lado da
+leitura.
+
+Construir aqui um selector de empresa faria o administrador editar a Power
+e o painel continuar a usar a global: é o incidente de 2026-09-21 outra
+vez, com outro nome. **Enquanto o leitor for global, o ecrã é global e
+diz-o.** A diferença está em `TECHNICAL_DEBT.md` D-12, não escondida.
+
+Corolário para formulários de configuração: **um erro de LEITURA nunca se
+apresenta como "está nas omissões"**. Se o GET falhou, diz-se, e avisa-se
+que guardar escreve por cima de valores que o utilizador não viu.
+
 ## 28. Edição inline e navegação contígua (Lote 5, Secção B, Set 2026)
 
 ### 28.1 Um controlo dentro de uma linha clicável começa por travar o clique

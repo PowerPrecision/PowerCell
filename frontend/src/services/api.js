@@ -669,6 +669,18 @@ export const getVisits = (processId) => api.get("/visits", { params: { process_i
 export const getExportPermission = (companyId = "default") =>
   api.get("/system-config/public/export-permission", { params: { company_id: companyId } });
 
+// Configuração do sistema — SEMPRE por Axios. A secção depende de contexto de
+// empresa/papel e um `fetch` cru perde o `X-Company-Id` (incidente 2026-09-21).
+export const getSystemConfig = (companyId) =>
+  api.get("/system-config", {
+    params: { ...(companyId ? { company_id: companyId } : {}) },
+  });
+
+export const updateSystemConfigSection = (section, data, companyId) =>
+  api.patch(`/system-config/${section}`, data, {
+    params: { ...(companyId ? { company_id: companyId } : {}) },
+  });
+
 // Deadlines
 export const getDeadlines = (processId) => 
   api.get("/deadlines", { params: { process_id: processId } });

@@ -737,23 +737,25 @@ class TestUmTokenDePortalNaoAbreOSocketDeStaff:
         assert isinstance(user, dict) and user["id"] == "user-staff-1"
 
     @pytest.mark.asyncio
-    async def test_um_token_de_staff_LEGADO_sem_type_continua_a_entrar(
-        self, fake_async_db
-    ):
-        """`None` é aceite de propósito.
+    async def test_um_token_SEM_type_ja_NAO_entra(self, fake_async_db):
+        """D-5 fechada: a tolerância ao `None` morreu.
 
-        O `create_token` só passou a estampar `type` neste lote; recusar `None`
-        invalidava TODAS as sessões abertas no momento do deploy. A segurança
-        vem do outro lado: um tipo ESTRANHO é recusado.
+        Existia por uma razão com prazo: dois dos três produtores não
+        estampavam `type` e recusar `None` deslogava a equipa inteira no
+        momento do deploy. Passadas as `JWT_EXPIRATION_HOURS` (24h), nenhum
+        token sem `type` pode continuar válido — o mais longevo expirou.
+
+        Manter a tolerância depois disso não é compatibilidade, é uma porta:
+        um token forjado sem a claim passava a valer tanto como um legítimo.
         """
         from services import websocket_api_helpers as wah
 
         await fake_async_db.users.insert_one({"id": "user-staff-1", "is_active": True})
 
         with patch.object(wah, "db", fake_async_db):
-            user = await wah.verify_websocket_token(token_de_staff(tipo=None))
+            resultado = await wah.verify_websocket_token(token_de_staff(tipo=None))
 
-        assert isinstance(user, dict)
+        assert resultado == "invalid"
 
 
 class TestUmTokenDeStaffNaoAbreOSocketDoPortal:
@@ -1075,9 +1077,14 @@ class TestGetCurrentUserRecusaTokensEstranhos:
         assert user["id"] == "user-staff-1"
 
     @pytest.mark.asyncio
-    async def test_um_token_de_staff_LEGADO_sem_type_continua_a_passar(
-        self, fake_async_db
-    ):
+    async def test_um_token_SEM_type_e_recusado_pela_API(self, fake_async_db):
+        """D-5 fechada — o mesmo do lado da API HTTP, não só do WebSocket.
+
+        A tolerância vivia num ponto único (`tipo_de_token_e_de_staff`), mas
+        são DOIS os caminhos que a consultam. Afirmar a regra nova só num
+        deixava o outro sem prova de que a segue.
+        """
+        from fastapi import HTTPException
         from services import auth
 
         await fake_async_db.users.insert_one({
@@ -1085,11 +1092,12 @@ class TestGetCurrentUserRecusaTokensEstranhos:
         })
 
         with patch.object(auth, "db", fake_async_db):
-            user = await auth.get_current_user(
-                self._pedido(), self._credenciais(token_de_staff(tipo=None))
-            )
+            with pytest.raises(HTTPException) as erro:
+                await auth.get_current_user(
+                    self._pedido(), self._credenciais(token_de_staff(tipo=None))
+                )
 
-        assert user["id"] == "user-staff-1"
+        assert erro.value.status_code == 401
 
 
 # ====================================================================

@@ -7627,3 +7627,135 @@ comentários que explicam as regras de negócio. **Fica como decisão para
 tomar, não como correcção feita** — apagar os `.map` do artefacto de deploy
 custa a legibilidade de todos os erros futuros; a alternativa é enviá-los
 para o Sentry e não os servir. Registado em `TECHNICAL_DEBT.md`.
+
+---
+
+## Iteração slas-e-sourcemaps — O crash do painel morto pela raiz, o ecrã dos SLAs, D-5 e D-11 fechadas (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+## 1. `TypeError: companies is not iterable` — e não era falta de um `|| []`
+
+A mensagem do Sentry apontava para um `useMemo` a iterar cedo demais, e a
+leitura natural é "falta um fallback defensivo". **Não era isso**, e o
+diagnóstico certo mudou completamente a correcção.
+
+`normalizeCompaniesPayload` devolve SEMPRE um array — a query deste separador
+não pode produzir outra coisa. O valor não iterável vinha de **outro
+componente**:
+
+| Componente | Chave | Valor escrito |
+|---|---|---|
+| `CompaniesAdminTab` | `companies(pesquisa, pagina)` | `{empresas, total}` |
+| `UsersAccessAdminTab` | `companies("")` | array |
+
+E `companies(s, p) = [...companiesAll(), s ?? '', p ?? 1]`, pelo que
+`companies("")` **é** `companies("", 1)`: a mesma chave. Os dois separadores
+vivem no mesmo `SystemAdminPanel`, logo no mesmo `QueryClient`. Quem monta
+primeiro decide a forma.
+
+**Porque é que o `|| []` não serviria, medido e não suposto:** um objecto é
+*truthy*. O `companiesForNewAccess` JÁ tinha `(companies || []).filter(...)`, e
+com a colisão presente a mutação dá `(companies || []).filter is not a
+function` — o erro **muda de sítio** em vez de desaparecer. Só `Array.isArray`
+distingue, e o consumidor seguinte (`find` no `handleAddAccess`) volta a
+rebentar. A correcção é a chave; a guarda no `companyNameById` fica como
+segunda linha de defesa e a mutação prova que não basta sozinha.
+
+**Porque é que nenhum teste apanhou** — incluindo os 12 que escrevi ontem: cada
+um monta um componente com o seu próprio `QueryClient`. O defeito só existe
+quando os dois compartilham a cache, e é isso que o
+`UsersAccessAdminTab.colisaoDeCache.test.jsx` faz. Reproduziu a mensagem exacta
+do Sentry antes da correcção.
+
+**Uma guarda de fonte estava a cristalizar o defeito:** o
+`queryClient.orgAdmin.test.js` exigia literalmente
+`queryKeys.orgAdmin.companies("")` no separador Utilizadores. Passou a afirmar
+o contrário — a chave própria é usada, a antiga não voltou, e a nova desce de
+`companiesAll()` para a invalidação por prefixo do CRUD continuar a alcançá-la.
+
+**Nota sobre a minha inferência de ontem:** disse que o crash acontecia antes
+de qualquer fetch e depois corrigi-me a dizer que a conclusão não se sustentava
+(os logs só cobriam uma janela). A conclusão estava **certa** — o `for...of`
+corre no render —, mas o raciocínio que a sustentava era inválido. Ficam as
+duas coisas registadas: o mecanismo é este, e a forma como cheguei a ele não
+era prova.
+
+## 2. Ecrã dos limiares de SLA — e o travão que o desenhou
+
+A secção `dashboard_slas` existia no backend com omissões (7/15/30 dias) e
+nunca tivera ecrã. Antes de o desenhar, uma verificação que mudou o resultado:
+**o leitor (`stats_sla._limiares`) chama `get_system_config()` sem
+`company_id`** — lê sempre o `default`. A docstring do modelo prometia "por
+EMPRESA" e a promessa não estava cumprida do lado da leitura.
+
+Um selector de empresa neste ecrã faria o administrador editar a Power e o
+painel continuar a usar a global: o incidente de 2026-09-21 outra vez.
+**Enquanto o leitor for global, o ecrã é global e di-lo no cartão.** A docstring
+foi corrigida e a diferença está registada (D-12), não escondida.
+
+Detalhes que valem a pena: os campos ficam em **texto** (estado numérico num
+`<input>` faz reaparecer um `0` a cada tecla e impede apagar para reescrever); o
+payload converte para número no fim; e **um erro de LEITURA nunca aparece como
+"está nas omissões"** — é dito, com aviso de que guardar escreve por cima de
+valores que o utilizador não viu. Tudo por Axios, porque configuração depende de
+contexto de empresa/papel.
+
+## 3. D-5 fechada — a tolerância tinha prazo e o prazo passou
+
+O ramo do `None` em `tipo_de_token_e_de_staff` saiu. Existia por uma razão real
+(dois dos três produtores não estampavam `type` e recusar `None` deslogava a
+equipa no deploy) e com prazo explícito: `JWT_EXPIRATION_HOURS` = 24h.
+
+Os dois testes do legado foram **invertidos, não apagados** — um token sem
+`type` é agora recusado no WebSocket (`"invalid"`) e na API (401). Afirmado nos
+DOIS caminhos de propósito: a tolerância vivia num ponto único mas são dois os
+que o consultam, e provar a regra nova só num deixava o outro sem prova.
+
+## 4. D-11 fechada — e o defeito não estava na configuração
+
+O `vite.config.js` já pedia `filesToDeleteAfterUpload: ['**/*.map']`. O
+problema é que o plugin **só corre com `SENTRY_AUTH_TOKEN`**: sem token não
+enviava e não apagava, e os mapas ficavam servidos. Um `sourcemap: 'hidden'`
+com o comentário "o browser nunca o descarrega" — que é falso — completava a
+ilusão.
+
+A regra passou a ser **fail-closed** e a viver num ponto único testado
+(`utils/buildSourcemap.js`): em produção os mapas só se GERAM se houver como os
+enviar e apagar. Sem token, o build sai sem mapas e imprime o motivo. Provado
+com o build real: **0 `.map` em `dist/`**.
+
+**Consequência operacional que não se pode perder:** `SENTRY_AUTH_TOKEN` tem de
+estar definido no serviço de deploy, senão o Sentry passa a mostrar stacks
+minificados. É uma troca visível em vez de uma fuga invisível.
+
+## 5. Dívida nova
+
+- **D-12** — limiares de SLA guardados por empresa e lidos globalmente.
+- **D-13 (ÉPICO)** — custos do MongoDB Atlas, cinco passos ordenados do mais
+  barato ao mais caro: medir por colecção antes de mover, TTLs nas colecções de
+  diagnóstico, `history`/`activities` para o S3, Online Archive para processos
+  terminais com mais de 1 ano, e só depois redimensionar a instância. Com as
+  armadilhas escritas: o `audit_trail` é conformidade e a retenção dele é
+  decisão jurídica; as consultas federadas do Archive são lentas e não servem
+  um ecrã interactivo; e o critério de arquivo é `updated_at`, nunca
+  `created_at`, senão arquiva-se um processo antigo que voltou a mexer.
+- **D-10** foi apagada por acidente ao recortar a D-5 do ficheiro e **reposta** —
+  continua aberta.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3894 passed, 5 skipped**.
+- `yarn test` → **1243 passed / 107 ficheiros** (baseline 1217 / 103).
+- `flake8 --select=E9,F63,F7,F82` → 0. `eslint --quiet` → 0. `yarn build` → OK,
+  com 0 `.map`.
+- Mutação: reverter a chave para `companies("")` **com a guarda presente** mata
+  2 testes e o erro muda para `(companies || []).filter is not a function` —
+  é a prova de que a guarda não substitui a correcção.
+
+## A fazer em produção
+
+1. **`SENTRY_AUTH_TOKEN` no serviço de deploy** — sem ele o build deixa de
+   gerar mapas (de propósito) e o Sentry mostra stacks minificados.
+2. Reabrir o painel de administração → separador Utilizadores, depois de
+   Empresas, que é a ordem que rebentava.
