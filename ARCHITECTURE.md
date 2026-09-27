@@ -5935,3 +5935,138 @@ equivalente:
 - `todos_online` a devolver clientes não matava nada, porque o meu teste só
   cobria o ramo **sem** Redis e a mutação vivia no ramo **com** Redis;
 - o `get_current_user` não tinha teste nenhum — endureci-o e não o provei.
+
+---
+
+## O Portal do Cliente em tempo real — o lado do browser (Set 2026)
+
+Fecha o Caminho 4. A fronteira de segurança estava montada e testada; este lote
+liga os cabos do lado do cliente e **fecha a dívida D-9**.
+
+### A forma: contentor + hook + módulo puro
+
+Segue a divisão que o Épico 4/5 já usa (`hooks/useTaskEvents.js` +
+`utils/taskEvents.js`):
+
+| Peça | Responsabilidade |
+|---|---|
+| `utils/portalRealtime.js` | **Puro.** O URL do socket, a decisão por evento, os textos. É o que se testa sem abrir sockets. |
+| `hooks/usePortalRealtime.js` | A **ligação**: handshake, `ping`, backoff, `isConnected`. Não guarda mensagens. |
+| `pages/ClientPortal.jsx` | O **estado** e os efeitos. Decide o que o `isConnected` implica. |
+
+O hook não guarda a conversa: diz "vai buscar" e "estou ligado". É a mesma
+fronteira do Webmail — o tempo real não atravessa para dentro do componente de
+apresentação.
+
+### O polling não foi apagado, foi condicionado
+
+```js
+// PARA quando o socket liga; RETOMA sozinho quando cai, porque
+// `tempoRealLigado` é a única dependência deste efeito além da sessão.
+useEffect(() => {
+  if (!isVerified || tempoRealLigado) return undefined;
+  const interval = setInterval(…, 15000);
+  return () => clearInterval(interval);
+}, [isVerified, tempoRealLigado, …]);
+```
+
+É a regra do Épico 10 e não é cerimónia: um browser atrás de um proxy que
+bloqueia WebSockets, ou um socket que morre a meio de uma conversa, deixaria o
+cliente sem mensagens **sem dar erro nenhum**. A primeira leitura corre sempre,
+ligado ou não — o socket avisa do que *chega* a partir da ligação; o que já
+existia vem do GET.
+
+### Duas armadilhas que o payload impõe
+
+**1. O evento `portal_message` não é a mensagem.** O servidor trunca o conteúdo
+a 200 caracteres (`content[:200]`, nos dois emissores). Inserido na lista como
+registo, uma mensagem longa ficava truncada no ecrã **para sempre**, até um
+refetch acidental. O evento é um **sinal**; a verdade é o
+`GET /portal/messages`.
+
+Isto é deliberadamente **diferente** do `utils/webmailRealtime.js`, que insere a
+linha sem GET. Lá o evento transporta o registo completo. A diferença está no
+payload, não na preferência — e está escrita nos dois sítios para que ninguém
+"unifique" os dois padrões.
+
+**2. O cliente recebe o eco da sua própria mensagem.** O
+`portal_client_messages` difunde para a sala **sem** `exclude_user_id` (ao
+contrário do caminho do staff). O reflexo é filtrar `sender_type === "client"`
+— e está errado: um processo pode ter **dois titulares** com magic links
+próprios, ambos `client`, e esse filtro fazia o titular 2 deixar de ver as
+mensagens do titular 1, em silêncio, com o polling parado. A desduplicação é
+por **id da mensagem**: a minha já está na lista (o POST refez o fetch), a do
+co-titular não.
+
+### O resto das decisões
+
+- **Recuperação da lacuna.** Ao (re)ligar faz-se **uma** leitura: enquanto o
+  socket estava em baixo podem ter chegado mensagens e o polling estava parado.
+  Sem isto, reconectar deixava a conversa desactualizada até à mensagem
+  *seguinte*.
+- **4001/4002 não reconectam.** São veredictos sobre o **token**; insistir com o
+  mesmo token repetia-os para sempre e transformava um erro de autenticação num
+  ciclo de pedidos. `isConnected` fica `false` e o polling volta a ser o
+  caminho.
+- **`https` → `wss`, sempre** (`construirUrlDoSocket`). Um `ws://` a partir de
+  uma página `https` é recusado pelo browser com "insecure WebSocket" — e isso
+  só aparece no browser do cliente.
+- **Os motivos de falha do Estado têm texto pt-PT** vindo de um mapa fechado, e
+  um motivo desconhecido cai no genérico: um `motivo` novo do backend nunca
+  aparece cru no ecrã de um cliente. O backend já colapsa os erros internos em
+  `indisponivel`; aqui só se traduz.
+- **As callbacks vivem numa ref.** Uma função nova a cada render do contentor,
+  nas dependências do efeito que abre o socket, fecharia e reabriria a ligação a
+  **cada tecla** escrita na caixa de mensagem. A lista de mensagens entra como
+  função (`() => messagesRef.current`) pela mesma razão.
+
+### Cobertura, e porque é que a página é montada
+
+- `utils/portalRealtime.test.js` (37) — a decisão pura, incluindo as duas
+  armadilhas e o mapa de motivos.
+- `hooks/__tests__/usePortalRealtime.test.jsx` (25) — o ciclo de vida da
+  ligação, com um `WebSocket` falso ao nível da API do browser: nunca envia
+  `join_process_room`, `ping` é a única mensagem que sai, backoff, e o
+  não-reconectar em 4001/4002.
+- `pages/__tests__/ClientPortal.tempoReal.test.jsx` (11) — **a página montada a
+  sério**, a contar os GETs. É o único que prova que o polling **para** quando o
+  socket liga e **retoma** quando cai.
+
+A página é montada em vez de um componente de teste que reproduza a ligação
+porque **um duplo que reimplementa a lógica valida o duplo** — a lição que este
+projecto pagou duas vezes, nos lotes da quarentena e dos WebSockets. A prova de
+que o polling para tem de correr contra os efeitos verdadeiros do
+`ClientPortal`.
+
+Onze mutações, todas mortas — incluindo tirar a condição do polling, invertê-la,
+apagar o polling, tirar a leitura de recuperação, reconectar em 4001/4002,
+enviar `join_process_room`, desduplicar por `sender_type`, mandar o motivo
+interno cru para o ecrã e produzir `ws://` a partir de `https`.
+
+### Uma armadilha do ambiente de testes, corrigida no caminho
+
+`TypeError: Canvas.Image is not a constructor`, num stack só de `react-dom` sem
+uma palavra sobre imagens. O `package.json` aponta
+`"canvas": "npm:empty-npm-package@1.0.0"` para não compilar o módulo nativo — e
+é aí que está: o `require("canvas")` do jsdom **tem sucesso**, logo o
+`if (!Canvas) return;` dele não dispara e rebenta em `new Canvas.Image()`.
+Apanha **qualquer** teste que monte uma página com um logótipo; este foi o
+primeiro. Um stub em `window.Image` não serve (o jsdom usa a sua referência
+interna); `src/test/setup.js` acrescenta a classe ao objecto de exports do
+módulo vazio, que é o mesmo que o jsdom capturou.
+
+### O contrato, verificado ponta a ponta
+
+O caminho que a função **real** do frontend constrói foi usado para ligar à app
+ASGI **real**:
+
+```
+frontend construiu ...... ws://localhost:8001/api/ws/portal?token=<jwt>
+✓ ligado: connection_status → {'status': 'connected', 'process_id': '…'}
+✓ identidade no manager .. cliente:proc-do-cliente
+✓ sala ................... {'process_proc-do-cliente'}
+✓ âmbito de rede ......... None
+  recebe ................. portal_message · portal_gov_progress
+  não recebe ............. process_updated · document_uploaded · new_chat_message
+✓ ping → heartbeat (pong)
+```

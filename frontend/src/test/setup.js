@@ -54,3 +54,53 @@ if (temDOM && !Element.prototype.hasPointerCapture) {
   Element.prototype.setPointerCapture = () => {};
   Element.prototype.releasePointerCapture = () => {};
 }
+
+// O jsdom tenta DESCODIFICAR as imagens de um `<img src=…>` e, para isso, faz
+// `require("canvas")` (`jsdom/lib/jsdom/utils.js`). Este projecto aponta o
+// `canvas` para um pacote VAZIO no `package.json`
+// (`"canvas": "npm:empty-npm-package@1.0.0"`, para não compilar o módulo
+// nativo) — e é aí que está a armadilha: o `require` **tem sucesso**, pelo que
+// o jsdom conclui que tem descodificador (`if (!Canvas) return;` não dispara) e
+// depois rebenta em `new Canvas.Image()`, que não existe.
+//
+// O sintoma é `TypeError: Canvas.Image is not a constructor` num stack só de
+// `react-dom`, que não menciona imagens nem canvas e manda procurar no sítio
+// errado. Qualquer teste que MONTE uma página com um logótipo bate nisto.
+//
+// Um stub em `window.Image` não serve: o jsdom usa a sua referência interna.
+// O que resolve é dar ao módulo vazio a única coisa que o jsdom lhe pede — e
+// como o `require` devolve sempre o MESMO objecto de exports, acrescentar-lhe
+// a classe aqui é visto pelo jsdom, que a capturou por referência.
+if (temDOM) {
+  try {
+    const { createRequire } = await import("node:module");
+    const requireCJS = createRequire(import.meta.url);
+    const canvas = requireCJS("canvas");
+
+    if (canvas && typeof canvas.Image !== "function") {
+      // Só o que o jsdom toca: constrói, atribui `src` e pode chamar
+      // `onerror`. Descodificar bytes não interessa a nenhum teste — o que se
+      // afirma é o `alt`, o `src` ou a presença do elemento.
+      canvas.Image = class {
+        constructor() {
+          this.width = 0;
+          this.height = 0;
+          this.onload = null;
+          this.onerror = null;
+          this._src = "";
+        }
+
+        get src() {
+          return this._src;
+        }
+
+        set src(valor) {
+          this._src = valor;
+        }
+      };
+    }
+  } catch {
+    // Sem o pacote `canvas` resolvível, o jsdom faz `Canvas = null` e volta
+    // atrás sozinho — que é o caminho bom. Nada a fazer.
+  }
+}

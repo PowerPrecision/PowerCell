@@ -186,19 +186,11 @@ regra do `rede_consensual` (recusa adivinhar quando há mais de uma candidata).
 
 ---
 
-### D-9 · Portal do Cliente ainda faz polling das mensagens
-**Onde:** `frontend/src/hooks/useProcessPortalMessages.js`
+## Fechadas
 
-O backend do `/ws/portal` está feito e testado (lote dos WebSockets externos),
-mas o hook do Portal continua a interrogar `/portal-messages/unread` de 30 em
-30 segundos. O tempo real do lado do cliente **ainda não está ligado**.
+Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
+`worklog.md`, que é o histórico. Uma dívida fechada não volta a este registo.
 
-**Porque foi adiado:** o lote entregou a fronteira de segurança (handshake,
-isolamento, lista de permissão, presença) e a ligação do frontend é trabalho
-de UI com o seu próprio risco — não se mistura com uma fronteira de segurança
-no mesmo commit.
-
-**Para fechar:** subscrever `/api/ws/portal` no hook e parar o intervalo
-quando `isConnected`, **mantendo o polling como recurso** (a regra do Épico 10:
-para quando o WS liga, retoma quando cai). Eventos a escutar: `portal_message`
-e `portal_gov_progress`.
+| # | Dívida | Fechada em |
+|---|---|---|
+| D-9 | Portal do Cliente em polling das mensagens | Iteração `ws-portal-ui` — ligado a `/api/ws/portal` com o polling mantido como recurso |

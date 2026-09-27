@@ -7283,3 +7283,120 @@ O hook `useProcessPortalMessages` continua em polling de 30s: a fronteira de
 segurança está feita e testada, mas a **subscrição do frontend não está
 ligada**. Não a misturei no mesmo commit de propósito — é trabalho de UI com o
 seu próprio risco, e o polling continua a ser o recurso por desenho.
+
+---
+
+## Iteração ws-portal-ui — O Portal do Cliente em tempo real (Set 2026)
+
+Fecha o Caminho 4 e a dívida **D-9**. A fronteira de segurança estava montada;
+este lote liga os cabos do lado do browser.
+
+### O que mudou
+
+| Ficheiro | Papel |
+|---|---|
+| `utils/portalRealtime.js` (novo) | Puro: URL do socket, decisão por evento, textos pt-PT |
+| `hooks/usePortalRealtime.js` (novo) | A ligação: handshake, `ping`, backoff, `isConnected` |
+| `pages/ClientPortal.jsx` | Consome o hook; o polling de 15s passou a condicional |
+
+O hook não guarda a conversa — diz "vai buscar" e "estou ligado". Mesma
+fronteira do `useTaskEvents`/`utils/taskEvents`.
+
+### O polling não foi apagado
+
+```js
+if (!isVerified || tempoRealLigado) return undefined;   // ← para quando liga
+```
+
+Retoma sozinho quando a ligação cai, porque `tempoRealLigado` é a única
+dependência do efeito além da sessão. Não é cerimónia: um browser atrás de um
+proxy que bloqueia WebSockets ficaria sem mensagens **sem erro nenhum**.
+
+### Duas armadilhas que o payload impõe
+
+1. **O evento `portal_message` não é a mensagem** — o servidor trunca o conteúdo
+   a 200 caracteres. Inserido como registo, uma mensagem longa ficava truncada
+   no ecrã para sempre. É um SINAL; a verdade é o GET. Deliberadamente diferente
+   do `webmailRealtime.js`, que insere sem GET porque lá o evento traz a linha
+   completa — a diferença está no payload, não na preferência.
+2. **O cliente recebe o eco da sua própria mensagem** (o
+   `portal_client_messages` difunde sem `exclude_user_id`). O reflexo é filtrar
+   `sender_type === "client"` e está **errado**: um processo pode ter dois
+   titulares com magic links próprios, ambos `client`, e o filtro fazia o
+   titular 2 deixar de ver as mensagens do titular 1 — em silêncio, com o
+   polling parado. A desduplicação é por **id**.
+
+### As outras decisões
+
+- **Recuperação da lacuna:** ao (re)ligar, uma leitura. Sem ela, reconectar
+  deixava a conversa desactualizada até à mensagem seguinte.
+- **4001/4002 não reconectam** — veredictos sobre o token; insistir repetia-os
+  para sempre. `isConnected` fica `false` e o polling volta a ser o caminho.
+- **`https` → `wss` sempre**: um `ws://` a partir de uma página `https` é
+  recusado pelo browser, e isso só aparece no browser do cliente.
+- **Callbacks numa ref**: uma função nova por render, nas dependências do efeito
+  do socket, reabria a ligação a cada tecla escrita na caixa de mensagem.
+
+### Cobertura, e porque é que a página é montada
+
+`utils/portalRealtime.test.js` (37) + `hooks/__tests__/usePortalRealtime.test.jsx`
+(25) + **`pages/__tests__/ClientPortal.tempoReal.test.jsx` (11)**.
+
+O terceiro monta a página **a sério** e conta os GETs — é o único que prova que
+o polling para e retoma. Montei a página em vez de escrever um componente de
+teste que reproduzisse a ligação porque **um duplo que reimplementa a lógica
+valida o duplo**: foi a lição paga duas vezes, nos lotes da quarentena e dos
+WebSockets, e não a ia pagar uma terceira.
+
+Onze mutações, todas mortas: tirar a condição do polling, invertê-la, apagar o
+polling, tirar a leitura de recuperação, reconectar em 4001/4002, enviar
+`join_process_room`, desduplicar por `sender_type`, mandar o motivo interno cru
+para o ecrã, produzir `ws://` a partir de `https`, recarregar com zero
+documentos e não fechar o socket ao desmontar.
+
+### Dois erros meus
+
+1. **`waitFor` com temporizadores falseados** — ele faz polling com
+   temporizadores REAIS e os meus estavam `vi.useFakeTimers()`: dois testes
+   pendurados a 5s de timeout. As actualizações de estado já chegam dentro do
+   `act`, logo a asserção é directa.
+2. **Inventei a forma do `/portal/status`** no mock. A real é **aninhada**
+   (`{process: {client_name}}`); a minha, achatada, fazia a página rebentar no
+   render — e **sem render os efeitos do polling nunca instalavam**, pelo que as
+   contagens ficavam a 1 e quatro testes "provavam" o contrário do que queriam.
+   Um mock com a forma errada é pior do que nenhum: passa a testar o caminho de
+   erro sem o dizer.
+
+### Uma armadilha do ambiente de testes, corrigida no caminho
+
+`TypeError: Canvas.Image is not a constructor`, num stack só de `react-dom` sem
+uma palavra sobre imagens. O `package.json` aponta o `canvas` para um pacote
+**vazio** (para não compilar o módulo nativo) — e o `require("canvas")` do jsdom
+**tem sucesso**, pelo que o `if (!Canvas) return;` dele não dispara. Apanha
+qualquer teste que monte uma página com um logótipo; este foi o primeiro.
+`src/test/setup.js` dá ao módulo vazio a única classe que o jsdom lhe pede.
+
+Um primeiro stub meu em `window.Image` **não resolvia nada** (o jsdom usa a sua
+referência interna) — apaguei-o em vez de o deixar: um stub que não previne o
+defeito que diz prevenir é um placebo, e este projecto já tem um no historial.
+
+### Estado
+
+- `yarn test`: **1195 passed** em 100 ficheiros (baseline 1122 em 97 — exactamente
+  +73 em +3 ficheiros, nenhum ficheiro silenciosamente não recolhido).
+- `eslint --quiet` (gate do CI): **0 erros**.
+- `vite build`: OK.
+- `pytest tests/unit`: **3880 passed, 5 skipped** (backend intocado).
+
+### O contrato, verificado ponta a ponta
+
+O caminho que a função **real** do frontend constrói, usado para ligar à app
+ASGI **real**:
+
+```
+frontend construiu ...... ws://localhost:8001/api/ws/portal?token=<jwt>
+✓ ligado · identidade cliente:proc-do-cliente · sala process_… · âmbito None
+  recebe ....... portal_message · portal_gov_progress
+  não recebe ... process_updated · document_uploaded · new_chat_message
+✓ ping → heartbeat (pong)
+```

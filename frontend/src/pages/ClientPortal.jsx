@@ -79,6 +79,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import ClientPortalLogin from './ClientPortalLogin';
 import SimulatorCH from '../components/portal/SimulatorCH';
 import { API_BASE_URL } from "../utils/apiBaseUrl";
+import { usePortalRealtime } from "../hooks/usePortalRealtime";
 
 // ====================================================================
 // CLIENT-ONLY WRAPPER — prevents hydration mismatches with Radix portals
@@ -2049,20 +2050,57 @@ export default function ClientPortal() {
     }
   }, [newMessage, fetchMessages]);
 
-  // Fetch messages on mount and poll every 15s
-  // CORREÇÃO: Só buscar mensagens quando isVerified === true.
-  // Antes, este useEffect disparava no mount mesmo sem sessão verificada,
-  // gerando 401s quando existia um token expirado em localStorage.
+  // ── Tempo real (WebSocket do Portal) ──────────────────────────────────
+  // O socket é `/api/ws/portal`; o contrato completo está em
+  // `FRONTEND_GUIDELINES.md` § 9 e a lógica pura em `utils/portalRealtime.js`.
+  //
+  // `mensagensActuais` é passado como FUNÇÃO e lido de uma ref: o hook precisa
+  // da lista para desduplicar o eco da própria mensagem, mas passá-la como
+  // valor punha-a nas dependências do efeito que abre o socket — e a ligação
+  // fechava e reabria a cada mensagem recebida.
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  const recarregarMensagens = useCallback(() => {
+    fetchMessages();
+    fetchUnreadCount();
+  }, [fetchMessages, fetchUnreadCount]);
+
+  const { isConnected: tempoRealLigado } = usePortalRealtime({
+    enabled: Boolean(isVerified),
+    obterToken: getPortalToken,
+    onMensagens: recarregarMensagens,
+    onDocumentos: handleUploadSuccess,
+    onAviso: (aviso) => {
+      if (aviso.tipo === "erro") toast.error(aviso.texto);
+      else toast.success(aviso.texto);
+    },
+    mensagensActuais: () => messagesRef.current,
+  });
+
+  // Primeira leitura: sempre, ligado ou não. O socket avisa do que CHEGA a
+  // partir da ligação; o que já existia vem daqui.
   useEffect(() => {
     if (!isVerified) return;
     fetchMessages();
     fetchUnreadCount();
+  }, [isVerified, fetchMessages, fetchUnreadCount]);
+
+  // POLLING DE RECURSO — 15s, e só enquanto o socket NÃO está ligado.
+  //
+  // Não foi apagado de propósito (regra do Épico 10): um browser atrás de um
+  // proxy que bloqueia WebSockets, ou um socket que morre a meio de uma
+  // conversa, deixaria o cliente sem mensagens. Para quando `tempoRealLigado`
+  // e retoma sozinho quando a ligação cai, porque é essa a única dependência
+  // deste efeito além da sessão.
+  useEffect(() => {
+    if (!isVerified || tempoRealLigado) return undefined;
     const interval = setInterval(() => {
       fetchMessages();
       fetchUnreadCount();
     }, 15000);
     return () => clearInterval(interval);
-  }, [isVerified, fetchMessages, fetchUnreadCount]);
+  }, [isVerified, tempoRealLigado, fetchMessages, fetchUnreadCount]);
 
   // ── Fetch recommended properties ──
   const fetchRecommendations = useCallback(async () => {

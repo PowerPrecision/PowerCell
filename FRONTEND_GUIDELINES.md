@@ -188,11 +188,19 @@ Os bytes passaram a ser validados **depois** de chegarem ao S3 (`HEAD` + `Range`
 
 Distinguir 400 de 503 no `catch` é o que separa "o teu ficheiro não serve" de "tenta outra vez dentro de um minuto" — e dizer a primeira coisa quando a verdade é a segunda faz o cliente desistir de um upload que estava bom.
 
+#### O que NÃO se faz com o evento `portal_message`
+
+**Não inserir o payload na lista de mensagens.** O servidor trunca o conteúdo a 200 caracteres (`content[:200]`): inserido como registo, uma mensagem longa fica truncada no ecrã **para sempre**, até um refetch acidental. O evento é um **sinal** — quem tem a verdade é o `GET /portal/messages`.
+
+É deliberadamente diferente do `utils/webmailRealtime.js`, que insere a linha **sem** GET. Lá o evento transporta o registo completo; aqui não. A diferença está no payload, não na preferência — e é por isso que está escrita nos dois sítios.
+
+**Não filtrar o eco por `sender_type`.** O cliente recebe a sua própria mensagem de volta (o `portal_client_messages` difunde sem `exclude_user_id`, ao contrário do caminho do staff). O reflexo de ignorar `sender_type === "client"` parece certo e está errado: um processo pode ter **dois titulares** com magic links próprios, ambos `client`, e esse filtro fazia o titular 2 deixar de ver as mensagens do titular 1 — com o polling parado, silenciosamente. A desduplicação é por **id da mensagem**: a minha já está na lista (o POST refez o fetch), a do meu co-titular não.
+
 O `file_size` e o `content_type` que o cliente envia no `confirm-upload` continuam a ser aceites no corpo por retrocompatibilidade, mas **são ignorados**: o que fica gravado é o que o S3 e os magic bytes dizem. Não construir UI que assuma que o tipo declarado é o que ficou (um `.pdf` que é na verdade um PNG aparecerá como `image/png` na lista de documentos, e está correcto).
 
 ### O Portal tem WebSocket próprio: `/api/ws/portal` (Set 2026)
 
-O backend está feito e testado; a **subscrição do frontend ainda não está ligada** (o `useProcessPortalMessages` continua em polling de 30s — dívida D-9). Quando for, estas são as regras do contrato, e nenhuma é negociável do lado do cliente:
+**Ligado** desde a iteração `ws-portal-ui`: `hooks/usePortalRealtime.js` (a ligação) + `utils/portalRealtime.js` (a decisão, pura e testada), consumidos pelo `ClientPortal`. Estas são as regras do contrato, e nenhuma é negociável do lado do cliente:
 
 - **Endpoint próprio.** `/api/ws/portal?token=<magic token do Portal>` — **não** o `/api/ws/notifications` da equipa, que recusa tokens de Portal com o código de fecho `4002`. O token é o mesmo que o Portal já usa nas chamadas REST (`getPortalToken()`).
 - **Não enviar `join_process_room`.** A sala é derivada do token **no servidor** e um pedido de sala é ignorado e registado como sondagem. Não há nada a subscrever: a ligação já está na sala do processo do cliente.
