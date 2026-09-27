@@ -65,6 +65,32 @@ import {
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
+/**
+ * Separadores com ecrã PRÓPRIO — ponto único.
+ *
+ * Isto era uma lista de EXCLUSÃO no render (`activeTab !== "a" && activeTab
+ * !== "b" && …`) ao lado de um `activeTab === "a" &&` por secção: a mesma
+ * informação em dois sítios, que divergem sem dar erro. Acrescentei o
+ * `dashboard_slas` só no lado positivo e o cartão genérico passou a
+ * renderizar-se A PAR dele, com `section` a `undefined` — `section.title`
+ * rebenta e a página fica em branco.
+ *
+ * Com um registo, um separador é dedicado OU genérico, nunca os dois, e
+ * acrescentar um obriga a decidir. Todas recebem `token` e `user`: as que não
+ * os usam ignoram-nos, e uniformizar evita um terceiro sítio com a lista de
+ * quem precisa de quê.
+ */
+export const SECCOES_DEDICADAS = {
+  document_recipients: DocumentRecipientsManager,
+  maintenance: MaintenanceSection,
+  integrations: IntegrationsConfigSection,
+  system_emails: SystemEmailsSection,
+  portal: PortalSettingsSection,
+  mandatory_documents: MandatoryDocumentsSection,
+  changelog: ChangelogSection,
+  dashboard_slas: SlaThresholdsSection,
+};
+
 const SystemConfigPage = ({ embedded = false }) => {
   const { token, user, effectiveCompanyId } = useAuth();
   const [searchParams] = useSearchParams();
@@ -212,6 +238,9 @@ const SystemConfigPage = ({ embedded = false }) => {
   }
 
   const sections = Object.keys(fields).filter(key => key !== "email");
+  // Qual secção o separador activo pede. Deriva do registo — ver
+  // `SECCOES_DEDICADAS`: é o que garante que nunca se renderizam as duas.
+  const SeccaoDedicada = SECCOES_DEDICADAS[activeTab];
 
 
   const pageContent = (
@@ -434,12 +463,8 @@ const SystemConfigPage = ({ embedded = false }) => {
 
           {/* ─── Right: Content Area ─── */}
           <main className="min-w-0 flex-1">
-            {activeTab === "document_recipients" && <DocumentRecipientsManager token={token} user={user} />}
-            {activeTab === "integrations" && <IntegrationsConfigSection />}
-            {activeTab === "system_emails" && <SystemEmailsSection token={token} />}
-            {activeTab === "portal" && <PortalSettingsSection token={token} />}
-            {activeTab === "mandatory_documents" && <MandatoryDocumentsSection token={token} />}
-            {activeTab !== "document_recipients" && activeTab !== "maintenance" && activeTab !== "integrations" && activeTab !== "system_emails" && activeTab !== "portal" && activeTab !== "mandatory_documents" && activeTab !== "changelog" && (
+            {SeccaoDedicada ? <SeccaoDedicada token={token} user={user} /> : null}
+            {!SeccaoDedicada && fields[activeTab] && (
               <ConfigSection
                 section={fields[activeTab]}
                 sectionKey={activeTab}
@@ -449,9 +474,20 @@ const SystemConfigPage = ({ embedded = false }) => {
                 onTest={handleTest}
               />
             )}
-            {activeTab === "maintenance" && <MaintenanceSection token={token} user={user} />}
-            {activeTab === "changelog" && <ChangelogSection token={token} />}
-            {activeTab === "dashboard_slas" && <SlaThresholdsSection />}
+            {/* Um separador desconhecido (um `?tab=` antigo num favorito) não
+                é dedicado nem tem campos: DIZ-SE, em vez de deixar a área de
+                conteúdo vazia sem explicação. */}
+            {!SeccaoDedicada && !fields[activeTab] && !loading && (
+              <Card data-testid="config-seccao-desconhecida">
+                <CardContent className="py-12 text-center space-y-2">
+                  <p className="font-medium">Secção desconhecida</p>
+                  <p className="text-sm text-muted-foreground">
+                    O separador &quot;{activeTab}&quot; não existe nesta configuração.
+                    Escolha um da lista ao lado.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
           </main>
         </div>
       </div>

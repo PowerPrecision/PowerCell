@@ -117,3 +117,49 @@ def test_auto_backup_enabled_is_settings_boolean_field():
     assert "auto_backup_enabled" in keys
     field = next(f for f in settings["fields"] if f.key == "auto_backup_enabled")
     assert field.type == "boolean"
+
+
+# ====================================================================
+# `dashboard_slas` TEM de ser uma secção aceite à ESCRITA (Set 2026)
+# ====================================================================
+# O ecrã de limiares de SLA foi construído contra um contrato SUPOSTO: assumi
+# que `PATCH /api/system-config/{seccao}` aceitava qualquer chave do
+# `SystemConfig`. Não aceita — o `run_update_config` valida contra
+# `CONFIG_FIELDS` (as secções com metadados de campos, que geram a UI
+# genérica) e `EXTRA_SECTIONS` (as que são válidas a gravar mas têm ecrã
+# próprio). O `dashboard_slas` não estava em nenhuma, logo o botão "Guardar
+# limiares" devolvia 400 "Secção inválida".
+#
+# O sítio certo é `EXTRA_SECTIONS`, e o precedente é o `mandatory_documents`:
+# tem componente próprio (`MandatoryDocumentsSection`) e não aparece na UI
+# genérica. Pô-lo em `CONFIG_FIELDS` faria o separador aparecer DUAS vezes —
+# o ecrã dedicado e o genérico.
+class TestDashboardSlasEUmaSeccaoValida:
+    def test_e_aceite_a_escrita(self):
+        from services.system_config_api import CONFIG_FIELDS, EXTRA_SECTIONS
+
+        assert (
+            "dashboard_slas" in CONFIG_FIELDS or "dashboard_slas" in EXTRA_SECTIONS
+        ), "sem isto, o PATCH devolve 400 e o ecrã de SLAs não grava nada"
+
+    def test_fica_FORA_do_CONFIG_FIELDS_porque_tem_ecra_proprio(self):
+        # Contraprova da escolha: em `CONFIG_FIELDS` o separador nasceria
+        # também na navegação genérica, ao lado do dedicado.
+        from services.system_config_api import CONFIG_FIELDS, EXTRA_SECTIONS
+
+        assert "dashboard_slas" not in CONFIG_FIELDS
+        assert "dashboard_slas" in EXTRA_SECTIONS
+
+    def test_o_modelo_tem_mesmo_essa_seccao(self):
+        # Uma secção aceite que o modelo não conheça seria aceite e perdida.
+        from models.system_config import SystemConfig
+
+        assert "dashboard_slas" in SystemConfig.model_fields
+
+    def test_uma_seccao_inventada_continua_a_ser_recusada(self):
+        # A guarda tem de continuar a guardar: alargar a lista não pode
+        # transformá-la em "aceita tudo".
+        from services.system_config_api import CONFIG_FIELDS, EXTRA_SECTIONS
+
+        assert "seccao_que_nao_existe" not in CONFIG_FIELDS
+        assert "seccao_que_nao_existe" not in EXTRA_SECTIONS
