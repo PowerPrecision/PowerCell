@@ -21,12 +21,30 @@ const ScrollBar = React.forwardRef(({ className, orientation = "vertical", ...pr
 ))
 ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName
 
-const ScrollArea = React.forwardRef(({ className, children, ...props }, ref) => (
+/**
+ * `viewportStyle` / `viewportClassName` — o limite de altura vai no VIEWPORT.
+ *
+ * PORQUÊ (Lote 6, ponto 4): a `Root` tem `overflow-hidden` e o `Viewport`
+ * tem `h-full`. Um `maxHeight` posto na Root — que é o reflexo natural e o
+ * que o `TasksPanel` fazia — deixa a Root com altura AUTO, pelo que o
+ * `h-full` do viewport resolve para a altura do conteúdo: o viewport nunca
+ * transborda, o Radix não mostra barra nenhuma, e a Root corta o excedente
+ * com o seu `overflow-hidden`. O resultado não é uma lista com elevador: é
+ * uma lista TRUNCADA, com tarefas que não se conseguem alcançar.
+ *
+ * Com o limite no viewport, a altura continua a crescer com o conteúdo até
+ * ao limite (uma lista curta não deixa espaço morto) e a partir dali
+ * aparece a barra.
+ */
+const ScrollArea = React.forwardRef(({ className, children, viewportClassName, viewportStyle, ...props }, ref) => (
   <ScrollAreaPrimitive.Root
     ref={ref}
     className={cn("relative overflow-hidden", className)}
     {...props}>
-    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit]">
+    <ScrollAreaPrimitive.Viewport
+      className={cn("h-full w-full rounded-[inherit]", viewportClassName)}
+      style={viewportStyle}
+      data-testid="scroll-area-viewport">
       {children}
     </ScrollAreaPrimitive.Viewport>
     <ScrollBar />

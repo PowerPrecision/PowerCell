@@ -1216,7 +1216,23 @@ export const getClients = (params = {}) => {
     return api.get("/clients", { params: cleanParams });
 };
 export const getClient = (id) => api.get(`/clients/${id}`);
-export const getClientFiles = (clientId) => api.get(`/documents/client/${clientId}/files`);
+/**
+ * Documentos do cliente (S3), para a Ficha do Cliente.
+ *
+ * `skipErrorToast` de propósito (Lote 6, ponto 7): este endpoint responde
+ * **403 por desenho** enquanto o processo não estiver indexado — é a regra
+ * de visibilidade de `services/document_visibility.py`. A Ficha do Cliente
+ * pede-o SOZINHA na montagem, pelo que o utilizador via "Não tem permissão
+ * para realizar esta ação" sem ter clicado em nada.
+ *
+ * O `catch {}` da página não bastava: o interceptor dispara o toast ANTES
+ * de o `catch` correr, e um componente não consegue calar um toast global.
+ * Quem pede tem de dizer que trata o erro. É a mesma regra do
+ * `S3FileManager` (PACOTE 11) — falta de permissão que a UI explica no
+ * lugar não é um erro para anunciar por cima.
+ */
+export const getClientFiles = (clientId) =>
+  api.get(`/documents/client/${clientId}/files`, { skipErrorToast: true });
 /**
  * Cria um novo cliente.
  * PACOTE 10 — aceita config axios opcional (ex.: { skipErrorToast: true }

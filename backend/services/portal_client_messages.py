@@ -20,11 +20,45 @@ from services.realtime_delivery import entregar_na_sala, sala_do_processo
 logger = logging.getLogger(__name__)
 
 
+async def _difundir_mensagem_na_sala(process_id: str, client_name: str, message_doc: dict) -> None:
+    """Entrega a mensagem do cliente à sala WebSocket do processo.
+
+    VIVIA DENTRO DA NOTIFICAÇÃO, DEPOIS DE UM `return` (Lote 6, ponto 5)
+    ===================================================================
+    O broadcast era a última instrução de `_notify_assigned_team_message`,
+    que começa por `if not assigned_ids: return`. Num processo SEM ninguém
+    atribuído — o caso normal de um processo acabado de nascer, e
+    precisamente aquele em que alguém está a olhar para ele — a mensagem do
+    cliente não era difundida a ninguém. Quem tivesse o processo aberto no
+    CRM não a via até o polling de 30 s passar.
+
+    A entrega em tempo real e a notificação por email/in-app são duas
+    coisas com destinatários diferentes: a sala é de quem tem o processo
+    ABERTO, a notificação é de quem está ATRIBUÍDO. Acoplá-las fez a
+    primeira herdar a condição da segunda.
+
+    Nunca levanta: a mensagem já está gravada e o cliente já recebeu o 200.
+    """
+    try:
+        await entregar_na_sala(sala_do_processo(process_id), WSEventType.PORTAL_MESSAGE, {
+            "id": message_doc.get("id"),
+            "process_id": process_id,
+            "sender_type": "client",
+            "sender_id": "client",
+            "sender_name": client_name,
+            # Truncado de propósito: o evento é um SINAL e a lista vem do
+            # GET. Ver `utils/portalRealtime.js`, armadilha 1.
+            "content": message_doc.get("content", "")[:200],
+            "created_at": message_doc.get("created_at"),
+        })
+    except Exception as ws_err:
+        logger.debug(f"Erro ao difundir mensagem do portal via WebSocket: {ws_err}")
+
+
 async def _notify_assigned_team_message(process: dict, process_id: str, client_name: str, message_doc: dict):
-    """Notifica TODOS os utilizadores atribuídos ao processo sobre uma nova mensagem do cliente.
-    
-    Também faz broadcast da mensagem para a sala WebSocket do processo (process_{process_id})
-    para que qualquer membro da equipa com o processo aberto veja a mensagem em tempo real.
+    """Notifica os utilizadores ATRIBUÍDOS ao processo (email + notificação in-app).
+
+    A difusão em tempo real não vive aqui — ver `_difundir_mensagem_na_sala`.
     """
     # ── Recolher TODOS os IDs de utilizadores atribuídos ──
     assigned_ids = _get_all_assigned_user_ids(process)
@@ -65,20 +99,6 @@ async def _notify_assigned_team_message(process: dict, process_id: str, client_n
                 
         except Exception as e:
             logger.warning(f"Erro ao notificar utilizador {uid} sobre mensagem do portal: {e}")
-    
-    # ── Broadcast para a sala WebSocket do processo ──
-    try:
-        await entregar_na_sala(sala_do_processo(process_id), WSEventType.PORTAL_MESSAGE, {
-            "id": message_doc.get("id"),
-            "process_id": process_id,
-            "sender_type": "client",
-            "sender_id": "client",
-            "sender_name": client_name,
-            "content": message_doc.get("content", "")[:200],
-            "created_at": message_doc.get("created_at"),
-        })
-    except Exception as ws_err:
-        logger.debug(f"Erro ao broadcast mensagem do portal via WebSocket: {ws_err}")
     
     logger.info(
         f"[PORTAL] Notificados {len(assigned_ids)} utilizadores sobre mensagem "
@@ -190,6 +210,10 @@ async def run_send_portal_message(data: dict, client_data: dict):
             status_code=500,
             detail="Erro ao enviar mensagem. Tente novamente."
         )
+
+    # A difusão vem PRIMEIRO: é a que serve quem está a olhar para o ecrã
+    # agora, e não pode ficar atrás de um ciclo de envio de emails.
+    await _difundir_mensagem_na_sala(process_id, client_name, message_doc)
 
     # Notificar TODOS os utilizadores atribuídos sobre a nova mensagem do cliente
     await _notify_assigned_team_message(process, process_id, client_name, message_doc)

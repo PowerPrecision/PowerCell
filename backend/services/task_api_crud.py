@@ -22,6 +22,11 @@ from services.task_assignment_hygiene import (
     diff_de_responsaveis,
     normalizar_assigned_to,
 )
+from services.tenant_network import (
+    build_tenant_condition,
+    com_isolamento,
+    resolve_tenant_stamp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +96,23 @@ async def run_create_task(task_data: TaskCreate, current_user: dict):
         "created_at": now,
         "updated_at": now
     }
+
+    # ── Carimbo de rede na ESCRITA ──
+    # Corrigir só a leitura tornaria a correcção invisível para o trabalho
+    # NOVO: uma tarefa por carimbar só aparece a quem tiver a rede de
+    # omissão no âmbito. É a lição do `assigned_to` — normalizar à leitura
+    # trata o que já existe; deixar de produzir mal é o que impede o
+    # problema de voltar.
+    #
+    # `resolve_tenant_stamp` devolve `None` quando não há contexto de
+    # empresa, e aí NÃO se carimba: uma rede errada é permanente e pior do
+    # que nenhuma.
+    carimbo = await resolve_tenant_stamp(
+        current_user,
+        active_company_id=current_user.get("active_company_id"),
+    )
+    if carimbo:
+        task.update(carimbo)
 
     await db.tasks.insert_one(task)
     logger.info(f"Tarefa criada: {task_id} por {current_user['name']}")
@@ -188,6 +210,22 @@ async def run_get_tasks(
     if not include_completed:
         query["completed"] = False
 
+    # ── Isolamento multi-tenant (Lote 6, ponto 4) ──
+    # Sem isto a query de um utilizador sem filtros era `{"completed": False}`
+    # — TODAS as tarefas da base de dados, de todas as redes. A Domus é uma
+    # ilha e via as tarefas da Power.
+    #
+    # A condição é por REDE e não por empresa: a Power e a Precision
+    # partilham `network_id` e trabalham mesmo sobre os mesmos dados.
+    # Vem do ponto único (`tenant_network`) de propósito — uma condição
+    # escrita aqui à mão divergiria da topologia na primeira mudança, que
+    # é exactamente o que o placebo `build_company_scope_condition` fez.
+    #
+    # Envolve TODOS os ramos, incluindo o do calendário global
+    # (`user_id="all"`): esse alarga o âmbito de PESSOAS, nunca o de redes.
+    # Um admin é admin da sua rede.
+    query = com_isolamento(await build_tenant_condition(current_user), query)
+
     tasks = await db.tasks.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
 
     # Enriquecer tarefas com nomes
@@ -210,6 +248,13 @@ async def run_get_my_tasks(current_user: dict, *, include_completed: bool = Fals
 
     if not include_completed:
         query["completed"] = False
+
+    # O filtro por `assigned_to` já restringe esta listagem por acidente —
+    # a atribuição coincide quase sempre com o âmbito, e foi essa metade
+    # que escondeu a fuga do `run_get_tasks`. "Quase sempre" não é uma
+    # garantia: uma tarefa atribuída antes de o utilizador mudar de rede
+    # continuaria a aparecer. O âmbito aplica-se às DUAS listagens.
+    query = com_isolamento(await build_tenant_condition(current_user), query)
 
     tasks = await db.tasks.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
 

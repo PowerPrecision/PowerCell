@@ -31,6 +31,45 @@ export default class ErrorBoundary extends Component {
     return { hasError: true, error };
   }
 
+  /**
+   * Sair do estado de erro quando o CONTEXTO muda (Lote 6, ponto 2).
+   *
+   * O DEFEITO: um `ErrorBoundary` do React fica preso no estado de erro
+   * até ser remontado ou reposto à mão. Este só se repunha no clique do
+   * botão "Tentar novamente". Como o boundary vive DENTRO do `element` de
+   * cada rota, ele sobrevive a uma mudança de `:id` na mesma rota — e a
+   * partir do primeiro crash, toda a navegação para aquela rota mostrava o
+   * ecrã de erro de um processo que já não era o aberto.
+   *
+   * Em produção isto apareceu como uma assimetria difícil de explicar: as
+   * setas Anterior/Seguinte funcionavam e o "Voltar" do browser dava ecrã
+   * em branco. A aplicação declara DUAS rotas para os detalhes do processo
+   * (`/processo/:id` e `/process/:id`), cada uma com o seu `element` e,
+   * portanto, com o seu boundary; um deles ficava latido e o outro não.
+   *
+   * `resetKey` é a chave do contexto (o `RouteBoundary` passa-lhe o
+   * pathname). Mudar de sítio é uma tentativa nova — e conta como tal,
+   * pelo que o `retryCount` também volta a zero: o limite de tentativas
+   * existe para travar um ciclo de re-render, não para condenar uma rota
+   * durante o resto da sessão.
+   *
+   * Isto NÃO esconde o erro: ele foi registado no `componentDidCatch` e
+   * volta a acontecer se a causa persistir. O que deixa de acontecer é o
+   * ecrã ficar quebrado depois de a causa desaparecer.
+   */
+  componentDidUpdate(prevProps) {
+    if (!this.state.hasError) return;
+    if (prevProps.resetKey === this.props.resetKey) return;
+    this.setState({
+      hasError: false,
+      error: null,
+      errorInfo: null,
+      eventId: null,
+      retryCount: 0,
+      isRetrying: false,
+    });
+  }
+
   componentDidCatch(error, errorInfo) {
     const { moduleName } = this.props;
 

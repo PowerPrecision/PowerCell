@@ -504,8 +504,29 @@ export function AuthProvider({ children }) {
       persistActiveCompany(resolvedCompanyId, newRole);
     }
 
+    // Lote 6, pontos 3 e 4 — o snapshot dos cabeçalhos ANTES do `clear()`.
+    //
+    // O interceptor do Axios lê `X-Company-Id`/`X-Active-Role` de
+    // `authContextHeaders` e PREFERE-O ao storage (para uma página que
+    // escreva "all" não conseguir desviar o âmbito). Esse snapshot era
+    // escrito apenas no `useEffect` lá abaixo — logo, DEPOIS do commit.
+    //
+    // O `clear()` aqui é síncrono e faz as queries activas voltar a pedir
+    // imediatamente: esses pedidos saíam com a empresa ANTERIOR e os dados
+    // que voltavam ficavam em cache como se fossem os do âmbito novo. Um
+    // utilizador da Domus via a caixa geral e as tarefas da Power, e nada
+    // repetia o pedido depois de o estado convergir.
+    //
+    // Escrever aqui não substitui o efeito — ele continua a reconciliar
+    // quando o perfil muda por outra via (arranque, `/auth/me`). Antecipa-o
+    // no único caminho em que a ordem importa.
+    syncAuthContextHeaders({
+      role: newRole,
+      companyId: resolvedCompanyId || activeCompanyId || null,
+    });
+
     queryClient.clear();
-  }, [user, persistActiveCompany, queryClient]);
+  }, [user, persistActiveCompany, queryClient, activeCompanyId]);
 
   // Context Switching - Múltiplas Empresas
   const switchActiveCompany = useCallback(async (companyId) => {
@@ -529,7 +550,34 @@ export function AuthProvider({ children }) {
     }
 
     const role = target?.role || activeRole || user?.role;
+
+    // O mesmo motivo do `switchActiveRole`, com uma janela mais estreita:
+    // o `await` abaixo é um pedido HTTP, e durante esse tempo a aplicação
+    // continua viva. Qualquer pedido que arranque nesse intervalo (um
+    // polling, um refetch ao voltar ao separador) sairia com a empresa
+    // anterior. O reload que vem a seguir apaga o snapshot de qualquer
+    // forma — sincronizar antes não custa nada e fecha a janela.
+    syncAuthContextHeaders({ role: role || null, companyId: resolvedId });
+
     await persistActiveCompany(resolvedId, role);
+
+    // Lote 6, ponto 4 — um `company_id` no URL sobrevive ao reload.
+    //
+    // O Webmail põe a empresa no URL (`/webmail?company_id=…`) para o
+    // separador sobreviver a um F5 e para um link levar alguém à caixa
+    // certa. Mas o `reload()` abaixo recarrega o MESMO URL: quem estivesse
+    // em `/webmail?company_id=<power>` e trocasse para a Domus voltava a
+    // cair na caixa da Power, porque o parâmetro do URL vence a empresa
+    // activa (e deve vencer — é o que faz um link funcionar).
+    //
+    // A correcção é reescrever o parâmetro, não removê-lo: quem estava a
+    // ver a caixa de uma empresa e troca de empresa quer ver a caixa da
+    // NOVA, e o resto do URL (pasta, pesquisa) continua a valer.
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("company_id")) {
+      url.searchParams.set("company_id", resolvedId);
+      window.history.replaceState(null, "", url.toString());
+    }
 
     // PACOTE AR: Hard reload para limpar toda a cache (TanStack Query, estado
     // de componentes, etc.) e evitar fugas de dados da empresa anterior na UI.

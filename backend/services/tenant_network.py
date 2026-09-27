@@ -262,6 +262,24 @@ async def build_tenant_condition(user: dict) -> dict:
     return build_network_scope_condition(await resolve_tenant_scope(user))
 
 
+def com_isolamento(tenant_condition: dict, query: Optional[dict]) -> dict:
+    """Junta a condição de Rede a uma query de listagem, sem a alterar.
+
+    Vive aqui, e não em cada serviço, porque já existiam DUAS cópias (uma
+    em `client_list_search`, uma fechada dentro de `search_api_global`) e a
+    terceira ia nascer nas tarefas. Uma regra de isolamento repetida em
+    cada listagem é uma regra que divergirá numa delas — e a listagem que
+    divergir não dá erro nenhum: devolve dados a mais.
+
+    O `$and` preserva a query original intacta: os filtros de estado, de
+    processo e de responsável continuam a valer, só deixam de atravessar
+    redes.
+    """
+    if not query:
+        return dict(tenant_condition)
+    return {"$and": [tenant_condition, query]}
+
+
 async def resolve_tenant_stamp(
     user: dict,
     *,

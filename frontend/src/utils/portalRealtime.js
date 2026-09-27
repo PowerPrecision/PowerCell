@@ -46,7 +46,14 @@ export const EVENTOS_DO_PORTAL = {
  * `ws://` contra um backend em `https` é recusado pelo browser com
  * "insecure WebSocket", e em produção isso só aparece no browser do cliente.
  *
- * @param {string} baseUrl - `API_BASE_URL` (ex.: `https://api.exemplo.pt`).
+ * @param {string} baseUrl - O URL do BACKEND, sem o prefixo `/api`
+ *   (ex.: `https://api.exemplo.pt`) — é o `BACKEND_URL` de
+ *   `utils/apiBaseUrl.js`, NUNCA o `API_BASE_URL`, que já termina em
+ *   `/api`. Esta linha dizia "`API_BASE_URL`" com um exemplo sem `/api`:
+ *   a descrição e o exemplo contradiziam-se e foi a descrição que o
+ *   chamador seguiu, produzindo `wss://…/api/api/ws/portal`. Uma base que
+ *   já traga o prefixo é RECUSADA aqui — compor um caminho inválido em
+ *   silêncio deixa o erro aparecer só na consola de um cliente.
  * @param {string} token - O magic token do Portal (vai na query string
  *   porque a API de WebSocket do browser não permite headers).
  * @returns {string|null} `null` sem base ou sem token — sem token não há
@@ -59,6 +66,10 @@ export function construirUrlDoSocket(baseUrl, token) {
   // Uma base sem protocolo (ex.: "//api.exemplo.pt" ou "api.exemplo.pt")
   // ficaria sem esquema e o `new WebSocket` levantaria SyntaxError.
   if (!/^wss?:\/\//i.test(comProtocolo)) return null;
+  // Uma base que já termine em `/api` duplicaria o prefixo. Recusar é o
+  // que transforma um 404 no browser do cliente num `null` que o hook
+  // trata (e que um teste apanha).
+  if (/\/api$/i.test(comProtocolo)) return null;
   return `${comProtocolo}/api/ws/portal?token=${encodeURIComponent(token)}`;
 }
 

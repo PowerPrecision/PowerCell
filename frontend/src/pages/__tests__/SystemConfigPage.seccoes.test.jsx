@@ -22,7 +22,7 @@
  * passava com o defeito presente, porque montava só a folha — é a regra do
  * `WebmailPage`, e falhei-a ao acrescentar o separador.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,7 +41,10 @@ vi.mock("../../services/api", () => ({
   updateSystemConfigSection: vi.fn(async () => ({ data: {} })),
 }));
 
-import SystemConfigPage from "../SystemConfigPage";
+import SystemConfigPage, {
+  SECCOES_DEDICADAS,
+  SECCOES_NA_NAVEGACAO,
+} from "../SystemConfigPage";
 
 // A forma REAL de `GET /api/system-config` (ver `run_get_config`):
 // `{config, fields}` — e NÃO a configuração no topo. Foi assumi-la errada que
@@ -151,5 +154,56 @@ describe("SystemConfigPage — o separador activo escolhe UMA secção", () => {
     expect(screen.getByTestId("sla-analise")).toHaveValue("21");
     expect(screen.getByTestId("sla-aprovado")).toHaveValue("45");
     expect(screen.getByTestId("sla-enabled")).toHaveAttribute("aria-checked", "false");
+  });
+});
+
+// ====================================================================
+// As TRÊS navegações derivam do mesmo registo (Lote 6, ponto 1)
+// ====================================================================
+// O separador "Limiares de SLA" existia só na barra lateral (`lg:block`).
+// Num ecrã estreito — onde só vivem o `<Select>` e a fila de chips — ele
+// DESAPARECIA. Não era overflow: a fila já rolava; um item que não é
+// renderizado não se alcança com scroll nenhum.
+//
+// Estes testes afirmam sobre o REGISTO e sobre o que é renderizado, e
+// falham por omissão para qualquer secção nova que fique fora de uma das
+// navs — o que os três blocos escritos à mão nunca conseguiriam garantir.
+describe("a navegação das secções dedicadas", () => {
+  it("toda a secção oferecida na nav tem componente em SECCOES_DEDICADAS", () => {
+    for (const { key } of SECCOES_NA_NAVEGACAO) {
+      expect(SECCOES_DEDICADAS[key]).toBeTruthy();
+    }
+  });
+
+  it("os Limiares de SLA estão na lista (contraprova do registo)", () => {
+    // Sem esta âncora, um registo VAZIO passaria o teste de cima.
+    expect(SECCOES_NA_NAVEGACAO.map((s) => s.key)).toContain("dashboard_slas");
+    expect(SECCOES_NA_NAVEGACAO.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("cada secção da nav é renderizada nas duas superfícies (lateral e chips)", async () => {
+    // O jsdom não aplica media queries de Tailwind, pelo que AMBAS as
+    // navegações existem na árvore. É exactamente isso que permite
+    // verificá-las: cada secção tem de ter o botão da barra lateral E o
+    // chip do ecrã estreito.
+    montar("storage");
+    await waitFor(() => expect(screen.getByTestId("nav-dashboard-slas")).toBeInTheDocument());
+
+    for (const { key } of SECCOES_NA_NAVEGACAO) {
+      const sufixo = key.replace(/_/g, "-");
+      expect(screen.getByTestId(`nav-${sufixo}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`chip-${sufixo}`)).toBeInTheDocument();
+    }
+  });
+
+  it("o chip do ecrã estreito abre a secção", async () => {
+    montar("storage");
+    await waitFor(() => expect(screen.getByTestId("chip-dashboard-slas")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("chip-dashboard-slas"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("sla-thresholds-section")).toBeInTheDocument(),
+    );
   });
 });

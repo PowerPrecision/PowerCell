@@ -289,6 +289,7 @@ async def list_client_files(
 async def upload_file_s3(
     client_id: str,
     request: Request,
+    response: Response,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     category: str = Form(...), # Ex: "Financeiros", "Imovel"
@@ -548,6 +549,7 @@ async def delete_file_s3(
     client_id: str,
     file_path: str,
     request: Request,
+    response: Response,
     user: dict = Depends(get_current_user)
 ):
     """
@@ -579,6 +581,7 @@ async def delete_file_s3(
 async def bulk_delete_files(
     client_id: str,
     request: Request,
+    response: Response,
     data: dict = Body(...),
     user: dict = Depends(get_current_user)
 ):

@@ -252,6 +252,10 @@ export default function ClientDetailPage() {
   const [error, setError] = useState(null);
   const [clientDocs, setClientDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  // 403 aqui não é um erro: é a regra de visibilidade pré-indexação. Um
+  // "Sem documentação" no lugar dela mentia — dizia que não existem, e
+  // existem.
+  const [docsEmTratamento, setDocsEmTratamento] = useState(false);
   const [savingField, setSavingField] = useState(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editForm, setEditForm] = useState({ nome: "", nif: "", email: "", telefone: "" });
@@ -410,9 +414,13 @@ export default function ClientDetailPage() {
       const res = await getClientFiles(id);
       const docs = res.data?.files || res.data;
       setClientDocs(Array.isArray(docs) ? docs : []);
-    } catch {
-      // Silently ignore — docs section is supplementary
+      setDocsEmTratamento(false);
+    } catch (erro) {
+      // Um 403 é a regra de negócio (documentos em tratamento pelo Índice)
+      // e diz-se; o resto continua a ser silencioso, porque a secção é
+      // suplementar e a ficha tem de abrir.
       setClientDocs([]);
+      setDocsEmTratamento(erro?.response?.status === 403);
     } finally {
       setDocsLoading(false);
     }
@@ -878,6 +886,21 @@ export default function ClientDetailPage() {
                 <Card className="rounded-xl shadow-sm">
                   <CardContent className="flex items-center justify-center py-12">
                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </CardContent>
+                </Card>
+              ) : docsEmTratamento ? (
+                <Card className="rounded-xl shadow-sm" data-testid="docs-em-tratamento">
+                  <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="p-4 bg-muted/50 rounded-full mb-4">
+                      <FileStack className="h-10 w-10 text-muted-foreground/40" />
+                    </div>
+                    <p className="text-muted-foreground font-medium">
+                      Documentação em tratamento
+                    </p>
+                    <p className="text-muted-foreground/70 text-sm mt-1 max-w-sm">
+                      Os documentos deste cliente estão a ser tratados pela equipa de
+                      indexação e ainda não lhe estão visíveis.
+                    </p>
                   </CardContent>
                 </Card>
               ) : clientDocs.length === 0 ? (

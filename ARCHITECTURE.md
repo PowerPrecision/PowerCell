@@ -6148,3 +6148,149 @@ uma **divergência**, não um valor errado.
 `pytest` com o comando e o ambiente exactos do `backend-full`: **4079 passed, 13
 skipped** (o CI tinha 25 failed / 4042 passed). `flake8` nos selectores
 bloqueantes: 0.
+
+## A bateria em produção — sete pontos, e três com a causa noutro sítio (Set 2026)
+
+Sete pontos reportados depois de uma bateria de testes em produção. O que
+liga esta iteração não é um subsistema: é o facto de **três dos sete terem a
+causa num sítio diferente daquele que o relato indicava**, e de **dois terem
+sido introduzidos por mim nos dois lotes anteriores**. Fica aqui o desenho
+que resulta de cada um.
+
+### O limiter e o caminho de sucesso
+
+`middleware/rate_limit.py` cria o `Limiter` com `headers_enabled=True`. Isso
+faz o slowapi acrescentar os `X-RateLimit-*` **depois** de o handler
+devolver, e para isso ele precisa de um objecto `Response`. Procura-o em dois
+sítios, por esta ordem:
+
+1. o **valor devolvido**, se já for uma `Response` (é o caso dos `run_*` que
+   devolvem `JSONResponse`);
+2. o parâmetro chamado **`response`** da assinatura, que o FastAPI injecta
+   quando declarado.
+
+Um endpoint que devolva um `dict` e não declare `response: Response` não tem
+nenhum dos dois, e o slowapi levanta. O contrato desta aplicação passa a ser:
+**todo o endpoint com `@limiter.limit` declara `request: Request` e
+`response: Response`.** A regra é sobre a assinatura e não sobre o tipo
+devolvido, porque o tipo devolvido é do corpo de cada serviço — que muda por
+outros motivos, e que hoje devolve `JSONResponse` num ramo e `dict` noutro.
+Um parâmetro vale para todos os ramos.
+
+A propriedade que tornou isto invisível durante um lote inteiro merece ficar
+escrita: **a injecção de cabeçalhos corre apenas no caminho de SUCESSO.** Num
+403, 404, 503 ou 429 a excepção sobe antes. Uma bateria composta só de
+rejeições — que é o que uma bateria de segurança é por desenho — não toca
+nesse caminho.
+
+### Isolamento: a rede é a fronteira, e o inventário é do lado que LISTA
+
+`services/tenant_network.py` continua a ser o ponto único, e ganhou o
+`com_isolamento` que existia em duas cópias (`client_list_search` e uma
+fechada dentro de `search_api_global`). A colecção `tasks` entrou no
+varrimento: as duas listagens (`run_get_tasks` e `run_get_my_tasks`) pedem a
+condição ao ponto único e `run_create_task` carimba na escrita.
+
+O ramo do calendário global (`user_id="all"`) fica **dentro** da condição de
+rede: alarga o âmbito de PESSOAS e nunca o de REDES. Um admin é admin da sua
+rede.
+
+A lição de desenho, agora com três instâncias (Kanban, notificações,
+tarefas): **um ponto único para a CONDIÇÃO não substitui um inventário das
+superfícies que listam.** E há um agravante recorrente — quando uma das
+listagens filtra por algo que *coincide* com o âmbito (aqui `assigned_to`),
+ela escapa por acidente e esconde a que não filtra nada.
+
+### O snapshot dos cabeçalhos é síncrono na troca de âmbito
+
+O interceptor do Axios lê `X-Company-Id`/`X-Active-Role` de
+`authContextHeaders` — um snapshot em memória de `services/api.js` — e
+**prefere-o** ao `localStorage`. Essa preferência é deliberada: impede que
+uma página que escreva `"all"` no storage desvie o âmbito dos pedidos.
+
+A consequência é que quem troca de âmbito tem de escrever o snapshot **no
+mesmo tick**, antes de invalidar ou esvaziar a cache. `queryClient.clear()` é
+síncrono e faz as queries activas voltar a pedir imediatamente; um snapshot
+escrito só num `useEffect` chega um commit tarde, e o refetch da troca sai
+com o âmbito anterior. O `useEffect` mantém-se como reconciliador (arranque,
+`/auth/me`), mas deixa de ser o único escritor.
+
+Do mesmo desenho: `switchActiveCompany` termina em `window.location.reload()`,
+que recarrega o **mesmo URL**. Um parâmetro de âmbito no URL — o
+`?company_id=` do Webmail — sobrevive ao reload e vence a empresa activa (e
+deve vencer, é o que faz um link levar alguém à caixa certa). A troca
+reescreve o parâmetro antes de recarregar.
+
+### O contrato do URL do socket do Portal
+
+`construirUrlDoSocket` recebe o **`BACKEND_URL`**, sem o prefixo `/api`, e
+acrescenta `/api/ws/portal`. Uma base que já traga o prefixo é **recusada**
+(devolve `null`, que o hook trata caindo no polling) em vez de produzir um
+caminho inválido em silêncio — porque um caminho inválido só aparece na
+consola de um cliente.
+
+A entrega de uma mensagem do cliente ao CRM tem agora dois destinatários
+separados, e é isso que o desenho passa a dizer:
+
+* **`_difundir_mensagem_na_sala`** — para quem tem o processo **ABERTO**
+  (sala `process_{id}`). Não depende de atribuição nenhuma.
+* **`_notify_assigned_team_message`** — email e notificação in-app para quem
+  está **ATRIBUÍDO**.
+
+Estavam na mesma função, e a difusão herdou o `if not assigned_ids: return`
+da notificação: num processo sem atribuição — o caso normal de um processo
+novo — a mensagem não chegava a ninguém em tempo real.
+
+No CRM, `useProcessPortalMessages` subscreve `portal_message` e **recarrega**
+(o payload vem truncado a 200 caracteres na origem, logo é um sinal e não o
+registo — a mesma regra do lado do cliente). O polling do unread fica, que é
+a regra do Épico 10.
+
+### Um 403 previsto é um estado do ecrã, não um erro global
+
+`GET /documents/client/{id}/files` responde 403 por desenho enquanto o
+processo não estiver indexado (`services/document_visibility.py`). Um ecrã
+que pede esse endpoint **sozinho, na montagem** tem de declarar
+`skipErrorToast` e desenhar o estado: um `catch {}` no componente não cala o
+toast do interceptor, que já disparou. E "Sem documentação" no lugar de um
+403 é uma afirmação falsa — os documentos existem, só não estão visíveis.
+
+### Navegação: um registo, todas as superfícies
+
+`SystemConfigPage` exporta `SECCOES_NA_NAVEGACAO` (ordem, rótulo, ícone) e as
+**três** superfícies de navegação — barra lateral, `<Select>` do telemóvel,
+fila de chips — fazem `map` sobre ele. `SECCOES_DEDICADAS` continua a decidir
+QUAL o componente; o array novo decide quais se OFERECEM.
+
+Um registo positivo para o conteúdo não basta se a navegação continuar
+escrita à mão: o separador existia e não havia como lá chegar num ecrã
+estreito. E `overflow-x-auto` com a barra de rolagem escondida não é uma
+alternativa a mostrar os itens.
+
+### Fronteiras de erro repõem-se ao mudar de sítio
+
+`RouteBoundary` passa `resetKey={pathname}` ao `ErrorBoundary`, que repõe o
+estado (incluindo o `retryCount`) quando ela muda. Sem isso, o boundary — que
+vive dentro do `element` de cada rota — fica preso no ecrã de erro a partir
+do primeiro crash, para toda a navegação naquela rota.
+
+As duas rotas dos detalhes do processo (`/processo/:id`, histórica, e
+`/process/:id`, a que a navegação contígua usa) partilham agora **um**
+`element`. Duas declarações independentes com a mesma lista de perfis
+divergiriam sem dar erro, e a que divergisse mandaria o utilizador de volta ao
+Dashboard sem explicação.
+
+Isto não esconde crashes: o erro continua a ser registado e volta a acontecer
+se a causa persistir. O que deixa de acontecer é o ecrã ficar quebrado depois
+de a causa desaparecer — a diferença entre um relato reproduzível e "às vezes
+fica branco".
+
+### `ScrollArea`: o limite de altura vive no viewport
+
+A `Root` do `ScrollArea` tem `overflow-hidden`; o `Viewport` tem `h-full`. Um
+`maxHeight` na Root deixa-a em altura auto, o `h-full` resolve para a altura
+do conteúdo, o viewport nunca transborda, o Radix não desenha barra — e a
+Root corta o excedente. O wrapper em `components/ui/scroll-area.jsx` aceita
+`viewportStyle`/`viewportClassName` para o caso em que a altura tem de ser um
+**limite** e não um valor fixo; com altura definida (`h-[280px]`) o problema
+não existe, e é isso que os restantes usos da aplicação já fazem.

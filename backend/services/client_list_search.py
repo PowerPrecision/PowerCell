@@ -42,7 +42,7 @@ from utils.input_sanitization import (
     sanitize_string, sanitize_url, log_sanitization_rejection,
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
-from services.tenant_network import build_tenant_condition
+from services.tenant_network import build_tenant_condition, com_isolamento
 from services.client_list_filters import (
     build_client_entity_query,
     client_doc_to_list_item,
@@ -87,19 +87,6 @@ def _merge_entity_client_docs(
         clients.append(client_doc_to_list_item(doc))
         present.add(cid)
     return clients
-
-
-def com_isolamento(tenant_condition: dict, query: Optional[dict]) -> dict:
-    """Junta a condição de Rede a uma query de listagem (Lote 4, ponto 10).
-
-    A listagem e a pesquisa de clientes não tinham filtro de empresa
-    NENHUM: um consultor de uma empresa via a carteira de clientes de
-    outra. O `$and` preserva a query original intacta — os filtros de
-    fonte/tipo/estado continuam a valer, só deixam de atravessar redes.
-    """
-    if not query:
-        return dict(tenant_condition)
-    return {"$and": [tenant_condition, query]}
 
 
 async def _enrich_clients_fonte(clients: list) -> list:

@@ -7854,3 +7854,362 @@ valores afastados (4/11/22), mata três.
 
 Nada. Confirmar o separador "Limiares de SLA" no próximo deploy: mostra os
 valores gravados (não as omissões) e o botão guarda sem 400.
+
+---
+
+# Iteração `bateria-em-producao` — os 7 pontos da bateria de testes
+
+Sete pontos reportados depois de uma bateria de testes em produção. O padrão
+desta iteração: **três dos sete tinham a causa num sítio diferente daquele
+que o relato indicava**, e verificar em vez de aceitar mudou a correcção.
+Dois dos sete foram introduzidos por mim nos dois lotes anteriores.
+
+## 1. O 500 do upload do Portal — introduzido pelo meu próprio lote
+
+Reproduzido com a pilha local (mongo avulso + uvicorn + credenciais S3 falsas
+— o *presign* do S3 é assinatura local e não precisa de rede, o que permitiu
+chegar ao caminho de sucesso sem bucket):
+
+```
+HTTP 500
+Exception: parameter `response` must be an instance of starlette.responses.Response
+  slowapi/extension.py:382, em _inject_headers
+```
+
+O limiter é criado com `headers_enabled=True`. Para acrescentar os
+`X-RateLimit-*` **depois** de o handler devolver, o slowapi precisa de um
+objecto `Response`, e procura-o em dois sítios: o valor devolvido (se já for
+uma `Response`) ou o parâmetro chamado `response` da assinatura. Um endpoint
+que devolva um `dict` e não declare `response: Response` não tem nenhum dos
+dois.
+
+**Onze dos catorze** endpoints limitados estavam nessa situação: os três do
+Portal (upload-url, confirm-upload, download-url — o cliente não conseguia
+enviar **nem descarregar**), três de `documents` (o upload multipart do CRM,
+o delete e o bulk-delete), dois de `async_jobs` e três de `public`
+(registo público, health, form-config). Os três de `auth` já declaravam
+`response` e os de `public` devolviam `JSONResponse`, o que explica por que
+metade da aplicação continuava a funcionar e a outra metade não.
+
+**Porque é que a bateria inteira ficou verde:** a injecção de cabeçalhos
+corre **apenas quando o handler devolve**. Num caminho de erro (403, 404,
+503, 429) a excepção sobe antes e o defeito não existe. O
+`test_portal_upload_path_traversal.py` que escrevi no incidente P0 é, por
+desenho, uma bateria de **rejeições** — provava o ataque fechado e nunca
+provou que um upload legítimo funcionava. Três endpoints ficaram inutilizáveis
+sem um único teste vermelho.
+
+A correcção é o parâmetro na assinatura (o que o slowapi documenta) e não o
+tipo devolvido: o tipo devolvido depende do corpo de cada serviço, que muda
+por outros motivos, e há `run_*` que devolvem `JSONResponse` num ramo e
+`dict` noutro. A guarda nova (`test_rate_limit_injecta_cabecalhos.py`) tem
+três partes: o mecanismo com um `Limiter` **real** (sem `response` → 500,
+com `response` → 200 e cabeçalhos — um duplo do slowapi reimplementaria
+exactamente a escolha que falhou), um inventário por AST de `routes/` com
+contraprova de que o leitor vê mesmo os endpoints, e um teste parametrizado
+que falha por omissão para qualquer endpoint limitado que apareça a seguir.
+
+**A quarentena de conteúdo não tinha nada a ver com isto** — o utilizador
+suspeitou dela por causa das fotografias do CC. Medido: `validate_file_content`
+aceita JPEG (`image/jpeg`, "JPEG Image") e PNG (`image/png`, "PNG Image"), e
+o `upload-url` não a chama sequer.
+
+## 2. As tarefas atravessavam redes — o inventário incompleto, terceira vez
+
+`run_get_tasks` abria com `query = {}` e nunca acrescentava marca de empresa
+nem de rede. Sem filtros na query string — que é como o Dashboard e o
+`TasksPanel` a chamam — a consulta final era `{"completed": False}`: **todas
+as tarefas não concluídas da base de dados**, de todas as redes. Um
+utilizador da Domus, que é uma ilha, via as da Power.
+
+O `AGENTS.md` do Lote 4 afirmava que `task_api_crud` fazia parte do
+varrimento de isolamento. Não fazia: o ficheiro tinha **zero** ocorrências
+de `compan` ou `tenant`. É a terceira vez que o inventário das superfícies
+que LISTAM fica incompleto (Kanban e notificações no Lote 5), e a razão é
+sempre a mesma: `run_get_my_tasks` filtra por `assigned_to` e escapa **por
+acidente**, porque a atribuição coincide quase sempre com o âmbito. Foi essa
+metade que escondeu a outra — a mesma forma do `invalidateQueries` por
+prefixo a esconder o `setQueryData` por chave exacta.
+
+Filtro por **rede** e não por empresa (Power e Precision partilham
+`network_id` e trabalham mesmo sobre os mesmos dados), vindo do ponto único.
+O `com_isolamento` existia em **duas** cópias (`client_list_search` e uma
+fechada dentro de `search_api_global`) e a terceira ia nascer aqui: passou
+para `tenant_network.py`, que é onde a regra vive.
+
+Aplicado às DUAS listagens, incluindo o ramo do calendário global
+(`user_id="all"`), que alarga o âmbito de **pessoas** e nunca o de redes —
+um admin é admin da sua rede. E carimbo na **escrita** (`run_create_task`):
+corrigir só a leitura tornava a correcção invisível para o trabalho novo. É
+a lição do `assigned_to` outra vez.
+
+Mutação: apagar a linha do isolamento mata 4 testes.
+
+## 3. O cabeçalho ficava um commit atrasado — a causa comum dos pontos 3 e 4
+
+O relato eram dois sintomas separados ("a cache não invalida ao mudar de
+perfil" e "um utilizador da Domus vê o Webmail da Power"). São o mesmo
+defeito, e é uma corrida de um único commit do React:
+
+1. o interceptor lê `X-Company-Id` de `authContextHeaders`, um snapshot em
+   memória, e **prefere-o** ao storage (de propósito: para uma página que
+   escreva `"all"` no storage não conseguir desviar o âmbito);
+2. quem escreve esse snapshot é `syncAuthContextHeaders`, chamado num
+   `useEffect` — depois do commit;
+3. `switchActiveRole` chama `queryClient.clear()` de forma **síncrona**, e o
+   `clear()` faz as queries activas voltar a pedir imediatamente.
+
+O refetch da troca saía com o snapshot **antigo**. Os dados que voltavam eram
+da empresa anterior e ficavam em cache como se fossem os da nova. O estado
+convergia um commit mais tarde — tarde demais, porque ninguém repetia o
+pedido.
+
+**O teste que eu tinha escrito no Lote 5 provava a ilusão:** afirmava
+`sessionStorage.getItem("activeRole") === "diretor"` com o comentário "se a
+cache fosse limpa primeiro, o refetch partia com os headers antigos". A
+premissa estava certa e a asserção era sobre o sítio errado — o storage não
+é o que o interceptor lê primeiro. Provava que a escrita acontecera e
+concluía que os cabeçalhos estavam certos. É a mesma forma da guarda que
+exigia literalmente a chave de cache colidida.
+
+O teste novo afirma a **ORDEM** (`syncAuthContextHeaders` com o âmbito novo
+antes do `clear()`), que é o que não se consegue provar com uma asserção
+sobre estado final, e tem a contraprova no outro sentido: nenhuma
+sincronização **depois** do `clear()` pode repor a empresa antiga.
+
+Segunda metade do ponto 4: `switchActiveCompany` termina em
+`window.location.reload()`, que recarrega o **mesmo URL** — e o Webmail põe a
+empresa em `?company_id=`, que vence a empresa activa (e deve vencer, é o
+que faz um link funcionar). Quem estivesse em `/webmail?company_id=<power>` e
+trocasse para a Domus voltava à caixa da Power. O parâmetro é agora
+reescrito antes do reload, não removido.
+
+## 4. O `/api/api/` do Portal — e o mock que o escondeu
+
+`usePortalRealtime` passava `API_BASE_URL` (que **já** termina em `/api`) a
+`construirUrlDoSocket`, que acrescenta `/api/ws/portal`. O socket do Portal
+**nunca ligou em produção**.
+
+A docstring da função dizia "`API_BASE_URL`" com um exemplo **sem** `/api`:
+a descrição e o exemplo contradiziam-se, e foi a descrição que o chamador
+seguiu. E o mock do teste do hook exportava `API_BASE_URL: "http://localhost:8001"`
+— um valor que o módulo real nunca produz para esse nome. Os 24 testes desse
+ficheiro ficavam verdes sobre um socket que nunca ligou. **Terceira vez** que
+um mock com a forma inventada esconde o defeito que devia apanhar
+(`/portal/status`, `{config, fields}` dos SLAs, este).
+
+Hoje o mock mantém a relação real entre os dois nomes, a função **recusa**
+uma base que já traga o prefixo (um `null` que o hook trata, em vez de um 404
+na consola de um cliente) e há um teste a contar que `/api/` aparece uma vez.
+
+Segunda metade, no CRM: nada ouvia o evento `portal_message`. E o polling de
+`useProcessPortalMessages` só buscava o **unread** — `fetchMessages` corria
+quando o separador ficava activo e depois de enviar, mais nada. Com o
+separador do Portal **aberto**, uma mensagem do cliente não aparecia nunca:
+o badge subia e a lista ficava igual. Era isto o "as mensagens do cliente não
+chegam ao CRM". O hook subscreve agora o evento (recarrega, não insere — o
+payload vem truncado a 200 caracteres) e o polling do unread fica, que é a
+regra do Épico 10.
+
+E do lado do servidor, o broadcast para a sala era a **última instrução** de
+`_notify_assigned_team_message`, que começa por `if not assigned_ids: return`.
+Num processo sem ninguém atribuído — o caso normal de um processo novo, e
+precisamente aquele em que alguém está a olhar para ele — a mensagem não era
+difundida a ninguém. A entrega em tempo real é de quem tem o processo
+**aberto**; a notificação é de quem está **atribuído**. Estavam na mesma
+função e a primeira herdou a condição da segunda.
+
+## 5. O 403 da Ficha do Cliente: a regra está certa, o toast é que fala a mais
+
+`GET /api/documents/client/{id}/files` responde **403 por desenho** enquanto
+o processo não estiver indexado — é a regra de visibilidade do Pacote 5. A
+`ClientDetailPage` pede-o sozinha na montagem, e por isso aparecia "Não tem
+permissão para realizar esta ação" sem ninguém clicar em nada.
+
+O `catch {}` da página, comentado com "silently ignore", **não podia
+funcionar**: o interceptor dispara o toast antes de o `catch` correr, e um
+componente não cala um toast global. Quem pede tem de declarar que trata o
+erro (`skipErrorToast`), como o `S3FileManager` já fazia.
+
+E "Sem documentação" no lugar do 403 **mentia** — dizia que não existem, e
+existem. Agora há um estado próprio: "Documentação em tratamento".
+
+## 6. O separador que desaparecia: um registo positivo com três renders
+
+O relato era "o Radix Tabs não lida com o overflow em mobile". **Não há Tabs
+do Radix nesta página.** A navegação estava escrita à mão em **três** sítios
+— barra lateral, `<Select>` do telemóvel e fila de chips — e eu acrescentei
+os Limiares de SLA só no primeiro. Num ecrã estreito o separador não
+existia. Scroll nenhum alcança um item que não é renderizado.
+
+É a regra que eu próprio escrevi em `FRONTEND_GUIDELINES.md` § 27.9 **no dia
+anterior, neste mesmo ficheiro**, e falhei-a por olhar só para o render do
+conteúdo e não para o da navegação. As três navs derivam agora de
+`SECCOES_NA_NAVEGACAO`.
+
+A fila de chips também deixou de rolar na horizontal com a barra **escondida**
+(`scrollbarWidth: none`): num telemóvel não havia pista de que houvesse mais
+à direita e num rato sem eixo horizontal não havia como chegar lá.
+`flex-wrap` mostra tudo em qualquer largura.
+
+No jsdom as media queries não se aplicam, pelo que as duas navegações existem
+na árvore ao mesmo tempo — e é isso que permite afirmar num só teste que cada
+secção tem o botão da lateral **e** o chip. Mutação: apagar
+`dashboard_slas` do registo mata 3.
+
+## 7. O ecrã branco do "Voltar": o boundary ficava preso
+
+Aqui a causa que encontrei explica a **assimetria** do relato, mas não
+identifica o crash original — e não tenho a linha da excepção.
+
+Um `ErrorBoundary` do React fica no estado de erro até ser remontado ou
+reposto à mão. O desta app só se repunha no clique de "Tentar novamente", e
+vive **dentro** do `element` de cada rota. A partir do primeiro crash, toda a
+navegação para aquela rota mostrava o ecrã de erro — de um processo que já
+não era o aberto, e mesmo depois de a causa desaparecer.
+
+E a app declarava **duas** rotas para os detalhes (`/processo/:id`, o caminho
+histórico, e `/process/:id`, o que as setas Anterior/Seguinte usam), cada uma
+com o seu `element` e portanto com o seu boundary. Um ficava latido e o outro
+não: exactamente "com as setas funciona, com o Voltar fica branco".
+
+O boundary recebe agora `resetKey` com o pathname e repõe-se quando ele muda,
+com o `retryCount` a zero — mudar de sítio é uma tentativa nova, e o limite
+de tentativas existe para travar um ciclo de re-render, não para condenar
+uma rota durante a sessão. Isto **não esconde o erro**: ele é registado e
+volta a acontecer se a causa persistir. O que deixa de acontecer é o ecrã
+ficar quebrado depois de a causa desaparecer.
+
+As duas rotas passaram a partilhar um `element`: eram dois blocos copiados com
+a mesma lista de perfis escrita duas vezes, e divergiriam sem dar erro —
+a forma do "Menu e rotas têm de concordar". A guarda de fonte que exigia
+`path="/process/:id"` literal foi ajustada e ganhou a contraprova de que não
+sobrou declaração solta.
+
+## 8. As tarefas do Dashboard eram truncadas, não roladas
+
+O pedido era "um elevador". O que havia era pior: `TasksPanel` passava
+`maxHeight` ao `ScrollArea`, que o punha na `Root`. A Root tem
+`overflow-hidden` e o `Viewport` tem `h-full` — com a Root em altura auto, o
+`h-full` resolve para a altura do conteúdo, o viewport nunca transborda, o
+Radix não desenha barra nenhuma e a Root **corta** o excedente. As tarefas
+além de 280px eram invisíveis e inalcançáveis.
+
+Os restantes usos de `ScrollArea` na app passam altura **definida**
+(`h-[280px]`), e por isso funcionam. Este era o único com `maxHeight`, o que
+explica o defeito ser isolado. O wrapper aceita agora `viewportStyle`.
+
+## Validação
+
+Backend **3927 passed, 5 skipped**. Frontend **1267 passed / 111 ficheiros**
+(eram 1249/108 — a contagem subiu, o que distingue "tudo passa" de "metade
+nem correu"). `eslint --quiet` 0, `flake8` com os selectores bloqueantes do
+CI 0, `yarn build` OK. Prova de ponta a ponta do ponto 1: o mesmo
+`POST /api/portal/upload-url` que dava 500 devolve agora 200 com a
+`upload_url` assinada.
+
+## A fazer em produção
+
+1. **Fundir `dev` em `main`.** Nada disto chega a produção sem isso, e o
+   ponto 1 tem o Portal a não aceitar documentos.
+2. Depois do deploy, confirmar no Portal: um upload de JPG do CC deve passar
+   (o 500 era do limiter, não da quarentena) e a consola não deve ter
+   `/api/api/ws/portal`.
+3. **Ponto 7:** se o ecrã branco voltar, é preciso a **primeira linha** da
+   excepção (o nome e a mensagem) ou a entrada do Sentry. Com o
+   `SENTRY_AUTH_TOKEN` já configurado na Vercel, o próximo deploy envia os
+   sourcemaps e o stack chega legível — o que não acontecia quando este
+   relato foi feito.
+4. Reavaliar se as tarefas antigas ficaram por carimbar: quem tiver a rede de
+   omissão no âmbito continua a vê-las (`TENANT_DEFAULT_NETWORK_ID` está
+   definido em produção), mas vale medir quantas são.
+
+---
+
+# ENGATILHADO — Ponto 8: fuga de notificações para consultores e intermediários
+
+Relatado pelo dono do produto depois da bateria em produção, **a fazer assim
+que o deploy deste lote passar**. Fica aqui o que já foi verificado, para o
+próximo passo não começar pela premissa errada — como aconteceu três vezes
+nesta iteração.
+
+## O relato
+
+> Os consultores e intermediários estão a receber alertas e notificações push
+> (via WebSocket) de processos que não lhes pertencem. O evento de publicação
+> das mensagens está a ignorar quem é o `assigned_to` ou o mediador do
+> processo e está a fazer broadcast indiscriminado.
+
+## O que JÁ ESTÁ DESCARTADO (medido, não presumido)
+
+A parte da premissa que fala de "broadcast indiscriminado" **não se
+confirma**. Três paredes que já existem e que eu verifiquei antes de escrever
+esta entrada:
+
+1. **A ACL das salas de processo é apertada.**
+   `websocket_api_helpers.user_can_join_process_room` recusa um consultor que
+   não esteja em `assigned_consultor_ids` / `assigned_consultor_id` /
+   `assigned_to`, recusa `parceiro`, recusa processo inexistente e recusa
+   roles desconhecidas. Um consultor não entra na sala de um processo que não
+   é dele, logo não é por aqui que um `portal_message` ou um delta chega.
+2. **Os deltas de processo já têm a parede no envelope.** O
+   `manager.broadcast()` foi removido no Épico 10, Fase 2 e substituído por
+   `realtime_audience`, com DUAS camadas que têm de passar ambas (rede +
+   necessidade de saber, esta a espelhar `build_kanban_role_base_query`) e
+   falha fechada — uma audiência sem ramos não alcança ninguém.
+3. **`route_system_event` descarta o envelope sem `user_id`** em vez de o
+   difundir (tenant-safety fail-closed), e `send_realtime_notification` é
+   **por `user_id`**, não por sala.
+
+Ou seja: o mecanismo de ENTREGA está filtrado. O que não está é a **escolha
+dos destinatários** a montante — quem é posto na lista antes de a entrega
+acontecer. É uma distinção que muda inteiramente onde se procura.
+
+## Os candidatos concretos
+
+**(a) `services/alerts.py` — a lista de atribuídos está incompleta, com o
+sinal ao contrário do esperado.** A recolha (linhas ~351-362, ~508-515,
+~845-851) lê `assigned_consultor_id`, `consultor_id`,
+`assigned_mediador_id` e `intermediario_id` — e **não** lê os plurais
+`assigned_consultor_ids` / `assigned_mediador_ids`, nem o legado
+`consultant_id`. Isto por si **perde** notificações, não as espalha.
+
+Mas cruza-se com o defeito do Lote 5, ponto 4: `build_clear_consultor_fields`
+limpava apenas quatro dos seis campos canónicos, deixando `consultor_id` e
+`consultant_id` com o valor ANTIGO. A correcção parou de produzir o problema,
+**não limpou o que já existia**. Um processo desatribuído antes dessa
+correcção continua a carregar o `consultor_id` do ex-consultor — e é
+exactamente `consultor_id` que o `alerts.py` lê. **Hipótese principal: não é
+broadcast, é dado residual a apontar para a pessoa errada.**
+
+Primeiro passo, e é de medição, não de código: contar em produção quantos
+processos têm `consultor_id` (ou `consultant_id`) preenchido sem o id
+constar de `assigned_consultor_ids`. Se forem muitos, a fuga é esta e a
+correcção é uma migração mais a leitura pelos construtores canónicos —
+nunca por campos escolhidos à mão.
+
+**(b) `services/alerts.py` — a gestão é notificada sem filtro de rede.** Nas
+linhas ~518 e ~857 há um `db.users.find(deep_role_in_filter(["admin", "ceo",
+"diretor"]))` **sem qualquer condição de tenant**: um alerta de um processo da
+Power notifica a direcção da Domus, que é uma ilha. Não é o sintoma que o
+dono relatou (ele falou de consultores), mas é a MESMA classe de defeito do
+ponto 4 deste lote e a tolerância de cruzamento entre redes é zero. Entra no
+mesmo varrimento.
+
+## A regra que se aplica, e o erro que não se pode repetir
+
+A correcção usa o mesmo desenho das tarefas: a condição vem de
+`services/tenant_network.py` e a leitura dos atribuídos vem dos
+**construtores canónicos** (`CONSULTOR_ID_FIELDS` / `MEDIADOR_ID_FIELDS` de
+`process_assignment`), nunca de uma lista de campos escrita à mão neste
+ficheiro — foi ter a lista escrita duas vezes que produziu o defeito do
+Lote 5.
+
+E o inventário é do lado que EMITE: não basta corrigir `alerts.py`. Há que
+enumerar todos os chamadores de `send_realtime_notification` e verificar, um
+por um, como cada um escolhe os destinatários. É a terceira lição desta
+iteração (Kanban, notificações, tarefas) e a que continua a falhar.
+
+**O teste vem primeiro e tem de ter as duas contraprovas:** um consultor não
+atribuído NÃO recebe, e o consultor atribuído RECEBE — sem a segunda, "não
+notificar ninguém" passa o teste e é uma regressão pior do que a fuga.

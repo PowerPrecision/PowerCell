@@ -20,8 +20,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { usePortalRealtime } from "../usePortalRealtime";
 
+// O mock tem de manter a RELAÇÃO REAL entre os dois nomes: no módulo
+// verdadeiro `API_BASE_URL` é `BACKEND_URL + "/api"`. Aqui exportava-se só
+// `API_BASE_URL` com um valor SEM `/api` — um valor que o módulo real nunca
+// produz para esse nome. O hook passava `API_BASE_URL` ao construtor do URL
+// (que acrescenta `/api/ws/portal`) e em produção saía
+// `wss://…/api/api/ws/portal`; aqui saía o URL certo, e os 24 testes deste
+// ficheiro ficavam verdes sobre um socket que nunca ligou.
+//
+// Terceira vez que um mock com a forma inventada esconde o defeito que
+// devia apanhar (`/portal/status`, `{config, fields}` dos SLAs, este).
+// Os literais ficam DENTRO da fábrica: o `vi.mock` é içado para o topo do
+// ficheiro e uma variável de módulo ainda não existe quando ele corre.
 vi.mock("../../utils/apiBaseUrl", () => ({
-  API_BASE_URL: "http://localhost:8001",
+  BACKEND_URL: "http://localhost:8001",
+  API_BASE_URL: "http://localhost:8001/api",
 }));
 
 /** Todos os sockets criados no teste, para inspecção. */

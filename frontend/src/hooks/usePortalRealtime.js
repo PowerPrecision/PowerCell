@@ -27,7 +27,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { API_BASE_URL } from "../utils/apiBaseUrl";
+import { BACKEND_URL } from "../utils/apiBaseUrl";
 import { construirUrlDoSocket, decidirDoEvento } from "../utils/portalRealtime";
 
 /** Batimento. O servidor renova a presença a cada `ping` (TTL de 90s). */
@@ -132,7 +132,11 @@ export function usePortalRealtime({
       if (desmontadoRef.current) return;
 
       const token = callbacksRef.current.obterToken?.();
-      const url = construirUrlDoSocket(API_BASE_URL, token);
+      // `BACKEND_URL` e NÃO `API_BASE_URL`: o segundo já termina em
+      // `/api` e o `construirUrlDoSocket` acrescenta `/api/ws/portal`. O
+      // resultado era `wss://…/api/api/ws/portal`, que o servidor não
+      // encaminha — o socket do Portal nunca ligou em produção.
+      const url = construirUrlDoSocket(BACKEND_URL, token);
       if (!url) {
         // Sem token não há handshake possível — não se insiste, e o polling
         // do contentor continua a ser o caminho (ele só para com `isConnected`).
