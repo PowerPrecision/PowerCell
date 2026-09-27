@@ -631,7 +631,21 @@ SENSITIVE_FIELDS = [
     "resend_api_key", "app_password",  # system_smtp + system_webmail
 ]
 
-EXTRA_SECTIONS = {"system_smtp", "system_webmail", "mandatory_documents"}
+# Secções válidas a GRAVAR que não têm metadados de campos em
+# `CONFIG_FIELDS` — porque têm ecrã próprio no frontend e não passam pela UI
+# genérica. Uma secção do `SystemConfig` que não esteja aqui nem no
+# `CONFIG_FIELDS` é recusada com 400 pelo `run_update_config`.
+#
+# `dashboard_slas` (limiares de SLA por macro-fase) entrou aqui e não no
+# `CONFIG_FIELDS` de propósito: lá, o separador nasceria também na navegação
+# genérica, a par do dedicado (`SlaThresholdsSection`), como acontece com o
+# `mandatory_documents`.
+EXTRA_SECTIONS = {
+    "system_smtp",
+    "system_webmail",
+    "mandatory_documents",
+    "dashboard_slas",
+}
 
 
 def mask_sensitive(obj, parent_key=""):

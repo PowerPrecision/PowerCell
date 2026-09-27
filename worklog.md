@@ -7759,3 +7759,98 @@ minificados. É uma troca visível em vez de uma fuga invisível.
    gerar mapas (de propósito) e o Sentry mostra stacks minificados.
 2. Reabrir o painel de administração → separador Utilizadores, depois de
    Empresas, que é a ordem que rebentava.
+
+---
+
+## Iteração sla-contrato — O ecrã em branco: TRÊS defeitos meus, todos por supor o contrato (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+O separador de SLAs que entreguei na iteração anterior deixava o ecrã em
+branco. A hipótese que me chegou — "uma desestruturação de `undefined` na tua
+secção, falta um optional chaining" — estava **errada**, e verificar em vez de
+aceitar mudou por completo a correcção.
+
+## Diagnóstico: o crash não era no meu componente
+
+O sourcemap de produção agora dá **404** — a D-11 está a funcionar (os mapas
+vão para o Sentry e saem do artefacto), portanto perdi essa via e tive de ler
+o minificado. Os dois frames identificam-se sem ambiguidade pela assinatura:
+
+| Frame | Minificado | É |
+|---|---|---|
+| `_a` (interno) | `({section, sectionKey, config, fields, onSave, onTest}) =>` | **`ConfigSection`** |
+| `Ya` | `({embedded = false}) =>` | `SystemConfigPage` |
+
+O código da minha secção **termina imediatamente antes** do `Ya` no bundle. O
+crash é no cartão genérico, em `section.title`.
+
+Verifiquei primeiro a premissa que o relato assumia: `main` (`fb72bd7e`)
+contém o meu commit e o bundle servido contém `sla-thresholds-section`. A
+premissa estava certa; a atribuição do culpado não.
+
+## Três defeitos, uma raiz
+
+| # | Defeito | Efeito |
+|---|---|---|
+| 1 | Lista de EXCLUSÃO no render da página | genérico renderiza a par do dedicado, `section: undefined` → **ecrã em branco** |
+| 2 | Lia `res.data.dashboard_slas` | a resposta é `{config, fields}` → mostrava sempre 7/15/30 |
+| 3 | `dashboard_slas` fora de `CONFIG_FIELDS`/`EXTRA_SECTIONS` | guardar devolvia **400 "Secção inválida"** |
+
+A raiz é a mesma nos três: **escrevi o ecrã contra um contrato suposto em vez
+de ler o handler.** O defeito 2 é o pior, porque parece funcionar — o
+formulário cai nas omissões e ninguém vê erro nenhum.
+
+### 1. A lista negativa
+
+```jsx
+{activeTab === "portal" && <PortalSettingsSection/>}              // positivo
+{activeTab !== "portal" && activeTab !== "maintenance" && …        // negativo
+  && <ConfigSection section={fields[activeTab]} …/>}
+```
+
+A mesma informação em dois sítios. Acrescentei o separador só no lado positivo
+e o genérico entrou por omissão. É a forma do "Menu e rotas têm de concordar":
+divergem e não dá erro em lado nenhum.
+
+Hoje `SECCOES_DEDICADAS` (chave → componente) é o ponto único, com props
+uniformes para não haver um terceiro sítio com a lista de quem precisa de quê.
+E o separador **desconhecido diz-se**: o `activeTab` sai de
+`searchParams.get("tab")`, logo um favorito antigo pedia uma secção inexistente
+e caía no genérico — o mesmo crash, por uma porta controlada por quem visita.
+
+### 3. A secção tinha de ser aceite à escrita
+
+`dashboard_slas` entrou em **`EXTRA_SECTIONS`** e não em `CONFIG_FIELDS`, com o
+precedente do `mandatory_documents`: lá, o separador nasceria também na
+navegação genérica, a par do dedicado. Há contraprova nos dois sentidos, mais
+uma a afirmar que uma secção inventada continua a ser recusada — alargar a
+lista não pode transformá-la em "aceita tudo".
+
+## O que os meus testes não podiam apanhar, e um que era fraco
+
+O teste da secção montava a **folha** com o seu próprio mundo: passava com o
+defeito 1 presente. A regra do `WebmailPage` está escrita por mim no
+`AGENTS.md` e falhei-a ao acrescentar um separador a uma página.
+`SystemConfigPage.seccoes.test.jsx` monta a página e reproduziu
+`Cannot read properties of undefined (reading 'title')` antes da correcção.
+
+E a mutação denunciou um **teste fraco meu**: o fixture da secção usava
+`{novo: 7, analise: 15, aprovado: 30}` — exactamente as omissões. Com esses
+valores, um erro no caminho de leitura é indistinguível de uma leitura
+correcta: apontar a leitura para a chave errada matava **um** teste. Com
+valores afastados (4/11/22), mata três.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3898 passed, 5 skipped** (baseline 3894).
+- `yarn test` → **1249 passed / 108 ficheiros** (baseline 1243 / 107).
+- `eslint --quiet` → 0. `yarn build` → OK.
+- Mutação: reverter o registo para a lista de exclusão → **4 mortos**, com a
+  mensagem exacta de produção; apontar a leitura para `res.data.dashboard_slas`
+  → **3 mortos** (era 1 antes de afastar o fixture das omissões).
+
+## A fazer em produção
+
+Nada. Confirmar o separador "Limiares de SLA" no próximo deploy: mostra os
+valores gravados (não as omissões) e o botão guarda sem 400.

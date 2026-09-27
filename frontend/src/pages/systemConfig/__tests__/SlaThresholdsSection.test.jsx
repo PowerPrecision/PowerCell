@@ -16,7 +16,11 @@ vi.mock("../../../services/api", () => ({
 import SlaThresholdsSection from "../SlaThresholdsSection";
 import * as api from "../../../services/api";
 
-const CONFIG = { enabled: true, novo: 7, analise: 15, aprovado: 30 };
+// Valores DIFERENTES das omissões (7/15/30) de propósito. Com os valores por
+// omissão aqui, um erro no caminho de leitura era indistinguível de uma
+// leitura correcta — foi a mutação que o denunciou: apontar a leitura para a
+// chave errada matava um único teste, e nenhum deste ficheiro.
+const CONFIG = { enabled: true, novo: 4, analise: 11, aprovado: 22 };
 
 function montar() {
   return render(<SlaThresholdsSection />);
@@ -25,14 +29,17 @@ function montar() {
 describe("SlaThresholdsSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    api.getSystemConfig.mockResolvedValue({ data: { dashboard_slas: CONFIG } });
+    // A forma REAL de `GET /api/system-config`: `{config, fields}`. O mock
+    // tinha a configuração no TOPO — uma forma inventada — e por isso os
+    // testes passavam enquanto produção mostrava sempre as omissões.
+    api.getSystemConfig.mockResolvedValue({ data: { config: { dashboard_slas: CONFIG } } });
   });
 
   it("mostra os limiares gravados", async () => {
     montar();
-    expect(await screen.findByTestId("sla-novo")).toHaveValue("7");
-    expect(screen.getByTestId("sla-analise")).toHaveValue("15");
-    expect(screen.getByTestId("sla-aprovado")).toHaveValue("30");
+    expect(await screen.findByTestId("sla-novo")).toHaveValue("4");
+    expect(screen.getByTestId("sla-analise")).toHaveValue("11");
+    expect(screen.getByTestId("sla-aprovado")).toHaveValue("22");
   });
 
   it("o botão de guardar começa desactivado — nada mudou", async () => {
@@ -55,7 +62,7 @@ describe("SlaThresholdsSection", () => {
       // teste). Passá-lo como `undefined` explícito seria outra chamada.
       expect(api.updateSystemConfigSection).toHaveBeenCalledWith(
         "dashboard_slas",
-        { enabled: true, novo: 10, analise: 15, aprovado: 30 },
+        { enabled: true, novo: 10, analise: 11, aprovado: 22 },
       );
     });
   });

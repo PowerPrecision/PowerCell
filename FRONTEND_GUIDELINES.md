@@ -991,6 +991,64 @@ Corolário para formulários de configuração: **um erro de LEITURA nunca se
 apresenta como "está nas omissões"**. Se o GET falhou, diz-se, e avisa-se
 que guardar escreve por cima de valores que o utilizador não viu.
 
+### 27.9 Um separador escolhe UMA secção — registo positivo, nunca lista de exclusão
+
+O `SystemConfigPage` decidia o conteúdo com uma lista NEGATIVA:
+
+```jsx
+{activeTab === "portal" && <PortalSettingsSection/>}            // lado positivo
+{activeTab !== "portal" && activeTab !== "maintenance" && …      // lado negativo
+  && <ConfigSection section={fields[activeTab]} …/>}
+```
+
+A mesma informação em dois sítios. Acrescentei um separador só no lado
+positivo e o cartão genérico passou a renderizar-se **a par** do dedicado,
+com `section` a `undefined` → `section.title` → `TypeError` → **ecrã em
+branco**. É a forma do "Menu e rotas têm de concordar": divergem e não dá
+erro em lado nenhum.
+
+**Regras:**
+
+- **Registo positivo** (`SECCOES_DEDICADAS`, chave → componente) como ponto
+  único. Um separador é dedicado **ou** genérico, nunca os dois, e
+  acrescentar um obriga a decidir.
+- **Props uniformes** para todas as secções do registo (`token`, `user`).
+  Quem não os usa ignora-os, e uniformizar evita um terceiro sítio com a
+  lista de quem precisa de quê.
+- **O separador vem do URL** (`searchParams.get("tab")`), logo um favorito
+  antigo pede secções que já não existem: o desconhecido **diz-se**, em vez
+  de cair no genérico (o mesmo crash por uma porta controlada por quem
+  visita) ou de deixar a área vazia sem explicação.
+- **Só a PÁGINA montada apanha isto.** O teste da secção nova passava com o
+  defeito presente — montava a folha. Acrescentar um separador a uma página
+  exige um teste que monte a página.
+
+### 27.10 Ler o endpoint antes de escrever o ecrã
+
+Três defeitos numa só entrega, todos da mesma raiz: construí o ecrã dos SLAs
+contra um contrato **suposto**.
+
+| Suposto | Real |
+|---|---|
+| `GET /system-config` devolve a configuração | devolve `{config, fields}` |
+| `PATCH /system-config/{secção}` aceita qualquer chave | valida contra `CONFIG_FIELDS` + `EXTRA_SECTIONS` → 400 |
+
+O primeiro é o pior dos dois, porque **parece funcionar**: `res.data.dashboard_slas`
+dava `undefined`, o formulário caía nas omissões e o ecrã mostrava 7/15/30
+fossem quais fossem os valores gravados.
+
+**Regras:**
+
+- **Ler o handler**, não inferir a resposta do nome do endpoint.
+- **O mock do teste usa a forma REAL.** Um mock com a forma inventada é pior
+  do que nenhum: faz a bateria verde sobre um ecrã que não lê nada. Terceira
+  ocorrência no projecto (a primeira foi o `/portal/status`).
+- **Os valores do fixture têm de ser DIFERENTES das omissões.** Com
+  `{novo: 7}` — que é a omissão — um erro no caminho de leitura é
+  indistinguível de uma leitura correcta. Foi a mutação que o denunciou:
+  apontar a leitura para a chave errada matava **um** teste; com valores
+  afastados, mata três.
+
 ## 28. Edição inline e navegação contígua (Lote 5, Secção B, Set 2026)
 
 ### 28.1 Um controlo dentro de uma linha clicável começa por travar o clique

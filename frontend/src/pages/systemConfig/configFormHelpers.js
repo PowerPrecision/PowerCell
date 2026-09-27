@@ -333,7 +333,7 @@ export const ConfigSection = ({ section, sectionKey, config, fields, onSave, onT
   const Icon = SECTION_ICONS[sectionKey] || Settings;
 
   return (
-    <Card>
+    <Card data-testid="config-section-generica">
       <CardHeader>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

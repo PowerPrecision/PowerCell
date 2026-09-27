@@ -55,7 +55,14 @@ export default function SlaThresholdsSection() {
     setErroDeLeitura("");
     try {
       const res = await getSystemConfig();
-      const secao = res.data?.dashboard_slas ?? null;
+      // A resposta de `GET /api/system-config` é `{config, fields}` — a
+      // configuração NÃO está no topo (ver `system_config_api.run_get_config`).
+      // Ler `res.data.dashboard_slas` dava sempre `undefined`, e o ecrã
+      // mostrava as omissões 7/15/30 fossem quais fossem os valores gravados:
+      // um erro de leitura silencioso, do tipo mais perigoso, porque parece
+      // funcionar. Construí isto contra um contrato SUPOSTO em vez de ler o
+      // endpoint.
+      const secao = res.data?.config?.dashboard_slas ?? null;
       setConfig(secao);
       setFormulario(hidratarLimiares(secao));
     } catch (err) {
