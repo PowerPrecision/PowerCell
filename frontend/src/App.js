@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -109,8 +109,14 @@ function PageLoadingSkeleton() {
 // sidebar e resto da app continuam a funcionar.
 // ====================================================================
 function RouteBoundary({ children, name }) {
+  // `resetKey` = o sítio onde estamos. Sem ela, o boundary ficava preso no
+  // estado de erro até um clique em "Tentar novamente": depois do primeiro
+  // crash, TODA a navegação para esta rota mostrava o ecrã de erro, mesmo
+  // com outro `:id` e mesmo que a causa já não existisse. Ver o comentário
+  // do `componentDidUpdate` em `components/ErrorBoundary.js`.
+  const { pathname } = useLocation();
   return (
-    <ErrorBoundary variant="page" moduleName={name}>
+    <ErrorBoundary variant="page" moduleName={name} resetKey={pathname}>
       <Suspense fallback={<PageLoadingSkeleton />}>
         {children}
       </Suspense>
@@ -532,27 +538,26 @@ function App() {
             }
           />
           
-          {/* Process Details - Staff and Admin */}
-          <Route
-            path="/processo/:id"
-            element={
-              <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <RouteBoundary name="Detalhes do Processo">
-                  <ProcessDetails />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/process/:id"
-            element={
-              <ProtectedRoute allowedRoles={STAFF_ROLES}>
-                <RouteBoundary name="Detalhes do Processo">
-                  <ProcessDetails />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
-          />
+          {/* Process Details - Staff and Admin.
+              DUAS rotas (o português é o caminho histórico, o inglês é o
+              que as setas Anterior/Seguinte usam) e UM só `element`: eram
+              dois blocos copiados, com a mesma lista de perfis escrita
+              duas vezes. É a forma do "Menu e rotas têm de concordar" —
+              divergiriam sem dar erro, e a rota que divergisse mandava o
+              utilizador de volta ao Dashboard sem explicação. */}
+          {["/processo/:id", "/process/:id"].map((caminho) => (
+            <Route
+              key={caminho}
+              path={caminho}
+              element={
+                <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                  <RouteBoundary name="Detalhes do Processo">
+                    <ProcessDetails />
+                  </RouteBoundary>
+                </ProtectedRoute>
+              }
+            />
+          ))}
           
           {/* Settings Page - Staff and Admin */}
           <Route

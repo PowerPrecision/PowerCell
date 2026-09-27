@@ -10,7 +10,7 @@ SEGURANÇA:
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Response, Query
 from fastapi.responses import JSONResponse
 
 from middleware.rate_limit import limiter
@@ -126,6 +126,7 @@ async def get_portal_status(client_data: dict = Depends(get_current_client)):
 @limiter.limit("20/minute")
 async def generate_portal_upload_url(
     request: Request,
+    response: Response,
     data: dict,
     client_data: dict = Depends(get_current_client),
 ):
@@ -136,6 +137,7 @@ async def generate_portal_upload_url(
 @limiter.limit("20/minute")
 async def confirm_portal_upload(
     request: Request,
+    response: Response,
     data: dict,
     client_data: dict = Depends(get_current_client),
 ):
@@ -146,6 +148,7 @@ async def confirm_portal_upload(
 @limiter.limit("60/minute")
 async def get_portal_download_url(
     request: Request,
+    response: Response,
     file_key: str,
     client_data: dict = Depends(get_current_client),
 ):

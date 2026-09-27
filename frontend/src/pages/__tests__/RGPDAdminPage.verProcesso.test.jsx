@@ -101,7 +101,28 @@ describe("Guarda: o caminho tem de existir no App.js", () => {
   it("a rota /process/:id está declarada", () => {
     // Se alguém renomear a rota, este teste cai junto com o anterior e diz
     // porquê — em vez de o utilizador descobrir no Login.
-    expect(APP).toMatch(/path="\/process\/:id"/);
+    //
+    // A asserção deixou de procurar `path="/process/:id"` literal (Lote 6,
+    // ponto 2): as duas rotas dos detalhes — `/processo/:id` (histórica) e
+    // `/process/:id` (a que as setas usam) — eram dois blocos copiados, com
+    // a mesma lista de perfis escrita duas vezes, e passaram a derivar de
+    // um array com um só `element`. O que importa é que o caminho exista,
+    // não a forma como é declarado; e o `path={caminho}` abaixo garante que
+    // a guarda não passa por um caminho que apenas APAREÇA no ficheiro
+    // (num comentário, por exemplo).
+    expect(APP).toMatch(/"\/process\/:id"/);
+    expect(APP).toMatch(/path=\{caminho\}/);
+  });
+
+  it("as duas rotas dos detalhes partilham um só element", () => {
+    // Contraprova da mudança acima. Duas declarações independentes
+    // divergiam sem dar erro — e a que divergisse mandava o utilizador de
+    // volta ao Dashboard sem explicação nenhuma (é a forma do "Menu e
+    // rotas têm de concordar").
+    const rotasDosDetalhes = APP.match(/\["\/processo\/:id", "\/process\/:id"\]/);
+    expect(rotasDosDetalhes).not.toBeNull();
+    // E não sobrou nenhuma declaração solta com o caminho antigo.
+    expect(APP).not.toMatch(/path="\/processo\/:id"/);
   });
 
   it("o catch-all continua a mandar para o Login", () => {

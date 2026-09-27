@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
+import { useWebSocket, WSEventType } from "./useWebSocket";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -134,6 +135,33 @@ export function useProcessPortalMessages(
       fetchUnreadCount();
     }
   }, [isActive, fetchMessages, fetchUnreadCount]);
+
+  // ── Tempo real: a mensagem do cliente (Lote 6, ponto 5) ──
+  //
+  // O polling deste hook só buscava o UNREAD. `fetchMessages` corria
+  // quando o separador ficava activo e depois de enviar — e mais nada.
+  // Com o separador do Portal ABERTO, uma mensagem do cliente não
+  // aparecia nunca: o badge subia e a lista ficava igual. Era isto o
+  // "as mensagens do cliente não chegam ao CRM".
+  //
+  // O servidor difunde `portal_message` para a sala do processo
+  // (`portal_client_messages._difundir_mensagem_na_sala`) e o evento é um
+  // SINAL truncado a 200 caracteres — por isso recarrega-se em vez de o
+  // inserir na lista, exactamente como no lado do cliente
+  // (`utils/portalRealtime.js`, armadilha 1).
+  //
+  // O polling do unread NÃO é apagado (regra do Épico 10): é o que salva
+  // um browser atrás de um proxy que bloqueia WebSockets.
+  const { on } = useWebSocket();
+  useEffect(() => {
+    if (!processId || !enabled || typeof on !== "function") return undefined;
+    return on(WSEventType.PORTAL_MESSAGE, (payload) => {
+      // A sala é por processo, mas o socket é um só: um evento de OUTRO
+      // processo aberto noutro separador não pode recarregar este.
+      if (payload?.process_id && payload.process_id !== processId) return;
+      refresh();
+    });
+  }, [on, processId, enabled, refresh]);
 
   // Polling unread a cada 30s (desliga em 404/401/403)
   useEffect(() => {

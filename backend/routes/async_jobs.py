@@ -9,7 +9,7 @@ Preserve rate limits on stubs. Keep static paths (/health, /session/*,
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 
 from middleware.rate_limit import limiter
 from services.auth import get_current_user
@@ -38,6 +38,7 @@ router = APIRouter(prefix="/jobs", tags=["Async Job Management"])
 @limiter.limit("100/minute")
 async def enqueue_analysis(
     request: Request,
+    response: Response,
     data: AnalyzeJobRequest,
     user: dict = Depends(get_current_user),
 ):
@@ -69,6 +70,7 @@ async def start_async_session(
 @limiter.limit("60/minute")
 async def enqueue_session_analysis(
     request: Request,
+    response: Response,
     session_id: str,
     file: UploadFile = File(...),
     document_type: str = Form(...),

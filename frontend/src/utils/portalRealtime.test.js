@@ -58,6 +58,21 @@ describe("construirUrlDoSocket", () => {
     expect(construirUrlDoSocket(null, "t1")).toBeNull();
   });
 
+  it("recusa uma base que já traga o prefixo /api (o defeito de produção)", () => {
+    // O hook passava `API_BASE_URL`, que é `BACKEND_URL + "/api"`: o URL
+    // saía `wss://…/api/api/ws/portal` e o socket do Portal NUNCA ligou em
+    // produção. Nenhum dos testes deste ficheiro tinha visto isto porque
+    // TODOS passavam uma base sem `/api` — validavam uma chamada que a
+    // aplicação não faz.
+    expect(construirUrlDoSocket("https://api.exemplo.pt/api", "t1")).toBeNull();
+    expect(construirUrlDoSocket("https://api.exemplo.pt/api/", "t1")).toBeNull();
+  });
+
+  it("o caminho /api/ aparece UMA vez", () => {
+    const url = construirUrlDoSocket("https://api.exemplo.pt", "t1");
+    expect(url.match(/\/api\//g)).toHaveLength(1);
+  });
+
   it("devolve null para uma base sem protocolo em vez de um URL inválido", () => {
     // `new WebSocket("api.exemplo.pt/...")` levanta SyntaxError — devolver
     // null deixa o polling ser o caminho, que é o degradado certo.

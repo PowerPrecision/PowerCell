@@ -658,7 +658,11 @@ const TasksPanel = ({
               <p className="text-sm">Nenhuma tarefa {showCompleted ? "" : "pendente"}</p>
             </div>
           ) : (
-            <ScrollArea style={{ maxHeight }}>
+            /* O limite vai no VIEWPORT, não na Root: ver o comentário em
+               `components/ui/scroll-area.jsx`. Com `style={{maxHeight}}` na
+               Root, as tarefas além do limite eram cortadas e ficavam
+               inalcançáveis — sem barra de rolagem nenhuma. */
+            <ScrollArea viewportStyle={{ maxHeight }}>
               {/* Background Jobs Section */}
               {backgroundJobs.length > 0 && (
                 <div className="mb-3">

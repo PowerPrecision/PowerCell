@@ -1471,3 +1471,117 @@ que misture medido com estimado sem o dizer é pior do que um gráfico vazio —
 a resposta do servidor traz as duas amostras separadas e a UI tem de as
 distinguir (nota de rodapé, cor diferente, o que for), nunca somá-las em
 silêncio.
+
+### 27.11 Um registo só é ponto único se TODAS as superfícies derivarem dele
+
+O `SystemConfigPage` decide o conteúdo por um registo positivo
+(`SECCOES_DEDICADAS`, § 27.9) — e mesmo assim o separador "Limiares de SLA"
+desapareceu num ecrã estreito. A navegação estava escrita à mão em **três**
+sítios: a barra lateral (`hidden lg:block`), o `<Select>` do telemóvel e a
+fila de chips ao lado dele. O separador entrou só no primeiro.
+
+Não era overflow. A fila de chips já tinha `overflow-x-auto`; um item que
+não é **renderizado** não se alcança com scroll nenhum. O diagnóstico
+natural ("o Radix Tabs não lida com o overflow") aponta para o sítio
+errado — e ali não há Tabs do Radix nenhum.
+
+**Regra:** uma lista de itens de navegação vive num array exportado e as
+superfícies (desktop, dropdown, chips) fazem `map` sobre ele. Acrescentar um
+item é acrescentar uma linha; esquecer uma superfície deixa de ser possível.
+
+**Corolário para o teste:** no jsdom as media queries do Tailwind não se
+aplicam, pelo que TODAS as navegações existem na árvore ao mesmo tempo — é
+exactamente isso que permite afirmar, num só teste, que cada item tem o
+botão da barra lateral **e** o chip do ecrã estreito. Um teste que verifique
+só uma delas volta a deixar passar este defeito.
+
+### 27.12 `overflow-x-auto` com a barra escondida é uma porta sem maçaneta
+
+A fila de chips rolava com `style={{scrollbarWidth: "none"}}`. Num telemóvel
+não havia nada a indicar que houvesse mais separadores à direita, e num rato
+sem eixo horizontal não havia como chegar lá. `flex-wrap` mostra tudo em
+qualquer largura e não precisa de afordância.
+
+Esconder a barra de rolagem é uma decisão de estética que custa
+descobribilidade: só se faz quando existe outra pista de que há mais
+conteúdo (um gradiente na margem, setas).
+
+### 27.13 O limite de altura de um `ScrollArea` vai no VIEWPORT
+
+O `ScrollArea` do Radix tem `overflow-hidden` na `Root` e `h-full` no
+`Viewport`. Um `maxHeight` na Root — o reflexo natural, e o que o
+`TasksPanel` fazia — deixa a Root em altura **auto**, pelo que o `h-full` do
+viewport resolve para a altura do conteúdo: o viewport nunca transborda, o
+Radix não desenha barra nenhuma, e a Root **corta** o excedente com o seu
+`overflow-hidden`.
+
+O resultado não é uma lista com elevador: é uma lista **truncada**, com
+itens que não se conseguem alcançar. Para "As minhas tarefas" do Dashboard
+isso significava tarefas invisíveis.
+
+Usar `viewportStyle`/`viewportClassName` (o wrapper em `components/ui/`
+aceita-os) para o limite, ou uma altura DEFINIDA (`className="h-[280px]"`,
+que é o que os restantes usos já faziam e por isso funcionavam). O jsdom não
+faz layout, pelo que o teste afirma o CONTRATO — o limite chega ao viewport
+e não à root — e não o scroll.
+
+### 27.14 Um `ErrorBoundary` fica preso até alguém o repor
+
+Um error boundary do React mantém o estado de erro até ser remontado ou
+reposto à mão. O desta app só se repunha no clique de "Tentar novamente", e
+vive **dentro** do `element` de cada rota: a partir do primeiro crash, toda
+a navegação para aquela rota mostrava o ecrã de erro — de um recurso que já
+não era o aberto, e mesmo depois de a causa desaparecer.
+
+Em produção apareceu como uma assimetria que não se explicava pelo código
+da página: as setas Anterior/Seguinte funcionavam e o "Voltar" do browser
+dava ecrã em branco. A app declarava **duas** rotas para os detalhes do
+processo (`/processo/:id` e `/process/:id`), cada uma com o seu `element` e
+portanto com o seu boundary — um ficava latido e o outro não.
+
+**Regra:** um boundary por rota recebe `resetKey` com o contexto (o
+pathname) e repõe-se quando ele muda, com o `retryCount` a zero — mudar de
+sítio é uma tentativa nova, e o limite de tentativas existe para travar um
+ciclo de re-render, não para condenar uma rota durante a sessão.
+
+Isto **não esconde o erro**: ele foi registado e volta a acontecer se a
+causa persistir. O que deixa de acontecer é o ecrã ficar quebrado depois de
+a causa desaparecer — que é a diferença entre um relato reproduzível e "às
+vezes fica branco".
+
+### 27.15 O snapshot dos cabeçalhos não pode ficar um commit atrasado
+
+O interceptor do Axios lê `X-Company-Id`/`X-Active-Role` de um snapshot em
+memória (`authContextHeaders`) e **prefere-o** ao storage. Quem o escreve é
+`syncAuthContextHeaders`, e isso acontecia apenas num `useEffect` — ou seja,
+depois do commit.
+
+`switchActiveRole` chama `queryClient.clear()` de forma **síncrona**, e o
+`clear()` faz as queries activas voltar a pedir imediatamente. Esses pedidos
+saíam com a empresa **anterior**, e os dados que voltavam ficavam em cache
+como se fossem os do âmbito novo. Um utilizador da Domus via a caixa geral e
+as tarefas da Power, e nada repetia o pedido depois de o estado convergir.
+
+**Regra:** numa troca de âmbito, o snapshot é escrito no mesmo tick, antes
+de invalidar ou esvaziar. O efeito continua a reconciliar (arranque,
+`/auth/me`); o que não pode é ser o único a escrever.
+
+**Como se prova:** afirmando a ORDEM, não o estado final. O teste anterior
+verificava `sessionStorage.getItem("activeRole")` com o comentário "se a
+cache fosse limpa primeiro, o refetch partia com os headers antigos" — a
+premissa certa e a asserção no sítio errado, porque o storage não é o que o
+interceptor lê primeiro. Provava que a escrita acontecera e concluía que os
+cabeçalhos estavam certos.
+
+### 27.16 Um parâmetro de âmbito no URL sobrevive ao `reload()`
+
+`switchActiveCompany` termina em `window.location.reload()`, que recarrega o
+**mesmo URL**. O Webmail põe a empresa em `?company_id=` (para o separador
+sobreviver a um F5 e para um link levar alguém à caixa certa) e o parâmetro
+do URL vence a empresa activa — e deve vencer, é o que faz um link
+funcionar. Quem estivesse em `/webmail?company_id=<power>` e trocasse para a
+Domus voltava a cair na caixa da Power.
+
+Reescrever o parâmetro antes do reload, não removê-lo: quem trocou de
+empresa quer ver a caixa da nova, e o resto do URL (pasta, pesquisa)
+continua a valer.

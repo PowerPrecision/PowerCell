@@ -91,6 +91,41 @@ export const SECCOES_DEDICADAS = {
   dashboard_slas: SlaThresholdsSection,
 };
 
+/**
+ * As secções com ecrã próprio que aparecem na NAVEGAÇÃO, por ordem.
+ *
+ * PORQUE É QUE ISTO EXISTE (Lote 6, ponto 1)
+ * ==========================================
+ * A navegação desta página estava escrita À MÃO em TRÊS sítios: a barra
+ * lateral (`hidden lg:block`), o `<Select>` do telemóvel e a fila de chips
+ * ao lado dele (`lg:hidden`). Ao acrescentar os Limiares de SLA pus o
+ * botão só na barra lateral — e num ecrã estreito o separador deixava
+ * simplesmente de EXISTIR. Não é um problema de overflow: a fila de chips
+ * já tem `overflow-x-auto`, e um item que não é renderizado não se alcança
+ * com scroll nenhum.
+ *
+ * É a mesma forma do defeito que corrigi no dia anterior neste mesmo
+ * ficheiro (o cartão genérico a renderizar-se a par do dedicado, por a
+ * decisão estar escrita duas vezes) e a regra que eu próprio escrevi em
+ * `FRONTEND_GUIDELINES.md` § 27.9. Uma lista repetida três vezes divergirá
+ * numa delas, e a que divergir não dá erro: fica um separador invisível.
+ *
+ * As três navs derivam agora desta lista. Acrescentar uma secção é
+ * acrescentar uma linha aqui; esquecer uma nav deixou de ser possível.
+ *
+ * `SECCOES_DEDICADAS` continua a ser a autoridade sobre QUAL o componente
+ * (inclui entradas que não são separadores próprios, como
+ * `document_recipients`); esta lista diz quais se OFERECEM e com que
+ * rótulo. Há um teste a afirmar que toda a chave daqui existe lá.
+ */
+export const SECCOES_NA_NAVEGACAO = [
+  { key: "maintenance", label: "Manutenção", Icon: Wrench },
+  { key: "portal", label: "Portal", Icon: MessageSquare },
+  { key: "mandatory_documents", label: "Docs Obrigatórios", Icon: FileEdit },
+  { key: "changelog", label: "Atualizações", Icon: Megaphone },
+  { key: "dashboard_slas", label: "Limiares de SLA", Icon: Gauge },
+];
+
 const SystemConfigPage = ({ embedded = false }) => {
   const { token, user, effectiveCompanyId } = useAuth();
   const [searchParams] = useSearchParams();
@@ -299,72 +334,23 @@ const SystemConfigPage = ({ embedded = false }) => {
                     <div className="my-1.5 border-t border-border" />
                     {/* Nota: "RGPD" foi removido daqui — vive apenas no tab Compliance do Painel de Administração (evita duplicação).
                         "Integrações" e "Emails Sistema" foram movidos para o tab Comunicações no Painel de Administração */}
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("maintenance")}
-                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
-                        activeTab === "maintenance"
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      <Wrench className={`h-4 w-4 shrink-0 ${activeTab === "maintenance" ? "text-primary" : ""}`} />
-                      <span className="truncate">Manutenção</span>
-                      {activeTab === "maintenance" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("portal")}
-                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
-                        activeTab === "portal"
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      <MessageSquare className={`h-4 w-4 shrink-0 ${activeTab === "portal" ? "text-primary" : ""}`} />
-                      <span className="truncate">Portal</span>
-                      {activeTab === "portal" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("mandatory_documents")}
-                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
-                        activeTab === "mandatory_documents"
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      <FileEdit className={`h-4 w-4 shrink-0 ${activeTab === "mandatory_documents" ? "text-primary" : ""}`} />
-                      <span className="truncate">Docs Obrigatórios</span>
-                      {activeTab === "mandatory_documents" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("changelog")}
-                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
-                        activeTab === "changelog"
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      <Megaphone className={`h-4 w-4 shrink-0 ${activeTab === "changelog" ? "text-primary" : ""}`} />
-                      <span className="truncate">Atualizações</span>
-                      {activeTab === "changelog" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("dashboard_slas")}
-                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
-                        activeTab === "dashboard_slas"
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                      data-testid="nav-dashboard-slas"
-                    >
-                      <Gauge className={`h-4 w-4 shrink-0 ${activeTab === "dashboard_slas" ? "text-primary" : ""}`} />
-                      <span className="truncate">Limiares de SLA</span>
-                      {activeTab === "dashboard_slas" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
-                    </button>
+                    {SECCOES_NA_NAVEGACAO.map(({ key, label, Icon }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setActiveTab(key)}
+                        className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
+                          activeTab === key
+                            ? "bg-primary/10 text-primary font-medium"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                        }`}
+                        data-testid={`nav-${key.replace(/_/g, "-")}`}
+                      >
+                        <Icon className={`h-4 w-4 shrink-0 ${activeTab === key ? "text-primary" : ""}`} />
+                        <span className="truncate">{label}</span>
+                        {activeTab === key && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+                      </button>
+                    ))}
                   </nav>
                 </CardContent>
               </Card>
@@ -390,34 +376,25 @@ const SystemConfigPage = ({ embedded = false }) => {
                     );
                   })}
                   {/* Nota: RGPD removido (vive só em Compliance); Integrações e Emails Sistema movidos para Comunicações */}
-                  <SelectItem value="maintenance">
-                    <span className="flex items-center gap-2">
-                      <Wrench className="h-4 w-4" />
-                      Manutenção
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="portal">
-                    <span className="flex items-center gap-2">
-                      <MessageSquare className="h-4 w-4" />
-                      Portal
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="mandatory_documents">
-                    <span className="flex items-center gap-2">
-                      <FileEdit className="h-4 w-4" />
-                      Docs Obrigatórios
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="changelog">
-                    <span className="flex items-center gap-2">
-                      <Megaphone className="h-4 w-4" />
-                      Atualizações
-                    </span>
-                  </SelectItem>
+                  {SECCOES_NA_NAVEGACAO.map(({ key, label, Icon }) => (
+                    <SelectItem key={key} value={key}>
+                      <span className="flex items-center gap-2">
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </span>
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
-              {/* Horizontal scrollable chips for quick access */}
-              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" style={{scrollbarWidth: "none", msOverflowStyle: "none"}}>
+              {/* Chips de acesso rápido.
+                  `flex-wrap` e NÃO `overflow-x-auto`: a versão anterior
+                  rolava na horizontal com a barra de rolagem ESCONDIDA
+                  (`scrollbarWidth: none`) — num telemóvel não havia nada a
+                  indicar que havia mais separadores à direita, e num rato
+                  sem scroll horizontal não havia forma de lá chegar. A
+                  quebra de linha mostra todos, em qualquer largura, e não
+                  precisa de afordância nenhuma. */}
+              <div className="flex flex-wrap gap-2 pb-1">
                 {sections.map((key) => {
                   const Icon = SECTION_ICONS[key] || Settings;
                   const isActive = activeTab === key;
@@ -437,26 +414,22 @@ const SystemConfigPage = ({ embedded = false }) => {
                     </button>
                   );
                 })}
-                {["maintenance", "portal", "mandatory_documents", "changelog"].map((key) => {
-                  const Icon = key === "portal" ? MessageSquare : key === "mandatory_documents" ? FileEdit : key === "changelog" ? Megaphone : Wrench;
-                  const isActive = activeTab === key;
-                  const label = key === "portal" ? "Portal" : key === "mandatory_documents" ? "Docs Obrigatórios" : key === "changelog" ? "Atualizações" : "Manutenção";
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setActiveTab(key)}
-                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
-                        isActive
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-muted text-muted-foreground hover:border-muted-foreground/50"
-                      }`}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      {label}
-                    </button>
-                  );
-                })}
+                {SECCOES_NA_NAVEGACAO.map(({ key, label, Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setActiveTab(key)}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
+                      activeTab === key
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-muted text-muted-foreground hover:border-muted-foreground/50"
+                    }`}
+                    data-testid={`chip-${key.replace(/_/g, "-")}`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
           </aside>
