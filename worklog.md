@@ -7400,3 +7400,60 @@ frontend construiu ...... ws://localhost:8001/api/ws/portal?token=<jwt>
   não recebe ... process_updated · document_uploaded · new_chat_message
 ✓ ping → heartbeat (pong)
 ```
+
+---
+
+## Iteração correcção-tipo-token — O `type` dos tokens do CRM é `"access"` (Set 2026)
+
+Correcção de uma regressão que **eu** introduzi no lote dos WebSockets externos
+e que o `backend-full` do CI apanhou: **25 testes vermelhos**, todos com
+`{"detail":"Este token não tem permissão para acessar a API."}` — a minha própria
+mensagem.
+
+### O erro
+
+Afirmei que "os tokens de staff não declaram `type`". Cheguei lá depois de ler
+**um** produtor (`services/auth.create_token`) e não verifiquei qual a função que
+o `/auth/login-v2` chama. O login de produção mina por
+`refresh_token_service.create_access_token`, que estampa `"type": "access"`
+**desde sempre**, num literal escondido nesse módulo.
+
+Inventar um `"staff"` e validá-lo fazia o `get_current_user` recusar **todos** os
+tokens reais: 401 em cada chamada de cada utilizador. Regressão total da API.
+
+**Os testes não viram porque forjavam os tokens** com o tipo que eu inventei — 96
+verdes sobre uma produção partida. É a falha do Lote 5 do lado da ESCRITA:
+inventariar um produtor e concluir sobre a regra.
+
+### A correcção
+
+Três produtores, um valor:
+
+| Produtor | Usado por |
+|---|---|
+| `refresh_token_service.create_access_token` | `/auth/login-v2`, `/auth/refresh` |
+| `auth.create_token` | `/auth/register` |
+| `auth.create_access_token` | *impersonate* |
+
+Todos estampam `auth.tipo_de_token_do_crm()` → `TIPO_DO_STAFF = "access"`. O
+valor é o que a produção **já** usava, não um nome novo: escolher um nome novo
+obrigava a migrar todos os tokens em circulação, e foi fazê-lo que partiu tudo.
+
+### A cobertura que faltava
+
+`TestTodosOsProdutoresDeTokenDoCRM`: cada produtor **real** contra o
+`get_current_user` **real**, mais uma guarda de fonte contra o literal voltar e
+a contraprova de que o produtor estampa mesmo um `type`. O helper
+`token_de_staff()` passou a usar o produtor de produção — **forjar era o que
+escondia o defeito**.
+
+A mutação fiel (literal de volta no `refresh_token_service`, a divergir da
+constante) é apanhada por **cinco** destes testes. Mutar só a constante
+partilhada não serve: move os dois lados ao mesmo tempo, e o defeito era uma
+**divergência**.
+
+### Estado
+
+- `pytest` com o comando e o ambiente exactos do `backend-full`: **4079 passed,
+  13 skipped** (CI tinha 25 failed / 4042 passed).
+- `flake8` nos selectores bloqueantes: **0**.

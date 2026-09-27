@@ -6070,3 +6070,79 @@ frontend construiu ...... ws://localhost:8001/api/ws/portal?token=<jwt>
   não recebe ............. process_updated · document_uploaded · new_chat_message
 ✓ ping → heartbeat (pong)
 ```
+
+---
+
+## Correcção pós-CI — o tipo dos tokens do CRM é `"access"`, e há três produtores
+
+O lote dos WebSockets externos foi escrito sobre uma premissa **errada**, e vale
+a pena deixá-la registada porque a forma do erro repete-se.
+
+### O que eu afirmei, e porque estava errado
+
+Afirmei que "os tokens de staff não declaram `type`" — e cheguei lá depois de
+ler **um** produtor, o `services/auth.create_token`. Essa função não é a que o
+`/auth/login-v2` chama. O login de produção mina por
+`services/refresh_token_service.create_access_token`, que estampa
+`"type": "access"` **desde sempre**, num literal escondido nesse módulo.
+
+Inventar um tipo `"staff"` e torná-lo autoritativo no `get_current_user` fez o
+validador recusar **todos** os tokens reais: 401 em cada chamada de cada
+utilizador autenticado. Uma regressão total da API, com uma mensagem minha na
+resposta.
+
+### Porque é que os testes não viram
+
+Os 96 testes do lote passavam porque **forjavam** os tokens com o tipo que eu
+tinha inventado. O `backend-full` do CI — que passa pelo `/auth/login-v2` a
+sério — foi o único a ver: **25 testes vermelhos**, todos com
+`{"detail":"Este token não tem permissão para acessar a API."}`.
+
+É a falha do Lote 5 do lado da **escrita**. A regra que já estava escrita —
+*"inventariar os sítios que LISTAM, não só a condição"* — vale igual para quem
+PRODUZ: inventariar um produtor e concluir sobre a regra é o mesmo erro com o
+sinal trocado.
+
+### O inventário completo
+
+| Produtor | Usado por | `type` antes | agora |
+|---|---|---|---|
+| `refresh_token_service.create_access_token` | `/auth/login-v2`, `/auth/refresh` | `"access"` (literal local) | `tipo_de_token_do_crm()` |
+| `auth.create_token` | `/auth/register` | nenhum | `tipo_de_token_do_crm()` |
+| `auth.create_access_token` | *impersonate* (2 sítios em `admin_users`) | nenhum | `tipo_de_token_do_crm()` |
+
+O valor canónico é **`"access"`** e não um nome novo: é o que a produção já
+estampava e o que está dentro de cada token em circulação. Escolher um nome novo
+obrigava a migrar todos — e foi exactamente ao fazê-lo que parti o login.
+
+`ws_client_identity.TIPO_DO_STAFF = "access"` é o ponto único;
+`auth.tipo_de_token_do_crm()` é o acessor (import tardio, para não fechar o ciclo
+`auth` → `ws_client_identity` → `websocket_manager`).
+
+### A cobertura que faltava
+
+`TestTodosOsProdutoresDeTokenDoCRM` corre **cada produtor real** — nunca um
+token forjado — contra o `get_current_user` **real**:
+
+- o tipo estampado é aceito pelo validador;
+- os três estampam o **mesmo** tipo;
+- o `get_current_user` devolve o utilizador para o token de cada um;
+- o valor canónico é o que a produção já estampava;
+- guarda de fonte: nenhum produtor usa um literal próprio (era a
+  invisibilidade do literal que produzia o defeito), com a contraprova de que
+  o produtor estampa mesmo um `type`.
+
+O helper `token_de_staff()` dos testes passou a usar o **produtor de produção**
+por omissão. Forjar era o que escondia o defeito.
+
+**A mutação fiel** — pôr o literal de volta no `refresh_token_service` a
+divergir da constante do validador — é apanhada por **cinco** destes testes,
+incluindo o que atravessa o `get_current_user`. Mutar só a constante partilhada
+não serve como prova: move os dois lados ao mesmo tempo, e o defeito original era
+uma **divergência**, não um valor errado.
+
+### Estado
+
+`pytest` com o comando e o ambiente exactos do `backend-full`: **4079 passed, 13
+skipped** (o CI tinha 25 failed / 4042 passed). `flake8` nos selectores
+bloqueantes: 0.

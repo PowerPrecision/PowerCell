@@ -164,8 +164,8 @@ def needs_rehash(hashed: str) -> bool:
     return not (hashed.startswith("$2b$") or hashed.startswith("$2a$"))
 
 
-def _tipo_de_token_do_staff() -> str:
-    """O valor da claim `type` dos tokens de staff, vindo do ponto ÚNICO.
+def tipo_de_token_do_crm() -> str:
+    """O valor da claim `type` dos tokens do CRM, vindo do ponto ÚNICO.
 
     Import TARDIO de propósito: o `ws_client_identity` importa o
     `websocket_manager` (para o `WSEventType`) e um import no topo deste módulo
@@ -200,14 +200,12 @@ def create_token(user_id: str, email: str, role: str) -> str:
         "sub": user_id,
         "email": email,
         "role": role,
-        # Claim `type` — acrescentada no lote dos WebSockets externos.
-        # Os tokens do Portal do Cliente são assinados com o MESMO `JWT_SECRET`
-        # e declaram `type` desde sempre; o do staff não declarava nada, pelo
-        # que a única coisa que separava as duas famílias era o `sub` de um
-        # token de Portal ser um `process_id` que não existe em `db.users` —
-        # uma coincidência de namespaces, não uma regra. Com esta claim, a
-        # separação passa a ser afirmada dos dois lados.
-        "type": _tipo_de_token_do_staff(),
+        # Claim `type` do CRM — o MESMO valor que o
+        # `refresh_token_service.create_access_token` (o produtor do
+        # `/auth/login-v2`) estampa desde sempre. Os TRÊS produtores de tokens
+        # do CRM têm de concordar: é isso que permite ao validador recusar os
+        # tipos ESTRANHOS (Portal, `gov_auth`) sem recusar os próprios.
+        "type": tipo_de_token_do_crm(),
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -219,6 +217,10 @@ def create_access_token(data: Dict[str, Any]) -> str:
     Usado para impersonate e outros cenários especiais.
     """
     payload = {
+        # O `type` vem primeiro para que um `data` que o traga possa
+        # sobrepor-se — mas nenhum chamador o faz, e o valor por omissão é o
+        # mesmo dos outros dois produtores do CRM.
+        "type": tipo_de_token_do_crm(),
         **data,
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
     }

@@ -115,9 +115,10 @@ teste-inventário como o de
 ### D-5 · Tolerância a tokens de staff sem claim `type`
 **Onde:** `backend/services/ws_client_identity.py::tipo_de_token_e_de_staff`
 
-O `create_token` só passou a estampar `type: "staff"` no lote dos WebSockets
-externos. O verificador aceita `None` para não invalidar as sessões abertas no
-momento do deploy.
+Os três produtores de tokens do CRM estampam hoje `type: "access"`
+(`auth.tipo_de_token_do_crm`), mas dois deles — o `/auth/register` e o
+*impersonate* — não estampavam nada antes deste lote. O verificador aceita
+`None` para não invalidar as sessões abertas no momento do deploy.
 
 **Porque foi adiado:** é a condição para o deploy não deslogar a equipa inteira.
 

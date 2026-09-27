@@ -65,12 +65,26 @@ TIPOS_DO_PORTAL: tuple[str, ...] = (
     "access_code_session",
 )
 
-# O tipo que o `auth.create_token` passou a estampar. Tokens de staff emitidos
-# ANTES desta alteração não têm claim `type` nenhuma — é por isso que o lado do
-# staff aceita `None` (ver `tipo_de_token_e_de_staff`). Essa tolerância pode
-# cair quando todos os tokens em circulação tiverem expirado
-# (`JWT_EXPIRATION_HOURS` depois do deploy).
-TIPO_DO_STAFF = "staff"
+# O tipo dos tokens do CRM. **É `"access"` e não um nome novo**, e essa foi uma
+# correcção pós-CI que vale a pena explicar, porque a lição é do género que se
+# repete:
+#
+#   Ao abrir os WebSockets concluí que "os tokens de staff não declaram `type`"
+#   depois de ler o `services/auth.create_token` — e essa função NÃO é a que o
+#   `/auth/login-v2` usa. O login de produção mina por
+#   `refresh_token_service.create_access_token`, que estampa
+#   `"type": "access"` desde sempre. Inventar um `"staff"` e validá-lo fazia o
+#   validador recusar TODOS os tokens reais: 401 em cada chamada de cada
+#   utilizador. Os testes unitários não viram (não passam pelo login); foi o
+#   `backend-full` do CI que apanhou.
+#
+#   Inventariar UM produtor e concluir sobre a regra é a mesma falha do Lote 5
+#   ("inventariar os sítios que LISTAM, não só a condição"), do lado da escrita.
+#
+# Hoje os TRÊS produtores de tokens do CRM estampam este mesmo valor, e há um
+# teste-inventário que os corre a todos contra o `get_current_user`
+# (`TestTodosOsProdutoresDeTokenDoCRM`).
+TIPO_DO_STAFF = "access"
 
 # Tipos que existem no sistema e NÃO são de staff nem de Portal. Ficam
 # nomeados para o guarda do staff os poder recusar explicitamente em vez de
@@ -86,13 +100,13 @@ def tipo_de_token_e_do_portal(tipo: Optional[str]) -> bool:
 
 
 def tipo_de_token_e_de_staff(tipo: Optional[str]) -> bool:
-    """`True` para um token de staff — incluindo os legados sem `type`.
+    """`True` para um token do CRM — incluindo os legados sem `type`.
 
-    Aceitar `None` não é frouxidão: até este lote o `create_token` não
-    estampava tipo nenhum, e recusar `None` invalidava **todas** as sessões
-    abertas no momento do deploy. O que importa para a segurança é o outro
-    lado: um tipo ESTRANHO (um token de Portal, um `gov_auth`) é recusado,
-    e é por aí que a fuga entraria.
+    Aceitar `None` não é frouxidão: dois dos três produtores não estampavam
+    tipo nenhum (o `/auth/register` e o *impersonate*), e recusar `None`
+    invalidava as sessões abertas no momento do deploy. O que importa para a
+    segurança é o outro lado: um tipo ESTRANHO (um token de Portal, um
+    `gov_auth`) é recusado, e é por aí que a fuga entraria.
     """
     if tipo is None or tipo == "":
         return True

@@ -75,7 +75,22 @@ def token_do_portal(process_id: str, tipo: str = "magic_link") -> str:
     )
 
 
-def token_de_staff(user_id: str = "user-staff-1", tipo: str | None = "staff") -> str:
+def token_de_staff(user_id: str = "user-staff-1", tipo: str | None = "REAL") -> str:
+    """Um token do CRM.
+
+    Por omissão vem do produtor de PRODUÇÃO (o do `/auth/login-v2`), e não
+    forjado — forjar era o que escondia o defeito que o `backend-full` apanhou:
+    estes testes passavam com um `type` inventado enquanto o validador recusava
+    o tipo real, e 401 em cada chamada de cada utilizador.
+
+    `tipo=None` forja de propósito um token SEM claim `type`, para exercitar a
+    tolerância ao legado; um valor explícito forja esse valor.
+    """
+    if tipo == "REAL":
+        from services.refresh_token_service import create_access_token
+
+        return create_access_token(user_id, "a@b.pt", "admin")
+
     corpo = {"sub": user_id, "email": "a@b.pt", "role": "admin"}
     if tipo is not None:
         corpo["type"] = tipo
@@ -839,9 +854,9 @@ class TestUmTokenDeStaffNaoAbreOSocketDoPortal:
         assert socket.recebido == []
 
 
-class TestOTokenDeStaffPassouAEstampparOTipo:
+class TestOsProdutoresEstampamOTipoDoCRM:
     @pytest.mark.asyncio
-    async def test_create_token_estampa_staff(self):
+    async def test_create_token_estampa_o_tipo_canonico(self):
         from services.auth import create_token
 
         corpo = jwt.decode(
@@ -851,16 +866,17 @@ class TestOTokenDeStaffPassouAEstampparOTipo:
         assert corpo["type"] == wci.TIPO_DO_STAFF
 
     def test_o_valor_vem_do_ponto_unico_e_nao_de_um_literal(self):
-        """Duplicar `"staff"` no `auth.py` era a forma de os dois lados
-        divergirem sem ninguém dar por isso."""
+        """Duplicar o literal era a forma de os produtores divergirem sem
+        ninguém dar por isso — e foi exactamente o que aconteceu, com o
+        `"access"` escondido no `refresh_token_service`."""
         import inspect
 
         from services import auth
         from tests.unit.helpers_fonte import codigo_sem_comentarios
 
-        fonte = codigo_sem_comentarios(inspect.getsource(auth._tipo_de_token_do_staff))
+        fonte = codigo_sem_comentarios(inspect.getsource(auth.tipo_de_token_do_crm))
         assert "TIPO_DO_STAFF" in fonte
-        assert "'staff'" not in fonte and '"staff"' not in fonte
+        assert "'access'" not in fonte and '"access"' not in fonte
 
 
 # ====================================================================
@@ -1204,3 +1220,137 @@ class TestOsDoisEventosDaRecolha:
         """A razão de existirem dois eventos, afirmada em código."""
         assert wci.evento_permitido_ao_cliente(WSEventType.PORTAL_GOV_PROGRESS) is True
         assert wci.evento_permitido_ao_cliente(WSEventType.DOCUMENT_UPLOADED) is False
+
+
+# ====================================================================
+# O INVENTÁRIO DOS PRODUTORES — o teste que faltava
+# ====================================================================
+# Este ficheiro foi escrito com uma premissa ERRADA: que "os tokens de staff não
+# declaram `type`". Cheguei lá depois de ler o `services/auth.create_token` — e
+# essa função NÃO é a que o `/auth/login-v2` usa. O login de produção mina por
+# `refresh_token_service.create_access_token`, que estampa `"type": "access"`
+# desde sempre.
+#
+# Resultado: o validador nasceu a recusar o tipo REAL, e todos os testes deste
+# ficheiro passavam porque eu FORJAVA os tokens com o tipo que tinha inventado.
+# 401 em cada chamada de cada utilizador — apanhado pelo `backend-full` do CI,
+# que passa pelo login a sério, e não pelos unitários.
+#
+# É a falha do Lote 5 do lado da escrita: inventariar UM produtor e concluir
+# sobre a regra. A correcção não é só o valor certo — é este inventário, que
+# corre CADA produtor real contra o validador real. Um produtor novo que não
+# estampe o tipo canónico fica vermelho aqui.
+
+class TestTodosOsProdutoresDeTokenDoCRM:
+    """Cada produtor REAL de tokens do CRM tem de passar o `get_current_user`.
+
+    Os tokens são criados pelas funções de PRODUÇÃO, nunca forjados — forjar era
+    exactamente o que escondia o defeito.
+    """
+
+    @staticmethod
+    def _produtores() -> dict:
+        from services.auth import create_access_token, create_token
+        from services.refresh_token_service import (
+            create_access_token as minar_do_login,
+        )
+
+        return {
+            # `/auth/login-v2` e `/auth/refresh` — a origem de TODOS os tokens
+            # de sessão em circulação.
+            "login-v2/refresh": minar_do_login("user-1", "a@b.pt", "admin"),
+            # `/auth/register`.
+            "register": create_token("user-1", "a@b.pt", "consultor"),
+            # "Ver como Cliente" (impersonate), em `admin_users`.
+            "impersonate": create_access_token({
+                "sub": "user-1",
+                "email": "a@b.pt",
+                "role": "admin",
+                "is_impersonated": True,
+                "impersonated_by": "admin-1",
+            }),
+        }
+
+    @pytest.mark.parametrize("origem", ["login-v2/refresh", "register", "impersonate"])
+    def test_o_tipo_estampado_e_aceito_pelo_validador(self, origem):
+        corpo = jwt.decode(
+            self._produtores()[origem], JWT_SECRET, algorithms=[JWT_ALGORITHM]
+        )
+        assert wci.tipo_de_token_e_de_staff(corpo.get("type")) is True, (
+            f"o produtor '{origem}' estampa type={corpo.get('type')!r}, que o "
+            "validador do CRM recusa — seria 401 em cada chamada"
+        )
+
+    @pytest.mark.parametrize("origem", ["login-v2/refresh", "register", "impersonate"])
+    def test_os_tres_estampam_o_MESMO_tipo(self, origem):
+        """Três produtores com três nomes seria a mesma armadilha adiada."""
+        corpo = jwt.decode(
+            self._produtores()[origem], JWT_SECRET, algorithms=[JWT_ALGORITHM]
+        )
+        assert corpo.get("type") == wci.TIPO_DO_STAFF
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("origem", ["login-v2/refresh", "register", "impersonate"])
+    async def test_o_get_current_user_aceita_o_token_de_cada_produtor(
+        self, fake_async_db, origem
+    ):
+        """Ponta a ponta pelo `get_current_user` REAL, e não só pelo predicado.
+
+        É esta a asserção que o CI fez por mim: entre o predicado e o endpoint
+        há uma chamada, e é na chamada que o defeito vivia.
+        """
+        from services import auth
+
+        await fake_async_db.users.insert_one({
+            "id": "user-1", "name": "Ana", "email": "a@b.pt",
+            "is_active": True, "role": "admin",
+        })
+
+        class _Req:
+            headers: dict = {}
+
+        from fastapi.security import HTTPAuthorizationCredentials
+
+        credenciais = HTTPAuthorizationCredentials(
+            scheme="Bearer", credentials=self._produtores()[origem]
+        )
+
+        with patch.object(auth, "db", fake_async_db):
+            utilizador = await auth.get_current_user(_Req(), credenciais)
+
+        assert utilizador["id"] == "user-1"
+
+    def test_o_valor_canonico_e_o_que_a_producao_ja_estampava(self):
+        """`"access"`, e não um nome inventado.
+
+        Escolher um nome novo obrigava a migrar todos os tokens em circulação —
+        e foi ao inventar `"staff"` que parti o login inteiro.
+        """
+        assert wci.TIPO_DO_STAFF == "access"
+
+    def test_nenhum_produtor_do_CRM_usa_um_literal_proprio(self):
+        """Guarda sobre o código-fonte: o valor vem do ponto único.
+
+        O literal `"access"` vivia escondido no `refresh_token_service`,
+        invisível a quem lesse o `services/auth` — e foi essa invisibilidade que
+        produziu o defeito. Com os três a ler a mesma constante, divergirem
+        deixa de ser possível em silêncio.
+        """
+        import inspect
+
+        from services import refresh_token_service
+        from tests.unit.helpers_fonte import codigo_da_funcao_sem_comentarios
+
+        fonte = codigo_da_funcao_sem_comentarios(
+            refresh_token_service.create_access_token
+        )
+        assert "tipo_de_token_do_crm" in fonte
+        assert "'access'" not in fonte and '"access"' not in fonte
+
+    def test_a_contraprova_o_produtor_estampa_mesmo_um_type(self):
+        """Sem isto, um produtor que deixasse de estampar satisfazia o guarda."""
+        corpo = jwt.decode(
+            self._produtores()["login-v2/refresh"],
+            JWT_SECRET, algorithms=[JWT_ALGORITHM],
+        )
+        assert "type" in corpo
