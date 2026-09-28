@@ -53,6 +53,7 @@ from services.process_staff_assignment import (
     MEDIADOR_ID_FIELDS,
     PAPEIS_COMO_CONSULTOR,
     PAPEIS_COMO_MEDIADOR,
+    PAPEL_DA_INDEXACAO,
 )
 
 #: (papel, campo da lista, campos singulares) — derivado das constantes de
@@ -142,6 +143,7 @@ def correccao_do_processo(
     *,
     incluir_ambiguos: bool = False,
     incluir_orfaos: bool = False,
+    incluir_indexacao: bool = False,
     historicos_por_papel: Optional[dict[str, Iterable[dict]]] = None,
     utilizadores: Optional[dict[str, Optional[dict]]] = None,
 ) -> dict[str, Any]:
@@ -161,6 +163,12 @@ def correccao_do_processo(
     utilizador nomeado não existe. Bandeiras distintas para provas
     distintas — quem autoriza limpar resíduo provado por registo não
     autorizou, com isso, limpar por ausência de utilizador.
+
+    `incluir_indexacao` é a terceira ordem, pela mesma razão: o utilizador
+    existe e está activo, mas tem o perfil `indexacao`, que nunca é um
+    atribuído. Limpar não lhe tira acesso nenhum — o Índice vê os
+    processos pelo carimbo próprio — mas continua a ser uma prova
+    diferente das outras duas, logo uma bandeira diferente.
     """
     correccao: dict[str, Any] = {}
     origens: dict[str, str] = {}
@@ -171,6 +179,8 @@ def correccao_do_processo(
         autorizadas.add(ORIGEM_DESATRIBUICAO)
     if incluir_orfaos:
         autorizadas.add(ORIGEM_ORFAO)
+    if incluir_indexacao:
+        autorizadas.add(ORIGEM_INDEXACAO_NAS_LISTAS)
 
     for d in desfasamentos_do_processo(processo):
         if d.e_seguro_corrigir:
@@ -294,11 +304,42 @@ ORIGEM_INDETERMINADA = "indeterminada"
 ORIGEM_ORFAO = "orfao"
 
 #: O utilizador existe mas não pode ocupar aquele campo — papel
-#: incompatível (o `indexacao` tem carimbo próprio e nunca entra nas
-#: listas) ou conta inactiva. Nenhum automatismo lhe toca: repor a lista
-#: cimentaria um estado que as regras do produto não admitem, e limpar
-#: pode ser cedo demais se a conta for reactivada.
+#: incompatível ou conta inactiva. Nenhum automatismo lhe toca: repor a
+#: lista cimentaria um estado que as regras do produto não admitem, e
+#: limpar pode ser cedo demais se a conta for reactivada.
 ORIGEM_ATRIBUIDO_INVALIDO = "atribuido_invalido"
+
+# ── O ÚLTIMO RESÍDUO: A INDEXAÇÃO NAS LISTAS (Set 2026) ─────────────
+#
+# Os 12 que sobreviveram à limpeza de produção eram todos a MESMA conta
+# (`2285198b`, "654", perfil `indexacao`) em `assigned_consultor_id`.
+# Estavam em `atribuido_invalido`, que é intocável — e bem, enquanto essa
+# origem juntar DUAS provas diferentes debaixo do mesmo nome:
+#
+#   conta inactiva      um consultor a sério que saiu. O campo regista uma
+#                       atribuição REAL; limpá-la apaga-a, e a conta pode
+#                       ser reactivada amanhã.
+#   papel `indexacao`   nunca foi uma atribuição. O Índice tem carimbo
+#                       próprio e as regras do produto não admitem que
+#                       ocupe um campo de consultor ou de mediador.
+#
+# São respostas opostas, logo não podem partilhar bandeira — é a regra
+# que o `--limpar-orfaos` já tinha estabelecido: bandeiras distintas para
+# provas distintas.
+#
+# E limpar este caso é seguro pela MESMA razão que o órfão: não desatribui
+# ninguém. Não porque a pessoa não exista — existe e está activa — mas
+# porque não é por este campo que ela vê o processo. `process_list_filters`
+# dá ao perfil `indexacao` `assigned_indexacao_id` / `created_by` /
+# `status: fila_espera`, e **nunca** `assigned_consultor_id`. O campo não
+# lhe dá acesso nenhum: só mente ao cartão de Atribuição e aos alertas.
+#
+# O que fica depois de limpar é o processo a aparecer "Por Atribuir", que
+# é o estado verdadeiro e o que aciona a triagem na UI. Não se escreve
+# `assigned_indexacao_id` em troca: quem indexou o processo é um facto que
+# este campo não prova, e inventá-lo — ou pior, escrever por cima de um
+# carimbo legítimo — seria trocar uma mentira por outra.
+ORIGEM_INDEXACAO_NAS_LISTAS = "indexacao_nas_listas"
 
 #: Que papéis podem ocupar o campo de cada função. Deriva das constantes
 #: de produção — uma lista à mão aqui divergiria dos escritores.
@@ -417,10 +458,20 @@ def _origem_pelo_utilizador(
     if doc is None:
         return ORIGEM_ORFAO
 
+    papel_do_utilizador = str(doc.get("role") or "")
+
+    # A INDEXAÇÃO antes do estado da conta, de propósito: "este perfil não
+    # ocupa este campo" é uma regra de produto e vale com a conta activa ou
+    # inactiva. Pela ordem inversa, um indexador desactivado caía em
+    # `conta inactiva` e ficava à espera de uma reactivação que não muda
+    # nada — continuaria a não poder ser consultor.
+    if papel_do_utilizador == PAPEL_DA_INDEXACAO:
+        return ORIGEM_INDEXACAO_NAS_LISTAS
+
     if not doc.get("is_active", True):
         return ORIGEM_ATRIBUIDO_INVALIDO
 
-    if str(doc.get("role") or "") not in _PAPEIS_ACEITES.get(papel, frozenset()):
+    if papel_do_utilizador not in _PAPEIS_ACEITES.get(papel, frozenset()):
         return ORIGEM_ATRIBUIDO_INVALIDO
 
     return ORIGEM_ATRIBUICAO_LEGADA

@@ -6662,7 +6662,8 @@ histórico o que disser.
    (`assigned_indexacao_id`) e não entra nas listas. Repor a lista para
    ele cimentaria um estado que as regras do produto não admitem;
    limpá-lo pode ser a resposta, mas é decisão de produto — por isso
-   nenhum automatismo lhe toca.
+   nenhum automatismo lhe tocava. Decisão tomada e fechada abaixo, em
+   "O último resíduo".
 3. **"Não perguntei" ≠ "perguntei e não existe".** Um id ausente do
    mapa de utilizadores fica `indeterminada`; só um `None` explícito é
    órfão. Sem essa distinção, um mapa incompleto — uma consulta que
@@ -6672,3 +6673,55 @@ histórico o que disser.
 bandeiras distintas para provas distintas. Quem autoriza limpar resíduo
 provado por registo não autorizou, com isso, limpar por ausência de
 utilizador.
+
+
+## O último resíduo: a Indexação nas listas (Set 2026)
+
+A passagem final em produção (`--corrigir --repor-listas --limpar-orfaos`)
+deixou **12 papéis em 2 processos**: todos a mesma conta (`2285198b`,
+"654", perfil `indexacao`, activa) em `assigned_consultor_id`.
+
+Estavam em `atribuido_invalido`, e o problema não era o veredicto — era
+o **nome**. Essa origem juntava duas provas **opostas** debaixo da mesma
+etiqueta, e portanto da mesma (não-)bandeira:
+
+| Caso | O que o campo regista | Limpar |
+|---|---|---|
+| conta **inactiva** | uma atribuição REAL de quem saiu | apaga-a; a conta pode voltar |
+| perfil **`indexacao`** | nada — nunca foi atribuição | é o estado verdadeiro |
+
+Por isso `indexacao_nas_listas` passou a ser uma origem própria, com
+bandeira própria (`--limpar-indexacao`), e `atribuido_invalido` ficou
+com a outra metade, intocável como antes.
+
+**Porque é que limpar é seguro** — pela mesma razão que o órfão, por um
+caminho diferente: *não desatribui ninguém*. Não porque a pessoa não
+exista (existe e está activa), mas porque **não é por este campo que ela
+vê o processo**. `process_list_filters` dá ao perfil `indexacao`
+`assigned_indexacao_id` / `created_by` / `status: fila_espera` — e nunca
+`assigned_consultor_id`, na listagem **e** no Kanban, que têm
+construtores separados. O campo não concede acesso nenhum: só mente ao
+cartão de Atribuição e aos alertas. Isto não fica como suposição — está
+afirmado contra o código real em
+`test_limpar_NAO_tira_acesso_a_indexacao`, com contraprova de que o
+carimbo próprio está lá (senão um construtor que devolvesse vazio
+passaria).
+
+**A ordem das verificações mudou:** o papel é testado **antes** do estado
+da conta. Pela ordem inversa, um indexador desactivado caía em "conta
+inactiva" e ficava à espera de uma reactivação que não muda nada — ele
+continuaria a não poder ser consultor. "Este perfil não ocupa este campo"
+é regra de produto e vale com a conta activa ou inactiva.
+
+**O que NÃO se faz:** escrever `assigned_indexacao_id` em troca. Quem
+indexou o processo é um facto que este campo não prova, e inventá-lo —
+ou pior, escrever por cima de um carimbo legítimo — trocava uma mentira
+por outra. Limpos, os processos aparecem **"Por Atribuir"**, que é o
+estado verdadeiro e o que aciona a triagem natural na UI do CRM.
+
+`PAPEL_DA_INDEXACAO` vive em `process_staff_assignment.py`, ao lado de
+`PAPEIS_COMO_CONSULTOR` / `PAPEIS_COMO_MEDIADOR`: é a **mesma** decisão
+de produto — que papel se carimba como quê — e separá-la daria o defeito
+do Lote 5 noutro eixo. Há guarda a afirmar que não está em nenhuma das
+duas tuplas: a bandeira só é defensável enquanto o Índice não for um
+atribuído.
