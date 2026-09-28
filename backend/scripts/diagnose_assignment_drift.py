@@ -52,12 +52,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.assignment_drift import (  # noqa: E402
+    ORIGEM_ATRIBUICAO_LEGADA,
+    ORIGEM_INDETERMINADA,
+    PAPEIS,
     VEREDICTO_AMBIGUO,
     VEREDICTO_DIVERGENTE,
     VEREDICTO_EM_FALTA,
     correccao_do_processo,
     desfasamentos_do_processo,
+    origem_do_ambiguo,
+    reposicao_de_listas_do_processo,
     resumir,
+    resumir_ambiguos,
 )
 from services.process_staff_assignment import (  # noqa: E402
     CONSULTOR_ID_FIELDS,
@@ -96,6 +102,14 @@ def _argumentos():
              "só têm `consultant_id`. Ler o cabeçalho antes de usar.",
     )
     p.add_argument(
+        "--repor-listas",
+        action="store_true",
+        help="Para os ambíguos provados como ATRIBUIÇÃO LEGADA, escreve a "
+             "lista em falta a partir do campo singular (o caminho OPOSTO "
+             "ao de limpar). Não alarga acesso nenhum: quem está no "
+             "singular já recebe alertas e já vê o processo.",
+    )
+    p.add_argument(
         "--incluir-eliminados",
         action="store_true",
         help="Analisa também os processos com `is_deleted`.",
@@ -108,6 +122,10 @@ async def principal() -> int:
 
     if args.incluir_ambiguos and not args.corrigir:
         print("`--incluir-ambiguos` só faz sentido com `--corrigir`.")
+        return 2
+
+    if args.repor_listas and not args.corrigir:
+        print("`--repor-listas` só faz sentido com `--corrigir`.")
         return 2
 
     if not os.environ.get("MONGO_URL"):
@@ -152,7 +170,38 @@ async def principal() -> int:
         p for p in processos
         if any(d.veredicto == VEREDICTO_AMBIGUO for d in desfasamentos_do_processo(p))
     ]
+
+    # ── Desambiguar com o histórico ──────────────────────────────────
+    # Só para os processos ambíguos: ler o histórico dos 333 seria caro e
+    # inútil. A ordem é do mais antigo para o mais recente, porque o que
+    # decide é o ÚLTIMO acontecimento de atribuição.
+    historicos: dict[str, dict[str, list]] = {}
+    for p in ambiguos:
+        pid = p.get("id")
+        if not pid:
+            continue
+        entradas = []
+        cursor = db.history.find(
+            {"process_id": pid},
+            {"_id": 0, "field": 1, "action": 1, "new_value": 1, "created_at": 1},
+        ).sort("created_at", 1)
+        async for entrada in cursor:
+            entradas.append(entrada)
+        historicos[pid] = {papel: entradas for papel, _lista, _campos in PAPEIS}
+
+    resumo_ambiguo = resumir_ambiguos(ambiguos, historicos_por_processo=historicos)
+
     if ambiguos:
+        print("  Ambíguos por ORIGEM (papel : de onde veio):")
+        for chave in sorted(resumo_ambiguo["por_papel_e_origem"]):
+            print(f"    {chave:<58} {resumo_ambiguo['por_papel_e_origem'][chave]:>6}")
+        print()
+        print("    desatribuicao     → resíduo provado. `--incluir-ambiguos` limpa.")
+        print("    atribuicao_legada → o processo TEM dono. `--repor-listas` repõe")
+        print("                        a lista; limpar desatribuiria trabalho real.")
+        print("    indeterminada     → sem prova. Fica para decisão humana.")
+        print()
+
         print(f"  Exemplos ambíguos (até {MAX_EXEMPLOS}):")
         for p in ambiguos[:MAX_EXEMPLOS]:
             campos = {
@@ -160,8 +209,31 @@ async def principal() -> int:
                 for d in desfasamentos_do_processo(p)
                 if d.veredicto == VEREDICTO_AMBIGUO
             }
-            print(f"    #{p.get('process_number', '?')} {p.get('id', '?')} → {campos}")
+            do_processo = historicos.get(p.get("id"), {})
+            origens = {
+                papel: origem_do_ambiguo(p, papel, historico=do_processo.get(papel))
+                for papel, _lista, _campos in PAPEIS
+                if any(
+                    d.papel == papel and d.veredicto == VEREDICTO_AMBIGUO
+                    for d in desfasamentos_do_processo(p)
+                )
+            }
+            print(
+                f"    #{p.get('process_number', '?')} {p.get('id', '?')} "
+                f"→ {campos} | {origens}"
+            )
         print()
+
+        indeterminados = resumo_ambiguo["processos_por_origem"].get(
+            ORIGEM_INDETERMINADA, []
+        )
+        if indeterminados:
+            print(
+                f"  {len(indeterminados)} caso(s) INDETERMINADO(S) — nenhum "
+                "automatismo lhes toca. Lista completa:"
+            )
+            print(f"    {', '.join(indeterminados)}")
+            print()
 
     if not args.corrigir:
         print("  MODO LEITURA. Nada foi escrito.")
@@ -171,22 +243,80 @@ async def principal() -> int:
 
     corrigidos = 0
     campos_escritos = 0
+    listas_repostas = 0
     for processo in processos:
-        correccao = correccao_do_processo(
-            processo, incluir_ambiguos=args.incluir_ambiguos
+        pid = processo.get("id")
+        do_processo = historicos.get(pid, {})
+
+        escrita: dict = {}
+
+        # ORDEM: repor a lista PRIMEIRO. Só depois se calcula a correcção
+        # dos singulares, e sobre o documento JÁ com a lista — senão o
+        # processo saía desta passagem com a lista reposta e os
+        # singulares em falta, ou seja, ainda desfasado. (Deu-se por isso
+        # a correr o script duas vezes no laboratório local: a segunda
+        # ainda tinha trabalho.)
+        if args.repor_listas:
+            reposicao = reposicao_de_listas_do_processo(
+                processo, historicos_por_papel=do_processo
+            )
+            if reposicao:
+                # O nome acompanha a lista: um cartão de Atribuição com
+                # ids e sem nomes fica em branco na mesma.
+                for campo_da_lista, ids in reposicao.items():
+                    escrita[campo_da_lista] = ids
+                    campo_nomes = (
+                        "consultor_names"
+                        if campo_da_lista == "assigned_consultor_ids"
+                        else "mediador_names"
+                    )
+                    nomes = []
+                    for uid in ids:
+                        doc = await db.users.find_one({"id": uid}, {"name": 1})
+                        if doc and doc.get("name"):
+                            nomes.append(doc["name"])
+                    if nomes:
+                        escrita[campo_nomes] = nomes
+                listas_repostas += 1
+
+        escrita.update(
+            correccao_do_processo(
+                {**processo, **escrita},
+                incluir_ambiguos=args.incluir_ambiguos,
+                historicos_por_papel=do_processo,
+            )
         )
-        if not correccao:
+
+        if not escrita:
             continue
-        await db.processes.update_one({"id": processo["id"]}, {"$set": correccao})
+        await db.processes.update_one({"id": pid}, {"$set": escrita})
         corrigidos += 1
-        campos_escritos += len(correccao)
+        campos_escritos += len(escrita)
 
     print(f"  CORRIGIDOS: {corrigidos} processos, {campos_escritos} campos.")
-    if not args.incluir_ambiguos and resumo["processos_ambiguos"]:
+    if args.repor_listas:
+        print(f"  LISTAS REPOSTAS: {listas_repostas} processos.")
+    intocados = (
+        resumo_ambiguo["por_papel_e_origem"] and not args.incluir_ambiguos
+    )
+    if intocados:
         print(
-            f"  {resumo['processos_ambiguos']} processos ambíguos ficaram INTACTOS "
-            "de propósito — ver o cabeçalho deste ficheiro."
+            "  Os ambíguos ficaram INTACTOS de propósito — ver o cabeçalho "
+            "deste ficheiro."
         )
+    if args.incluir_ambiguos:
+        legados = len(
+            resumo_ambiguo["processos_por_origem"].get(ORIGEM_ATRIBUICAO_LEGADA, [])
+        )
+        indets = len(
+            resumo_ambiguo["processos_por_origem"].get(ORIGEM_INDETERMINADA, [])
+        )
+        if legados or indets:
+            print(
+                f"  {legados} atribuição(ões) legada(s) e {indets} "
+                "indeterminado(s) NÃO foram limpos, apesar da bandeira: "
+                "limpá-los deixaria o processo sem dono."
+            )
     print("=" * 66)
     return 0
 

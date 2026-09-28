@@ -14,12 +14,18 @@ from __future__ import annotations
 import pytest
 
 from services.assignment_drift import (
+    ORIGEM_ATRIBUICAO_LEGADA,
+    ORIGEM_DESATRIBUICAO,
+    ORIGEM_INDETERMINADA,
     VEREDICTO_AMBIGUO,
     VEREDICTO_DIVERGENTE,
     VEREDICTO_EM_FALTA,
     correccao_do_processo,
     desfasamentos_do_processo,
+    origem_do_ambiguo,
+    reposicao_de_listas_do_processo,
     resumir,
+    resumir_ambiguos,
 )
 from services.process_staff_assignment import (
     build_clear_consultor_fields,
@@ -69,8 +75,12 @@ class TestOResiduoDoLote5:
     def test_esse_caso_NAO_e_corrigido_automaticamente(self):
         """A guarda que impede desatribuir trabalho legado.
 
-        Um processo do `dual_auto_assign_on_pre_registo_transition` tem
-        exactamente esta forma e está LEGITIMAMENTE atribuído.
+        CORRECÇÃO (Lote 6): esta forma — `consultor_id` E `consultant_id`
+        — é a do CLEAR antigo, não a da dupla auto-atribuição, que
+        gravava apenas `consultant_id` (ver `git log` de
+        `d8a739d1`). A distinção só ficou visível quando foi preciso
+        classificar os 213 ambíguos de produção, e é ela que decide
+        quem se pode limpar: ver `TestDeOndeVeioOAmbiguo`.
         """
         processo = {
             "assigned_consultor_ids": [],
@@ -185,3 +195,237 @@ class TestOResumo:
         assert resumo["total_analisados"] == 0
         assert resumo["processos_afectados"] == 0
         assert resumo["por_campo"] == {}
+
+
+class TestDeOndeVeioOAmbiguo:
+    """Lote 6 — desambiguar os 213 em vez de atirar uma moeda ao ar.
+
+    Os dois escritores antigos deixavam rastos DIFERENTES, e é isso que
+    transforma "indecidível" em "decidível com prova".
+    """
+
+    def test_a_assinatura_do_clear_antigo_e_uma_desatribuicao(self):
+        """`consultor_id` + `consultant_id`, `assigned_consultor_id` limpo."""
+        processo = {
+            "assigned_consultor_ids": [],
+            "assigned_consultor_id": None,
+            "consultor_id": "ex",
+            "consultant_id": "ex",
+        }
+        assert origem_do_ambiguo(processo, "consultor") == ORIGEM_DESATRIBUICAO
+
+    def test_a_assinatura_da_dupla_auto_atribuicao_e_um_processo_com_dono(self):
+        """Só `consultant_id` — era tudo o que esse escritor gravava.
+
+        Este é o caso que o `--incluir-ambiguos` NÃO pode tocar: limpar
+        aqui desatribui um processo que tem consultor a trabalhar nele.
+        """
+        processo = {
+            "assigned_consultor_ids": [],
+            "consultant_id": "consultor-real",
+        }
+        assert origem_do_ambiguo(processo, "consultor") == ORIGEM_ATRIBUICAO_LEGADA
+
+    def test_o_mediador_nao_se_decide_pela_assinatura(self):
+        """Contraprova honesta: os dois escritores deixavam `{mediador_id}`.
+
+        Sem esta afirmação seria fácil acreditar que a classificação
+        resolve tudo — e resolvê-lo por assinatura no mediador seria
+        inventar uma prova que não existe.
+        """
+        processo = {"assigned_mediador_ids": [], "mediador_id": "alguem"}
+        assert origem_do_ambiguo(processo, "mediador") == ORIGEM_INDETERMINADA
+
+    def test_o_historico_decide_o_mediador(self):
+        processo = {"assigned_mediador_ids": [], "mediador_id": "alguem"}
+        historico = [
+            {
+                "field": "assigned_mediador_ids",
+                "action": "Removeu todos os intermediários",
+                "new_value": None,
+            },
+        ]
+        assert (
+            origem_do_ambiguo(processo, "mediador", historico=historico)
+            == ORIGEM_DESATRIBUICAO
+        )
+
+    def test_o_historico_de_uma_dupla_auto_atribuicao_protege_o_mediador(self):
+        processo = {"assigned_mediador_ids": [], "mediador_id": "alguem"}
+        historico = [
+            {
+                "field": "assignment",
+                "action": "Dupla auto-atribuição (pré-registo → pipeline): "
+                          "Intermediário: Rui",
+                "new_value": "Intermediário: Rui",
+            },
+        ]
+        assert (
+            origem_do_ambiguo(processo, "mediador", historico=historico)
+            == ORIGEM_ATRIBUICAO_LEGADA
+        )
+
+    def test_conta_o_ULTIMO_acontecimento_e_nao_o_primeiro(self):
+        """Atribuído, removido, e o singular ficou: é resíduo."""
+        processo = {"assigned_mediador_ids": [], "mediador_id": "alguem"}
+        historico = [
+            {
+                "field": "assignment",
+                "action": "Dupla auto-atribuição: Intermediário: Rui",
+                "new_value": "Intermediário: Rui",
+            },
+            {
+                "field": "assigned_mediador_ids",
+                "action": "Removeu todos os intermediários",
+                "new_value": None,
+            },
+        ]
+        assert (
+            origem_do_ambiguo(processo, "mediador", historico=historico)
+            == ORIGEM_DESATRIBUICAO
+        )
+
+    def test_um_registo_que_so_fala_do_consultor_nao_decide_o_mediador(self):
+        """A entrada genérica `assignment` cobre os DOIS papéis."""
+        processo = {"assigned_mediador_ids": [], "mediador_id": "alguem"}
+        historico = [
+            {
+                "field": "assignment",
+                "action": "Dupla auto-atribuição: Consultor: Ana",
+                "new_value": "Consultor: Ana",
+            },
+        ]
+        assert (
+            origem_do_ambiguo(processo, "mediador", historico=historico)
+            == ORIGEM_INDETERMINADA
+        )
+
+    def test_o_historico_ganha_a_assinatura(self):
+        """Assinatura diz resíduo; o registo diz que foi atribuído."""
+        processo = {
+            "assigned_consultor_ids": [],
+            "assigned_consultor_id": None,
+            "consultor_id": "ex",
+            "consultant_id": "ex",
+        }
+        historico = [
+            {
+                "field": "assignment",
+                "action": "Dupla auto-atribuição: Consultor: Ana",
+                "new_value": "Consultor: Ana",
+            },
+        ]
+        assert (
+            origem_do_ambiguo(processo, "consultor", historico=historico)
+            == ORIGEM_ATRIBUICAO_LEGADA
+        )
+
+
+class TestOIncluirAmbiguosExigeProva:
+    """A bandeira autoriza a escrita; não substitui a prova."""
+
+    def test_limpa_o_residuo_provado(self):
+        processo = {
+            "assigned_consultor_ids": [],
+            "assigned_consultor_id": None,
+            "consultor_id": "ex",
+            "consultant_id": "ex",
+        }
+        assert correccao_do_processo(processo, incluir_ambiguos=True) == {
+            "consultor_id": None,
+            "consultant_id": None,
+        }
+
+    def test_NAO_limpa_a_atribuicao_legada_nem_com_a_bandeira_ligada(self):
+        """A guarda que impede desatribuir trabalho real."""
+        processo = {
+            "assigned_consultor_ids": [],
+            "consultant_id": "consultor-real",
+        }
+        assert correccao_do_processo(processo, incluir_ambiguos=True) == {}
+
+    def test_NAO_limpa_o_indeterminado_nem_com_a_bandeira_ligada(self):
+        processo = {"assigned_mediador_ids": [], "mediador_id": "alguem"}
+        assert correccao_do_processo(processo, incluir_ambiguos=True) == {}
+
+    def test_o_inequivoco_continua_a_ser_corrigido_sem_bandeira(self):
+        """Contraprova: a narrativa nova não apertou o que já era seguro."""
+        processo = {
+            "assigned_consultor_ids": ["u-1"],
+            "assigned_consultor_id": "u-1",
+            "consultor_id": "u-1",
+        }
+        assert correccao_do_processo(processo) == {"consultant_id": "u-1"}
+
+
+class TestReporAListaEOCaminhoOposto:
+    """Para um `atribuicao_legada` a correcção NÃO é limpar."""
+
+    def test_repoe_a_lista_a_partir_do_singular(self):
+        processo = {
+            "assigned_consultor_ids": [],
+            "consultant_id": "consultor-real",
+        }
+        assert reposicao_de_listas_do_processo(processo) == {
+            "assigned_consultor_ids": ["consultor-real"]
+        }
+
+    def test_nao_toca_num_residuo_de_desatribuicao(self):
+        """Repor aqui RE-ATRIBUIRIA um processo de onde alguém foi tirado."""
+        processo = {
+            "assigned_consultor_ids": [],
+            "assigned_consultor_id": None,
+            "consultor_id": "ex",
+            "consultant_id": "ex",
+        }
+        assert reposicao_de_listas_do_processo(processo) == {}
+
+    def test_nao_toca_num_indeterminado(self):
+        processo = {"assigned_mediador_ids": [], "mediador_id": "alguem"}
+        assert reposicao_de_listas_do_processo(processo) == {}
+
+    def test_repoe_o_mediador_quando_o_historico_o_prova(self):
+        processo = {"assigned_mediador_ids": [], "mediador_id": "rui"}
+        historicos = {
+            "mediador": [
+                {
+                    "field": "assignment",
+                    "action": "Dupla auto-atribuição: Intermediário: Rui",
+                    "new_value": "Intermediário: Rui",
+                }
+            ]
+        }
+        assert reposicao_de_listas_do_processo(
+            processo, historicos_por_papel=historicos
+        ) == {"assigned_mediador_ids": ["rui"]}
+
+    def test_um_processo_com_lista_nao_e_tocado(self):
+        processo = build_set_consultor_fields(["u-1"], ["Ana"])
+        assert reposicao_de_listas_do_processo(processo) == {}
+
+
+class TestOResumoPorOrigem:
+    def test_conta_cada_papel_por_origem(self):
+        processos = [
+            {
+                "id": "p-1",
+                "assigned_consultor_ids": [],
+                "assigned_consultor_id": None,
+                "consultor_id": "ex",
+                "consultant_id": "ex",
+            },
+            {"id": "p-2", "assigned_consultor_ids": [], "consultant_id": "real"},
+            {"id": "p-3", "assigned_mediador_ids": [], "mediador_id": "alguem"},
+        ]
+        resumo = resumir_ambiguos(processos)
+
+        assert resumo["por_papel_e_origem"] == {
+            "consultor:desatribuicao": 1,
+            "consultor:atribuicao_legada": 1,
+            "mediador:indeterminada": 1,
+        }
+        assert resumo["processos_por_origem"][ORIGEM_ATRIBUICAO_LEGADA] == ["p-2"]
+
+    def test_um_processo_coerente_nao_entra_na_contagem(self):
+        processos = [build_set_consultor_fields(["u-1"], ["Ana"])]
+        assert resumir_ambiguos(processos)["por_papel_e_origem"] == {}

@@ -12,6 +12,10 @@ from datetime import datetime, timezone
 from typing import Optional, Tuple, Dict, List
 
 from database import db
+from services.process_staff_assignment import (
+    build_set_consultor_fields,
+    build_set_mediador_fields,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1452,12 +1456,11 @@ async def dual_auto_assign_on_pre_registo_transition(
             # apesar de a atribuição ter corrido bem e de a Timeline a
             # mostrar. `consultant_id` mantém-se porque
             # `process_list_filters` filtra por ele em "Os Meus Processos".
-            update_data["consultant_id"] = consultor["id"]
-            update_data["assigned_consultor_id"] = consultor["id"]
-            update_data["assigned_consultor_ids"] = [consultor["id"]]
-            update_data["consultor_id"] = consultor["id"]
-            update_data["consultor_name"] = consultor["name"]
-            update_data["consultor_names"] = [consultor["name"]]
+            # LOTE 6 — derivado das constantes canónicas em vez de uma
+            # quarta cópia da lista de campos. Ver `assignment_drift`.
+            update_data.update(
+                build_set_consultor_fields([consultor["id"]], [consultor["name"]])
+            )
             result_data["consultant_id"] = consultor["id"]
             result_data["consultant_name"] = consultor["name"]
             newly_assigned.append(consultor)
@@ -1481,11 +1484,9 @@ async def dual_auto_assign_on_pre_registo_transition(
         intermediario = await _find_least_busy_user("intermediario", company_id)
         if intermediario:
             # Simétrico do consultor — ver comentário acima.
-            update_data["mediador_id"] = intermediario["id"]
-            update_data["assigned_mediador_id"] = intermediario["id"]
-            update_data["assigned_mediador_ids"] = [intermediario["id"]]
-            update_data["mediador_name"] = intermediario["name"]
-            update_data["mediador_names"] = [intermediario["name"]]
+            update_data.update(
+                build_set_mediador_fields([intermediario["id"]], [intermediario["name"]])
+            )
             result_data["mediador_id"] = intermediario["id"]
             result_data["mediador_name"] = intermediario["name"]
             newly_assigned.append(intermediario)

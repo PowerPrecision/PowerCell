@@ -29,6 +29,10 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
+from services.process_staff_assignment import (
+    build_set_consultor_fields,
+    build_set_mediador_fields,
+)
 from models.client import (
     Client, ClientCreate, ClientUpdate,
     ClientContact, ClientPersonalData,
@@ -55,6 +59,35 @@ from utils.input_sanitization import (
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 
 logger = logging.getLogger(__name__)
+
+
+def apply_target_role_assignment(process_doc: dict, target_user: dict) -> None:
+    """Carimba a atribuição do utilizador de DESTINO (mutação in-place).
+
+    LOTE 6 — era um bloco em linha com a lista de campos copiada à mão, e
+    faltava-lhe ``consultant_id`` no consultor e ``mediador_id`` no
+    mediador: todo o processo nascido da Sala de Triagem ficava
+    desfasado. Ver `services/assignment_drift.py` e a contagem em
+    produção (``em_falta``: 297 campos).
+
+    Extraída para ser testável sem base de dados — o teste afirma que o
+    documento produzido tem ZERO desfasamentos segundo o detector real,
+    e não uma quarta cópia da lista de campos.
+
+    O papel `indexacao` tem carimbo PRÓPRIO e não entra nas listas: o
+    Índice não é um atribuído do processo, é quem lhe mexe.
+    """
+    target_role = target_user.get("role", "")
+    target_user_id = target_user.get("id")
+    target_name = target_user.get("name")
+
+    if target_role == "intermediario":
+        process_doc.update(build_set_mediador_fields([target_user_id], [target_name]))
+    elif target_role == "consultor":
+        process_doc.update(build_set_consultor_fields([target_user_id], [target_name]))
+    elif target_role == "indexacao":
+        process_doc["assigned_indexacao_id"] = target_user_id
+
 
 async def run_assign_client_to_user(
     client_id: str,
@@ -206,24 +239,9 @@ async def run_assign_client_to_user(
             "created_by": user.get("email")
         }
         
-        # Atribuir automaticamente baseado no papel do utilizador de destino
-        # PACOTE 9 — preencher também os campos multi-assignee (listas) em
-        # sincronia com os singulars de compatibilidade, tal como faz o
-        # build_staff_assign_update do fluxo manual.
+        # Atribuir automaticamente baseado no papel do utilizador de destino.
         target_role = target_user.get("role", "")
-        if target_role == "intermediario":
-            process_doc["assigned_mediador_id"] = target_user_id
-            process_doc["mediador_name"] = target_user.get("name")
-            process_doc["assigned_mediador_ids"] = [target_user_id]
-            process_doc["mediador_names"] = [target_user.get("name")]
-        elif target_role == "consultor":
-            process_doc["assigned_consultor_id"] = target_user_id
-            process_doc["consultor_name"] = target_user.get("name")
-            process_doc["consultor_id"] = target_user_id  # Consultor associado ao processo
-            process_doc["assigned_consultor_ids"] = [target_user_id]
-            process_doc["consultor_names"] = [target_user.get("name")]
-        elif target_role == "indexacao":
-            process_doc["assigned_indexacao_id"] = target_user_id
+        apply_target_role_assignment(process_doc, target_user)
 
         # Encriptar dados sensíveis do processo antes de inserir
         # (o cliente já foi desencriptado acima, por isso os dados estão em plain text)

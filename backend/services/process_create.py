@@ -18,6 +18,10 @@ from database import db
 from models.auth import UserRole
 from models.enums import ProcessStatus
 from services.encryption import decrypt_client_data
+from services.process_staff_assignment import (
+    build_set_consultor_fields,
+    build_set_mediador_fields,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,19 +161,20 @@ def apply_creator_role_assignment(process_doc: dict, user: dict) -> None:
       com os singulars de compatibilidade, tal como o fluxo manual
       (``build_staff_assign_update``), garantindo que o processo aparece
       de imediato em "Os Meus Clientes" do criador.
+
+    LOTE 6 — os campos deixaram de ser escritos à mão. A lista estava
+    aqui copiada e faltava-lhe ``consultant_id`` (consultor) e
+    ``mediador_id`` (mediador): **cada processo criado nascia
+    desfasado**, e foi isso que o diagnóstico em produção contou como
+    ``em_falta`` (297 campos em 333 processos). A regra do Lote 5 — o
+    ``set`` e o ``clear`` derivam da MESMA constante — só vale se quem
+    atribui usar os construtores em vez de repetir a lista.
     """
     effective = (user.get("effective_role") or user.get("role") or "")
     if effective == UserRole.INTERMEDIARIO:
-        process_doc["assigned_mediador_id"] = user["id"]
-        process_doc["mediador_name"] = user["name"]
-        process_doc["assigned_mediador_ids"] = [user["id"]]
-        process_doc["mediador_names"] = [user["name"]]
+        process_doc.update(build_set_mediador_fields([user["id"]], [user["name"]]))
     elif effective in [UserRole.CONSULTOR, UserRole.DIRETOR]:
-        process_doc["assigned_consultor_id"] = user["id"]
-        process_doc["consultor_name"] = user["name"]
-        process_doc["consultor_id"] = user["id"]
-        process_doc["assigned_consultor_ids"] = [user["id"]]
-        process_doc["consultor_names"] = [user["name"]]
+        process_doc.update(build_set_consultor_fields([user["id"]], [user["name"]]))
 
 
 async def attach_second_client_on_create(
