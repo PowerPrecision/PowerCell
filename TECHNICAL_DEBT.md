@@ -18,29 +18,6 @@ quatro, é um comentário e não uma dívida.
 
 ## Segurança
 
-### D-1 · `document_direct_upload.py` sem quarentena de magic bytes
-**Onde:** `backend/services/document_direct_upload.py` (o `confirm-upload` do **CRM**).
-
-O caminho do CRM usa o mesmo upload pré-assinado do Portal e tem a mesma
-lacuna que a [quarentena](ARCHITECTURE.md) fechou no Portal: os bytes vão do
-browser para o S3 sem passar pelo backend, e o `file_size`/`content_type`
-gravados são os que o cliente **declarou**. A parede de `file_validation.py`
-não é chamada neste caminho.
-
-**Porque foi adiado:** a exposição é **interna** — utilizadores autenticados da
-equipa, não a Internet. Interromper o Caminho 4 (Portal do Cliente) por ela
-custava mais do que o risco que fecha.
-
-**Quem é atingido:** um membro da equipa com sessão válida pode arquivar
-qualquer conteúdo no bucket, e os metadados do documento ficam a mentir. Não é
-escalada de privilégio; é integridade de dados e higiene do bucket.
-
-**Para fechar:** `services.s3_content_quarantine.exigir_conteudo_valido` serve
-tal como está — é uma chamada, mais o `file_size`/`content_type` a vir do
-veredicto. Ver o padrão em `portal_upload_ops.run_confirm_portal_upload`.
-
----
-
 ### D-2 · Segredo JWT partilhado entre o Portal e o staff
 **Onde:** `backend/config.py` (`JWT_SECRET`), `services/portal_security.py`,
 `services/auth.py`.
@@ -64,30 +41,6 @@ verificador de tipo volta a ser explorável, em vez de ser inofensivo.
 **Para fechar:** `PORTAL_JWT_SECRET` próprio + rotação com janela de
 sobreposição (aceitar os dois segredos durante o tempo de vida do magic link
 mais longo), ou aceitar a invalidação numa janela de manutenção anunciada.
-
----
-
-### D-3 · `GOV_AUTH_JWT_SECRET` com valor por omissão em código
-**Onde:** `backend/services/gov_auth_api_helpers.py:20`
-
-```python
-_JWT_SECRET = os.environ.get("GOV_AUTH_JWT_SECRET", "dev-secret-change-in-prod")
-```
-
-O `gov_token` carrega `verified_by_gov: True` e pré-preenche o formulário
-público. Se a variável não estiver definida em produção, qualquer pessoa forja
-uma identidade "verificada pelo Estado".
-
-**Porque foi adiado:** é o fluxo gov **mockado**; não está em uso real. Mas é
-o mesmo padrão do CORS do bucket S3 — um recurso em código que ninguém vê
-falhar.
-
-**Quem é atingido:** se o fluxo gov entrar em produção sem a variável, a
-verificação de identidade do Estado passa a ser forjável.
-
-**Para fechar:** falhar no arranque quando `ENVIRONMENT` é de produção e a
-variável não existe (o padrão que o `config.py` já usa para o `JWT_SECRET` e o
-`CORS_ORIGINS`), e apagar o valor por omissão.
 
 ---
 
@@ -294,3 +247,5 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 | D-9 | Portal do Cliente em polling das mensagens | Iteração `ws-portal-ui` — ligado a `/api/ws/portal` com o polling mantido como recurso |
 | D-5 | Tolerância a tokens de staff sem `type` | Iteração `slas-e-sourcemaps` — 24h após o deploy que unificou os três produtores; o ramo do `None` saiu e os dois testes foram INVERTIDOS (um token sem `type` é agora recusado no WebSocket e na API) |
 | D-11 | Sourcemaps servidos em produção | Iteração `slas-e-sourcemaps` — `utils/buildSourcemap.js`: sem `SENTRY_AUTH_TOKEN` um build de produção não gera mapas (provado com o build real: 0 `.map` em `dist/`) |
+| D-1 | `confirm-upload` do CRM sem posse nem quarentena | Iteração `posse-e-segredo-gov` — era **escalada de privilégio** e não integridade de dados: sem guarda de posse e a devolver `temporary_url` pré-assinado para a chave do corpo do pedido (o Incidente P0 do Portal, no CRM) |
+| D-3 | `GOV_AUTH_JWT_SECRET` com valor por omissão | Iteração `posse-e-segredo-gov` — fail-closed em produção, segredo efémero em dev, e o ramo que aceitava tokens por assinar removido dos dois lados |

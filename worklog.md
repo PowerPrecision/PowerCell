@@ -1,4 +1,25 @@
 ---
+Task ID: posse-e-segredo-gov
+Agent: Cloud Agent
+Task: D-1 + D-3 — posse antes de conteúdo no confirm-upload do CRM, e o gov_token sem segredo por omissão
+
+Date: 2026-09-28
+
+Work Log:
+- O DONO AUTORIZOU DUAS DÍVIDAS PEQUENAS; UMA DELAS NÃO ERA PEQUENA. A D-1 estava classificada no registo como "integridade de dados e higiene do bucket", com um "não é escalada de privilégio" escrito à mão. É escalada de privilégio: o `run_confirm_upload` não tinha guarda de posse NENHUMA (zero ocorrências de `assert_` no ficheiro), aceitava o `file_key` do corpo do pedido e devolvia `temporary_url` — um URL pré-assinado para essa chave. É o Incidente P0 do Portal, na superfície do CRM.
+- PORQUE É QUE O REGISTO ERROU: a entrada foi escrita a olhar para a quarentena de magic bytes que faltava e não para o `file_key` que ninguém validava. O diagnóstico ficou preso ao sintoma que o motivou. Reportei isto ao dono antes de alargar o âmbito, em vez de o alargar em silêncio.
+- A ORDEM É A REGRA, e é a mesma do Portal: sem dono recusa-se → raiz → posse → só então conteúdo. Invertida, o backend passava a ler 2 KB de qualquer chave que um utilizador nomeasse, um oráculo feito com a própria parede. Há um teste a afirmar que a quarentena NÃO é sequer aguardada quando a posse falha.
+- RESÍDUO QUE ENCONTREI A MEIO: o degradado de `assert_s3_file_belongs_to_process`, sem `s3_folder`, monta o prefixo a partir do `client_name` — e com o nome vazio os dois prefixos colapsam em `"Documentação Clientes/"`, a raiz inteira. Fechei no PONTO DE CHAMADA e não na guarda partilhada, que serve dezenas de endpoints do CRM: o raio da alteração não tinha de crescer para o risco ser fechado.
+- UM TESTE LEGADO CAIU, E POR BOM MOTIVO. O fixture do PACOTE 10 punha "Cliente Upload" no processo e ".../Cliente/..." na chave; passava porque não havia guarda. Corrigi o FIXTURE, não a guarda — fui verificar primeiro que o fluxo real (`run_generate_upload_url`) deriva a chave do `s3_folder`/`client_name` do MESMO processo, logo a guarda não recusa uploads legítimos. É o defeito do meu teste do Lote 4 outra vez: documentos à mão com valores que a produção nunca produz.
+- D-3. O `os.environ.get("GOV_AUTH_JWT_SECRET", "dev-secret-change-in-prod")` com a variável NÃO declarada no `render.yaml`: produção assinava com um literal público. Verifiquei que o router está montado (`server.py`, prefixo `/api`), logo os endpoints estavam vivos — a entrada do registo dizia "não está em uso real" e essa era a parte errada.
+- Em dev o recurso é um segredo ALEATÓRIO por processo, não um literal. Um literal é um segredo conhecido em qualquer máquina que corra o código; efémero, os tokens não sobrevivem a um reinício, que é o que se quer de um token de 10 minutos.
+- SEGUNDO DEFEITO NO MESMO FICHEIRO, que só vi ao lê-lo: produtor e verificador tinham ramos simétricos `except ImportError` que criavam e ACEITAVAM um token terminado em `"mock-signature"`, sem assinatura. NÃO era explorável — o `PyJWT==2.10.1` está fixado e o import nunca falha — e disse-o assim, sem inflacionar. Saiu dos dois lados no mesmo commit: manter metade deixava um consumidor permissivo sem produtor.
+- Provas: 4081 passed / 5 skipped (era 4047/5, +34). Sete mutações, sete mortes. A mais eloquente é a E: reposto o literal, o teste do token FORJADO passa a falhar — ou seja, o ataque volta a funcionar e o teste demonstra-o.
+- Consequência operacional registada no ARCHITECTURE.md: `GOV_AUTH_JWT_SECRET` é agora OBRIGATÓRIA em produção (o dono já a definiu no Render antes de eu mexer).
+
+---
+
+---
 Task ID: fecho-desfasamento-indexacao
 Agent: Cloud Agent
 Task: O último resíduo — a Indexação nas listas de atribuição (`--limpar-indexacao`)
