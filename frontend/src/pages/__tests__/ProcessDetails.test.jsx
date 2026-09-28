@@ -85,7 +85,6 @@ vi.mock("../../hooks/mutations/useProcessMutations", () => ({
     updateProcess: mutacaoFalsa(),
     updateClient: mutacaoFalsa(),
     assignProcess: mutacaoFalsa(),
-    addActivity: mutacaoFalsa(),
     deleteActivity: mutacaoFalsa(),
     deadlines: {
       create: mutacaoFalsa(),

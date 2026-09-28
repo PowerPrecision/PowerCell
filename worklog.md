@@ -8651,3 +8651,92 @@ Frontend **1288 passed / 112 ficheiros** (eram 1274/111). `eslint
 * **O modal do Kanban** (`ProcessDetailsModal`) continua a escrever no
   escalar `notes`. Não é um sítio concorrente: é o MESMO campo que o
   cartão do Resumo lê e que a coluna passa a espelhar.
+
+---
+
+# Iteração `ponto-9-fios-soltos` — matar o endpoint e alinhar o diretor
+
+Os três fios soltos que deixei em aberto no Ponto 9, decididos: matar o
+endpoint, deixar o apagar de comentário, alinhar o diretor.
+
+## 1. `POST /api/activities` morreu
+
+**410, não a rota apagada.** Sem o stub, um POST responde **405** — o
+caminho continua a existir para o GET e o DELETE — e um 405 lê-se como
+avaria de encaminhamento: quem lá bater vai procurar o defeito no
+router. O 410 diz o que aconteceu, e a mensagem diz **para onde ir** (o
+Resumo), porque um 410 sem destino manda procurar às cegas. É o
+precedente que o `POST /auth/login` já usa aqui.
+
+**A escrita foi REMOVIDA, não desligada.** O corpo antigo — `insert_one`
+em `db.activities` mais o `log_history` — saiu do
+`run_create_activity`. Código adormecido atrás de um `raise` é um
+convite a religá-lo, e há uma guarda sobre a fonte a afirmar que não
+voltou (`insert_one` e `activity_doc` fora da função).
+
+**A recusa vem ANTES de tocar na base de dados.** Um endpoint que valida
+o processo e só depois recusa continua a ser uma superfície que lê a
+base de dados por ordem de quem chama. O teste passa `data=object()`,
+sem `.process_id`: se a função ainda lá chegasse, rebentava com
+`AttributeError` em vez de `HTTPException`.
+
+**O que NÃO se fechou, de propósito:** `voice_note_engine` (a nota
+ditada entra na timeline) e `temp_link_api_public` (o cliente que envia
+por link temporário). Escrevem em `db.activities` directamente e nunca
+passaram por este endpoint. Há um teste a afirmar que continuam a
+escrever — senão "só de leitura" virava "sem nada", que é uma regressão
+disfarçada de cumprimento da regra.
+
+**O teste legado foi INVERTIDO, não apagado.** O
+`test_create_activity_comment` afirmava 200 e o comentário gravado;
+agora afirma 410. É a mesma escolha dos dois testes do token sem `type`:
+é aqui que se vê que a porta fechou, e não num ficheiro que deixou de
+existir.
+
+Do lado do frontend saíram `createActivity` e `useAddActivityMutation` —
+já sem chamadores desde o commit anterior, e agora mutações que só
+saberiam falhar.
+
+**A guarda de indexação silenciosa saiu deste módulo** por ter ficado
+redundante: já ninguém cria atividades por aqui, seja qual for o perfil.
+O ponto único continua a ser `history._is_stealth_user`.
+
+## 2. Apagar comentário: fica
+
+Decisão do produto, e concordo pelo motivo que já tinha registado: é a
+única válvula de escape para rectificar a trilha à mão, e depois desta
+mudança só alcança registos antigos e notas de voz.
+
+## 3. O diretor no `client_assign`
+
+Mesmo defeito dos campos canónicos, noutro eixo. `process_create`
+tratava o diretor como consultor; o `client_assign` só conhecia
+`"consultor"`. **Um cliente atribuído a um diretor pela Sala de Triagem
+nascia com processo e sem atribuição nenhuma** — nem lista, nem
+singulares, nem nome. Não dava erro: o processo simplesmente não era de
+ninguém.
+
+Ali divergia a lista de CAMPOS, aqui a lista de PAPÉIS, e a correcção é
+a mesma: `PAPEIS_COMO_CONSULTOR` / `PAPEIS_COMO_MEDIADOR` em
+`process_staff_assignment.py`, ao lado de `CONSULTOR_ID_FIELDS`.
+
+A guarda compara os dois escritores **reais**, papel a papel — uma lista
+de papéis escrita no teste seria a terceira cópia. E tem contraprova no
+sentido oposto: `administrativo`, `parceiro` e `ceo` continuam sem
+atribuição, senão "fazer os dois concordarem" passaria também se ambos
+atribuíssem a toda a gente.
+
+Mutação: tirar `DIRETOR` da constante mata 2 testes.
+
+## Um erro apanhado pelo lint
+
+Ao limpar os imports que ficaram órfãos com o corpo do
+`run_create_activity`, levei `ActivityResponse` à frente — e ele ainda é
+usado pelo `run_get_activities`. O `flake8` apanhou-o com `F821` antes
+de chegar aos testes. Vale registar porque o modo de falha era silencioso
+ao olho: a função removida usava-o, a que fica também.
+
+## Validação
+
+Backend **4009 passed, 5 skipped** (eram 3998; +8 do endpoint morto, +3
+do diretor). Frontend **1288 / 112 ficheiros**, `eslint --quiet` 0.

@@ -81,6 +81,34 @@ async def fetch_user_names(user_ids: list[str]) -> list[str]:
 # voltarem a divergir — era a divergência, não o esquecimento, o defeito.
 # ────────────────────────────────────────────────────────────────────
 
+# ────────────────────────────────────────────────────────────────────
+# QUE PAPÉIS SE CARIMBAM COMO QUÊ (Ponto 9)
+#
+# O mesmo defeito dos campos, noutro eixo. `process_create` tratava o
+# diretor como consultor e o `client_assign` só conhecia `"consultor"`:
+# um cliente atribuído a um diretor pela Sala de Triagem nascia com
+# processo e **sem atribuição nenhuma**. Não dava erro — o processo
+# simplesmente não era de ninguém.
+#
+# A lista de PAPÉIS vive aqui pela mesma razão que a lista de CAMPOS:
+# escrita à mão em dois sítios, diverge na primeira mudança.
+#
+# Quem NÃO está aqui não é um atribuído do processo (administrativo,
+# parceiro, ceo, admin); `indexacao` tem carimbo próprio
+# (`assigned_indexacao_id`) e não entra nas listas — o Índice não é um
+# atribuído, é quem lhe mexe.
+# ────────────────────────────────────────────────────────────────────
+
+#: Papéis que, ao criar ou atribuir um processo, ficam como CONSULTOR.
+PAPEIS_COMO_CONSULTOR: tuple[str, ...] = (
+    UserRole.CONSULTOR,
+    UserRole.DIRETOR,
+)
+
+#: Papéis que ficam como MEDIADOR (intermediário de crédito).
+PAPEIS_COMO_MEDIADOR: tuple[str, ...] = (UserRole.INTERMEDIARIO,)
+
+
 #: (campo_do_id_singular, …) → recebem o PRIMEIRO id da lista.
 CONSULTOR_ID_FIELDS: tuple[str, ...] = (
     "assigned_consultor_id",

@@ -23,7 +23,6 @@ import {
   updateProcess,
   updateClient,
   assignProcess,
-  createActivity,
   deleteActivity,
   createDeadline,
   updateDeadline,
@@ -258,32 +257,13 @@ export function useAssignProcessMutation(processId, options = {}) {
   });
 }
 
-export function useAddActivityMutation(processId, options = {}) {
-  const queryClient = useQueryClient();
-  const { onSuccess, onError } = options;
-
-  return useMutation({
-    mutationFn: async (data) => {
-      const response = await createActivity({
-        ...data,
-        process_id: processId,
-      });
-      return response.data;
-    },
-
-    onSuccess: (data, variables, context) => {
-      notifySuccess(options, 'Atividade adicionada');
-      queryClient.invalidateQueries({ queryKey: queryKeys.history.byProcess(processId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.activities.byProcess(processId) });
-      onSuccess?.(data, variables, context);
-    },
-
-    onError: (error, variables, context) => {
-      notifyError(options, 'Erro ao adicionar atividade');
-      onError?.(error, variables, context);
-    },
-  });
-}
+// PONTO 9 — `useAddActivityMutation` foi REMOVIDA com o endpoint.
+// `POST /api/activities` responde 410: o histórico é uma trilha de
+// auditoria gerada pelo sistema. Deixá-la aqui seria dar a quem a
+// encontrasse uma mutação que só sabe falhar. As notas do consultor
+// escrevem-se no cartão de Observações (`addProcessObservationNote`).
+// A eliminação (`useDeleteActivityMutation`) fica: é a válvula de
+// escape para rectificar a trilha à mão.
 
 export function useDeleteActivityMutation(processId, options = {}) {
   const queryClient = useQueryClient();
@@ -388,7 +368,6 @@ export function useProcessMutations(processId, options = {}) {
     processId,
   });
   const assignProcessMut = useAssignProcessMutation(processId, shared);
-  const addActivity = useAddActivityMutation(processId, shared);
   const deleteActivityMut = useDeleteActivityMutation(processId, shared);
   const deadlines = useProcessDeadlineMutations(processId, shared);
 
@@ -397,7 +376,6 @@ export function useProcessMutations(processId, options = {}) {
     updateProcess: updateProcessMut,
     updateClient: updateClientMut,
     assignProcess: assignProcessMut,
-    addActivity,
     deleteActivity: deleteActivityMut,
     deadlines,
 
@@ -406,7 +384,6 @@ export function useProcessMutations(processId, options = {}) {
       updateProcessMut.isPending ||
       updateClientMut.isPending ||
       assignProcessMut.isPending ||
-      addActivity.isPending ||
       deleteActivityMut.isPending ||
       deadlines.create.isPending ||
       deadlines.update.isPending ||

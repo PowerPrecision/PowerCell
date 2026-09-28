@@ -766,7 +766,9 @@ export const getActivities = (processId, limit = 50) => {
   params.limit = limit;
   return api.get("/activities", { params });
 };
-export const createActivity = (data) => api.post("/activities", data);
+// PONTO 9 — `createActivity` foi removida: `POST /api/activities`
+// responde 410. O histórico é gerado pelo sistema; as notas do
+// consultor vão por `addProcessObservationNote`.
 export const addProcessObservationNote = (processId, text) =>
   api.post(`/processes/${processId}/observation-notes`, { text });
 export const deleteActivity = (id) => api.delete(`/activities/${id}`);

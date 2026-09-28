@@ -2,36 +2,29 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_create_activity_comment(client, admin_token):
-    """Test creating a comment on a process"""
-    try:
-        list_response = await client.get(
-            "/processes",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        processes = list_response.json()
-    except Exception:
-        pytest.skip("Could not fetch processes (DB unavailable in CI)")
-        return
+async def test_criar_atividade_pela_api_responde_410(client, admin_token):
+    """INVERTIDO no Ponto 9 — este teste provava a escrita que morreu.
 
-    # processes might be a dict (error response) instead of a list
-    if not isinstance(processes, list) or not processes:
-        pytest.skip("No processes available in test DB")
-        return
+    Era `test_create_activity_comment` e afirmava 200 + o comentário
+    gravado. O histórico passou a ser uma trilha de auditoria só de
+    leitura, e o endpoint morreu com a UI. O teste foi invertido em vez
+    de apagado, como os dois do token sem `type`: é aqui que se vê que a
+    porta fechou, e não num ficheiro que deixou de existir.
 
-    process_id = processes[0]["id"]
+    Não precisa de processos na base de dados: a recusa vem ANTES de se
+    olhar para o processo, de propósito.
+    """
     response = await client.post(
         "/activities",
         headers={"Authorization": f"Bearer {admin_token}"},
         json={
-            "process_id": process_id,
+            "process_id": "seja-qual-for",
             "comment": "Comentário de teste pytest"
         }
     )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["comment"] == "Comentário de teste pytest"
-    assert data["process_id"] == process_id
+    assert response.status_code == 410
+    # E diz para onde ir — um 410 sem destino manda procurar às cegas.
+    assert "Resumo" in response.json().get("detail", "")
 
 
 @pytest.mark.asyncio
