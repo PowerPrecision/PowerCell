@@ -6627,3 +6627,48 @@ Essa última linha é o que decide os indeterminados, e a regra é simples:
 um que aponta para um consultor activo é uma atribuição.** Transformar
 "199 processos indecidíveis" em "duas pessoas a confirmar" é a diferença
 entre uma decisão e um encolher de ombros.
+
+
+## O fecho: os 199 não eram um bloco (Set 2026)
+
+Resolvidos os ids contra `db.users`, os 199 papéis indeterminados
+partiram-se em três grupos com respostas **opostas**:
+
+| Grupo | Papéis | Prova | Acção |
+|---|---|---|---|
+| `orfao` | **153** | o utilizador NÃO existe | `--limpar-orfaos` |
+| `atribuicao_legada` | **34** | activo, papel certo para o campo | `--repor-listas` |
+| `atribuido_invalido` | **12** | perfil `indexacao` (ou conta inactiva) | nenhuma |
+
+**A regra que fecha o módulo:** *limpar um órfão não desatribui
+ninguém.* O risco contra o qual tudo isto foi construído — "limpar
+deixa o processo sem dono" — não se materializa quando o dono não
+existe: o processo **já** está sem dono e o campo está a mentir. Quem
+não existe não perde acesso nenhum.
+
+Por isso o **utilizador ganha ao registo** na ordem das provas: um
+processo atribuído a alguém que já não existe não tem dono, diga o
+histórico o que disser.
+
+### Três detalhes que não se podem perder
+
+1. **O papel tem de bater com o CAMPO, não apenas ser atribuível.** Um
+   intermediário em `assigned_consultor_id` é inválido; o mesmo
+   intermediário em `assigned_mediador_id` é uma atribuição. A
+   compatibilidade deriva de `PAPEIS_COMO_CONSULTOR` /
+   `PAPEIS_COMO_MEDIADOR` — uma lista à mão aqui divergiria dos
+   escritores.
+2. **`indexacao` nunca é um atribuído.** O Índice tem carimbo próprio
+   (`assigned_indexacao_id`) e não entra nas listas. Repor a lista para
+   ele cimentaria um estado que as regras do produto não admitem;
+   limpá-lo pode ser a resposta, mas é decisão de produto — por isso
+   nenhum automatismo lhe toca.
+3. **"Não perguntei" ≠ "perguntei e não existe".** Um id ausente do
+   mapa de utilizadores fica `indeterminada`; só um `None` explícito é
+   órfão. Sem essa distinção, um mapa incompleto — uma consulta que
+   falhou, um lote por resolver — apagaria atribuições boas em silêncio.
+
+`--limpar-orfaos` é uma bandeira **separada** de `--incluir-ambiguos`:
+bandeiras distintas para provas distintas. Quem autoriza limpar resíduo
+provado por registo não autorizou, com isso, limpar por ausência de
+utilizador.

@@ -51,6 +51,8 @@ from typing import Any, Iterable, Optional
 from services.process_staff_assignment import (
     CONSULTOR_ID_FIELDS,
     MEDIADOR_ID_FIELDS,
+    PAPEIS_COMO_CONSULTOR,
+    PAPEIS_COMO_MEDIADOR,
 )
 
 #: (papel, campo da lista, campos singulares) — derivado das constantes de
@@ -139,7 +141,9 @@ def correccao_do_processo(
     processo: dict,
     *,
     incluir_ambiguos: bool = False,
+    incluir_orfaos: bool = False,
     historicos_por_papel: Optional[dict[str, Iterable[dict]]] = None,
+    utilizadores: Optional[dict[str, Optional[dict]]] = None,
 ) -> dict[str, Any]:
     """O `$set` que põe os singulares de acordo com a lista.
 
@@ -152,22 +156,36 @@ def correccao_do_processo(
     `indeterminada` continuam intactos **mesmo com a bandeira ligada**,
     porque limpá-los deixa o processo sem dono. A bandeira autoriza a
     escrita; não substitui a prova.
+
+    `incluir_orfaos` é uma ordem SEPARADA, para uma prova separada: o
+    utilizador nomeado não existe. Bandeiras distintas para provas
+    distintas — quem autoriza limpar resíduo provado por registo não
+    autorizou, com isso, limpar por ausência de utilizador.
     """
     correccao: dict[str, Any] = {}
     origens: dict[str, str] = {}
     historicos = historicos_por_papel or {}
 
+    autorizadas = set()
+    if incluir_ambiguos:
+        autorizadas.add(ORIGEM_DESATRIBUICAO)
+    if incluir_orfaos:
+        autorizadas.add(ORIGEM_ORFAO)
+
     for d in desfasamentos_do_processo(processo):
         if d.e_seguro_corrigir:
             correccao[d.campo] = d.valor_esperado
             continue
-        if not incluir_ambiguos:
+        if not autorizadas:
             continue
         if d.papel not in origens:
             origens[d.papel] = origem_do_ambiguo(
-                processo, d.papel, historico=historicos.get(d.papel)
+                processo,
+                d.papel,
+                historico=historicos.get(d.papel),
+                utilizadores=utilizadores,
             )
-        if origens[d.papel] == ORIGEM_DESATRIBUICAO:
+        if origens[d.papel] in autorizadas:
             correccao[d.campo] = d.valor_esperado
 
     return correccao
@@ -251,6 +269,44 @@ ORIGEM_DESATRIBUICAO = "desatribuicao"
 ORIGEM_ATRIBUICAO_LEGADA = "atribuicao_legada"
 ORIGEM_INDETERMINADA = "indeterminada"
 
+# ── A TERCEIRA FONTE DE PROVA: QUEM LÁ ESTÁ (Set 2026) ──────────────
+#
+# Os 199 indeterminados de produção não eram um bloco. Resolvidos os ids
+# contra `db.users`, partiram-se em três grupos com respostas OPOSTAS:
+#
+#   153 papéis   o utilizador **não existe**
+#    34 papéis   utilizador activo com o papel CERTO para o campo
+#    12 papéis   utilizador activo com papel `indexacao`
+#
+# Nem a assinatura nem o histórico os distinguem — só saber quem lá
+# está. E a consequência é o fecho de todo este módulo:
+#
+#   **Limpar um órfão não desatribui ninguém.** O risco contra o qual
+#   tudo isto foi construído — "limpar deixa o processo sem dono" — não
+#   se materializa quando o dono não existe: o processo JÁ está sem dono
+#   e o campo está a mentir. Alguém a quem o processo não aparece em
+#   lado nenhum não perde nada quando o campo desaparece.
+#
+# Por isso o utilizador ganha ao registo: um processo atribuído a alguém
+# que já não existe não tem dono, diga o histórico o que disser.
+
+#: O utilizador nomeado pelo campo não existe. Limpar é seguro.
+ORIGEM_ORFAO = "orfao"
+
+#: O utilizador existe mas não pode ocupar aquele campo — papel
+#: incompatível (o `indexacao` tem carimbo próprio e nunca entra nas
+#: listas) ou conta inactiva. Nenhum automatismo lhe toca: repor a lista
+#: cimentaria um estado que as regras do produto não admitem, e limpar
+#: pode ser cedo demais se a conta for reactivada.
+ORIGEM_ATRIBUIDO_INVALIDO = "atribuido_invalido"
+
+#: Que papéis podem ocupar o campo de cada função. Deriva das constantes
+#: de produção — uma lista à mão aqui divergiria dos escritores.
+_PAPEIS_ACEITES = {
+    "consultor": frozenset(PAPEIS_COMO_CONSULTOR),
+    "mediador": frozenset(PAPEIS_COMO_MEDIADOR),
+}
+
 #: Assinaturas que decidem sozinhas, por papel. Conjunto EXACTO dos
 #: campos singulares preenchidos com a lista vazia.
 _ASSINATURAS: dict[str, tuple[tuple[frozenset[str], str], ...]] = {
@@ -326,11 +382,56 @@ def _origem_pelo_historico(historico: Iterable[dict], papel: str) -> Optional[st
     return veredicto
 
 
+def _id_no_singular(processo: dict, papel: str, campos: frozenset[str]) -> Optional[str]:
+    """O id que o campo ambíguo nomeia. Um papel tem UM dono."""
+    for _p, _lista, campos_singulares in PAPEIS:
+        if _p != papel:
+            continue
+        for campo in campos_singulares:
+            if campo not in campos:
+                continue
+            valor = _texto((processo or {}).get(campo))
+            if valor:
+                return valor
+    return None
+
+
+def _origem_pelo_utilizador(
+    processo: dict,
+    papel: str,
+    campos: frozenset[str],
+    utilizadores: dict[str, Optional[dict]],
+) -> Optional[str]:
+    """Quem está no campo — a prova mais forte que existe.
+
+    Devolve `None` quando NÃO se perguntou por este id. "Não perguntei"
+    é diferente de "perguntei e não existe": sem essa distinção, um mapa
+    incompleto (uma consulta que falhou, um lote por resolver) apagaria
+    atribuições boas em silêncio.
+    """
+    uid = _id_no_singular(processo, papel, campos)
+    if not uid or uid not in utilizadores:
+        return None
+
+    doc = utilizadores[uid]
+    if doc is None:
+        return ORIGEM_ORFAO
+
+    if not doc.get("is_active", True):
+        return ORIGEM_ATRIBUIDO_INVALIDO
+
+    if str(doc.get("role") or "") not in _PAPEIS_ACEITES.get(papel, frozenset()):
+        return ORIGEM_ATRIBUIDO_INVALIDO
+
+    return ORIGEM_ATRIBUICAO_LEGADA
+
+
 def origem_do_ambiguo(
     processo: dict,
     papel: str,
     *,
     historico: Optional[Iterable[dict]] = None,
+    utilizadores: Optional[dict[str, Optional[dict]]] = None,
 ) -> str:
     """De onde veio o `ambiguo` deste papel — e portanto o que fazer.
 
@@ -348,6 +449,16 @@ def origem_do_ambiguo(
     if not campos:
         return ORIGEM_INDETERMINADA
 
+    # O UTILIZADOR primeiro: ganha ao registo porque um processo
+    # atribuído a alguém que já não existe não tem dono, diga o
+    # histórico o que disser.
+    if utilizadores is not None:
+        pelo_utilizador = _origem_pelo_utilizador(
+            processo, papel, campos, utilizadores
+        )
+        if pelo_utilizador:
+            return pelo_utilizador
+
     if historico is not None:
         pelo_registo = _origem_pelo_historico(historico, papel)
         if pelo_registo:
@@ -364,6 +475,7 @@ def reposicao_de_listas_do_processo(
     processo: dict,
     *,
     historicos_por_papel: Optional[dict[str, Iterable[dict]]] = None,
+    utilizadores: Optional[dict[str, Optional[dict]]] = None,
 ) -> dict[str, Any]:
     """O `$set` que repõe a LISTA a partir do singular — o caminho oposto.
 
@@ -387,7 +499,10 @@ def reposicao_de_listas_do_processo(
         if _lista_de_ids(processo, campo_da_lista):
             continue
         origem = origem_do_ambiguo(
-            processo, papel, historico=historicos.get(papel)
+            processo,
+            papel,
+            historico=historicos.get(papel),
+            utilizadores=utilizadores,
         )
         if origem != ORIGEM_ATRIBUICAO_LEGADA:
             continue
@@ -404,6 +519,7 @@ def resumir_ambiguos(
     processos: Iterable[dict],
     *,
     historicos_por_processo: Optional[dict[str, dict[str, Iterable[dict]]]] = None,
+    utilizadores: Optional[dict[str, Optional[dict]]] = None,
 ) -> dict[str, Any]:
     """Contagem dos ambíguos POR ORIGEM — é isto que decide o `--corrigir`.
 
@@ -438,7 +554,10 @@ def resumir_ambiguos(
             if not ambiguos:
                 continue
             origem = origem_do_ambiguo(
-                processo, papel, historico=do_processo.get(papel)
+                processo,
+                papel,
+                historico=do_processo.get(papel),
+                utilizadores=utilizadores,
             )
             chave = f"{papel}:{origem}"
             por_origem[chave] = por_origem.get(chave, 0) + 1

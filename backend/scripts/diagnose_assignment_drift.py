@@ -53,6 +53,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.assignment_drift import (  # noqa: E402
     ORIGEM_ATRIBUICAO_LEGADA,
+    ORIGEM_ATRIBUIDO_INVALIDO,
+    ORIGEM_ORFAO,
     ORIGEM_INDETERMINADA,
     PAPEIS,
     VEREDICTO_AMBIGUO,
@@ -102,6 +104,14 @@ def _argumentos():
              "só têm `consultant_id`. Ler o cabeçalho antes de usar.",
     )
     p.add_argument(
+        "--limpar-orfaos",
+        action="store_true",
+        help="Limpa os singulares que nomeiam um utilizador que NÃO "
+             "EXISTE. É uma ordem separada de `--incluir-ambiguos` "
+             "porque a prova é outra: limpar um órfão não desatribui "
+             "ninguém — o processo já está sem dono e o campo mente.",
+    )
+    p.add_argument(
         "--repor-listas",
         action="store_true",
         help="Para os ambíguos provados como ATRIBUIÇÃO LEGADA, escreve a "
@@ -126,6 +136,10 @@ async def principal() -> int:
 
     if args.repor_listas and not args.corrigir:
         print("`--repor-listas` só faz sentido com `--corrigir`.")
+        return 2
+
+    if args.limpar_orfaos and not args.corrigir:
+        print("`--limpar-orfaos` só faz sentido com `--corrigir`.")
         return 2
 
     if not os.environ.get("MONGO_URL"):
@@ -189,7 +203,31 @@ async def principal() -> int:
             entradas.append(entrada)
         historicos[pid] = {papel: entradas for papel, _lista, _campos in PAPEIS}
 
-    resumo_ambiguo = resumir_ambiguos(ambiguos, historicos_por_processo=historicos)
+    # ── Quem está nos campos singulares ─────────────────────────────
+    # Resolvido UMA vez e partilhado por toda a classificação: é a
+    # terceira fonte de prova e a que parte os indeterminados em grupos
+    # com respostas opostas. `None` significa "perguntei e não existe";
+    # um id AUSENTE do mapa significa "não perguntei", e a diferença é o
+    # que impede um lote por resolver de apagar atribuições boas.
+    ids_nos_singulares: set[str] = set()
+    for p_amb in ambiguos:
+        for _papel, _lista, campos_singulares in PAPEIS:
+            for campo in campos_singulares:
+                valor = (p_amb or {}).get(campo)
+                if valor and str(valor).strip():
+                    ids_nos_singulares.add(str(valor).strip())
+
+    utilizadores: dict = {}
+    for uid in sorted(ids_nos_singulares):
+        utilizadores[uid] = await db.users.find_one(
+            {"id": uid}, {"_id": 0, "id": 1, "name": 1, "role": 1, "is_active": 1}
+        )
+
+    resumo_ambiguo = resumir_ambiguos(
+        ambiguos,
+        historicos_por_processo=historicos,
+        utilizadores=utilizadores,
+    )
 
     if ambiguos:
         print("  Ambíguos por ORIGEM (papel : de onde veio):")
@@ -199,6 +237,11 @@ async def principal() -> int:
         print("    desatribuicao     → resíduo provado. `--incluir-ambiguos` limpa.")
         print("    atribuicao_legada → o processo TEM dono. `--repor-listas` repõe")
         print("                        a lista; limpar desatribuiria trabalho real.")
+        print("    orfao             → o utilizador NÃO EXISTE. `--limpar-orfaos`")
+        print("                        limpa: não desatribui ninguém.")
+        print("    atribuido_invalido→ existe mas não pode ocupar o campo")
+        print("                        (papel incompatível ou conta inactiva).")
+        print("                        Nenhum automatismo lhe toca.")
         print("    indeterminada     → sem prova. Fica para decisão humana.")
         print()
 
@@ -211,7 +254,12 @@ async def principal() -> int:
             }
             do_processo = historicos.get(p.get("id"), {})
             origens = {
-                papel: origem_do_ambiguo(p, papel, historico=do_processo.get(papel))
+                papel: origem_do_ambiguo(
+                    p,
+                    papel,
+                    historico=do_processo.get(papel),
+                    utilizadores=utilizadores,
+                )
                 for papel, _lista, _campos in PAPEIS
                 if any(
                     d.papel == papel and d.veredicto == VEREDICTO_AMBIGUO
@@ -239,9 +287,7 @@ async def principal() -> int:
                 print(f"    {origem}:")
                 for uid, quantos in pares[:MAX_EXEMPLOS]:
                     nome = ""
-                    doc = await db.users.find_one(
-                        {"id": uid}, {"name": 1, "role": 1, "is_active": 1}
-                    )
+                    doc = utilizadores.get(uid)
                     if doc:
                         estado = "activo" if doc.get("is_active") else "INACTIVO"
                         nome = f"  {doc.get('name', '?')} ({doc.get('role', '?')}, {estado})"
@@ -290,7 +336,9 @@ async def principal() -> int:
         # ainda tinha trabalho.)
         if args.repor_listas:
             reposicao = reposicao_de_listas_do_processo(
-                processo, historicos_por_papel=do_processo
+                processo,
+                historicos_por_papel=do_processo,
+                utilizadores=utilizadores,
             )
             if reposicao:
                 # O nome acompanha a lista: um cartão de Atribuição com
@@ -315,7 +363,9 @@ async def principal() -> int:
             correccao_do_processo(
                 {**processo, **escrita},
                 incluir_ambiguos=args.incluir_ambiguos,
+                incluir_orfaos=args.limpar_orfaos,
                 historicos_por_papel=do_processo,
+                utilizadores=utilizadores,
             )
         )
 
@@ -336,18 +386,23 @@ async def principal() -> int:
             "  Os ambíguos ficaram INTACTOS de propósito — ver o cabeçalho "
             "deste ficheiro."
         )
-    if args.incluir_ambiguos:
-        legados = len(
-            resumo_ambiguo["processos_por_origem"].get(ORIGEM_ATRIBUICAO_LEGADA, [])
-        )
-        indets = len(
-            resumo_ambiguo["processos_por_origem"].get(ORIGEM_INDETERMINADA, [])
-        )
-        if legados or indets:
+    if args.incluir_ambiguos or args.limpar_orfaos:
+        intocaveis = {
+            "atribuição(ões) legada(s)": ORIGEM_ATRIBUICAO_LEGADA,
+            "atribuído(s) inválido(s)": ORIGEM_ATRIBUIDO_INVALIDO,
+            "indeterminado(s)": ORIGEM_INDETERMINADA,
+        }
+        if not args.limpar_orfaos:
+            intocaveis["órfão(s)"] = ORIGEM_ORFAO
+        partes = []
+        for rotulo, origem in intocaveis.items():
+            quantos = len(resumo_ambiguo["processos_por_origem"].get(origem, []))
+            if quantos:
+                partes.append(f"{quantos} {rotulo}")
+        if partes:
             print(
-                f"  {legados} atribuição(ões) legada(s) e {indets} "
-                "indeterminado(s) NÃO foram limpos, apesar da bandeira: "
-                "limpá-los deixaria o processo sem dono."
+                f"  NÃO foram limpos, apesar da bandeira: {', '.join(partes)} — "
+                "cada um por falta da prova respectiva."
             )
     print("=" * 66)
     return 0

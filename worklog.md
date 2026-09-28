@@ -8878,3 +8878,69 @@ distingue os três casos e marca os dois ids órfãos.
 
 Backend **4019 passed, 5 skipped** (eram 4013). Os cinco testes novos
 falham contra o código anterior.
+
+---
+
+# Iteração `quem-esta-la` — os 199 não eram um bloco
+
+## O veredicto por id
+
+Resolvidos contra `db.users`, os 199 papéis indeterminados partiram-se
+em três grupos com respostas **opostas**:
+
+| Grupo | Papéis | Ids |
+|---|---|---|
+| `orfao` — utilizador NÃO existe | **153** | `a72f00e7` ×76, `3ffa9a82` ×62, `ae46cb38` ×12, `294b851c` ×3 |
+| `atribuicao_legada` — activo, papel certo | **34** | Fernando Andrade (intermediário) ×28, Flávio da Silva (consultor) ×6 |
+| `atribuido_invalido` — perfil `indexacao` | **12** | "654" ×12 |
+
+## A regra que fecha o módulo
+
+**Limpar um órfão não desatribui ninguém.** O risco contra o qual todo
+este trabalho foi construído — "limpar deixa o processo sem dono" — não
+se materializa quando o dono não existe: o processo **já** está sem dono
+e o campo está a mentir. Quem não existe não perde acesso nenhum.
+
+Por isso o **utilizador ganha ao registo** na ordem das provas: um
+processo atribuído a alguém que já não existe não tem dono, diga o
+histórico o que disser.
+
+E há uma corroboração forte no sentido contrário: nos 34 casos válidos o
+**papel bate com o campo** — Fernando é intermediário e está em campos de
+mediador, Flávio é consultor e está em campos de consultor. Resíduo não
+se correlaciona assim; atribuições reais sim.
+
+## Três detalhes que não se podem perder
+
+1. **O papel tem de bater com o CAMPO**, não apenas ser atribuível. Um
+   intermediário em `assigned_consultor_id` é inválido; o mesmo
+   intermediário em `assigned_mediador_id` é uma atribuição. Há
+   contraprova nos dois sentidos, porque não é o papel que é mau — é o
+   sítio.
+2. **`indexacao` nunca é um atribuído.** O Índice tem carimbo próprio e
+   não entra nas listas. Repor a lista para ele cimentaria um estado que
+   as regras do produto não admitem; limpá-lo pode ser a resposta, mas é
+   decisão de produto. Nenhum automatismo lhe toca.
+3. **"Não perguntei" ≠ "perguntei e não existe".** Um id ausente do mapa
+   fica `indeterminada`; só um `None` explícito é órfão. Sem isso, um
+   mapa incompleto — uma consulta que falhou, um lote por resolver —
+   apagaria atribuições boas em silêncio.
+
+`--limpar-orfaos` é bandeira **separada** de `--incluir-ambiguos`:
+bandeiras distintas para provas distintas.
+
+## Como se provou
+
+Base local semeada com os três grupos reais (4 órfãos, 3 atribuições
+válidas, 2 com perfil `indexacao`). O script:
+
+* classifica os três correctamente em modo leitura;
+* com `--corrigir --repor-listas --limpar-orfaos`: limpa os órfãos, repõe
+  as listas **com o nome**, e deixa os `indexacao` **intactos**;
+* segunda passagem converge — sobram só os 2 inválidos, e são
+  reportados.
+
+## Validação
+
+Backend **4035 passed, 5 skipped** (eram 4019). Os 16 testes novos falham
+contra o código anterior.

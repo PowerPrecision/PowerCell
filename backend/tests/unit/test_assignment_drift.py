@@ -15,6 +15,8 @@ import pytest
 
 from services.assignment_drift import (
     ORIGEM_ATRIBUICAO_LEGADA,
+    ORIGEM_ATRIBUIDO_INVALIDO,
+    ORIGEM_ORFAO,
     ORIGEM_DESATRIBUICAO,
     ORIGEM_INDETERMINADA,
     VEREDICTO_AMBIGUO,
@@ -28,6 +30,7 @@ from services.assignment_drift import (
     resumir_ambiguos,
 )
 from services.process_staff_assignment import (
+    CONSULTOR_ID_FIELDS,
     build_clear_consultor_fields,
     build_set_consultor_fields,
 )
@@ -517,3 +520,194 @@ class TestQuemAparecNosAmbiguos:
     def test_um_processo_coerente_nao_traz_ninguem(self):
         processos = [build_set_consultor_fields(["u-1"], ["Ana"])]
         assert resumir_ambiguos(processos)["responsaveis_por_origem"] == {}
+
+
+class TestQuemEstaLaDecideOAmbiguo:
+    """A terceira fonte de prova: o UTILIZADOR (Set 2026, fecho da limpeza).
+
+    Os 199 indeterminados de produção não eram um bloco. Resolvidos os
+    ids contra `db.users`, partiram-se em três grupos com respostas
+    OPOSTAS:
+
+      153 papéis  o utilizador **não existe**
+       34 papéis  utilizador activo com o papel CERTO para o campo
+       12 papéis  utilizador activo com papel `indexacao`
+
+    A assinatura e o histórico não os distinguem — só saber quem lá
+    está. Daí esta terceira fonte, e a ordem: o utilizador ganha ao
+    registo, porque um processo atribuído a alguém que já não existe não
+    tem dono, diga o histórico o que disser.
+
+    A REGRA QUE ISTO FECHA
+      **Limpar um órfão não desatribui ninguém.** O risco contra o qual
+      todo este módulo foi construído — "limpar deixa o processo sem
+      dono" — não se materializa quando o dono não existe: o processo já
+      está sem dono, e o campo está a mentir.
+    """
+
+    def _processo(self, campo="assigned_consultor_id", valor="u-x"):
+        lista = (
+            "assigned_consultor_ids"
+            if campo in CONSULTOR_ID_FIELDS
+            else "assigned_mediador_ids"
+        )
+        return {"id": "p-1", lista: [], campo: valor}
+
+    def test_utilizador_INEXISTENTE_e_orfao(self):
+        processo = self._processo()
+        assert (
+            origem_do_ambiguo(processo, "consultor", utilizadores={"u-x": None})
+            == ORIGEM_ORFAO
+        )
+
+    def test_o_orfao_ganha_ao_historico(self):
+        """Mesmo com registo de atribuição: quem lá está já não existe."""
+        processo = self._processo()
+        historico = [
+            {
+                "field": "assignment",
+                "action": "Dupla auto-atribuição: Consultor: Ana",
+                "new_value": "Consultor: Ana",
+            }
+        ]
+        assert (
+            origem_do_ambiguo(
+                processo, "consultor", historico=historico,
+                utilizadores={"u-x": None},
+            )
+            == ORIGEM_ORFAO
+        )
+
+    def test_utilizador_activo_com_o_papel_CERTO_e_uma_atribuicao(self):
+        processo = self._processo()
+        utilizadores = {"u-x": {"role": "consultor", "is_active": True}}
+        assert (
+            origem_do_ambiguo(processo, "consultor", utilizadores=utilizadores)
+            == ORIGEM_ATRIBUICAO_LEGADA
+        )
+
+    def test_o_diretor_tambem_serve_de_consultor(self):
+        """Deriva de `PAPEIS_COMO_CONSULTOR` — não de uma lista à mão."""
+        processo = self._processo()
+        utilizadores = {"u-x": {"role": "diretor", "is_active": True}}
+        assert (
+            origem_do_ambiguo(processo, "consultor", utilizadores=utilizadores)
+            == ORIGEM_ATRIBUICAO_LEGADA
+        )
+
+    def test_um_intermediario_num_campo_de_CONSULTOR_e_invalido(self):
+        """O papel tem de bater com o CAMPO, não apenas ser atribuível."""
+        processo = self._processo()
+        utilizadores = {"u-x": {"role": "intermediario", "is_active": True}}
+        assert (
+            origem_do_ambiguo(processo, "consultor", utilizadores=utilizadores)
+            == ORIGEM_ATRIBUIDO_INVALIDO
+        )
+
+    def test_o_mesmo_intermediario_num_campo_de_MEDIADOR_e_valido(self):
+        """Contraprova: não é o papel que é mau, é o sítio."""
+        processo = self._processo(campo="assigned_mediador_id")
+        utilizadores = {"u-x": {"role": "intermediario", "is_active": True}}
+        assert (
+            origem_do_ambiguo(processo, "mediador", utilizadores=utilizadores)
+            == ORIGEM_ATRIBUICAO_LEGADA
+        )
+
+    def test_o_perfil_INDEXACAO_nunca_e_um_atribuido(self):
+        """O Índice tem carimbo próprio e não entra nas listas.
+
+        É o caso real do `2285198b` ("654"): um utilizador de indexação
+        em 12 campos de consultor/mediador. Repor a lista cimentaria um
+        estado que as regras do produto não admitem.
+        """
+        for papel, campo in (
+            ("consultor", "assigned_consultor_id"),
+            ("mediador", "assigned_mediador_id"),
+        ):
+            processo = self._processo(campo=campo)
+            utilizadores = {"u-x": {"role": "indexacao", "is_active": True}}
+            assert (
+                origem_do_ambiguo(processo, papel, utilizadores=utilizadores)
+                == ORIGEM_ATRIBUIDO_INVALIDO
+            )
+
+    def test_utilizador_INACTIVO_nao_e_atribuicao_automatica(self):
+        """Existe, mas saiu. Pode voltar — não se decide por automatismo."""
+        processo = self._processo()
+        utilizadores = {"u-x": {"role": "consultor", "is_active": False}}
+        assert (
+            origem_do_ambiguo(processo, "consultor", utilizadores=utilizadores)
+            == ORIGEM_ATRIBUIDO_INVALIDO
+        )
+
+    def test_sem_mapa_de_utilizadores_o_comportamento_ANTIGO_mantem_se(self):
+        """Contraprova: a fonte nova não pode alterar quem não a usa."""
+        processo = {"id": "p-1", "assigned_consultor_ids": [], "consultant_id": "u-y"}
+        assert origem_do_ambiguo(processo, "consultor") == ORIGEM_ATRIBUICAO_LEGADA
+
+    def test_um_id_ausente_do_mapa_nao_e_tratado_como_orfao(self):
+        """"Não perguntei" é diferente de "perguntei e não existe".
+
+        Sem esta distinção, um mapa incompleto — uma consulta que falhou,
+        um lote por resolver — apagaria atribuições boas em silêncio.
+        """
+        processo = self._processo()
+        assert (
+            origem_do_ambiguo(processo, "consultor", utilizadores={"outro": None})
+            == ORIGEM_INDETERMINADA
+        )
+
+
+class TestLimparOrfaosEUmaOrdemPropria:
+    def _orfao(self):
+        return {
+            "id": "p-1",
+            "assigned_consultor_ids": [],
+            "assigned_consultor_id": "u-fantasma",
+        }
+
+    def test_o_incluir_ambiguos_sozinho_NAO_toca_no_orfao(self):
+        """Bandeiras distintas para provas distintas."""
+        assert correccao_do_processo(
+            self._orfao(),
+            incluir_ambiguos=True,
+            utilizadores={"u-fantasma": None},
+        ) == {}
+
+    def test_com_incluir_orfaos_o_campo_e_limpo(self):
+        assert correccao_do_processo(
+            self._orfao(),
+            incluir_orfaos=True,
+            utilizadores={"u-fantasma": None},
+        ) == {"assigned_consultor_id": None}
+
+    def test_o_incluir_orfaos_NAO_toca_numa_atribuicao_real(self):
+        """A bandeira nova é cirúrgica: só o que não tem ninguém."""
+        processo = self._orfao()
+        assert correccao_do_processo(
+            processo,
+            incluir_orfaos=True,
+            utilizadores={"u-fantasma": {"role": "consultor", "is_active": True}},
+        ) == {}
+
+    def test_nem_no_papel_invalido(self):
+        processo = self._orfao()
+        assert correccao_do_processo(
+            processo,
+            incluir_orfaos=True,
+            incluir_ambiguos=True,
+            utilizadores={"u-fantasma": {"role": "indexacao", "is_active": True}},
+        ) == {}
+
+    def test_repor_listas_alcanca_o_atribuido_existente(self):
+        processo = self._orfao()
+        assert reposicao_de_listas_do_processo(
+            processo,
+            utilizadores={"u-fantasma": {"role": "consultor", "is_active": True}},
+        ) == {"assigned_consultor_ids": ["u-fantasma"]}
+
+    def test_repor_listas_NAO_ressuscita_um_orfao(self):
+        """Repor a lista de um utilizador que não existe é inventar equipa."""
+        assert reposicao_de_listas_do_processo(
+            self._orfao(), utilizadores={"u-fantasma": None}
+        ) == {}
