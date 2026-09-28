@@ -22,6 +22,11 @@ from typing import List, Optional, Dict, Any
 
 from database import db
 from services.notification_service import send_notification_with_preference_check, send_deadline_reminder
+from services.alert_audience import (
+    destinatarios_do_alerta,
+    gestao_da_rede_do_processo,
+    ids_atribuidos,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -347,19 +352,14 @@ async def create_deed_reminder(process: dict, deed_date: str, user: dict) -> Opt
         if reminder_date.date() < datetime.now().date():
             return None
         
-        # Obter utilizadores envolvidos no processo
-        assigned_users = []
-        if process.get("assigned_consultor_id"):
-            assigned_users.append(process["assigned_consultor_id"])
-        if process.get("consultor_id"):
-            assigned_users.append(process["consultor_id"])
-        if process.get("assigned_mediador_id"):
-            assigned_users.append(process["assigned_mediador_id"])
-        if process.get("intermediario_id"):
-            assigned_users.append(process["intermediario_id"])
-        
-        # Remover duplicados
-        assigned_users = list(set(assigned_users))
+        # Utilizadores envolvidos, pelo ponto único (Lote 6, ponto 8).
+        # A lista escrita à mão que estava aqui lia só os SINGULARES e
+        # ignorava `assigned_consultor_ids`/`assigned_mediador_ids`, que são
+        # a verdade desde o Lote 5: num processo com dois consultores, o
+        # segundo nunca era avisado. `list(set(...))` também baralhava a
+        # ordem a cada execução, o que torna um diff de notificações
+        # impossível de ler.
+        assigned_users = ids_atribuidos(process)
         
         deadline_id = str(uuid.uuid4())
         
@@ -413,10 +413,25 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
         process: Dados do processo (pode ter 'client_name' ou 'nome')
         has_property: Se o cliente já tem imóvel (atribuir só intermediários)
     """
-    from services.role_query import deep_role_in_filter
-    admins = await db.users.find({
-        "$and": [deep_role_in_filter(["admin", "ceo"]), {"is_active": True}]
-    }, {"_id": 0}).to_list(100)
+    # Lote 6, ponto 8 — a gestão DA REDE do registo, não a de todas.
+    #
+    # Um registo público não traz carimbo (`public_registration` não chama
+    # `resolve_tenant_stamp`), pelo que cai na rede de omissão — que é
+    # exactamente onde a pilha por carimbar pertence, e que em produção
+    # está definida.
+    ids_da_gestao = await gestao_da_rede_do_processo(process, ["admin", "ceo"])
+    admins = []
+    if ids_da_gestao:
+        admins = await db.users.find(
+            {"id": {"$in": ids_da_gestao}, "is_active": {"$ne": False}},
+            {"_id": 0},
+        ).to_list(100)
+    if not admins:
+        logger.warning(
+            "[ALERTS] Registo de cliente sem gestão na rede do processo %s — "
+            "ninguém foi notificado.",
+            process.get("id"),
+        )
     
     # Obter nome do cliente (compatível com ambos os formatos)
     client_name = process.get("client_name") or process.get("nome") or "Cliente"
@@ -446,20 +461,39 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
             is_urgent=True
         )
     
-    # Criar notificação no sistema para TODOS os admins
-    notification = {
-        "id": str(uuid.uuid4()),
-        "type": ALERT_TYPES["NEW_CLIENT_REGISTRATION"],
-        "process_id": process.get("id"),  # Compatibilidade retroactiva
-        "client_id": process.get("client_id") or process.get("id"),  # ID real do cliente
-        "client_name": client_name,
-        "has_property": has_property,
-        "message": f"Novo registo: {client_name}" + (" (Já tem imóvel)" if has_property else ""),
-        "read": False,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    
-    await db.notifications.insert_one(notification)
+    # ── Uma notificação POR administrador (Lote 6, ponto 8) ──
+    #
+    # Isto inseria UM documento, sem `user_id`, com o comentário "para
+    # TODOS os admins". Funcionava enquanto `run_get_notifications`
+    # filtrava por visibilidade de processo — mas o Lote 5, ponto 3, pôs o
+    # `user_id` como ÚNICO critério (e bem: o cargo não decide
+    # visibilidade de dados pessoais). Desde então esta notificação é
+    # invisível a toda a gente: não é lida por ninguém, nem por quem a
+    # devia ver. Foi uma regressão que eu próprio introduzi e que ninguém
+    # notou, porque uma notificação que não aparece não dá erro.
+    #
+    # A colecção tem um destinatário por documento; um aviso para N
+    # pessoas são N documentos.
+    agora = datetime.now(timezone.utc).isoformat()
+    notificacoes = [
+        {
+            "id": str(uuid.uuid4()),
+            "user_id": admin["id"],
+            "type": ALERT_TYPES["NEW_CLIENT_REGISTRATION"],
+            "process_id": process.get("id"),  # Compatibilidade retroactiva
+            "client_id": process.get("client_id") or process.get("id"),
+            "client_name": client_name,
+            "has_property": has_property,
+            "message": f"Novo registo: {client_name}" + (" (Já tem imóvel)" if has_property else ""),
+            "read": False,
+            "created_at": agora,
+        }
+        for admin in admins
+        if admin.get("id")
+    ]
+
+    if notificacoes:
+        await db.notifications.insert_many(notificacoes)
 
 
 # ====================================================================
@@ -503,24 +537,17 @@ async def notify_cpcv_or_deed_document_check(process: dict, new_status: str):
     else:
         title, description = "📋 Mudança de Fase", "O processo mudou de fase"
     
-    # Obter utilizadores envolvidos
-    user_ids = set()
-    if process.get("assigned_consultor_id"):
-        user_ids.add(process["assigned_consultor_id"])
-    if process.get("consultor_id"):
-        user_ids.add(process["consultor_id"])
-    if process.get("assigned_mediador_id"):
-        user_ids.add(process["assigned_mediador_id"])
-    if process.get("intermediario_id"):
-        user_ids.add(process["intermediario_id"])
-    
-    from services.role_query import deep_role_in_filter
-    staff = await db.users.find({
-        "$and": [deep_role_in_filter(["ceo", "diretor", "admin"]), {"is_active": True}]
-    }, {"_id": 0, "id": 1, "email": 1, "name": 1}).to_list(100)
-    
-    for s in staff:
-        user_ids.add(s["id"])
+    # Lote 6, ponto 8 — atribuídos + gestão DA MESMA REDE.
+    #
+    # Estava aqui um `deep_role_in_filter(["ceo","diretor","admin"])` sem
+    # condição de tenant nenhuma: um alerta de um processo da Power
+    # notificava a direcção da Domus — que é uma ilha — com o NOME DO
+    # CLIENTE no título. O varrimento do Lote 4/5 não o apanhou porque não
+    # é uma listagem: é um emissor, e o inventário foi feito do lado de
+    # quem LISTA.
+    user_ids = set(await destinatarios_do_alerta(
+        process, papeis_de_gestao=["ceo", "diretor", "admin"],
+    ))
     
     # Verificar documentos do imóvel
     property_check = await check_property_documents(process)
@@ -840,25 +867,21 @@ async def notify_valuation_alert(process: dict):
     if not alert.get("active"):
         return
     
-    # Obter utilizadores envolvidos
-    user_ids = set()
-    if process.get("assigned_consultor_id"):
-        user_ids.add(process["assigned_consultor_id"])
-    if process.get("consultor_id"):
-        user_ids.add(process["consultor_id"])
-    if process.get("assigned_mediador_id"):
-        user_ids.add(process["assigned_mediador_id"])
-    if process.get("intermediario_id"):
-        user_ids.add(process["intermediario_id"])
-    
-    # Sempre notificar admin/CEO para alertas críticos
-    if alert.get("priority") in ["critical", "high"]:
-        from services.role_query import deep_role_in_filter
-        staff = await db.users.find({
-            "$and": [deep_role_in_filter(["admin", "ceo", "diretor"]), {"is_active": True}]
-        }, {"_id": 0, "id": 1}).to_list(100)
-        for s in staff:
-            user_ids.add(s["id"])
+    # Lote 6, ponto 8 — atribuídos + (nos alertas graves) a gestão DA
+    # MESMA REDE. O `deep_role_in_filter` que estava aqui não tinha
+    # condição de tenant nenhuma: ver o comentário em
+    # `notify_cpcv_or_deed_document_check` e `services/alert_audience.py`.
+    #
+    # "Sempre notificar admin/CEO" continua a valer — o que muda é o
+    # alcance de "admin/CEO": os da rede do processo, não os de todas.
+    papeis_de_gestao = (
+        ["admin", "ceo", "diretor"]
+        if alert.get("priority") in ["critical", "high"]
+        else []
+    )
+    user_ids = set(await destinatarios_do_alerta(
+        process, papeis_de_gestao=papeis_de_gestao,
+    ))
     
     client_name = process.get("client_name", "Cliente")
     
