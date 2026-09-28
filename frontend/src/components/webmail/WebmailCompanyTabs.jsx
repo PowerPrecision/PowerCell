@@ -25,6 +25,7 @@ import { Button } from "../ui/button";
 import { Building2, RefreshCw, Loader2 } from "lucide-react";
 import {
   deveMostrarSeparadores,
+  deveMostrarNomeDaEmpresa,
   rotuloDaEmpresa,
   estadoDaSincronizacao,
 } from "../../utils/webmailEmpresas";
@@ -55,6 +56,7 @@ export default function WebmailCompanyTabs({
 }) {
   const sinc = estadoDaSincronizacao({ syncing, ultimaSinc });
   const mostrarSeparadores = deveMostrarSeparadores(empresas);
+  const mostrarNome = deveMostrarNomeDaEmpresa(empresas);
 
   return (
     <div
@@ -83,10 +85,15 @@ export default function WebmailCompanyTabs({
             ))}
           </TabsList>
         </Tabs>
-      ) : (
+      ) : mostrarNome ? (
         // Uma empresa só: sem separador solitário. O nome fica como
         // rótulo discreto — o utilizador continua a saber em que caixa
         // está, sem lhe dar uma escolha que não existe.
+        //
+        // `mostrarNome` e NÃO o `else` do `mostrarSeparadores`: o
+        // complemento de `length > 1` inclui o ZERO, e com a lista ainda a
+        // carregar isto desenhava o ícone com o nome em branco. Ver
+        // `deveMostrarNomeDaEmpresa`.
         <span
           className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground
                      truncate min-w-0"
@@ -95,6 +102,11 @@ export default function WebmailCompanyTabs({
           <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           {rotuloDaEmpresa(empresas?.[0])}
         </span>
+      ) : (
+        // Sem empresas (a carregar, pedido falhado, ou utilizador sem UCR):
+        // o espaço fica, a afirmação não. O indicador de sincronização à
+        // direita continua a fazer sentido.
+        <span className="min-w-0" />
       )}
 
       <div className="flex items-center gap-2 shrink-0">

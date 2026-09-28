@@ -25,6 +25,31 @@ export function deveMostrarSeparadores(empresas) {
 }
 
 /**
+ * Vale a pena escrever o nome da empresa activa?
+ *
+ * Só com **exactamente uma**. O complemento de `deveMostrarSeparadores`
+ * (`length > 1`) inclui o ZERO, e era aí que estava o defeito: enquanto a
+ * lista carrega — ou quando o pedido falha, ou quando o utilizador não tem
+ * UCR nenhum — o ramo do nome único disparava e desenhava o ícone de
+ * empresa com o nome VAZIO ao lado.
+ *
+ * Duas consequências, e a segunda é a que custou:
+ *
+ *   1. no ecrã, "a carregar" e "uma empresa" ficam indistinguíveis, com um
+ *      rótulo em branco a dizer em que caixa se está;
+ *   2. num teste, `findByTestId` resolve no ESTADO INTERMÉDIO — o elemento
+ *      já existe, vazio — e a asserção sobre o texto corre a seguir, contra
+ *      esse vazio. Passa numa máquina rápida e falha no CI. Foi assim que
+ *      apareceu: verde três vezes local, vermelho no CI.
+ *
+ * A saída não é esperar melhor no teste: é o elemento só existir quando
+ * tem o que dizer. Aí a sua presença É a afirmação.
+ */
+export function deveMostrarNomeDaEmpresa(empresas) {
+  return (Array.isArray(empresas) ? empresas : []).length === 1;
+}
+
+/**
  * Qual o separador activo.
  *
  * Uma empresa pedida (URL, sessão anterior) só vale se ainda constar da

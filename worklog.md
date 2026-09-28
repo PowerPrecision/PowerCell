@@ -8350,3 +8350,75 @@ o teste da fuga e é pior do que a fuga.
 4. Dívida nova que este trabalho destapou: `public_registration.py` **não
    carimba a rede** (zero ocorrências de `resolve_tenant_stamp`). Funciona
    porque cai na rede de omissão, mas é um carimbo em falta na origem.
+
+---
+
+# Iteração `ci-webmail-vazio` — o CI vermelho num teste que passou três vezes local
+
+O `WebmailPage.test.jsx` falhou no CI com:
+
+```
+Expected element to have text content:
+  Power Real Estate
+Received:
+```
+
+O elemento foi **encontrado** e estava **vazio**. Localmente passou três
+vezes seguidas, e a bateria completa passou duas vezes com 1267/1267.
+
+## Não era intermitência
+
+`WebmailCompanyTabs` decidia com `deveMostrarSeparadores(empresas)`
+(`length > 1`) e punha o rótulo da empresa única no **`else`**. O
+complemento de "mais do que uma" inclui o **zero** — logo, com a lista
+ainda a carregar, o `else` disparava e desenhava o ícone de empresa com o
+nome em branco.
+
+`findByTestId` resolve assim que o elemento existe. Ele já existia, vazio.
+O `toHaveTextContent` corre a seguir, síncrono, contra esse vazio. Numa
+máquina rápida a query chega antes do primeiro *poll* e passa; num CI com
+`setup 30s` e `environment 64s`, não.
+
+**No ecrã o defeito é o mesmo e afecta gente real:** "a carregar", "pedido
+falhado" e "utilizador sem UCR" mostram exactamente o que "uma empresa"
+mostra — um rótulo a dizer em que caixa se está, em branco.
+
+## Duas reproduções falhadas antes da boa
+
+Vale a pena registar, porque quase dei um diagnóstico por confirmado sem o
+estar:
+
+1. Injectei um atraso de 120 ms na resposta das empresas e o teste da
+   página **passou na mesma**. A página tem a sua própria porta de
+   carregamento e 120 ms não abriam a janela.
+2. "Revi" o componente com um `.bak` — que eu tinha feito **depois** de
+   aplicar a correcção. Revertê-lo repunha a correcção. A mutação era
+   nula e eu quase a li como "o defeito não é este".
+
+A boa foi `git checkout --` do ficheiro (o original verdadeiro) contra o
+teste de componente novo: falha com
+`expect(element).not.toBeInTheDocument()`. E, ao nível da página, com um
+atraso de 400 ms, o original reproduz **o erro do CI à letra** ("Expected
+element to have text content / Received:") enquanto a correcção passa.
+
+## A correcção
+
+`deveMostrarNomeDaEmpresa` (`length === 1`) — uma decisão **positiva**,
+com contraprova de que nunca é verdadeira ao mesmo tempo que
+`deveMostrarSeparadores`. Três estados, três condições. Sem empresas, o
+espaço fica e a afirmação não; o indicador de sincronização à direita é
+independente e sobrevive (também com teste, senão "não desenhar nada"
+viraria "esconder a barra").
+
+**Não pus um `waitFor` à volta da asserção.** Isso teria feito o CI ficar
+verde e deixado o rótulo vazio a aparecer a utilizadores reais — um teste a
+esconder o defeito que existe para apanhar.
+
+Quem prova a regra é o teste de **componente**: o da página passa de
+qualquer forma numa máquina rápida, e ficou lá uma nota a dizer porquê,
+para ninguém lá voltar a pôr um `waitFor`.
+
+## Validação
+
+Frontend **1274 passed / 111 ficheiros** (eram 1267; +7: 4 do helper e 3 do
+componente). `eslint --quiet` 0. Backend não foi tocado.

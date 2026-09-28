@@ -10,6 +10,7 @@
 import { describe, it, expect } from "vitest";
 import {
   deveMostrarSeparadores,
+  deveMostrarNomeDaEmpresa,
   resolverEmpresaActiva,
   rotuloDaEmpresa,
   estadoDaSincronizacao,
@@ -33,6 +34,38 @@ describe("deveMostrarSeparadores", () => {
     expect(deveMostrarSeparadores([])).toBe(false);
     expect(deveMostrarSeparadores(null)).toBe(false);
     expect(deveMostrarSeparadores(undefined)).toBe(false);
+  });
+});
+
+describe("deveMostrarNomeDaEmpresa — o zero não é uma empresa", () => {
+  it("escreve o nome com UMA empresa", () => {
+    expect(deveMostrarNomeDaEmpresa([empresa("power", "Power")])).toBe(true);
+  });
+
+  it("NÃO escreve nada com zero — era aqui o defeito", () => {
+    // O ramo do nome único era o `else` de `deveMostrarSeparadores`
+    // (`length > 1`), cujo complemento inclui o ZERO: enquanto a lista
+    // carregava, desenhava-se o ícone de empresa com o nome em branco.
+    // No ecrã, "a carregar" e "uma empresa" ficavam iguais; num teste, o
+    // `findByTestId` resolvia nesse estado intermédio e a asserção sobre
+    // o texto corria contra o vazio — verde local, vermelho no CI.
+    expect(deveMostrarNomeDaEmpresa([])).toBe(false);
+    expect(deveMostrarNomeDaEmpresa(undefined)).toBe(false);
+    expect(deveMostrarNomeDaEmpresa(null)).toBe(false);
+  });
+
+  it("NÃO escreve nada com duas — essas são separadores", () => {
+    expect(deveMostrarNomeDaEmpresa([
+      empresa("power", "Power"), empresa("domus", "Domus"),
+    ])).toBe(false);
+  });
+
+  it("nunca é verdade ao mesmo tempo que os separadores", () => {
+    // Contraprova sobre as DUAS decisões: são exclusivas por construção,
+    // e é essa exclusividade que o `else` encadeado do componente assume.
+    for (const lista of [[], [empresa("a", "A")], [empresa("a", "A"), empresa("b", "B")]]) {
+      expect(deveMostrarSeparadores(lista) && deveMostrarNomeDaEmpresa(lista)).toBe(false);
+    }
   });
 });
 
