@@ -22,6 +22,7 @@ import { getProcesses, getWorkflowStatuses, getCalendarDeadlines } from "../serv
 import { safeDateStr, safeFormat } from "../lib/utils";
 import { safeString } from "../utils/safeString";
 import { formatCurrency as formatCurrencyShared } from "../utils/formatCurrency";
+import { notaMaisRecenteDoConsultor } from "../utils/processObservationNotes";
 // PACOTE CH — ClientDetailsModal reutilizável
 import ClientDetailsModal from "../components/ClientDetailsModal";
 
@@ -547,10 +548,14 @@ const FilteredProcessList = () => {
                               )}
                             </TableCell>
                           )}
-                          {/* PACOTE CZ: Notas — lê a atividade mais recente PRIMEIRO (não process.notes estático) */}
-                          <TableCell className="min-w-[140px] max-w-[220px]">
+                          {/* PONTO 9: espelha o RESUMO. Os três campos que
+                              aqui se liam (`latest_activity_preview`,
+                              `latest_activity_note`, `latest_note`) não
+                              existem no backend: esta coluna dizia "Sem
+                              notas recentes" em TODOS os processos. */}
+                          <TableCell className="min-w-[140px] max-w-[220px]" data-testid="notas-do-consultor">
                             {(() => {
-                              const noteText = process.latest_activity_preview || process.latest_activity_note || process.latest_note || "";
+                              const noteText = notaMaisRecenteDoConsultor(process);
                               if (noteText) {
                                 return (
                                   <div className="line-clamp-2 text-sm text-muted-foreground" title={noteText}>

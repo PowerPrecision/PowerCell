@@ -107,3 +107,52 @@ export function resolveProcessObservationNotes(process) {
     })
     .map(({ nota }) => nota);
 }
+
+/**
+ * A nota mais recente escrita por uma PESSOA — o que a Listagem de
+ * Processos mostra na coluna "Notas do Consultor" (Ponto 9).
+ *
+ * O QUE ESTAVA A ACONTECER
+ *   As duas listagens não mostravam notas nenhumas: mostravam a
+ *   ATIVIDADE mais recente, e faziam-no lendo campos que o backend nunca
+ *   produziu. `latest_activity_preview`, `latest_note` e
+ *   `latest_activity_note` têm **zero** ocorrências em `backend/` — são
+ *   nomes inventados no frontend. Na `FilteredProcessList`, onde a
+ *   cascata só lia esses três, a coluna dizia "Sem notas recentes" em
+ *   TODOS os processos, sempre, desde que foi escrita. Na `ProcessesPage`
+ *   a cascata tinha mais sete ramos por baixo e acabava por chegar a
+ *   `notes`, pelo que às vezes mostrava alguma coisa — e foi essa metade
+ *   a funcionar que escondeu a outra.
+ *
+ *   É a armadilha do "mock com a forma inventada", desta vez em código de
+ *   produção: quem escreveu a cascata assumiu o contrato em vez de o ler.
+ *
+ * A REGRA (Ponto 9)
+ *   A listagem espelha o **Resumo**, que é o local oficial das notas do
+ *   consultor. Não lê o Histórico — o Histórico passou a ser uma linha
+ *   temporal do sistema, e misturar as duas coisas na mesma coluna é o
+ *   que esta separação vem desfazer.
+ *
+ *   Deriva de `resolveProcessObservationNotes` de propósito: são os
+ *   MESMOS campos, pela MESMA ordem cronológica, e por isso a coluna não
+ *   pode divergir do cartão sem alguém dar por isso.
+ *
+ * PORQUE É QUE A IA FICA DE FORA
+ *   O cartão do Resumo mostra as notas lidas pela IA com um crachá
+ *   próprio, precisamente porque não têm o mesmo peso que o que um
+ *   consultor escreveu. A coluna chama-se "Notas do Consultor" e não tem
+ *   crachá nenhum: deixar lá entrar texto da IA seria apresentá-lo como
+ *   se fosse de uma pessoa. O `ai_extracted_notes` também não vem nas
+ *   projecções das listagens — e é texto livre sem limite de tamanho, que
+ *   não tem de viajar em todas as linhas de uma tabela.
+ *
+ * @param {object} [process]
+ * @returns {string} A nota mais recente, ou `""` quando não há nenhuma.
+ */
+export function notaMaisRecenteDoConsultor(process) {
+  const daPessoa = resolveProcessObservationNotes(process).filter(
+    (nota) => nota.origin !== "ai",
+  );
+  if (daPessoa.length === 0) return "";
+  return texto(daPessoa[daPessoa.length - 1].text).trim();
+}

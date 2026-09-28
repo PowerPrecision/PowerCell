@@ -1,6 +1,20 @@
 /**
  * PACOTE DU — Observações como feed de notas.
  * Lista notas antigas e um campo para acrescentar novas.
+ *
+ * PONTO 9: É AQUI QUE AS NOTAS SE ESCREVEM
+ * ========================================
+ * Este cartão passou a ser o local OFICIAL e único das notas do
+ * consultor. O separador Histórico deixou de as aceitar (é uma trilha de
+ * auditoria automática) e a coluna "Notas do Consultor" da Listagem de
+ * Processos espelha o que aqui está — é a MESMA função que resolve as
+ * duas (`resolveProcessObservationNotes`), para não poderem divergir.
+ *
+ * O botão de nota de voz mudou-se para cá pela mesma razão: uma nota
+ * ditada é uma nota. Componente de APRESENTAÇÃO — pede a abertura do
+ * gravador (`onAbrirNotaDeVoz`) e é o contentor que decide; o diálogo
+ * vive ao nível da página, para o utilizador não o perder ao mudar de
+ * separador.
  */
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -10,7 +24,7 @@ import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
 import { EmptyState } from "../ui/EmptyState";
 import { Badge } from "../ui/badge";
-import { Loader2, StickyNote, Plus } from "lucide-react";
+import { Loader2, StickyNote, Plus, Mic } from "lucide-react";
 import { formatDateTime } from "../../lib/utils";
 import { resolveProcessObservationNotes } from "../../utils/processObservationNotes";
 
@@ -28,6 +42,7 @@ export default function ProcessObservationsCard({
   onAdd,
   disabled = false,
   saving = false,
+  onAbrirNotaDeVoz,
 }) {
   const notes = resolveProcessObservationNotes(process);
   const [draft, setDraft] = useState("");
@@ -50,6 +65,20 @@ export default function ProcessObservationsCard({
           <StickyNote className="h-4 w-4 text-muted-foreground" />
           Observações
         </CardTitle>
+        {/* Sem callback não há botão: um botão que não faz nada é pior
+            do que botão nenhum (mesma regra que valia no Histórico). */}
+        {!disabled && onAbrirNotaDeVoz && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => onAbrirNotaDeVoz()}
+            data-testid="voice-note-open"
+          >
+            <Mic className="h-3.5 w-3.5" />
+            Nota de voz
+          </Button>
+        )}
       </CardHeader>
       <CardContent className="space-y-3">
         {notes.length === 0 ? (

@@ -8547,3 +8547,107 @@ Frontend não foi tocado.
 `client_assign` não atribui nada quando o alvo é `diretor` — o
 `process_create` trata diretor como consultor, este não. Não foi alargado
 aqui de propósito (mudaria comportamento fora do âmbito deste ponto).
+
+---
+
+# Iteração `ponto-9-resumo-vs-historico` — um sítio para escrever, um para auditar
+
+## O pedido
+
+1. O local oficial das notas do consultor é exclusivamente o Resumo.
+2. O Histórico passa a ser só de leitura — sem UI de adição.
+3. A coluna "Notas do Consultor" da listagem espelha o Resumo.
+
+## O que encontrei antes de mexer
+
+**O ponto 3 escondia um defeito maior do que o pedido.** As duas
+listagens não mostravam o Resumo *nem* o Histórico: mostravam campos que
+**não existem**.
+
+```js
+const noteText = process.latest_activity_preview
+  || process.latest_activity_note || process.latest_note || "";
+```
+
+`latest_activity_preview`, `latest_note` e `latest_activity_note` têm
+**zero** ocorrências em `backend/`. Na `FilteredProcessList`, onde a
+cascata só lia esses três, a coluna dizia **"Sem notas recentes" em todos
+os processos, sempre**, desde que foi escrita. Na `ProcessesPage` havia
+mais sete ramos por baixo e o sexto chegava a `process.notes` — foi essa
+metade a funcionar que escondeu a outra, a mesma forma do
+`run_get_my_tasks` a esconder o `run_get_tasks`.
+
+É a armadilha do "mock com a forma inventada", desta vez em **código de
+produção**: a cascata foi escrita contra um contrato suposto. E uma
+coluna vazia não produz erro nenhum, por isso ninguém deu por ela.
+
+## O que mudou
+
+**Ponto 3 —** `notaMaisRecenteDoConsultor`, puro, derivado de
+`resolveProcessObservationNotes`: os mesmos campos, a mesma ordem
+cronológica do cartão do Resumo, para a coluna não poder divergir do
+cartão. As notas lidas pela IA ficam de fora — o cartão distingue-as com
+um crachá e a coluna não tem crachá nenhum; deixá-las entrar seria
+apresentar como de uma pessoa um texto que a máquina leu.
+
+**Ponto 2 —** `HistoryTab` perdeu o diálogo "Registar Atividade / Nota",
+e o `ProcessDetails` perdeu com ele o `handleSendComment` e o estado
+`newComment`/`sendingComment` (era o único chamador de
+`processMutations.addActivity` no frontend). A ausência **explica-se no
+ecrã**: "Registo automático — as notas escrevem-se no Resumo". Sem isso,
+quem procurar o botão conclui que a página está partida.
+
+**Ponto 1 —** o botão de nota de voz **mudou-se** para o cartão de
+Observações. Não foi apagado: uma nota ditada é uma nota, e o sítio das
+notas passou a ser um só. O `VoiceNoteRecorder` subiu para o nível da
+página, junto dos outros diálogos.
+
+## Um teste meu que afirmava o impossível
+
+Escrevi um teste a dizer "mudar de separador não fecha a gravação", para
+justificar ter subido o gravador ao nível da página. **Falhou por bom
+motivo:** o gravador é um diálogo MODAL, logo com ele aberto os
+separadores por trás ficam `aria-hidden` e não há como lá clicar. A
+afirmação era sobre um percurso que a UI não permite e ficaria ali a dar
+uma garantia falsa.
+
+Corrigi o teste **e os dois comentários** que davam a mesma justificação
+errada no `ProcessDetails.js` e no cabeçalho do teste movido. A razão
+verdadeira é mais simples: o gatilho passou para o Resumo e um diálogo
+não é conteúdo de separador.
+
+## As guardas
+
+**A ausência precisa de teste.** Uma UI removida volta com a mesma
+facilidade com que saiu e não parte nada ao voltar.
+`HistoryTab.soLeitura.test.jsx` afirma-a pelo papel e pelo nome
+acessível, com duas contraprovas: que não depende de quem chama (recebe
+`handleSendComment` e continua a não desenhar nada) e que "só de leitura"
+não virou "vazio".
+
+**O contrato afirma-se do lado que o conhece.** O frontend não consegue
+saber o que a projecção traz. `test_projeccao_das_notas_do_consultor.py`
+verifica que `observation_notes`/`observations`/`notes` estão nas
+projecções da listagem e do Kanban, com contraprova de que os três nomes
+inventados continuam a não existir — se alguém os acrescentar, é porque
+passou a calculá-los, e aí a decisão do Ponto 9 está a ser desfeita sem
+se dizer.
+
+## Validação
+
+Frontend **1288 passed / 112 ficheiros** (eram 1274/111). `eslint
+--quiet` 0. Backend **3998 passed, 5 skipped**.
+
+## O que ficou aberto de propósito
+
+* **`POST /api/activities` continua aberto** e `useAddActivityMutation`
+  continua exportado. Fechou-se a UI, não o endpoint — fechá-lo exige
+  inventariar quem mais lá escreve (o motor de notas de voz escreve em
+  `db.activities` directamente, não por aqui) e é decisão à parte.
+* **Apagar um comentário no Histórico continua possível.** Já ninguém os
+  consegue criar por ali, pelo que o botão só alcança registos antigos e
+  notas de voz — é a única forma de corrigir uma entrada errada. Se a
+  regra for "nem apagar", digam e tira-se.
+* **O modal do Kanban** (`ProcessDetailsModal`) continua a escrever no
+  escalar `notes`. Não é um sítio concorrente: é o MESMO campo que o
+  cartão do Resumo lê e que a coluna passa a espelhar.
