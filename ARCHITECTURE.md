@@ -6294,3 +6294,90 @@ Root corta o excedente. O wrapper em `components/ui/scroll-area.jsx` aceita
 `viewportStyle`/`viewportClassName` para o caso em que a altura tem de ser um
 **limite** e não um valor fixo; com altura definida (`h-[280px]`) o problema
 não existe, e é isso que os restantes usos da aplicação já fazem.
+
+## A audiência de um alerta — o isolamento do lado de quem EMITE (Set 2026)
+
+O isolamento por rede do Lote 4/5 foi construído do lado de quem **lista**:
+uma condição Mongo (`tenant_network.build_network_scope_condition`) aplicada
+a cada consulta que devolve dados. Três vezes o inventário dessas
+superfícies ficou incompleto — Kanban, notificações, tarefas — e todas as
+três eram listagens esquecidas.
+
+`services/alerts.py` mostrou um eixo que não estava coberto de todo: um
+**emissor**. Não devolve dados a um pedido; escolhe destinatários e
+empurra-lhes uma notificação. A consulta que o traía era
+
+```python
+db.users.find({"$and": [deep_role_in_filter(["admin","ceo","diretor"]),
+                        {"is_active": True}]})
+```
+
+sem condição de tenant nenhuma, em três sítios. Um alerta de um processo da
+Power notificava a direcção da Domus com o nome do cliente no título.
+
+### As duas audiências não são a mesma, e é isso que estrutura o módulo
+
+`services/alert_audience.py` separa-as de propósito:
+
+| audiência | de onde vem | filtro de rede |
+|---|---|---|
+| **atribuídos** | campos canónicos do processo | **não** |
+| **gestão** | UCRs com o cargo, nas empresas da rede | **sim** |
+
+Estar atribuído a um processo *é* a autorização para saber dele: quem foi
+posto lá dentro já tem acesso aos dados, e aplicar-lhe o filtro faria um
+processo por carimbar deixar de avisar o próprio consultor que o trata. O
+filtro existe para a audiência que se obtém por **cargo**, que é a única
+que pode alcançar alguém sem relação nenhuma com o processo.
+
+### A rede do processo, e o que fazer sem carimbo
+
+Por esta ordem: o carimbo (`network_id`) → a empresa do processo (com o
+grupo lido de `companies`) → a rede de omissão
+(`TENANT_DEFAULT_NETWORK_ID`, definida em produção, que é a dona da pilha
+por carimbar).
+
+Se nenhuma resolver, a audiência de gestão é **vazia**, com `warning`.
+Falha fechada, pela mesma razão do `CONDICAO_IMPOSSIVEL`: a alternativa é
+difundir o nome de um cliente a toda a gestão de todas as redes. Um alerta
+que não chega nota-se; uma fuga não.
+
+### Os destinatários vêm das constantes canónicas
+
+Os campos de atribuição são lidos de `CONSULTOR_ID_FIELDS` /
+`MEDIADOR_ID_FIELDS` (`process_staff_assignment`), nunca de uma lista
+escrita no emissor. A que lá estava ignorava os **plurais**
+(`assigned_consultor_ids`), que são a verdade desde o Lote 5: num processo
+com dois consultores, o segundo nunca era notificado.
+
+É a mesma regra do `set`/`clear` derivarem da mesma constante — e pela mesma
+razão: a lista escrita duas vezes diverge, e o lado que divergir não dá erro
+nenhum.
+
+### Uma notificação tem UM destinatário
+
+`db.notifications` é por pessoa. Desde que `run_get_notifications` passou a
+filtrar só por `user_id` (Lote 5, ponto 3), um documento sem esse campo é
+invisível a toda a gente. Um aviso para N pessoas são N documentos — não um
+documento "para todos", que é o que lá estava e que ninguém recebia.
+
+## Desfasamento de atribuição: medir antes de limpar (Set 2026)
+
+`services/assignment_drift.py` (puro) compara os campos singulares com a
+lista que os devia gerar, e dá **três** veredictos, não dois:
+
+* `divergente` — a lista tem gente e o singular aponta para fora dela;
+* `em_falta` — a lista tem gente e o singular está vazio;
+* `ambiguo` — a lista está vazia e o singular tem valor.
+
+Os dois primeiros são inequívocos: a lista é a verdade. O terceiro **não se
+decide a partir do documento**, e é aí que está o risco. O
+`dual_auto_assign_on_pre_registo_transition` gravava só `consultant_id`,
+pelo que essa forma tanto pode ser resíduo de uma desatribuição antiga como
+uma atribuição legada legítima — e limpá-la deixa o processo sem dono.
+
+`scripts/diagnose_assignment_drift.py` corre **contra produção**, ao
+contrário dos scripts de seed, e por isso não chama
+`require_non_production_db`. A contrapartida é a gradação de ordens: ler e
+contar por omissão, `--corrigir` só para os inequívocos, `--incluir-ambiguos`
+como segunda ordem explícita.

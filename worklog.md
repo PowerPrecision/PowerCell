@@ -8213,3 +8213,140 @@ iteração (Kanban, notificações, tarefas) e a que continua a falhar.
 **O teste vem primeiro e tem de ter as duas contraprovas:** um consultor não
 atribuído NÃO recebe, e o consultor atribuído RECEBE — sem a segunda, "não
 notificar ninguém" passa o teste e é uma regressão pior do que a fuga.
+
+---
+
+# Iteração `ponto-8-alertas` — a medição, e dois furos que ela destapou
+
+O Ponto 8 pedia números de produção e a correcção da fuga de notificações.
+**Os números não saem daqui** (ver abaixo), mas tudo o resto saiu — e ao ler
+o `alerts.py` para o corrigir encontrei um segundo defeito que é meu, do
+Lote 5.
+
+## Não consigo contar a partir deste ambiente — e é assim que deve ser
+
+`MONGO_URL` vem **vazio** neste contentor e o DNS do Atlas não resolve
+(`gaierror: Name or service not known`). Não há credenciais de produção
+aqui, por desenho: o ambiente local opera com dados simulados e a regra é
+não usar dados reais de clientes em dev.
+
+Portanto a contagem é entregue como **script para correr em produção**, e
+não como um número que eu invente. `scripts/diagnose_assignment_drift.py`.
+
+## O que o script mede, e a distinção que o torna seguro
+
+O defeito de origem: até ao Lote 5, `build_clear_consultor_fields` limpava
+quatro dos seis campos canónicos e deixava `consultor_id` e `consultant_id`
+com o valor antigo. A correcção parou de **produzir** o problema; não
+limpou o que já existia. E há dois leitores desses campos:
+`services/alerts.py` (notifica quem lá estiver) e `process_list_filters`
+(usa `consultant_id` em "Os Meus Processos").
+
+**A armadilha, e é o ponto todo:** "lista vazia + campo singular
+preenchido" **não é** sinónimo de resíduo. O
+`dual_auto_assign_on_pre_registo_transition` gravava SÓ `consultant_id`,
+pelo que há processos legitimamente atribuídos cuja lista nunca foi
+escrita. Limpá-los DESATRIBUI trabalho real — e um processo sem dono não se
+nota até alguém reparar que ninguém lhe pega. É a mesma razão pela qual o
+`backfill_network_id` se recusa a adivinhar: um carimbo errado é
+permanente.
+
+Daí três veredictos, e só dois corrigíveis sozinhos:
+
+| veredicto | condição | seguro? |
+|---|---|---|
+| `divergente` | lista tem gente, singular aponta para fora | sim — a lista é a verdade |
+| `em_falta` | lista tem gente, singular vazio | sim — perde notificações |
+| `ambiguo` | lista vazia, singular preenchido | **não** — indecidível |
+
+O script lê e conta por omissão; `--corrigir` aplica só os inequívocos; os
+ambíguos exigem `--incluir-ambiguos`, uma segunda ordem explícita.
+Ao contrário dos scripts de seed, **não** chama `require_non_production_db`:
+a dívida que mede está na base de dados real.
+
+Provado de ponta a ponta contra uma base local semeada com os quatro casos
+(coerente, ambíguo, divergente, em falta, mais um eliminado): contou
+4 analisados / 3 afectados, corrigiu 2 e **deixou o ambíguo intacto**.
+
+## O furo de segregação: a gestão era notificada sem filtro de rede
+
+`services/alerts.py` fazia, em **três** sítios:
+
+```python
+db.users.find({"$and": [deep_role_in_filter(["admin","ceo","diretor"]),
+                        {"is_active": True}]})
+```
+
+sem uma única condição de tenant. Um alerta de um processo da Power
+notificava a direcção da Domus — que é uma ilha — **com o nome do cliente
+no título da notificação**.
+
+O varrimento do Lote 4/5 não o apanhou porque não é uma listagem: é um
+**emissor**. O inventário foi feito do lado de quem LISTA, e este lado
+nunca foi percorrido. É a quarta instância da mesma lição, com um eixo
+novo.
+
+`services/alert_audience.py` é o ponto único. Duas regras que não se podem
+perder:
+
+* **Os atribuídos NÃO passam pelo filtro de rede.** Estar atribuído é, por
+  si, a autorização; o filtro é para a audiência obtida por CARGO. Aplicá-lo
+  a todos faria um processo por carimbar deixar de avisar o próprio
+  consultor que trata dele.
+* **Falha fechada na gestão.** Sem rede determinável, a audiência de gestão
+  é vazia e fica um `warning`. A alternativa é difundir o nome de um cliente
+  a toda a gestão de todas as redes: um alerta que não chega nota-se, uma
+  fuga não. Na prática a rede de omissão cobre a pilha por carimbar, e está
+  definida em produção.
+
+Segundo defeito no mesmo ficheiro: os atribuídos eram lidos de uma lista
+escrita à mão que ignorava os **plurais** (`assigned_consultor_ids`), que
+são a verdade desde o Lote 5. Num processo com dois consultores, o segundo
+nunca era notificado — o sinal CONTRÁRIO ao relatado, e que ninguém repara
+porque uma notificação que não chega não dá erro. Os campos vêm agora das
+constantes de produção.
+
+## E um defeito meu, do Lote 5, que só apareci a ler isto
+
+`notify_new_client_registration` inseria **um** documento em
+`db.notifications`, **sem `user_id`**, com o comentário "Criar notificação
+no sistema para TODOS os admins".
+
+Funcionava enquanto `run_get_notifications` filtrava por visibilidade de
+processo. Mas o Lote 5, ponto 3, pôs o `user_id` como **único** critério — e
+bem, porque o cargo não decide visibilidade de dados pessoais. **Desde
+então essa notificação é invisível a toda a gente**, incluindo a quem a
+devia ver.
+
+Ninguém deu por isso porque uma notificação que não aparece não produz
+erro nenhum. A colecção tem um destinatário por documento: um aviso para N
+pessoas são N documentos, e é assim que passa a ser gravado.
+
+## Validação
+
+Backend **3960 passed, 5 skipped** (eram 3927; +31 meus e +2 do
+`test_listas_de_fases_implodidas`, que é parametrizado por módulo de
+`services/` — acrescentei dois). Frontend não foi tocado nesta iteração.
+`flake8` com os selectores bloqueantes do CI: 0.
+
+Guardas de fonte com contraprova: `alerts.py` tem de chamar o ponto único,
+**e** não pode restar nenhuma consulta a `db.users` por cargo lá dentro
+(`deep_role_in_filter` fora dos comentários) — a leitura ignora comentários,
+senão a explicação do defeito fazia o teste ficar vermelho e a saída óbvia
+seria apagar a explicação.
+
+O teste que impede a correcção de virar regressão é
+`test_o_atribuido_recebe_SEMPRE`: sem ele, "não notificar ninguém" satisfaz
+o teste da fuga e é pior do que a fuga.
+
+## A fazer em produção
+
+1. **Correr o diagnóstico** (só lê):
+   `MONGO_URL=… DB_NAME=… python scripts/diagnose_assignment_drift.py`
+2. Com os números à frente, decidir sobre `--corrigir` (inequívocos) e,
+   separadamente, sobre os ambíguos.
+3. **Confirmar `TENANT_DEFAULT_NETWORK_ID`** está definida: é ela que faz a
+   gestão continuar a ser notificada dos processos por carimbar.
+4. Dívida nova que este trabalho destapou: `public_registration.py` **não
+   carimba a rede** (zero ocorrências de `resolve_tenant_stamp`). Funciona
+   porque cai na rede de omissão, mas é um carimbo em falta na origem.
