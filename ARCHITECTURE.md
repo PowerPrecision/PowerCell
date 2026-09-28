@@ -6725,3 +6725,89 @@ de produto — que papel se carimba como quê — e separá-la daria o defeito
 do Lote 5 noutro eixo. Há guarda a afirmar que não está em nenhuma das
 duas tuplas: a bandeira só é defensável enquanto o Índice não for um
 atribuído.
+
+
+## Posse antes de conteúdo, e um segredo sem omissão (Set 2026)
+
+Duas dívidas fechadas no mesmo lote (D-1 e D-3). Partilham a forma: **uma
+parede que existia e não estava ligada a esta porta**.
+
+### O `confirm-upload` do CRM era o Incidente P0, noutra superfície
+
+`document_direct_upload.run_confirm_upload` recebia o `file_key` do CORPO
+do pedido e validava-o **só** com `s3_service.file_exists()`. O ficheiro
+tinha **zero** ocorrências de `assert_` — nenhuma guarda de posse. E a
+resposta trazia `temporary_url`, um URL pré-assinado para essa chave.
+
+No mesmo bucket vivem os documentos de TODAS as redes, os `backups/*.zip`
+e os `companies/*`. Um membro da equipa com sessão válida — incluindo um
+consultor da Domus, que é uma ilha — nomeava `backups/dump.zip` e recebia
+o URL para o descarregar. Pior: o registo criado com esse `s3_path` fazia
+os caminhos de download autorizarem a chave a partir daí.
+
+**O registo de dívida classificava isto como "integridade de dados e
+higiene do bucket" e dizia explicitamente "não é escalada de
+privilégio".** Era. A entrada foi escrita a olhar para a quarentena de
+magic bytes que faltava e **não para o `file_key` que ninguém validava** —
+o diagnóstico ficou preso ao sintoma que o motivou.
+
+Hoje, por esta ordem:
+
+1. **Sem dono, recusa-se.** O degradado de
+   `assert_s3_file_belongs_to_process` (sem `s3_folder`) monta o prefixo a
+   partir do `client_name`; com o nome vazio os dois prefixos colapsam em
+   `"Documentação Clientes/"` — a raiz inteira, e a guarda deixa de
+   guardar. Fechado no ponto de chamada, para não alargar o raio à guarda
+   partilhada que serve dezenas de endpoints.
+2. **As duas guardas**, que não se substituem: a da RAIZ defende de um
+   `s3_folder` envenenado que aponte para fora da árvore de documentos; a
+   de POSSE defende do processo do vizinho.
+3. **Só então o conteúdo.** `exigir_conteudo_valido` substitui o
+   `file_exists()` — é o MESMO `head_object`, mas responde a mais
+   perguntas (tamanho e tipo REAIS) e apaga o que reprovar por conteúdo.
+
+**A ordem é a regra.** Invertida, o backend passava a ler 2 KB de
+qualquer chave que um utilizador nomeasse — um oráculo feito com a
+própria parede.
+
+`temporary_url` saiu da resposta, como no Portal: ninguém o lia — o
+`directS3Upload` do `api.js` devolvia-o e **não tem chamadores**. E o
+`file_size`/`content_type` passaram a vir do veredicto, não da declaração
+do cliente.
+
+**Um teste legado caiu, e por bom motivo:** o fixture do PACOTE 10 punha
+"Cliente Upload" no processo e `.../Cliente/...` na chave. Passava porque
+não havia guarda nenhuma. Corrigiu-se o **fixture**, não a guarda — o
+fluxo real (`run_generate_upload_url`) deriva a chave do `s3_folder` /
+`client_name` do MESMO processo, logo a guarda nunca recusa um upload
+legítimo.
+
+### O `gov_token` assinava com um literal público
+
+`gov_auth_api_helpers` fazia
+`os.environ.get("GOV_AUTH_JWT_SECRET", "dev-secret-change-in-prod")` e a
+variável **não estava declarada no `render.yaml`**. O router está montado
+(`server.py`, prefixo `/api`), portanto os três endpoints estavam vivos e
+qualquer pessoa forjava um `verified_by_gov: True` — que pré-preenche o
+formulário público. A entrada do registo dizia "não está em uso real", e
+era essa a parte errada do diagnóstico.
+
+Hoje `_resolver_segredo` é **puro** e fail-closed: produção sem variável →
+`sys.exit(1)` (o padrão do `config.py`); fora de produção → segredo
+**aleatório por processo**. Aleatório e não um literal, porque um literal
+é um segredo conhecido em qualquer máquina que corra o código; efémero, os
+tokens não sobrevivem a um reinício — que é o que se quer de um token de
+10 minutos em dev.
+
+**Segundo defeito no mesmo ficheiro:** produtor e verificador tinham ramos
+simétricos `except ImportError` que criavam e ACEITAVAM um token terminado
+no literal `"mock-signature"`, sem assinatura nenhuma. Nunca foi
+explorável (o `PyJWT==2.10.1` está fixado, o `import` nunca falhou), mas
+saiu dos DOIS lados no mesmo commit: manter só metade deixaria um
+consumidor permissivo sem produtor, que é a metade perigosa. Um
+`ImportError` do PyJWT não é um caso a degradar — é a aplicação inteira
+sem autenticação, e deve rebentar.
+
+**Consequência operacional:** `GOV_AUTH_JWT_SECRET` passa a ser
+**obrigatória** no serviço de produção. Sem ela o arranque falha, de
+propósito.

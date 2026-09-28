@@ -16,10 +16,16 @@ from services.document_auto_categorize import auto_categorize_document_backgroun
 from services.document_constants import (
     DEFAULT_CLIENT_NAME,
     DEFAULT_FILE_PREFIX,
+    ERROR_FILE_ACCESS_DENIED,
     ERROR_PROCESS_NOT_FOUND,
 )
 from services.document_filenames import normalize_filename, sanitize_for_log
-from services.document_process_resolve import extract_second_client_name
+from services.document_process_resolve import (
+    assert_path_within_document_root,
+    assert_s3_file_belongs_to_process,
+    extract_second_client_name,
+)
+from services.s3_content_quarantine import exigir_conteudo_valido
 from services.document_upload import _auto_fulfill_portal_request
 from services.history import log_history
 from services.s3_storage import s3_service
@@ -170,9 +176,11 @@ async def run_confirm_upload(
     file_key = data.get("file_key")
     original_filename = data.get("original_filename")
     category = data.get("category", "Outros")
-    file_size = data.get("file_size")  # reserved / accepted from client
-    content_type = data.get("content_type", "application/octet-stream")
-    _ = (file_size, content_type)  # kept for API compat; not persisted here
+    # O `file_size`/`content_type` do CORPO do pedido são DECLARAÇÕES do
+    # cliente e não são usados: o que vale é o veredicto da quarentena,
+    # que os lê do objecto real. Continuam aceites por compatibilidade de
+    # API (o `directS3Upload` do frontend ainda os envia).
+    _ = (data.get("file_size"), data.get("content_type"))
 
     if not process_id:
         raise HTTPException(status_code=400, detail="process_id é obrigatório")
@@ -187,14 +195,54 @@ async def run_confirm_upload(
 
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
 
-    if not s3_service.file_exists(file_key):
-        raise HTTPException(
-            status_code=400,
-            detail="Ficheiro não encontrado no S3. O upload pode ter falhado.",
+    # ============================================================
+    # POSSE ANTES DE CONTEÚDO (D-1, Set 2026)
+    # ============================================================
+    # O `file_key` vem do CORPO do pedido e, até aqui, era validado só
+    # com `s3_service.file_exists()` — a MESMA lacuna do Incidente P0 do
+    # Portal, nesta superfície. Um membro da equipa com sessão válida
+    # nomeava `backups/dump-2026-09-01.zip` e a resposta devolvia-lhe um
+    # `temporary_url` pré-assinado para o descarregar; no mesmo bucket
+    # vivem os documentos de TODAS as redes, os backups e os
+    # `companies/*`. Pior: o registo criado com esse `s3_path` fazia os
+    # caminhos de download autorizarem a chave para sempre.
+    #
+    # As duas guardas são ambas precisas e nenhuma substitui a outra: a
+    # da RAIZ defende de um `s3_folder` envenenado que aponte para fora
+    # da árvore de documentos; a de POSSE defende do processo do vizinho.
+    #
+    # A ORDEM é a regra da quarentena do Portal: posse ANTES de
+    # conteúdo. Invertida, o backend passava a ler 2 KB de qualquer
+    # chave que um utilizador nomeasse — um oráculo feito com a própria
+    # parede.
+    # SEM DONO, RECUSA-SE. O degradado de
+    # `assert_s3_file_belongs_to_process` (sem `s3_folder`) monta o
+    # prefixo a partir do `client_name`; com o nome VAZIO os prefixos
+    # válidos passam a ser `"Documentação Clientes/"` — a raiz inteira, ou
+    # seja, a guarda deixa de guardar. É a mesma regra do
+    # `portal_upload_ops`, aplicada aqui no ponto de chamada por não
+    # alargar o raio da alteração à guarda partilhada, que serve dezenas
+    # de endpoints do CRM.
+    if not process.get("s3_folder") and not (process.get("client_name") or "").strip():
+        logger.warning(
+            "[CONFIRM-UPLOAD] Processo %s sem pasta nem nome de cliente — "
+            "recusado por não ser possível determinar a posse do ficheiro.",
+            process_id,
         )
+        raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
+
+    assert_path_within_document_root(file_key)
+    assert_s3_file_belongs_to_process(file_key, process)
+
+    # Só agora se toca no objecto. `exigir_conteudo_valido` substitui o
+    # `s3_service.file_exists()`: é o MESMO `head_object`, mas responde a
+    # mais perguntas (tamanho e tipo REAIS) e apaga o que reprovar por
+    # CONTEÚDO. Falha de leitura é 503 e não apaga nada.
+    veredicto = await exigir_conteudo_valido(file_key, filename=original_filename)
+    content_type = veredicto.tipo_detectado or "application/octet-stream"
+    file_size = veredicto.tamanho
 
     normalized_filename = file_key.split("/")[-1] if "/" in file_key else file_key
-    temporary_url = s3_service.get_presigned_url(file_key) or ""
 
     category, ai_categorization_detail, file_content = await _triage_category_with_ai(
         category=category,
@@ -317,7 +365,10 @@ async def run_confirm_upload(
         "normalized_filename": normalized_filename,
         "original_filename": original_filename,
         "category": category,
-        "temporary_url": temporary_url,
+        # `temporary_url` SAIU da resposta (D-1): era um URL pré-assinado
+        # para a chave que o cliente nomeou, e portanto o veículo da fuga.
+        # Ninguém o lia — o `directS3Upload` do `api.js` devolvia-o e não
+        # tem chamadores. Mesma decisão do `portal/confirm-upload`.
         "message": "Upload registado com sucesso",
         "auto_categorization": "iniciada" if file_content else " indisponível",
         "portal_fulfilled": portal_fulfill.get("fulfilled", 0),

@@ -22,6 +22,11 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from services.s3_content_quarantine import (  # noqa: E402
+    MOTIVO_APROVADO as _MOTIVO_APROVADO,
+    Veredicto as _QuarentenaVeredicto,
+)
+
 
 # ====================================================================
 # 1) PREVENÇÃO DE CLIENTES DUPLICADOS (409)
@@ -594,6 +599,17 @@ class TestTasksActiveMerge:
 # 6) TASK LOG DE UPLOAD CONFIRMADO (document_direct_upload)
 # ====================================================================
 
+#: Veredicto de quarentena aprovado, para os testes que só querem
+#: exercitar o que vem DEPOIS da inspecção de conteúdo (D-1).
+_VEREDICTO_OK = _QuarentenaVeredicto(
+    aprovado=True,
+    motivo=_MOTIVO_APROVADO,
+    detalhe="",
+    tamanho=2048,
+    tipo_detectado="application/pdf",
+)
+
+
 class TestConfirmUploadTaskLog:
     """run_confirm_upload cria task_log DOCUMENT_UPLOAD concluído."""
 
@@ -606,22 +622,27 @@ class TestConfirmUploadTaskLog:
         })
 
         fake_s3 = MagicMock()
-        fake_s3.file_exists = MagicMock(return_value=True)
-        fake_s3.get_presigned_url = MagicMock(return_value="https://s3/url")
         fake_s3.get_file_content = MagicMock(return_value=None)
 
         fake_bg = MagicMock()
 
+        # D-1: a chave TEM de pertencer à pasta do processo. Este fixture
+        # dizia "Cliente Upload" no processo e ".../Cliente/..." na chave —
+        # passava porque não havia guarda de posse nenhuma. É o mesmo
+        # defeito do teste do Lote 4: documentos construídos à mão, com
+        # valores que o fluxo real nunca produz (o `run_generate_upload_url`
+        # deriva a chave do `s3_folder`/`client_name` do MESMO processo).
         with patch.object(mod, "db", fake_async_db), \
              patch.object(tls_mod, "db", fake_async_db), \
              patch.object(mod, "s3_service", fake_s3), \
+             patch.object(mod, "exigir_conteudo_valido", AsyncMock(return_value=_VEREDICTO_OK)), \
              patch.object(mod, "_triage_category_with_ai", AsyncMock(return_value=("Outros", None, None))), \
              patch.object(mod, "log_history", AsyncMock()), \
              patch.object(mod, "_auto_fulfill_portal_request", AsyncMock(return_value={"fulfilled": 0})):
             response = await mod.run_confirm_upload(
                 {
                     "process_id": "p-up",
-                    "file_key": "Documentação Clientes/Cliente/ficheiro.pdf",
+                    "file_key": "Documentação Clientes/Cliente Upload/ficheiro.pdf",
                     "original_filename": "ficheiro.pdf",
                     "category": "Outros",
                 },
