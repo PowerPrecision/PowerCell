@@ -14,6 +14,10 @@ from fastapi import HTTPException, Query, Request, BackgroundTasks
 from pydantic import BaseModel
 
 from database import db
+from services.process_staff_assignment import (
+    build_set_consultor_fields,
+    build_set_mediador_fields,
+)
 from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from models.email_config import EmailConfigCreate, EmailConfigResponse
@@ -572,13 +576,21 @@ async def run_seed_realistic_data(request: Request, current_user: dict, body: Se
                 "process_type": process_type, "type": process_type,
                 "status": status,
                 "is_active": status not in ["concluido", "arquivo", "perdido", "desistencias"],
-                "assigned_consultor_id": consultor["id"] if consultor else None,
-                "assigned_consultor_ids": [consultor["id"]] if consultor else [],
-                "consultor_names": [consultor["name"]] if consultor else [],
+                # LOTE 6 — pelos construtores canónicos. Escrita à mão,
+                # esta lista dava TRÊS dos seis campos do consultor e
+                # dois dos cinco do mediador: cada processo semeado
+                # nascia desfasado, e este é um endpoint de
+                # administração que corre contra a base a que estiver
+                # apontado.
+                **build_set_consultor_fields(
+                    [consultor["id"]] if consultor else [],
+                    [consultor["name"]] if consultor else [],
+                ),
+                **build_set_mediador_fields(
+                    [intermediario["id"]] if intermediario else [],
+                    [intermediario["name"]] if intermediario else [],
+                ),
                 "assigned_indexacao_id": indexador["id"] if indexador else None,
-                "assigned_mediador_id": intermediario["id"] if intermediario else None,
-                "assigned_mediador_ids": [intermediario["id"]] if intermediario else [],
-                "mediador_names": [intermediario["name"]] if intermediario else [],
                 "personal_data": cliente.get("dados_pessoais", {}).copy(),
                 "finance_data": cliente.get("dados_financeiros", {}),
                 "real_estate_data": real_estate_data, "credit_data": credit_data,

@@ -222,3 +222,94 @@ class TestODiretorTemOsMesmosDeveresDoConsultor:
                 doc, {"id": "u-x", "name": "Alguém", "role": papel}
             )
             assert doc == {}, f"{papel} não é um atribuído do processo"
+
+
+class TestORemoverMeTambemCarimbaOConjuntoCompleto:
+    """O QUINTO escritor — encontrado pelos números, não pelo inventário.
+
+    A contagem por campo do diagnóstico em produção obrigou-me a voltar
+    ao código: `build_unassign_me_update` (o "remover-me" de um processo)
+    escrevia os campos **à mão** e tocava em QUATRO dos seis do
+    consultor — `assigned_consultor_ids`, `consultor_names`,
+    `assigned_consultor_id`, `consultor_name` — deixando `consultor_id`
+    e `consultant_id` com o valor ANTIGO. No mediador faltava
+    `mediador_id`.
+
+    **É o defeito do Lote 5, literalmente.** A correcção de então fez o
+    `set` e o `clear` derivarem da mesma constante e esta função ficou
+    de fora; continuou a produzir, a cada clique em "remover-me", a
+    mesma forma que o `build_clear_consultor_fields` antigo produzia.
+
+    Porque é que isto importa AGORA: quando quem sai é o último, a lista
+    fica vazia e os dois singulares ficam preenchidos — **a assinatura
+    `desatribuicao`**, exactamente a que o `--incluir-ambiguos` limpa.
+    Correr a limpeza sem isto seria limpar hoje e ver voltar amanhã.
+    """
+
+    def test_sair_de_um_processo_com_outro_consultor_nao_deixa_desfasamento(self):
+        from services.process_staff_assignment import (
+            build_set_consultor_fields,
+            build_unassign_me_update,
+        )
+
+        processo = build_set_consultor_fields(["u-1", "u-2"], ["Ana", "Rui"])
+        update, removido = build_unassign_me_update(processo, {"id": "u-1"})
+
+        assert removido == ["consultor"]
+        depois = {**processo, **update}
+        assert depois["assigned_consultor_ids"] == ["u-2"]
+        assert desfasamentos_do_processo(depois) == []
+
+    def test_sair_sendo_o_ULTIMO_deixa_o_processo_limpo(self):
+        """O caso que produzia a assinatura `desatribuicao`.
+
+        Antes: lista vazia, `assigned_consultor_id` a `None`, e
+        `consultor_id`/`consultant_id` com o id de quem saiu — um
+        processo sem dono que continuava a notificar e a aparecer em
+        "Os Meus Processos" ao consultor que se removeu.
+        """
+        from services.process_staff_assignment import (
+            build_set_consultor_fields,
+            build_unassign_me_update,
+        )
+
+        processo = build_set_consultor_fields(["u-1"], ["Ana"])
+        update, _ = build_unassign_me_update(processo, {"id": "u-1"})
+
+        depois = {**processo, **update}
+        assert depois["assigned_consultor_ids"] == []
+        for campo in CONSULTOR_ID_FIELDS:
+            assert depois[campo] is None, f"{campo} ficou com o id de quem saiu"
+        assert desfasamentos_do_processo(depois) == []
+
+    def test_o_mesmo_no_mediador(self):
+        from services.process_staff_assignment import (
+            build_set_mediador_fields,
+            build_unassign_me_update,
+        )
+
+        processo = build_set_mediador_fields(["u-3"], ["Jorge"])
+        update, removido = build_unassign_me_update(processo, {"id": "u-3"})
+
+        assert removido == ["intermediario"]
+        depois = {**processo, **update}
+        for campo in MEDIADOR_ID_FIELDS:
+            assert depois[campo] is None, f"{campo} ficou com o id de quem saiu"
+        assert desfasamentos_do_processo(depois) == []
+
+    def test_quem_esta_nos_DOIS_papeis_sai_dos_dois(self):
+        """Contraprova: a correcção não pode ter perdido um dos ramos."""
+        from services.process_staff_assignment import (
+            build_set_consultor_fields,
+            build_set_mediador_fields,
+            build_unassign_me_update,
+        )
+
+        processo = {
+            **build_set_consultor_fields(["u-1"], ["Ana"]),
+            **build_set_mediador_fields(["u-1"], ["Ana"]),
+        }
+        update, removido = build_unassign_me_update(processo, {"id": "u-1"})
+
+        assert sorted(removido) == ["consultor", "intermediario"]
+        assert desfasamentos_do_processo({**processo, **update}) == []
