@@ -6576,3 +6576,54 @@ que resta é documentos anteriores ao esquema multi-atribuído, cuja lista
 foi preenchida mais tarde. Fica dito como hipótese, não como facto: a
 correcção (`em_falta` → preencher a partir da lista) é a mesma em
 qualquer dos casos.
+
+
+## A inferência que os números desmentiram — e o que resta (Set 2026)
+
+Escrevi aqui que `assigned_consultor_id` (93) e `assigned_mediador_id`
+(110) **só podiam ser `em_falta`**, por nenhum escritor antigo os deixar
+preenchidos com a lista vazia. **Estava errado.** Depois de `--corrigir`
+zerar os 297 `em_falta`, esses dois campos ficaram **intactos** — são os
+213 ambíguos, quase todos. A inferência partia de um inventário de
+escritores que continua incompleto.
+
+O que sobra em produção, por origem:
+
+| Origem | Papéis | O que fazer |
+|---|---|---|
+| `consultor:atribuicao_legada` | 4 | `--repor-listas` |
+| `consultor:desatribuicao` | 2 | `--incluir-ambiguos` |
+| `consultor:indeterminada` | 92 | decisão humana |
+| `mediador:atribuicao_legada` | 4 | `--repor-listas` |
+| `mediador:indeterminada` | 107 | decisão humana |
+
+Dois detalhes que só se vêem cruzando os números:
+
+* **`consultor_id` ficou a 0 e `consultant_id` a 6.** A assinatura do
+  `clear` antigo (`consultor_id` + `consultant_id`) já não pode existir —
+  logo as **2** `desatribuicao` não vieram da assinatura, vieram do
+  **histórico**. É o caminho que existe para o mediador a funcionar
+  também no consultor: registo ganha a inferência.
+* **Os `indeterminada` concentram-se em 2–3 ids de utilizador.** Isso não
+  é actividade orgânica de pessoas a atribuir processos um a um; é uma
+  escrita em massa por um caminho que só gravou o singular.
+
+### O relatório passou a responder "quem", não só "quantos"
+
+Duas correcções no `resumir_ambiguos`:
+
+1. `processos_por_origem` acumulava por (processo, **papel**): um
+   processo com os dois papéis ambíguos aparecia **duas vezes** e o
+   relatório anunciava "199 casos" sobre uma lista que não era nem de
+   processos nem de papéis. Hoje a lista é de processos (sem repetição,
+   ordenada) e o rótulo distingue as duas contagens.
+2. `responsaveis_por_origem` é novo: **quem** está nos singulares e
+   quantas vezes, resolvido contra `db.users` com nome, papel e se está
+   activo — e a dizer **`⚠ utilizador NÃO EXISTE`** quando o id não
+   resolve.
+
+Essa última linha é o que decide os indeterminados, e a regra é simples:
+**um singular que aponta para um utilizador que já não existe é resíduo;
+um que aponta para um consultor activo é uma atribuição.** Transformar
+"199 processos indecidíveis" em "duas pessoas a confirmar" é a diferença
+entre uma decisão e um encolher de ombros.

@@ -224,13 +224,45 @@ async def principal() -> int:
             )
         print()
 
+        # QUEM aparece nos singulares. É a linha que transforma "N
+        # processos indecidíveis" em "duas pessoas a confirmar": os
+        # mesmos ids repetidos não são actividade orgânica de gente a
+        # atribuir processos um a um — são uma escrita em massa, e isso
+        # diz-se olhando para a concentração, não para a lista de ids.
+        responsaveis = resumo_ambiguo.get("responsaveis_por_origem", {})
+        if responsaveis:
+            print("  Quem aparece nos campos singulares (id : nº de papéis):")
+            for origem in sorted(responsaveis):
+                pares = sorted(
+                    responsaveis[origem].items(), key=lambda kv: -kv[1]
+                )
+                print(f"    {origem}:")
+                for uid, quantos in pares[:MAX_EXEMPLOS]:
+                    nome = ""
+                    doc = await db.users.find_one(
+                        {"id": uid}, {"name": 1, "role": 1, "is_active": 1}
+                    )
+                    if doc:
+                        estado = "activo" if doc.get("is_active") else "INACTIVO"
+                        nome = f"  {doc.get('name', '?')} ({doc.get('role', '?')}, {estado})"
+                    else:
+                        nome = "  ⚠ utilizador NÃO EXISTE"
+                    print(f"      {uid}  ×{quantos}{nome}")
+                if len(pares) > MAX_EXEMPLOS:
+                    print(f"      … mais {len(pares) - MAX_EXEMPLOS} id(s)")
+            print()
+
         indeterminados = resumo_ambiguo["processos_por_origem"].get(
             ORIGEM_INDETERMINADA, []
         )
         if indeterminados:
+            papeis = sum(
+                n for chave, n in resumo_ambiguo["por_papel_e_origem"].items()
+                if chave.endswith(f":{ORIGEM_INDETERMINADA}")
+            )
             print(
-                f"  {len(indeterminados)} caso(s) INDETERMINADO(S) — nenhum "
-                "automatismo lhes toca. Lista completa:"
+                f"  INDETERMINADOS: {len(indeterminados)} processo(s), "
+                f"{papeis} papel(éis) — nenhum automatismo lhes toca."
             )
             print(f"    {', '.join(indeterminados)}")
             print()

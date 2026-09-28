@@ -429,3 +429,91 @@ class TestOResumoPorOrigem:
     def test_um_processo_coerente_nao_entra_na_contagem(self):
         processos = [build_set_consultor_fields(["u-1"], ["Ana"])]
         assert resumir_ambiguos(processos)["por_papel_e_origem"] == {}
+
+
+class TestOResumoNaoContaDuasVezesOMesmoProcesso:
+    """A lista dos indeterminados saía com ids repetidos.
+
+    `processos_por_origem` acumulava por (processo, PAPEL): um processo
+    com o consultor e o mediador ambíguos aparecia DUAS vezes, e o
+    relatório anunciava "199 casos" sobre uma lista de 199 entradas que
+    eram ~132 processos. Quem lê aquilo para decidir uma migração tem de
+    saber se o número é de processos ou de papéis — e o rótulo dizia
+    "casos", que não é nem uma coisa nem outra.
+    """
+
+    def _dois_papeis_ambiguos(self):
+        return {
+            "id": "p-1",
+            "assigned_consultor_ids": [],
+            "assigned_consultor_id": "u-c",
+            "assigned_mediador_ids": [],
+            "assigned_mediador_id": "u-m",
+        }
+
+    def test_o_mesmo_processo_aparece_UMA_vez_na_lista(self):
+        resumo = resumir_ambiguos([self._dois_papeis_ambiguos()])
+        assert resumo["processos_por_origem"][ORIGEM_INDETERMINADA] == ["p-1"]
+
+    def test_mas_a_contagem_por_papel_continua_a_contar_os_DOIS(self):
+        """Contraprova: deduplicar a lista não pode apagar a contagem.
+
+        São dois problemas distintos no mesmo processo — um por papel — e
+        é por papel que se decide o que fazer.
+        """
+        resumo = resumir_ambiguos([self._dois_papeis_ambiguos()])
+        assert resumo["por_papel_e_origem"] == {
+            "consultor:indeterminada": 1,
+            "mediador:indeterminada": 1,
+        }
+
+    def test_a_lista_fica_ordenada_para_ser_comparavel(self):
+        processos = [
+            {"id": "p-b", "assigned_consultor_ids": [], "assigned_consultor_id": "u"},
+            {"id": "p-a", "assigned_consultor_ids": [], "assigned_consultor_id": "u"},
+        ]
+        assert resumir_ambiguos(processos)["processos_por_origem"][
+            ORIGEM_INDETERMINADA
+        ] == ["p-a", "p-b"]
+
+
+class TestQuemAparecNosAmbiguos:
+    """A pergunta que o relatório não respondia — e é a que decide.
+
+    Os 199 indeterminados de produção mostravam, nos exemplos, SEMPRE os
+    mesmos dois ou três ids de utilizador. Isso não é actividade orgânica
+    de pessoas a atribuir processos um a um: é uma escrita em massa. Mas
+    para o afirmar era preciso ler os exemplos à mão e contar de cabeça.
+
+    `responsaveis_por_origem` transforma "199 processos indecidíveis" em
+    "duas pessoas a confirmar" — e é a diferença entre uma decisão e um
+    encolher de ombros.
+    """
+
+    def test_conta_quantas_vezes_cada_id_aparece(self):
+        processos = [
+            {"id": "p-1", "assigned_consultor_ids": [], "assigned_consultor_id": "u-a"},
+            {"id": "p-2", "assigned_consultor_ids": [], "assigned_consultor_id": "u-a"},
+            {"id": "p-3", "assigned_consultor_ids": [], "assigned_consultor_id": "u-b"},
+        ]
+        resumo = resumir_ambiguos(processos)
+
+        assert resumo["responsaveis_por_origem"][ORIGEM_INDETERMINADA] == {
+            "u-a": 2,
+            "u-b": 1,
+        }
+
+    def test_separa_por_ORIGEM_e_nao_mistura(self):
+        """Um id que apareça em duas origens conta em cada uma."""
+        processos = [
+            {"id": "p-1", "assigned_consultor_ids": [], "assigned_consultor_id": "u-a"},
+            {"id": "p-2", "assigned_consultor_ids": [], "consultant_id": "u-a"},
+        ]
+        resumo = resumir_ambiguos(processos)
+
+        assert resumo["responsaveis_por_origem"][ORIGEM_INDETERMINADA] == {"u-a": 1}
+        assert resumo["responsaveis_por_origem"][ORIGEM_ATRIBUICAO_LEGADA] == {"u-a": 1}
+
+    def test_um_processo_coerente_nao_traz_ninguem(self):
+        processos = [build_set_consultor_fields(["u-1"], ["Ana"])]
+        assert resumir_ambiguos(processos)["responsaveis_por_origem"] == {}
