@@ -108,6 +108,15 @@ PAPEIS_COMO_CONSULTOR: tuple[str, ...] = (
 #: Papéis que ficam como MEDIADOR (intermediário de crédito).
 PAPEIS_COMO_MEDIADOR: tuple[str, ...] = (UserRole.INTERMEDIARIO,)
 
+#: O perfil de Indexação NUNCA é um atribuído. Tem carimbo próprio
+#: (`assigned_indexacao_id`) e é por esse carimbo que vê os processos
+#: (`process_list_filters`: `assigned_indexacao_id` / `created_by` /
+#: `fila_espera` — nunca `assigned_consultor_id`). Por isso não está em
+#: nenhuma das duas tuplas acima, e por isso vive aqui, ao lado delas: é a
+#: MESMA decisão de produto — que papel se carimba como quê — e separá-la
+#: daria o defeito do Lote 5 noutro eixo.
+PAPEL_DA_INDEXACAO: str = UserRole.INDEXACAO
+
 
 #: (campo_do_id_singular, …) → recebem o PRIMEIRO id da lista.
 CONSULTOR_ID_FIELDS: tuple[str, ...] = (

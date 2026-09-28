@@ -16,6 +16,7 @@ import pytest
 from services.assignment_drift import (
     ORIGEM_ATRIBUICAO_LEGADA,
     ORIGEM_ATRIBUIDO_INVALIDO,
+    ORIGEM_INDEXACAO_NAS_LISTAS,
     ORIGEM_ORFAO,
     ORIGEM_DESATRIBUICAO,
     ORIGEM_INDETERMINADA,
@@ -31,6 +32,9 @@ from services.assignment_drift import (
 )
 from services.process_staff_assignment import (
     CONSULTOR_ID_FIELDS,
+    PAPEIS_COMO_CONSULTOR,
+    PAPEIS_COMO_MEDIADOR,
+    PAPEL_DA_INDEXACAO,
     build_clear_consultor_fields,
     build_set_consultor_fields,
 )
@@ -617,8 +621,13 @@ class TestQuemEstaLaDecideOAmbiguo:
         """O Índice tem carimbo próprio e não entra nas listas.
 
         É o caso real do `2285198b` ("654"): um utilizador de indexação
-        em 12 campos de consultor/mediador. Repor a lista cimentaria um
-        estado que as regras do produto não admitem.
+        em 12 campos de consultor. Repor a lista cimentaria um estado que
+        as regras do produto não admitem.
+
+        INVERTIDO (Set 2026): a origem deixou de ser `atribuido_invalido`
+        e passou a ter nome próprio. O teste não mudou de sentido — mudou
+        de destino, porque juntar este caso ao da conta inactiva metia
+        duas provas opostas na mesma bandeira.
         """
         for papel, campo in (
             ("consultor", "assigned_consultor_id"),
@@ -628,7 +637,7 @@ class TestQuemEstaLaDecideOAmbiguo:
             utilizadores = {"u-x": {"role": "indexacao", "is_active": True}}
             assert (
                 origem_do_ambiguo(processo, papel, utilizadores=utilizadores)
-                == ORIGEM_ATRIBUIDO_INVALIDO
+                == ORIGEM_INDEXACAO_NAS_LISTAS
             )
 
     def test_utilizador_INACTIVO_nao_e_atribuicao_automatica(self):
@@ -691,12 +700,20 @@ class TestLimparOrfaosEUmaOrdemPropria:
         ) == {}
 
     def test_nem_no_papel_invalido(self):
+        """Um intermediário num campo de CONSULTOR: existe, está activo, e
+        nenhuma das duas bandeiras lhe toca.
+
+        O exemplo era o perfil `indexacao`; passou a ter bandeira própria,
+        pelo que aqui deixou de provar o que este teste afirma.
+        """
         processo = self._orfao()
         assert correccao_do_processo(
             processo,
             incluir_orfaos=True,
             incluir_ambiguos=True,
-            utilizadores={"u-fantasma": {"role": "indexacao", "is_active": True}},
+            utilizadores={
+                "u-fantasma": {"role": "intermediario", "is_active": True}
+            },
         ) == {}
 
     def test_repor_listas_alcanca_o_atribuido_existente(self):
@@ -711,3 +728,163 @@ class TestLimparOrfaosEUmaOrdemPropria:
         assert reposicao_de_listas_do_processo(
             self._orfao(), utilizadores={"u-fantasma": None}
         ) == {}
+
+
+class TestLimparAIndexacaoEAUltimaOrdem:
+    """Os 12 que sobreviveram: a mesma conta de Indexação em `assigned_consultor_id`.
+
+    Ficavam em `atribuido_invalido`, que junta DUAS provas opostas:
+
+      conta inactiva    um consultor a sério que saiu — o campo regista
+                        uma atribuição REAL e a conta pode voltar;
+      perfil indexacao  nunca foi uma atribuição, e reactivar a conta não
+                        muda isso.
+
+    Limpar o segundo é seguro pela MESMA razão que o órfão, por um
+    caminho diferente: não desatribui ninguém. Não porque a pessoa não
+    exista — existe e está activa — mas porque não é por este campo que
+    ela vê o processo. Isso não é uma suposição: está afirmado abaixo
+    contra o `process_list_filters` real.
+    """
+
+    def _indexador(self, campo="assigned_consultor_id"):
+        return {
+            "id": "p-1",
+            "assigned_consultor_ids": [],
+            "assigned_mediador_ids": [],
+            campo: "u-indice",
+        }
+
+    def _mapa(self, is_active=True):
+        return {"u-indice": {"role": PAPEL_DA_INDEXACAO, "is_active": is_active}}
+
+    # ── A bandeira ──────────────────────────────────────────────────
+
+    def test_o_incluir_ambiguos_sozinho_NAO_toca_na_indexacao(self):
+        assert correccao_do_processo(
+            self._indexador(), incluir_ambiguos=True, utilizadores=self._mapa()
+        ) == {}
+
+    def test_o_limpar_orfaos_sozinho_TAMBEM_nao_lhe_toca(self):
+        """Bandeiras distintas para provas distintas.
+
+        Quem autorizou limpar por ausência de utilizador não autorizou,
+        com isso, limpar um utilizador que existe e está activo.
+        """
+        assert correccao_do_processo(
+            self._indexador(), incluir_orfaos=True, utilizadores=self._mapa()
+        ) == {}
+
+    def test_com_incluir_indexacao_o_campo_e_limpo(self):
+        assert correccao_do_processo(
+            self._indexador(), incluir_indexacao=True, utilizadores=self._mapa()
+        ) == {"assigned_consultor_id": None}
+
+    def test_limpa_tambem_no_campo_do_mediador(self):
+        assert correccao_do_processo(
+            self._indexador(campo="assigned_mediador_id"),
+            incluir_indexacao=True,
+            utilizadores=self._mapa(),
+        ) == {"assigned_mediador_id": None}
+
+    # ── O que a bandeira NÃO alcança ────────────────────────────────
+
+    def test_NAO_toca_numa_atribuicao_real(self):
+        assert correccao_do_processo(
+            self._indexador(),
+            incluir_indexacao=True,
+            utilizadores={"u-indice": {"role": "consultor", "is_active": True}},
+        ) == {}
+
+    def test_NAO_toca_num_consultor_INACTIVO(self):
+        """A metade que ficou em `atribuido_invalido` continua intocável.
+
+        É a contraprova da separação: se a bandeira nova varresse as duas,
+        não teria valido a pena separá-las.
+        """
+        assert correccao_do_processo(
+            self._indexador(),
+            incluir_indexacao=True,
+            utilizadores={"u-indice": {"role": "consultor", "is_active": False}},
+        ) == {}
+
+    def test_NAO_toca_num_orfao(self):
+        assert correccao_do_processo(
+            self._indexador(),
+            incluir_indexacao=True,
+            utilizadores={"u-indice": None},
+        ) == {}
+
+    def test_repor_listas_NUNCA_poe_a_indexacao_numa_lista(self):
+        """Repor cimentaria o estado que as regras do produto não admitem."""
+        assert reposicao_de_listas_do_processo(
+            self._indexador(), utilizadores=self._mapa()
+        ) == {}
+
+    # ── O papel ganha ao estado da conta ────────────────────────────
+
+    def test_um_indexador_INACTIVO_continua_a_ser_indexacao(self):
+        """Reactivar a conta não a torna consultor: a ordem certa é papel
+        primeiro, estado depois."""
+        assert (
+            origem_do_ambiguo(
+                self._indexador(), "consultor", utilizadores=self._mapa(is_active=False)
+            )
+            == ORIGEM_INDEXACAO_NAS_LISTAS
+        )
+
+    def test_o_historico_nao_transforma_a_indexacao_em_atribuicao(self):
+        historico = [
+            {
+                "field": "assignment",
+                "action": "Dupla auto-atribuição: Consultor: 654",
+                "new_value": "Consultor: 654",
+            }
+        ]
+        assert (
+            origem_do_ambiguo(
+                self._indexador(),
+                "consultor",
+                historico=historico,
+                utilizadores=self._mapa(),
+            )
+            == ORIGEM_INDEXACAO_NAS_LISTAS
+        )
+
+    # ── As contraprovas que sustentam a decisão ─────────────────────
+
+    def test_a_indexacao_nao_esta_nas_tuplas_de_papeis_atribuiveis(self):
+        """Guarda de fonte: se alguém a acrescentar, isto grita.
+
+        A bandeira só é defensável enquanto o Índice não for um atribuído.
+        """
+        assert PAPEL_DA_INDEXACAO not in PAPEIS_COMO_CONSULTOR
+        assert PAPEL_DA_INDEXACAO not in PAPEIS_COMO_MEDIADOR
+
+    def test_limpar_NAO_tira_acesso_a_indexacao(self):
+        """A razão pela qual isto é seguro, afirmada contra o código REAL.
+
+        Se um dia a visibilidade do Índice passar a depender de
+        `assigned_consultor_id`, limpar deixa de ser inócuo — e é este
+        teste que o denuncia, não o relatório do script.
+
+        Duas superfícies, dois testes: a listagem e o Kanban têm
+        construtores SEPARADOS (a lição do Lote 5).
+        """
+        from models.auth import UserRole
+        from services.process_list_filters import (
+            build_kanban_role_base_query,
+            build_role_visibility_conditions,
+        )
+
+        utilizador = {"id": "u-indice", "email": "indice@exemplo.pt"}
+
+        listagem = build_role_visibility_conditions(utilizador, UserRole.INDEXACAO)
+        kanban = build_kanban_role_base_query(utilizador, UserRole.INDEXACAO)
+
+        for condicoes in (repr(listagem), repr(kanban)):
+            assert "assigned_consultor_id" not in condicoes
+            assert "assigned_mediador_id" not in condicoes
+            # Contraprova: o carimbo próprio ESTÁ lá. Sem isto, um
+            # construtor que devolvesse vazio passaria nas duas de cima.
+            assert "assigned_indexacao_id" in condicoes

@@ -1,4 +1,24 @@
 ---
+Task ID: fecho-desfasamento-indexacao
+Agent: Cloud Agent
+Task: O último resíduo — a Indexação nas listas de atribuição (`--limpar-indexacao`)
+
+Date: 2026-09-28
+
+Work Log:
+- PONTO DE PARTIDA. A passagem final em produção (`--corrigir --repor-listas --limpar-orfaos`) deixou 12 papéis em 2 processos: todos a MESMA conta (`2285198b`, "654", `indexacao`, activa) em `assigned_consultor_id`. Ficaram em `atribuido_invalido`, que é intocável por automatismo.
+- O DEFEITO NÃO ERA O VEREDICTO, ERA O NOME. `atribuido_invalido` juntava duas provas OPOSTAS debaixo da mesma etiqueta: (a) conta inactiva — um consultor a sério que saiu, e o campo regista uma atribuição REAL que pode voltar a valer; (b) perfil `indexacao` — nunca foi atribuição, e reactivar a conta não muda isso. Respostas opostas não podem partilhar bandeira; é a regra que o `--limpar-orfaos` já tinha estabelecido.
+- Separei em `indexacao_nas_listas` (bandeira `--limpar-indexacao`) e deixei `atribuido_invalido` com a outra metade, intocável como antes.
+- PORQUE É QUE LIMPAR É SEGURO, e não o assumi: fui verificar. É a mesma razão do órfão por um caminho diferente — não desatribui ninguém. Não porque a pessoa não exista (existe e está activa), mas porque NÃO É POR ESTE CAMPO que ela vê o processo: `process_list_filters` dá ao perfil `indexacao` `assigned_indexacao_id` / `created_by` / `fila_espera`, e nunca `assigned_consultor_id`. O campo não concede acesso nenhum — só mente ao cartão de Atribuição e aos alertas.
+- E não deixei isso como suposição escrita num comentário: `test_limpar_NAO_tira_acesso_a_indexacao` afirma-o contra o `process_list_filters` REAL, nas DUAS superfícies (listagem e Kanban têm construtores separados — a lição do Lote 5), com contraprova de que o carimbo próprio está lá. Sem essa contraprova, um construtor que devolvesse vazio passava nas duas asserções de ausência.
+- ORDEM DAS VERIFICAÇÕES: o papel passou a ser testado ANTES do estado da conta. Pela ordem inversa, um indexador desactivado caía em "conta inactiva" e ficava à espera de uma reactivação que não muda nada — continuaria a não poder ser consultor. "Este perfil não ocupa este campo" é regra de produto e vale com a conta activa ou inactiva.
+- O QUE NÃO FIZ, de propósito: escrever `assigned_indexacao_id` em troca. Quem indexou o processo é um facto que este campo não prova, e inventá-lo — ou pior, escrever por cima de um carimbo legítimo — trocava uma mentira por outra. Limpos, os processos aparecem "Por Atribuir", que é o estado verdadeiro e o que aciona a triagem na UI.
+- `PAPEL_DA_INDEXACAO` foi para `process_staff_assignment.py`, ao lado de `PAPEIS_COMO_CONSULTOR`/`PAPEIS_COMO_MEDIADOR`: é a MESMA decisão de produto — que papel se carimba como quê — e separá-la daria o defeito do Lote 5 noutro eixo. Guarda a afirmar que não está em nenhuma das duas tuplas: a bandeira só é defensável enquanto o Índice não for um atribuído.
+- DOIS TESTES INVERTIDOS, não apagados: `test_o_perfil_INDEXACAO_nunca_e_um_atribuido` mudou de destino (não de sentido) e `test_nem_no_papel_invalido` usava o `indexacao` como exemplo de papel inválido — passou a usar um intermediário num campo de consultor, que continua a provar o que o teste afirma.
+
+---
+
+---
 Task ID: lote-5-seccao-a
 Agent: Cloud Agent
 Task: Lote 5, Secção A — furos de isolamento e bugs críticos do UAT (pontos 4, 3, 1, 2, 6, 5)

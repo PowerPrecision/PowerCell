@@ -34,12 +34,30 @@ não se nota até alguém reparar que ninguém lhe pega — um carimbo errado é
 permanente, e é a mesma razão pela qual o `backfill_network_id` se recusa
 a adivinhar.
 
+UMA BANDEIRA POR PROVA
+======================
+As bandeiras de escrita não são graus de agressividade — são provas
+diferentes, e por isso não se acumulam numa só:
+
+  ``--incluir-ambiguos``  resíduo provado por assinatura ou registo.
+  ``--limpar-orfaos``     o utilizador nomeado NÃO EXISTE.
+  ``--limpar-indexacao``  o utilizador é do perfil Indexação, que nunca é
+                          um atribuído (carimbo próprio).
+  ``--repor-listas``      o caminho OPOSTO: o processo tem dono e o que
+                          falta é a lista.
+
+Fora delas ficam, de propósito e mesmo com tudo ligado, a `atribuicao_legada`
+(tem dono), o `atribuido_invalido` (conta inactiva ou papel incompatível) e
+o `indeterminada` (sem prova).
+
 USO
 ===
     MONGO_URL=... DB_NAME=... python scripts/diagnose_assignment_drift.py
     MONGO_URL=... DB_NAME=... python scripts/diagnose_assignment_drift.py --corrigir
     MONGO_URL=... DB_NAME=... python scripts/diagnose_assignment_drift.py \
         --corrigir --incluir-ambiguos
+    MONGO_URL=... DB_NAME=... python scripts/diagnose_assignment_drift.py \
+        --corrigir --limpar-indexacao
 """
 from __future__ import annotations
 
@@ -54,6 +72,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from services.assignment_drift import (  # noqa: E402
     ORIGEM_ATRIBUICAO_LEGADA,
     ORIGEM_ATRIBUIDO_INVALIDO,
+    ORIGEM_INDEXACAO_NAS_LISTAS,
     ORIGEM_ORFAO,
     ORIGEM_INDETERMINADA,
     PAPEIS,
@@ -112,6 +131,16 @@ def _argumentos():
              "ninguém — o processo já está sem dono e o campo mente.",
     )
     p.add_argument(
+        "--limpar-indexacao",
+        action="store_true",
+        help="Limpa os singulares ocupados pelo perfil INDEXAÇÃO, que "
+             "nunca é um atribuído (tem carimbo próprio). Não lhe tira "
+             "acesso nenhum: o Índice vê os processos por "
+             "`assigned_indexacao_id` / `created_by` / `fila_espera`. Os "
+             "processos passam a aparecer 'Por Atribuir', que é o estado "
+             "verdadeiro e o que aciona a triagem.",
+    )
+    p.add_argument(
         "--repor-listas",
         action="store_true",
         help="Para os ambíguos provados como ATRIBUIÇÃO LEGADA, escreve a "
@@ -140,6 +169,10 @@ async def principal() -> int:
 
     if args.limpar_orfaos and not args.corrigir:
         print("`--limpar-orfaos` só faz sentido com `--corrigir`.")
+        return 2
+
+    if args.limpar_indexacao and not args.corrigir:
+        print("`--limpar-indexacao` só faz sentido com `--corrigir`.")
         return 2
 
     if not os.environ.get("MONGO_URL"):
@@ -239,6 +272,10 @@ async def principal() -> int:
         print("                        a lista; limpar desatribuiria trabalho real.")
         print("    orfao             → o utilizador NÃO EXISTE. `--limpar-orfaos`")
         print("                        limpa: não desatribui ninguém.")
+        print("    indexacao_nas_listas→ é o perfil INDEXAÇÃO, que nunca é um")
+        print("                        atribuído. `--limpar-indexacao` limpa:")
+        print("                        o Índice vê pelo carimbo próprio, logo")
+        print("                        não perde acesso nenhum.")
         print("    atribuido_invalido→ existe mas não pode ocupar o campo")
         print("                        (papel incompatível ou conta inactiva).")
         print("                        Nenhum automatismo lhe toca.")
@@ -364,6 +401,7 @@ async def principal() -> int:
                 {**processo, **escrita},
                 incluir_ambiguos=args.incluir_ambiguos,
                 incluir_orfaos=args.limpar_orfaos,
+                incluir_indexacao=args.limpar_indexacao,
                 historicos_por_papel=do_processo,
                 utilizadores=utilizadores,
             )
@@ -386,7 +424,7 @@ async def principal() -> int:
             "  Os ambíguos ficaram INTACTOS de propósito — ver o cabeçalho "
             "deste ficheiro."
         )
-    if args.incluir_ambiguos or args.limpar_orfaos:
+    if args.incluir_ambiguos or args.limpar_orfaos or args.limpar_indexacao:
         intocaveis = {
             "atribuição(ões) legada(s)": ORIGEM_ATRIBUICAO_LEGADA,
             "atribuído(s) inválido(s)": ORIGEM_ATRIBUIDO_INVALIDO,
@@ -394,6 +432,8 @@ async def principal() -> int:
         }
         if not args.limpar_orfaos:
             intocaveis["órfão(s)"] = ORIGEM_ORFAO
+        if not args.limpar_indexacao:
+            intocaveis["da Indexação"] = ORIGEM_INDEXACAO_NAS_LISTAS
         partes = []
         for rotulo, origem in intocaveis.items():
             quantos = len(resumo_ambiguo["processos_por_origem"].get(origem, []))
