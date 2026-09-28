@@ -6467,11 +6467,30 @@ registos antigos e notas de voz — é a única forma de corrigir uma entrada
 errada. Se a regra vier a ser "nem apagar", é uma decisão a tomar de
 propósito.
 
-**O endpoint `POST /api/activities` continua aberto** e
-`useAddActivityMutation` continua exportado: o que se fechou foi a UI.
-Fechar o endpoint exige inventariar quem mais lá escreve (o motor de
-notas de voz escreve em `db.activities` directamente, não por aqui) e é
-uma decisão à parte.
+**O endpoint `POST /api/activities` morreu** (decisão tomada: se a UI
+morreu, o endpoint morre — senão a regra existe só na aparência).
+Responde **410**, e não 405: o caminho continua a existir para o GET e o
+DELETE, e um 405 lê-se como avaria de encaminhamento, mandando quem lá
+bater procurar o defeito no router. É o precedente do `POST /auth/login`.
+A resposta diz para onde ir (o Resumo), porque um 410 sem destino manda
+procurar às cegas.
+
+A **escrita foi removida, não desligada**: o corpo antigo (`insert_one`
+em `db.activities` + `log_history`) saiu do `run_create_activity`, com
+uma guarda sobre a fonte a afirmá-lo — código adormecido atrás de um
+`raise` é um convite a religá-lo. Do lado do frontend saíram
+`createActivity` e `useAddActivityMutation`, que só sabiam falhar.
+
+**Os escritores de SISTEMA continuam, e é esse o ponto:**
+`voice_note_engine` (a nota ditada entra na timeline) e
+`temp_link_api_public` (o cliente que envia por link temporário). Nunca
+passaram por este endpoint. O que se fechou foi a escrita MANUAL, não o
+registo automático — e há um teste a afirmar que continuam a escrever,
+senão "só de leitura" viraria "sem nada".
+
+A guarda de indexação silenciosa saiu deste módulo por ter ficado
+redundante: já ninguém cria atividades por aqui, seja qual for o perfil.
+O ponto único da regra continua a ser `history._is_stealth_user`.
 
 ### A listagem espelha o Resumo — e lia campos que não existem
 
@@ -6489,3 +6508,27 @@ o pode afirmar — `tests/unit/test_projeccao_das_notas_do_consultor.py`
 verifica que `observation_notes` / `observations` / `notes` estão nas
 projecções da listagem e do Kanban, com contraprova de que os nomes
 inventados continuam a não existir.
+
+
+## A decisão "que papel é atribuído como quê" é uma constante (Set 2026, Ponto 9)
+
+Mesmo defeito dos campos canónicos, noutro eixo. `process_create`
+tratava o diretor como consultor (`effective in [CONSULTOR, DIRETOR]`) e
+o `client_assign` só conhecia `"consultor"`: **um cliente atribuído a um
+diretor pela Sala de Triagem nascia com processo e sem atribuição
+nenhuma** — nem lista, nem singulares, nem nome. Não dava erro; o
+processo simplesmente não era de ninguém, e um processo sem dono não se
+nota até alguém reparar que ninguém lhe pega.
+
+Ali divergia a lista de CAMPOS, aqui a lista de PAPÉIS — e a correcção é
+a mesma: `PAPEIS_COMO_CONSULTOR` / `PAPEIS_COMO_MEDIADOR` em
+`process_staff_assignment.py`, ao lado de `CONSULTOR_ID_FIELDS`. Quem
+não está lá não é um atribuído do processo (`administrativo`,
+`parceiro`, `ceo`, `admin`); `indexacao` tem carimbo próprio
+(`assigned_indexacao_id`) e não entra nas listas.
+
+A guarda compara os dois escritores REAIS papel a papel, em vez de
+afirmar uma lista — uma lista escrita no teste seria a terceira cópia.
+E tem contraprova no sentido oposto: um papel fora das constantes
+continua sem atribuição, senão "fazer os dois concordarem" passaria
+também se ambos atribuíssem sempre a toda a gente.

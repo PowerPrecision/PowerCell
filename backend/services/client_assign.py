@@ -30,6 +30,8 @@ from fastapi import HTTPException, Request
 
 from database import db
 from services.process_staff_assignment import (
+    PAPEIS_COMO_CONSULTOR,
+    PAPEIS_COMO_MEDIADOR,
     build_set_consultor_fields,
     build_set_mediador_fields,
 )
@@ -81,11 +83,11 @@ def apply_target_role_assignment(process_doc: dict, target_user: dict) -> None:
     target_user_id = target_user.get("id")
     target_name = target_user.get("name")
 
-    if target_role == "intermediario":
+    if target_role in PAPEIS_COMO_MEDIADOR:
         process_doc.update(build_set_mediador_fields([target_user_id], [target_name]))
-    elif target_role == "consultor":
+    elif target_role in PAPEIS_COMO_CONSULTOR:
         process_doc.update(build_set_consultor_fields([target_user_id], [target_name]))
-    elif target_role == "indexacao":
+    elif target_role == UserRole.INDEXACAO:
         process_doc["assigned_indexacao_id"] = target_user_id
 
 

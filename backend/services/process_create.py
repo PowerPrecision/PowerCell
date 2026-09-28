@@ -19,6 +19,8 @@ from models.auth import UserRole
 from models.enums import ProcessStatus
 from services.encryption import decrypt_client_data
 from services.process_staff_assignment import (
+    PAPEIS_COMO_CONSULTOR,
+    PAPEIS_COMO_MEDIADOR,
     build_set_consultor_fields,
     build_set_mediador_fields,
 )
@@ -171,9 +173,9 @@ def apply_creator_role_assignment(process_doc: dict, user: dict) -> None:
     atribui usar os construtores em vez de repetir a lista.
     """
     effective = (user.get("effective_role") or user.get("role") or "")
-    if effective == UserRole.INTERMEDIARIO:
+    if effective in PAPEIS_COMO_MEDIADOR:
         process_doc.update(build_set_mediador_fields([user["id"]], [user["name"]]))
-    elif effective in [UserRole.CONSULTOR, UserRole.DIRETOR]:
+    elif effective in PAPEIS_COMO_CONSULTOR:
         process_doc.update(build_set_consultor_fields([user["id"]], [user["name"]]))
 
 

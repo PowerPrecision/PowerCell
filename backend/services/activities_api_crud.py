@@ -4,8 +4,6 @@ Extraído de `routes/activities.py`.
 """
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException
@@ -13,41 +11,56 @@ from fastapi import HTTPException
 from database import db
 from models.auth import UserRole
 from models.activity import ActivityCreate, ActivityResponse
-from services.history import log_history, _is_stealth_user
-from utils.input_sanitization import sanitize_string
+
+# NOTA (Ponto 9): `uuid`, `datetime`, `log_history`, `_is_stealth_user`,
+# `sanitize_string` saíram daqui com o corpo do
+# `run_create_activity`. A guarda de indexação silenciosa não se perdeu —
+# tornou-se redundante neste módulo, porque já NINGUÉM cria atividades
+# por aqui, seja qual for o perfil. O ponto único da regra continua a ser
+# `history._is_stealth_user`, para os escritores que restam.
+
+
+#: O que se responde a quem ainda tente escrever aqui. Um 410 sem destino
+#: manda a pessoa procurar às cegas.
+ATIVIDADE_MANUAL_DESCONTINUADA = (
+    "O histórico do processo é uma trilha de auditoria gerada pelo sistema "
+    "e deixou de aceitar registos manuais. As notas do consultor escrevem-se "
+    "no campo Observações, no separador Resumo do processo."
+)
 
 
 async def run_create_activity(data: ActivityCreate, user: dict):
-    process = await db.processes.find_one({"id": data.process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    """DESCONTINUADO (Ponto 9) — o histórico é só de leitura.
 
-    if user["role"] == UserRole.CLIENTE and process["client_id"] != user["id"]:
-        raise HTTPException(status_code=403, detail="Acesso negado")
+    O separador Histórico perdeu a UI de adição e este endpoint morreu
+    com ela: fechar o ecrã e deixar a porta aberta seria uma regra só na
+    aparência.
 
-    if _is_stealth_user(user):
-        raise HTTPException(
-            status_code=403,
-            detail="O seu perfil está em modo de indexação silenciosa e não pode adicionar comentários ao histórico do processo."
-        )
+    **410 e não a rota apagada.** Sem o stub, um `POST /api/activities`
+    responde 405 — o caminho continua a existir para o GET e o DELETE —
+    e um 405 lê-se como avaria de encaminhamento, mandando quem lá bater
+    procurar o defeito no router. O 410 diz o que aconteceu e para onde
+    ir. É o precedente que o `POST /auth/login` já usa aqui.
 
-    activity_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
+    **A escrita foi REMOVIDA, não desligada.** O corpo antigo (insert em
+    `db.activities` + `log_history`) saiu daqui de propósito: código
+    adormecido atrás de um `raise` é um convite a religá-lo, e há um
+    teste sobre a fonte a afirmar que não voltou.
 
-    activity_doc = {
-        "id": activity_id,
-        "process_id": data.process_id,
-        "user_id": user["id"],
-        "user_name": user["name"],
-        "user_role": user["role"],
-        "comment": sanitize_string(data.comment, max_length=1000),
-        "created_at": now
-    }
+    **Continuam a escrever, e é assim que tem de ser:** o
+    `voice_note_engine` (a nota ditada entra na timeline) e o
+    `temp_link_api_public` (o cliente que envia por link temporário).
+    Escrevem em `db.activities` directamente e nunca passaram por aqui —
+    o que se fechou foi a escrita MANUAL, não o registo automático.
 
-    await db.activities.insert_one(activity_doc)
-    await log_history(data.process_id, user, "Adicionou comentário")
-
-    return ActivityResponse(**{k: v for k, v in activity_doc.items() if k != "_id"})
+    A recusa vem ANTES de tocar na base de dados: um endpoint que valida
+    e só depois recusa continua a ser uma superfície que lê a base de
+    dados por ordem de quem chama.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail=ATIVIDADE_MANUAL_DESCONTINUADA,
+    )
 
 
 async def run_get_activities(

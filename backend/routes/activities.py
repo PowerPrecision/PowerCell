@@ -21,9 +21,17 @@ from services.activities_api_history import run_get_history
 router = APIRouter(tags=["Activities"])
 
 
-@router.post("/activities", response_model=ActivityResponse)
+@router.post("/activities")
 async def create_activity(data: ActivityCreate, user: dict = Depends(get_current_user)):
-    """Create a new activity/comment on a process"""
+    """DESCONTINUADO (Ponto 9) — responde sempre 410.
+
+    O histórico é uma trilha de auditoria gerada pelo sistema. O stub
+    mantém-se para a resposta ser 410 e não 405: o caminho continua a
+    existir para o GET e o DELETE, e um 405 lê-se como avaria de
+    encaminhamento. Mesmo padrão do `POST /auth/login`.
+
+    Sem `response_model`: já não devolve uma atividade.
+    """
     return await run_create_activity(data, user)
 
 

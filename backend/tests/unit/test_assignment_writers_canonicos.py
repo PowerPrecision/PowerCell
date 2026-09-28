@@ -148,3 +148,77 @@ class TestADuplaAutoAtribuicaoUsaOsMesmosConstrutores:
 
         doc = build_set_consultor_fields(["u-6"], ["Sofia"])
         assert desfasamentos_do_processo(doc) == []
+
+
+class TestODiretorTemOsMesmosDeveresDoConsultor:
+    """Ponto 9, fio solto 3 — os dois escritores divergiam no `diretor`.
+
+    `process_create` tratava o diretor como consultor
+    (``effective in [CONSULTOR, DIRETOR]``); o `client_assign` só
+    conhecia `"consultor"`, pelo que um cliente atribuído a um diretor
+    pela Sala de Triagem nascia com processo e **sem atribuição
+    nenhuma** — nem lista, nem singulares, nem nome. Não dava erro: o
+    processo simplesmente não era de ninguém, e um processo sem dono não
+    se nota até alguém reparar que ninguém lhe pega.
+
+    Era a MESMA forma do defeito dos campos — a decisão escrita à mão em
+    dois sítios —, só que num eixo diferente: ali divergia a lista de
+    CAMPOS, aqui a lista de PAPÉIS. Por isso a correcção também é a
+    mesma: uma constante, não uma segunda cópia.
+    """
+
+    def test_o_diretor_e_atribuido_como_consultor(self):
+        from services.client_assign import apply_target_role_assignment
+
+        doc = {}
+        apply_target_role_assignment(
+            doc, {"id": "u-dir", "name": "Marta Diretora", "role": "diretor"}
+        )
+
+        assert doc["assigned_consultor_ids"] == ["u-dir"]
+        assert doc["consultor_names"] == ["Marta Diretora"]
+        assert desfasamentos_do_processo(doc) == []
+
+    def test_os_dois_escritores_concordam_sobre_quem_e_consultor(self):
+        """A contraprova que impede a divergência de voltar.
+
+        Compara os escritores REAIS papel a papel. Uma lista de papéis
+        escrita à mão neste teste seria a terceira cópia.
+        """
+        from services.client_assign import apply_target_role_assignment
+        from services.process_create import apply_creator_role_assignment
+        from services.process_staff_assignment import (
+            PAPEIS_COMO_CONSULTOR,
+            PAPEIS_COMO_MEDIADOR,
+        )
+
+        for papel in (*PAPEIS_COMO_CONSULTOR, *PAPEIS_COMO_MEDIADOR):
+            do_criador = {}
+            apply_creator_role_assignment(
+                do_criador, {"id": "u-1", "name": "Ana", "effective_role": papel}
+            )
+            do_alvo = {}
+            apply_target_role_assignment(
+                do_alvo, {"id": "u-1", "name": "Ana", "role": papel}
+            )
+
+            assert do_criador == do_alvo, (
+                f"os dois escritores divergem no papel {papel!r} — foi "
+                "exactamente assim que o diretor ficou sem atribuição"
+            )
+
+    def test_um_papel_fora_das_constantes_continua_sem_atribuicao(self):
+        """Contraprova no sentido oposto: alargar não é alargar a todos.
+
+        Sem isto, fazer os dois concordarem atribuindo SEMPRE também
+        passaria — e um `parceiro` ou um `administrativo` passaria a ser
+        carimbado como consultor do processo.
+        """
+        from services.client_assign import apply_target_role_assignment
+
+        for papel in ("administrativo", "parceiro", "ceo"):
+            doc = {}
+            apply_target_role_assignment(
+                doc, {"id": "u-x", "name": "Alguém", "role": papel}
+            )
+            assert doc == {}, f"{papel} não é um atribuído do processo"
