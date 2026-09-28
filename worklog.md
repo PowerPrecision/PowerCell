@@ -8812,3 +8812,69 @@ encontrou este.
 Backend **4013 passed, 5 skipped** (eram 4009). Os quatro testes novos
 falham contra o código anterior — é a medição da mutação, feita na
 ordem certa.
+
+---
+
+# Iteração `quem-esta-nos-ambiguos` — a inferência que a passagem seguinte desmentiu
+
+## Onde eu errei
+
+Na iteração anterior escrevi, com confiança a mais:
+
+> `assigned_consultor_id` (93) e `assigned_mediador_id` (110) só podem
+> ser `em_falta`: nenhum escritor antigo os deixa preenchidos com a lista
+> vazia.
+
+Depois do `--corrigir` em produção, os 297 `em_falta` foram a zero — e
+esses dois campos ficaram **exactamente onde estavam**: 93 e 110. São
+quase todos os 213 ambíguos.
+
+A dedução estava bem construída sobre um inventário de escritores que
+continua incompleto. **Uma dedução sobre quem escreve o quê vale o
+inventário que a suporta, e o inventário nunca está provado** — foi a
+segunda vez neste lote que os números mandaram voltar ao código, e a
+primeira em que me apanharam a mim e não ao código.
+
+## O que o cruzamento mostrou
+
+**`consultor_id` ficou a 0 e `consultant_id` a 6.** A assinatura do
+`clear` antigo (`consultor_id` + `consultant_id`) já não pode existir —
+logo as **2** `desatribuicao` não vieram da assinatura, vieram do
+**histórico**. O caminho que construí para o mediador (porque lá a
+assinatura não decide) provou-se a decidir também no consultor.
+
+**Os indeterminados concentram-se em 2–3 ids de utilizador.** Isso não é
+actividade orgânica de pessoas a atribuir processos um a um: é uma
+escrita em massa por um caminho que só gravou o singular.
+
+## Duas correcções no relatório
+
+1. **`processos_por_origem` acumulava por (processo, PAPEL)**: um
+   processo com os dois papéis ambíguos aparecia duas vezes, e o
+   relatório anunciava "199 casos" sobre uma lista que não era nem de
+   processos nem de papéis. Hoje a lista é de processos, sem repetições e
+   ordenada, e o rótulo distingue as duas contagens ("8 processo(s), 16
+   papel(éis)").
+
+2. **`responsaveis_por_origem` é novo** — quem está nos singulares e
+   quantas vezes, resolvido contra `db.users` com nome, papel e se está
+   activo, e a dizer **`⚠ utilizador NÃO EXISTE`** quando o id não
+   resolve.
+
+É essa última linha que decide os indeterminados, e a regra é simples:
+**um singular que aponta para um utilizador que já não existe é resíduo;
+um que aponta para um consultor activo é uma atribuição.** Transformar
+199 processos indecidíveis em duas pessoas a confirmar é a diferença
+entre uma decisão e um encolher de ombros.
+
+## Como se provou
+
+Base local semeada com a FORMA da produção — oito processos com a mesma
+dupla de ids, um legado, um removido com registo no histórico — e dois
+dos ids deliberadamente sem utilizador correspondente. O relatório
+distingue os três casos e marca os dois ids órfãos.
+
+## Validação
+
+Backend **4019 passed, 5 skipped** (eram 4013). Os cinco testes novos
+falham contra o código anterior.

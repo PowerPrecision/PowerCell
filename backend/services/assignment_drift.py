@@ -405,25 +405,67 @@ def resumir_ambiguos(
     *,
     historicos_por_processo: Optional[dict[str, dict[str, Iterable[dict]]]] = None,
 ) -> dict[str, Any]:
-    """Contagem dos ambíguos POR ORIGEM — é isto que decide o `--corrigir`."""
+    """Contagem dos ambíguos POR ORIGEM — é isto que decide o `--corrigir`.
+
+    Três leituras, e não se confundem:
+
+    ``por_papel_e_origem``   quantos PAPÉIS (processo × consultor/mediador).
+                             É por papel que se decide o que fazer, logo é
+                             este o número que conta para o trabalho.
+    ``processos_por_origem`` que PROCESSOS, sem repetições. Um processo com
+                             os dois papéis ambíguos aparecia aqui duas
+                             vezes e o relatório anunciava "N casos" sobre
+                             uma lista que não era nem de processos nem de
+                             papéis.
+    ``responsaveis_por_origem``
+                             QUEM aparece nos singulares, e quantas vezes.
+                             É a pergunta que transforma "199 processos
+                             indecidíveis" em "duas pessoas a confirmar":
+                             os mesmos dois ou três ids repetidos não são
+                             actividade orgânica, são uma escrita em massa.
+    """
     historicos = historicos_por_processo or {}
     por_origem: dict[str, int] = {}
     processos_por_origem: dict[str, list[str]] = {}
+    vistos: dict[str, set[str]] = {}
+    responsaveis: dict[str, dict[str, int]] = {}
 
     for processo in processos:
         pid = str((processo or {}).get("id") or "")
         do_processo = historicos.get(pid) or {}
-        for papel, _campo_da_lista, _campos in PAPEIS:
-            if not _campos_ambiguos(processo, papel):
+        for papel, _campo_da_lista, campos_singulares in PAPEIS:
+            ambiguos = _campos_ambiguos(processo, papel)
+            if not ambiguos:
                 continue
             origem = origem_do_ambiguo(
                 processo, papel, historico=do_processo.get(papel)
             )
             chave = f"{papel}:{origem}"
             por_origem[chave] = por_origem.get(chave, 0) + 1
-            processos_por_origem.setdefault(origem, []).append(pid)
+
+            # A lista é de PROCESSOS: sem repetir quem tem os dois papéis.
+            ja = vistos.setdefault(origem, set())
+            if pid not in ja:
+                ja.add(pid)
+                processos_por_origem.setdefault(origem, []).append(pid)
+
+            # Quem está nos singulares. Um papel contribui com UM id — o
+            # mesmo valor repetido em dois campos do mesmo papel é a mesma
+            # pessoa, não duas.
+            for campo in campos_singulares:
+                if campo not in ambiguos:
+                    continue
+                valor = _texto((processo or {}).get(campo))
+                if not valor:
+                    continue
+                contagem = responsaveis.setdefault(origem, {})
+                contagem[valor] = contagem.get(valor, 0) + 1
+                break
 
     return {
         "por_papel_e_origem": por_origem,
-        "processos_por_origem": processos_por_origem,
+        "processos_por_origem": {
+            origem: sorted(ids) for origem, ids in processos_por_origem.items()
+        },
+        "responsaveis_por_origem": responsaveis,
     }
