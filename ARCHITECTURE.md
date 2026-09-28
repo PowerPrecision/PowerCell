@@ -6381,3 +6381,62 @@ contrário dos scripts de seed, e por isso não chama
 `require_non_production_db`. A contrapartida é a gradação de ordens: ler e
 contar por omissão, `--corrigir` só para os inequívocos, `--incluir-ambiguos`
 como segunda ordem explícita.
+
+### O que os números de produção disseram (Set 2026)
+
+Em 333 processos: **`divergente` 0, `em_falta` 297, `ambiguo` 213**. As
+duas leituras que daí saíram desmontam a hipótese com que o módulo foi
+escrito.
+
+**`divergente` a zero.** Não há um único processo em que um singular
+aponte para alguém FORA da lista. A "fuga por dados residuais" não tem
+esta forma — e não era ela a causa dos alertas mal dirigidos, que eram os
+dois defeitos reais do `alerts.py` (difusão à gestão sem filtro de rede e
+os plurais ignorados).
+
+**`em_falta` a 297 não é histórico — estava a ser produzido.**
+`process_create.apply_creator_role_assignment` e o bloco equivalente do
+`client_assign` escreviam CINCO dos seis campos canónicos do consultor
+(faltava `consultant_id`) e QUATRO dos cinco do mediador (faltava
+`mediador_id`): **todo o processo criado nascia desfasado.** A regra do
+Lote 5 — o `set` e o `clear` derivam da mesma constante — tinha sido
+aplicada aos construtores e não a quem os devia usar; os três escritores
+repetiam a lista à mão. Limpar a base de dados sem os corrigir seria
+esfregar o chão com a torneira aberta, e é por isso que a correcção do
+código veio primeiro. Hoje `process_create`, `client_assign` e
+`dual_auto_assign_on_pre_registo_transition` chamam
+`build_set_consultor_fields` / `build_set_mediador_fields`.
+
+### Desambiguar o `ambiguo`: assinatura, e depois o registo
+
+"Indecidível pelo valor do campo" não é o mesmo que "indecidível". Os dois
+escritores antigos deixavam rastos DIFERENTES:
+
+| Escritor antigo | Deixava | Significa |
+|---|---|---|
+| `build_clear_consultor_fields` (pré-Lote 5) | `consultor_id` + `consultant_id` | resíduo de desatribuição |
+| `dual_auto_assign...` (pré-`d8a739d1`) | só `consultant_id` | processo COM dono |
+
+`origem_do_ambiguo` devolve `desatribuicao`, `atribuicao_legada` ou
+`indeterminada`. Para o **mediador a assinatura não decide** — ambos os
+escritores deixavam apenas `mediador_id` —, e aí entra a segunda fonte de
+prova: o **último** acontecimento de atribuição no `db.history`. Quando o
+registo fala do papel, ganha à assinatura: é registo, não inferência.
+
+Três consequências que não se podem perder:
+
+1. **`--incluir-ambiguos` deixou de significar "limpa todos".** Limpa os
+   que se PROVAM resíduo; os `atribuicao_legada` e os `indeterminada`
+   ficam intactos mesmo com a bandeira ligada. A bandeira autoriza a
+   escrita, não substitui a prova.
+2. **Para o `atribuicao_legada` a correcção é a OPOSTA**: repor a lista
+   (`--repor-listas`), não limpar o singular. Quem está no singular já
+   recebe alertas e já vê o processo em "Os Meus Processos" — repor não
+   alarga acesso nenhum, põe o documento de acordo com o comportamento que
+   já está em produção e tira o cartão de Atribuição do estado em branco.
+3. **A ordem das escritas importa**: repor a lista primeiro e só depois
+   calcular os singulares, sobre o documento já com a lista. Ao contrário,
+   o processo sai da passagem com a lista reposta e os singulares em
+   falta — continua desfasado. Deu-se por isso a correr o script duas
+   vezes num laboratório local; hoje converge numa passagem e a segunda
+   não tem trabalho.

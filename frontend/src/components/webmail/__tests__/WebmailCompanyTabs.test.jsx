@@ -84,3 +84,42 @@ describe("WebmailCompanyTabs", () => {
     expect(screen.getByRole("tab", { name: /sem-nome/ })).toBeInTheDocument();
   });
 });
+
+describe("a lista ainda a carregar não inventa uma empresa", () => {
+  it("com zero empresas NÃO desenha o rótulo do nome", () => {
+    /**
+     * O DEFEITO (CI, Set 2026): o ramo do nome único era o `else` de
+     * `deveMostrarSeparadores` (`length > 1`), e o complemento disso
+     * inclui o ZERO. Enquanto a lista carregava — ou quando o pedido
+     * falha, ou o utilizador não tem UCR nenhum — desenhava-se o ícone
+     * de empresa com o nome EM BRANCO ao lado: no ecrã, "a carregar" e
+     * "uma empresa" ficavam indistinguíveis.
+     *
+     * E foi isso que fez o `WebmailPage.test.jsx` ser vermelho só no CI:
+     * o `findByTestId` resolvia nesse estado intermédio (o elemento já
+     * existia, vazio) e a asserção sobre o texto corria contra o vazio.
+     * Numa máquina rápida a query chegava antes e passava.
+     *
+     * A correcção não é esperar melhor no teste — é o elemento só existir
+     * quando tem o que dizer. A presença dele passa a SER a afirmação.
+     */
+    montar({ empresas: [] });
+
+    expect(screen.queryByTestId("webmail-empresa-unica")).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+  });
+
+  it("com zero empresas a barra continua lá, com a sincronização", () => {
+    // Contraprova: "não desenhar nada" não pode virar "esconder a barra".
+    // O indicador de sincronização é independente das empresas e tem de
+    // sobreviver ao estado de carregamento.
+    montar({ empresas: [] });
+    expect(screen.getByTestId("webmail-company-bar")).toBeInTheDocument();
+  });
+
+  it("com UMA empresa escreve o nome", () => {
+    montar({ empresas: [{ company_id: "power", company_name: "Power Real Estate" }] });
+    expect(screen.getByTestId("webmail-empresa-unica"))
+      .toHaveTextContent("Power Real Estate");
+  });
+});

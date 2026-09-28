@@ -390,6 +390,13 @@ describe("WebmailPage — separadores por Empresa (Ponto 8, Fase 3)", () => {
       });
     montar();
 
+    // Este `findByTestId` só é determinístico porque o rótulo NÃO existe
+    // enquanto a lista está vazia (`deveMostrarNomeDaEmpresa`). Enquanto o
+    // ramo era o `else` de `length > 1`, o elemento existia logo — vazio —
+    // e a asserção seguinte corria contra esse vazio: verde numa máquina
+    // rápida, vermelho no CI. Quem garante a regra é
+    // `WebmailCompanyTabs.test.jsx`; não voltar a pôr aqui um `waitFor`
+    // sobre o texto, que mascara o defeito em vez de o apanhar.
     expect(await screen.findByTestId("webmail-empresa-unica")).toHaveTextContent(
       "Power Real Estate",
     );

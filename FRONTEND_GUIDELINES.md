@@ -1585,3 +1585,43 @@ Domus voltava a cair na caixa da Power.
 Reescrever o parâmetro antes do reload, não removê-lo: quem trocou de
 empresa quer ver a caixa da nova, e o resto do URL (pasta, pesquisa)
 continua a valer.
+
+### 27.17 Três estados precisam de três condições, não de duas e um `else`
+
+`WebmailCompanyTabs` decidia com `deveMostrarSeparadores(empresas)`
+(`length > 1`) e punha o rótulo da empresa única no **`else`**. O
+complemento de "mais do que uma" inclui o **zero**: com a lista ainda a
+carregar — ou com o pedido falhado, ou com um utilizador sem UCR nenhum —
+o `else` disparava e desenhava o ícone de empresa com o nome **em branco**.
+
+No ecrã, "a carregar" e "uma empresa" ficam indistinguíveis. Um estado de
+carregamento nunca pode cair no ramo de um estado de dados.
+
+**Num teste o efeito é pior, e é assíncrono:** `findByTestId` resolve
+assim que o elemento existe — e ele já existia, vazio. O
+`toHaveTextContent` que vem a seguir corre contra esse vazio. Passa numa
+máquina rápida, falha num CI carregado. Foi verde três vezes localmente e
+vermelho no CI.
+
+**A saída não é esperar melhor no teste.** Um `waitFor` à volta da
+asserção mascara o defeito: o ecrã continua a mostrar um rótulo vazio a
+utilizadores reais. A correcção é **o elemento só existir quando tem o que
+dizer** — e aí a presença dele passa a ser, ela própria, a afirmação.
+
+```js
+// ✗ duas condições para três estados
+{mostrarSeparadores ? <Tabs …/> : <span>{rotulo(empresas?.[0])}</span>}
+
+// ✓ cada estado com a sua condição, e a do meio é POSITIVA
+{mostrarSeparadores ? <Tabs …/>
+ : mostrarNome ? <span>{rotulo(empresas[0])}</span>
+ : <span className="min-w-0" />}
+```
+
+**A contraprova que acompanha a regra:** as duas condições nunca podem ser
+verdadeiras ao mesmo tempo, para qualquer lista — é essa exclusividade que
+o `else` encadeado assume.
+
+**E quem prova a regra é o teste de COMPONENTE.** O teste da página passa
+de qualquer forma numa máquina rápida; é o teste que monta o componente com
+a lista vazia que afirma que o rótulo não existe.

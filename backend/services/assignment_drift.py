@@ -139,16 +139,37 @@ def correccao_do_processo(
     processo: dict,
     *,
     incluir_ambiguos: bool = False,
+    historicos_por_papel: Optional[dict[str, Iterable[dict]]] = None,
 ) -> dict[str, Any]:
     """O `$set` que põe os singulares de acordo com a lista.
 
     Vazio quando não há nada seguro a corrigir. Os `ambiguo` só entram por
     ordem explícita (`incluir_ambiguos=True`) — ver o cabeçalho do módulo.
+
+    LOTE 6 — `incluir_ambiguos` deixou de significar "limpa TODOS os
+    ambíguos". Limpa os que se provam resíduo de uma desatribuição
+    (`origem_do_ambiguo`); os de origem `atribuicao_legada` ou
+    `indeterminada` continuam intactos **mesmo com a bandeira ligada**,
+    porque limpá-los deixa o processo sem dono. A bandeira autoriza a
+    escrita; não substitui a prova.
     """
     correccao: dict[str, Any] = {}
+    origens: dict[str, str] = {}
+    historicos = historicos_por_papel or {}
+
     for d in desfasamentos_do_processo(processo):
-        if d.e_seguro_corrigir or incluir_ambiguos:
+        if d.e_seguro_corrigir:
             correccao[d.campo] = d.valor_esperado
+            continue
+        if not incluir_ambiguos:
+            continue
+        if d.papel not in origens:
+            origens[d.papel] = origem_do_ambiguo(
+                processo, d.papel, historico=historicos.get(d.papel)
+            )
+        if origens[d.papel] == ORIGEM_DESATRIBUICAO:
+            correccao[d.campo] = d.valor_esperado
+
     return correccao
 
 
@@ -194,4 +215,215 @@ def resumir(processos: Iterable[dict]) -> dict[str, Any]:
         "processos_ambiguos": ambiguos_por_decidir,
         "por_veredicto": por_veredicto,
         "por_campo": por_campo,
+    }
+
+
+# ────────────────────────────────────────────────────────────────────
+# DESAMBIGUAR O `ambiguo` (Lote 6 — a leitura dos números)
+#
+# O diagnóstico em produção devolveu 213 campos ambíguos. "Lista vazia +
+# singular preenchido" continua a ser indecidível **pelo valor do
+# campo** — mas não pela ASSINATURA do documento, porque os dois
+# escritores antigos deixavam rastos diferentes:
+#
+#   `build_clear_consultor_fields` (pré-Lote 5)
+#       limpava a lista, os nomes e `assigned_consultor_id`, e deixava
+#       `consultor_id` + `consultant_id` → assinatura de DOIS campos.
+#
+#   `dual_auto_assign_on_pre_registo_transition` (pré-`d8a739d1`)
+#       escrevia SÓ `consultant_id` → assinatura de UM campo.
+#
+# Para o consultor isto decide. Para o mediador NÃO decide: ambos os
+# escritores antigos deixavam apenas `mediador_id`, e é preciso a
+# segunda fonte de prova — o histórico do processo.
+#
+# A pergunta que o histórico responde é uma só: **o último acontecimento
+# de atribuição deste papel foi uma remoção ou uma atribuição?** Se foi
+# remoção, o singular é resíduo e limpá-lo é seguro. Se foi atribuição,
+# o processo tem dono e limpar desatribui trabalho real.
+#
+# Porque é que o histórico ganha à assinatura quando existe: a
+# assinatura é uma inferência sobre qual escritor passou por ali; o
+# histórico é o registo do que aconteceu.
+# ────────────────────────────────────────────────────────────────────
+
+ORIGEM_DESATRIBUICAO = "desatribuicao"
+ORIGEM_ATRIBUICAO_LEGADA = "atribuicao_legada"
+ORIGEM_INDETERMINADA = "indeterminada"
+
+#: Assinaturas que decidem sozinhas, por papel. Conjunto EXACTO dos
+#: campos singulares preenchidos com a lista vazia.
+_ASSINATURAS: dict[str, tuple[tuple[frozenset[str], str], ...]] = {
+    "consultor": (
+        (frozenset({"consultor_id", "consultant_id"}), ORIGEM_DESATRIBUICAO),
+        (frozenset({"consultant_id"}), ORIGEM_ATRIBUICAO_LEGADA),
+    ),
+    # O mediador não tem assinatura que decida: `build_clear_mediador_fields`
+    # e a dupla auto-atribuição antiga deixavam ambos `{mediador_id}`.
+    "mediador": (),
+}
+
+#: Campo do histórico que cada papel usa nas remoções manuais, mais o
+#: `"assignment"` genérico com que a dupla auto-atribuição regista.
+_CAMPOS_DE_HISTORICO = {
+    "consultor": ("assigned_consultor_ids", "assignment"),
+    "mediador": ("assigned_mediador_ids", "assignment"),
+}
+
+#: Palavras com que uma entrada genérica (`field == "assignment"`) se
+#: atribui a um papel. Comparadas sem acentos e em minúsculas.
+_PALAVRAS_DO_PAPEL = {
+    "consultor": ("consultor",),
+    "mediador": ("intermediario", "mediador"),
+}
+
+
+def _sem_acentos(texto: str) -> str:
+    import unicodedata
+
+    normalizado = unicodedata.normalize("NFD", texto or "")
+    return "".join(c for c in normalizado if unicodedata.category(c) != "Mn").lower()
+
+
+def _campos_ambiguos(processo: dict, papel: str) -> frozenset[str]:
+    return frozenset(
+        d.campo
+        for d in desfasamentos_do_processo(processo)
+        if d.papel == papel and d.veredicto == VEREDICTO_AMBIGUO
+    )
+
+
+def _origem_pelo_historico(historico: Iterable[dict], papel: str) -> Optional[str]:
+    """O ÚLTIMO acontecimento de atribuição deste papel, se existir.
+
+    Devolve `None` quando o histórico não fala deste papel — que é
+    diferente de "não sei decidir": quem chama distingue.
+    """
+    campos = _CAMPOS_DE_HISTORICO[papel]
+    palavras = _PALAVRAS_DO_PAPEL[papel]
+    veredicto: Optional[str] = None
+
+    for entrada in historico or []:
+        campo = (entrada or {}).get("field") or ""
+        if campo not in campos:
+            continue
+
+        if campo == "assignment":
+            # Entrada genérica (dupla auto-atribuição): só conta se
+            # nomear este papel. Um registo que só fala do consultor não
+            # diz nada sobre o mediador.
+            texto = _sem_acentos(
+                f"{entrada.get('action') or ''} {entrada.get('new_value') or ''}"
+            )
+            if not any(p in texto for p in palavras):
+                continue
+
+        novo = entrada.get("new_value")
+        veredicto = (
+            ORIGEM_DESATRIBUICAO if not novo else ORIGEM_ATRIBUICAO_LEGADA
+        )
+
+    return veredicto
+
+
+def origem_do_ambiguo(
+    processo: dict,
+    papel: str,
+    *,
+    historico: Optional[Iterable[dict]] = None,
+) -> str:
+    """De onde veio o `ambiguo` deste papel — e portanto o que fazer.
+
+    ``desatribuicao``      resíduo de uma remoção: limpar é seguro.
+    ``atribuicao_legada``  o processo TEM dono: limpar desatribui
+                           trabalho real; o que falta é a lista.
+    ``indeterminada``      sem prova suficiente. Fica para decisão
+                           humana — nunca para o automatismo.
+
+    O histórico, quando fala deste papel, ganha à assinatura: é registo,
+    não inferência. `historico` tem de vir ORDENADO do mais antigo para
+    o mais recente.
+    """
+    campos = _campos_ambiguos(processo, papel)
+    if not campos:
+        return ORIGEM_INDETERMINADA
+
+    if historico is not None:
+        pelo_registo = _origem_pelo_historico(historico, papel)
+        if pelo_registo:
+            return pelo_registo
+
+    for assinatura, origem in _ASSINATURAS.get(papel, ()):
+        if campos == assinatura:
+            return origem
+
+    return ORIGEM_INDETERMINADA
+
+
+def reposicao_de_listas_do_processo(
+    processo: dict,
+    *,
+    historicos_por_papel: Optional[dict[str, Iterable[dict]]] = None,
+) -> dict[str, Any]:
+    """O `$set` que repõe a LISTA a partir do singular — o caminho oposto.
+
+    Para um `ambiguo` de origem `atribuicao_legada` a correcção certa
+    **não é limpar**: o processo tem dono, e limpá-lo deixa-o sem
+    ninguém. O que falta é a lista que o escritor antigo nunca escreveu.
+
+    Nota sobre o risco: quem está no singular JÁ recebe os alertas e JÁ
+    vê o processo em "Os Meus Processos" (ambos os leitores consultam os
+    campos singulares). Repor a lista não alarga acesso nenhum — põe o
+    documento de acordo com o comportamento que já está em produção, e
+    tira o cartão de Atribuição do estado em branco.
+
+    Não devolve nomes: quem os sabe resolver é o script, contra
+    `db.users`.
+    """
+    correccao: dict[str, Any] = {}
+    historicos = historicos_por_papel or {}
+
+    for papel, campo_da_lista, campos_singulares in PAPEIS:
+        if _lista_de_ids(processo, campo_da_lista):
+            continue
+        origem = origem_do_ambiguo(
+            processo, papel, historico=historicos.get(papel)
+        )
+        if origem != ORIGEM_ATRIBUICAO_LEGADA:
+            continue
+        for campo in campos_singulares:
+            valor = _texto((processo or {}).get(campo))
+            if valor:
+                correccao[campo_da_lista] = [valor]
+                break
+
+    return correccao
+
+
+def resumir_ambiguos(
+    processos: Iterable[dict],
+    *,
+    historicos_por_processo: Optional[dict[str, dict[str, Iterable[dict]]]] = None,
+) -> dict[str, Any]:
+    """Contagem dos ambíguos POR ORIGEM — é isto que decide o `--corrigir`."""
+    historicos = historicos_por_processo or {}
+    por_origem: dict[str, int] = {}
+    processos_por_origem: dict[str, list[str]] = {}
+
+    for processo in processos:
+        pid = str((processo or {}).get("id") or "")
+        do_processo = historicos.get(pid) or {}
+        for papel, _campo_da_lista, _campos in PAPEIS:
+            if not _campos_ambiguos(processo, papel):
+                continue
+            origem = origem_do_ambiguo(
+                processo, papel, historico=do_processo.get(papel)
+            )
+            chave = f"{papel}:{origem}"
+            por_origem[chave] = por_origem.get(chave, 0) + 1
+            processos_por_origem.setdefault(origem, []).append(pid)
+
+    return {
+        "por_papel_e_origem": por_origem,
+        "processos_por_origem": processos_por_origem,
     }
