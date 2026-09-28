@@ -6440,3 +6440,52 @@ Três consequências que não se podem perder:
    falta — continua desfasado. Deu-se por isso a correr o script duas
    vezes num laboratório local; hoje converge numa passagem e a segunda
    não tem trabalho.
+
+## Notas do consultor: um só sítio para escrever, um só para auditar (Set 2026, Ponto 9)
+
+O texto livre de um processo estava espalhado por dois ecrãs com regras
+diferentes, e a listagem mostrava um terceiro. A separação passou a ser
+explícita:
+
+| Onde | O que é | Escrita |
+|---|---|---|
+| **Resumo** → cartão Observações | as notas do consultor | **SIM** — é o local oficial e único |
+| **Histórico** | trilha de auditoria gerada pelo sistema | **NÃO** |
+| Listagem → "Notas do Consultor" | espelho do Resumo | — |
+
+**O Histórico deixou de aceitar escrita.** O diálogo "Registar Atividade
+/ Nota" foi removido, e com ele o `handleSendComment` do `ProcessDetails`
+— que era o único chamador de `processMutations.addActivity` no
+frontend. O botão de nota de voz **mudou-se** para o cartão de
+Observações (uma nota ditada é uma nota) e o `VoiceNoteRecorder` passou a
+ser renderizado ao nível da página, junto dos restantes diálogos: um
+diálogo não é conteúdo de separador.
+
+Fica a eliminação de um comentário no `UnifiedAuditTrail`. Já ninguém
+consegue criar comentários por ali, pelo que esse botão só alcança
+registos antigos e notas de voz — é a única forma de corrigir uma entrada
+errada. Se a regra vier a ser "nem apagar", é uma decisão a tomar de
+propósito.
+
+**O endpoint `POST /api/activities` continua aberto** e
+`useAddActivityMutation` continua exportado: o que se fechou foi a UI.
+Fechar o endpoint exige inventariar quem mais lá escreve (o motor de
+notas de voz escreve em `db.activities` directamente, não por aqui) e é
+uma decisão à parte.
+
+### A listagem espelha o Resumo — e lia campos que não existem
+
+`notaMaisRecenteDoConsultor` (em `utils/processObservationNotes.js`)
+deriva de `resolveProcessObservationNotes`: os mesmos campos, a mesma
+ordem cronológica do cartão. As notas lidas pela IA ficam de fora —
+a coluna chama-se "Notas do Consultor" e não tem o crachá que o cartão
+usa para as distinguir, pelo que deixá-las entrar seria apresentar como
+de uma pessoa um texto que a máquina leu.
+
+O que lá estava antes lia `latest_activity_preview`, `latest_note` e
+`latest_activity_note`, que **não existem no backend**. Ver
+`FRONTEND_GUIDELINES.md` § 27.18. O contrato tem agora guarda do lado que
+o pode afirmar — `tests/unit/test_projeccao_das_notas_do_consultor.py`
+verifica que `observation_notes` / `observations` / `notes` estão nas
+projecções da listagem e do Kanban, com contraprova de que os nomes
+inventados continuam a não existir.

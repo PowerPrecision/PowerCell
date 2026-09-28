@@ -1625,3 +1625,72 @@ o `else` encadeado assume.
 **E quem prova a regra é o teste de COMPONENTE.** O teste da página passa
 de qualquer forma numa máquina rápida; é o teste que monta o componente com
 a lista vazia que afirma que o rótulo não existe.
+
+### 27.18 Uma cascata de fallbacks esconde um contrato inventado
+
+As duas listagens de processos mostravam a coluna "Notas do Consultor"
+com uma cascata que começava assim:
+
+```js
+// ❌ ERRADO — os três primeiros campos não existem no backend
+const noteText =
+  process.latest_activity_preview ||
+  process.latest_activity_note ||
+  process.latest_note ||
+  "";
+```
+
+`latest_activity_preview`, `latest_note` e `latest_activity_note` têm
+**zero** ocorrências em `backend/`. Na `FilteredProcessList`, onde a
+cascata só lia esses três, a coluna dizia "Sem notas recentes" em TODOS
+os processos, sempre. Na `ProcessesPage` havia mais sete ramos por baixo
+e o sexto chegava a `process.notes` — **foi essa metade a funcionar que
+escondeu a outra**, exactamente como o `run_get_my_tasks` escondeu o
+`run_get_tasks`.
+
+Duas regras saem daqui:
+
+1. **Um `||` encadeado sobre campos de um endpoint é uma hipótese, não
+   um contrato.** Se não se sabe qual dos nomes vem, não se sabe se
+   algum vem. Ler a projecção do backend **antes** (§ 27.10) e escrever
+   um só nome.
+2. **A cascata é o próprio disfarce.** Com um campo só, "está vazio"
+   nota-se no primeiro processo. Com sete, o ecrã mostra *alguma coisa*
+   e ninguém pergunta de onde vem.
+
+Hoje a regra vive num ponto único e puro (`notaMaisRecenteDoConsultor`,
+derivado de `resolveProcessObservationNotes` — os mesmos campos, a mesma
+ordem que o cartão do Resumo), e o contrato tem guarda **do lado do
+backend**, que é o único que o pode afirmar:
+`tests/unit/test_projeccao_das_notas_do_consultor.py`, com contraprova de
+que os nomes inventados continuam a não existir.
+
+### 27.19 Uma UI removida por regra de negócio precisa de um teste da AUSÊNCIA
+
+O separador Histórico passou a ser uma trilha de auditoria só de leitura
+(Ponto 9): sem diálogo de "Registar Atividade", sem caixa de texto, sem
+gravador. Apagar o código não chega — **uma UI removida volta com a
+mesma facilidade com que saiu**, e é a regressão mais fácil de não dar
+por ela: não parte nada, não dá erro, apenas repõe um botão que alguém
+achou que faltava.
+
+`HistoryTab.soLeitura.test.jsx` afirma a ausência pelo papel e pelo nome
+acessível (não por `data-testid`, senão o mesmo botão com outro
+identificador passava), e inclui duas coisas que a tornam honesta:
+
+* uma contraprova de que a ausência **não depende de quem chama** — o
+  separador recebe `handleSendComment`/`newComment` e continua a não
+  desenhar nada;
+* uma contraprova de que "só de leitura" não virou "vazio": a timeline
+  e a tabela de auditoria continuam lá.
+
+E a ausência **explica-se no ecrã** (`historico-so-leitura`: "Registo
+automático — as notas escrevem-se no Resumo"). Sem isso, quem procurar o
+botão conclui que a página está partida em vez de perceber que o sítio
+mudou — é a mesma razão pela qual um 403 esperado não se mostra como
+"Sem documentação".
+
+**Uma funcionalidade que estorva uma regra nova muda-se de sítio, não se
+apaga.** O botão de nota de voz saiu do Histórico para o cartão de
+Observações, no Resumo, e o teste da ligação mudou-se com ele: uma nota
+ditada é uma nota, e o sítio das notas passou a ser um só.

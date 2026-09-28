@@ -1,26 +1,35 @@
 /**
  * HistoryTab — separador "Histórico" da página de detalhes do processo.
  *
- * PACOTE DS: a auditoria deixa de ser uma lista básica. Junta timeline de
- * fases + tabela rica (quem / o quê / quando / detalhes) + notas manuais
- * atrás de um Dialog (Progressive Disclosure).
+ * PONTO 9: O HISTÓRICO É SÓ DE LEITURA
+ * ====================================
+ * Este separador é uma **linha temporal gerada pelo sistema** — uma
+ * trilha de auditoria. Não tem, e não pode voltar a ter, UI de adição de
+ * notas ou atividades.
+ *
+ * O que saiu daqui e para onde foi:
+ *
+ *   * o diálogo "Registar Atividade / Nota" foi **removido**. O local
+ *     oficial das notas do consultor passou a ser, exclusivamente, o
+ *     campo Observações do separador **Resumo** — que é também o que a
+ *     coluna "Notas do Consultor" da listagem espelha;
+ *   * o botão "Nota de voz" **mudou-se** para o cartão de Observações,
+ *     ao lado das notas escritas. Não foi apagado: uma nota ditada é
+ *     uma nota, e o sítio das notas é o Resumo.
+ *
+ * O que FICA: a eliminação de um comentário no `UnifiedAuditTrail`.
+ * Depois desta mudança já ninguém consegue criar comentários por aqui,
+ * pelo que esse botão só alcança registos antigos e notas de voz — é a
+ * única forma de limpar uma entrada errada, e tirá-lo deixaria a
+ * trilha sem maneira de a corrigir. Se a regra for "nem apagar", é uma
+ * decisão a tomar de propósito, não um resto desta.
+ *
+ * PACOTE DS (histórico): timeline de fases + tabela rica de auditoria
+ * (quem / o quê / quando / detalhes).
  */
-import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../ui/card";
-import { Button } from "../../ui/button";
-import { Textarea } from "../../ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "../../ui/dialog";
-import { History, MessageSquare, Mic, Send, Loader2, Plus } from "lucide-react";
+import { History, Lock } from "lucide-react";
 import ProcessTimeline from "../../ProcessTimeline";
-import VoiceNoteRecorder from "../VoiceNoteRecorder";
 import UnifiedAuditTrail from "../../UnifiedAuditTrail";
 
 export default function HistoryTab({
@@ -29,32 +38,9 @@ export default function HistoryTab({
   history,
   workflowStatuses,
   activities,
-  newComment,
-  setNewComment,
-  sendingComment,
-  handleSendComment,
   handleDeleteComment,
   user,
-  isProcessLocked,
-  // ── Nota de voz (Épico 7) ──────────────────────────────────────────
-  // O separador só rende o botão e o diálogo: quem detém o estado e quem
-  // fala com a API é o contentor (`ProcessDetails`).
-  voiceNoteOpen = false,
-  onVoiceNoteOpenChange,
-  onEnviarNotaDeVoz,
-  aEnviarNotaDeVoz = false,
-  aProcessarNotaDeVoz = false,
 }) {
-  const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
-  const wasSendingRef = useRef(false);
-
-  useEffect(() => {
-    if (wasSendingRef.current && !sendingComment && !newComment.trim()) {
-      setIsNoteDialogOpen(false);
-    }
-    wasSendingRef.current = sendingComment;
-  }, [sendingComment, newComment]);
-
   return (
     <div className="space-y-6">
       <ProcessTimeline
@@ -70,71 +56,17 @@ export default function HistoryTab({
             <History className="h-4 w-4 text-primary" />
             Histórico de Auditoria
           </CardTitle>
-          {!isProcessLocked && onEnviarNotaDeVoz && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5"
-              onClick={() => onVoiceNoteOpenChange?.(true)}
-              data-testid="voice-note-open"
-            >
-              <Mic className="h-3.5 w-3.5" />
-              Nota de voz
-            </Button>
-          )}
-          {!isProcessLocked && (
-            <Dialog open={isNoteDialogOpen} onOpenChange={setIsNoteDialogOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" className="gap-1.5" data-testid="quick-note-open">
-                  <Plus className="h-3.5 w-3.5" />
-                  Registar Atividade
-                </Button>
-              </DialogTrigger>
-              <DialogContent
-                title="Registar Atividade / Nota"
-                description="Escreva uma nota ou registo de atividade para este processo."
-              >
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2 text-base">
-                    <MessageSquare className="h-4 w-4 text-primary" />
-                    Registar Atividade / Nota
-                  </DialogTitle>
-                  <DialogDescription>
-                    Escreva uma nota ou registo de atividade para este processo.
-                  </DialogDescription>
-                </DialogHeader>
-                <Textarea
-                  placeholder="Escreva uma nota ou registo de atividade para este processo..."
-                  value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
-                  className="min-h-[100px] text-sm resize-none"
-                  data-testid="quick-note-input"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      handleSendComment();
-                    }
-                  }}
-                />
-                <p className="text-xs text-muted-foreground -mt-2">Cmd/Ctrl+Enter para enviar rápido</p>
-                <DialogFooter>
-                  <Button
-                    onClick={handleSendComment}
-                    disabled={sendingComment || !newComment.trim()}
-                    data-testid="quick-note-submit"
-                  >
-                    {sendingComment ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Send className="h-4 w-4 mr-2" />
-                    )}
-                    Enviar
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
+          {/* A ausência do botão explica-se. Sem isto, quem procurar o
+              "Registar Atividade" conclui que a página está partida —
+              e o Resumo continua a ser o sítio certo sem ninguém o
+              dizer. */}
+          <span
+            className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+            data-testid="historico-so-leitura"
+          >
+            <Lock className="h-3 w-3" aria-hidden="true" />
+            Registo automático — as notas escrevem-se no Resumo
+          </span>
         </CardHeader>
         <CardContent className="pt-0 pb-3">
           {/* BUGFIX (visual): maxHeight alinhado com o contentor de scroll
@@ -148,16 +80,6 @@ export default function HistoryTab({
           />
         </CardContent>
       </Card>
-
-      {onEnviarNotaDeVoz && (
-        <VoiceNoteRecorder
-          open={voiceNoteOpen}
-          onOpenChange={onVoiceNoteOpenChange}
-          onEnviar={onEnviarNotaDeVoz}
-          aEnviar={aEnviarNotaDeVoz}
-          aProcessar={aProcessarNotaDeVoz}
-        />
-      )}
     </div>
   );
 }

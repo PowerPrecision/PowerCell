@@ -245,17 +245,19 @@ describe("ProcessDetails — sub-separadores do Resumo", () => {
   });
 });
 
-describe("ProcessDetails — nota de voz (Épico 7) sobrevive", () => {
-  it("o botão vive no separador Histórico", async () => {
-    // Eixo 3 do épico: o que o Épico 7 acrescentou não pode partir-se no
-    // corte. Este teste falha se o `HistoryTab` deixar de receber o
-    // callback do contentor.
-    const utilizador = userEvent.setup();
+describe("ProcessDetails — nota de voz (Épico 7) sobrevive ao Ponto 9", () => {
+  // O Ponto 9 mudou o sítio: o Histórico ficou só de leitura e a nota de
+  // voz passou para o cartão de Observações, no Resumo. O que este bloco
+  // defende continua a ser o mesmo — que o Épico 7 não se parte quando se
+  // mexe à volta dele —, mas agora no sítio certo. Só a PÁGINA montada
+  // prova esta mudança: os testes de componente passam a montar cada peça
+  // no sítio novo e nenhum deles vê que as duas foram religadas.
+
+  it("o botão vive no Resumo, ao lado das notas escritas", async () => {
     montar();
     await screen.findByTestId("layout");
 
-    await utilizador.click(screen.getByRole("tab", { name: /Histórico/i }));
-
+    // O Resumo abre por omissão — não é preciso navegar.
     expect(await screen.findByTestId("voice-note-open")).toBeInTheDocument();
   });
 
@@ -264,13 +266,9 @@ describe("ProcessDetails — nota de voz (Épico 7) sobrevive", () => {
     montar();
     await screen.findByTestId("layout");
 
-    await utilizador.click(screen.getByRole("tab", { name: /Histórico/i }));
     await utilizador.click(await screen.findByTestId("voice-note-open"));
 
     // O `VoiceNoteRecorder` é o real: se a ligação se partir, não abre.
-    // Há dois "Nota de voz" no ecrã — o botão e o título do diálogo; é o
-    // conteúdo do diálogo que prova que abriu.
-    //
     // Não se procura o botão de GRAVAR: o jsdom não tem `MediaRecorder`
     // nem `getUserMedia`, pelo que o componente mostra — correctamente — o
     // caminho de recurso. O que aqui se prova é que o diálogo abriu e que
@@ -281,14 +279,43 @@ describe("ProcessDetails — nota de voz (Épico 7) sobrevive", () => {
     expect(screen.getByRole("button", { name: /Enviar nota/ })).toBeInTheDocument();
   });
 
-  it("o botão de registar atividade continua ao lado", async () => {
+  it("o gravador está montado com o Resumo, não com o Histórico", async () => {
+    // Escrevi primeiro este teste a afirmar que "mudar de separador não
+    // fecha a gravação" — e falhou por bom motivo: o `VoiceNoteRecorder`
+    // é um diálogo MODAL, logo com ele aberto os separadores por trás
+    // ficam `aria-hidden` e não há como lá clicar. A afirmação era sobre
+    // um percurso que a UI não permite, e ficaria aqui a dar uma garantia
+    // falsa. O que se pode afirmar, e é o que importa, é que o gatilho e
+    // o gravador estão ligados a partir do Resumo — o separador que abre
+    // por omissão — sem passar pelo Histórico.
+    const utilizador = userEvent.setup();
+    montar();
+    await screen.findByTestId("layout");
+
+    expect(screen.getByRole("tab", { name: /Resumo/i })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    await utilizador.click(await screen.findByTestId("voice-note-open"));
+
+    expect(
+      await screen.findByRole("button", { name: /Enviar nota/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("o Histórico não oferece nada com que escrever", async () => {
+    // Ponto 9: trilha de auditoria. A ausência afirma-se, senão volta.
     const utilizador = userEvent.setup();
     montar();
     await screen.findByTestId("layout");
 
     await utilizador.click(screen.getByRole("tab", { name: /Histórico/i }));
+    await screen.findByTestId("historico-so-leitura");
 
-    expect(await screen.findByTestId("quick-note-open")).toBeInTheDocument();
+    expect(screen.queryByTestId("quick-note-open")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Registar Atividade/i }),
+    ).not.toBeInTheDocument();
   });
 });
 

@@ -23,7 +23,10 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { resolveProcessObservationNotes } from "./processObservationNotes";
+import {
+  notaMaisRecenteDoConsultor,
+  resolveProcessObservationNotes,
+} from "./processObservationNotes";
 
 describe("resolveProcessObservationNotes — o feed", () => {
   it("devolve as notas do feed", () => {
@@ -137,5 +140,79 @@ describe("resolveProcessObservationNotes — ordem e robustez", () => {
       observation_notes: [null, { id: "a", text: "boa" }, { id: "b" }, "texto solto"],
     });
     expect(notas.map((n) => n.text)).toEqual(["boa"]);
+  });
+});
+
+describe("notaMaisRecenteDoConsultor — a coluna da listagem (Ponto 9)", () => {
+  it("devolve a nota mais recente do feed", () => {
+    expect(
+      notaMaisRecenteDoConsultor({
+        observation_notes: [
+          { id: "1", text: "primeira", created_at: "2026-01-01T10:00:00Z" },
+          { id: "2", text: "mais recente", created_at: "2026-02-01T10:00:00Z" },
+        ],
+      }),
+    ).toBe("mais recente");
+  });
+
+  it("lê o escalar legado quando é o único que existe", () => {
+    // É onde o modal do Kanban escreve. Uma listagem que o ignorasse
+    // mostrava "—" a um processo com notas.
+    expect(notaMaisRecenteDoConsultor({ notes: "escrita no Kanban" })).toBe(
+      "escrita no Kanban",
+    );
+  });
+
+  it("NÃO apresenta como do consultor o que foi lido pela IA", () => {
+    // O cartão do Resumo distingue-as com um crachá; a coluna não tem
+    // crachá nenhum, logo deixá-la entrar seria atribuir a uma pessoa um
+    // texto que a máquina leu.
+    expect(
+      notaMaisRecenteDoConsultor({ ai_extracted_notes: "lido de um IRS" }),
+    ).toBe("");
+  });
+
+  it("com notas de pessoa e da IA, devolve a da pessoa", () => {
+    expect(
+      notaMaisRecenteDoConsultor({
+        observation_notes: [
+          { id: "1", text: "escrita à mão", created_at: "2026-01-01T10:00:00Z" },
+        ],
+        ai_extracted_notes: "lido de um IRS",
+      }),
+    ).toBe("escrita à mão");
+  });
+
+  it("um processo sem notas devolve vazio", () => {
+    expect(notaMaisRecenteDoConsultor({ id: "p-1" })).toBe("");
+    expect(notaMaisRecenteDoConsultor(null)).toBe("");
+  });
+
+  it("NÃO lê atividades — o Histórico deixou de alimentar esta coluna", () => {
+    // Contraprova do Ponto 9: era isto que a cascata antiga lia primeiro.
+    expect(
+      notaMaisRecenteDoConsultor({
+        activities: [{ content: "telefonema ao banco" }],
+        last_activity: { content: "telefonema ao banco" },
+        latest_activity_preview: "telefonema ao banco",
+      }),
+    ).toBe("");
+  });
+
+  it("segue a MESMA ordem do cartão do Resumo", () => {
+    // Contraprova de que não há duas ordenações: se divergirem, a coluna
+    // mostra uma nota e o cartão destaca outra.
+    const processo = {
+      observation_notes: [
+        { id: "1", text: "antiga", created_at: "2026-01-01T10:00:00Z" },
+        { id: "2", text: "recente", created_at: "2026-03-01T10:00:00Z" },
+      ],
+    };
+    const doCartao = resolveProcessObservationNotes(processo).filter(
+      (n) => n.origin !== "ai",
+    );
+    expect(notaMaisRecenteDoConsultor(processo)).toBe(
+      doCartao[doCartao.length - 1].text,
+    );
   });
 });

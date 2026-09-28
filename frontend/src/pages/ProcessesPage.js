@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { normalizarEtiquetas } from "../utils/processLabels";
+import { notaMaisRecenteDoConsultor } from "../utils/processObservationNotes";
 import ProcessLabelFilter from "../components/processDetails/ProcessLabelFilter";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -1058,29 +1059,14 @@ const ProcessesPage = () => {
                               )}
                             </div>
                           </TableCell>
-                          {/* PACOTE CZ: Notas do Consultor — lê a atividade mais recente PRIMEIRO */}
-                          <TableCell className="min-w-[180px] max-w-[280px]">
+                          {/* PONTO 9: espelha o RESUMO, nunca o Histórico.
+                              A cascata de sete ramos que aqui estava lia
+                              primeiro três campos que o backend nunca
+                              produziu e só depois chegava às notas — ver
+                              `notaMaisRecenteDoConsultor`. */}
+                          <TableCell className="min-w-[180px] max-w-[280px]" data-testid="notas-do-consultor">
                             {(() => {
-                              // PACOTE CZ: Priorizar latest_activity_preview (alias explícito do backend)
-                              // e latest_note (batch aggregation PACOTE BT) sobre process.notes estático.
-                              let noteText = '';
-                              if (typeof process.latest_activity_preview === 'string' && process.latest_activity_preview.trim()) {
-                                noteText = process.latest_activity_preview.trim();
-                              } else if (typeof process.latest_note === 'string' && process.latest_note.trim()) {
-                                noteText = process.latest_note.trim();
-                              } else if (typeof process.latest_activity_note === 'string' && process.latest_activity_note.trim()) {
-                                noteText = process.latest_activity_note.trim();
-                              } else if (process.last_activity?.content) {
-                                noteText = String(process.last_activity.content);
-                              } else if (Array.isArray(process.activities) && process.activities.length > 0) {
-                                const lastAct = process.activities[process.activities.length - 1];
-                                noteText = lastAct?.content || lastAct?.description || '';
-                              } else if (typeof process.notes === 'string' && process.notes.trim()) {
-                                noteText = process.notes.trim();
-                              } else if (Array.isArray(process.observation_notes) && process.observation_notes.length > 0) {
-                                const lastNote = process.observation_notes[process.observation_notes.length - 1];
-                                noteText = (lastNote?.text || "").trim();
-                              }
+                              const noteText = notaMaisRecenteDoConsultor(process);
                               if (!noteText) return <span className="text-xs text-muted-foreground">—</span>;
                               return (
                                 <p className="text-xs text-muted-foreground line-clamp-2" title={noteText}>

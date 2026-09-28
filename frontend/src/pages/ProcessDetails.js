@@ -198,6 +198,7 @@ import PortalMessagesTab from "../components/processDetails/tabs/PortalMessagesT
 import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
 import HistoryTab from "../components/processDetails/tabs/HistoryTab";
 import ProcessObservationsCard from "../components/processDetails/ProcessObservationsCard";
+import VoiceNoteRecorder from "../components/processDetails/VoiceNoteRecorder";
 import ProcessLabelsEditor from "../components/processDetails/ProcessLabelsEditor";
 import ProcessSummaryTimeline from "../components/processDetails/ProcessSummaryTimeline";
 import { PageHeader } from "../components/shared/PageHeader";
@@ -348,8 +349,6 @@ const ProcessDetails = () => {
   const [status, setStatus] = useState("");
 
   // Activity state
-  const [newComment, setNewComment] = useState("");
-  const [sendingComment, setSendingComment] = useState(false);
   // ── Nota de voz (Épico 7) ────────────────────────────────────────
   // Declarado JUNTO DO RESTANTE ESTADO, e não ao pé dos handlers: um
   // `const` usado por um `useCallback` declarado antes dele fica na zona
@@ -1566,20 +1565,10 @@ const ProcessDetails = () => {
     await executeSave(status);
   };
 
-  const handleSendComment = async () => {
-    if (!newComment.trim()) return;
-
-    setSendingComment(true);
-    try {
-      await processMutations.addActivity.mutateAsync({ comment: newComment });
-      setNewComment("");
-      toast.success("Comentário adicionado");
-    } catch {
-      toast.error("Erro ao adicionar comentário");
-    } finally {
-      setSendingComment(false);
-    }
-  };
+  // PONTO 9 — `handleSendComment` foi REMOVIDO com o diálogo "Registar
+  // Atividade". Era o único chamador de `processMutations.addActivity`
+  // no frontend: o Histórico deixou de aceitar escrita manual e as notas
+  // escrevem-se no cartão de Observações (`handleAddObservationNote`).
 
   // ── Nota de voz (Épico 7) ────────────────────────────────────────
   // O upload devolve de imediato; o trabalho pesado (transcrição, IA,
@@ -2678,6 +2667,9 @@ const ProcessDetails = () => {
                     onAdd={handleAddObservationNote}
                     disabled={isViewMode || isProcessLocked}
                     saving={savingObservations}
+                    onAbrirNotaDeVoz={
+                      handleEnviarNotaDeVoz ? () => setVoiceNoteOpen(true) : undefined
+                    }
                   />
                   <ProcessSummaryTimeline
                     process={process}
@@ -2979,24 +2971,17 @@ const ProcessDetails = () => {
 
               {/* ── Separador: Histórico — changelog, notas e cronologia de atividades ── */}
               <TabsContent value="historico" className="mt-4">
+                {/* PONTO 9 — o Histórico é só de leitura: não recebe
+                    nada com que se possa escrever. A nota de voz mudou-se
+                    para o cartão de Observações, no Resumo. */}
                 <HistoryTab
                   processId={id}
                   process={process}
                   history={history}
                   workflowStatuses={workflowStatuses}
                   activities={activities}
-                  newComment={newComment}
-                  setNewComment={setNewComment}
-                  sendingComment={sendingComment}
-                  handleSendComment={handleSendComment}
                   handleDeleteComment={handleDeleteComment}
                   user={user}
-                  isProcessLocked={isProcessLocked}
-                  voiceNoteOpen={voiceNoteOpen}
-                  onVoiceNoteOpenChange={setVoiceNoteOpen}
-                  onEnviarNotaDeVoz={handleEnviarNotaDeVoz}
-                  aEnviarNotaDeVoz={aEnviarNotaDeVoz}
-                  aProcessarNotaDeVoz={Boolean(notaDeVozEmCurso)}
                 />
               </TabsContent>
             </Tabs>
@@ -3079,6 +3064,24 @@ const ProcessDetails = () => {
       </div>
       
       {/* Dialog para atribuir utilizadores */}
+      {/* PONTO 9 — o gravador vive ao nível da PÁGINA, junto dos outros
+          diálogos, porque o gatilho passou para o cartão de Observações
+          (Resumo) e um diálogo não é conteúdo de separador. Estava dentro
+          do `HistoryTab` por acidente de onde nasceu o botão.
+
+          (Nota para quem vier a seguir: não é por causa de "sobreviver à
+          mudança de separador" — é modal, com ele aberto não se clica em
+          separador nenhum. Ver o teste com o mesmo nome.) */}
+      {handleEnviarNotaDeVoz && (
+        <VoiceNoteRecorder
+          open={voiceNoteOpen}
+          onOpenChange={setVoiceNoteOpen}
+          onEnviar={handleEnviarNotaDeVoz}
+          aEnviar={aEnviarNotaDeVoz}
+          aProcessar={Boolean(notaDeVozEmCurso)}
+        />
+      )}
+
       <ProcessAssignDialog
         open={showAssignDialog}
         onOpenChange={setShowAssignDialog}
