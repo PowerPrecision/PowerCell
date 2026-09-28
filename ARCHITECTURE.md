@@ -6532,3 +6532,47 @@ afirmar uma lista — uma lista escrita no teste seria a terceira cópia.
 E tem contraprova no sentido oposto: um papel fora das constantes
 continua sem atribuição, senão "fazer os dois concordarem" passaria
 também se ambos atribuíssem sempre a toda a gente.
+
+
+## A contagem POR CAMPO encontrou o quinto escritor (Set 2026)
+
+A segunda passagem do diagnóstico em produção trouxe o detalhe por
+campo, e foi ele — não o inventário — que apontou para código ainda por
+corrigir:
+
+| Campo | Desfasados |
+|---|---|
+| `assigned_consultor_id` | 93 |
+| `consultor_id` | 100 |
+| `consultant_id` | 109 |
+| `assigned_mediador_id` | 110 |
+| `mediador_id` | 98 |
+
+**`build_unassign_me_update`** — o "remover-me" de um processo —
+escrevia os campos à mão e tocava em QUATRO dos seis do consultor,
+deixando `consultor_id` e `consultant_id` com o id de **quem saiu**; no
+mediador faltava `mediador_id`. É o defeito do Lote 5 literalmente: a
+correcção de então fez o `set` e o `clear` derivarem da mesma constante
+e esta função ficou de fora.
+
+A consequência exacta: quando quem sai é o **último**, a lista fica
+vazia e os singulares ficam preenchidos — **a assinatura
+`desatribuicao`**, que é precisamente a que `--incluir-ambiguos` limpa.
+Limpar a base de dados sem isto seria limpar hoje e ver voltar ao
+primeiro clique. Também explica o `divergente` a zero: com um só
+atribuído, sair produz o ambíguo, não o divergente.
+
+O mesmo tratamento foi dado ao semeador do painel de administração
+(`admin_dev_ops`), que escrevia três dos seis campos do consultor e dois
+dos cinco do mediador — é um endpoint que corre contra a base a que
+estiver apontado.
+
+**O que a contagem ainda não explica.** `assigned_consultor_id` (93) e
+`assigned_mediador_id` (110) só podem ser `em_falta`: nenhum dos
+escritores antigos deixa esses campos preenchidos com a lista vazia (o
+`clear` punha-os a `None`, a dupla auto-atribuição nunca lhes tocou).
+Mas nenhum escritor encontrado escreve a lista **sem** eles — a hipótese
+que resta é documentos anteriores ao esquema multi-atribuído, cuja lista
+foi preenchida mais tarde. Fica dito como hipótese, não como facto: a
+correcção (`em_falta` → preencher a partir da lista) é a mesma em
+qualquer dos casos.

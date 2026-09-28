@@ -8740,3 +8740,75 @@ ao olho: a função removida usava-o, a que fica também.
 
 Backend **4009 passed, 5 skipped** (eram 3998; +8 do endpoint morto, +3
 do diretor). Frontend **1288 / 112 ficheiros**, `eslint --quiet` 0.
+
+---
+
+# Iteração `quinto-escritor` — os números mandaram voltar ao código
+
+## O que a segunda passagem trouxe
+
+| | |
+|---|---|
+| Processos analisados | 333 |
+| Com desfasamento | **255** |
+| `divergente` | 0 |
+| `em_falta` | 297 |
+| `ambiguo` | 213 |
+| Corrigíveis sem ambiguidade | 129 |
+| A precisar de decisão humana | 132 |
+
+E, pela primeira vez, o detalhe **por campo**: `assigned_consultor_id`
+93, `consultor_id` 100, `consultant_id` 109, `assigned_mediador_id` 110,
+`mediador_id` 98. Soma 510 = 297 + 213 — a aritmética fecha.
+
+Nota: 129 + 132 = 261, mais do que os 255 afectados. **Seis processos
+estão nos dois baldes** — têm correcção segura num papel e ambiguidade
+no outro.
+
+## O achado: um quinto escritor, vivo
+
+`assigned_consultor_id` com 93 não batia com nenhum escritor que eu
+conhecia. Fui procurar e encontrei `build_unassign_me_update` — o
+"remover-me" de um processo — a escrever os campos **à mão**: quatro dos
+seis do consultor, deixando `consultor_id` e `consultant_id` com o id de
+**quem saiu**; no mediador faltava `mediador_id`.
+
+**É o defeito do Lote 5, literalmente.** A correcção de então fez o `set`
+e o `clear` derivarem da mesma constante, e esta função ficou de fora.
+
+A consequência exacta importa para o que vem a seguir: quando quem sai é
+o **último**, a lista fica vazia e os singulares ficam preenchidos — **a
+assinatura `desatribuicao`**, que é precisamente a que
+`--incluir-ambiguos` limpa. Limpar sem isto seria limpar hoje e ver
+voltar ao primeiro clique.
+
+Também explica o `divergente` a zero, que eu tinha lido como confirmação
+de coerência: com um único atribuído, sair produz o **ambíguo** e não o
+divergente. O zero não provava o que eu pensei que provava.
+
+O semeador do painel de administração (`admin_dev_ops`) tinha a mesma
+forma — três dos seis campos do consultor — e foi alinhado. É um
+endpoint que corre contra a base a que estiver apontado.
+
+## O que continua por explicar, e digo-o como hipótese
+
+`assigned_consultor_id` (93) e `assigned_mediador_id` (110) só podem ser
+`em_falta`: nenhum escritor antigo os deixa preenchidos com a lista
+vazia. Mas nenhum escritor que encontrei escreve a lista **sem** eles. A
+hipótese que resta são documentos anteriores ao esquema multi-atribuído,
+cuja lista foi preenchida mais tarde. Não tenho como o confirmar daqui, e
+não invento a atribuição: a correcção do `em_falta` é a mesma em
+qualquer dos casos.
+
+## A regra que fica
+
+**Quando um número não bate com os escritores que se conhecem, o
+inventário está incompleto.** Os números mandam voltar ao código — foi o
+detalhe por campo, e não mais uma leitura da lista de serviços, que
+encontrou este.
+
+## Validação
+
+Backend **4013 passed, 5 skipped** (eram 4009). Os quatro testes novos
+falham contra o código anterior — é a medição da mutação, feita na
+ordem certa.

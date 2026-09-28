@@ -504,24 +504,30 @@ def build_unassign_me_update(process: dict, user: dict) -> tuple[dict, list[str]
     current_consultor_names = list(process.get("consultor_names") or [])
     current_mediador_names = list(process.get("mediador_names") or [])
 
+    # LOTE 6 — os campos deixaram de ser escritos à mão. Esta função
+    # tocava em QUATRO dos seis do consultor e deixava `consultor_id` e
+    # `consultant_id` com o id de quem SAIU; no mediador faltava
+    # `mediador_id`. É o defeito do Lote 5 literalmente: a correcção de
+    # então fez o `set` e o `clear` derivarem da mesma constante e esta
+    # função ficou de fora, continuando a produzir a cada "remover-me" a
+    # mesma forma que o `build_clear_consultor_fields` antigo produzia.
+    #
+    # Quando quem sai é o ÚLTIMO, a lista fica vazia e os singulares
+    # ficam preenchidos — a assinatura `desatribuicao` do
+    # `assignment_drift`. Foi a contagem POR CAMPO do diagnóstico em
+    # produção que obrigou a voltar aqui.
     if user_id in current_consultor_ids:
         idx = current_consultor_ids.index(user_id)
         new_ids = current_consultor_ids[:idx] + current_consultor_ids[idx + 1:]
         new_names = current_consultor_names[:idx] + current_consultor_names[idx + 1:]
-        update_data["assigned_consultor_ids"] = new_ids
-        update_data["consultor_names"] = new_names
-        update_data["assigned_consultor_id"] = new_ids[0] if new_ids else None
-        update_data["consultor_name"] = new_names[0] if new_names else None
+        update_data.update(build_set_consultor_fields(new_ids, new_names))
         removed_from.append("consultor")
 
     if user_id in current_mediador_ids:
         idx = current_mediador_ids.index(user_id)
         new_ids = current_mediador_ids[:idx] + current_mediador_ids[idx + 1:]
         new_names = current_mediador_names[:idx] + current_mediador_names[idx + 1:]
-        update_data["assigned_mediador_ids"] = new_ids
-        update_data["mediador_names"] = new_names
-        update_data["assigned_mediador_id"] = new_ids[0] if new_ids else None
-        update_data["mediador_name"] = new_names[0] if new_names else None
+        update_data.update(build_set_mediador_fields(new_ids, new_names))
         removed_from.append("intermediario")
 
     if not removed_from:
