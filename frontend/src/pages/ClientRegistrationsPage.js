@@ -19,6 +19,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { getClient, getRegisteredClients } from "../services/api";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -72,10 +73,9 @@ import CreateProcessModal from "../components/CreateProcessModal";
 import { formatDate, formatDateTime } from "../lib/utils";
 import { formatCurrency } from "../utils/formatCurrency";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const ClientRegistrationsPage = () => {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -153,11 +153,8 @@ const ClientRegistrationsPage = () => {
       }, { replace: true });
       // Buscar detalhes do cliente e abrir modal
       setDetailsLoading(true);
-      fetch(`${API_URL}/api/clients/${clientIdFromUrl}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then(res => res.ok ? res.json() : Promise.reject("Erro"))
-        .then(data => setDetailsDialog({ open: true, client: data }))
+      getClient(clientIdFromUrl)
+        .then(({ data }) => setDetailsDialog({ open: true, client: data }))
         .catch(() => toast.error("Erro ao carregar detalhes do cliente"))
         .finally(() => setDetailsLoading(false));
     }
@@ -183,24 +180,16 @@ const ClientRegistrationsPage = () => {
       params.append("sort_order", sortOrder);
       params.append("limit", "100");
 
-      const response = await fetch(`${API_URL}/api/clients/registered?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setClients(data.clients || []);
-        setTotal(data.total || 0);
-      } else {
-        toast.error("Erro ao carregar clientes");
-      }
+      const { data } = await getRegisteredClients(params);
+      setClients(data.clients || []);
+      setTotal(data.total || 0);
     } catch (error) {
       console.error("Erro:", error);
       toast.error("Erro ao carregar clientes");
     } finally {
       setLoading(false);
     }
-  }, [token, search, hasProcessFilter, sortField, sortOrder, assignedToMe, isIndexacao]);
+  }, [search, hasProcessFilter, sortField, sortOrder, assignedToMe, isIndexacao]);
 
   useEffect(() => {
     fetchClients();
@@ -209,16 +198,8 @@ const ClientRegistrationsPage = () => {
   const handleViewClientDetails = async (clientId) => {
     setDetailsLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/clients/${clientId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setDetailsDialog({ open: true, client: data });
-      } else {
-        toast.error("Erro ao carregar detalhes do cliente");
-      }
+      const { data } = await getClient(clientId);
+      setDetailsDialog({ open: true, client: data });
     } catch (error) {
       console.error("Erro:", error);
       toast.error("Erro ao carregar detalhes do cliente");

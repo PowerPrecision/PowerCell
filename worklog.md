@@ -1,4 +1,28 @@
 ---
+Task ID: pool-webmail-trilha
+Agent: Cloud Agent
+Task: P0 das fugas de isolamento (Registos + contas do Webmail) e o 404 do Histórico
+
+Date: 2026-09-29
+
+Work Log:
+- ORIGEM: QA humano em produção. Três defeitos que 4081 testes não apanhavam — e a razão é a mesma nos dois primeiros: o que falta não é cobertura, é INVENTÁRIO.
+- FUGA 1 (clientes). `GET /clients/registered` — a página de Registos, aberta a STAFF_ROLES — não tinha filtro de rede NENHUM. Inventariei os quinze serviços de clientes: só o `client_list_search.py` filtrava. Quinta instância da lição do Lote 5.
+- A REGRA AQUI NÃO É A DO ISOLAMENTO NORMAL, e foi a parte que exigiu pensar. O `build_network_scope_condition` só inclui a pilha por carimbar para quem pertence à rede de omissão; numa POOL isso é errado — um registo público ainda não é de ninguém e, escondido, nunca é reivindicado. `build_pool_scope_condition` DERIVA do construtor normal forçando a bandeira, em vez de escrever ramos próprios: duas condições à mão divergem e a que divergir devolve dados a mais sem dar erro.
+- O CARIMBO NASCE NA REIVINDICAÇÃO, e vai no processo E NO CLIENTE. Foi o detalhe que quase me escapou: a Pool filtra `db.clients`, logo carimbar só o processo deixava o cliente reivindicado visível a todas as redes para sempre. Filtrar a leitura sem carimbar a escrita é a lição do `assigned_to` — a correcção ficaria invisível para o trabalho novo.
+- Rede e não empresa (decisão do dono: Power e Precision partilham rede; a Domus é ilha), e a rede é a do `target_user` — quem fica DONO — não a de quem clica: a triagem é feita por admins e um carimbo errado é permanente. Sem rede determinável não se carimba; ficar na Pool é recuperável.
+- A condição entra IMEDIATAMENTE antes da execução da query. A `query` é remontada acima (cursor, `$or` da pesquisa, triagem) e uma condição posta mais cedo seria sobreposta — sem dar erro.
+- Frontend: as três chamadas da página iam por `fetch` cru, logo sem `X-Company-Id`. Com a Pool a filtrar por rede isso daria a lista errada em silêncio (5.ª instância do incidente de 2026-09-21). Passaram para Axios; `API_URL` e `token` saíram do ficheiro.
+- FUGA 2 (webmail), E É UM ERRO MEU DE ANÁLISE. `run_get_configured_accounts` recebia `current_user` e IGNORAVA-O: devolvia as contas das variáveis de ambiente a toda a gente. Quando avaliei a D-8 disse ao dono que o webmail não tinha fuga activa — verifiquei o FILTRO DE LISTAGEM (que é escrupuloso) e não o inventário das superfícies. A listagem de CONTAS é outra superfície e não tinha filtro nenhum. Cometi a lição do Lote 5 na mesma resposta em que a citava; disse-o ao dono sem rodeios.
+- O âmbito deriva de `empresas_do_webmail`, a MESMA função dos separadores — uma segunda regra aqui divergiria e mostraria uma conta a mais. A Caixa Geral segue o `tem_caixa_geral` que já existia.
+- O 404 DO HISTÓRICO: a rota DELETE nunca caiu. O 410 do POST não lhe tocou. A causa é a trilha UNIFICADA — o `classifyAuditEvent` marca como "comment" também registos de `db.history` (field `observation_notes`), o botão aparece para qualquer "comment" e o handler procurava só em `db.activities`. O Ponto 9 tornou isto quase universal: ao pôr as notas no Resumo, passaram a ser gravadas por `log_history` no `db.history`. Ou seja: fui eu que criei este 404, ao mudar onde as notas vivem sem olhar para quem as apaga.
+- Uma entrada de SISTEMA (sem `user_id`) não tem dono e só o admin a rectifica. Tratar "sem dono" como "de todos" abriria a trilha de auditoria a qualquer utilizador — foi a decisão menos óbvia das três.
+- Provas: backend 4108 passed / 5 skipped (era 4081/5, +27); frontend 1288 passed em 112 ficheiros; eslint --quiet limpo. Quatro mutações, quatro mortes (pool sem forçar a pilha; listagem sem isolamento; webmail a devolver tudo; apagar só em `activities`).
+- POR FAZER deste lote do dono: notas em processos alheios (P1), filtro "Por Atribuir" (P2), ecrã branco no Voltar (P2), multi-upload do Portal a mostrar só o último ficheiro (P2), microfone recusado sem pedir permissão (P2).
+
+---
+
+---
 Task ID: posse-e-segredo-gov
 Agent: Cloud Agent
 Task: D-1 + D-3 — posse antes de conteúdo no confirm-upload do CRM, e o gov_token sem segredo por omissão

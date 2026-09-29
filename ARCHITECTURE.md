@@ -6811,3 +6811,100 @@ sem autenticação, e deve rebentar.
 **Consequência operacional:** `GOV_AUTH_JWT_SECRET` passa a ser
 **obrigatória** no serviço de produção. Sem ela o arranque falha, de
 propósito.
+
+
+## A Pool, as contas do Webmail e a trilha unificada (Set 2026)
+
+Três defeitos apanhados por QA humano em produção que a bateria não
+apanhava. Dois são fugas de isolamento; o terceiro é uma consequência
+directa do Ponto 9.
+
+### `GET /clients/registered` não tinha filtro de rede nenhum
+
+A página "Registos de Clientes", aberta a `STAFF_ROLES`, listava todos os
+registos públicos. Um utilizador da **Domus**, que é uma ilha, via os
+clientes da Power. Dos quinze serviços de clientes, só o
+`client_list_search.py` filtrava — **quinta instância** da mesma lição:
+ponto único para a CONDIÇÃO (Lote 4) sem inventário dos sítios que
+LISTAM.
+
+**A regra aqui é a de uma POOL e não a do isolamento normal.**
+`build_network_scope_condition` só inclui a pilha por carimbar quando o
+utilizador pertence à rede de omissão — certo para processos, errado
+para uma pool: um registo público ainda não é de ninguém e tem de ser
+visível a todas as redes, senão nunca é reivindicado.
+
+`build_pool_scope_condition` **deriva** do construtor normal forçando
+`inclui_rede_de_omissao` — não escreve ramos próprios, porque duas
+condições de isolamento escritas à mão divergem na primeira mudança e a
+que divergir não dá erro: devolve dados a mais.
+
+```
+sem carimbo  → é da POOL, visível a TODAS as redes
+com carimbo  → é de UMA rede, e só essa o vê
+```
+
+**O carimbo nasce na reivindicação** (`client_assign`), e vai no
+processo **e no cliente** — a Pool filtra `db.clients`, logo carimbar só
+o processo deixaria o cliente reivindicado na Pool de todas as redes
+para sempre. Filtrar a leitura sem carimbar a escrita seria a lição do
+`assigned_to` outra vez: a correcção ficaria invisível para o trabalho
+novo.
+
+Dois detalhes do carimbo: é a **rede** e não a empresa (Power e Precision
+partilham rede e têm de colaborar; a Domus é a ilha), e vem do
+`target_user` — **quem fica dono** — e não de quem clica, porque o acto
+pode ser de um admin em triagem e um carimbo errado é permanente. Sem
+rede determinável **não se carimba**: ficar na Pool é recuperável.
+
+A condição é aplicada **imediatamente antes da execução** da query: a
+`query` é remontada acima (cursor, `$or` da pesquisa, triagem) e uma
+condição posta mais cedo seria sobreposta sem dar erro.
+
+**Frontend:** a página chamava tudo por `fetch` cru, logo sem
+`X-Company-Id`/`X-Active-Role`. Com a Pool a filtrar por rede isso daria
+a lista errada em silêncio — 5.ª instância do incidente de 2026-09-21.
+As três chamadas passaram para o cliente Axios.
+
+### As contas do Webmail eram as do servidor, não as do utilizador
+
+```python
+async def run_get_configured_accounts(current_user: dict):
+    accounts = get_email_accounts()   # variáveis de ambiente
+    return [...]                       # current_user NUNCA usado
+```
+
+Recebia o utilizador e ignorava-o, devolvendo `power` e `precision` a
+qualquer pessoa — daí a Domus ver `geral@powerealestate.pt`.
+
+O âmbito deriva agora de `webmail_scope.empresas_do_webmail`, a **mesma**
+função que decide os separadores; a Caixa Geral só entra com papel de
+gestão nessa empresa (`tem_caixa_geral`), regra que já existia e não foi
+reescrita. Falha fechada: sem empresas, lista vazia.
+
+**Nota de método, contra mim:** ao avaliar a D-8 concluí que o webmail
+não tinha fuga activa, apoiado no `test_webmail_tenant_isolation.py`.
+Essa parte estava certa — o construtor do *filtro de listagem* é
+escrupuloso. Mas verifiquei **o filtro** e não o **inventário das
+superfícies**: a listagem de CONTAS é outra superfície e não tinha
+filtro nenhum. Cometi a lição do Lote 5 enquanto a citava.
+
+### O 404 ao apagar um comentário — a rota DELETE nunca caiu
+
+O `POST /api/activities` a responder 410 não tocou no `DELETE`, que
+continua registado. O 404 vinha da **trilha unificada**: o
+`UnifiedAuditTrail` funde `db.history` com `db.activities`, e o
+`classifyAuditEvent` marca como `"comment"` também os registos de
+HISTÓRICO (`field` = `observation_notes`, ou acção com
+"coment"/"observaç"). O botão aparecia para qualquer `"comment"` e
+enviava o id; `run_delete_activity` procurava só em `db.activities`.
+
+O Ponto 9 tornou isto quase universal: ao fazer do Resumo o local
+oficial das notas, elas passaram a ser gravadas por `log_history` em
+`db.history` — o botão, construído para `db.activities`, deixou de
+funcionar em praticamente todas.
+
+Hoje o id decide a colecção (`COLECCOES_DA_TRILHA`) e a permissão é a
+mesma nas duas: dono ou admin. Uma entrada de **sistema** (sem
+`user_id`) não tem dono e só o admin a rectifica — tratar "sem dono"
+como "de todos" abriria a trilha de auditoria a qualquer utilizador.

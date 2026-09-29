@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
+from services.tenant_network import build_tenant_pool_condition, com_isolamento
 from models.client import (
     Client, ClientCreate, ClientUpdate,
     ClientContact, ClientPersonalData,
@@ -297,6 +298,25 @@ async def run_list_registered_clients(
         else:
             query = {"$and": [{**query}, cursor_condition]}
     
+    # ==================================================================
+    # ISOLAMENTO — A POOL (P0, Set 2026)
+    # ==================================================================
+    # Esta listagem não tinha filtro de rede NENHUM: um utilizador da
+    # Domus, que é uma ilha, via os clientes da Power. Quinta instância
+    # da mesma lição — o Lote 4 fez ponto único para a CONDIÇÃO e não
+    # inventariou os sítios que LISTAM.
+    #
+    # A regra aqui é a da POOL e não a do isolamento normal: um registo
+    # público por carimbar ainda não é de ninguém e tem de ser visível a
+    # todas as redes, senão nunca é reivindicado. Carimbado, é de uma
+    # rede só. O carimbo nasce na reivindicação (`client_assign`).
+    #
+    # Aplicado IMEDIATAMENTE antes da execução, de propósito: a `query`
+    # é remontada acima (cursor, $or da pesquisa, triagem) e uma condição
+    # posta mais cedo seria sobreposta por uma dessas remontagens sem dar
+    # erro nenhum.
+    query = com_isolamento(await build_tenant_pool_condition(user), query)
+
     # Buscar clientes
     clients = await db.clients.find(
         query,
