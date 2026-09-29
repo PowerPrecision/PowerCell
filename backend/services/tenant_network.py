@@ -152,6 +152,48 @@ def build_network_scope_condition(scope: TenantScope) -> dict:
     return {"$or": ramos}
 
 
+def build_pool_scope_condition(scope: TenantScope) -> dict:
+    """Âmbito de uma POOL: por carimbar é de todos, carimbado é da sua rede.
+
+    PORQUE É QUE ISTO NÃO É O `build_network_scope_condition` (Set 2026)
+    ====================================================================
+    Aquele só inclui a pilha por carimbar quando o utilizador pertence à
+    rede de omissão. Para processos está certo — a pilha por carimbar é
+    do grupo incumbente e não de toda a gente. Para uma **Pool** está
+    errado: um registo público ainda não é de ninguém, e escondê-lo de
+    quem não é da rede de omissão faz com que nunca seja reivindicado.
+
+    A regra do produto é a do *claim-based routing*:
+
+      sem carimbo  → é da POOL, visível a TODAS as redes;
+      com carimbo  → é de UMA rede, e só essa o vê.
+
+    DERIVA do construtor normal em vez de escrever ramos próprios: duas
+    condições de isolamento escritas à mão divergem na primeira mudança,
+    e a que divergir não dá erro — devolve dados a mais. Aqui a única
+    diferença é forçar `inclui_rede_de_omissao`, e é isso que o código
+    diz.
+
+    **Só para listagens que SÃO uma pool** (registos públicos por
+    reivindicar). Uma listagem normal continua a usar o
+    `build_tenant_condition`: usar esta aqui abriria a pilha por carimbar
+    a toda a gente, que é a fuga que o Lote 4 fechou.
+    """
+    return build_network_scope_condition(
+        TenantScope(
+            network_ids=scope.network_ids,
+            company_ids=scope.company_ids,
+            company_names=scope.company_names,
+            inclui_rede_de_omissao=True,
+        )
+    )
+
+
+async def build_tenant_pool_condition(user: dict) -> dict:
+    """Atalho da Pool: âmbito do utilizador já convertido em condição."""
+    return build_pool_scope_condition(await resolve_tenant_scope(user))
+
+
 async def _redes_das_empresas(company_ids: Sequence[str]) -> dict[str, Optional[str]]:
     """Mapa company_id → network_id (ilha implícita quando não há grupo)."""
     identificadores = [c for c in dict.fromkeys(_texto(c) for c in company_ids) if c]

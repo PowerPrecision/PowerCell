@@ -100,13 +100,53 @@ async def run_get_activities(
     return valid_activities
 
 
+#: Colecções da trilha unificada, pela ordem em que se procura o id.
+#: `activities` primeiro por ser a origem histórica deste endpoint.
+COLECCOES_DA_TRILHA: tuple[str, ...] = ("activities", "history")
+
+
 async def run_delete_activity(activity_id: str, user: dict):
-    activity = await db.activities.find_one({"id": activity_id})
-    if not activity:
-        raise HTTPException(status_code=404, detail="Comentário não encontrado")
+    """Apaga uma entrada da trilha, na colecção a que o id pertence.
 
-    if activity["user_id"] != user["id"] and user["role"] != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="Só pode eliminar os seus próprios comentários")
+    PORQUE É QUE ISTO PROCURA EM DUAS COLECÇÕES (Set 2026)
+    ======================================================
+    O separador Histórico mostra uma trilha UNIFICADA: o
+    `UnifiedAuditTrail` funde `db.history` com `db.activities`, e o
+    `classifyAuditEvent` marca como `"comment"` também os registos de
+    HISTÓRICO (`field` = `observation_notes`/`observations`, ou acção com
+    "coment"/"observaç"). O botão de apagar aparece para qualquer
+    `"comment"` e envia o `id` do evento.
 
-    await db.activities.delete_one({"id": activity_id})
-    return {"message": "Comentário eliminado"}
+    Esta função procurava só em `db.activities` — logo devolvia **404**
+    para tudo o que viesse do histórico.
+
+    E o Ponto 9 tornou isso quase universal: ao fazer do Resumo o local
+    oficial das notas, elas passaram a ser gravadas por `log_history` em
+    `db.history`. O botão, construído para `db.activities`, deixou de
+    funcionar em praticamente todas as notas.
+
+    A permissão é a MESMA nas duas colecções — dono ou admin —, porque a
+    trilha é uma só para quem a lê. Uma entrada de SISTEMA (sem
+    `user_id`) não tem dono e só o admin a rectifica: tratar "sem dono"
+    como "de todos" abriria a trilha de auditoria a qualquer utilizador.
+    """
+    e_admin = (user or {}).get("role") == UserRole.ADMIN
+    user_id = str((user or {}).get("id") or "")
+
+    for nome in COLECCOES_DA_TRILHA:
+        coleccao = getattr(db, nome)
+        entrada = await coleccao.find_one({"id": activity_id})
+        if not entrada:
+            continue
+
+        dono = str(entrada.get("user_id") or "")
+        if not e_admin and (not dono or dono != user_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Só pode eliminar os seus próprios comentários",
+            )
+
+        await coleccao.delete_one({"id": activity_id})
+        return {"message": "Comentário eliminado"}
+
+    raise HTTPException(status_code=404, detail="Comentário não encontrado")

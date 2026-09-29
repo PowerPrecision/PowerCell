@@ -1694,3 +1694,23 @@ mudou — é a mesma razão pela qual um 403 esperado não se mostra como
 apaga.** O botão de nota de voz saiu do Histórico para o cartão de
 Observações, no Resumo, e o teste da ligação mudou-se com ele: uma nota
 ditada é uma nota, e o sítio das notas passou a ser um só.
+
+## 27.20 — `fetch` cru numa página com contexto de empresa (5.ª instância)
+
+`ClientRegistrationsPage` fazia as três chamadas por `fetch` cru. O
+interceptor que injecta `X-Company-Id` / `X-Active-Role` vive no cliente
+**Axios** (`services/api.js`); um `fetch` só leva o que lhe escreverem à
+mão, e ali só ia a `Authorization`.
+
+Enquanto o backend não filtrava por rede, isso não se notava. No momento
+em que `/clients/registered` passou a resolver a rede do utilizador, um
+`fetch` cru passaria a devolver **a lista errada, em silêncio** — sem
+erro, sem aviso, com ar de estar a funcionar.
+
+**Regra (a mesma desde 2026-09-21, agora pela quinta vez):** qualquer
+chamada que dependa de contexto de empresa/perfil vai pelo `api` do
+Axios. E o corolário que esta instância acrescenta: **quando se põe um
+filtro de tenant num endpoint, verifica-se no mesmo lote quem o chama** —
+um endpoint que passa a filtrar e um chamador que não manda os
+cabeçalhos produzem uma lista vazia ou errada que ninguém liga à
+alteração do backend.

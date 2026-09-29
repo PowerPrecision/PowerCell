@@ -20,6 +20,11 @@ from services.email_service import (
     get_email_accounts_async,
     sync_webmail_emails,
 )
+from services.webmail_scope import (
+    conta_da_caixa_geral,
+    contas_pessoais_da_empresa,
+    empresas_do_webmail,
+)
 from utils.input_sanitization import escape_regex, sanitize_string
 
 logger = logging.getLogger(__name__)
@@ -283,9 +288,50 @@ async def run_test_email_connections(current_user: dict, account: Optional[str] 
     return results
 
 
+async def _enderecos_no_ambito_do_utilizador(current_user: dict) -> set:
+    """Endereços de email que ESTE utilizador pode ver, por empresa.
+
+    Deriva de `webmail_scope.empresas_do_webmail`, a MESMA função que
+    decide os separadores do Webmail. Uma segunda regra aqui divergiria
+    da dos separadores — e a que divergisse não daria erro nenhum:
+    mostrava uma conta a mais.
+
+    A Caixa Geral só entra quando o utilizador tem papel de gestão
+    NESSA empresa (`tem_caixa_geral`), que é a regra já existente; não
+    se reescreve aqui.
+    """
+    user_id = str((current_user or {}).get("id") or "")
+    enderecos: set = set()
+
+    for empresa in await empresas_do_webmail(current_user):
+        enderecos |= await contas_pessoais_da_empresa(user_id, empresa.company_id)
+        if empresa.tem_caixa_geral:
+            enderecos |= await conta_da_caixa_geral(empresa.company_id)
+
+    return {e.lower().strip() for e in enderecos if e}
+
+
 async def run_get_configured_accounts(current_user: dict):
-    """Listar contas de email configuradas."""
-    accounts = get_email_accounts()
+    """Listar as contas de email que ESTE utilizador pode usar.
+
+    ISOLAMENTO (P0, Set 2026)
+    =========================
+    Esta função recebia `current_user` e **ignorava-o**: devolvia o que o
+    `get_email_accounts()` lê das variáveis de ambiente (`power`,
+    `precision`), sem noção nenhuma de empresa. Um utilizador da Domus,
+    que é uma ilha, via `geral@powerealestate.pt` no seu Webmail.
+
+    O filtro de LISTAGEM de emails já era escrupuloso — a fuga estava na
+    listagem de CONTAS, uma superfície que o inventário do isolamento
+    nunca percorreu. É a lição do Lote 5: um ponto único para a condição
+    não dispensa inventariar quem LISTA.
+
+    **Falha fechada:** sem empresas no âmbito devolve vazio. Um Webmail
+    sem contas mostra-se vazio; um Webmail com as contas erradas mostra
+    a caixa de outra rede.
+    """
+    permitidos = await _enderecos_no_ambito_do_utilizador(current_user)
+
     return [
         {
             "name": a.name,
@@ -293,7 +339,8 @@ async def run_get_configured_accounts(current_user: dict):
             "imap_server": a.imap_server,
             "smtp_server": a.smtp_server
         }
-        for a in accounts
+        for a in get_email_accounts()
+        if str(a.email or "").lower().strip() in permitidos
     ]
 
 

@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
+from services.tenant_network import resolve_tenant_stamp
 from services.process_staff_assignment import (
     PAPEIS_COMO_CONSULTOR,
     PAPEIS_COMO_MEDIADOR,
@@ -245,6 +246,35 @@ async def run_assign_client_to_user(
         target_role = target_user.get("role", "")
         apply_target_role_assignment(process_doc, target_user)
 
+        # ============================================================
+        # CLAIM-BASED ROUTING — o carimbo nasce aqui (Set 2026)
+        # ============================================================
+        # O registo público cai numa POOL neutra, sem carimbo, visível a
+        # todas as redes (ver `client_registered`). É a REIVINDICAÇÃO que
+        # lhe dá dono, e é aqui que a rede é gravada.
+        #
+        # A rede é a do `target_user` — quem fica DONO — e não a de quem
+        # clica: o acto pode ser de um admin a fazer triagem, e carimbar
+        # a rede dele poria o cliente na rede errada. Um carimbo errado é
+        # permanente.
+        #
+        # Rede e não empresa, por decisão de produto: a Power e a
+        # Precision partilham rede e têm de continuar a colaborar; a
+        # Domus é a ilha. Carimbar a empresa cortaria a colaboração.
+        #
+        # `resolve_tenant_stamp` devolve `None` quando não consegue
+        # determinar a rede — e aí não se carimba. Ficar na Pool é
+        # recuperável; um carimbo errado não é.
+        carimbo = await resolve_tenant_stamp(target_user)
+        if carimbo:
+            process_doc.update(carimbo)
+        else:
+            logger.warning(
+                "[ASSIGN-CLIENT] Sem rede determinável para %s — o processo "
+                "%s fica por carimbar (permanece na Pool).",
+                target_user.get("id"), process_id,
+            )
+
         # Encriptar dados sensíveis do processo antes de inserir
         # (o cliente já foi desencriptado acima, por isso os dados estão em plain text)
         from services.process_service import encrypt_sensitive_data as encrypt_process_data
@@ -304,6 +334,17 @@ async def run_assign_client_to_user(
                 logger.warning(f"[ASSIGN-CLIENT] Erro na auto-atribuição de indexador para processo {process_id}: {e}")
     
     # Actualizar cliente + marcar lead como convertido
+    #
+    # O CARIMBO VAI TAMBÉM NO CLIENTE, e não só no processo: a Pool
+    # filtra `db.clients`. Carimbar só o processo deixaria o cliente
+    # reivindicado a aparecer na Pool de todas as redes para sempre — a
+    # fuga sobreviveria à correcção, agora com um dono.
+    #
+    # Resolvido aqui de novo (e não reaproveitado de cima) porque o ramo
+    # `else` corre sem processo nenhum: uma variável partilhada estaria
+    # por definir nesse caminho.
+    carimbo_do_cliente = await resolve_tenant_stamp(target_user) or {}
+
     if process_id:
         await db.clients.update_one(
             {"id": client_id},
@@ -312,7 +353,8 @@ async def run_assign_client_to_user(
                     "assigned_to": target_user_id,
                     "assigned_at": now,
                     "updated_at": now,
-                    "lead_status": "converted"  # Lead já não aparece na página de Registos
+                    "lead_status": "converted",  # Lead já não aparece na página de Registos
+                    **carimbo_do_cliente,
                 },
                 "$addToSet": {"process_ids": process_id}
             }
@@ -320,7 +362,12 @@ async def run_assign_client_to_user(
     else:
         await db.clients.update_one(
             {"id": client_id},
-            {"$set": {"assigned_to": target_user_id, "assigned_at": now, "updated_at": now}}
+            {"$set": {
+                "assigned_to": target_user_id,
+                "assigned_at": now,
+                "updated_at": now,
+                **carimbo_do_cliente,
+            }}
         )
     
     logger.info(f"Cliente {client_id} atribuído a {target_user_id} por {user.get('email')}")

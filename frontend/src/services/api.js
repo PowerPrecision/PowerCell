@@ -1218,6 +1218,22 @@ export const getClients = (params = {}) => {
     return api.get("/clients", { params: cleanParams });
 };
 export const getClient = (id) => api.get(`/clients/${id}`);
+
+/**
+ * Registos de clientes (a Pool / Sala de Triagem).
+ *
+ * VAI POR AXIOS, NUNCA POR `fetch` (Set 2026). A página chamava-o com
+ * `fetch` cru, portanto sem os cabeçalhos `X-Company-Id` /
+ * `X-Active-Role` que o interceptor injecta — e é por eles que o
+ * backend resolve a rede do utilizador. Com a Pool a filtrar por rede,
+ * um `fetch` cru daria a lista errada em silêncio: 5.ª instância do
+ * incidente de 2026-09-21.
+ *
+ * @param {Object} params - search, has_process, assigned_to_me,
+ *   triage_mode, sort_field, sort_order, limit
+ */
+export const getRegisteredClients = (params = {}) =>
+  api.get("/clients/registered", { params });
 /**
  * Documentos do cliente (S3), para a Ficha do Cliente.
  *
