@@ -129,38 +129,6 @@ o DPO. Se a escolha for encriptar, a opção (a) com um campo `ano_de_nascimento
 de recálculo: o ano não muda, e o limiar de "menos de 36" calcula-se sobre ele
 com uma margem de um ano a resolver em Python.
 
-### D-17 · Os `co_buyers` não têm data de nascimento
-**Onde:** `backend/services/ai_document.py` (construção de `co_buyers`),
-`services/sub35.py::processo_e_sub35`.
-
-A regra Sub35 é estrita desde o Lote 5: o apoio do Estado exige que **todos**
-os compradores tenham 35 anos ou menos, e um 2.º titular mais velho retira a
-etiqueta. A regra é aplicada ao `titular2_data`, que tem `birth_date`.
-
-Um processo pode ter **mais** compradores em `co_buyers` (extraídos de um CPCV
-pela IA) e essa estrutura guarda nome, NIF, CC, estado civil, regime de bens,
-profissão, morada, código postal, localidade, email e telefone — **e nenhuma
-data de nascimento**. A idade de um terceiro comprador simplesmente não existe
-na base de dados.
-
-**Porque foi adiado:** bloquear a etiqueta por `co_buyers` seria bloquear por
-dados que não existem — ficava sem etiqueta todo o processo com mais de dois
-compradores, sem forma de confirmar porquê, e um consultor não teria como
-destravar a situação a não ser inventando uma data. O erro ficaria no sentido
-errado para um sinal de oportunidade.
-
-**Quem é atingido se explodir:** um processo com três ou mais compradores em
-que o terceiro tem mais de 35 anos mostra a etiqueta Sub35 e não é elegível.
-Isso aparece no banco ou nas Finanças, não no CRM.
-
-**O que é preciso para fechar:** acrescentar a data de nascimento ao esquema de
-extracção dos compradores do CPCV (`get_document_tool_definition`) e ao
-`buyer_data`, e só então estender a regra — com o cuidado de que, no Mongo, a
-condição sobre um ARRAY precisa de `$elemMatch` e o quantificador correcto é
-«todos», não «algum» (o oposto do que um `{"co_buyers.birth_date": {...}}`
-ingénuo faz). Enquanto a data não existir, estender a regra é só desligar a
-etiqueta.
-
 ### D-12 · Os limiares de SLA guardam-se por empresa e leem-se globalmente
 **Onde:** `backend/services/stats_sla.py::_limiares`,
 `backend/models/system_config.py::DashboardSlaConfig`
@@ -305,6 +273,67 @@ Sala de Triagem fundir, ou (c) recusar com uma mensagem que mande o cliente
 usar o Portal. Qualquer das três reutiliza `encontrar_cliente_duplicado`, que
 já existe e é o que a criação e a edição usam.
 
+### D-18 · `co_buyers` tem dois significados
+**Onde:** `backend/services/ai_document.py::build_update_data_from_extraction`
+(mapeador do CPCV), `backend/services/process_clients_nm.py::build_add_client_update`.
+
+O mesmo campo é escrito com dois significados diferentes:
+
+* o mapeador do CPCV grava **TODOS** os compradores — o elemento 0 é o
+  titular 1, e é dele que o mapeador copia o `personal_data`;
+* o `build_add_client_update` grava apenas os compradores **ADICIONAIS**, e usa
+  `co_buyers[0]` para construir o `titular2_data`.
+
+Encontrado ao fechar a D-17: a regra Sub35 estrita conta "compradores a mais",
+e sob o primeiro significado o titular 1 era contado duas vezes. Como um CPCV
+português muitas vezes não indica datas de nascimento, isso retirava a etiqueta
+a qualquer processo cujo CPCV tivesse sido analisado — **mesmo com um só
+comprador**.
+
+**Porque foi adiado:** a correcção óbvia (passar o mapeador a gravar
+`compradores[1:]`) criaria um TERCEIRO significado durante a transição, porque
+os documentos já gravados mantêm o primeiro. E o campo é lido por
+`ai_bulk_clients`, `client_process_ops`, `gdpr`, `encryption` e
+`process_service`, nenhum dos quais distingue os dois casos. A regra Sub35 foi
+por isso escrita para ser correcta sob **os dois** significados, desduplicando
+por identidade (`sub35.compradores_que_bloqueiam`) — o que é mais robusto do
+que escolher um e migrar o resto.
+
+**Quem é atingido se explodir:** qualquer regra nova que conte elementos de
+`co_buyers` (número de compradores, LTV por comprador, rateio de comissões)
+dá um resultado diferente conforme quem escreveu o array.
+
+**O que é preciso para fechar:** decidir o significado único (o nome do campo e
+o `titular2_data` apontam para "os adicionais"), migrar os documentos escritos
+pelo mapeador do CPCV — identificáveis porque `co_buyers[0]` tem a identidade
+do titular 1 — e só então simplificar a desduplicação.
+
+### D-19 · Homónimos exactos ainda partilham pasta na LEITURA legada
+**Onde:** `backend/services/s3_storage.py::_find_client_folder_combined`,
+`_get_possible_client_paths`.
+
+A identidade da pasta passou a derivar do ID (Lote 6), mas a LEITURA de um
+processo que nunca teve `s3_folder` gravado continua a procurar a pasta pelo
+nome. O match por similaridade foi removido — era ele que ligava "Carolina
+Agostinho da Silva" a `carolina_silva` — e ficou só o match **exacto**.
+
+Dois clientes com o nome EXACTAMENTE igual continuam, nesse caminho de recurso,
+a resolver para a mesma pasta.
+
+**Porque foi adiado:** a alternativa — não devolver nada sem mapeamento — faria
+desaparecer documentos que existem, em número desconhecido (a medição de
+produção do Épico 10 contou 2.650 pastas órfãs). Um documento que desaparece
+não produz erro nenhum, e esse é o defeito que esta casa produz há sete lotes.
+
+**Quem é atingido se explodir:** dois clientes homónimos sem mapeamento gravado
+vêem a documentação um do outro. É um cruzamento de dados pessoais, e a
+tolerância é zero — mas é agora um conjunto muito menor do que era.
+
+**O que é preciso para fechar:** medir quantos processos ativos estão sem
+`s3_folder` (`scripts/medir_cobertura_s3.py` já dá o número), religá-los com a
+ferramenta de mapeamento manual, e depois **apagar o recurso por nome**, com os
+testes de leitura invertidos em vez de apagados.
+
 ---
 
 ## Fechadas
@@ -320,4 +349,5 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 | D-1 | `confirm-upload` do CRM sem posse nem quarentena | Iteração `posse-e-segredo-gov` — era **escalada de privilégio** e não integridade de dados: sem guarda de posse e a devolver `temporary_url` pré-assinado para a chave do corpo do pedido (o Incidente P0 do Portal, no CRM) |
 | D-3 | `GOV_AUTH_JWT_SECRET` com valor por omissão | Iteração `posse-e-segredo-gov` — fail-closed em produção, segredo efémero em dev, e o ramo que aceitava tokens por assinar removido dos dois lados |
 | D-16 | Eliminar um cliente não deixava entrada no trilho de auditoria | Iteração `sub35-estrito-e-auditoria` — `audit_trail_service.log_audit_event` nos **dois** pontos de saída do `run_delete_client` (o cliente pode viver em `processes` ou em `clients`, e um registo escrito só num ramo era a forma de defeito desta casa); com IP, papel EFECTIVO em `metadata` (o campo partilhado guarda o do JWT) e os ids da cascata. O registo é escrito DEPOIS da eliminação e nunca a faz falhar |
+| D-17 | Os `co_buyers` não tinham data de nascimento | Iteração `identidade-documental-e-d17` — a data entrou no esquema de extracção do CPCV (opcional, e com instrução explícita de NÃO inferir: uma data inventada é pior do que nenhuma) e a regra estrita estendeu-se aos compradores, em Python e na condição Mongo (`$nor` + `$elemMatch`, porque o quantificador é «todos» e no Mongo isso não tem forma positiva). A desduplicação por identidade é o que impede a regra de se desligar a si mesma — ver D-18 |
 | D-7 | Relatório semanal do CEO com âmbito global | Iteração `motor-fila-e-agenda` — decisão de produto tomada (a Direcção quer o CONSOLIDADO, e fica a única excepção deliberada ao isolamento por rede); a dívida fechou com o defeito que ninguém tinha visto ao lado dela — o «às 06:00» vivia só na docstring e o relatório saía **24 vezes** à segunda-feira |

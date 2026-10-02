@@ -45,9 +45,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from functools import partial
 from typing import Any, Optional
 
 from database import db
+from services.s3_document_root import pasta_do_cliente
 from services.s3_storage import s3_service
 
 logger = logging.getLogger(__name__)
@@ -62,6 +64,7 @@ async def ensure_s3_mapping_for_entity(
     existing_s3_folder: Optional[str] = None,
     extra_set: Optional[dict] = None,
     label: str = "entidade",
+    owner_client_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Garante e persiste o ``s3_folder`` de UMA entidade (cliente ou processo).
@@ -87,20 +90,25 @@ async def ensure_s3_mapping_for_entity(
         "persisted": False,
     }
 
-    if not client_name or not str(client_name).strip():
+    # LOTE 6: o nome deixou de ser requisito. A pasta deriva do ID, logo um
+    # cliente sem nome preenchido tem direito a pasta como qualquer outro —
+    # exigi-lo aqui era deixar sem documentação quem a UI deixa criar sem nome.
+    if not entity_id or not str(entity_id).strip():
         logger.warning(
-            "[S3-ON-CREATE] %s %s sem nome válido — não é possível mapear pasta S3.",
-            label, entity_id,
+            "[S3-ON-CREATE] %s sem id — não é possível mapear pasta S3.", label,
         )
         return result
 
     try:
         s3_mapping = await asyncio.to_thread(
-            s3_service.ensure_client_folder_mapping,
-            entity_id,
-            client_name,
-            second_client_name,
-            existing_s3_folder,
+            partial(
+                s3_service.ensure_client_folder_mapping,
+                entity_id,
+                client_name,
+                second_client_name,
+                existing_s3_folder,
+                owner_client_id=owner_client_id,
+            )
         )
     except Exception as e:  # degradação graciosa — nunca rebenta a criação
         logger.warning(
@@ -189,6 +197,7 @@ async def ensure_s3_mapping_on_process_create(
         second_client_name=second_client_name,
         existing_s3_folder=process_existing_s3_folder,
         label="processo",
+        owner_client_id=client_id,
     )
     outcome["s3_folder"] = process_result.get("s3_folder")
 
@@ -223,15 +232,24 @@ async def ensure_s3_mapping_on_process_create(
     if existing and existing.lower() not in ("undefined", "null", "none"):
         return outcome  # cliente já tem mapeamento válido
 
+    # LOTE 6: o cliente recebe a SUA raiz, não a pasta do processo.
+    #
+    # Antes, cliente e processo partilhavam literalmente o mesmo caminho. Com a
+    # pasta do processo a viver DENTRO da do cliente, copiar a do processo para
+    # o cliente prenderia a ficha do cliente ao primeiro processo dele — e o
+    # segundo processo ficaria invisível na ficha. A raiz do cliente contém as
+    # dos processos, logo não se perde nada; e não se criam marcadores aqui
+    # porque a subárvore do processo já faz a raiz existir.
+    raiz_do_cliente = pasta_do_cliente(client_id) or outcome["s3_folder"]
     try:
         await clients.update_one(
             {"id": client_id},
-            {"$set": {"s3_folder": outcome["s3_folder"]}},
+            {"$set": {"s3_folder": raiz_do_cliente}},
         )
         outcome["client_backfilled"] = True
         logger.info(
             "[S3-ON-CREATE] Backfill do mapeamento S3 do cliente %s: %s",
-            client_id, outcome["s3_folder"],
+            client_id, raiz_do_cliente,
         )
     except Exception as e:
         logger.warning(

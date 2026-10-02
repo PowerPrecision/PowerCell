@@ -12,6 +12,7 @@ from typing import List, Optional
 from fastapi import HTTPException
 
 from database import db
+from services.s3_document_root import RAIZ, e_id_gerado
 from services.process_status import ARCHIVED_STATUSES, DELETED_STATUS_VALUES
 
 logger = logging.getLogger(__name__)
@@ -196,8 +197,14 @@ async def run_fix_missing_client_names(user: dict):
         s3_folder = process.get("s3_folder")
         if s3_folder:
             # Extrair nome da pasta: "Documentação Clientes/Nome_Cliente" -> "Nome Cliente"
-            folder_name = s3_folder.replace("Documentação Clientes/", "").rstrip("/")
-            if folder_name:
+            folder_name = s3_folder.replace(RAIZ, "").rstrip("/")
+            # LOTE 6: desde que a pasta deriva do ID, o primeiro segmento é um
+            # uuid — e um uuid NÃO é um nome. Sem esta guarda, este reparador
+            # gravava o id como `client_name`, que depois sai em emails, PDFs e
+            # documentos RGPD. As outras fontes (email, `personal_data`) são
+            # melhores do que uma pasta, e é para lá que o caso cai.
+            primeiro_segmento = folder_name.split("/")[0]
+            if folder_name and not e_id_gerado(primeiro_segmento):
                 new_name = folder_name.replace("_", " ").replace("  ", " ")
 
         # 2. Tentar extrair do email

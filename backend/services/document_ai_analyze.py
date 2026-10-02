@@ -689,7 +689,7 @@ async def run_organize_documents_after_analysis(
 ) -> dict[str, Any]:
     """Cria pastas standard e move ficheiros S3 conforme tipo IA."""
     process = await db.processes.find_one(
-        {"id": process_id}, {"_id": 0, "client_name": 1}
+        {"id": process_id}, {"_id": 0, "client_name": 1, "client_id": 1}
     )
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
@@ -700,7 +700,7 @@ async def run_organize_documents_after_analysis(
 
     if create_folders and s3_service.is_configured():
         base_path = s3_service._get_client_base_path_for_upload(
-            process_id, client_name, None
+            process_id, client_name, owner_client_id=process.get("client_id")
         )
         logger.info(f"Organizar documentos: usando pasta {base_path} para {client_name}")
         _ensure_standard_folders(base_path, results)
@@ -708,7 +708,7 @@ async def run_organize_documents_after_analysis(
     if s3_service.is_configured():
         if base_path is None:
             base_path = s3_service._get_client_base_path_for_upload(
-                process_id, client_name, None
+                process_id, client_name, owner_client_id=process.get("client_id")
             )
         for doc in documents:
             try:

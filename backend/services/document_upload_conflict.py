@@ -30,13 +30,19 @@ def resolve_upload_base_path(
     if s3_folder:
         return s3_folder.rstrip("/")
 
+    # Sem mapeamento gravado, o caminho deriva dos IDs (Lote 6, ponto 1) — era
+    # aqui que saía do nome do cliente, com o match por similaridade pelo meio.
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    second_client_name = (
-        process.get("second_client_name") or process.get("titular2", {}).get("nome")
+    caminho = s3_service._get_client_base_path_for_upload(
+        process_id, client_name, owner_client_id=process.get("client_id"),
     )
-    return s3_service._get_client_base_path_for_upload(
-        process_id, client_name, second_client_name
-    )
+    if not caminho:
+        raise HTTPException(
+            status_code=400,
+            detail="Processo sem pasta de documentos utilizável. "
+                   "Contacte a Administração para religar a pasta.",
+        )
+    return caminho
 
 
 def suggest_alternate_filenames(

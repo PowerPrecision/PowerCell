@@ -87,7 +87,6 @@ from services.document_process_resolve import (
     resolve_process_from_flexible_id,
     extract_second_client_name,
     assert_s3_file_belongs_to_process,
-    build_s3_valid_prefixes,
 )
 from services.document_expiring_dashboard import run_get_expiring_documents_dashboard
 from services.document_portal_request import (

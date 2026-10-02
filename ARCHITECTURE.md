@@ -7628,3 +7628,173 @@ são dois.
   estar feita; propagar aqui deixaria o cliente eliminado e a resposta em
   erro. E um 404 não deixa registo: um trilho com eliminações que não
   aconteceram é pior do que um trilho vazio.
+
+## A identidade da pasta, e o terceiro comprador (Out 2026)
+
+### O que correu mal
+
+Os documentos de uma cliente nova — "Carolina Agostinho da Silva" — foram
+servidos na pasta de uma cliente já existente, "Carolina Silva". O relatório
+chama-lhe "o *fuzzy match* falhou". Não falhou: fez exactamente o que estava
+escrito.
+
+```
+palavras em comum / palavras totais = 2/3 = 0.667      ("da" é palavra comum, descartada)
++ 0.2  porque o primeiro nome aparece no nome da pasta
+--------------------------------------------------------
+= 0.867   >=   0.7   →   é a mesma pessoa
+```
+
+A **assinatura da colisão** é *mesmo primeiro nome + um conjunto de nomes
+contido no outro*: mãe e filha, dois irmãos, e sobretudo a MESMA pessoa
+inserida uma vez com nome curto e outra com nome completo. `Ana Costa` contra
+`Ana Maria Costa` dá o mesmo 0.867. Não é o caso raro — é o frequente.
+
+E o sistema não tinha rede nenhuma: `_get_client_base_path`, a única função que
+acrescentava `_2`/`_3` a um nome repetido, **não tinha um único chamador**. A
+que corria (`_get_client_base_path_for_upload`) diz na própria docstring que
+não usa incrementador. Dois clientes com o mesmo nome nunca tiveram pastas
+separadas — e o `s3_folder_relink.py` documentava o `_2` como *"precisamente
+como o sistema desambigua homónimos"*. Um mecanismo documentado que não
+existia.
+
+### A raiz passa a derivar do ID
+
+`services/s3_document_root.py` é o ponto único:
+
+```
+Documentação Clientes/{client_id}/                        ← documentos do CLIENTE
+Documentação Clientes/{client_id}/processos/{process_id}/ ← documentos do PROCESSO
+```
+
+Três decisões que não se podem perder:
+
+1. **A raiz canónica é a MESMA** (`Documentação Clientes/`). É a que o
+   `assert_path_within_document_root` exige e a que o Explorador usa. Uma raiz
+   nova obrigaria a alargar a guarda de segurança para a acomodar, e alargar
+   uma parede para caber a correcção é como o Incidente P0 do Portal começou.
+
+2. **Nada se migra e nada se move.** Os mapeamentos já gravados continuam a ser
+   lidos tal e qual (é o passo 1 do `ensure_client_folder_mapping`). Mover
+   objectos foi exactamente o que produziu as **205 ligações partidas** que o
+   Épico 10 mediu. A regra nova vale para mapeamentos NOVOS e para o
+   religamento manual.
+
+3. **A pasta do processo vive DENTRO da do cliente, logo a leitura é uma
+   UNIÃO.** Listar só a subpasta esconderia tudo o que o cliente enviou antes
+   de o processo existir — o onboarding do Portal inteiro. O
+   `leituras_do_mapeamento` devolve os dois prefixos e exclui a subárvore
+   `processos/` na raiz do cliente, para o processo do lado nunca entrar.
+   Tem teste nos dois sentidos, porque um documento que desaparece não produz
+   erro nenhum.
+
+**Quem ainda pode procurar por nome:** a procura não foi apagada, foi
+despromovida. Serve a LEITURA de um processo legado sem mapeamento (não
+devolver nada esconderia documentos que existem) e a sugestão ao administrador.
+Perdeu o score: só match EXACTO, nas duas grafias que o sistema produziu. O
+resíduo dos homónimos exactos está em `TECHNICAL_DEBT.md` (D-19).
+
+### A fronteira de segmento, que não precisava do *fuzzy match* nenhum
+
+`assert_s3_file_belongs_to_process` tem dois ramos. Com `s3_folder` gravado
+compara `startswith(f"{prefixo}/")` — correcto. Sem ele degradava para o nome e
+construía `f"Documentação Clientes/{nome}"` **sem a barra final**:
+
+```python
+"Documentação Clientes/Carolina Silva Agostinho/Financeiros/irs.pdf" \
+    .startswith("Documentação Clientes/Carolina Silva")   # → True
+```
+
+Um processo da "Carolina Silva" autorizava **tudo** o que estivesse na pasta da
+"Carolina Silva Agostinho". Idem em `build_s3_valid_prefixes`, que alimenta a
+eliminação em massa — e lá o chamador fazia o seu próprio `startswith`, pelo
+que as duas verificações degradavam de maneiras diferentes. E o degradado é
+alcançável **do Portal**, a única superfície externa, para um cliente sem
+`s3_folder`.
+
+Hoje há um ponto único (`dentro_da_pasta`), `build_s3_valid_prefixes` é a única
+lista de prefixos (a guarda deriva dela) e uma lista VAZIA recusa tudo — o
+degradado com nome vazio produzia o prefixo `Documentação Clientes/` e aceitava
+a árvore inteira. É a regra que o `reescrever_prefixo` do relink já tinha
+(*"`Joao_Silva_2` começa pelo mesmo texto e é OUTRO cliente"*) e que estas duas
+funções nunca aprenderam.
+
+### E um botão que fabricava a colisão
+
+`run_auto_map_client_s3_folders` resolvia pasta → processo com um `find_one`
+sobre `{"client_name": {"$regex": f"{primeiro}.*{último}"}}` e ficava com o
+PRIMEIRO documento devolvido, **sem verificar unicidade** — depois gravava
+`s3_folder`. Hoje conta os candidatos e **recusa quando há mais do que um**,
+reportando a pasta em `ambiguas` com os nomes dos processos. A diferença é a
+que importa: *"não encontrei"* é trabalho pendente, *"encontrei dois"* é um
+cruzamento de dados à espera de acontecer. O nome da pasta passou também a ser
+escapado com `re.escape` — as pastas antigas foram criadas à mão no Explorador
+e um parêntese ia cru para o `$regex`.
+
+**Nota sobre a medição que já existia:** o `s3_folder_coverage` conta como
+"ambígua" só a pasta reclamada por processos de **redes diferentes**. Duas
+fichas da mesma rede a partilhar pasta é invisível nessa contagem, pelo que as
+45 ambíguas medidas em produção são o subconjunto que atravessa redes — um
+limite inferior, não o número.
+
+### D-17: o terceiro comprador
+
+A regra Sub35 é estrita desde o Lote 5 (todos os titulares com 35 anos ou
+menos), mas os `co_buyers` ficavam de fora porque a estrutura que a IA gravava
+do CPCV não tinha data de nascimento nenhuma. Fechou-se pelos dois lados:
+
+* **o esquema** (`get_document_tool_definition("cpcv")`) passou a pedir
+  `data_nascimento` por comprador — **opcional, e com instrução explícita de
+  não inferir**. Um CPCV português identifica as partes por NIF/CC e estado
+  civil e muitas vezes não indica a data; exigi-la levaria o modelo a
+  inventá-la, e a regra sabe tratar "não sei" (bloqueia), não sabe tratar uma
+  mentira;
+* **a regra** (`sub35.compradores_que_bloqueiam`) estendeu-se: um comprador com
+  data conhecida acima dos 35 bloqueia, e um comprador **distinto** sem data
+  também (falha fechada, a mesma assimetria do 2.º titular).
+
+**A desduplicação por identidade não é zelo — é o que separa a regra de se
+desligar a si mesma.** O mapeador do CPCV grava o titular 1 como
+`co_buyers[0]`; sem desduplicar, um processo de UM só comprador cujo CPCV não
+indique datas ficava com "um comprador sem data" e perdia a etiqueta. A
+comparação é por NIF/CC (dígitos) ou por nome normalizado, e é **exacta**: foi
+um score de similaridade entre nomes que produziu a colisão de pastas deste
+mesmo lote, e aplicá-lo aqui seria incoerente — além de abrir a etiqueta, que é
+o sentido errado. Ao fazê-la, encontrou-se que `co_buyers` tem **dois
+significados** no sistema (D-18).
+
+### `$nor` e `$elemMatch`, e porque é que o duplo teve de aprendê-los
+
+O quantificador da regra é **TODOS os compradores**, e no Mongo isso não tem
+forma positiva: escreve-se "não existe elemento que falhe". Um
+`{"co_buyers.data_nascimento": {...}}` ingénuo diria **ALGUM**, que é o oposto;
+e o `$elemMatch` é obrigatório porque as duas condições ("tem identidade" e
+"não tem data de Sub35") têm de valer no MESMO elemento — com dois caminhos com
+ponto, cada uma encontraria o seu comprador e a condição ficava sempre
+satisfeita.
+
+O `FakeAsyncCollection` não implementava nenhum dos dois, e o efeito **não era
+"ignorar"**: um `$nor` caía no `_lookup_path`, comparava-se com uma lista e a
+query deixava de casar com NADA — fail-closed, e igualmente enganador, porque
+um teste de filtro mostraria a lista vazia em vez de revelar o defeito. (A nota
+do Lote 5 em `AGENTS.md` dizia "ignorado"; era pior.) Como o duplo passa a
+implementar lógica em que os outros testes confiam, a semântica dos dois
+operadores é afirmada **um nível abaixo**, em
+`test_duplo_de_mongo_nor_e_elemmatch.py`.
+
+### A assimetria deliberada entre o filtro e a etiqueta
+
+O predicado desduplica por identidade; a condição Mongo **não consegue**,
+porque o `nif`/`cc` dos `co_buyers` estão encriptados em repouso e um nome não
+se normaliza dentro de uma consulta. O filtro é por isso mais estrito do que a
+etiqueta num caso enumerado: um processo cujo CPCV de um só comprador não trouxe
+datas tem etiqueta e **não aparece** na lista filtrada.
+
+A assimetria vai sempre no sentido seguro, e isso é agora uma **propriedade
+afirmada** e não uma esperança: `test_o_filtro_NUNCA_mostra_uma_linha_sem_etiqueta`
+corre sobre a amostra inteira. O erro ao contrário seria um consultor a
+prometer uma isenção de IMT que a Autoridade Tributária recusa em cima da
+escritura; este é uma oportunidade que não aparece numa lista. A lista de
+excepções tem o seu próprio teste a exigir que ainda divergem — sem ele,
+encher-se-ia de casos que já concordam e passaria a esconder uma divergência
+nova.

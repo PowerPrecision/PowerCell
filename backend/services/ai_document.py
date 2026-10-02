@@ -408,6 +408,15 @@ def get_document_tool_definition(document_type: str) -> dict:
                                     "nome_completo": {"type": "string", "description": "Nome completo do comprador/proponente"},
                                     "nif": {"type": "string", "description": "NIF do comprador (9 dígitos)"},
                                     "cc": {"type": "string", "description": "Número do Cartão de Cidadão"},
+                                    # D-17 (Lote 6): sem este campo a idade de um
+                                    # terceiro comprador não existia na base de
+                                    # dados e a regra Sub35 — que exige TODOS os
+                                    # compradores com 35 anos ou menos — não o
+                                    # podia considerar. Um CPCV português muitas
+                                    # vezes NÃO indica a data; é por isso que o
+                                    # campo é opcional e que "não sei" tem de se
+                                    # distinguir de "não é elegível".
+                                    "data_nascimento": {"type": "string", "description": "Data de nascimento do comprador (YYYY-MM-DD). Deixar vazio se o contrato não a indicar — NÃO inferir da idade nem do número do CC."},
                                     "estado_civil": {"type": "string", "description": "Estado civil (Solteiro/Casado/Divorciado/Viúvo/União de Facto)"},
                                     "regime_bens": {"type": "string", "description": "Regime de bens (Comunhão de adquiridos/Separação de bens/etc)"},
                                     "profissao": {"type": "string", "description": "Profissão"},
@@ -2664,6 +2673,10 @@ def build_update_data_from_extraction(
                 "nome": comprador.get('nome_completo') or comprador.get('nome'),
                 "nif": comprador.get('nif'),
                 "cc": comprador.get('cc'),
+                # D-17: o nome do campo é o canónico do `services.sub35`
+                # (`CAMPOS_DE_NASCIMENTO`). Um nome novo aqui seria o quinto
+                # nome da mesma data e a regra não o leria.
+                "data_nascimento": comprador.get('data_nascimento'),
                 "estado_civil": comprador.get('estado_civil'),
                 "regime_bens": comprador.get('regime_bens'),
                 "profissao": comprador.get('profissao'),
@@ -2684,6 +2697,8 @@ def build_update_data_from_extraction(
                 if i == 0:
                     if buyer_data.get('nif'):
                         personal_update['nif'] = buyer_data['nif']
+                    if buyer_data.get('data_nascimento'):
+                        personal_update['data_nascimento'] = buyer_data['data_nascimento']
                     if buyer_data.get('cc'):
                         personal_update['documento_id'] = buyer_data['cc']
                     if buyer_data.get('morada'):

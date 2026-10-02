@@ -9679,3 +9679,183 @@ Seis mutações, seis mortes:
    chamada em vez de levantar o limiar, como no lote anterior — mas é
    sinal de que este ficheiro está no limite e a próxima linha vai ter de
    pagar com uma extracção, não com formatação.
+
+---
+
+# Iteração `identidade-documental-e-d17` — 2026-10-02
+
+**Pedido (Lote 6, pontos 1 e 3):** a colisão de identidade nas pastas de
+documentos (uma cliente nova mapeada para a pasta de uma existente) e o fecho
+da D-17 (Sub35 para os `co_buyers`). Os pontos 2, 4 e 5 do lote ficam para a
+iteração seguinte.
+
+## O que estava mal
+
+### A colisão não era o *fuzzy match* a falhar
+
+Fez exactamente o que estava escrito. A aritmética do
+`_find_client_folder_combined`, reproduzida antes de tocar em código:
+
+| Nome novo | Pasta existente | Score | |
+|---|---|---|---|
+| Carolina Agostinho da Silva | `carolina_silva` | **0.867** | colide |
+| Ana Maria Costa | `ana_costa` | **0.867** | colide |
+| Maria Silva | `joao_silva` | 0.500 | ok |
+
+2/3 de palavras em comum (`da` é descartada como palavra comum) + 0.2 de bónus
+por o primeiro nome aparecer na pasta, contra um limiar de 0.7. A **assinatura**
+é *mesmo primeiro nome + um conjunto de nomes contido no outro*: mãe e filha,
+dois irmãos, e sobretudo a mesma pessoa inserida com nome curto e com nome
+completo.
+
+### O mecanismo de desambiguação não existia
+
+`_get_client_base_path` — a única função que acrescentava `_2`/`_3` — **não
+tinha um único chamador**. A que corria diz na própria docstring que não usa
+incrementador. Dois homónimos nunca tiveram pastas separadas, e o
+`s3_folder_relink.py` documentava o `_2` como "precisamente como o sistema
+desambigua homónimos". Foi apagada.
+
+### Cinco escritores derivavam o caminho do nome
+
+`ensure_client_folder_mapping` (criar cliente, criar processo, atribuir, upload
+do Portal, 2 scripts), `initialize_client_folders` (registo público,
+init-folders), `_get_client_base_path_for_upload` (análise IA ×2, conflito de
+nomes), o `generate_upload_presigned_*` por dentro — e um **quarto, em linha**,
+que só apareceu a ler o `client_assign`: um "fallback determinístico" que
+gravava `Documentação Clientes/{Safe_Name}` **directamente no documento do
+processo**. Dois homónimos recebiam ali o mesmo `s3_folder`, e como o `ensure`
+honra o que já está gravado (passo 1), essa colisão **sobrevivia a qualquer
+correcção feita só no `ensure`**.
+
+### A guarda de posse tinha um buraco que não precisava do *fuzzy match*
+
+```python
+"Documentação Clientes/Carolina Silva Agostinho/Financeiros/irs.pdf" \
+    .startswith("Documentação Clientes/Carolina Silva")   # → True
+```
+
+Sem `s3_folder`, `assert_s3_file_belongs_to_process` construía o prefixo a
+partir do nome **sem barra final**. Alcançável do **Portal**, a única superfície
+externa. E `build_s3_valid_prefixes` tinha o mesmo defeito com um chamador que
+fazia o seu próprio `startswith` — duas verificações a degradar de maneiras
+diferentes.
+
+### O botão que fabricava a colisão
+
+`run_auto_map_client_s3_folders` fazia `find_one` com
+`{"client_name": {"$regex": f"{primeiro}.*{último}"}}` e ficava com o primeiro
+que o Mongo devolvesse, sem verificar unicidade — e gravava.
+
+## O que ficou
+
+`services/s3_document_root.py` como ponto único:
+`Documentação Clientes/{client_id}/` e `.../processos/{process_id}/`. A raiz
+canónica é a mesma (alargar a parede de segurança para caber a correcção é como
+o Incidente P0 começou), **nada se migra e nada se move** (mover objectos
+produziu as 205 ligações partidas do Épico 10), e a leitura de um processo é uma
+**união** — a subpasta dele mais a raiz do cliente sem a subárvore `processos/`
+—, senão o onboarding do Portal desaparecia do separador Documentos.
+
+A procura por nome não foi apagada: foi **despromovida**. Perdeu o score (só
+match exacto) e serve agora a leitura de um processo legado sem mapeamento e a
+sugestão ao administrador. O resíduo dos homónimos exactos ficou em D-19.
+
+## D-17, e o que apareceu ao fechá-la
+
+A data de nascimento entrou no esquema de extracção do CPCV — **opcional, e com
+instrução explícita de não inferir**: um CPCV português identifica as partes por
+NIF/CC e estado civil e muitas vezes não indica a data; exigi-la levaria o
+modelo a inventá-la, e a regra sabe tratar "não sei" (bloqueia), não sabe tratar
+uma mentira.
+
+**`co_buyers` tem dois significados** (D-18): o mapeador do CPCV grava TODOS os
+compradores com o titular 1 no elemento 0; o `build_add_client_update` grava só
+os ADICIONAIS. Sem desduplicar por identidade, a regra estrita contava o titular
+1 duas vezes e — como as datas raramente vêm no CPCV — **retirava a etiqueta a
+qualquer processo analisado, mesmo com um só comprador**. A regra foi escrita
+para ser correcta sob os dois significados.
+
+A comparação de identidade é **exacta** (NIF/CC em dígitos, nome normalizado
+sem acentos). Foi um score de similaridade entre nomes que produziu a colisão de
+pastas deste mesmo lote; usá-lo aqui seria incoerente, e abriria a etiqueta —
+o sentido errado.
+
+Duas perguntas que tive de separar para decidir bem: **"há aqui alguém?"** (uma
+chave de identidade com valor) e **"sei dizer quem?"** (um token comparável).
+Uma linha que a extracção deixou vazia não é uma pessoa e salta; uma linha com
+algo escrito mas incomparável é uma pessoa que não sei identificar, e aí vale a
+falha fechada. É também o que alinha o predicado com a condição Mongo, que
+decide por valor presente (`$nin: [None, ""]`).
+
+### O duplo de Mongo teve de aprender `$nor` e `$elemMatch`
+
+O quantificador é **TODOS**, e no Mongo isso não tem forma positiva. O
+`FakeAsyncCollection` não implementava nenhum dos dois, e o efeito **não era
+"ignorar"**: o `$nor` caía no `_lookup_path`, comparava-se com uma lista, e a
+query deixava de casar com nada — fail-closed e igualmente enganador, porque o
+teste mostraria uma lista vazia em vez do defeito. A nota do Lote 5 no
+`AGENTS.md` dizia "ignorado"; **era pior do que isso, e corrigi a nota**. A
+semântica dos dois operadores é afirmada um nível abaixo, em
+`test_duplo_de_mongo_nor_e_elemmatch.py`.
+
+### A assimetria que decidi manter, e afirmar
+
+O predicado desduplica; a condição Mongo não consegue (o `nif`/`cc` estão
+encriptados em repouso). Num caso enumerado — CPCV de um só comprador sem datas
+— o processo tem etiqueta e **não aparece** na lista filtrada.
+
+Escolhi este sentido de propósito: a etiqueta é o que o consultor vê e tem de
+ser a autoridade; o filtro é conveniência. O erro ao contrário seria prometer
+uma isenção de IMT que a AT recusa em cima da escritura. A propriedade
+`test_o_filtro_NUNCA_mostra_uma_linha_sem_etiqueta` corre sobre a amostra
+inteira, e a lista de excepções tem um teste a exigir que ainda divergem —
+sem ele encher-se-ia de casos que já concordam e esconderia uma divergência
+nova.
+
+## Um efeito colateral que a correcção criou, e que apanhei a lê-la
+
+Dois reparadores de `client_name` extraem o nome **DA PASTA**
+(`run_fix_missing_client_names`, `run_auto_map_client_s3_folders`). Com a pasta
+a derivar do ID, passavam a gravar um **uuid como nome do cliente** — e esse
+nome sai depois em emails, PDFs e documentos RGPD.
+
+E a primeira guarda que escrevi estava errada: usei `id_valido`, que pergunta
+*"serve como segmento de caminho?"* — e `Rui_Pereira` serve. O reparador deixava
+de reparar nomes legítimos. São **duas perguntas diferentes**, e `e_id_gerado`
+(a forma do `uuid4`) é a segunda. Um id legado que não seja uuid responde
+`False`, e aí a pasta é tratada como pasta por nome: falhar para o lado antigo é
+seguro, o contrário escreve um uuid onde vai um nome.
+
+## O que fica a saber
+
+As pastas NOVAS aparecem no Explorador de Ficheiros e no diálogo de mapeamento
+como um **uuid**, até o ponto 2 deste lote (o religamento manual) acrescentar a
+resolução do nome a partir do mapeamento. Fica dito de propósito: é o custo
+conhecido de a identidade deixar de ser o nome, e tem um lado bom — uma listagem
+de pastas deixa de revelar os nomes dos clientes, que é uma preocupação já
+escrita no `s3_explorer_scope` ("o nome da pasta É o nome do cliente —
+confirmaria a carteira da concorrência").
+
+## Medição
+
+| | |
+|---|---|
+| Testes novos | `test_s3_document_root.py` (57), `test_posse_s3_fronteira_de_segmento.py` (11), `test_automap_pastas_ambiguas.py` (8), `test_duplo_de_mongo_nor_e_elemmatch.py` (15), `test_cpcv_data_de_nascimento.py` (5) |
+| Testes invertidos | 4 em `test_s3_ensure_client_folder_mapping.py` (afirmavam a procura por nome), 1 em `test_sub35.py` (afirmava o adiamento da D-17) |
+
+Dez mutações, dez mortes:
+
+| Mutação | Testes que morreram |
+|---|---|
+| `dentro_da_pasta` perde a fronteira de segmento | 7 |
+| A pasta do processo deixa de ficar sob a do cliente | 4 |
+| A leitura da raiz do cliente deixa de excluir os processos | 1 |
+| `client_assign` volta a derivar o caminho do nome | 1 |
+| O auto-map volta a mapear a pasta ambígua | 2 |
+| Sem nome, os prefixos de posse voltam a ser a raiz nua | 2 |
+| Os `co_buyers` deixam de bloquear | 7 |
+| A desduplicação por identidade desaparece | 4 |
+| Uma data desconhecida de um comprador deixa de bloquear | 5 |
+| A condição Mongo perde os compradores | 5 |
+| A guarda do uuid-como-nome volta a usar `id_valido` | 1 |

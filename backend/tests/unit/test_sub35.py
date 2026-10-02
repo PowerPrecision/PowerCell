@@ -360,17 +360,141 @@ class TestARegraEstritaDoSegundoTitular:
         cliente["titular2_data"] = {"name": "B", "birth_date": "1999-01-01"}
         assert cliente_e_sub35(cliente, HOJE) is True
 
-    def test_os_co_buyers_NAO_bloqueiam_e_e_deliberado(self):
-        """A estrutura dos `co_buyers` (nome, nif, cc, estado civil,
-        morada, contactos) não tem data de nascimento NENHUMA. Bloquear
-        por eles era bloquear por dados que não existem — ficaria sem
-        etiqueta todo o processo com mais de um comprador, sem forma de
-        confirmar porquê. Registado em D-17."""
+    def test_os_co_buyers_JA_bloqueiam_D17_fechada(self):
+        """INVERTIDO (Lote 6, D-17 fechada), não apagado.
+
+        Este teste afirmava o adiamento: os `co_buyers` não tinham data de
+        nascimento nenhuma na base de dados, logo bloquear por eles era
+        bloquear por dados inexistentes. A data passou a ser extraída do CPCV
+        e a regra estende-se — um comprador DISTINTO sem data bloqueia
+        (falha fechada), como o 2.º titular.
+
+        Fica a afirmar o contrário para a memória não se perder: se alguém
+        voltar a tirar os `co_buyers` da regra, é este teste que o diz.
+        """
         processo = {
             **self.JOVEM,
             "co_buyers": [{"nome": "Velho", "nif": "999999999"}],
         }
+        assert processo_e_sub35(processo, HOJE) is False
+
+
+class TestARegraDosCoBuyers:
+    """D-17: todos os compradores, incluindo o terceiro."""
+
+    JOVEM = {
+        "client_name": "Ana Jovem",
+        "personal_data": {
+            "birth_date": "2000-01-01",
+            "nome": "Ana Jovem",
+            "nif": "111111111",
+        },
+    }
+
+    def test_um_terceiro_comprador_JOVEM_nao_bloqueia(self):
+        processo = {
+            **self.JOVEM,
+            "co_buyers": [{"nome": "Rui Novo", "nif": "222222222",
+                           "data_nascimento": "1999-05-05"}],
+        }
         assert processo_e_sub35(processo, HOJE) is True
+
+    def test_um_terceiro_comprador_VELHO_retira_a_etiqueta(self):
+        """O passivo que a D-17 descrevia: o banco e as Finanças vêem-no, o
+        CRM é que não via."""
+        processo = {
+            **self.JOVEM,
+            "co_buyers": [{"nome": "Rui Velho", "nif": "222222222",
+                           "data_nascimento": "1970-05-05"}],
+        }
+        assert processo_e_sub35(processo, HOJE) is False
+
+    def test_data_desconhecida_de_um_comprador_DISTINTO_bloqueia(self):
+        processo = {
+            **self.JOVEM,
+            "co_buyers": [{"nome": "Rui Sem Data", "nif": "222222222"}],
+        }
+        assert processo_e_sub35(processo, HOJE) is False
+
+    # ── A desduplicação: o que separa a regra de desligar a etiqueta ──
+
+    def test_o_comprador_que_E_o_titular1_nao_conta_por_NIF(self):
+        """O mapeador do CPCV grava o titular 1 como `co_buyers[0]`.
+
+        Sem desduplicar, um processo de UM só comprador cujo CPCV não indique
+        datas (o caso comum: um CPCV português identifica por NIF/CC, não por
+        data de nascimento) perdia a etiqueta. Era a regra a desligar-se a si
+        mesma.
+        """
+        processo = {
+            **self.JOVEM,
+            "co_buyers": [{"nome": "Ana J.", "nif": "111111111"}],
+        }
+        assert processo_e_sub35(processo, HOJE) is True
+
+    def test_o_comprador_que_E_o_titular1_nao_conta_por_NOME(self):
+        processo = {
+            **self.JOVEM,
+            "co_buyers": [{"nome": "ANA  JOVEM"}],  # acentos/caixa/espaços
+        }
+        assert processo_e_sub35(processo, HOJE) is True
+
+    def test_o_comprador_que_E_o_titular2_nao_conta(self):
+        processo = {
+            **self.JOVEM,
+            "titular2_data": {"name": "Beatriz Dois", "birth_date": "2001-02-02"},
+            "co_buyers": [{"nome": "Beatriz Dois"}],
+        }
+        assert processo_e_sub35(processo, HOJE) is True
+
+    def test_uma_linha_de_comprador_VAZIA_nao_e_uma_pessoa(self):
+        """«Presente mas vazio» não é «presente» — terceira vez no projecto."""
+        processo = {**self.JOVEM, "co_buyers": [{"nome": "", "nif": None}]}
+        assert processo_e_sub35(processo, HOJE) is True
+
+    def test_lista_ausente_ou_vazia_nao_bloqueia(self):
+        assert processo_e_sub35(self.JOVEM, HOJE) is True
+        assert processo_e_sub35({**self.JOVEM, "co_buyers": []}, HOJE) is True
+        assert processo_e_sub35({**self.JOVEM, "co_buyers": None}, HOJE) is True
+
+    def test_a_marca_manual_continua_a_vencer(self):
+        processo = {
+            **self.JOVEM,
+            "is_sub35": True,
+            "co_buyers": [{"nome": "Rui Velho", "data_nascimento": "1950-01-01"}],
+        }
+        assert processo_e_sub35(processo, HOJE) is True
+
+    def test_a_identidade_nao_e_aproximada(self):
+        """Nomes parecidos NÃO são a mesma pessoa.
+
+        Era um score de similaridade entre nomes que produziu a colisão de
+        pastas deste mesmo lote; aplicar aqui o que se acabou de arrancar lá
+        seria incoerente — e abriria a etiqueta, que é o sentido errado.
+        """
+        processo = {
+            **self.JOVEM,
+            "co_buyers": [{"nome": "Ana Jovem Pereira"}],
+        }
+        assert processo_e_sub35(processo, HOJE) is False
+
+    def test_um_token_curto_nao_identifica_ninguem(self):
+        processo = {
+            "client_name": "Ab",
+            "personal_data": {"birth_date": "2000-01-01", "nome": "Ab"},
+            "co_buyers": [{"nome": "Ab"}],
+        }
+        # "Ab" tem menos de 3 caracteres: não serve como prova de identidade,
+        # logo o comprador conta e bloqueia (falha fechada).
+        assert processo_e_sub35(processo, HOJE) is False
+
+    def test_a_mesma_regra_no_cliente_da_Pool(self):
+        cliente = {
+            "nome": "Ana Jovem",
+            "dados_pessoais": {"birth_date": "2000-01-01", "nome": "Ana Jovem"},
+            "co_buyers": [{"nome": "Rui Velho", "data_nascimento": "1970-01-01"}],
+        }
+        assert cliente_e_sub35(cliente, HOJE) is False
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -433,6 +557,54 @@ DOCUMENTOS = [
         "under_35": True,
         "titular2_data": {"name": "Hugo", "birth_date": "1950-01-01"},
     }),
+    # ── D-17 (Lote 6): os compradores do CPCV ──
+    ("t1 jovem + co_buyer jovem", {
+        "client_name": "Ivo Jovem",
+        "personal_data": {"birth_date": "2000-01-01", "nome": "Ivo Jovem"},
+        "co_buyers": [{"nome": "Joana Nova", "data_nascimento": "1998-03-03"}],
+    }),
+    ("t1 jovem + co_buyer VELHO", {
+        "client_name": "Ivo Jovem",
+        "personal_data": {"birth_date": "2000-01-01", "nome": "Ivo Jovem"},
+        "co_buyers": [{"nome": "Luís Velho", "data_nascimento": "1965-03-03"}],
+    }),
+    ("t1 jovem + co_buyer sem data", {
+        "client_name": "Ivo Jovem",
+        "personal_data": {"birth_date": "2000-01-01", "nome": "Ivo Jovem"},
+        "co_buyers": [{"nome": "Marta Sem Data", "nif": "555555555"}],
+    }),
+    ("t1 jovem + co_buyer linha vazia", {
+        "client_name": "Ivo Jovem",
+        "personal_data": {"birth_date": "2000-01-01", "nome": "Ivo Jovem"},
+        "co_buyers": [{"nome": "", "nif": None}],
+    }),
+    ("t1 jovem + lista de compradores vazia", {
+        "client_name": "Ivo Jovem",
+        "personal_data": {"birth_date": "2000-01-01", "nome": "Ivo Jovem"},
+        "co_buyers": [],
+    }),
+    ("t1 jovem + co_buyer na fronteira (35)", {
+        "client_name": "Ivo Jovem",
+        "personal_data": {"birth_date": "2000-01-01", "nome": "Ivo Jovem"},
+        "co_buyers": [{"nome": "Nuno Limite", "birth_date": "1990-10-03"}],
+    }),
+]
+
+#: Os documentos em que o filtro é DELIBERADAMENTE mais estrito do que a
+#: etiqueta: o predicado desduplica por identidade (um `co_buyer` que É o
+#: titular 1 não conta) e a condição Mongo não o consegue fazer, porque o
+#: `nif`/`cc` estão encriptados em repouso e um nome não se normaliza dentro
+#: de uma consulta. A assimetria vai sempre no sentido seguro — esconder uma
+#: linha que tem etiqueta, nunca mostrar uma que não a tem — e está
+#: enumerada aqui para ser uma decisão, não uma surpresa.
+DOCUMENTOS_COM_FILTRO_MAIS_ESTRITO = [
+    ("o co_buyer É o titular 1 (CPCV de um só comprador)", {
+        "client_name": "Ivo Jovem",
+        "personal_data": {
+            "birth_date": "2000-01-01", "nome": "Ivo Jovem", "nif": "111111111",
+        },
+        "co_buyers": [{"nome": "Ivo Jovem", "nif": "111111111"}],
+    }),
 ]
 
 
@@ -456,6 +628,43 @@ class TestOFiltroEAEtiquetaConcordam:
         aceita tudo passar o teste acima."""
         veredictos = {processo_e_sub35(doc, HOJE) for _, doc in DOCUMENTOS}
         assert veredictos == {True, False}
+
+    @pytest.mark.parametrize(
+        "nome,doc",
+        DOCUMENTOS + DOCUMENTOS_COM_FILTRO_MAIS_ESTRITO,
+        ids=[n for n, _ in DOCUMENTOS + DOCUMENTOS_COM_FILTRO_MAIS_ESTRITO],
+    )
+    def test_o_filtro_NUNCA_mostra_uma_linha_sem_etiqueta(self, nome, doc):
+        """A propriedade que importa, sobre a amostra INTEIRA.
+
+        A igualdade acima é o ideal; esta implicação é o contrato de
+        segurança: tudo o que o filtro "Sub35" devolve tem de ter etiqueta.
+        O erro ao contrário é uma oportunidade que não aparece numa lista; e
+        este é um consultor a prometer uma isenção de IMT que a Autoridade
+        Tributária recusa em cima da escritura.
+        """
+        from tests.unit.conftest import FakeAsyncCollection
+
+        if FakeAsyncCollection._matches(doc, condicao_sub35(HOJE)):
+            assert processo_e_sub35(doc, HOJE) is True, (
+                f"{nome}: o filtro inclui um processo que a etiqueta nega"
+            )
+
+    @pytest.mark.parametrize(
+        "nome,doc",
+        DOCUMENTOS_COM_FILTRO_MAIS_ESTRITO,
+        ids=[n for n, _ in DOCUMENTOS_COM_FILTRO_MAIS_ESTRITO],
+    )
+    def test_a_assimetria_e_exactamente_a_enumerada(self, nome, doc):
+        """E é mesmo assimétrica — se deixar de ser, esta lista tem de mudar.
+
+        Sem este teste, a lista de excepções poderia encher-se de casos que
+        já concordam e passaria a esconder uma divergência nova.
+        """
+        from tests.unit.conftest import FakeAsyncCollection
+
+        assert processo_e_sub35(doc, HOJE) is True
+        assert FakeAsyncCollection._matches(doc, condicao_sub35(HOJE)) is False
 
 
 

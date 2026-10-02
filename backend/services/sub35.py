@@ -52,6 +52,7 @@ Mongo — e é dívida técnica registada (D-15), não um desenho.
 from __future__ import annotations
 
 import logging
+import unicodedata
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Optional
 
@@ -80,6 +81,26 @@ SECCOES_DO_CLIENTE = ("dados_pessoais",)
 #: `titular2_data` fica no cliente até o processo nascer e é copiado na
 #: criação (ver `process_create`).
 SECCAO_DO_TITULAR2 = "titular2_data"
+
+#: A lista de TODOS os compradores extraída de um CPCV pela IA.
+#:
+#: **Atenção — este campo tem DUAS escritas com significados diferentes**, e é
+#: a razão de a regra ter de desduplicar por identidade (ver `compradores_que_
+#: bloqueiam`): o mapeador do CPCV (`ai_document`) grava **todos** os
+#: compradores, sendo o elemento 0 o titular 1 (é dele que copia o
+#: `personal_data`); o `process_clients_nm.build_add_client_update` grava
+#: apenas os compradores ADICIONAIS (e usa `co_buyers[0]` para construir o
+#: `titular2_data`). Contar cegamente os elementos como "compradores a mais"
+#: retiraria a etiqueta a qualquer processo cujo CPCV tenha sido analisado,
+#: mesmo com UM só comprador. Registado em `TECHNICAL_DEBT.md` (D-18).
+SECCAO_DOS_COMPRADORES = "co_buyers"
+
+#: O que identifica um comprador da lista. `nome` é o nome que o mapeador do
+#: CPCV grava; `name` é o que o add-client grava. Nenhum é encriptado em
+#: repouso; o `nif`/`cc` são (ver `encryption.py`), e por isso a comparação de
+#: identidade só é possível no predicado em Python, onde o documento já vem
+#: desencriptado — nunca na condição Mongo.
+CHAVES_DE_IDENTIDADE_DO_COMPRADOR = ("nome", "name", "nif", "cc", "documento_id")
 
 #: O que prova que um 2.º titular EXISTE.
 #:
@@ -279,15 +300,130 @@ def titular2_bloqueia(doc: dict, hoje: Optional[date] = None) -> bool:
     return True
 
 
-def processo_e_sub35(processo: dict, hoje: Optional[date] = None) -> bool:
-    """O processo é Sub35? TODOS os titulares com 35 anos ou menos.
+def _normalizar_identidade(valor: Any) -> Optional[str]:
+    """Um pedaço de identidade comparável, ou `None`.
 
-    Os `co_buyers` ficam de fora e não é esquecimento: a estrutura que o
-    `ai_document` grava (nome, nif, cc, estado civil, morada, contactos)
-    **não tem data de nascimento nenhuma**. Bloquear por eles seria
-    bloquear por dados que não existem — retirava a etiqueta a todos os
-    processos com mais de um comprador sem nunca poder confirmar porquê.
-    Fica dito em `TECHNICAL_DEBT.md` (D-17).
+    Nomes: minúsculas, sem acentos, espaços colapsados. Números (NIF, CC):
+    só os dígitos. Tokens com menos de 3 caracteres são descartados — um
+    token curto casaria por acidente, e um falso "é a mesma pessoa" é o erro
+    que ABRE a etiqueta.
+
+    A comparação é **exacta** depois de normalizada. Não há aqui match
+    aproximado, de propósito: foi um score de similaridade entre nomes que
+    produziu a colisão de pastas do Lote 6, e a lição não se aplica a meio.
+    """
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    digitos = "".join(c for c in texto if c.isdigit())
+    if digitos and len(digitos) == len(texto.replace(" ", "")):
+        return digitos if len(digitos) >= 3 else None
+    texto = unicodedata.normalize("NFKD", texto.lower())
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = " ".join(texto.split())
+    return texto if len(texto) >= 3 else None
+
+
+def _identidades_dos_titulares(doc: dict) -> set[str]:
+    """Quem já é contado pela regra dos titulares 1 e 2."""
+    identidades: set[str] = set()
+    if not isinstance(doc, dict):
+        return identidades
+
+    candidatos: list[Any] = [doc.get("client_name"), doc.get("nome")]
+    for seccao in (*SECCOES_DO_PROCESSO, *SECCOES_DO_CLIENTE, SECCAO_DO_TITULAR2):
+        bloco = doc.get(seccao)
+        if isinstance(bloco, dict):
+            candidatos.extend(
+                bloco.get(chave) for chave in CHAVES_DE_IDENTIDADE_DO_COMPRADOR
+            )
+    for valor in candidatos:
+        token = _normalizar_identidade(valor)
+        if token:
+            identidades.add(token)
+    return identidades
+
+
+def compradores_que_bloqueiam(
+    doc: dict, hoje: Optional[date] = None
+) -> list[dict]:
+    """Os `co_buyers` que impedem a etiqueta — os que são OUTRA pessoa.
+
+    D-17 (Lote 6). O apoio do Estado exige que **todos** os compradores
+    cumpram o requisito, e um processo pode ter um terceiro comprador em
+    `co_buyers`. A data de nascimento passou a ser extraída do CPCV
+    (`ai_document.get_document_tool_definition`), pelo que a regra já tem
+    com que trabalhar.
+
+    **A desduplicação por identidade não é zelo — é o que separa a regra de
+    desligar a etiqueta no sistema inteiro.** O mapeador do CPCV grava o
+    titular 1 como `co_buyers[0]`, e um CPCV português muitas vezes não
+    indica datas de nascimento: sem desduplicar, um processo de UM só
+    comprador ficava com um "comprador sem data" e perdia a etiqueta. Com
+    ela, só um comprador que não se consiga identificar como o titular 1 ou
+    o 2 é que conta.
+
+    Data desconhecida de um comprador distinto **bloqueia** (falha fechada,
+    a mesma assimetria do 2.º titular: uma etiqueta a mais faz prometer uma
+    isenção de IMT que a AT recusa em cima da escritura).
+    """
+    if not isinstance(doc, dict):
+        return []
+    compradores = doc.get(SECCAO_DOS_COMPRADORES)
+    if not isinstance(compradores, (list, tuple)):
+        return []
+
+    conhecidos = _identidades_dos_titulares(doc)
+    bloqueadores: list[dict] = []
+    for comprador in compradores:
+        if not isinstance(comprador, dict):
+            continue
+        # Duas perguntas DIFERENTES, e confundi-las decide ao contrário:
+        #   (a) há aqui alguém?            → alguma chave de identidade com valor
+        #   (b) sei dizer QUEM?            → algum token comparável
+        # Uma linha totalmente vazia que a extracção deixou não é uma pessoa e
+        # salta («presente mas vazio» não é «presente»). Uma linha COM algo
+        # escrito mas que não se consegue comparar (uma abreviatura, duas
+        # letras) é uma pessoa que não sei identificar — e aí vale a falha
+        # fechada, como em todo o resto da regra.
+        #
+        # É também o que alinha este predicado com a condição Mongo, que
+        # decide "é uma pessoa" com `{"$nin": [None, ""]}` — por valor
+        # presente, não por token comparável.
+        tem_alguem = any(
+            str(comprador.get(chave)).strip()
+            for chave in CHAVES_DE_IDENTIDADE_DO_COMPRADOR
+            if comprador.get(chave) is not None
+        )
+        if not tem_alguem:
+            continue
+        tokens = {
+            token
+            for token in (
+                _normalizar_identidade(comprador.get(chave))
+                for chave in CHAVES_DE_IDENTIDADE_DO_COMPRADOR
+            )
+            if token
+        }
+        if tokens & conhecidos:
+            continue  # é o titular 1 ou o 2, já contado
+        for campo in CAMPOS_DE_NASCIMENTO:
+            if data_iso(comprador.get(campo)):
+                if not e_sub35(comprador.get(campo), hoje):
+                    bloqueadores.append(comprador)
+                break
+        else:
+            bloqueadores.append(comprador)
+    return bloqueadores
+
+
+def processo_e_sub35(processo: dict, hoje: Optional[date] = None) -> bool:
+    """O processo é Sub35? TODOS os compradores com 35 anos ou menos.
+
+    marca manual OU (titular 1 Sub35 E o 2.º não bloqueia E nenhum
+    `co_buyer` distinto bloqueia).
     """
     if tem_marca_manual(processo):
         # Afirmação humana sobre o processo INTEIRO: quem a escreveu sabe
@@ -296,7 +432,9 @@ def processo_e_sub35(processo: dict, hoje: Optional[date] = None) -> bool:
         return True
     if not _e_sub35_do_documento(processo, SECCOES_DO_PROCESSO, hoje):
         return False
-    return not titular2_bloqueia(processo, hoje)
+    if titular2_bloqueia(processo, hoje):
+        return False
+    return not compradores_que_bloqueiam(processo, hoje)
 
 
 def cliente_e_sub35(cliente: dict, hoje: Optional[date] = None) -> bool:
@@ -309,7 +447,13 @@ def cliente_e_sub35(cliente: dict, hoje: Optional[date] = None) -> bool:
         return True
     if not _e_sub35_do_documento(cliente, SECCOES_DO_CLIENTE, hoje):
         return False
-    return not titular2_bloqueia(cliente, hoje)
+    if titular2_bloqueia(cliente, hoje):
+        return False
+    # Um cliente da Pool raramente tem `co_buyers` (nascem da análise do CPCV,
+    # que acontece já com processo), mas a regra é a mesma e o `client_process_
+    # ops` copia o campo para o processo — aplicá-la só de um lado faria a
+    # etiqueta mudar na criação do processo, sem nada ter mudado.
+    return not compradores_que_bloqueiam(cliente, hoje)
 
 
 def aplicar_flag_a_processos(
@@ -408,14 +552,62 @@ def condicao_sem_titular2(seccao: str = SECCAO_DO_TITULAR2) -> dict:
     }
 
 
+def condicao_sem_comprador_bloqueador(hoje: Optional[date] = None) -> dict:
+    """"Nenhum `co_buyer` bloqueia" — `$nor` + `$elemMatch` (D-17).
+
+    O quantificador é **TODOS**, e no Mongo não há forma positiva de o dizer:
+    diz-se "não existe elemento que falhe". Um
+    `{"co_buyers.data_nascimento": {...}}` ingénuo diria **ALGUM**, que é o
+    oposto — e um `$elemMatch` é obrigatório porque as duas condições
+    ("tem identidade" e "não tem data de Sub35") têm de valer no MESMO
+    elemento: com dois caminhos com ponto, cada uma encontraria o seu
+    comprador e a condição ficava sempre satisfeita.
+
+    O `$nor` e o `$elemMatch` passaram a estar implementados no duplo de
+    teste, com a semântica afirmada um nível abaixo
+    (`test_duplo_de_mongo_nor_e_elemmatch.py`) — sem isso, esta condição
+    deixaria de casar com NADA no duplo (não "seria ignorada": é pior, a
+    lista aparecia vazia).
+
+    **ESTA CONDIÇÃO É DELIBERADAMENTE MAIS ESTRITA DO QUE O PREDICADO.**
+    O predicado desduplica por identidade (um `co_buyer` que É o titular 1
+    não conta); aqui não é possível, porque o `nif`/`cc` estão encriptados em
+    repouso e o nome não se normaliza numa consulta. A assimetria é sempre no
+    sentido seguro — o filtro pode esconder uma linha que tem etiqueta, nunca
+    mostrar uma linha que não a tem — e está afirmada como propriedade no
+    teste de concordância, não deixada à sorte.
+    """
+    inicio, fim = intervalo_de_nascimento(hoje)
+    ramos_com_data_sub35: list[dict] = []
+    for campo in CAMPOS_DE_NASCIMENTO:
+        ramos_com_data_sub35.extend(_ramos_do_campo(campo, inicio, fim))
+
+    bloqueia = {
+        "$and": [
+            # É uma pessoa: alguma chave de identidade tem valor.
+            {
+                "$or": [
+                    {chave: {"$nin": [None, ""]}}
+                    for chave in CHAVES_DE_IDENTIDADE_DO_COMPRADOR
+                ]
+            },
+            # E não tem data de nascimento de quem é Sub35 (incluindo o caso
+            # de não ter data nenhuma — falha fechada).
+            {"$nor": ramos_com_data_sub35},
+        ]
+    }
+    return {"$nor": [{SECCAO_DOS_COMPRADORES: {"$elemMatch": bloqueia}}]}
+
+
 def condicao_sub35(
     hoje: Optional[date] = None, *, seccoes: Iterable[str] = SECCOES_DO_PROCESSO
 ) -> dict:
     """A condição Mongo "é Sub35", pelo MESMO limite do predicado.
 
-    Estrutura (Lote 5):
+    Estrutura (Lote 6):
 
-        marca manual   OU   (titular 1 é Sub35   E   o 2.º não bloqueia)
+        marca manual
+        OU (titular 1 é Sub35  E  o 2.º não bloqueia  E  nenhum co_buyer bloqueia)
 
     As marcas manuais ficam de fora do `$and` porque são uma afirmação
     sobre o processo inteiro — a mesma precedência do predicado.
@@ -445,7 +637,13 @@ def condicao_sub35(
     return {
         "$or": [
             *({campo: True} for campo in MARCAS_MANUAIS),
-            {"$and": [{"$or": ramos_titular1}, titular2_ok]},
+            {
+                "$and": [
+                    {"$or": ramos_titular1},
+                    titular2_ok,
+                    condicao_sem_comprador_bloqueador(hoje),
+                ]
+            },
         ]
     }
 

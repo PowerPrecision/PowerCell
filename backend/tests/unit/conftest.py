@@ -162,7 +162,36 @@ class FakeAsyncCollection:
                 if not all(FakeAsyncCollection._matches(doc, q) for q in expected):
                     return False
                 continue
+            # LOTE 6 — $nor e $elemMatch.
+            #
+            # Antes não estavam implementados, e o efeito NÃO era "ignorar":
+            # um `$nor` caía no `_lookup_path` (devolve None), comparava-se com
+            # uma lista e a query deixava de casar com NADA. Fail-closed, mas
+            # igualmente enganador — um teste de filtro mostraria a lista vazia
+            # em vez do defeito. (A nota do Lote 5 em AGENTS.md dizia
+            # "ignorado"; era pior do que isso.)
+            #
+            # São precisos para o quantificador "TODOS os elementos de um
+            # array": no Mongo não existe forma positiva de o dizer, e a
+            # regra Sub35 dos `co_buyers` (D-17) exige-o. A semântica de cada
+            # um é afirmada um nível ABAIXO, em
+            # `test_duplo_de_mongo_nor_e_elemmatch.py`, porque aqui está a ser
+            # implementada lógica em que os outros testes passam a confiar.
+            if key == "$nor":
+                if any(FakeAsyncCollection._matches(doc, q) for q in expected):
+                    return False
+                continue
             value = FakeAsyncCollection._lookup_path(doc, key)
+            if isinstance(expected, dict) and "$elemMatch" in expected:
+                sub = expected["$elemMatch"]
+                if not isinstance(value, (list, tuple)):
+                    return False
+                if not any(
+                    isinstance(el, dict) and FakeAsyncCollection._matches(el, sub)
+                    for el in value
+                ):
+                    return False
+                continue
             if isinstance(expected, dict):
                 matched_operator = False
                 if "$ne" in expected:

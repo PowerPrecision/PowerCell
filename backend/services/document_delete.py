@@ -20,6 +20,7 @@ from services.document_process_resolve import (
 )
 from services.process_status import INACTIVE_STATUSES
 from services.history import log_history
+from services.s3_document_root import dentro_da_pasta
 from services.s3_storage import s3_service
 from services.document_portal_revoke import revoke_portal_files_on_delete
 
@@ -211,7 +212,10 @@ async def run_bulk_delete_files(
     for file_path in file_paths:
         if file_path.endswith("/"):
             continue
-        if not any(file_path.startswith(prefix) for prefix in valid_prefixes):
+        # Fronteira de SEGMENTO, nunca `startswith` de texto: sobre o prefixo
+        # `Documentação Clientes/Carolina Silva`, um `startswith` cru
+        # autorizava apagar a pasta da `Carolina Silva Agostinho`.
+        if not any(dentro_da_pasta(file_path, prefixo) for prefixo in valid_prefixes):
             failed_files.append(file_path)
             continue
         try:

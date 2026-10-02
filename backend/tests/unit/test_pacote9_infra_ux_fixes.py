@@ -57,12 +57,17 @@ class TestS3MappingOnCreate:
         proc = await fake_async_db.processes.find_one({"id": "proc-1"})
         cli = await fake_async_db.clients.find_one({"id": "cli-1"})
         assert proc["s3_folder"] == "Documentação Clientes/Joao_Silva"
-        assert cli["s3_folder"] == "Documentação Clientes/Joao_Silva"
+        # LOTE 6: o cliente recebe a SUA raiz, não a pasta do processo.
+        # Partilharem o caminho prendia a ficha do cliente ao primeiro
+        # processo dele; com a pasta do processo a viver DENTRO da do
+        # cliente, a raiz contém-nas todas e nada se perde.
+        assert cli["s3_folder"] == "Documentação Clientes/cli-1"
 
-        # ensure chamado em thread (boto3 síncrono) com os nomes certos
-        fake_s3.ensure_client_folder_mapping.assert_called_once_with(
-            "proc-1", "João Silva", None, None,
-        )
+        # ensure chamado em thread (boto3 síncrono), com o cliente a dizer
+        # sob que raiz a pasta do processo nasce.
+        chamada = fake_s3.ensure_client_folder_mapping.call_args
+        assert chamada.args == ("proc-1", "João Silva", None, None)
+        assert chamada.kwargs == {"owner_client_id": "cli-1"}
 
     async def test_client_with_valid_folder_is_not_overwritten(self, fake_async_db):
         from services import s3_mapping_on_create as mod
