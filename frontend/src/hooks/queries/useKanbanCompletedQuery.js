@@ -24,9 +24,20 @@
  * ====================================================================
  */
 
+/**
+ * CORRECÇÃO (Lote 4, ponto 1) — a canalização estava cortada ao meio.
+ * O fetcher lia `filters.labels` e montava os parâmetros; o hook
+ * destruturava uma lista FIXA de opções, descartava as etiquetas e
+ * reconstruía um objecto novo para o `queryFn` — e a chave de cache
+ * também as ignorava. Resultado: o filtro de etiquetas do quadro não
+ * enviava nada ao servidor e, por não entrar na chave, não provocava
+ * sequer um pedido. Hoje os parâmetros E a chave derivam do mesmo
+ * `utils/kanbanFiltros.js`, que tem um teste a flipar cada filtro.
+ */
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryClient';
 import { getKanbanBoard } from '../../services/api';
+import { normalizarFiltros, parametrosDoKanban } from '../../utils/kanbanFiltros';
 
 /**
  * Fetcher function para dados dos Concluídos
@@ -34,46 +45,12 @@ import { getKanbanBoard } from '../../services/api';
  * para buscar APENAS as colunas inactivas.
  */
 const fetchKanbanCompletedData = async (token, filters) => {
-  const params = new URLSearchParams();
-
-  // view_mode=concluidos_only: o backend devolve apenas colunas concluidos + desistencias
-  params.append('view_mode', 'all');
-  params.append('show_all', 'true');
-
-  // Filtro de datas para processos concluídos (últimos N dias, 0 = sem limite)
-  if (filters.completedDays !== undefined && filters.completedDays !== null) {
-    params.append('completed_days', String(filters.completedDays));
-  }
-
-  // Manter filtros de utilizador para consistência
-  const { consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter } = filters;
-
-  if (consultorFilter && consultorFilter !== 'all') {
-    params.append('consultor_id', consultorFilter === 'none' ? 'none' : consultorFilter);
-  }
-  if (mediadorFilter && mediadorFilter !== 'all') {
-    params.append('mediador_id', mediadorFilter === 'none' ? 'none' : mediadorFilter);
-  }
-  if (indexacaoFilter && indexacaoFilter !== 'all') {
-    params.append('indexacao_id', indexacaoFilter === 'none' ? 'none' : indexacaoFilter);
-  }
-  if (parceiroFilter && parceiroFilter !== 'all') {
-    params.append('parceiro_id', parceiroFilter === 'none' ? 'none' : parceiroFilter);
-  }
-
-  // Ponto 15 — etiquetas. O Kanban tem construtor de query SEPARADO no
-  // backend (foi assim que ficou de fora do isolamento no Lote 4), por
-  // isso o filtro tem de ser ligado aqui de propósito: inventariar os
-  // sítios que LISTAM, não só a condição.
-  for (const etiqueta of filters.labels || []) {
-    params.append('labels', etiqueta);
-  }
-  if ((filters.labels || []).length > 1 && filters.labelsLogic === 'AND') {
-    params.append('labels_logic', 'AND');
-  }
+  const params = parametrosDoKanban(filters);
 
   // Pelo cliente Axios: o interceptor injecta `X-Company-Id` e
-  // `X-Active-Role`, sem os quais o backend responde sobre o papel BASE.
+  // `X-Active-Role`. Com um `fetch` cru (só `Authorization`), o
+  // backend respondia sobre o papel BASE — o ContextSwitcher
+  // mudava de cargo e o quadro não acompanhava.
   try {
     const { data } = await getKanbanBoard(params);
     return data;
@@ -101,37 +78,16 @@ const fetchKanbanCompletedData = async (token, filters) => {
  * @returns {Object} Query result com data, isLoading, isFetching, etc.
  */
 export function useKanbanCompletedQuery(options = {}) {
-  const {
-    token,
-    consultorFilter = 'all',
-    mediadorFilter = 'all',
-    indexacaoFilter = 'all',
-    parceiroFilter = 'all',
-    completedDays = 30,
-    enabled = true,
-  } = options;
+  const { token, enabled = true } = options;
 
-  // Criar objeto de filtros estável para a query key
-  const filters = {
-    consultor: consultorFilter,
-    mediador: mediadorFilter,
-    indexacao: indexacaoFilter,
-    parceiro: parceiroFilter,
-    completedDays,
-    viewMode: 'all',
-  };
+  // Os filtros canónicos: é deste objecto que saem OS DOIS lados
+  // (chave de cache e parâmetros do pedido).
+  const filters = normalizarFiltros(options);
 
   const query = useQuery({
     // CHAVE INDEPENDENTE — não partilha cache com a query activa
     queryKey: queryKeys.processes.kanbanCompleted(filters),
-    queryFn: () => fetchKanbanCompletedData(token, {
-      consultorFilter,
-      mediadorFilter,
-      indexacaoFilter,
-      parceiroFilter,
-      completedDays,
-      viewMode: 'all',
-    }),
+    queryFn: () => fetchKanbanCompletedData(token, filters),
     enabled: !!token && enabled,
     staleTime: 60 * 1000, // 1 minuto (alinhado com useKanbanQuery)
     refetchOnWindowFocus: true,

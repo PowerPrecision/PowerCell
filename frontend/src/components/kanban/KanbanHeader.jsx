@@ -33,7 +33,8 @@ import {
   Download,
   Loader2,
   Bell,
-  BellOff
+  BellOff,
+  Sparkles
 } from 'lucide-react';
 import { formatDate } from '../../lib/utils';
 
@@ -66,6 +67,8 @@ const KanbanHeader = memo(({
   isFetchingCompleted = false,
   columns = [],
   // ═══ Filtro "A Aguardar Ação" ═══
+  sub35 = false,
+  onSub35Change,
   showOnlyPendingActions = false,
   onTogglePendingActions,
   pendingActionsCount = 0,
@@ -132,7 +135,11 @@ const KanbanHeader = memo(({
     onUrgencyFilterChange?.('all');
     onLabelsChange?.([]);
     onCompletedDaysChange?.(30);
-  }, [onDateFilterChange, onUrgencyFilterChange, onLabelsChange, onCompletedDaysChange]);
+    // Limpar tem de limpar TUDO o que a condição acima considera activo
+    // — uma lista que inclui um filtro e um "Limpar" que não o limpa é
+    // um botão que mente.
+    onSub35Change?.(false);
+  }, [onDateFilterChange, onUrgencyFilterChange, onLabelsChange, onCompletedDaysChange, onSub35Change]);
 
   return (
     <>
@@ -235,6 +242,23 @@ const KanbanHeader = memo(({
           onLogicaChange={onLabelsLogicChange}
         />
 
+        {/* Ponto 1 (Lote 4) — Sub35. Interruptor e não um select de
+            três valores: o servidor recusa a pergunta "não é Sub35" de
+            propósito, porque juntaria quem tem mais de 35 anos com quem
+            não tem data de nascimento na ficha. */}
+        <Button
+          variant={sub35 ? 'default' : 'outline'}
+          size="sm"
+          aria-pressed={Boolean(sub35)}
+          className="h-8 text-xs gap-1.5 shrink-0"
+          onClick={() => onSub35Change?.(!sub35)}
+          data-testid="kanban-sub35-filter"
+          title={sub35 ? 'A mostrar só processos Sub35' : 'Mostrar só processos Sub35'}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          Sub35
+        </Button>
+
         <Select value={dateFilter} onValueChange={onDateFilterChange}>
           <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs" data-testid="kanban-date-filter" aria-label="Filtrar por data">
             <Calendar className="h-3 w-3 mr-1" />
@@ -314,7 +338,9 @@ const KanbanHeader = memo(({
           )}
         </Button>
 
-        {(dateFilter !== 'all' || urgencyFilter !== 'all' || completedDays !== 30) && (
+        {/* O Sub35 entra aqui: um filtro activo com o "Limpar" escondido
+            deixa o utilizador numa lista reduzida sem forma de sair. */}
+        {(dateFilter !== 'all' || urgencyFilter !== 'all' || completedDays !== 30 || sub35) && (
           <Button 
             variant="ghost" 
             size="sm" 

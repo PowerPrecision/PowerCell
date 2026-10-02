@@ -19,6 +19,7 @@ from typing import Optional, Tuple
 
 from database import db
 from models.process import ProcessCreate, ProcessUpdate
+from services.sub35 import PROJECCAO as PROJECCAO_SUB35
 from services.encryption import encryption_service, generate_nif_hash, generate_email_hash, generate_telefone_hash
 from services.process_labels import normalizar_etiquetas
 
@@ -882,6 +883,13 @@ PROCESS_LIST_PROJECTION = {
     "notes": 1,  # PACOTE BE: incluir notes para coluna 'Notas do Consultor'
     "observations": 1,  # PACOTE DO.1 — Resumo do Processo
     "observation_notes": 1,  # PACOTE DV — feed de notas → Kanban
+    # Ponto 1 (Sub35) — a data de nascimento (nos dois nomes com que vive
+    # gravada) e as marcas manuais. A lista vem do ponto único: uma cópia
+    # aqui divergiria da que o cálculo lê. A etiqueta é calculada ao
+    # serializar — um booleano persistido fica errado no dia do
+    # aniversário. Só subcampos de `personal_data` entram, nunca o bloco
+    # inteiro: o resto é PII e a listagem não precisa dele.
+    **PROJECCAO_SUB35,
 }
 
 # Campos necessários para o Kanban (visualização em colunas)
@@ -897,6 +905,9 @@ PROCESS_KANBAN_PROJECTION = {
     "status": 1,
     "priority": 1,
     "prioridade": 1,
+    # Marca MANUAL legada. Nenhum ficheiro do backend a escreve — é lida
+    # por `services/sub35.py` como afirmação feita à mão e o valor
+    # enviado à UI passa a ser calculado. Ver o ponto 1 do Lote 4.
     "under_35": 1,
     "process_type": 1,
     "property_value": 1,
@@ -921,6 +932,13 @@ PROCESS_KANBAN_PROJECTION = {
     "labels": 1,
     "co_buyers": 1,
     "compradores": 1,
+    # Ponto 1 (Sub35) — a data de nascimento (nos dois nomes com que vive
+    # gravada) e as marcas manuais. A lista vem do ponto único: uma cópia
+    # aqui divergiria da que o cálculo lê. A etiqueta é calculada ao
+    # serializar — um booleano persistido fica errado no dia do
+    # aniversário. Só subcampos de `personal_data` entram, nunca o bloco
+    # inteiro: o resto é PII e a listagem não precisa dele.
+    **PROJECCAO_SUB35,
 }
 
 # Campos necessários para "Os Meus Clientes"

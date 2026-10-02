@@ -16,10 +16,10 @@
  * 3. CreateProcessModal abre com cliente pré-selecionado
  * 4. Após criação, lead_status muda para "converted" → desaparece da lista
  */
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { getClient, getRegisteredClients } from "../services/api";
+import { deleteClient, getClient, getRegisteredClients } from "../services/api";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -66,16 +66,24 @@ import {
   Clock,
   FileInput,
   ClipboardList,
+  Trash2,
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { safeString } from "../utils/safeString";
 import CreateProcessModal from "../components/CreateProcessModal";
+import ProcessNavigator from "../components/processDetails/ProcessNavigator";
+import Sub35Badge from "../components/shared/Sub35Badge";
+import { MANAGEMENT_ROLES } from "../utils/roleUtils";
+import {
+  construirContextoDeNavegacao,
+  vizinhosNoContexto,
+} from "../utils/processNavigation";
 import { formatDate, formatDateTime } from "../lib/utils";
 import { formatCurrency } from "../utils/formatCurrency";
 
 
 const ClientRegistrationsPage = () => {
-  const { user } = useAuth();
+  const { user, effectiveRole } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -167,6 +175,17 @@ const ClientRegistrationsPage = () => {
   // Verificar permissões
   const canAssign = userRole !== "indexacao";
 
+  // Ponto 2 (Lote 4) — eliminar da Pool: só Administração/Direção.
+  // O papel é o EFECTIVO e não o do JWT, porque é o efectivo que o
+  // `require_roles` do backend lê: quem entra COMO diretor tendo perfil
+  // base de consultor tem de ver o botão, e quem tem perfil base de
+  // admin a agir como consultor NÃO. Um gate pelo papel base dava as
+  // duas respostas erradas.
+  const papelActivo = (effectiveRole || userRole || "").toLowerCase();
+  const podeEliminar = MANAGEMENT_ROLES.includes(papelActivo);
+  const [eliminarDialog, setEliminarDialog] = useState({ open: false, client: null });
+  const [aEliminar, setAEliminar] = useState(false);
+
   const fetchClients = useCallback(async () => {
     setLoading(true);
     try {
@@ -195,7 +214,7 @@ const ClientRegistrationsPage = () => {
     fetchClients();
   }, [fetchClients]);
 
-  const handleViewClientDetails = async (clientId) => {
+  const handleViewClientDetails = useCallback(async (clientId) => {
     setDetailsLoading(true);
     try {
       const { data } = await getClient(clientId);
@@ -206,7 +225,68 @@ const ClientRegistrationsPage = () => {
     } finally {
       setDetailsLoading(false);
     }
-  };
+  }, []);
+
+  // ══════════════════════════════════════════════════════════════════
+  // Ponto 3 — Próximo / Anterior dentro do diálogo
+  // ══════════════════════════════════════════════════════════════════
+  // Reaproveita o mecanismo do Ponto 17 (navegação contígua entre
+  // processos) em vez de escrever outro: a lista ABERTA já está em
+  // memória — `clients` — e os ids pela ordem em que aparecem no ecrã
+  // são tudo o que as setas precisam. Zero pedidos para saber o vizinho;
+  // um pedido (o `getClient`) para o mostrar, que é o mesmo que o clique
+  // no nome já fazia.
+  //
+  // O `total` que vai para o contexto é o da LISTA CARREGADA e não o do
+  // filtro inteiro: a Pool pede `limit=100` sem paginação, e dizer
+  // "12 / 243" quando só 100 estão em mão prometia uma vizinhança que
+  // não existe (a seta pararia no 100 sem explicação). Com o total da
+  // lista, "100 / 100" é verdade e o botão desactivado é honesto.
+  const contextoDaPool = useMemo(
+    () =>
+      construirContextoDeNavegacao({
+        ids: clients.map((c) => c.id),
+        page: 1,
+        size: clients.length,
+        total: clients.length,
+        origem: "/registos-clientes",
+      }),
+    [clients],
+  );
+
+  const vizinhos = useMemo(
+    () => vizinhosNoContexto(contextoDaPool, detailsDialog.client?.id),
+    [contextoDaPool, detailsDialog.client?.id],
+  );
+
+  // ══════════════════════════════════════════════════════════════════
+  // Ponto 2 — Eliminar um registo da Pool
+  // ══════════════════════════════════════════════════════════════════
+  const confirmarEliminacao = useCallback(async () => {
+    const cliente = eliminarDialog.client;
+    if (!cliente?.id) return;
+    setAEliminar(true);
+    try {
+      await deleteClient(cliente.id);
+      toast.success(`${safeString(cliente.nome) || "Registo"} eliminado.`);
+      setEliminarDialog({ open: false, client: null });
+      // O diálogo de detalhes pode estar aberto NESTE cliente: fechá-lo
+      // evita um ecrã a mostrar um registo que já não existe.
+      setDetailsDialog((anterior) =>
+        anterior.client?.id === cliente.id ? { open: false, client: null } : anterior,
+      );
+      fetchClients();
+    } catch (error) {
+      console.error("Erro:", error);
+      // A mensagem do servidor é a que diz se foi permissão (403) ou
+      // outra coisa — um "Erro ao eliminar" genérico manda procurar.
+      toast.error(
+        error?.response?.data?.detail || "Não foi possível eliminar o registo.",
+      );
+    } finally {
+      setAEliminar(false);
+    }
+  }, [eliminarDialog.client, fetchClients]);
 
   return (
     <DashboardLayout>
@@ -446,11 +526,16 @@ const ClientRegistrationsPage = () => {
                           >
                             {safeString(client.nome)}
                           </button>
-                          {client.fonte && (
-                            <Badge variant="outline" className="text-[10px] mt-1 px-1.5 py-0">
-                              {safeString(client.fonte)}
-                            </Badge>
-                          )}
+                          <div className="flex items-center gap-1 mt-1">
+                            {client.fonte && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                                {safeString(client.fonte)}
+                              </Badge>
+                            )}
+                            {/* Ponto 1 — na triagem, a elegibilidade
+                                jovem é informação de prioridade. */}
+                            <Sub35Badge processo={client} tamanho="sm" />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -580,6 +665,22 @@ const ClientRegistrationsPage = () => {
                           Criar Processo
                         </Button>
                       )}
+                      {/* Ponto 2 — limpar lixo/spam da Pool. Só
+                          Administração/Direção, e o papel é o EFECTIVO
+                          (o mesmo que o backend lê). */}
+                      {podeEliminar && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEliminarDialog({ open: true, client })}
+                          title="Eliminar este registo"
+                          aria-label={`Eliminar ${safeString(client.nome)}`}
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                          data-testid={`btn-eliminar-cliente-${client.id}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -612,17 +713,102 @@ const ClientRegistrationsPage = () => {
         } : null}
       />
 
+      {/* ════════════════════════════════════════════════════════════
+          Ponto 2 — confirmação de eliminação
+          ════════════════════════════════════════════════════════════
+          Confirmação explícita e com as CONSEQUÊNCIAS escritas: o
+          backend faz soft delete em cascata (processo + documentos +
+          tarefas) quando o cliente é o 1.º titular. Um "Tem a certeza?"
+          sem dizer o que arrasta é um aviso que não informa.
+          O que é 2.º titular NÃO é eliminado — é desligado do processo,
+          que continua activo para o 1.º (regra do Pacote L). */}
+      <Dialog
+        open={eliminarDialog.open}
+        onOpenChange={(open) => !aEliminar && setEliminarDialog({ open, client: open ? eliminarDialog.client : null })}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Eliminar registo
+            </DialogTitle>
+            <DialogDescription>
+              {safeString(eliminarDialog.client?.nome) || "Este registo"} vai
+              para o lixo. A eliminação é reversível (restauro), mas o
+              registo deixa de aparecer nas listagens.
+            </DialogDescription>
+          </DialogHeader>
+
+          {eliminarDialog.client?.has_process && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+              <p className="font-medium">Este registo tem processo associado.</p>
+              <p className="text-muted-foreground mt-1">
+                O processo, os documentos e as tarefas são eliminados com ele.
+                Se o cliente for apenas 2.º titular de um processo, esse
+                processo mantém-se activo e o titular é apenas desligado.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setEliminarDialog({ open: false, client: null })}
+              disabled={aEliminar}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmarEliminacao}
+              disabled={aEliminar}
+              data-testid="btn-confirmar-eliminar-cliente"
+            >
+              {aEliminar ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  A eliminar...
+                </>
+              ) : (
+                "Eliminar"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Client Details Dialog */}
       <Dialog open={detailsDialog.open} onOpenChange={(open) => setDetailsDialog({ open, client: detailsDialog.client })}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <User className="h-5 w-5" />
-              Detalhes do Cliente
-            </DialogTitle>
-            <DialogDescription>
-              Informações completas do cliente
-            </DialogDescription>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <DialogTitle className="flex items-center gap-2">
+                  <User className="h-5 w-5" />
+                  Detalhes do Cliente
+                </DialogTitle>
+                <DialogDescription>
+                  Informações completas do cliente
+                </DialogDescription>
+              </div>
+              {/* Ponto 3 — passar ao registo seguinte sem fechar e
+                  voltar ao índice. Só aparece quando este cliente
+                  pertence à lista aberta: quem chegou por notificação
+                  (`?clientId=`) não veio de listagem nenhuma, e inventar
+                  uma vizinhança seria prometer uma ordem que não existe. */}
+              {vizinhos.disponivel && (
+                <ProcessNavigator
+                  anteriorId={vizinhos.anteriorId}
+                  seguinteId={vizinhos.seguinteId}
+                  posicao={vizinhos.posicao}
+                  total={vizinhos.total}
+                  aCarregar={detailsLoading}
+                  onNavegar={handleViewClientDetails}
+                  rotuloAnterior="Cliente anterior"
+                  rotuloSeguinte="Cliente seguinte"
+                />
+              )}
+            </div>
           </DialogHeader>
 
           {detailsLoading ? (

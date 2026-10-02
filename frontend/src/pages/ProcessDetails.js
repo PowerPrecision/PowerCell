@@ -2816,6 +2816,9 @@ const ProcessDetails = () => {
                   {/* Financial Data Tab */}
                   <TabsContent value="financial" className="mt-4">
                     <FinancialTab
+                      sugestaoDoCampo={(campo) => sugestaoDoCampo(sugestoesIA, campo)}
+                      onAprovarSugestao={handleAprovarSugestao}
+                      onRejeitarSugestao={handleRejeitarSugestao}
                       titular2Data={titular2Data}
                       setTitular2Data={setTitular2Data}
                       financialData={financialData}
@@ -2840,6 +2843,9 @@ const ProcessDetails = () => {
                   {/* Real Estate Tab */}
                   <TabsContent value="realestate" className="space-y-4 mt-4">
                     <RealEstateTab
+                      sugestaoDoCampo={(campo) => sugestaoDoCampo(sugestoesIA, campo)}
+                      onAprovarSugestao={handleAprovarSugestao}
+                      onRejeitarSugestao={handleRejeitarSugestao}
                       financialData={financialData}
                       setFinancialData={setFinancialData}
                       realEstateData={realEstateData}
@@ -3189,7 +3195,10 @@ const ProcessDetails = () => {
           linha, nos próprios campos — `BarraDeSugestoes` acima dos
           separadores e `InlineAISuggestion` ao lado de cada campo. Deixar
           aqui um diálogo cuja flag nunca passa a `true` era código
-          adormecido, e código adormecido é um convite a religá-lo. */}
+          adormecido, e código adormecido é um convite a religá-lo.
+          LOTE 4: o componente e os seus 35 testes foram APAGADOS — o
+          preenchimento em linha foi validado e não há caminho de volta,
+          logo um ficheiro órfão só teria de ser mantido para nada. */}
 
       {/* Dialog: documento ambíguo → Titular 1 / Titular 2 / Ignorar */}
       <TitularChoiceDialog

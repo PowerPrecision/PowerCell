@@ -30,6 +30,15 @@ from services.alert_audience import (
 
 logger = logging.getLogger(__name__)
 
+# Ponto único da regra Sub35 (Lote 4, ponto 1): a etiqueta das
+# listagens, o filtro do Mongo e este alerta respondem à mesma pergunta
+# e tinham três respostas diferentes.
+from services.sub35 import (
+    CAMPOS_DE_NASCIMENTO as CAMPOS_DE_NASCIMENTO_SUB35,
+    idade as idade_sub35,
+    processo_e_sub35,
+)
+
 
 # ====================================================================
 # CONSTANTES DE CONFIGURAÇÃO
@@ -63,67 +72,68 @@ MATCH_SCORE_THRESHOLD = 50  # Score mínimo para notificação de match
 def calculate_age(birth_date_str: str) -> Optional[int]:
     """
     Calcula a idade a partir da data de nascimento.
-    
+
+    Delega em `services.sub35.idade`: era aqui que vivia a única cópia
+    deste cálculo, e o `sub35` precisava do MESMO para a etiqueta e o
+    filtro concordarem com o alerta. Aceita agora também `data_nascimento`
+    com hora e objectos `date`/`datetime`, que esta versão recusava.
+
     Args:
         birth_date_str: Data no formato YYYY-MM-DD
-    
+
     Returns:
         Idade em anos ou None se não conseguir calcular
     """
-    if not birth_date_str:
-        return None
-    
-    try:
-        birth_date = datetime.strptime(birth_date_str, "%Y-%m-%d")
-        today = datetime.now()
-        age = today.year - birth_date.year
-        
-        # Ajustar se ainda não fez anos este ano
-        if (today.month, today.day) < (birth_date.month, birth_date.day):
-            age -= 1
-        
-        return age
-    except (ValueError, TypeError):
-        return None
+    return idade_sub35(birth_date_str)
 
 
 def check_age_alert(process: dict) -> Dict[str, Any]:
     """
-    Verifica se o cliente tem menos de 35 anos (elegível para apoio do estado).
-    
+    Verifica se o cliente é elegível para o apoio jovem (Sub35).
+
+    CORRECÇÃO (Lote 4, ponto 1): a comparação era `age < 35` e a regra do
+    produto é **menos de 36** — até aos 35, inclusive, como os programas
+    de apoio à habitação jovem. Um cliente de 35 anos, que é elegível,
+    não recebia o alerta: um ano inteiro de clientes de fora.
+
+    E lia `personal_data["birth_date"]` apenas. O `client_crud`
+    sincroniza as DUAS entradas do formulário (`birth_date` e
+    `data_nascimento`) para `personal_data.data_nascimento` — o nome que
+    esta função não lia. Hoje o veredicto vem do ponto único
+    (`services/sub35.py`), o mesmo que decide a etiqueta nas listagens e
+    o filtro no Mongo: três respostas diferentes à mesma pergunta era o
+    que havia.
+
     Args:
         process: Dados do processo
-    
+
     Returns:
         Dict com informação do alerta ou None
     """
+    if not processo_e_sub35(process):
+        return {"type": ALERT_TYPES["AGE_UNDER_35"], "active": False}
+
+    alerta = {
+        "type": ALERT_TYPES["AGE_UNDER_35"],
+        "active": True,
+        "message": "Cliente com menos de 36 anos - Elegível para Apoio ao Estado",
+        "details": "Verificar condições do programa de apoio à habitação jovem",
+        "priority": "info",
+        "icon": "star",
+    }
+
+    # A idade só entra quando é CALCULADA: num processo marcado à mão
+    # (`idade_menos_35`/`under_35`) não há data de nascimento, e um "0
+    # anos" na mensagem seria pior do que não dizer a idade.
     personal_data = process.get("personal_data", {}) or {}
-    birth_date = personal_data.get("birth_date")
-    
-    # Também verificar o campo idade_menos_35
-    if process.get("idade_menos_35"):
-        return {
-            "type": ALERT_TYPES["AGE_UNDER_35"],
-            "active": True,
-            "message": "Cliente com menos de 35 anos - Elegível para Apoio ao Estado",
-            "details": "Verificar condições do programa de apoio à habitação jovem",
-            "priority": "info",
-            "icon": "star"
-        }
-    
-    age = calculate_age(birth_date)
-    if age is not None and age < 35:
-        return {
-            "type": ALERT_TYPES["AGE_UNDER_35"],
-            "active": True,
-            "age": age,
-            "message": f"Cliente com {age} anos - Elegível para Apoio ao Estado",
-            "details": "Verificar condições do programa de apoio à habitação jovem",
-            "priority": "info",
-            "icon": "star"
-        }
-    
-    return {"type": ALERT_TYPES["AGE_UNDER_35"], "active": False}
+    for campo in CAMPOS_DE_NASCIMENTO_SUB35:
+        anos = idade_sub35(personal_data.get(campo))
+        if anos is not None:
+            alerta["age"] = anos
+            alerta["message"] = f"Cliente com {anos} anos - Elegível para Apoio ao Estado"
+            break
+
+    return alerta
 
 
 # ====================================================================

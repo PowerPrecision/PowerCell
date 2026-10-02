@@ -10,6 +10,7 @@ import logging
 from typing import Any, Optional
 
 from database import db
+from services.sub35 import aplicar_flag_a_processos as aplicar_flag_sub35
 from services.workflow_phases import carregar_fases, nomes_terminais
 from services.tenant_network import build_tenant_condition
 from services.process_my_clients import (
@@ -335,6 +336,7 @@ async def run_get_processes(
     process_type: Optional[str] = None,
     labels: Optional[Any] = None,
     labels_logic: Optional[str] = "OR",
+    sub35: Optional[bool] = None,
 ) -> dict:
     """Orquestra GET /processes (offset pagination)."""
     from services.process_list_filters import build_process_list_query
@@ -363,6 +365,7 @@ async def run_get_processes(
         process_type=process_type,
         labels=labels,
         labels_logic=labels_logic,
+        sub35=sub35,
         terminais=nomes_terminais(await carregar_fases()),
     )
 
@@ -375,6 +378,7 @@ async def run_get_processes(
         processes, fields_to_decrypt=["client_phone", "client_nif"],
     )
 
+    aplicar_flag_sub35(processes)
     await enrich_processes_assignee_names(processes)
     sort_process_list(
         processes,
@@ -416,6 +420,7 @@ async def run_get_processes_paginated(
     process_type: Optional[str] = None,
     labels: Optional[Any] = None,
     labels_logic: Optional[str] = "OR",
+    sub35: Optional[bool] = None,
 ) -> dict:
     """Orquestra GET /processes/paginated (cursor-based)."""
     from services.cursor_pagination import CursorPaginator
@@ -437,6 +442,7 @@ async def run_get_processes_paginated(
         process_type=process_type,
         labels=labels,
         labels_logic=labels_logic,
+        sub35=sub35,
         terminais=nomes_terminais(await carregar_fases()),
     )
 
@@ -461,6 +467,7 @@ async def run_get_processes_paginated(
         result["items"],
         fields_to_decrypt=["client_phone", "client_nif"],
     )
+    aplicar_flag_sub35(result["items"])
     await enrich_processes_portal_flags(result["items"])
     await enrich_processes_latest_notes(result["items"])
 

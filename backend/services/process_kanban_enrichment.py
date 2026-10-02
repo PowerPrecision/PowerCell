@@ -11,6 +11,7 @@ import logging
 from typing import Any, Optional
 
 from database import db
+from services.sub35 import aplicar_flag_a_processos as aplicar_flag_sub35
 from services.process_status import STATUS_VALUE_ALIASES
 from services.workflow_phases import carregar_fases, nomes_terminais
 
@@ -413,6 +414,7 @@ async def run_get_kanban_board(
     completed_days: Optional[int],
     labels: Optional[Any] = None,
     labels_logic: Optional[str] = "OR",
+    sub35: Optional[bool] = None,
     decrypt_list_fn=None,
     kanban_projection: dict,
 ) -> dict[str, Any]:
@@ -455,6 +457,7 @@ async def run_get_kanban_board(
         completed_days=completed_days,
         labels=labels,
         labels_logic=labels_logic,
+        sub35=sub35,
         terminais=terminais,
     )
     if str(role).lower() == "indexacao":
@@ -469,6 +472,7 @@ async def run_get_kanban_board(
         fields_to_decrypt=["client_phone", "client_nif"],
     )
 
+    aplicar_flag_sub35(processes)
     await fill_missing_process_client_contacts(processes)
     await enrich_processes_portal_flags(processes)
     await enrich_processes_latest_activity(processes)

@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
+from services.sub35 import cliente_e_sub35
 from services.tenant_network import build_tenant_pool_condition, com_isolamento
 from models.client import (
     Client, ClientCreate, ClientUpdate,
@@ -422,7 +423,15 @@ async def run_list_registered_clients(
             "updated_at": c.get("updated_at"),
             "fonte": c.get("fonte"),
             "has_property": c.get("has_property"),
+            # Legado: é escrito `False` à letra pelo registo público e
+            # nunca calculado por ninguém. Fica porque alguém pode
+            # tê-lo posto a True à mão (e aí `cliente_e_sub35` honra-o).
             "idade_menos_35": c.get("idade_menos_35"),
+            # Ponto 1 (Lote 4) — a etiqueta Sub35, calculada da data de
+            # nascimento no momento de servir. O mesmo ponto único das
+            # listagens de processos, com a secção do CLIENTE
+            # (`dados_pessoais`) em vez da do processo.
+            "is_sub35": cliente_e_sub35(c),
             "lead_status": c.get("lead_status", "new"),  # "new" = pendente, "converted" = com processo
             # PACOTE BN — estado de triagem para badges no frontend
             "triage_status": triage_status,

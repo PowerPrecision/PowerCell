@@ -24,6 +24,7 @@ import { safeString } from "../utils/safeString";
 import { formatCurrency as formatCurrencyShared } from "../utils/formatCurrency";
 import { notaMaisRecenteDoConsultor } from "../utils/processObservationNotes";
 // PACOTE CH — ClientDetailsModal reutilizável
+import Sub35Badge from "../components/shared/Sub35Badge";
 import ClientDetailsModal from "../components/ClientDetailsModal";
 
 const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|eliminado|eliminados|cancelado|arquivo|perdido|inativo/i;
@@ -493,11 +494,7 @@ const FilteredProcessList = () => {
                                   </Badge>
                                 )}
                               </div>
-                              {process.under_35 && (
-                                <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 mt-1">
-                                  &lt;35 anos
-                                </Badge>
-                              )}
+                              <Sub35Badge processo={process} className="mt-1" />
                             </div>
                           </TableCell>
                           <TableCell>

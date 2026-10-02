@@ -23,7 +23,11 @@ from models.client import (
     find_or_create_client_key,
     generate_portal_access_code,
 )
-from services.auth import get_effective_role
+from services.auth import (
+    authorization_role,
+    effective_role_is_allowed,
+    get_effective_role,
+)
 from models.auth import UserRole
 from services.encryption import (
     encryption_service,
@@ -44,9 +48,22 @@ from utils.search_filters import create_accent_insensitive_regex, build_multiwor
 
 logger = logging.getLogger(__name__)
 
+#: Quem pode eliminar um cliente. UMA lista: a da rota
+#: (`require_roles`) e a da guarda interna derivam desta, senão divergem
+#: — é o defeito dos campos canónicos de atribuição (Lote 5) noutro eixo.
+PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES = (
+    UserRole.ADMIN,
+    UserRole.CEO,
+    UserRole.DIRETOR,
+    UserRole.ADMINISTRATIVO,
+)
+
+
 async def run_delete_client(
     client_id: str,
-    user: dict
+    user: dict,
+    *,
+    papel_efectivo: Optional[str] = None,
 ):
     """
     Eliminar um cliente/processo (sempre soft delete, nunca hard delete).
@@ -79,10 +96,24 @@ async def run_delete_client(
     destruía processos que ainda tinham um 1º titular ativo, causando perda
     silenciosa de dados e bloqueio do trabalho do consultor responsável.
 
-    Apenas Admin, CEO, Diretor e Administrativo podem eliminar.
+    Apenas Admin, CEO, Diretor e Administrativo podem eliminar
+    (`PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES`).
+
+    CORRECÇÃO (Lote 4, ponto 2) — a guarda interna olhava para o papel
+    ERRADO. A rota entra por `require_roles`, que decide pelo cargo
+    EFECTIVO (UCR + `X-Active-Role`); esta linha lia `user["role"]`, o
+    cargo do JWT. Quem tem perfil base de consultor e entra COMO diretor
+    passava a porta e levava 403 aqui — o botão aparece, o pedido sai e o
+    servidor recusa, sem nada a explicar porquê. É a forma exacta do
+    `history._is_stealth_user` do Lote 4: duas noções de papel, e a
+    segunda a não ser a que manda.
+
+    Hoje as duas pontas derivam do mesmo par de funções e da mesma
+    constante, e o papel efectivo é passado pela rota (só ela tem o
+    `Request` de onde ele sai).
     """
-    # Verificar também se é diretor ou administrativo
-    if user.get("role") not in ["admin", "ceo", "diretor", "administrativo"]:
+    papel = authorization_role(papel_efectivo or user.get("role"), user)
+    if not effective_role_is_allowed(papel, list(PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES)):
         raise HTTPException(status_code=403, detail="Sem permissão para eliminar clientes")
 
     now = datetime.now(timezone.utc).isoformat()

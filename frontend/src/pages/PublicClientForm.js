@@ -1186,7 +1186,7 @@ export default function PublicClientForm({ previewMode = false }) {
                 {label}
               </Label>
               <p className="text-xs text-amber-700">
-                Se tem menos de 35 anos, pode ser elegível para benefícios fiscais na compra da primeira habitação própria permanente (isenção/redução de IMT e Imposto de Selo).
+                Se tem até 35 anos (inclusive), pode ser elegível para benefícios fiscais na compra da primeira habitação própria permanente (isenção/redução de IMT e Imposto de Selo).
               </p>
             </div>
           </div>

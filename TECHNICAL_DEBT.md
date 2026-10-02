@@ -98,6 +98,58 @@ sai da mesma estrutura, em vez de ser uma segunda lista à mão.
 
 ## Correcção e modelo de dados
 
+### D-15 · A data de nascimento é PII e está em claro
+**Onde:** `backend/services/encryption.py` (`SENSITIVE_FIELDS`,
+`CLIENT_SENSITIVE_FIELDS`), `personal_data.birth_date` /
+`personal_data.data_nascimento`, `dados_pessoais.*`.
+
+O NIF, o documento de identificação, a morada fiscal e o telefone são
+encriptados em repouso. A **data de nascimento não está em nenhuma das duas
+listas** — está em texto simples em `processes` e em `clients`. Com o nome,
+é dos campos que mais contribui para identificar uma pessoa, e a avaliação
+de impacto do RGPD trata-a como PII.
+
+**Porque foi adiado (Lote 4):** encriptá-la **parte o filtro Sub35**. A
+condição Mongo de `services/sub35.py` compara a data com um limite
+(`$gte`/`$lt` sobre a data ISO), o que só funciona em claro. Encriptar
+exigiria uma das três: (a) um blind index por FAIXA (um campo derivado
+`nascimento_ano` ou `sub35_ate`, que tem de ser recalculado — e um valor
+derivado gravado volta a ficar errado no dia do aniversário, que é o
+defeito que o Lote 4 acabou de fechar); (b) filtrar em Python depois de
+desencriptar, o que obriga a ler a colecção inteira; (c) aceitar que o
+filtro deixa de existir.
+
+**O que é preciso para fechar:** decidir entre o filtro e a encriptação, com
+o DPO. Se a escolha for encriptar, a opção (a) com um campo `ano_de_nascimento`
+(não a idade, não um booleano) é a única que não quebra a pesquisa nem precisa
+de recálculo: o ano não muda, e o limiar de "menos de 36" calcula-se sobre ele
+com uma margem de um ano a resolver em Python.
+
+### D-16 · Eliminar um cliente não deixa entrada no histórico
+**Onde:** `backend/services/client_delete.py::run_delete_client`.
+
+A eliminação (soft delete, com cascata para processo/documentos/tarefas)
+grava `deleted_at`/`deleted_by` nos documentos afectados — e **não escreve
+nada em `db.history`**. O `run_delete_client_registration` do painel de
+admin, que faz muito menos, escreve.
+
+O rasto existe (é o que o restauro lê), mas não aparece em nenhuma trilha
+consultável: para saber quem eliminou o quê é preciso ir ao documento
+eliminado. Com o botão novo na Pool (Lote 4, ponto 2) a operação passou a
+estar ao alcance de um clique da Direção, o que aumenta a probabilidade de
+alguém querer essa resposta.
+
+**Porque foi adiado:** `db.history` é indexado por `process_id` e um cliente
+sem processo não tem âncora — escrever lá exigiria decidir o que fazer com
+esse caso (uma colecção de auditoria própria, ou o `audit_trail_service`, que
+é o que tem IP e retenção). É uma decisão de desenho e não uma linha.
+
+**Nota de segurança que não se pode perder ao fechar isto:** o perfil
+`indexacao` não pode gerar registo de actividade. Aqui não chega a ser
+questão — `indexacao` não está em `PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES` e leva
+403 — mas qualquer escrita de histórico que se acrescente tem de passar por
+`history._is_stealth_user`, nunca por uma cópia da regra.
+
 ### D-12 · Os limiares de SLA guardam-se por empresa e leem-se globalmente
 **Onde:** `backend/services/stats_sla.py::_limiares`,
 `backend/models/system_config.py::DashboardSlaConfig`

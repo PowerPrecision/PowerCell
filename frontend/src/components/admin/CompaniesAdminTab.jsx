@@ -3,7 +3,7 @@
  *
  * Liga a GET/POST /admin/companies e PUT /admin/companies/{id}.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Loader2, Pencil, Plug, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ import {
   isCompanyActive,
   normalizeCompaniesPayload,
 } from "../../utils/organizationAdmin";
+import { etiquetasDeRede, normalizarRede } from "../../utils/redesDeEmpresas";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -43,6 +44,7 @@ import {
 } from "../ui/table";
 import EmptyState from "../ui/EmptyState";
 import CompanyNetworkField from "./CompanyNetworkField";
+import NetworkChip from "./NetworkChip";
 import { TableSkeleton } from "../ui/skeletons";
 
 const EMPTY_FORM = {
@@ -120,6 +122,16 @@ export default function CompaniesAdminTab() {
 
   const companies = pagemento?.empresas ?? [];
   const total = pagemento?.total ?? 0;
+
+  // Ponto 5 — as etiquetas dos grupos dependem das OUTRAS empresas da
+  // página: dois slugs distintos com o mesmo rótulo bonito voltam a
+  // mostrar-se crus, senão a etiqueta esconderia a gralha de rede que o
+  // `CompanyNetworkField` existe para apanhar.
+  const etiquetas = useMemo(() => etiquetasDeRede(companies), [companies]);
+  const chipDaRede = (company) => {
+    const slug = normalizarRede(company?.network_id);
+    return etiquetas.get(slug) || { slug, etiqueta: slug, ambigua: false };
+  };
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchInput), 300);
@@ -287,6 +299,10 @@ export default function CompaniesAdminTab() {
             <TableHeader>
               <TableRow>
                 <TableHead>Nome</TableHead>
+                {/* Ponto 5 — o Grupo (rede) passou a ter coluna. É o
+                    campo que decide quem vê os dados de quem e não
+                    estava em sítio nenhum da listagem. */}
+                <TableHead>Grupo</TableHead>
                 <TableHead>NIF</TableHead>
                 <TableHead>Email Geral</TableHead>
                 <TableHead>Estado</TableHead>
@@ -302,6 +318,9 @@ export default function CompaniesAdminTab() {
                     data-testid={`company-row-${company.id}`}
                   >
                     <TableCell className="font-medium">{company.name}</TableCell>
+                    <TableCell>
+                      <NetworkChip {...chipDaRede(company)} />
+                    </TableCell>
                     <TableCell className="text-muted-foreground">
                       {company.nif || "—"}
                     </TableCell>

@@ -9411,3 +9411,172 @@ errada.
    Um teste preso à mensagem de uma versão falha noutro runtime por um
    motivo que não é o do teste — passou a afirmar o literal e, ao lado, que
    nenhuma mensagem real deste runtime é classificada como chunk.
+
+# Iteração `navegacao-pool-e-sub35` — 2026-10-02
+
+Lote 4: UX de navegação, Pool e Sub35. Cinco pontos, mais a limpeza do
+`AIReviewDialog` órfão e a extensão do preenchimento em linha aos dados
+financeiros e do imóvel, ambas autorizadas pelo dono do produto.
+
+## Ponto 1 — a etiqueta Sub35 existia e nunca apareceu
+
+`PROCESS_KANBAN_PROJECTION` tinha `"under_35": 1`. `KanbanCard`,
+`SearchResultsList` e `FilteredProcessList` tinham, cada um, o seu
+`{process.under_35 && <Badge>&lt;35 anos</Badge>}`. **Nenhum ficheiro do
+backend escreve `under_35`** — `grep -rn "under_35" backend/` dá uma
+linha, a da projecção.
+
+**Terceiro lote seguido com a mesma forma:** a fila Mongo do Lote 2, o
+`doc_id` do Lote 3, este. A UI a ler um contrato que o servidor nunca
+cumpriu, e em todos os casos a intenção estava escrita e o campo não.
+
+E a mesma pergunta tinha quatro respostas:
+
+| Onde | O que fazia |
+|---|---|
+| `alerts.check_age_alert` | `age < 35` — um cliente de 35 anos, elegível, NÃO recebia o alerta |
+| `idade_menos_35` | booleano persistido, escrito `False` à letra pelo registo público, calculado por ninguém |
+| `under_35` | projectado, lido por três ecrãs, escrito por ninguém |
+| a data | vive em `birth_date` **e** `data_nascimento`, e o `client_crud` sincroniza as duas entradas do formulário para `personal_data.data_nascimento` — o nome que o `check_age_alert` não lia |
+
+`services/sub35.py` é o ponto único. A regra do produto é **menos de
+36** (até aos 35 inclusive, como os apoios jovem), o que corrige o ano de
+clientes que o alerta deixava de fora.
+
+**O teste que justifica o módulo** é o de concordância: o predicado em
+Python (que decide a ETIQUETA) e a condição Mongo (que decide a LISTA
+FILTRADA) correm sobre os mesmos catorze documentos e têm de dar o mesmo
+veredicto. Apanhou um defeito meu na primeira execução — uma data no
+FUTURO (gralha `2206` por `2006`) entrava na lista filtrada e não tinha
+etiqueta no ecrã, porque a condição só tinha limite de baixo.
+
+O filtro entra nos DOIS construtores de query **e no endpoint dos
+vizinhos**: um filtro que existisse na listagem e não ali fazia a seta
+da fronteira da página levar a um processo que a lista não contém.
+
+### Achado de caminho: o filtro de etiquetas do Kanban não fazia nada
+
+Ponto 15 do Lote 2, meu. Os dois hooks do quadro têm um
+`fetchX(token, filters)` que lê `filters.labels` — e destruturam uma
+lista FIXA de opções, descartam as etiquetas e reconstroem um objecto
+novo para o `queryFn`. A canalização está cortada ao meio. Pior: como as
+etiquetas também não entram na CHAVE, mudar o filtro não provocava nem um
+pedido. E não há filtragem local de etiquetas em sítio nenhum — o efeito
+era exactamente zero.
+
+`utils/kanbanFiltros.js` faz os parâmetros e a chave descerem do mesmo
+objecto, com um teste que flipa **cada** filtro e exige que ambos mudem.
+
+## Ponto 2 — eliminar da Pool, e duas noções de papel
+
+A rota entrava por `require_roles` (cargo EFECTIVO) e o serviço tinha
+`if user.get("role") not in [...]` (cargo do JWT). Quem tem perfil base
+de consultor e entra COMO diretor passava a porta e levava 403 na
+segunda. Forma exacta do `history._is_stealth_user` do Lote 4. No
+sentido inverso não há escalada — a porta recusa primeiro — logo o modo
+de falha era a recusa indevida.
+
+O botão novo é gated pelo mesmo papel efectivo, e o diálogo de
+confirmação diz o que a eliminação ARRASTA (processo, documentos,
+tarefas) e o que não (um 2.º titular é desligado, o processo do 1.º fica
+activo).
+
+## Ponto 3 — Próximo/Anterior na Pool
+
+Reaproveitei o mecanismo do Ponto 17 em vez de escrever outro: a lista
+aberta já está em memória, e `vizinhosNoContexto` responde sem pedido
+nenhum. O `ProcessNavigator` passou a ter rótulos parametrizáveis — o
+mesmo componente, não uma cópia.
+
+O `total` do contexto é o da lista CARREGADA (a Pool pede `limit=100`
+sem paginação): "100 / 100" é verdade e o botão desactivado é honesto,
+enquanto "12 / 243" prometia um 101.º que a seta nunca alcança.
+
+## Ponto 4 — o cabeçalho fixo que nunca colou
+
+`sticky z-50 h-14` **sem `top`**. O valor inicial de `top` é `auto` e um
+sticky com `top: auto` comporta-se como estático. Havia até um efeito de
+scroll escrito para quando o cabeçalho acompanha a página — a intenção
+estava lá, a propriedade não.
+
+O único caminho em que funcionava era a IMPERSONAÇÃO, onde um `style` em
+linha punha `top: 48px`. Quem testou "ver como cliente" viu-o a
+funcionar. E o padrão certo já existia noutro ficheiro:
+`PendingItemsList.js` escreve o `top` nos dois ramos.
+
+Camadas: o cabeçalho desceu para `z-40`. Com `z-50` nos dois, decidia a
+ordem no DOM e o cabeçalho tapava o logótipo da gaveta lateral em ecrã
+estreito — invisível enquanto o cabeçalho não era fixo.
+
+## Ponto 5 — o grupo das empresas
+
+A tabela de Empresas mostrava Nome, NIF, Email e Estado e **não mostrava
+a rede** — o campo que decide quem vê os dados de quem. Para saber o
+grupo de uma empresa era preciso abrir o diálogo de edição, uma a uma.
+
+O chip embeleza (`grupo_power_precision` → "Power Precision") mas **não
+unifica**: se dois slugs distintos no mesmo ecrã derem o mesmo rótulo,
+mostram-se os dois crus. É o mesmo risco contra o qual o
+`CompanyNetworkField` foi construído, e a etiqueta bonita podia
+escondê-lo. "Sem grupo" tem aparência própria, porque uma empresa sem
+rede é uma ilha.
+
+## Limpeza e extensão (autorizadas)
+
+- `AIReviewDialog.jsx` + os seus 35 testes **apagados**. O preenchimento
+  em linha foi validado e não há caminho de volta.
+- `InlineAISuggestion` ligado a `monthly_income`, `rendimento_bruto`,
+  `employer_name`, `categoria_profissional` (Financeiros) e
+  `valor_imovel`, `tipologia`, `area`, `artigo_matricial`,
+  `localizacao` (Imóvel).
+- **Achado ao fazê-lo:** `naturalidade` estava no mapa que PRODUZ
+  sugestões e não no que as GRAVA — e o apply descarta em silêncio o que
+  não conhece. O consultor aprovava, recebia 200 e nada era gravado.
+  `test_mapas_de_sugestoes_da_ia.py` compara os dois conjuntos por AST.
+
+## Medição
+
+| | |
+|---|---|
+| backend `tests/unit` | **4426 passed**, 5 skipped (era 4335) |
+| frontend | **1460 passed**, 122 ficheiros (era 1410/117, com 35 testes apagados) |
+| `flake8` / `eslint --quiet` / `yarn build` | limpos |
+
+Doze mutações, doze mortes:
+
+| Mutação | Testes que morreram |
+|---|---|
+| A regra volta a `< 35` | 8 |
+| O filtro Mongo perde o limite de cima | 1 (o de concordância) |
+| O Kanban deixa de escrever a etiqueta | 1 |
+| Os vizinhos deixam de receber o filtro | 2 |
+| A projecção da listagem perde os campos | 1 |
+| A guarda interna volta a ler o papel do JWT | 2 |
+| O apply volta a descartar a `naturalidade` | 2 |
+| A chave de cache perde o `sub35` | 1 |
+| O cabeçalho fica `sticky` sem `top` | 2 |
+| O chip embeleza sempre | 2 |
+| O botão de eliminar volta ao papel base | 1 |
+| A etiqueta deixa de ler o campo novo | 3 |
+
+## Erros meus neste lote
+
+1. **Uma das mutações não mutou nada.** A âncora apanhou o bloco de
+   comentário antes do `**PROJECCAO_SUB35` e a substituição acrescentou
+   uma linha mantendo o spread — "SOBREVIVEU" com o código intacto. É a
+   lição do Épico 9 (distinguir mutação perdida de teste fraco): com a
+   âncora certa, morreu. Uma mutação tem de ser VERIFICADA antes de se
+   concluir algo do resultado.
+2. **O meu primeiro teste de concordância tinha a amostra certa e a
+   condição errada** — foi ele a dizer-me que o filtro aceitava datas no
+   futuro. Conta como acerto do método e erro meu no desenho: escrevi a
+   condição Mongo antes de pensar no limite de cima.
+3. **Passei o `routes/clients.py` dos 250 linhas** que o guarda de
+   "thin stubs" permite, com comentários que pertenciam ao serviço. Baixei
+   o ficheiro em vez de levantar o limiar: o guarda existe para a lógica
+   não voltar às rotas, e relaxá-lo pela primeira coisa que o toca é como
+   se perde.
+4. **Um fixture meu tinha o nome da empresa igual ao do grupo**
+   ("Domus"), e o teste falhou com "Found multiple elements". Era o teste
+   a estar mal, não o código — mas um fixture cujo valor colide com outro
+   campo esconde qual dos dois a asserção apanhou.

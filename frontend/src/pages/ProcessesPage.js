@@ -51,6 +51,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { safeString } from "../utils/safeString";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import ProcessFilters from "../components/filters/ProcessFilters";
+import Sub35Badge from "../components/shared/Sub35Badge";
 import { notifyFinancialEngine } from "../utils/financialEngineFeedback";
 
 const roleLabels = {
@@ -141,6 +142,9 @@ const ProcessesPage = () => {
     [labelsParam],
   );
   const labelsLogicFilter = searchParams.get("labels_logic") === "AND" ? "AND" : "OR";
+  // Ponto 1 (Lote 4) — Sub35 no URL, como os outros filtros: um link
+  // já filtrado é metade da utilidade da segmentação.
+  const sub35Filter = searchParams.get("sub35") === "true";
   const [etiquetasDisponiveis, setEtiquetasDisponiveis] = useState([]);
   useEffect(() => {
     let cancelado = false;
@@ -204,6 +208,7 @@ const ProcessesPage = () => {
       next.delete("assigned_logic");
       next.delete("labels");
       next.delete("labels_logic");
+      next.delete("sub35");
       next.set("page", "1");
       return next;
     }, { replace: true });
@@ -247,6 +252,7 @@ const ProcessesPage = () => {
         ...(statusFilter ? { status: statusFilter } : {}),
         ...(processTypeFilter ? { process_type: processTypeFilter } : {}),
         ...(labelsFilter.length ? { labels: labelsFilter, labels_logic: labelsLogicFilter } : {}),
+        ...(sub35Filter ? { sub35: true } : {}),
         ...(assignedUserIdsFilter.length
           ? {
               assigned_user_ids: assignedUserIdsFilter.join(","),
@@ -336,7 +342,7 @@ const ProcessesPage = () => {
     } finally {
       setExporting(false);
     }
-  }, [searchTerm, showCompleted, sortField, sortOrder, isGlobalView, indexStatusFilter, statusFilter, processTypeFilter, assignedUserIdsFilter, assignedLogicFilter, labelsParam, labelsFilter, labelsLogicFilter, effectiveCompanyId]);
+  }, [searchTerm, showCompleted, sortField, sortOrder, isGlobalView, indexStatusFilter, statusFilter, processTypeFilter, assignedUserIdsFilter, assignedLogicFilter, labelsParam, labelsFilter, labelsLogicFilter, sub35Filter, effectiveCompanyId]);
 
   const handleMarkIndexed = useCallback(async (e, processId) => {
     e.stopPropagation();
@@ -448,6 +454,7 @@ const ProcessesPage = () => {
         ...(statusFilter ? { status: statusFilter } : {}),
         ...(processTypeFilter ? { process_type: processTypeFilter } : {}),
         ...(labelsFilter.length ? { labels: labelsFilter, labels_logic: labelsLogicFilter } : {}),
+        ...(sub35Filter ? { sub35: true } : {}),
         ...(assignedUserIdsFilter.length
           ? {
               assigned_user_ids: assignedUserIdsFilter.join(","),
@@ -484,7 +491,7 @@ const ProcessesPage = () => {
         setLoading(false);
       }
     }
-  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveCompanyId, statusFilter, processTypeFilter, assignedUserIdsParam, assignedLogicFilter, labelsParam, labelsFilter, labelsLogicFilter]);
+  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveCompanyId, statusFilter, processTypeFilter, assignedUserIdsParam, assignedLogicFilter, labelsParam, labelsFilter, labelsLogicFilter, sub35Filter]);
   
   /**
    * Ponto 16 — muda a fase de um processo a partir da listagem.
@@ -562,6 +569,11 @@ const ProcessesPage = () => {
         ...(labelsFilter.length
           ? { labels: labelsFilter, labels_logic: labelsLogicFilter }
           : {}),
+        // Vai TAMBÉM no contexto de navegação: as setas Anterior/
+        // Seguinte dos Detalhes repetem os filtros da listagem de
+        // origem, e um vizinho calculado sem este filtro leva a um
+        // processo que a lista não contém.
+        ...(sub35Filter ? { sub35: true } : {}),
         ...(assignedUserIdsFilter.length
           ? {
               assigned_user_ids: assignedUserIdsFilter.join(","),
@@ -576,7 +588,7 @@ const ProcessesPage = () => {
     sortedProcesses, pagination.page, pagination.size, pagination.total,
     location.pathname, location.search, viewMode, sortField, sortOrder,
     isGlobalView, effectiveCompanyId, indexStatusFilter, statusFilter,
-    processTypeFilter, labelsFilter, labelsLogicFilter,
+    processTypeFilter, labelsFilter, labelsLogicFilter, sub35Filter,
     assignedUserIdsFilter, assignedLogicFilter, navigate,
   ]);
 
@@ -924,6 +936,8 @@ const ProcessesPage = () => {
                 onAssignedUserIdsChange={updateAssignedUserIds}
                 assignedLogic={assignedLogicFilter}
                 onAssignedLogicChange={(v) => updateProcessFilter("assigned_logic", v === "AND" ? "AND" : "OR")}
+                sub35={sub35Filter}
+                onSub35Change={(activo) => updateProcessFilter("sub35", activo ? "true" : "all")}
                 onReset={resetProcessFilters}
               />
               {/* Ponto 15 — o mesmo filtro que o Kanban usa. */}
@@ -1037,6 +1051,11 @@ const ProcessesPage = () => {
                                     #{process.process_number}
                                   </span>
                                 )}
+                                {/* Ponto 1 — a etiqueta na listagem principal.
+                                    Esta era a listagem que NÃO a tinha: o
+                                    `under_35` não estava sequer na projecção
+                                    das listagens, só na do Kanban. */}
+                                <Sub35Badge processo={process} tamanho="sm" />
                                 {process.client_nif && (
                                   <span className="text-xs text-muted-foreground">NIF: {safeString(process.client_nif)}</span>
                                 )}

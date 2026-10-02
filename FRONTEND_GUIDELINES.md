@@ -1864,3 +1864,123 @@ abaixo do seu conteúdo e o `overflow-y` nunca dispara.
 
 No rodapé, `flex-wrap`: num ecrã estreito os botões passam a duas linhas em
 vez de um deles sair do ecrã.
+
+## 27.27 — `position: sticky` sem `top` não cola
+
+O valor inicial de `top` é `auto`, e um elemento `sticky` com `top: auto`
+**não tem limiar onde colar**: comporta-se como `static`. A classe
+`sticky` sozinha não dá erro, não dá aviso do Tailwind e o ecrã parece
+normal — só não cola.
+
+```jsx
+// ERRADO — e foi o cabeçalho do CRM durante meses
+<header className="sticky z-50 h-14" style={isImpersonating ? { top: '48px' } : {}}>
+
+// CERTO — o `top` nos DOIS ramos, por classe
+<header className={classesDoCabecalhoFixo({ isImpersonating })}>
+```
+
+Três regras:
+
+1. **As classes de posição vivem num ponto único** (`utils/stickyHeader.js`),
+   com teste a exigir um `top-*` em **cada** ramo. Era ter `top` só num
+   deles que fazia a impersonação ser o único caso funcional.
+2. **Classes Tailwind LITERAIS, nunca compostas.** `z-${CAMADA}` não
+   existe como texto no ficheiro, o Tailwind não gera a regra e o
+   resultado é o mesmo nada que o `top` em falta produzia.
+3. **Uma barra fixa fica ABAIXO da gaveta lateral e do seu fundo.** Com
+   camadas iguais decide a ordem no DOM, e o cabeçalho vem depois: em
+   ecrã estreito tapava o logótipo e o botão de fechar da gaveta.
+
+O jsdom não calcula posicionamento: um `sticky` que cola e um que não
+cola renderizam igual. Não há teste de render que apanhe isto — o que se
+afirma é a REGRA (no módulo puro) e a LIGAÇÃO (guarda sobre a fonte do
+layout).
+
+## 27.28 — Um filtro que vai nos parâmetros TEM de ir na chave de cache
+
+O filtro de etiquetas do Kanban não fazia nada. O fetcher lia
+`filters.labels` e montava `params.append('labels', …)`; o hook
+destruturava uma lista FIXA de opções, descartava-as e reconstruía um
+objecto novo para o `queryFn`. E, por não entrarem na chave, mudar o
+filtro **não provocava sequer um pedido**.
+
+```js
+// ERRADO — duas listas escritas à mão, em quatro sítios
+const { token, consultorFilter = 'all', … } = options;   // sem labels
+const filters = { consultor, mediador, … };              // sem labels
+useQuery({ queryKey: keys.kanban(filters),               // sem labels
+           queryFn: () => fetch(token, { consultorFilter, … }) });  // sem labels
+
+// CERTO — um objecto canónico, e dele saem os DOIS lados
+const filters = normalizarFiltros(options);
+useQuery({ queryKey: keys.kanban(filters),
+           queryFn: () => fetch(token, filters) });
+```
+
+O teste é da FORMA e não do filtro: flipar **cada** campo e exigir que
+os parâmetros E a chave mudem, com a contraprova de que filtros iguais
+dão a mesma chave (senão um valor aleatório passava e destruía a cache a
+cada render). Cuidado com `|| 30` sobre um `completedDays` que pode ser
+`0`: "sem limite" é falsy e virava "30 dias" em silêncio.
+
+## 27.29 — Um gate de UI lê o papel EFECTIVO, o mesmo que o backend lê
+
+`require_roles` decide pelo cargo efectivo (UCR + `X-Active-Role`). Um
+botão escondido por `user.role` dá as duas respostas erradas: a Direção
+a trabalhar a partir de um perfil base de consultor não vê o botão, e um
+admin de base a agir como consultor vê-o e leva 403.
+
+```jsx
+const papelActivo = (effectiveRole || user?.role || "").toLowerCase();
+const podeEliminar = MANAGEMENT_ROLES.includes(papelActivo);
+```
+
+O teste tem de usar um utilizador cujo `role` do JWT DIFIRA do perfil
+activo — com os dois iguais, passa com o defeito presente.
+
+## 27.30 — Uma etiqueta bonita não pode fazer duas coisas parecerem uma
+
+O chip do grupo de empresas mostra `grupo_power_precision` como
+"Power Precision". Mas `grupo_power` em vez de `grupo_power_precision`
+não dá erro nenhum: cria uma rede nova de uma empresa só e o isolamento
+quebra AO CONTRÁRIO (esconde dados de quem os devia ver). Se dois slugs
+distintos no mesmo ecrã derem o mesmo rótulo, mostram-se os dois CRUS —
+a etiqueta embeleza, nunca unifica.
+
+Duas consequências a manter:
+
+- **"Sem grupo" tem aparência própria.** Uma empresa sem `network_id` é
+  uma ILHA; desenhá-la como as outras fazia o estado mais consequente do
+  ecrã passar por um campo em branco.
+- **Nada de contagens sobre uma PÁGINA.** "Esta rede tem uma empresa só"
+  é falso para toda a rede cujas empresas estejam partidas entre páginas,
+  e um aviso errado sobre a fronteira de isolamento é pior do que aviso
+  nenhum.
+
+## 27.31 — Uma confirmação destrutiva diz o que ARRASTA
+
+Eliminar um registo da Pool faz soft delete em cascata (processo,
+documentos, tarefas) quando o cliente é 1.º titular, e apenas DESLIGA a
+associação quando é 2.º — o processo do 1.º fica activo. O diálogo
+escreve as duas coisas. Um "Tem a certeza?" sem dizer o que arrasta é um
+aviso que não informa.
+
+E a mensagem de erro é a DO SERVIDOR: um "Erro ao eliminar" genérico
+esconde a diferença entre 403 (permissão) e 404 (já não existe), que é
+exactamente o que quem está no ecrã precisa de saber.
+
+## 27.32 — Navegação Próximo/Anterior: o mecanismo é um só
+
+A Pool navega entre CLIENTES e os Detalhes entre PROCESSOS, e é o mesmo
+`ProcessNavigator` com os rótulos parametrizados — "Processo anterior"
+num diálogo de cliente seria mentira para um leitor de ecrã, e uma
+segunda cópia do componente divergiria. As regras que se mantêm:
+
+- **um lado sem vizinho é um botão DESACTIVADO, não ausente** (o controlo
+  não pode saltar de sítio a meio de uma revisão);
+- **sem contexto, sem setas**: quem chega por notificação (`?clientId=`)
+  não veio de listagem nenhuma, e inventar-lhe uma vizinhança promete uma
+  ordem que não existe;
+- **o total é o da lista EM MÃO.** A Pool pede `limit=100` sem paginação:
+  dizer "12 / 243" prometia um 101.º que a seta nunca alcança.

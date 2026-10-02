@@ -775,6 +775,12 @@ AI_SUGGESTION_FIELD_MAP = {
     "cc_validity": "personal_data.data_validade_cc",
     "data_validade_cc": "personal_data.data_validade_cc",
     "nationality": "personal_data.nacionalidade",
+    # Lote 4: FALTAVA. `compare_extracted_with_existing` produz
+    # `naturalidade` como sugestão, o consultor podia aprová-la e o
+    # `map_ai_suggestions_to_mongo_update` descartava-a em silêncio
+    # (`if field not in AI_SUGGESTION_FIELD_MAP: continue`). Uma
+    # aprovação sem efeito é pior do que não oferecer o campo.
+    "naturalidade": "personal_data.naturalidade",
     "gender": "personal_data.sexo",
     "address": "personal_data.morada_fiscal",
     "fiscal_address": "personal_data.morada_fiscal",

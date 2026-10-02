@@ -276,6 +276,7 @@ async def get_processes(
     process_type: Optional[str] = Query(None, description="PACOTE FK — Filtrar por tipo de processo"),
     labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
     labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
+    sub35: Optional[bool] = Query(None, description="Ponto 1 (Lote 4) — true: só processos Sub35 (titular com menos de 36 anos). O valor false NÃO filtra: ver services/sub35.py"),
     company_id: Optional[str] = Query(None, description="PACOTE FN — Empresa activa seleccionada no ContextSwitcher (Header); limita a Lista Global à empresa explicitamente enviada"),
     user: dict = Depends(get_current_user)
 ):
@@ -303,6 +304,7 @@ async def get_processes(
         process_type=process_type,
         labels=labels,
         labels_logic=labels_logic,
+        sub35=sub35,
     )
 
 
@@ -323,6 +325,7 @@ async def get_my_processes(
     process_type: Optional[str] = Query(None, description="PACOTE FK — Filtrar por tipo de processo"),
     labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
     labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
+    sub35: Optional[bool] = Query(None, description="Ponto 1 (Lote 4) — true: só processos Sub35 (titular com menos de 36 anos). O valor false NÃO filtra: ver services/sub35.py"),
     company_id: Optional[str] = Query(None, description="PACOTE FN — Empresa activa seleccionada no ContextSwitcher (Header); tem prioridade sobre o header X-Company-Id quando enviada explicitamente"),
     user: dict = Depends(get_current_user),
 ):
@@ -370,6 +373,7 @@ async def get_my_processes(
         process_type=process_type,
         labels=labels,
         labels_logic=labels_logic,
+        sub35=sub35,
     )
 
 
@@ -388,6 +392,7 @@ async def get_processes_paginated(
     process_type: Optional[str] = Query(None, description="PACOTE FK — Filtrar por tipo de processo"),
     labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
     labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
+    sub35: Optional[bool] = Query(None, description="Ponto 1 (Lote 4) — true: só processos Sub35 (titular com menos de 36 anos). O valor false NÃO filtra: ver services/sub35.py"),
     user: dict = Depends(get_current_user)
 ):
     """Listar processos com paginação cursor-based."""
@@ -409,6 +414,7 @@ async def get_processes_paginated(
         process_type=process_type,
         labels=labels,
         labels_logic=labels_logic,
+        sub35=sub35,
     )
 
 
@@ -453,6 +459,7 @@ async def get_kanban_board(
     completed_days: Optional[int] = Query(30, description="Limitar concluídos/desistências aos últimos N dias (0 = sem limite)"),
     labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
     labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
+    sub35: Optional[bool] = Query(None, description="Ponto 1 (Lote 4) — true: só processos Sub35 (titular com menos de 36 anos). O valor false NÃO filtra: ver services/sub35.py"),
     user: dict = Depends(require_staff())
 ):
     """Kanban por status com filtros de assignee / view_mode / completed_days."""
@@ -474,6 +481,7 @@ async def get_kanban_board(
         completed_days=completed_days,
         labels=labels,
         labels_logic=labels_logic,
+        sub35=sub35,
         decrypt_list_fn=decrypt_processes_list,
         kanban_projection=PROCESS_KANBAN_PROJECTION,
     )
@@ -593,6 +601,7 @@ async def get_process_neighbours(
     process_type: Optional[str] = Query(None, description="Filtrar por tipo de processo"),
     labels: Optional[List[str]] = Query(None, description="Filtrar por etiquetas"),
     labels_logic: Optional[str] = Query("OR", description="AND (todas) ou OR (qualquer uma)"),
+    sub35: Optional[bool] = Query(None, description="Ponto 1 (Lote 4) — true: só processos Sub35 (titular com menos de 36 anos). O valor false NÃO filtra: ver services/sub35.py"),
     company_id: Optional[str] = Query(None, description="Empresa activa do ContextSwitcher"),
     user: dict = Depends(get_current_user),
 ):
@@ -629,6 +638,7 @@ async def get_process_neighbours(
         process_type=process_type,
         labels=labels,
         labels_logic=labels_logic,
+        sub35=sub35,
     )
 
 

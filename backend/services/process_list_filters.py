@@ -27,6 +27,7 @@ from utils.search_filters import (
     build_multiword_search_filter,
 )
 from services.process_labels import build_labels_condition
+from services.sub35 import condicao_de_filtro as condicao_de_filtro_sub35
 
 
 def normalize_id_for_match(value: Any) -> Optional[str]:
@@ -507,6 +508,7 @@ def build_process_list_query(
     process_type: Optional[str] = None,
     labels: Optional[Union[str, Sequence[str]]] = None,
     labels_logic: Optional[str] = "OR",
+    sub35: Optional[bool] = None,
     tenant_condition: Optional[dict] = None,
     terminais: Optional[list[str]] = None,
 ) -> dict[str, Any]:
@@ -590,6 +592,15 @@ def build_process_list_query(
     labels_cond = build_labels_condition(labels, labels_logic)
     if labels_cond:
         and_conditions.append(labels_cond)
+
+    # Sub35 (Lote 4, ponto 1). Como as etiquetas: em `$and`, nunca a
+    # substituir o isolamento de rede que entrou primeiro. A condição vem
+    # do MESMO ponto que calcula a etiqueta (`services/sub35.py`) — se o
+    # filtro tivesse aqui um limite próprio, a lista filtrada e os
+    # cartões etiquetados divergiriam no dia de um aniversário.
+    sub35_cond = condicao_de_filtro_sub35(sub35)
+    if sub35_cond:
+        and_conditions.append(sub35_cond)
 
     search_cond = build_process_search_condition(search, mode=search_mode)
     if search_cond:
@@ -788,6 +799,7 @@ def build_kanban_query(
     completed_days: Optional[int] = 30,
     labels: Optional[Union[str, Sequence[str]]] = None,
     labels_logic: Optional[str] = "OR",
+    sub35: Optional[bool] = None,
     tenant_condition: Optional[dict] = None,
     terminais: Optional[list[str]] = None,
 ) -> dict:
@@ -828,6 +840,15 @@ def build_kanban_query(
     labels_cond = build_labels_condition(labels, labels_logic)
     if labels_cond:
         query = merge_query_and(query, labels_cond)
+
+    # Sub35 (Lote 4, ponto 1) — o quadro tem construtor SEPARADO, e é
+    # por isso que o filtro novo tem de entrar aqui TAMBÉM. Foi este
+    # construtor que ficou de fora do isolamento do Lote 4 e do Lote 5;
+    # um filtro que só existisse na listagem dava um quadro a ignorá-lo
+    # sem dar erro nenhum.
+    sub35_cond = condicao_de_filtro_sub35(sub35)
+    if sub35_cond:
+        query = merge_query_and(query, sub35_cond)
 
     # Pré-registo sempre excluído do Kanban (todos os roles)
     query = merge_query_and(query, {"status": {"$nin": LEAD_STATUS_VALUES}})

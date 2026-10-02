@@ -10,6 +10,13 @@
  * chega ao primeiro ou ao último processo — perder o alvo do rato a
  * meio de uma revisão de 40 processos é exactamente o atrito que esta
  * funcionalidade veio remover.
+ *
+ * Lote 4, ponto 3: os rótulos são parametrizáveis porque a Pool
+ * (`registos-clientes`) navega entre CLIENTES e não processos. O
+ * mecanismo é o mesmo e o componente também — "Processo anterior" num
+ * diálogo de cliente seria mentira para um leitor de ecrã, e uma segunda
+ * cópia do componente seria a terceira vez neste código que duas cópias
+ * divergem.
  */
 import { Button } from "../ui/button";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
@@ -22,6 +29,8 @@ import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
  * @param {number} props.total
  * @param {boolean} [props.aCarregar] — a camada 3 está a perguntar ao servidor
  * @param {(id: string) => void} props.onNavegar
+ * @param {string} [props.rotuloAnterior] — nome acessível do botão
+ * @param {string} [props.rotuloSeguinte]
  */
 export default function ProcessNavigator({
   anteriorId,
@@ -30,6 +39,8 @@ export default function ProcessNavigator({
   total,
   aCarregar = false,
   onNavegar,
+  rotuloAnterior = "Processo anterior",
+  rotuloSeguinte = "Processo seguinte",
 }) {
   return (
     <div
@@ -40,7 +51,7 @@ export default function ProcessNavigator({
         variant="ghost"
         size="icon"
         className="h-8 w-8"
-        aria-label="Processo anterior"
+        aria-label={rotuloAnterior}
         disabled={!anteriorId || aCarregar}
         onClick={() => anteriorId && onNavegar?.(anteriorId)}
       >
@@ -64,7 +75,7 @@ export default function ProcessNavigator({
         variant="ghost"
         size="icon"
         className="h-8 w-8"
-        aria-label="Processo seguinte"
+        aria-label={rotuloSeguinte}
         disabled={!seguinteId || aCarregar}
         onClick={() => seguinteId && onNavegar?.(seguinteId)}
       >

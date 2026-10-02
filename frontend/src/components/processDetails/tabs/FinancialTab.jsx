@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "../../ui/select";
 import { AIBadge } from "../../ui/AIBadge";
+import { InlineAISuggestion } from "../../ui/InlineAISuggestion";
 import AutoDSTIBadge from "../../AutoDSTIBadge";
 import {
   Briefcase, CreditCard, Database, User, Eye, EyeOff, Pencil, Plus, AlertCircle,
@@ -24,6 +25,10 @@ import { safeString } from "../../../utils/safeString";
 
 export default function FinancialTab({
   titular2Data, setTitular2Data, financialData, setFinancialData, process, editingCardId, editingCreditField, setEditingCreditField, showPortalSenha, setShowPortalSenha, showSegSocialSenha, setShowSegSocialSenha, canEditFinancial, CardHeaderWithEdit, getFieldMetaFor, token, id, shouldCardBeCollapsed,
+  // Lote 4 — preenchimento em linha também nos financeiros (o Lote 3
+  // ligou-o só à identificação). Os nomes dos campos são os que o
+  // servidor usa nas sugestões (`compare_extracted_with_existing`).
+  sugestaoDoCampo, onAprovarSugestao, onRejeitarSugestao,
 }) {
   return (
     <>
@@ -40,6 +45,13 @@ export default function FinancialTab({
                               <div className="flex items-center gap-1">
                                 <Label className="text-xs text-muted-foreground">Rendimento Mensal (€)</Label>
                                 <AIBadge {...(getFieldMetaFor("financial_data.monthly_income") || {})} />
+                                <InlineAISuggestion
+                                  campo="monthly_income"
+                                  rotulo="Rendimento Mensal"
+                                  sugestao={sugestaoDoCampo?.("monthly_income")}
+                                  onAprovar={onAprovarSugestao}
+                                  onRejeitar={onRejeitarSugestao}
+                                />
                               </div>
                               <Input
                                 type="number"
@@ -53,6 +65,13 @@ export default function FinancialTab({
                               <div className="flex items-center gap-1">
                                 <Label className="text-xs text-muted-foreground">Rendimento Bruto (€)</Label>
                                 <AIBadge {...(getFieldMetaFor("financial_data.rendimento_bruto") || {})} />
+                                <InlineAISuggestion
+                                  campo="rendimento_bruto"
+                                  rotulo="Rendimento Bruto"
+                                  sugestao={sugestaoDoCampo?.("rendimento_bruto")}
+                                  onAprovar={onAprovarSugestao}
+                                  onRejeitar={onRejeitarSugestao}
+                                />
                               </div>
                               <Input
                                 type="number"
@@ -730,7 +749,16 @@ export default function FinancialTab({
                               />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Entidade Empregadora</Label>
+                              <div className="flex items-center gap-1">
+                                <Label className="text-xs text-muted-foreground">Entidade Empregadora</Label>
+                                <InlineAISuggestion
+                                  campo="employer_name"
+                                  rotulo="Entidade Empregadora"
+                                  sugestao={sugestaoDoCampo?.("employer_name")}
+                                  onAprovar={onAprovarSugestao}
+                                  onRejeitar={onRejeitarSugestao}
+                                />
+                              </div>
                               <Input
                                 value={financialData.employer_name || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, employer_name: e.target.value })}
@@ -752,7 +780,16 @@ export default function FinancialTab({
                               />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Categoria Profissional</Label>
+                              <div className="flex items-center gap-1">
+                                <Label className="text-xs text-muted-foreground">Categoria Profissional</Label>
+                                <InlineAISuggestion
+                                  campo="categoria_profissional"
+                                  rotulo="Categoria Profissional"
+                                  sugestao={sugestaoDoCampo?.("categoria_profissional")}
+                                  onAprovar={onAprovarSugestao}
+                                  onRejeitar={onRejeitarSugestao}
+                                />
+                              </div>
                               <Input
                                 value={financialData.categoria_profissional || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, categoria_profissional: e.target.value })}

@@ -7417,3 +7417,112 @@ Hoje: `overflow-hidden flex flex-col` no contentor (rodapé sempre visível),
 scroll só no corpo com `min-h-0` (sem ele um filho flex recusa-se a encolher
 e o `overflow-y` nunca dispara), `max-w-lg` em vez de `max-w-md` e
 `flex-wrap` no rodapé. O padrão já existia no `DocumentReviewModal`.
+
+## O campo que três ecrãs liam e ninguém escrevia (Out 2026)
+
+Lote 4 — UX de Navegação, Pool e Sub35. Cinco pontos, e o primeiro
+voltou a ser a mesma forma dos dois lotes anteriores: a UI a ler um
+contrato que o servidor nunca cumpriu.
+
+### Sub35: a MESMA pergunta, quatro respostas diferentes
+
+`PROCESS_KANBAN_PROJECTION` tinha `"under_35": 1`. `KanbanCard`,
+`SearchResultsList` e `FilteredProcessList` tinham, cada um, o seu
+`{process.under_35 && <Badge>&lt;35 anos</Badge>}`, com as cores
+escritas à mão. **Nenhum ficheiro do backend escreve `under_35`.** A
+etiqueta foi construída e nunca apareceu uma única vez — a mesma forma
+do `doc_id` do Lote 3 e da fila Mongo do Lote 2, três lotes seguidos.
+
+E havia mais três respostas à volta da mesma pergunta:
+
+| Onde | O que fazia |
+|---|---|
+| `alerts.check_age_alert` | `age < 35` — um cliente de **35 anos**, que É elegível, não recebia o alerta |
+| `idade_menos_35` | booleano PERSISTIDO, escrito `False` à letra pelo registo público e nunca calculado |
+| `under_35` | projectado no Kanban, lido por três ecrãs, escrito por ninguém |
+| a data de nascimento | vive em DOIS nomes (`birth_date` e `data_nascimento`), e o `client_crud` sincroniza ambas as entradas do formulário para `personal_data.data_nascimento` — que é precisamente o nome que o `check_age_alert` não lia |
+
+`services/sub35.py` é hoje o ponto único: a regra (**menos de 36** — até
+aos 35, inclusive, como os apoios à habitação jovem), os dois nomes do
+campo, o predicado em Python que decide a ETIQUETA e a condição Mongo
+que decide a LISTA FILTRADA. As marcas legadas (`under_35`,
+`idade_menos_35`) são lidas como afirmação feita à mão — um `True` posto
+por alguém é informação; o `False` do registo público não nega nada.
+
+**Três decisões que não se podem perder:**
+
+1. **A etiqueta é CALCULADA ao servir, nunca gravada.** Um booleano
+   persistido fica errado no dia do aniversário, e seria o quinto nome
+   do mesmo conceito.
+2. **O predicado e a condição Mongo têm um teste de CONCORDÂNCIA** sobre
+   os mesmos catorze documentos. Foi ele a apanhar, na primeira
+   execução, que uma data no FUTURO (a gralha `2206` por `2006`) entrava
+   na lista filtrada e não tinha etiqueta no ecrã — daí o intervalo ser
+   fechado dos dois lados.
+3. **`sub35=false` NÃO filtra, de propósito.** "Não é Sub35" juntaria
+   num só grupo quem tem mais de 35 anos e quem não tem data de
+   nascimento na ficha, que é a maioria dos processos antigos. O filtro
+   não afirma o que não sabe.
+
+O filtro entra nos DOIS construtores de query (listagens e Kanban — o
+quadro tem o seu, e foi assim que ficou de fora do isolamento por Rede
+no Lote 4/5) **e no endpoint dos vizinhos**: um filtro que existisse na
+listagem e não ali fazia a seta da fronteira da página saltar para um
+processo que a lista não contém. `tests/unit/test_sub35.py` enumera por
+AST os quatro chamadores dos construtores e os cinco handlers de rota, e
+afirma os NÚMEROS.
+
+### O filtro de etiquetas do Kanban não fazia nada
+
+Achado de caminho, do Lote 2 (ponto 15): `useKanbanQuery` e
+`useKanbanCompletedQuery` têm cada um um `fetchX(token, filters)` que lê
+`filters.labels` e monta `params.append('labels', …)` — e os dois hooks
+destruturam uma lista FIXA de opções, descartam as etiquetas e
+reconstroem um objecto novo para o `queryFn`. A canalização está cortada
+ao meio: o fetcher sabe enviar e nunca recebe. Por cima, as etiquetas
+também não entram na CHAVE de cache, logo mudar o filtro não provocava
+sequer um pedido. Não há filtragem local de etiquetas em sítio nenhum —
+o efeito era zero.
+
+`utils/kanbanFiltros.js` é o ponto único: `normalizarFiltros` produz os
+filtros canónicos e deles saem OS DOIS lados (`parametrosDoKanban` e a
+chave). O teste flipa **cada** filtro e exige que os parâmetros E a
+chave mudem — a regra é da forma, não das etiquetas.
+
+### Eliminar da Pool: duas noções de papel no mesmo caminho
+
+`DELETE /clients/{id}` tinha duas verificações: `require_roles` na rota,
+que decide pelo cargo **EFECTIVO** (UCR + `X-Active-Role`), e
+`if user.get("role") not in [...]` dentro do serviço — o cargo do
+**JWT**. Quem tem perfil base de consultor e entra COMO diretor passava
+a porta e levava 403 na segunda. É a forma exacta do
+`history._is_stealth_user` do Lote 4. No sentido inverso não há
+escalada (a porta recusa primeiro): o modo de falha era a recusa
+indevida, que é o pior dos dois para quem trabalha.
+
+Hoje `PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES` é a única lista e as duas
+pontas passam por `authorization_role` + `effective_role_is_allowed`.
+
+### Uma sugestão da IA que o apply descartava em silêncio
+
+Os campos da IA passam por DOIS mapas escritos à mão, em módulos
+diferentes: `compare_extracted_with_existing` traduz documento → ficha
+(e é esse nome que o consultor vê), e `AI_SUGGESTION_FIELD_MAP` traduz
+ficha → caminho Mongo **descartando o que não conhece**. `naturalidade`
+estava no primeiro e não no segundo: o consultor via a sugestão,
+aprovava, recebia 200 — e o valor não era gravado em sítio nenhum. Uma
+aprovação sem efeito é pior do que não oferecer o campo.
+`test_mapas_de_sugestoes_da_ia.py` compara os dois conjuntos por AST.
+
+### `position: sticky` sem `top` nunca cola
+
+O cabeçalho do CRM declarava `sticky z-50 h-14` e um `style` em linha
+com `top: 48px` **só durante a impersonação**. O valor inicial de `top`
+é `auto`, e um sticky com `top: auto` comporta-se como estático: o
+cabeçalho subia com o scroll em todo o sistema, e o único caminho em que
+funcionava era o "ver como cliente" — provavelmente o único em que
+alguém o viu a funcionar. O padrão certo já existia no projecto, noutro
+ficheiro: `PendingItemsList.js` escreve `sticky z-50 ${isImpersonating ?
+'top-12' : 'top-0'}`. Regra e camadas em `utils/stickyHeader.js`; o
+cabeçalho desceu para `z-40` porque a gaveta lateral (z-50) e o seu
+fundo (z-45) têm de o cobrir em ecrã estreito.
