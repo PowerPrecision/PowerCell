@@ -71,11 +71,34 @@ class TestQuemPodeEliminar:
         assert erro.value.status_code == 403
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("papel", ["admin", "ceo", "diretor", "administrativo"])
-    async def test_os_quatro_papeis_da_constante_passam(self, papel, fake_async_db):
+    @pytest.mark.parametrize("papel", ["admin", "ceo", "diretor"])
+    async def test_os_tres_papeis_da_constante_passam(self, papel, fake_async_db):
         with pytest.raises(HTTPException) as erro:
             await _eliminar(papel, papel, fake_async_db)
         assert erro.value.status_code == 404, papel
+
+    @pytest.mark.asyncio
+    async def test_o_ADMINISTRATIVO_ja_NAO_elimina(self, fake_async_db):
+        """Teste INVERTIDO (Lote 5), não apagado: era um dos quatro papéis
+        aceites e passou a ser recusado por decisão do dono do produto.
+
+        Eliminar arrasta o processo, os documentos, as tarefas e os
+        pedidos RGPD em cascata — é poder de Administração e Direção. O
+        botão da Pool já só aparecia a esses três, e uma rota mais larga
+        do que o botão é "o menu e as rotas têm de concordar" com as
+        consequências ao contrário: a UI não mostra e o endpoint aceita.
+        """
+        with pytest.raises(HTTPException) as erro:
+            await _eliminar("administrativo", "administrativo", fake_async_db)
+        assert erro.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_nem_a_agir_COMO_administrativo(self, fake_async_db):
+        """Um admin de base com o perfil administrativo activo também não:
+        quem manda é o papel efectivo, nos dois sentidos."""
+        with pytest.raises(HTTPException) as erro:
+            await _eliminar("admin", "administrativo", fake_async_db)
+        assert erro.value.status_code == 403
 
     @pytest.mark.asyncio
     async def test_o_perfil_indexacao_NUNCA_elimina(self, fake_async_db):
@@ -129,10 +152,22 @@ class TestAsDuasPontasDerivamDaMesmaConstante:
         assert 'user.get("role") not in' not in fonte
         assert "effective_role_is_allowed(papel" in fonte
 
-    def test_a_constante_tem_os_quatro_papeis(self):
+    def test_a_constante_tem_Administracao_e_Direcao_e_mais_ninguem(self):
         from models.auth import UserRole
         from services.client_delete import PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES
 
         assert set(PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES) == {
-            UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
+            UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
         }
+        assert UserRole.ADMINISTRATIVO not in PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES
+
+    def test_a_lista_e_a_MESMA_do_gate_da_UI(self):
+        """O botão da Pool usa `MANAGEMENT_ROLES` do frontend
+        (`admin`/`ceo`/`diretor`). É afirmado aqui porque são duas listas
+        em linguagens diferentes e ninguém as cruza: divergirem é o
+        defeito que este lote veio fechar, com o endpoint mais largo do
+        que o botão."""
+        from services.client_delete import PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES
+
+        papeis_da_ui = {"admin", "ceo", "diretor"}  # frontend/src/utils/roleUtils.js
+        assert {str(p) for p in PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES} == papeis_da_ui

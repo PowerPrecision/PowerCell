@@ -119,36 +119,47 @@ defeito que o Lote 4 acabou de fechar); (b) filtrar em Python depois de
 desencriptar, o que obriga a ler a colecção inteira; (c) aceitar que o
 filtro deixa de existir.
 
+**Decisão registada (Lote 5):** o dono do produto confirmou o adiamento —
+fica para uma sprint dedicada à criptografia, de propósito, para não partir o
+filtro Sub35 recém-construído.
+
 **O que é preciso para fechar:** decidir entre o filtro e a encriptação, com
 o DPO. Se a escolha for encriptar, a opção (a) com um campo `ano_de_nascimento`
 (não a idade, não um booleano) é a única que não quebra a pesquisa nem precisa
 de recálculo: o ano não muda, e o limiar de "menos de 36" calcula-se sobre ele
 com uma margem de um ano a resolver em Python.
 
-### D-16 · Eliminar um cliente não deixa entrada no histórico
-**Onde:** `backend/services/client_delete.py::run_delete_client`.
+### D-17 · Os `co_buyers` não têm data de nascimento
+**Onde:** `backend/services/ai_document.py` (construção de `co_buyers`),
+`services/sub35.py::processo_e_sub35`.
 
-A eliminação (soft delete, com cascata para processo/documentos/tarefas)
-grava `deleted_at`/`deleted_by` nos documentos afectados — e **não escreve
-nada em `db.history`**. O `run_delete_client_registration` do painel de
-admin, que faz muito menos, escreve.
+A regra Sub35 é estrita desde o Lote 5: o apoio do Estado exige que **todos**
+os compradores tenham 35 anos ou menos, e um 2.º titular mais velho retira a
+etiqueta. A regra é aplicada ao `titular2_data`, que tem `birth_date`.
 
-O rasto existe (é o que o restauro lê), mas não aparece em nenhuma trilha
-consultável: para saber quem eliminou o quê é preciso ir ao documento
-eliminado. Com o botão novo na Pool (Lote 4, ponto 2) a operação passou a
-estar ao alcance de um clique da Direção, o que aumenta a probabilidade de
-alguém querer essa resposta.
+Um processo pode ter **mais** compradores em `co_buyers` (extraídos de um CPCV
+pela IA) e essa estrutura guarda nome, NIF, CC, estado civil, regime de bens,
+profissão, morada, código postal, localidade, email e telefone — **e nenhuma
+data de nascimento**. A idade de um terceiro comprador simplesmente não existe
+na base de dados.
 
-**Porque foi adiado:** `db.history` é indexado por `process_id` e um cliente
-sem processo não tem âncora — escrever lá exigiria decidir o que fazer com
-esse caso (uma colecção de auditoria própria, ou o `audit_trail_service`, que
-é o que tem IP e retenção). É uma decisão de desenho e não uma linha.
+**Porque foi adiado:** bloquear a etiqueta por `co_buyers` seria bloquear por
+dados que não existem — ficava sem etiqueta todo o processo com mais de dois
+compradores, sem forma de confirmar porquê, e um consultor não teria como
+destravar a situação a não ser inventando uma data. O erro ficaria no sentido
+errado para um sinal de oportunidade.
 
-**Nota de segurança que não se pode perder ao fechar isto:** o perfil
-`indexacao` não pode gerar registo de actividade. Aqui não chega a ser
-questão — `indexacao` não está em `PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES` e leva
-403 — mas qualquer escrita de histórico que se acrescente tem de passar por
-`history._is_stealth_user`, nunca por uma cópia da regra.
+**Quem é atingido se explodir:** um processo com três ou mais compradores em
+que o terceiro tem mais de 35 anos mostra a etiqueta Sub35 e não é elegível.
+Isso aparece no banco ou nas Finanças, não no CRM.
+
+**O que é preciso para fechar:** acrescentar a data de nascimento ao esquema de
+extracção dos compradores do CPCV (`get_document_tool_definition`) e ao
+`buyer_data`, e só então estender a regra — com o cuidado de que, no Mongo, a
+condição sobre um ARRAY precisa de `$elemMatch` e o quantificador correcto é
+«todos», não «algum» (o oposto do que um `{"co_buyers.birth_date": {...}}`
+ingénuo faz). Enquanto a data não existir, estender a regra é só desligar a
+etiqueta.
 
 ### D-12 · Os limiares de SLA guardam-se por empresa e leem-se globalmente
 **Onde:** `backend/services/stats_sla.py::_limiares`,
@@ -308,4 +319,5 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 | D-11 | Sourcemaps servidos em produção | Iteração `slas-e-sourcemaps` — `utils/buildSourcemap.js`: sem `SENTRY_AUTH_TOKEN` um build de produção não gera mapas (provado com o build real: 0 `.map` em `dist/`) |
 | D-1 | `confirm-upload` do CRM sem posse nem quarentena | Iteração `posse-e-segredo-gov` — era **escalada de privilégio** e não integridade de dados: sem guarda de posse e a devolver `temporary_url` pré-assinado para a chave do corpo do pedido (o Incidente P0 do Portal, no CRM) |
 | D-3 | `GOV_AUTH_JWT_SECRET` com valor por omissão | Iteração `posse-e-segredo-gov` — fail-closed em produção, segredo efémero em dev, e o ramo que aceitava tokens por assinar removido dos dois lados |
+| D-16 | Eliminar um cliente não deixava entrada no trilho de auditoria | Iteração `sub35-estrito-e-auditoria` — `audit_trail_service.log_audit_event` nos **dois** pontos de saída do `run_delete_client` (o cliente pode viver em `processes` ou em `clients`, e um registo escrito só num ramo era a forma de defeito desta casa); com IP, papel EFECTIVO em `metadata` (o campo partilhado guarda o do JWT) e os ids da cascata. O registo é escrito DEPOIS da eliminação e nunca a faz falhar |
 | D-7 | Relatório semanal do CEO com âmbito global | Iteração `motor-fila-e-agenda` — decisão de produto tomada (a Direcção quer o CONSOLIDADO, e fica a única excepção deliberada ao isolamento por rede); a dívida fechou com o defeito que ninguém tinha visto ao lado dela — o «às 06:00» vivia só na docstring e o relatório saía **24 vezes** à segunda-feira |

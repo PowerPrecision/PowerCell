@@ -1984,3 +1984,23 @@ segunda cópia do componente divergiria. As regras que se mantêm:
   ordem que não existe;
 - **o total é o da lista EM MÃO.** A Pool pede `limit=100` sem paginação:
   dizer "12 / 243" prometia um 101.º que a seta nunca alcança.
+
+## 27.33 — Uma etiqueta que explica uma regra muda COM a regra
+
+O `Sub35Badge` prometia, no `title`, «Titular com menos de 36 anos». Com
+a regra estrita do Lote 5 — o apoio exige que **todos** os compradores
+cumpram o requisito — esse texto passou a prometer menos do que a
+condição exige, e é o texto que o consultor lê antes de falar com o
+cliente. A diferença entre «o titular» e «todos os titulares» é a
+diferença entre uma oportunidade e uma isenção de IMT recusada pela
+Autoridade Tributária em cima da escritura.
+
+Duas regras:
+
+- **o texto da explicação vive ao lado do componente, num ponto único**
+  (`EXPLICACAO_SUB35`), e o teste afirma o seu CONTEÚDO, não só a sua
+  presença. Um `toBeTruthy()` sobre o `title` não distingue uma
+  explicação certa de uma desactualizada;
+- **quem decide continua a ser o servidor.** O componente nunca recalcula
+  a regra para a "confirmar" — duas contas da mesma regra divergem no dia
+  de um aniversário. Ele lê a flag e explica-a.

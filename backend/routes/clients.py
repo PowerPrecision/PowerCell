@@ -245,4 +245,4 @@ async def delete_client(
     user: dict = Depends(require_roles(list(PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES))),
 ):
     papel = await get_effective_role_async(request, user)
-    return await run_delete_client(client_id, user, papel_efectivo=papel)
+    return await run_delete_client(client_id, user, papel_efectivo=papel, request=request)

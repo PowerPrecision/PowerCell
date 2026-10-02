@@ -76,6 +76,20 @@ SECCOES_DO_PROCESSO = ("personal_data",)
 #: Onde vive num CLIENTE da Pool.
 SECCOES_DO_CLIENTE = ("dados_pessoais",)
 
+#: A secção do 2.º TITULAR — a mesma no processo e no cliente. O
+#: `titular2_data` fica no cliente até o processo nascer e é copiado na
+#: criação (ver `process_create`).
+SECCAO_DO_TITULAR2 = "titular2_data"
+
+#: O que prova que um 2.º titular EXISTE.
+#:
+#: Nunca `if doc.get("titular2_data")`: o formulário público grava as
+#: chaves PRESENTES E VAZIAS (`{"nif": "", "name": ""}`), logo o
+#: dicionário é verdadeiro e não há titular nenhum. É a lição do RGPD do
+#: 2.º titular — «presente mas vazio» não é «presente» — e aqui o custo
+#: de a esquecer era retirar a etiqueta a TODOS os processos do portal.
+CHAVES_DE_IDENTIDADE = ("name", "nome", "nif", "documento_id")
+
 #: Booleanos legados que, quando explicitamente verdadeiros, VENCEM o
 #: cálculo. São uma marca manual: alguém afirmou a elegibilidade sem a
 #: data de nascimento estar na ficha. `check_age_alert` já os honrava e
@@ -222,21 +236,80 @@ def _e_sub35_do_documento(doc: dict, seccoes, hoje=None) -> bool:
     return e_sub35(_primeira_data(doc, seccoes), hoje)
 
 
-def processo_e_sub35(processo: dict, hoje: Optional[date] = None) -> bool:
-    """O processo é Sub35?
+def titular2_presente(doc: dict) -> bool:
+    """Existe um 2.º titular com identidade preenchida?
 
-    Pelo TITULAR 1, que é "o cliente" do processo. O 2.º titular fica de
-    fora de propósito: os programas exigem que todos os compradores
-    sejam elegíveis, mas isso é uma regra de negócio que não se inventa
-    aqui — e marcar um processo como Sub35 pelo titular mais novo quando
-    o outro tem 50 anos seria pior do que não marcar.
+    `titular2_data` existe quase sempre — o registo público grava-o com
+    as chaves vazias. O que conta é haver VALOR em alguma das chaves de
+    identidade.
     """
-    return _e_sub35_do_documento(processo, SECCOES_DO_PROCESSO, hoje)
+    if not isinstance(doc, dict):
+        return False
+    bloco = doc.get(SECCAO_DO_TITULAR2)
+    if not isinstance(bloco, dict):
+        return False
+    return any(
+        bloco.get(chave) is not None and str(bloco.get(chave)) != ""
+        for chave in CHAVES_DE_IDENTIDADE
+    )
+
+
+def titular2_bloqueia(doc: dict, hoje: Optional[date] = None) -> bool:
+    """O 2.º titular impede a etiqueta Sub35?
+
+    REGRA (Lote 5, confirmada pelo dono do produto): o benefício do
+    Estado exige que **todos** os compradores cumpram o requisito de
+    idade. Logo um 2.º titular com mais de 35 anos retira a etiqueta ao
+    processo inteiro.
+
+    **E a data desconhecida também bloqueia.** "Todos têm 35 ou menos"
+    não se pode afirmar de quem não tem data na ficha, e o custo dos dois
+    erros não é simétrico: uma etiqueta a mais faz o consultor prometer a
+    um cliente uma isenção de IMT que a Autoridade Tributária vai
+    recusar; uma etiqueta a menos é uma oportunidade que alguém confirma
+    à mão. Falha fechada, como a audiência dos alertas.
+    """
+    if not titular2_presente(doc):
+        return False
+    bloco = doc.get(SECCAO_DO_TITULAR2) or {}
+    for campo in CAMPOS_DE_NASCIMENTO:
+        if data_iso(bloco.get(campo)):
+            return not e_sub35(bloco.get(campo), hoje)
+    # Titular real, sem data interpretável.
+    return True
+
+
+def processo_e_sub35(processo: dict, hoje: Optional[date] = None) -> bool:
+    """O processo é Sub35? TODOS os titulares com 35 anos ou menos.
+
+    Os `co_buyers` ficam de fora e não é esquecimento: a estrutura que o
+    `ai_document` grava (nome, nif, cc, estado civil, morada, contactos)
+    **não tem data de nascimento nenhuma**. Bloquear por eles seria
+    bloquear por dados que não existem — retirava a etiqueta a todos os
+    processos com mais de um comprador sem nunca poder confirmar porquê.
+    Fica dito em `TECHNICAL_DEBT.md` (D-17).
+    """
+    if tem_marca_manual(processo):
+        # Afirmação humana sobre o processo INTEIRO: quem a escreveu sabe
+        # quantos compradores há. Não se descarta informação introduzida
+        # à mão — é a mesma razão por que `check_age_alert` já a honrava.
+        return True
+    if not _e_sub35_do_documento(processo, SECCOES_DO_PROCESSO, hoje):
+        return False
+    return not titular2_bloqueia(processo, hoje)
 
 
 def cliente_e_sub35(cliente: dict, hoje: Optional[date] = None) -> bool:
-    """O cliente da Pool é Sub35? (mesma regra, outra secção)."""
-    return _e_sub35_do_documento(cliente, SECCOES_DO_CLIENTE, hoje)
+    """O cliente da Pool é Sub35? (mesma regra, outra secção).
+
+    O `titular2_data` do cliente é o MESMO bloco que será copiado para o
+    processo, logo a regra estrita vale aqui desde a triagem.
+    """
+    if tem_marca_manual(cliente):
+        return True
+    if not _e_sub35_do_documento(cliente, SECCOES_DO_CLIENTE, hoje):
+        return False
+    return not titular2_bloqueia(cliente, hoje)
 
 
 def aplicar_flag_a_processos(
@@ -317,25 +390,64 @@ def _ramos_do_campo(caminho: str, inicio: str, fim: str) -> list[dict]:
     ]
 
 
+def condicao_sem_titular2(seccao: str = SECCAO_DO_TITULAR2) -> dict:
+    """"Não há 2.º titular" — sem `$nor` e sem `$not`.
+
+    Um `{"$in": [None, ""]}` por chave de identidade casa com o campo
+    AUSENTE, `null` e a string vazia (o que o formulário público grava), e
+    é expressável com os operadores que tanto o Mongo como o duplo de
+    teste já implementam. A negação explícita (`$nor`) seria ignorada
+    pelo duplo — o teste de concordância ficaria verde a provar menos do
+    que parece, que é a armadilha do duplo demasiado esperto.
+    """
+    return {
+        "$and": [
+            {f"{seccao}.{chave}": {"$in": [None, ""]}}
+            for chave in CHAVES_DE_IDENTIDADE
+        ]
+    }
+
+
 def condicao_sub35(
     hoje: Optional[date] = None, *, seccoes: Iterable[str] = SECCOES_DO_PROCESSO
 ) -> dict:
     """A condição Mongo "é Sub35", pelo MESMO limite do predicado.
 
-    Inclui as marcas manuais, senão o filtro esconderia processos que a
-    etiqueta mostra — e uma lista filtrada que não contém uma linha
-    etiquetada é a pior das duas incoerências possíveis.
+    Estrutura (Lote 5):
+
+        marca manual   OU   (titular 1 é Sub35   E   o 2.º não bloqueia)
+
+    As marcas manuais ficam de fora do `$and` porque são uma afirmação
+    sobre o processo inteiro — a mesma precedência do predicado.
     """
     inicio, fim = intervalo_de_nascimento(hoje)
 
-    ramos: list[dict] = [{campo: True} for campo in MARCAS_MANUAIS]
-    for seccao in seccoes:
-        for campo in CAMPOS_DE_NASCIMENTO:
-            ramos.extend(_ramos_do_campo(f"{seccao}.{campo}", inicio, fim))
-    for campo in CAMPOS_DE_NASCIMENTO:
-        ramos.extend(_ramos_do_campo(campo, inicio, fim))
+    def ramos_das_datas(secs: Iterable[str]) -> list[dict]:
+        ramos: list[dict] = []
+        for seccao in secs:
+            for campo in CAMPOS_DE_NASCIMENTO:
+                ramos.extend(_ramos_do_campo(f"{seccao}.{campo}", inicio, fim))
+        return ramos
 
-    return {"$or": ramos}
+    # Titular 1: nas secções pedidas e, em recurso, na raiz do documento.
+    ramos_titular1 = ramos_das_datas(seccoes)
+    for campo in CAMPOS_DE_NASCIMENTO:
+        ramos_titular1.extend(_ramos_do_campo(campo, inicio, fim))
+
+    # O 2.º titular não bloqueia: ou não existe, ou é ele próprio Sub35.
+    titular2_ok = {
+        "$or": [
+            condicao_sem_titular2(),
+            *ramos_das_datas([SECCAO_DO_TITULAR2]),
+        ]
+    }
+
+    return {
+        "$or": [
+            *({campo: True} for campo in MARCAS_MANUAIS),
+            {"$and": [{"$or": ramos_titular1}, titular2_ok]},
+        ]
+    }
 
 
 def condicao_de_filtro(

@@ -9580,3 +9580,102 @@ Doze mutações, doze mortes:
    ("Domus"), e o teste falhou com "Found multiple elements". Era o teste
    a estar mal, não o código — mas um fixture cujo valor colide com outro
    campo esconde qual dos dois a asserção apanhou.
+
+# Iteração `sub35-estrito-e-auditoria` — 2026-10-02
+
+Lote 5: as três decisões de negócio que o Lote 4 deixou em aberto, mais o
+fecho da D-16. Nenhuma delas era um defeito meu a corrigir — eram
+perguntas que fiz e que o dono do produto respondeu.
+
+## 1 — Sub35 estrito: a condição é sobre TODOS os compradores
+
+Regra confirmada: o apoio do Estado exige que todos os compradores tenham
+35 anos ou menos. A do Lote 4 olhava só para o titular 1.
+
+```
+marca manual   OU   (titular 1 é Sub35   E   o 2.º titular não bloqueia)
+```
+
+**A decisão que mais me deu que pensar** foi a data DESCONHECIDA de um 2.º
+titular real. Bloqueia. «Todos têm 35 ou menos» não se afirma de quem não
+tem data na ficha, e os dois erros não custam o mesmo: uma etiqueta a mais
+faz o consultor prometer uma isenção que a AT recusa em cima da
+escritura; uma etiqueta a menos é uma oportunidade que alguém confirma à
+mão. Falha fechada, como a audiência dos alertas do Lote 6.
+
+**A armadilha que quase apanhei de novo:** `titular2_data` existe quase
+sempre — o registo público grava-o com as chaves PRESENTES E VAZIAS. Um
+`if doc.get("titular2_data")` teria retirado a etiqueta a **todos** os
+processos vindos do portal. É a lição do RGPD do 2.º titular («presente
+mas vazio» não é «presente»), e desta vez lembrei-me antes de escrever o
+código — mas só porque está no AGENTS.md.
+
+**A condição Mongo sem `$nor`.** «Não há 2.º titular» é um `$and` de
+`{campo: {"$in": [None, ""]}}` (casa com ausente, `null` e `""`) em vez de
+uma negação. O duplo de teste implementa `$or`/`$and`/`$in` e **ignora** o
+`$nor`: com negação, o teste de concordância ficava verde a provar menos
+do que parece. É a armadilha do duplo demasiado esperto evitada na
+escolha dos operadores, não no teste.
+
+A amostra da concordância passou de 14 para **24** documentos, dez do 2.º
+titular. O predicado e a condição Mongo concordam em todos.
+
+**Os `co_buyers` ficam de fora** porque a estrutura que a IA grava do CPCV
+não tem data de nascimento nenhuma — bloquear por eles era bloquear por
+dados que não existem. D-17, com o que falta para fechar.
+
+## 2 — A porta não pode ser mais larga do que o botão
+
+`ADMINISTRATIVO` saiu de `PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES`. O botão da
+Pool já só aparecia a Administração/Direção; uma rota mais larga é o
+«menu e rotas têm de concordar» com as consequências ao contrário — a UI
+não mostra e o endpoint aceita.
+
+Os dois testes do legado foram **invertidos**, não apagados, e há um novo
+a cruzar a constante do backend com a lista do gate da UI: são duas
+listas em linguagens diferentes e ninguém as cruzava.
+
+## 3 — D-16 fechada: quem apagou o quê
+
+`log_audit_event` nos **dois** pontos de saída do `run_delete_client` (o
+cliente vive em `processes` ou em `clients`). Um registo escrito só num
+ramo é a forma de defeito desta casa há seis lotes — há um teste por ramo
+e um a afirmar que são dois.
+
+Três detalhes: o trilho e não o `db.history` (indexado por `process_id`, e
+um cliente da Pool pode não ter processo); o papel no registo é o
+**efectivo**, em `metadata`, porque o campo partilhado guarda o do JWT; e
+o registo nunca falha a eliminação — é escrito depois, e um 404 não deixa
+rasto nenhum.
+
+## Medição
+
+| | |
+|---|---|
+| backend `tests/unit` | **4462 passed**, 5 skipped (era 4426) |
+| frontend | **1460 passed**, 122 ficheiros |
+| `flake8` / `eslint --quiet` / `yarn build` | limpos |
+
+Seis mutações, seis mortes:
+
+| Mutação | Testes que morreram |
+|---|---|
+| Uma data desconhecida deixa de bloquear | 4 |
+| `titular2_data` vazio conta como titular | 3 |
+| A condição Mongo perde a restrição do 2.º titular | 4 |
+| O `administrativo` volta a poder eliminar | 4 |
+| O ramo do cliente deixa de registar a auditoria | 3 |
+| O helper de auditoria deixa de engolir o erro | 1 |
+
+## Erros meus neste lote
+
+1. **Escrevi uma guarda de fonte com aspas duplas.** O
+   `codigo_sem_comentarios` passa pelo `ast.unparse`, que NORMALIZA as
+   aspas — `"success"` chega ao teste como `'success'`. Está escrito no
+   AGENTS.md, escrito por mim, e falhei-o. O teste apanhou-se a si
+   próprio, mas é a segunda vez que esta regra me morde.
+2. **Passei outra vez o `routes/clients.py` dos 250 linhas** do guarda de
+   thin stubs, agora com o `request=` a mais na chamada. Comprimi a
+   chamada em vez de levantar o limiar, como no lote anterior — mas é
+   sinal de que este ficheiro está no limite e a próxima linha vai ter de
+   pagar com uma extracção, não com formatação.

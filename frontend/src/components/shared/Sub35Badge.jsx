@@ -18,6 +18,14 @@
  * Porque é que diz "Sub35" e não "<35 anos": o rótulo é o nome que a
  * equipa usa para o segmento (e o critério é "menos de 36", até aos 35
  * inclusive — "<35 anos" estava, à letra, errado).
+ *
+ * LOTE 5 — a regra é ESTRITA: o apoio do Estado exige que TODOS os
+ * compradores cumpram o requisito de idade, logo um 2.º titular com mais
+ * de 35 anos retira a etiqueta ao processo. Quem decide continua a ser o
+ * servidor (`services/sub35.py`); o que muda aqui é só o que a etiqueta
+ * PROMETE a quem passa o rato — e prometer "o titular" quando a condição
+ * é sobre todos era a diferença entre uma oportunidade e uma isenção de
+ * IMT recusada pela AT em cima da escritura.
  */
 import { Sparkles } from "lucide-react";
 
@@ -27,7 +35,8 @@ import { cn } from "../../lib/utils";
 /** O texto é único e vive aqui: três cópias é como as três divergiram. */
 export const ROTULO_SUB35 = "Sub35";
 export const EXPLICACAO_SUB35 =
-  "Titular com menos de 36 anos — elegível para os apoios à habitação jovem";
+  "Todos os titulares com 35 anos ou menos — elegível para os apoios à " +
+  "habitação jovem";
 
 /**
  * @param {object} props

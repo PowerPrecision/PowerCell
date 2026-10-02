@@ -52,11 +52,12 @@ describe("Sub35Badge", () => {
 
   it("explica o critério ao passar o rato", () => {
     // "<35 anos" — o rótulo antigo — estava à letra ERRADO: o critério
-    // é menos de 36, até aos 35 inclusive.
+    // é até aos 35, inclusive. E desde o Lote 5 é sobre TODOS os
+    // titulares: a etiqueta não pode prometer menos do que a regra exige.
     render(<Sub35Badge processo={{ is_sub35: true }} />);
-    expect(screen.getByTestId("etiqueta-sub35").getAttribute("title")).toContain(
-      "menos de 36",
-    );
+    const titulo = screen.getByTestId("etiqueta-sub35").getAttribute("title");
+    expect(titulo).toContain("Todos os titulares");
+    expect(titulo).toContain("35 anos ou menos");
   });
 
   it("aceita `activo` já resolvido (para quem não tem o processo à mão)", () => {

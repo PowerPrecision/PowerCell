@@ -7526,3 +7526,105 @@ ficheiro: `PendingItemsList.js` escreve `sticky z-50 ${isImpersonating ?
 'top-12' : 'top-0'}`. Regra e camadas em `utils/stickyHeader.js`; o
 cabeçalho desceu para `z-40` porque a gaveta lateral (z-50) e o seu
 fundo (z-45) têm de o cobrir em ecrã estreito.
+
+## Sub35 estrito, a porta apertada e o rasto da eliminação (Out 2026)
+
+Lote 5 — afinações finais, as três decisões de negócio que o Lote 4 deixou
+em aberto.
+
+### Sub35: a condição é sobre TODOS os compradores
+
+O apoio do Estado à habitação jovem (isenção de IMT/IS, garantia pública)
+exige que **todos** os compradores cumpram o requisito de idade. A regra
+do Lote 4 olhava só para o titular 1: um processo com um titular de 28 e
+outro de 50 aparecia como Sub35.
+
+Hoje `processo_e_sub35` é:
+
+```
+marca manual   OU   (titular 1 é Sub35   E   o 2.º titular não bloqueia)
+```
+
+**Quatro decisões, todas com teste:**
+
+1. **«Presente mas vazio» não é um titular.** O registo público grava
+   `titular2_data` com as chaves presentes e VAZIAS (`{"nif": "", "name":
+   ""}`), logo `if doc.get("titular2_data")` é verdadeiro e não há
+   titular nenhum. Tratá-lo como real retirava a etiqueta a **todos** os
+   processos vindos do portal. É a mesma lição do RGPD do 2.º titular, e
+   aqui o custo de a esquecer era desligar a funcionalidade inteira.
+   `CHAVES_DE_IDENTIDADE = ("name", "nome", "nif", "documento_id")`.
+2. **Uma data desconhecida BLOQUEIA.** «Todos têm 35 ou menos» não se
+   afirma de quem não tem data na ficha, e o custo dos dois erros não é
+   simétrico: uma etiqueta a mais faz o consultor prometer uma isenção
+   que a Autoridade Tributária vai recusar em cima da escritura; uma
+   etiqueta a menos é uma oportunidade que alguém confirma à mão. Falha
+   fechada, como a audiência dos alertas.
+3. **A marca manual vence.** Um `under_35: True` posto à mão é uma
+   afirmação sobre o processo inteiro — quem a escreveu sabe quantos
+   compradores há. Não se descarta informação introduzida à mão.
+4. **Os `co_buyers` ficam de fora, e não é esquecimento.** A estrutura
+   que o `ai_document` grava a partir de um CPCV não tem data de
+   nascimento nenhuma: bloquear por eles era bloquear por dados que não
+   existem. Registado em `TECHNICAL_DEBT.md` D-17, com o que falta para
+   fechar.
+
+**A condição Mongo seguiu a mesma forma, sem `$nor`.** «Não há 2.º
+titular» é um `$and` de `{campo: {"$in": [None, ""]}}` — que casa com o
+campo ausente, `null` e a string vazia — em vez de uma negação. Não é
+estética: o duplo de teste (`FakeAsyncCollection`) implementa `$or`,
+`$and` e `$in` e **ignora** um `$nor`, pelo que o teste de concordância
+ficaria verde a provar menos do que parece. É a armadilha do duplo
+demasiado esperto, evitada pela escolha dos operadores.
+
+O teste de concordância passou a correr sobre **24** documentos, dez
+deles do 2.º titular (velho, jovem, na fronteira dos 35, a fazer 36 hoje,
+sem data, só com NIF, bloco vazio do portal, bloco não-dicionário, marca
+manual com titular velho). O predicado e a condição Mongo têm de dar o
+mesmo veredicto em todos.
+
+### A rota de eliminar: a porta não pode ser mais larga do que o botão
+
+`PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES` perdeu o `ADMINISTRATIVO` (decisão
+do dono do produto). Eliminar arrasta o processo, os documentos, as
+tarefas e os pedidos RGPD em cascata — é poder de Administração e
+Direção, e o botão da Pool já só aparecia a esses três.
+
+Uma rota mais larga do que o botão é o «menu e rotas têm de concordar»
+com as consequências ao contrário: a UI não mostra e o endpoint aceita.
+Os dois testes do legado foram **invertidos**, não apagados, e há um a
+cruzar a constante do backend com a lista do gate da UI — são duas listas
+em linguagens diferentes e ninguém as cruzava.
+
+O `administrativo` mantém o que não destrói: `/unlink-process` continua a
+admiti-lo.
+
+### D-16 fechada: quem apagou o quê
+
+A eliminação gravava `deleted_at`/`deleted_by` nos documentos — e isso é
+o que o **restauro** lê, não um trilho consultável. Para responder a
+«quem apagou este cliente?» era preciso ir ao documento eliminado; para
+«o que foi apagado esta semana?» não havia resposta.
+
+`audit_trail_service.log_audit_event` é chamado nos **dois** pontos de
+saída do `run_delete_client` — o cliente pode viver em `db.processes`
+(modelo unificado) ou em `db.clients` (legado), cada um com o seu
+`return`. Um registo escrito só num ramo é a forma de defeito que esta
+casa produz há seis lotes, e há um teste por ramo mais um a afirmar que
+são dois.
+
+**Três detalhes:**
+
+- **o trilho e não o histórico.** `db.history` é indexado por
+  `process_id` e um cliente da Pool pode não ter processo — não há
+  âncora. O `audit_trail` tem IP, retenção e consulta por utilizador e
+  por data, e é deliberadamente o único sítio que o perfil `indexacao`
+  não silencia (aqui nem chega a ser questão: `indexacao` leva 403).
+- **o papel que vai no registo é o EFECTIVO.** O `log_audit_event` grava
+  `user["role"]` — o do JWT — e quem autorizou foi o perfil activo. Vai
+  em `metadata` para não mudar a semântica de um campo partilhado por
+  todos os outros chamadores.
+- **nunca falha a eliminação.** O registo é escrito DEPOIS de a operação
+  estar feita; propagar aqui deixaria o cliente eliminado e a resposta em
+  erro. E um 404 não deixa registo: um trilho com eliminações que não
+  aconteceram é pior do que um trilho vazio.

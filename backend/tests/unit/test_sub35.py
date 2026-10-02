@@ -33,10 +33,12 @@ from services.sub35 import (  # noqa: E402
     condicao_sub35,
     data_iso,
     data_limite_de_nascimento,
+    CHAVES_DE_IDENTIDADE,
     e_sub35,
     idade,
     intervalo_de_nascimento,
     processo_e_sub35,
+    titular2_presente,
 )
 
 HOJE = date(2026, 10, 2)
@@ -193,6 +195,26 @@ class TestOLimiteNoCalendario:
         assert data_limite_de_nascimento(datetime(2026, 10, 2, 23, 59)) == "1990-10-02"
 
 
+def _folhas(condicao):
+    """Todos os ramos-folha `{campo: expressão}` de uma condição.
+
+    A condição passou a ter `$and` dentro de `$or` (Lote 5: o 2.º titular
+    é uma restrição E, não uma alternativa OU), logo as asserções não
+    podem olhar só para o primeiro nível.
+    """
+    if isinstance(condicao, list):
+        for item in condicao:
+            yield from _folhas(item)
+        return
+    if not isinstance(condicao, dict):
+        return
+    for chave, valor in condicao.items():
+        if chave in ("$or", "$and", "$nor"):
+            yield from _folhas(valor)
+        else:
+            yield {chave: valor}
+
+
 class TestOFiltro:
     def test_none_nao_filtra(self):
         assert condicao_de_filtro(None, HOJE) is None
@@ -211,7 +233,7 @@ class TestOFiltro:
         # data em formato português entrava na lista.
         cond = condicao_sub35(HOJE)
         ramos_de_texto = [
-            r for r in cond["$or"]
+            r for r in _folhas(cond)
             for v in r.values()
             if isinstance(v, dict) and isinstance(v.get("$gte"), str)
         ]
@@ -227,18 +249,21 @@ class TestOFiltro:
         inicio, fim = intervalo_de_nascimento(HOJE)
         assert inicio == "1990-10-03"   # quem faz 36 amanhã
         assert fim == "2026-10-03"      # amanhã: o futuro fica fora
-        for ramo in condicao_sub35(HOJE)["$or"]:
+        for ramo in _folhas(condicao_sub35(HOJE)):
             (expressao,) = ramo.values()
-            if isinstance(expressao, dict):
-                assert "$gte" in expressao and "$lt" in expressao, ramo
+            if isinstance(expressao, dict) and "$gte" in expressao:
+                assert "$lt" in expressao, ramo
 
     def test_a_condicao_inclui_as_marcas_manuais(self):
         cond = condicao_sub35(HOJE)
+        # No PRIMEIRO nível do `$or`, não dentro do `$and`: uma marca
+        # manual é uma afirmação sobre o processo inteiro e tem de vencer
+        # a restrição do 2.º titular, como vence no predicado.
         for campo in MARCAS_MANUAIS:
             assert {campo: True} in cond["$or"], campo
 
     def test_a_condicao_cobre_os_dois_nomes_em_personal_data(self):
-        chaves = {chave for ramo in condicao_sub35(HOJE)["$or"] for chave in ramo}
+        chaves = {chave for ramo in _folhas(condicao_sub35(HOJE)) for chave in ramo}
         assert "personal_data.birth_date" in chaves
         assert "personal_data.data_nascimento" in chaves
 
@@ -247,11 +272,105 @@ class TestOFiltro:
 
         chaves = {
             chave
-            for ramo in condicao_sub35(HOJE, seccoes=SECCOES_DO_CLIENTE)["$or"]
+            for ramo in _folhas(condicao_sub35(HOJE, seccoes=SECCOES_DO_CLIENTE))
             for chave in ramo
         }
         assert "dados_pessoais.birth_date" in chaves
         assert "personal_data.birth_date" not in chaves
+
+
+class TestARegraEstritaDoSegundoTitular:
+    """Lote 5 — o apoio do Estado exige que TODOS os compradores
+    cumpram o requisito de idade."""
+
+    JOVEM = {"personal_data": {"birth_date": "2000-01-01"}}
+
+    def test_sozinho_continua_Sub35(self):
+        assert processo_e_sub35(dict(self.JOVEM), HOJE) is True
+
+    def test_um_2o_titular_com_mais_de_35_RETIRA_a_etiqueta(self):
+        processo = {**self.JOVEM, "titular2_data": {"name": "C", "birth_date": "1970-01-01"}}
+        assert processo_e_sub35(processo, HOJE) is False
+
+    def test_dois_titulares_jovens_mantem(self):
+        processo = {**self.JOVEM, "titular2_data": {"name": "B", "birth_date": "1998-01-01"}}
+        assert processo_e_sub35(processo, HOJE) is True
+
+    def test_o_2o_titular_na_fronteira_dos_35_e_elegivel(self):
+        processo = {**self.JOVEM, "titular2_data": {"name": "E", "birth_date": "1990-10-03"}}
+        assert processo_e_sub35(processo, HOJE) is True
+
+    def test_o_2o_titular_que_faz_36_hoje_bloqueia(self):
+        processo = {**self.JOVEM, "titular2_data": {"name": "F", "birth_date": "1990-10-02"}}
+        assert processo_e_sub35(processo, HOJE) is False
+
+    def test_um_2o_titular_SEM_data_bloqueia_falha_fechada(self):
+        """"Todos têm 35 ou menos" não se afirma de quem não tem data.
+
+        O custo dos dois erros não é simétrico: uma etiqueta a mais faz o
+        consultor prometer uma isenção de IMT que a AT vai recusar."""
+        processo = {**self.JOVEM, "titular2_data": {"name": "D", "nif": "2"}}
+        assert processo_e_sub35(processo, HOJE) is False
+
+    def test_titular2_data_VAZIO_nao_e_um_titular(self):
+        """O caso de TODO o registo público: as chaves são gravadas
+        presentes e vazias. Tratá-las como um titular real retirava a
+        etiqueta a todos os processos vindos do portal."""
+        for bloco in ({}, {"name": "", "nif": ""}, {"name": None}):
+            processo = {**self.JOVEM, "titular2_data": bloco}
+            assert processo_e_sub35(processo, HOJE) is True, bloco
+
+    def test_titular2_data_que_nao_e_um_dicionario(self):
+        for bloco in (None, "", [], "Maria"):
+            processo = {**self.JOVEM, "titular2_data": bloco}
+            assert processo_e_sub35(processo, HOJE) is True, bloco
+
+    def test_qualquer_chave_de_identidade_conta(self):
+        for chave in CHAVES_DE_IDENTIDADE:
+            processo = {**self.JOVEM, "titular2_data": {chave: "X"}}
+            assert titular2_presente(processo) is True, chave
+            # Sem data → bloqueia.
+            assert processo_e_sub35(processo, HOJE) is False, chave
+
+    def test_a_marca_manual_vence_o_2o_titular(self):
+        """Uma afirmação humana é sobre o processo INTEIRO — quem a
+        escreveu sabe quantos compradores há. Não se descarta informação
+        introduzida à mão."""
+        processo = {"under_35": True, "titular2_data": {"name": "H", "birth_date": "1950-01-01"}}
+        assert processo_e_sub35(processo, HOJE) is True
+
+    def test_o_titular_1_continua_a_mandar(self):
+        """Contraprova: a regra ACRESCENTA uma condição, não a substitui.
+        Um 2.º titular jovem não torna elegível um 1.º de 60 anos."""
+        processo = {
+            "personal_data": {"birth_date": "1960-01-01"},
+            "titular2_data": {"name": "G", "birth_date": "2001-01-01"},
+        }
+        assert processo_e_sub35(processo, HOJE) is False
+
+    def test_na_POOL_a_regra_e_a_mesma(self):
+        """O `titular2_data` do cliente é o bloco que será COPIADO para o
+        processo: a regra estrita vale desde a triagem, senão a etiqueta
+        mudava de valor no momento em que o processo nasce."""
+        cliente = {
+            "dados_pessoais": {"birth_date": "2000-01-01"},
+            "titular2_data": {"name": "C", "birth_date": "1970-01-01"},
+        }
+        assert cliente_e_sub35(cliente, HOJE) is False
+        cliente["titular2_data"] = {"name": "B", "birth_date": "1999-01-01"}
+        assert cliente_e_sub35(cliente, HOJE) is True
+
+    def test_os_co_buyers_NAO_bloqueiam_e_e_deliberado(self):
+        """A estrutura dos `co_buyers` (nome, nif, cc, estado civil,
+        morada, contactos) não tem data de nascimento NENHUMA. Bloquear
+        por eles era bloquear por dados que não existem — ficaria sem
+        etiqueta todo o processo com mais de um comprador, sem forma de
+        confirmar porquê. Registado em D-17."""
+        processo = {
+            **self.JOVEM,
+            "co_buyers": [{"nome": "Velho", "nif": "999999999"}],
+        }
+        assert processo_e_sub35(processo, HOJE) is True
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -273,6 +392,47 @@ DOCUMENTOS = [
     ("marca manual", {"under_35": True}),
     ("marca manual falsa + jovem", {"idade_menos_35": False, "personal_data": {"birth_date": "2002-02-02"}}),
     ("futuro", {"personal_data": {"birth_date": "2206-01-01"}}),
+    # ── Lote 5: o 2.º titular ────────────────────────────────────────
+    ("t1 jovem + t2 jovem", {
+        "personal_data": {"birth_date": "2000-01-01"},
+        "titular2_data": {"name": "Beatriz", "birth_date": "1998-05-05"},
+    }),
+    ("t1 jovem + t2 VELHO", {
+        "personal_data": {"birth_date": "2000-01-01"},
+        "titular2_data": {"name": "Carlos", "birth_date": "1970-05-05"},
+    }),
+    ("t1 jovem + t2 sem data", {
+        "personal_data": {"birth_date": "2000-01-01"},
+        "titular2_data": {"name": "Dulce", "nif": "200000002"},
+    }),
+    ("t1 jovem + t2 só com nif", {
+        "personal_data": {"birth_date": "2000-01-01"},
+        "titular2_data": {"nif": "200000003"},
+    }),
+    ("t1 jovem + titular2_data VAZIO do portal", {
+        "personal_data": {"birth_date": "2000-01-01"},
+        "titular2_data": {"name": "", "nif": "", "documento_id": ""},
+    }),
+    ("t1 jovem + titular2_data {}", {
+        "personal_data": {"birth_date": "2000-01-01"},
+        "titular2_data": {},
+    }),
+    ("t1 jovem + t2 na fronteira (35)", {
+        "personal_data": {"birth_date": "2000-01-01"},
+        "titular2_data": {"nome": "Eva", "data_nascimento": "1990-10-03"},
+    }),
+    ("t1 jovem + t2 faz 36 hoje", {
+        "personal_data": {"birth_date": "2000-01-01"},
+        "titular2_data": {"nome": "Fábio", "data_nascimento": "1990-10-02"},
+    }),
+    ("t1 VELHO + t2 jovem", {
+        "personal_data": {"birth_date": "1960-01-01"},
+        "titular2_data": {"name": "Gil", "birth_date": "2001-01-01"},
+    }),
+    ("marca manual + t2 velho", {
+        "under_35": True,
+        "titular2_data": {"name": "Hugo", "birth_date": "1950-01-01"},
+    }),
 ]
 
 
