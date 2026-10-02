@@ -1,9 +1,12 @@
 /**
  * Monitor de Sinais Vitais do motor (Lote 4, ponto 14).
  *
- * O painel é READ-ONLY: o motor corre noutro processo (`powercell-worker`)
- * e um disparo a partir da web nunca lá chegaria. Um botão que não faz
- * nada é pior do que não existir.
+ * O painel DEIXOU de ser read-only no Lote 2 (ponto 1) — ver
+ * `EngineStatusPanel.forcar.test.jsx`. O que aqui se afirmava («não
+ * oferece nenhuma acção») foi INVERTIDO, não apagado: continua a valer
+ * que um job sem permissão do servidor não mostra botão nenhum, e é o
+ * SERVIDOR que decide (`pode_forcar`) — uma segunda lista no frontend
+ * divergiria da dele sem dar erro.
  *
  * A asserção mais importante deste ficheiro é a que distingue
  * DESACTIVADO de EM BAIXO. Em dev quase tudo está desligado de propósito
@@ -21,7 +24,10 @@ vi.mock("../../../services/api", () => ({
     if (api.erro) throw api.erro;
     return { data: api.resposta };
   }),
+  forcarExecucaoDeAutomatismo: vi.fn(async () => ({ data: { success: true } })),
 }));
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import EngineStatusPanel from "../EngineStatusPanel";
 
@@ -131,11 +137,22 @@ describe("O eletrocardiograma", () => {
     expect(within(linha).getByTestId("engine-last-run").textContent).toMatch(/—|nunca/i);
   });
 
-  it("não oferece nenhuma acção sobre o motor", async () => {
-    // Read-only: o disparo teria de atravessar a fronteira de processos.
+  it("sem autorização do servidor não oferece acção nenhuma", async () => {
+    // LEGADO INVERTIDO (Lote 2, ponto 1): o painel passou a ter acções, mas
+    // é o servidor que diz quais. Sem `pode_forcar`, nada de botão — e a
+    // decisão NÃO se reconstrói aqui, senão divergia da dele em silêncio.
+    api.resposta = {
+      jobs: [{ ...JOB_SAUDAVEL, pode_forcar: false,
+               motivo_sem_forcar: "O job está desativado neste ambiente." }],
+      resumo: { total: 1, com_problema: 0, desactivados: 1, saudaveis: 0 },
+      gerado_em: "2026-09-23T12:00:00+00:00",
+    };
     render(<EngineStatusPanel />);
     await screen.findByText("Sincronização de e-mail (IMAP)");
-    expect(screen.queryByRole("button", { name: /correr|executar|forçar/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /forçar/i })).toBeNull();
+    // E diz PORQUÊ: um botão em falta sem explicação manda o utilizador
+    // procurar o que não existe.
+    expect(screen.getByText(/desativado neste ambiente/i)).toBeTruthy();
   });
 
   it("uma falha a ler o estado não deixa o painel em branco", async () => {

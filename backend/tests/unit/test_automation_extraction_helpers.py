@@ -38,7 +38,11 @@ def test_automation_api_export_run_entrypoints():
 def test_automation_router_is_thin_stubs_only():
     routes_path = Path(__file__).resolve().parents[2] / "routes" / "automation.py"
     text = routes_path.read_text()
-    assert text.count("return await run_") >= 7
-    assert len(text.splitlines()) < 110
+    assert text.count("return await run_") >= 8
+    # O tecto subiu com o endpoint de execução forçada (Lote 2, ponto 1) e o
+    # seu docstring. A propriedade que importa é a de baixo — zero lógica no
+    # ficheiro de rotas; a contagem de linhas é só um indício, e apertá-la
+    # obrigaria a tirar a explicação de PORQUE é que o endpoint existe.
+    assert len(text.splitlines()) < 160
     assert "VALID_TRIGGERS" not in text
     assert "create_task" not in text

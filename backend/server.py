@@ -717,62 +717,16 @@ async def root_health():
 # ====================================================================
 # BACKGROUND JOB MONITOR - Detecção automática de jobs stuck (P2)
 # ====================================================================
-async def send_stuck_job_email(stuck_jobs: list):
-    """Enviar email quando jobs ficam stuck."""
-    try:
-        # Buscar configuração de email do sistema
-        config = await db.system_config.find_one({"type": "email_notifications"})
-        if not config or not config.get("enabled"):
-            logger.info("Notificações por email desactivadas")
-            return
-        
-        admin_emails = config.get("admin_emails", [])
-        if not admin_emails:
-            # Buscar emails de admins
-            from services.role_query import deep_role_filter
-            admins = await db.users.find(deep_role_filter("admin"), {"email": 1}).to_list(10)
-            admin_emails = [a["email"] for a in admins if a.get("email")]
-        
-        if not admin_emails:
-            logger.warning("Nenhum email de admin configurado para notificações")
-            return
-        
-        # Construir mensagem
-        job_details = "\n".join([
-            f"- {job.get('name', job.get('id', 'N/A'))} ({job.get('job_type', 'desconhecido')})"
-            for job in stuck_jobs[:10]
-        ])
-        
-        subject = f"⚠️ {len(stuck_jobs)} Jobs Bloqueados Detectados - CRM"
-        body = f"""
-Olá,
-
-O sistema detectou {len(stuck_jobs)} job(s) bloqueado(s) que foram automaticamente marcados como falhados.
-
-Jobs afectados:
-{job_details}
-
-Por favor verifique a página de Background Jobs para mais detalhes.
-
----
-Esta é uma notificação automática do CRM.
-        """.strip()
-        
-        # Tentar enviar email usando o serviço existente
-        from services.email_service import send_email
-        for email in admin_emails[:3]:  # Máximo 3 destinatários
-            try:
-                await send_email(
-                    to_email=email,
-                    subject=subject,
-                    body=body
-                )
-                logger.info(f"Email de jobs stuck enviado para {email}")
-            except (IOError, OSError, ValueError, ConnectionError) as email_err:
-                logger.warning(f"Falha ao enviar email para {email}: {email_err}")
-                
-    except (IOError, OSError, ValueError, ConnectionError, KeyError) as email_global_err:
-        logger.error(f"Erro ao enviar emails de jobs stuck: {email_global_err}")
+# O varrimento e o aviso por email vivem em `services/background_job_sweep.py`
+# desde o Lote 2 (ponto 1): estavam dentro do `while` deste ficheiro, logo não
+# eram chamáveis, e o botão «Forçar Execução» do painel precisa de UMA função —
+# a alternativa era uma segunda cópia do ciclo, a divergir sem dar erro.
+# Reexportados para não quebrar quem os importe daqui.
+from services.background_job_sweep import (  # noqa: E402
+    _tratar_jobs_bloqueados,
+    send_stuck_job_email,
+    varrer_jobs_bloqueados,
+)
 
 
 async def background_job_monitor():
@@ -787,99 +741,27 @@ async def background_job_monitor():
     4. Regista no log
     """
     import asyncio
-    from datetime import timedelta
-    
-    STUCK_THRESHOLD_HOURS = 2  # Jobs sem update há mais de 2h são considerados stuck
+
     CHECK_INTERVAL_SECONDS = 1800  # Verificar a cada 30 minutos
-    
+
     logger.info("🔍 Background Job Monitor iniciado - verificação a cada 30 minutos")
-    
-    from services.job_heartbeat import heartbeat
+
+    from services.job_executors import executar_job
 
     while True:
         try:
             await asyncio.sleep(CHECK_INTERVAL_SECONDS)
 
-            # Monitor de Sinais Vitais (ponto 14): o batimento embrulha o
-            # TRABALHO, não corre ao lado dele — senão registava "ok" para
-            # um ciclo que rebentou a seguir. Vai para uma colecção
-            # partilhada porque a API não vê a memória deste processo,
-            # muito menos a do worker.
-            async with heartbeat("background_job_monitor",
-                                 interval_seconds=CHECK_INTERVAL_SECONDS):
-                cutoff_time = datetime.now(timezone.utc) - timedelta(hours=STUCK_THRESHOLD_HOURS)
-                cutoff_iso = cutoff_time.isoformat()
-
-                # Buscar jobs stuck na base de dados
-                stuck_jobs = await db.background_jobs.find({
-                    "status": {"$in": ["running", "pending"]},
-                    "updated_at": {"$lt": cutoff_iso}
-                }).to_list(100)
-
-                await _tratar_jobs_bloqueados(stuck_jobs, STUCK_THRESHOLD_HOURS)
-
-                # Higiene do ZSET de presença (Ponto 2). As LEITURAS já
-                # filtram por score, portanto isto não corrige nada — só
-                # impede o conjunto de crescer com todos os utilizadores
-                # que alguma vez se ligaram. Boleia neste ciclo em vez de
-                # um temporizador novo; corre em todos os workers e é
-                # idempotente (quem já saiu, já saiu).
-                try:
-                    from services.presenca import limpar_expirados
-
-                    saidos = await limpar_expirados()
-                    if saidos:
-                        logger.debug(
-                            f"[PRESENCA] {saidos} entrada(s) expirada(s) removida(s)"
-                        )
-                except Exception:
-                    pass
+            # O ciclo passa pelo MESMO executor que o botão «Forçar
+            # Execução» do painel (Lote 2, ponto 1) — e o executor é que
+            # embrulha o trabalho no batimento. Escrever o varrimento aqui
+            # e no endpoint dava duas definições de "correr este job", a
+            # divergir sem dar erro.
+            await executar_job("background_job_monitor")
 
         except (IOError, OSError, ValueError, KeyError) as monitor_err:
             logger.error(f"Erro no background job monitor: {monitor_err}")
 
-
-async def _tratar_jobs_bloqueados(stuck_jobs: list, STUCK_THRESHOLD_HOURS: int):
-    """Marca como falhados os jobs parados e avisa quem de direito.
-
-    Extraído do corpo do ciclo para o envelope do batimento não precisar
-    de indentar 50 linhas — e para o ciclo passar a ler-se de uma vez.
-    """
-    if stuck_jobs:
-        logger.warning(f"⚠️ Encontrados {len(stuck_jobs)} jobs bloqueados há mais de {STUCK_THRESHOLD_HOURS}h")
-        
-        job_ids = [job.get("id") for job in stuck_jobs]
-        
-        # Marcar como failed
-        await db.background_jobs.update_many(
-            {"id": {"$in": job_ids}},
-            {"$set": {
-                "status": "failed",
-                "error": f"Job marcado automaticamente como stuck após {STUCK_THRESHOLD_HOURS}h sem actividade",
-                "auto_cleaned_at": datetime.now(timezone.utc).isoformat()
-            }}
-        )
-        
-        # Criar notificação de sistema
-        for job in stuck_jobs:
-            try:
-                await db.system_notifications.insert_one({
-                    "type": "job_stuck",
-                    "severity": "warning",
-                    "title": "Job bloqueado detectado",
-                    "message": f"Job '{job.get('name', job.get('id'))}' foi automaticamente marcado como falhado após {STUCK_THRESHOLD_HOURS}h sem actividade.",
-                    "job_id": job.get("id"),
-                    "job_type": job.get("job_type"),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "read": False
-                })
-            except (IOError, OSError, ValueError) as notif_err:
-                logger.error(f"Erro ao criar notificação para job stuck: {notif_err}")
-        
-        # Enviar email para admins
-        await send_stuck_job_email(stuck_jobs)
-        
-        logger.info(f"✅ {len(stuck_jobs)} jobs stuck foram marcados como 'failed'")
 
 # ====================================================================
 # LOGGING / RASTREABILIDADE MIDDLEWARE

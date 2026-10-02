@@ -1,20 +1,46 @@
 /**
- * Monitor de Sinais Vitais do motor de background (Lote 4, ponto 14).
+ * Monitor de Sinais Vitais do motor de background (Lote 4, ponto 14) com
+ * execução forçada (Lote 2, ponto 1).
  *
- * READ-ONLY por desenho. O motor corre em DOIS processos distintos do
- * `render.yaml` — a aplicação (`powercell`) e o worker
- * (`powercell-worker`) — e um disparo a partir da web nunca chegaria ao
- * segundo. Um botão que não faz nada é pior do que não existir.
+ * PORQUE É QUE DEIXOU DE SER READ-ONLY
+ * A objecção original era: «o motor corre em DOIS processos distintos do
+ * `render.yaml` e um disparo a partir da web nunca chegaria ao segundo;
+ * um botão que não faz nada é pior do que não existir». A objecção está
+ * certa, e a fila persistente é a resposta a ela — não a sua negação:
+ *
+ *   · job da Aplicação  → corre no processo que serve o pedido;
+ *   · job do Processador → fica um PEDIDO que o worker reclama no ciclo
+ *     seguinte (até 1 minuto).
+ *
+ * A UI tem de DISTINGUIR os dois («correu» vs «pedido entregue»), senão
+ * é o botão a mentir — exactamente o que a objecção queria evitar. E um
+ * pedido que fica pendente é o diagnóstico: prova que o Processador não
+ * está a consumir a fila.
  *
  * O estado vem todo calculado do backend (`services/job_heartbeat.py`):
  * este componente apresenta, não decide. Em particular, a distinção
- * DESACTIVADO vs. EM BAIXO é regra de negócio e vive lá.
+ * DESACTIVADO vs. EM BAIXO é regra de negócio e vive lá, e QUEM PODE ser
+ * forçado também (`pode_forcar`/`motivo_sem_forcar`) — uma segunda lista
+ * aqui divergiria da do servidor sem dar erro.
  */
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock, PauseCircle, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Loader2,
+  PauseCircle,
+  Play,
+  XCircle,
+} from "lucide-react";
+import { toast } from "sonner";
 
-import { getAutomationsEngineStatus } from "../../services/api";
+import {
+  forcarExecucaoDeAutomatismo,
+  getAutomationsEngineStatus,
+} from "../../services/api";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { safeFormat } from "../../lib/utils";
 
@@ -50,9 +76,29 @@ function formatarDuracao(ms) {
   return `${(ms / 1000).toFixed(1)} s`;
 }
 
-function LinhaDeJob({ job }) {
+/**
+ * O estado do último pedido de execução forçada, em texto.
+ *
+ * Função PURA e exportada: é a frase que transforma «Nunca correu» num
+ * diagnóstico, e tem de poder ser afirmada sem montar o painel.
+ */
+export function descreverPedido(pedido) {
+  if (!pedido) return "";
+  if (pedido.estado === "pendente") {
+    return "Pedido à espera do Processador. Se não sair deste estado, o Processador não está a consumir a fila.";
+  }
+  if (pedido.estado === "a_processar") return "Pedido em execução no Processador.";
+  if (pedido.estado === "falhada") {
+    return `Pedido falhou${pedido.erro ? `: ${pedido.erro}` : "."}`;
+  }
+  if (pedido.estado === "concluida") return "Último pedido manual concluído.";
+  return "";
+}
+
+function LinhaDeJob({ job, onForcar, aForcar }) {
   const estado = ESTADOS[job.estado] || ESTADOS.nunca_correu;
   const { Icone } = estado;
+  const textoDoPedido = descreverPedido(job.pedido_pendente);
 
   return (
     <div
@@ -72,6 +118,24 @@ function LinhaDeJob({ job }) {
         ) : null}
         {job.erro ? (
           <p className="mt-1 text-xs text-destructive break-words">{job.erro}</p>
+        ) : null}
+        {textoDoPedido ? (
+          <p
+            data-testid={`engine-pedido-${job.chave}`}
+            className="mt-1 text-xs text-muted-foreground break-words"
+          >
+            {textoDoPedido}
+          </p>
+        ) : null}
+        {/* O motivo de não se poder forçar vai À VISTA: um botão em falta
+            sem explicação manda o utilizador procurar o que não existe. */}
+        {!job.pode_forcar && job.motivo_sem_forcar ? (
+          <p
+            data-testid={`engine-sem-forcar-${job.chave}`}
+            className="mt-1 text-xs text-muted-foreground"
+          >
+            {job.motivo_sem_forcar}
+          </p>
         ) : null}
       </div>
 
@@ -97,6 +161,27 @@ function LinhaDeJob({ job }) {
           <dd>{formatarDuracao(job.duracao_ms)}</dd>
         </div>
       </dl>
+
+      {/* Renderizado só quando `pode_forcar` — e é o servidor que decide
+          (um job desativado não se força, e o CDC não tem ciclo). Um botão
+          desenhado e desativado por CSS continua acessível ao teclado. */}
+      {job.pode_forcar ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0 self-start"
+          disabled={aForcar}
+          onClick={() => onForcar(job)}
+        >
+          {aForcar ? (
+            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <Play className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          Forçar Execução
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -105,6 +190,9 @@ export default function EngineStatusPanel() {
   const [dados, setDados] = useState(null);
   const [erro, setErro] = useState(false);
   const [aCarregar, setACarregar] = useState(true);
+  // A chave do job em execução, e não um booleano: com um booleano, clicar
+  // num job desativava o botão de TODOS.
+  const [aForcar, setAForcar] = useState(null);
 
   const carregar = useCallback(async () => {
     try {
@@ -123,6 +211,27 @@ export default function EngineStatusPanel() {
   useEffect(() => {
     carregar();
   }, [carregar]);
+
+  const forcar = useCallback(
+    async (job) => {
+      setAForcar(job.chave);
+      try {
+        const res = await forcarExecucaoDeAutomatismo(job.chave);
+        // A mensagem vem do servidor, que é quem sabe qual dos dois
+        // caminhos aconteceu. Escrevê-la aqui obrigava a UI a saber em que
+        // processo vive cada job — uma segunda cópia dessa regra.
+        toast.success(res.data?.mensagem || `«${job.nome}» accionado.`);
+      } catch {
+        // O interceptor já mostra o erro; aqui não se duplica o toast.
+        // Mas o painel TEM de recarregar à mesma: um pedido que ficou
+        // registado antes da falha continua a ser informação.
+      } finally {
+        setAForcar(null);
+        await carregar();
+      }
+    },
+    [carregar],
+  );
 
   if (aCarregar) {
     return <p className="py-6 text-sm text-muted-foreground">A ler o estado do motor…</p>;
@@ -155,7 +264,12 @@ export default function EngineStatusPanel() {
       </CardHeader>
       <CardContent>
         {jobs.map((job) => (
-          <LinhaDeJob key={job.chave} job={job} />
+          <LinhaDeJob
+            key={job.chave}
+            job={job}
+            onForcar={forcar}
+            aForcar={aForcar === job.chave}
+          />
         ))}
       </CardContent>
     </Card>

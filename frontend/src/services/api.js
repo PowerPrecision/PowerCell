@@ -1606,6 +1606,20 @@ export const deleteAutomationRule = (id) => api.delete(`/admin/automation/rules/
 export const getAutomationsEngineStatus = () => api.get("/automations");
 
 /**
+ * Corre um automatismo agora (Lote 2, ponto 1).
+ *
+ * A resposta traz `modo`: `executado_agora` (job do processo web, correu
+ * já) ou `pedido_ao_worker` (job do Processador, ficou um pedido na fila
+ * que é reclamado no ciclo seguinte). A UI tem de distinguir os dois —
+ * dizer "correu" a um pedido que só foi entregue é o botão a mentir.
+ *
+ * Vai por Axios como todo o resto: um `fetch` cru perderia o
+ * `X-Company-Id`/`X-Active-Role` que o interceptor injecta.
+ */
+export const forcarExecucaoDeAutomatismo = (chave) =>
+  api.post(`/automations/${encodeURIComponent(chave)}/executar`);
+
+/**
  * Empresas do âmbito do utilizador (a sua REDE), paginadas.
  *
  * O `page`/`size` fecha o tecto de 200 que truncava em silêncio: à

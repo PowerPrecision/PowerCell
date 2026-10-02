@@ -429,14 +429,14 @@ async def _send_documentation_email_impl(
     
     # Validar destinatários contra contas ativas e simulações
     financial_data = process.get("financial_data", {}) or {}
-    _bancos_raw = financial_data.get("bancos_creditos", []) or []
-    # bancos_creditos pode ser [{banco, valor}] (novo) ou ["CGD"] (legacy)
-    bancos_creditos = []
-    for item in _bancos_raw:
-        if isinstance(item, dict):
-            bancos_creditos.append(item.get("banco", ""))
-        else:
-            bancos_creditos.append(item)
+    # Os nomes dos bancos com crédito saem do ponto único (Lote 2, ponto 3):
+    # `bancos_creditos` pode ser [{banco, valor}] ou ["CGD"], e a IA escreve
+    # os seus em `creditos_ativos` com a chave `instituicao` — esta cópia
+    # local só conhecia a primeira forma da primeira origem, pelo que um
+    # banco extraído pela IA não bloqueava o envio.
+    from services.financial_bank_sync import nomes_de_bancos_com_credito
+
+    bancos_creditos = nomes_de_bancos_com_credito(financial_data)
     bancos_simulacoes = financial_data.get("bancos_simulacoes", []) or []
     
     def normalize_bank_name(name):

@@ -49,6 +49,24 @@ except ImportError as e:
 shutdown_event = asyncio.Event()
 
 
+def _jobs_do_processador() -> dict:
+    """Os jobs deste processo e o intervalo de cada um, em segundos.
+
+    DERIVADO de `job_heartbeat.JOBS_DECLARADOS` (Lote 2, ponto 1). Os
+    números estavam escritos à mão aqui (3600/1800/600) **e** lá — duas
+    cópias da mesma cadência, que divergem na primeira vez que alguém
+    afinar uma delas, e aí o painel anuncia um horário que não é o que
+    este laço cumpre. A ordem é a do registo declarado.
+    """
+    from services.job_heartbeat import JOBS_DECLARADOS
+
+    return {
+        job["chave"]: int(job.get("interval_seconds") or 0)
+        for job in JOBS_DECLARADOS
+        if job.get("processo") == "worker" and int(job.get("interval_seconds") or 0) > 0
+    }
+
+
 async def process_task(task: dict):
     """
     Processa uma tarefa individual da fila.
@@ -138,8 +156,13 @@ async def worker_loop():
     
     while not shutdown_event.is_set():
         try:
-            # Buscar próxima tarefa pendente
-            task = await task_queue.get_next_task()
+            # Buscar próxima tarefa pendente. `excluir_tipos` é o par
+            # complementar do `tipos` que o `scheduler_loop` usa: os dois
+            # laços consomem a MESMA fila, e sem o filtro cada um reclamava
+            # tarefas que não sabe tratar e gastava-lhes as tentativas.
+            from services.task_queue_mongo import TIPO_FORCAR_JOB
+
+            task = await task_queue.get_next_task(excluir_tipos=[TIPO_FORCAR_JOB])
             
             if task:
                 await process_task(task)
@@ -154,221 +177,132 @@ async def worker_loop():
             await asyncio.sleep(5)  # Esperar antes de tentar novamente
 
 
-async def run_scheduled_tasks():
-    """
-    Executa as tarefas agendadas (carrega o serviço apenas quando necessário).
-    LAZY LOADING: O módulo pesado scheduled_tasks só é carregado aqui.
-    BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE EXECUÇÃO.
-    """
-    # KILL SWITCH — SÓ PRODUÇÃO PERMITE TAREFAS AGENDADAS (proteção RAM em DEV)
-    import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        logger.info("[run_scheduled_tasks] BLOCKED — ENVIRONMENT != production")
-        return
-
-    try:
-        # LAZY IMPORT: Carrega o serviço de tarefas agendadas
-        from services.scheduled_tasks import ScheduledTasksService
-        
-        service = ScheduledTasksService()
-        await service.run_all_tasks()
-    except Exception as e:
-        logger.error(f"Erro ao executar tarefas agendadas: {e}")
-
-
-async def _bater_webmail_worker_sync():
-    """Regista o batimento da rede de segurança de webmail (ponto 14).
-
-    O bloco de sync deste laço tem ~120 linhas e o seu próprio `try`, por
-    isso o batimento fica num envelope à parte em vez de reindentar tudo.
-    Marca o ciclo como iniciado e terminado — o resultado detalhado de
-    cada caixa continua a ir para o log, como sempre.
-    """
-    from services.job_heartbeat import heartbeat
-
-    async with heartbeat("webmail_worker_sync", interval_seconds=600):
-        pass
+# `run_scheduled_tasks` foi REMOVIDA no Lote 2 (ponto 1), não desligada: o
+# trabalho é agora `job_executors.EXECUTORES["scheduled_tasks"]`, que o laço
+# e o botão «Forçar Execução» partilham. O kill switch de produção que ela
+# tinha passou a viver em `executar_job` (via `job_esta_activo`), uma guarda
+# única em vez de um `if` por job — que é como se esquece um. Deixá-la aqui
+# a chamar o mesmo serviço era a segunda cópia que este lote existe para
+# eliminar, e código adormecido é um convite a religá-lo.
 
 
 async def scheduler_loop():
+    """Laço das tarefas agendadas do Processador.
+
+    REESTRUTURADO no Lote 2 (ponto 1). O que estava mal não era a
+    cadência — era a ESTRUTURA:
+
+      · Os três jobs partilhavam UM `try`. O `task_queue.add_task` do
+        matching não existe (`AttributeError`), a excepção subia por
+        dentro do `async with heartbeat(...)` e saltava tudo o que vinha
+        depois. O bloco de sincronização de webmail estava DEPOIS, logo
+        **nunca era alcançado** — e é por isso, e não por o Processador
+        estar em baixo, que `webmail_worker_sync` aparecia como «Nunca
+        correu» no painel.
+
+      · `last_runs[...]` era escrito DEPOIS do trabalho. Um job que
+        falhasse não registava a passagem e voltava a tentar 60 segundos
+        depois, para sempre, em vez de esperar o seu intervalo.
+
+    Hoje cada job é independente: um `try` por job (`_correr_job`), o
+    relógio avança mesmo quando o trabalho falha, e o trabalho em si vem
+    de `job_executors.EXECUTORES` — o MESMO registo que o botão «Forçar
+    Execução» do painel usa. Duas definições de "correr este job"
+    divergiriam sem dar erro.
+
+    BLOQUEIO RADICAL: só produção permite o agendador.
     """
-    Loop para tarefas agendadas (Cron jobs).
-    BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE O SCHEDULER.
-    """
-    # KILL SWITCH — SÓ PRODUÇÃO PERMITE SCHEDULER LOOP (proteção RAM em DEV)
     import os
     if os.environ.get('ENVIRONMENT') != 'production':
         logger.info("[scheduler_loop] BLOCKED — ENVIRONMENT != production — scheduler will NOT start")
         return
 
     logger.info("Agendador iniciado.")
-    
-    # Horários da última execução
-    last_runs = {
-        "scheduled": 0,
-        "matching": 0,
-        "webmail": 0
-    }
-    
+
+    # `last_runs` vive na memória DESTE processo e a API nunca o vê — o
+    # batimento (colecção partilhada) é a única coisa que atravessa a
+    # fronteira entre o worker e a web.
+    jobs = _jobs_do_processador()
+    last_runs = {chave: 0.0 for chave in jobs}
+
     while not shutdown_event.is_set():
         try:
-            now = time.time()
-            
-            # Monitor de Sinais Vitais (ponto 14): `last_runs` vive na
-            # memória DESTE processo e a API nunca o vê — o batimento é a
-            # única coisa que atravessa a fronteira entre o worker e a web.
-            from services.job_heartbeat import heartbeat
+            agora = time.time()
 
-            # Executar tarefas agendadas (a cada 1 hora)
-            if now - last_runs["scheduled"] > 3600:
-                logger.info("Executando tarefas agendadas...")
-                async with heartbeat("scheduled_tasks", interval_seconds=3600):
-                    await run_scheduled_tasks()
-                last_runs["scheduled"] = now
+            for chave, intervalo in jobs.items():
+                if agora - last_runs[chave] <= intervalo:
+                    continue
+                # O relógio avança ANTES do trabalho: um job que rebente
+                # tem de esperar o seu intervalo, não voltar dentro de 60s.
+                last_runs[chave] = agora
+                await _correr_job(chave)
 
-            # Matching automático de Leads (a cada 30 minutos)
-            # Nota: O import pesado só acontece quando a tarefa for processada
-            if now - last_runs["matching"] > 1800:
-                logger.info("Agendando matching automático...")
-                async with heartbeat("lead_matching", interval_seconds=1800):
-                    await task_queue.add_task("match_leads", {})
-                last_runs["matching"] = now
+            await _atender_pedidos_de_execucao()
 
-            # Sincronização Webmail — rede de segurança no worker.
-            # O sync do processo API (via run_email_auto_sync, ~5 min desde
-            # o Lote 5) é o que emite o WebSocket new_email; este ciclo de
-            # 10 min cobre o caso de o worker primário da API estar em baixo.
-            # As duas cadências estão deliberadamente desencontradas para
-            # não caírem em cima uma da outra no mesmo servidor IMAP.
-            # 🛑 Só em produção (ENVIRONMENT=production)
-            if os.environ.get('ENVIRONMENT') == 'production' and now - last_runs["webmail"] > 600:
-                logger.info("Agendando sincronização de webmail por utilizador...")
-                await _bater_webmail_worker_sync()
-                try:
-                    from services.email_service import sync_user_emails
-                    from services.user_email_config_service import get_active_email_configs_for_sync
-                    from services.email_config_resolver import resolve_email_config_for_sync
-
-                    # 1. Sync de caixas pessoais (multi-empresa)
-                    # ----------------------------------------------------------------
-                    # SUBSTITUI a query legacy db.users.find({"email_config.is_configured": True})
-                    # que só encontrava configs flat embebidas. Agora consultamos a coleção
-                    # canónica user_email_configs (uma config por par user+empresa), que
-                    # suporta a arquitetura multi-empresa e as configs guardadas via
-                    # Perfil > Configuração de Webmail.
-                    # ----------------------------------------------------------------
-                    active_configs = await get_active_email_configs_for_sync(limit=50)
-                    if active_configs:
-                        for cfg in active_configs:
-                            user_id = cfg["user_id"]
-                            company_id = cfg["company_id"]
-                            auth_method = cfg.get("auth_method", "imap_smtp")
-                            try:
-                                # OAuth pessoal ainda não tem sync function própria
-                                # (só IMAP/SMTP via sync_user_emails). Saltar com log
-                                # debug — não é regressão (legacy também não suportava).
-                                if auth_method == "google_oauth":
-                                    logger.debug(
-                                        f"Webmail sync: user={user_id} company={company_id} "
-                                        f"usa Google OAuth — sync pessoal OAuth ainda não implementada (a saltar)"
-                                    )
-                                    continue
-
-                                # Resolver a config canónica para este par user+empresa
-                                # (passa a saber exatamente que credenciais usar)
-                                resolved = await resolve_email_config_for_sync(
-                                    user_id,
-                                    active_company_id=company_id,
-                                    account_id=cfg.get("id"),
-                                )
-                                if not resolved:
-                                    logger.debug(
-                                        f"Webmail sync: config não resolúvel para "
-                                        f"user={user_id} company={company_id} — a saltar"
-                                    )
-                                    continue
-
-                                result = await sync_user_emails(
-                                    user_id,
-                                    days=30,
-                                    max_emails=50,
-                                    resolved_config=resolved,
-                                )
-                                synced = result.get("total_synced", 0)
-                                if synced > 0:
-                                    logger.info(
-                                        f"Webmail sync user={user_id} company={company_id}: "
-                                        f"{synced} novos emails"
-                                    )
-                                # Se houve policy violation, parar de iterar contas
-                                if result.get("error") and any(kw in result["error"].lower() for kw in [
-                                    "policy violation", "temporarily refused", "rate limit",
-                                    "too many", "blocked", "connection limit", "abuse"
-                                ]):
-                                    logger.warning(
-                                        f"Webmail sync: policy violation para "
-                                        f"user={user_id} company={company_id} — a parar iteração"
-                                    )
-                                    break
-                            except Exception as user_err:
-                                err_str = str(user_err)
-                                if any(kw in err_str.lower() for kw in [
-                                    "policy violation", "temporarily refused", "rate limit",
-                                    "too many", "blocked", "connection limit", "abuse"
-                                ]):
-                                    logger.warning(
-                                        f"Webmail sync: policy violation para "
-                                        f"user={user_id} company={company_id} — a parar iteração: {err_str[:200]}"
-                                    )
-                                    break
-                                logger.warning(
-                                    f"Erro ao sincronizar webmail do user={user_id} "
-                                    f"company={company_id}: {user_err}"
-                                )
-                            # Delay entre contas para evitar ligações IMAP simultâneas (3s)
-                            await asyncio.sleep(3)
-                        logger.info(
-                            f"Sincronização webmail pessoal concluída "
-                            f"({len(active_configs)} configs multi-empresa)"
-                        )
-                    else:
-                        logger.debug("Nenhuma config de email pessoal ativa encontrada em user_email_configs")
-
-                    # 2. Sync de caixas partilhadas via Gmail API (ex: indexacao)
-                    from services.gmail_api_service import gmail_api_sync_to_db
-                    shared_configs = await db.shared_role_email_configs.find(
-                        {
-                            "is_configured": True,
-                            "google_refresh_token": {"$ne": "", "$exists": True},
-                        },
-                        {"role": 1, "email_address": 1},
-                    ).to_list(10)
-                    if shared_configs:
-                        for shared_cfg in shared_configs:
-                            role = shared_cfg.get("role")
-                            try:
-                                result = await gmail_api_sync_to_db(role=role, days=3, max_emails=100)
-                                if result.get("success"):
-                                    synced = result.get("total_synced", 0)
-                                    if synced > 0:
-                                        logger.info(f"Gmail API sync role '{role}': {synced} novos emails")
-                                else:
-                                    logger.warning(f"Gmail API sync role '{role}' falhou: {result.get('error')}")
-                            except Exception as shared_err:
-                                logger.warning(f"Erro ao sincronizar Gmail API do role '{role}': {shared_err}")
-                        logger.info(f"Sincronização Gmail API concluída ({len(shared_configs)} roles)")
-
-                except Exception as e:
-                    logger.error(f"Erro na sincronização de webmail: {e}")
-                last_runs["webmail"] = now
-            
             await asyncio.sleep(60)  # Verificar a cada minuto
-            
+
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"Erro no agendador: {e}")
             await asyncio.sleep(60)
+
+
+async def _correr_job(chave: str) -> None:
+    """Corre um job do Processador, isolado dos outros.
+
+    O `try` é POR JOB de propósito: com um `try` partilhado, o primeiro a
+    rebentar levava os seguintes consigo — foi exactamente assim que a
+    sincronização de webmail deixou de correr.
+    """
+    from services.job_executors import executar_job
+
+    logger.info("[Agendador] A correr %s...", chave)
+    try:
+        await executar_job(chave)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        # O batimento já registou `erro` e o painel mostra-o; aqui fica o
+        # log para quem está a ler a consola do Render.
+        logger.error("[Agendador] Job %s falhou: %s", chave, e, exc_info=True)
+
+
+async def _atender_pedidos_de_execucao() -> None:
+    """Reclama os pedidos de «Forçar Execução» vindos do painel.
+
+    A web não consegue invocar este processo (são serviços distintos do
+    `render.yaml`), logo o painel deixa um pedido na fila persistente e é
+    aqui que ele é atendido. Um pedido que fique pendente PROVA que este
+    laço não está a correr — é esse o valor de diagnóstico que o painel
+    não tinha.
+    """
+    from services.task_queue_mongo import (
+        TIPO_FORCAR_JOB,
+        complete_task,
+        fail_task,
+        get_next_task,
+    )
+
+    for _ in range(5):  # tecto por ciclo: não deixa o laço preso na fila
+        # `tipos` e não um filtro depois de reclamar: reclamar uma tarefa do
+        # `worker_loop` para a devolver gastava-lhe uma tentativa, e três
+        # ciclos matavam-na sem ela nunca ter chegado a quem a sabe correr.
+        tarefa = await get_next_task(tipos=[TIPO_FORCAR_JOB])
+        if not tarefa:
+            return
+        task_id = tarefa.get("id")
+        chave = (tarefa.get("payload") or {}).get("chave") or ""
+        logger.info("[Agendador] Pedido de execução forçada: %s", chave)
+        try:
+            from services.job_executors import executar_job
+
+            await executar_job(chave)
+            await complete_task(task_id, result={"chave": chave})
+        except Exception as e:
+            logger.error("[Agendador] Execução forçada de %s falhou: %s", chave, e)
+            await fail_task(task_id, error=str(e))
+
 
 
 async def cleanup_temp_files():

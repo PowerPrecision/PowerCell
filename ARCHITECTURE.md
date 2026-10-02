@@ -7004,3 +7004,243 @@ respostas da API; corrigir um e esquecer o outro é a forma do "Menu e
 rotas têm de concordar" — divergem sem dar erro e o sintoma volta pelo
 outro caminho. Há teste a afirmar que a câmara continua desligada e que o
 `media-src` não abriu para `*` nem `http:`.
+
+## O motor que nunca consumiu a fila, e um horário que vivia na docstring (Out 2026)
+
+Lote 2. Quatro pontos, e o primeiro explicou um sintoma que apontava para
+o lado errado.
+
+### O «Nunca correu» não era um worker em baixo
+
+O painel «Estado do Motor» mostrava as tarefas do Processador como
+**Nunca correu**, e a hipótese natural — a que o próprio pedido trazia —
+era "possível worker inativo". Não era.
+
+`worker.py` chama QUATRO métodos que não existem em `TaskQueueService`
+(que é ARQ/Redis e não tem `__getattr__`):
+
+    get_next_task()   complete_task()   fail_task()   add_task()
+
+Cada chamada levanta `AttributeError`. As consequências:
+
+1. **`worker_loop` rebentava a cada 5 segundos, desde sempre.** O
+   despachante `process_task` — scrape de imóveis, matching de leads,
+   envio de email — nunca correu uma única vez.
+
+2. **No `scheduler_loop`, a excepção saltava o resto do ciclo.** O
+   `add_task` do matching estava DENTRO do `async with
+   heartbeat("lead_matching")`; a excepção subia, o batimento marcava
+   `erro` e re-levantava, e o `except` do laço apanhava-a. O bloco de
+   sincronização de webmail vinha **depois**, logo nunca era alcançado.
+
+   É essa a origem do «Nunca correu»: uma linha inalcançável por uma
+   excepção lançada três linhas acima. Os dois estados do painel diziam
+   a verdade e nenhum deles dizia isto.
+
+3. **`last_runs[...]` era escrito DEPOIS do trabalho**, pelo que um job
+   que falhasse não registava a passagem e voltava a tentar dentro de 60
+   segundos, para sempre, em vez de esperar o seu intervalo.
+
+**A ironia documentada:** a docstring do `client_portal_email.py` afirma,
+a explicar outro bugfix, que «o worker de produção arranca com `python
+worker.py` (loop próprio que processa a **fila Mongo** por `task_type`)».
+Essa fila Mongo nunca foi escrita. A crença estava registada em dois
+sítios e era falsa nos dois — e nenhum deles verificou se o método
+existia. Mais um caso de **a descrição e o comportamento divergirem, com
+quem lê a acreditar na descrição** (a forma da cascata de `||` sobre
+campos inexistentes).
+
+### A fila, e três decisões que não se podem perder
+
+`services/task_queue_mongo.py`. Mongo e não ARQ porque o `enqueue` do ARQ
+funciona mas **não tem consumidor** (`arq worker.config.WorkerSettings`
+nunca é lançado) — uma fila que aceita tudo e entrega nada é o que já
+matou o email de boas-vindas do Portal em silêncio.
+
+1. **O backoff (`disponivel_em`) não é luxo.** O `worker_loop` só dorme
+   quando NÃO há tarefa. Uma tarefa que falhe sempre e volte logo a
+   `pendente` punha o laço a girar a 100% de CPU: a correcção teria
+   trocado um worker parado por um worker a arder.
+2. **A reclamação é ATÓMICA** (`find_one_and_update`), e isso é afirmado
+   **um nível abaixo**, sobre os parâmetros que saem — o duplo de teste é
+   single-thread e reimplementa o escolhe-e-actualiza, logo passaria
+   também com um `find_one` seguido de `update_one`.
+3. **Uma tarefa reclamada e nunca terminada volta à fila.** Um deploy a
+   meio deixa-a `a_processar` para sempre. A recuperação corre no caminho
+   da própria leitura, para não precisar de um laço novo que também
+   pudesse estar em baixo.
+
+### «Forçar Execução»: a objecção estava certa, e a fila é a resposta
+
+O painel era read-only e dizia porquê: «um disparo manual a partir da web
+não chegaria ao processo worker (são processos distintos do
+`render.yaml`), e um botão que não faz nada é pior do que não existir».
+
+A objecção está certa. A fila responde-lhe sem a negar:
+
+* job do processo **web** → corre no processo que serve o pedido;
+* job do **Processador** → fica um PEDIDO que o `scheduler_loop` reclama
+  no ciclo seguinte.
+
+E a resposta diz **qual dos dois** aconteceu. "A correr" e "pedido
+entregue" são estados diferentes, e dar o segundo pelo primeiro seria o
+botão a mentir — exactamente o que a objecção queria evitar.
+
+**O pedido que ninguém reclama é o diagnóstico.** Deixa de ser preciso
+adivinhar entre "o job falhou" e "o processo não está lá": um pedido
+pendente **prova** que ninguém está a ouvir. É a mesma razão por que o
+`JOBS_DECLARADOS` existe — o job mais avariado é o que nunca arrancou, e
+tem de ser o mais visível.
+
+O que «correr o job» significa vive em `job_executors.EXECUTORES`, UM
+registo, que o laço e o botão partilham. Duas definições divergiriam sem
+dar erro, e aí o diagnóstico passava a depender de qual delas correu.
+Inventário nos dois sentidos contra `JOBS_DECLARADOS`: um job declarado
+sem executor dá um botão que rebenta; um executor sem job declarado é
+código morto.
+
+Duas extracções foram necessárias para isso, e cada uma corrigiu um
+defeito pelo caminho:
+
+* `services/background_job_sweep.py` — o varrimento estava dentro do
+  `while` do `server.py`, logo não era chamável;
+* `services/webmail_worker_sync.py` — e aqui o defeito era maior: o
+  `_bater_webmail_worker_sync` abria e fechava o batimento com um `pass`
+  e o trabalho corria **a seguir, fora do envelope**. O painel dizia `ok`
+  a um ciclo em que todas as caixas podiam ter falhado, com duração de
+  microssegundos.
+
+**Um job desactivado não se força.** Guarda única em `executar_job` (via
+`job_esta_activo`) e não um `if` por executor — é assim que se esquece
+um, e o que se esquecesse aqui tocava em servidores de email REAIS em
+dev. Devolve 409 e não 403: não é falta de permissão, é o job estar
+desligado neste ambiente.
+
+### O horário que vivia na docstring (D-7 fechada)
+
+`send_weekly_ceo_report` abria com «Corre todas as Segundas-feiras às
+~06:00». A guarda real era, na íntegra:
+
+    if today.weekday() != 0:
+        return False
+
+E o `run_all_tasks` corre de **hora a hora**. Logo:
+
+1. **Não havia hora nenhuma.** O relatório saía à hora a que o
+   Processador tivesse arrancado. Um deploy às 14h punha o relatório
+   semanal a sair às 14h para sempre, com a docstring a prometer 06:00.
+2. **Saía 24 VEZES.** `weekday() == 0` é verdade durante as 24 horas da
+   segunda-feira e não havia marca de "já enviei esta semana". O
+   `send_weekly_ai_report` tem a mesma forma e o mesmo resultado.
+
+Um horário escrito só numa docstring não é um horário — é uma intenção.
+
+`services/relatorio_semanal_agenda.py`, e quatro detalhes:
+
+* **A marca é PERSISTIDA** (`db.job_schedule_marks`). O `last_runs` do
+  laço morre em cada reinício, e o Render reinicia por deploy, por OOM e
+  por manutenção — com a marca em memória, um reinício às 10h de
+  segunda-feira mandava o relatório outra vez.
+* **A semana é a semana ISO**, não "há mais de 7 dias": a segunda forma
+  faz o envio deslizar de dia a cada semana até sair à quarta.
+* **"A partir das" 06:00 e não "às"**: o ciclo é horário, logo a hora
+  exacta não é garantível. Uma igualdade (`hora == 6`) perdia a semana
+  inteira se o ciclo das 06h falhasse ou o processo estivesse a
+  reiniciar nesse minuto.
+* **A etiqueta do período segue a PERIODICIDADE** (dia / semana / mês). O
+  relatório de IA é configurável no painel de administração, e usar a
+  etiqueta semanal num relatório diário fazia-o sair uma vez por semana —
+  trocar 24 emails a mais por 6 a menos não é uma correcção.
+* **Falha FECHADA**: sem base de dados, assume que já enviou. O custo de
+  não enviar é um relatório em atraso, que se nota; o de enviar é um
+  ciclo horário a mandar 24 emails ao CEO, que é como se ensina alguém a
+  ignorar o relatório.
+
+A decisão de produto que fecha a D-7: o âmbito é **consolidado** (a
+Direcção quer o agregado das três empresas), e fica registado como a
+ÚNICA excepção deliberada ao isolamento por rede do Lote 4/5 — pelo que
+os destinatários têm de ser gente credenciada nas três empresas.
+
+### A regra que vivia num ecrã: Créditos Ativos → Contas Bancárias
+
+A sincronização existia — dentro do `executeSave` do
+`pages/ProcessDetails.js`. Corria quando um humano carregava em Gravar
+**naquela página**, e só então. Passavam ao lado a IA (que é quem
+preenche os créditos a partir do mapa de responsabilidades do Banco de
+Portugal — o caso mais comum), o `ai-apply-suggestions`, o `ai_bulk`, o
+motor financeiro e qualquer importação.
+
+É a lição do `assigned_to` noutro eixo: **a regra vivia num ecrã e não na
+escrita**, por isso era invisível para o trabalho que não passava por
+aquele botão. E não dava erro — a lista ficava só incompleta, que é o
+tipo de defeito que ninguém reporta.
+
+Havia TRÊS nomes para a mesma pergunta: `bancos_creditos` usa a chave
+`banco`, `creditos_ativos` (IA) usa `instituicao`, e o bloco do frontend
+só conhecia o primeiro. A mesma cópia incompleta estava no
+`email_documentation`, pelo que um banco extraído pela IA também não
+bloqueava o envio de documentação para ele.
+
+`services/financial_bank_sync.py` é o ponto único, ligado aos dois
+escritores reais, e **nunca remove** nada: uma conta inserida à mão sem
+crédito associado é informação legítima (a regra das tarefas órfãs do
+Lote 4). Devolve `None` quando não há alteração, para não carimbar
+`updated_at` nem encher a auditoria com diffs vazios.
+
+Detalhe do bloco antigo que vale guardar: ele mutava `financialData` em
+sítio **E** chamava `setFinancialData`. Era a MUTAÇÃO que o fazia
+funcionar (o `setState` é assíncrono e não chegaria a tempo do payload) —
+o código parecia idiomático e dependia do contrário.
+
+### A porta da frente estava fechada e a janela ao lado aberta
+
+`run_create_client` recusava um NIF/Email repetido com 409 estruturado
+desde o PACOTE 10. `run_update_client` **não verificava nada**: abrir um
+cliente, trocar o NIF para o de outro e gravar deixava dois clientes com
+o mesmo NIF, sem erro em sítio nenhum.
+
+A edição é a mais perigosa das duas, porque fabrica a colisão em cima de
+dados que já existem.
+
+`services/client_uniqueness.py` é a mesma função nas duas portas, e a
+peça que as distingue é o **`excluir_id`**: na edição o cliente casa
+consigo próprio, e sem ele gravar um cliente sem lhe tocar no NIF
+devolvia 409 contra o próprio registo. É o erro óbvio de quem copia a
+condição da criação para a edição, pelo que tem teste próprio nos dois
+sentidos — uma guarda que impede a edição de tudo é pior do que guarda
+nenhuma.
+
+Dois detalhes:
+
+* **Os dois ramos da procura.** O índice cego (`nif_hash`/`email_hash`)
+  apanha os registos migrados; o valor em claro apanha os antigos. Só o
+  hash deixava passar duplicados sobre os dados mais velhos da base.
+* **A edição verifica o que foi SUBMETIDO, nunca o resultado do merge.**
+  O valor em base está encriptado, e calcular o índice cego sobre um
+  criptograma dá um hash que nunca casa — a guarda passaria calada e
+  pareceria funcionar.
+
+O formulário **público** fica deliberadamente de fora (D-14): um 409 numa
+porta externa perde a lead em vez de a tratar, e o que ali faz sentido —
+reaproveitar o cliente existente — muda o fluxo de negócio.
+
+### O email «Documentação Recebida» passou a ser um recibo
+
+O gatilho já existia, ligado aos dois caminhos de upload, idempotente por
+processo e com fallback de SMTP. O que faltava era a **lista de nomes**:
+confirmava "toda a documentação" sem dizer qual. Uma confirmação que não
+enumera o que recebeu não serve de recibo — quem a lê não consegue
+detectar que faltou uma peça, que é a razão de se mandar a confirmação.
+
+Duas regras ficaram afirmadas em teste:
+
+* **Os nomes vão no CORPO, os ficheiros NUNCA em anexo.** Reenviar ao
+  cliente os documentos que ele acabou de submeter põe dados pessoais a
+  circular por email sem necessidade, e o Portal é onde eles vivem. Sem
+  teste, "juntar os anexos" é a melhoria óbvia que alguém faz a seguir.
+* **O nome do ficheiro é texto do CLIENTE**, logo conteúdo externo num
+  corpo HTML, logo leva escape.
+
+Os estados de "concluído" vêm de `document_portal_counts`, nunca de uma
+lista escrita no sítio novo: duas listas de estados divergem na primeira
+vez que aparecer um estado novo.

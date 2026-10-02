@@ -41,9 +41,17 @@ class TestDuplicateClient409:
     async def _run_create(self, fake_async_db, *, nome="Ana Novo", email="ana@novo.pt", nif=None):
         from models.client import ClientCreate
         from services import client_crud as mod
+        from services import client_uniqueness as unicidade
 
         payload = ClientCreate(nome=nome, email=email, nif=nif, fonte="staff_created")
+        # `client_uniqueness` TAMBÉM tem de ser patchado (Lote 2, ponto 4): a
+        # verificação de duplicados saiu do `client_crud` para o ponto único
+        # partilhado com a edição, e cada módulo faz `from database import db`
+        # ao nível do módulo — logo tem a SUA referência ao proxy. Patchar só
+        # o `client_crud` deixava a guarda a consultar a base real (ver
+        # AGENTS.md: patchar cada módulo da cadeia).
         with patch.object(mod, "db", fake_async_db), \
+             patch.object(unicidade, "db", fake_async_db), \
              patch.object(mod, "encrypt_client_data", lambda d: d), \
              patch.object(mod, "decrypt_client_data", lambda d: d), \
              patch.object(mod, "s3_service", MagicMock()), \

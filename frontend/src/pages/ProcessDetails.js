@@ -1283,30 +1283,16 @@ const ProcessDetails = () => {
       const processUpdateData = {};
       const clientUpdateData = {};
       
-      // ── Sincronização Inteligente: Créditos Ativos → Contas Bancárias ──
-      // Quando o utilizador preenche "Créditos Ativos" (bancos_creditos),
-      // os bancos indicados são adicionados automaticamente a "Contas de
-      // Crédito Abertas" (tem_creditos_activos) se ainda não existirem.
-      if (Array.isArray(financialData.bancos_creditos) && financialData.bancos_creditos.length > 0) {
-        const creditBanks = financialData.bancos_creditos.map(item =>
-          typeof item === 'object' ? item.banco : item
-        ).filter(b => b); // extrair nomes dos bancos, ignorar vazios
-        
-        const existingAccounts = financialData.tem_creditos_activos || [];
-        const newAccounts = [...existingAccounts];
-        
-        for (const bank of creditBanks) {
-          if (!newAccounts.includes(bank)) {
-            newAccounts.push(bank);
-          }
-        }
-        
-        if (newAccounts.length !== existingAccounts.length) {
-          financialData.tem_creditos_activos = newAccounts;
-          setFinancialData({ ...financialData, tem_creditos_activos: newAccounts });
-        }
-      }
-      
+      // ── Créditos Ativos → Contas Bancárias: AGORA NO BACKEND ──────────
+      // A regra vivia aqui (Lote 2, ponto 3) e por isso só corria quando um
+      // humano carregava em Gravar NESTA página: a IA do mapa de
+      // responsabilidades, o motor financeiro e o `ai-apply-suggestions`
+      // passavam todos ao lado, e a lista ficava incompleta sem dar erro.
+      // Vive em `services/financial_bank_sync.py`, ligada à ESCRITA. Não
+      // repor aqui — duas cópias divergem, e o bloco antigo ainda mutava
+      // `financialData` em sítio (era a mutação, e não o `setFinancialData`,
+      // que o fazia chegar ao payload).
+
       // 1. LIMPAR DADOS
       const cleanedPersonalData = cleanPersonalDataForSubmit(personalData);
       const cleanedFinancialData = cleanFinancialDataForSubmit(financialData);

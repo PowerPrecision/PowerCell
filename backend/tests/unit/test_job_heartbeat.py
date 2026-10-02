@@ -171,10 +171,18 @@ class TestRegistoDeclarado:
         from services.job_heartbeat import JOBS_DECLARADOS
 
         raiz = Path(__file__).resolve().parents[2]
+        # O inventário de ficheiros tem de seguir o código: desde o Lote 2
+        # (ponto 1) os emissores passaram pelo registo único
+        # `job_executors.EXECUTORES`, e o sync de webmail do worker saiu do
+        # `worker.py` para o seu próprio serviço. Sem acrescentar os
+        # ficheiros aqui, este guarda ficava a afirmar sobre uma lista
+        # incompleta — que é o defeito que ele existe para apanhar.
         fontes = "\n".join(
             (raiz / nome).read_text("utf-8")
             for nome in ("server.py", "worker.py", "services/scheduled_tasks.py",
-                         "services/backup.py", "services/audit_cdc.py")
+                         "services/backup.py", "services/audit_cdc.py",
+                         "services/job_executors.py",
+                         "services/webmail_worker_sync.py")
         )
         for job in JOBS_DECLARADOS:
             assert f'"{job["chave"]}"' in fontes, (
@@ -367,9 +375,19 @@ class TestEndpointDeTelemetria:
         assert all(j["estado"] in {"nunca_correu", "desactivado"} for j in resposta["jobs"])
 
     @pytest.mark.asyncio
-    async def test_o_endpoint_e_de_LEITURA(self):
-        """Read-only por desenho: o motor corre noutro processo e um
-        disparo a partir da web nunca lá chegaria."""
+    async def test_o_endpoint_NAO_muda_configuracao(self):
+        """LEGADO INVERTIDO (Lote 2, ponto 1).
+
+        Isto afirmava "read-only por desenho: o motor corre noutro processo
+        e um disparo a partir da web nunca lá chegaria". A premissa está
+        certa e a fila persistente é a resposta a ela — um job do
+        Processador não é invocado, é PEDIDO.
+
+        O que continua a valer, e é o que aqui se afirma: o painel do motor
+        acciona ciclos e **não altera configuração**. Um PUT/PATCH/DELETE
+        aqui seria o painel a mudar o que o laço faz, e isso vive nas regras
+        de automação (`@router`, com outro prefixo e outra autorização).
+        """
         from pathlib import Path
 
         fonte = (
@@ -377,6 +395,10 @@ class TestEndpointDeTelemetria:
         ).read_text("utf-8")
         bloco = fonte[fonte.index("engine_router = APIRouter"):]
         bloco = bloco[: bloco.index("@router.") if "@router." in bloco else len(bloco)]
-        for verbo in ("@engine_router.post", "@engine_router.put",
-                      "@engine_router.delete", "@engine_router.patch"):
+        for verbo in ("@engine_router.put", "@engine_router.delete",
+                      "@engine_router.patch"):
             assert verbo not in bloco, f"o painel do motor expõe {verbo}"
+        # E o único POST é o de accionar — afirmado para que acrescentar um
+        # segundo POST (que seria outra coisa) obrigue a decidir aqui.
+        assert bloco.count("@engine_router.post") == 1
+        assert "/executar" in bloco

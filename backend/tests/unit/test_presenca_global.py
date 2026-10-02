@@ -524,8 +524,17 @@ class TestOsPontosDeLigacao:
         assert fonte.index("online_entre(") < fonte.index("for conv in")
 
     def test_a_higiene_do_zset_corre_num_ciclo_que_ja_existia(self):
-        fonte = self._fonte("server.py")
+        """O ciclo saiu do `server.py` para `services/background_job_sweep.py`
+        no Lote 2 (ponto 1) — era um bloco dentro de um `while`, logo não era
+        chamável, e o botão «Forçar Execução» do painel precisa de uma
+        função. A propriedade afirmada é a MESMA: a limpeza anda de boleia num
+        ciclo que já existe, em vez de ter temporizador próprio."""
+        fonte = self._fonte("services/background_job_sweep.py")
         assert "limpar_expirados" in fonte
+        # E continua a não poder derrubar o varrimento que a transporta.
+        assert fonte.index("limpar_expirados") > fonte.index("_tratar_jobs_bloqueados(")
+        # O `server.py` continua a ser quem a agenda, pelo executor.
+        assert "background_job_monitor" in self._fonte("server.py")
 
 
 class TestODirectorioDoChat:

@@ -3045,6 +3045,16 @@ def build_update_data_from_extraction(
             else:
                 update_data["ai_extracted_notes"] = new_notes
     
+    # === Créditos Ativos → Contas Bancárias (Lote 2, ponto 3) ===
+    # Aplicado no ÚNICO ponto de saída desta função, antes do log, para o
+    # log mostrar o que de facto vai ser gravado. É aqui que a IA do mapa
+    # de responsabilidades preenche `creditos_ativos` — o caso mais comum,
+    # e o que a regra antiga (só no `executeSave` do ProcessDetails) nunca
+    # alcançava.
+    from services.financial_bank_sync import aplicar_a_update_data
+
+    aplicar_a_update_data(update_data)
+
     # === LOG FINAL DO UPDATE_DATA ===
     logger.info(f"[BUILD_UPDATE] Tipo: {document_type}, Campos a actualizar: {list(update_data.keys())}")
     if update_data.get('financial_data'):

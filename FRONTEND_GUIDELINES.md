@@ -1714,3 +1714,56 @@ filtro de tenant num endpoint, verifica-se no mesmo lote quem o chama** —
 um endpoint que passa a filtrar e um chamador que não manda os
 cabeçalhos produzem uma lista vazia ou errada que ninguém liga à
 alteração do backend.
+
+## 27.21 — Um painel de operação diz QUAL caminho aconteceu, não só que correu
+
+`EngineStatusPanel` ganhou botões «Forçar Execução» (Lote 2, ponto 1). O
+motor vive em DOIS processos do `render.yaml`, e o botão faz coisas
+diferentes conforme o job:
+
+* job da **Aplicação** → corre no processo que serve o pedido;
+* job do **Processador** → fica um PEDIDO na fila, reclamado no ciclo
+  seguinte (até 1 minuto).
+
+**A mensagem vem do SERVIDOR.** Escrevê-la no frontend obrigaria a UI a
+saber em que processo vive cada job — uma segunda cópia dessa regra, a
+divergir da do backend sem dar erro. E a UI tem de **distinguir os dois**:
+dizer "correu" a um pedido que só foi entregue é o painel a mentir, que é
+exactamente o motivo por que ele era read-only antes.
+
+Três regras que vieram deste componente:
+
+1. **Quem pode ser accionado é decisão do servidor** (`pode_forcar`), e o
+   motivo de não poder vai à vista (`motivo_sem_forcar`). Um botão em
+   falta sem explicação manda o utilizador procurar o que não existe. Uma
+   lista de "quem se pode forçar" no frontend divergiria da do backend —
+   e aí o botão aparece para um job que o servidor recusa.
+2. **O estado "a carregar" guarda a CHAVE, não um booleano.** Com um
+   booleano, clicar num job desativava o botão de todos.
+3. **Recarregar o estado depois de accionar, inclusive quando FALHA.** Sem
+   isso o painel continua a dizer «Nunca correu» a seguir ao clique e o
+   utilizador conclui que o botão não faz nada; e um pedido registado
+   antes da falha continua a ser informação.
+
+O teste legado que afirmava «não oferece nenhuma acção sobre o motor» foi
+**INVERTIDO, não apagado**: continua a valer que um job sem autorização do
+servidor não mostra botão nenhum.
+
+## 27.22 — Uma regra de negócio não vive num `executeSave`
+
+A sincronização «Créditos Ativos → Contas Bancárias» estava dentro do
+`executeSave` do `pages/ProcessDetails.js`. Corria quando um humano
+carregava em Gravar naquela página, e só então: a IA, o
+`ai-apply-suggestions`, o motor financeiro e qualquer importação passavam
+todos ao lado, e a lista ficava incompleta **sem dar erro nenhum**.
+
+**Regra:** uma transformação que tenha de valer para TODOS os escritores
+de um campo vive no backend, no caminho da escrita — não no handler de
+gravação de um ecrã. O ecrã é um dos escritores, não o escritor.
+
+O bloco antigo tem um detalhe que vale guardar: mutava `financialData` em
+sítio **e** chamava `setFinancialData`. Era a MUTAÇÃO que o fazia
+funcionar — o `setState` é assíncrono e não chegaria a tempo do payload —
+pelo que o código parecia idiomático e dependia do contrário. Quando se
+encontra um par assim, a pergunta não é qual dos dois tirar: é porque é
+que a regra está ali.

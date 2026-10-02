@@ -210,22 +210,6 @@ do passo 2.
 
 ## Produto e âmbito
 
-### D-7 · Relatório semanal do CEO mantém âmbito global
-**Onde:** `backend/services/analytics_service.py::generate_weekly_team_report`
-
-Sem `user`, o relatório atravessa todas as redes e regista um `warning`. A
-chamada agendada de segunda-feira não passa utilizador.
-
-**Porque foi adiado:** é uma **decisão de produto** (a Direcção quer o
-consolidado) e não um defeito. Fica registada porque é a única excepção
-deliberada ao isolamento por rede do Lote 4/5.
-
-**Para fechar:** decidir se o email de segunda é consolidado (e então
-documentá-lo como excepção explícita, com destinatários credenciados nas três
-empresas) ou segmentado por rede.
-
----
-
 ### D-8 · `db.emails` não tem carimbo de rede
 **Onde:** colecção `emails`
 
@@ -234,6 +218,29 @@ lote do webmail.
 
 **Para fechar:** carimbo na escrita (`resolve_tenant_stamp`) + backfill com a
 regra do `rede_consensual` (recusa adivinhar quando há mais de uma candidata).
+
+---
+
+### D-14 · O formulário público pode criar um cliente com NIF repetido
+**Onde:** `backend/services/public_registration.py` (`db.clients.insert_one`)
+
+O Lote 2 (ponto 4) fechou a unicidade de NIF/Email nas duas portas do CRM —
+criação e edição — com o ponto único `services/client_uniqueness.py`. O
+formulário **público** continua a inserir sem essa guarda, pelo que a
+invariante não é uma invariante: um cliente que se registe duas vezes pelo
+site cria o duplicado que a edição já não deixa fabricar.
+
+**Porque foi adiado:** não é esquecimento, é uma decisão de produto que não se
+toma dentro de uma correcção técnica. Um 409 numa porta EXTERNA perde a lead
+em vez de a tratar, e o que ali faz sentido é reaproveitar o cliente
+existente — o que muda o fluxo de negócio (a quem fica atribuído? o que
+acontece aos dados novos que ele submeteu? e aos documentos?).
+
+**Para fechar:** decidir entre (a) reaproveitar o cliente existente e anexar a
+submissão nova ao registo que já existe, (b) criar sempre e sinalizar para a
+Sala de Triagem fundir, ou (c) recusar com uma mensagem que mande o cliente
+usar o Portal. Qualquer das três reutiliza `encontrar_cliente_duplicado`, que
+já existe e é o que a criação e a edição usam.
 
 ---
 
@@ -249,3 +256,4 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 | D-11 | Sourcemaps servidos em produção | Iteração `slas-e-sourcemaps` — `utils/buildSourcemap.js`: sem `SENTRY_AUTH_TOKEN` um build de produção não gera mapas (provado com o build real: 0 `.map` em `dist/`) |
 | D-1 | `confirm-upload` do CRM sem posse nem quarentena | Iteração `posse-e-segredo-gov` — era **escalada de privilégio** e não integridade de dados: sem guarda de posse e a devolver `temporary_url` pré-assinado para a chave do corpo do pedido (o Incidente P0 do Portal, no CRM) |
 | D-3 | `GOV_AUTH_JWT_SECRET` com valor por omissão | Iteração `posse-e-segredo-gov` — fail-closed em produção, segredo efémero em dev, e o ramo que aceitava tokens por assinar removido dos dois lados |
+| D-7 | Relatório semanal do CEO com âmbito global | Iteração `motor-fila-e-agenda` — decisão de produto tomada (a Direcção quer o CONSOLIDADO, e fica a única excepção deliberada ao isolamento por rede); a dívida fechou com o defeito que ninguém tinha visto ao lado dela — o «às 06:00» vivia só na docstring e o relatório saía **24 vezes** à segunda-feira |

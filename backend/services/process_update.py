@@ -20,6 +20,7 @@ from services.encryption import generate_nif_hash, generate_email_hash
 from services.auth import get_effective_role, resolve_concrete_role
 from services.process_status import INACTIVE_STATUSES
 from services.process_labels import normalizar_etiquetas
+from services.financial_bank_sync import sincronizar_contas_bancarias
 
 logger = logging.getLogger(__name__)
 
@@ -590,6 +591,11 @@ async def apply_staff_business_updates(
             merged_fd = merge_nested_process_section(
                 existing_fd, incoming_fd, drop_empty_strings=True,
             )
+            # Créditos Ativos → Contas Bancárias (Lote 2, ponto 3). A regra
+            # vivia no `executeSave` do ProcessDetails, logo só corria neste
+            # ecrã; está agora na ESCRITA, onde a IA e os restantes
+            # escritores também passam.
+            merged_fd = sincronizar_contas_bancarias(merged_fd)
             await log_data_changes(
                 process_id, user, existing_fd, incoming_fd, "dados financeiros",
             )

@@ -31,8 +31,13 @@ from database import db
 
 logger = logging.getLogger(__name__)
 
-# Status que representam o pedido concluído (recebido por inteiro)
-_COMPLETED_PORTAL_STATUSES = ("RECEIVED", "received")
+# Status que representam o pedido concluído (recebido por inteiro).
+# Público desde o Lote 2 (ponto 2): o email de "Documentação Recebida"
+# precisa de listar o que foi recebido, e uma segunda lista de estados
+# escrita à mão lá divergiria desta na primeira vez que um estado novo
+# aparecesse. O nome privado fica como alias para não quebrar chamadores.
+COMPLETED_PORTAL_STATUSES = ("RECEIVED", "received")
+_COMPLETED_PORTAL_STATUSES = COMPLETED_PORTAL_STATUSES
 
 
 def parse_expected_count(source: Optional[dict]) -> int:

@@ -82,7 +82,44 @@ class TaskQueueService:
     def is_connected(self) -> bool:
         """Verifica se está conectado."""
         return self._connected
-    
+
+    # ================================================================
+    # FILA PERSISTENTE DO WORKER (Mongo) — Lote 2, ponto 1
+    # ================================================================
+    # Estes quatro métodos são os que o `worker.py` chama desde sempre e
+    # que NÃO EXISTIAM: cada chamada levantava `AttributeError`, o
+    # `worker_loop` rebentava a cada 5 segundos e o despachante
+    # `process_task` nunca correu. No `scheduler_loop` a mesma excepção
+    # saltava o bloco de sincronização de webmail que vem depois — é
+    # essa, e não um worker morto, a origem do «Nunca correu» no painel.
+    #
+    # A implementação vive em `task_queue_mongo` (importado dentro dos
+    # métodos: este módulo é importado no arranque do worker e não tem de
+    # arrastar a `database` para o import).
+    #
+    # Mongo e não ARQ de propósito: o `enqueue` ARQ funciona mas NÃO TEM
+    # CONSUMIDOR (`arq worker.config.WorkerSettings` nunca é lançado), e
+    # uma fila que aceita tudo e entrega nada é o que já matou o email de
+    # boas-vindas do Portal em silêncio.
+    # ================================================================
+
+    async def add_task(self, task_type: str, payload: Optional[Dict[str, Any]] = None,
+                       **kwargs) -> Optional[str]:
+        from services import task_queue_mongo
+        return await task_queue_mongo.add_task(task_type, payload, **kwargs)
+
+    async def get_next_task(self) -> Optional[Dict[str, Any]]:
+        from services import task_queue_mongo
+        return await task_queue_mongo.get_next_task()
+
+    async def complete_task(self, task_id: str, result: Any = None) -> bool:
+        from services import task_queue_mongo
+        return await task_queue_mongo.complete_task(task_id, result=result)
+
+    async def fail_task(self, task_id: str, error: str = "") -> bool:
+        from services import task_queue_mongo
+        return await task_queue_mongo.fail_task(task_id, error=error)
+
     # ================================================================
     # MÉTODOS DE ENFILEIRAMENTO
     # ================================================================

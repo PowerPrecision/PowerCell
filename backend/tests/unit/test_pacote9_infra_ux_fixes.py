@@ -372,7 +372,13 @@ class TestAssignmentGuards:
             skip_welcome_email=True,
         )
 
+        from services import client_uniqueness
+
+        # `client_uniqueness` também (Lote 2, ponto 4): a verificação de
+        # duplicados saiu para o ponto único partilhado com a edição, e cada
+        # módulo tem a SUA referência ao proxy do `db` (AGENTS.md).
         with patch.object(client_crud, "db", fake_async_db), \
+             patch.object(client_uniqueness, "db", fake_async_db), \
              patch.object(client_crud, "s3_service", fake_s3), \
              patch("services.background_tasks.spawn_background_task", MagicMock()):
             created = await client_crud.run_create_client(payload, user)

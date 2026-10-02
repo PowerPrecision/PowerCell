@@ -308,7 +308,14 @@ class FakeAsyncCollection:
             self.docs.append(dict(doc))
         return MagicMock(inserted_ids=["fake-inserted-id"] * len(docs))
 
-    async def find_one_and_update(self, query: dict, update: dict, return_document: bool = False):
+    async def find_one_and_update(
+        self,
+        query: dict,
+        update: dict,
+        return_document: bool = False,
+        sort: list = None,
+        projection: dict = None,
+    ):
         """``find_one_and_update`` (PACOTE 10 — usado por
         ``task_log_service.update_task`` para as transições do monitor
         global de tarefas).
@@ -317,14 +324,35 @@ class FakeAsyncCollection:
         actualizado (o Mongo real devolve before/after conforme
         ``return_document``; o serviço espera o doc actualizado —
         ``return_document=True`` é aceito e ignorado).
+
+        ``sort`` e ``projection`` (Lote 2): a reclamação de tarefas da fila
+        do Processador (`task_queue_mongo.get_next_task`) precisa de FIFO e
+        de excluir o ``_id``. **Este duplo não prova atomicidade** — ele
+        reimplementa a escolha-e-actualiza num só passo porque é
+        single-thread, e um duplo que reimplementa a lógica valida o duplo
+        (lição de Set 2026). Que a reclamação seja UMA operação e não um
+        find-depois-update é afirmado um nível abaixo, sobre os parâmetros
+        que saem.
         """
-        for doc in self.docs:
+        candidatos = self.docs
+        if sort:
+            for chave, direccao in reversed(list(sort)):
+                candidatos = sorted(
+                    candidatos,
+                    key=lambda d: (d.get(chave) is None, d.get(chave)),
+                    reverse=direccao < 0,
+                )
+        for doc in candidatos:
             if self._matches(doc, query):
                 self._apply_set(doc, update.get("$set", {}))
                 push_ops = update.get("$push")
                 if push_ops:
                     self._apply_push(doc, push_ops)
-                return dict(doc)
+                resultado = dict(doc)
+                if projection:
+                    excluir = {k for k, v in projection.items() if not v}
+                    resultado = {k: v for k, v in resultado.items() if k not in excluir}
+                return resultado
         return None
 
     async def delete_one(self, query: dict):

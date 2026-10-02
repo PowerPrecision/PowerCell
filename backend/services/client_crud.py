@@ -34,6 +34,7 @@ from services.encryption import (
     generate_email_hash,
     generate_telefone_hash,
 )
+from services.client_uniqueness import assert_cliente_unico
 from services.process_service import get_next_process_number
 from services.s3_storage import s3_service
 from utils.input_sanitization import (
@@ -196,66 +197,12 @@ async def run_create_client(
     sanitized_fonte = sanitize_string(client_data.fonte, max_length=100) if client_data.fonte else None
     sanitized_notas = sanitize_string(client_data.notas, max_length=500) if client_data.notas else None
 
-    # Verificar se já existe cliente com mesmo NIF ou email
-    # Usar blind index (nif_hash, email_hash) para pesquisa de dados encriptados
-    existing_query = []
-    nif_hash = generate_nif_hash(sanitized_nif) if sanitized_nif else None
-    email_hash = generate_email_hash(sanitized_email) if sanitized_email else None
-    if sanitized_nif:
-        if nif_hash:
-            existing_query.append({"dados_pessoais.nif_hash": nif_hash})
-        # Fallback para dados antigos não migrados
-        existing_query.append({"dados_pessoais.nif": sanitized_nif})
-    if sanitized_email:
-        if email_hash:
-            existing_query.append({"contacto.email_hash": email_hash})
-        # Fallback para dados antigos não migrados
-        existing_query.append({"contacto.email": sanitized_email.lower()})
+    # ── Unicidade de NIF/Email: UM PONTO ÚNICO (Lote 2, ponto 4) ───────
+    # A mesma regra corre agora na edição (`run_update_client`). Estava
+    # escrita aqui à mão e NÃO existia lá — logo o bloco em linha saiu
+    # para `client_uniqueness`, para as duas portas não poderem divergir.
+    await assert_cliente_unico(sanitized_nif, sanitized_email)
 
-    if existing_query:
-        # ============================================================
-        # PACOTE 10 — PREVENÇÃO DE CLIENTES DUPLICADOS (409 Conflict)
-        # ============================================================
-        # O check existia mas devolvia 400 (Bad Request), o que não
-        # permite ao frontend distinguir "dados inválidos" de "cliente
-        # duplicado". Agora devolve 409 Conflict com payload estruturado
-        # (message + existing_client_id + existing_client_name +
-        # matched_fields) — os formulários de criação usam estes dados
-        # para mostrar um alerta visual bloqueante e oferecer a acção
-        # "Usar cliente existente".
-        # Clientes ELIMINADOS (soft-delete: is_deleted=True ou
-        # status="eliminado") NÃO bloqueiam — permite recriar um
-        # cliente eliminado por engano sem ter de o restaurar.
-        existing = await db.clients.find_one({
-            "$or": existing_query,
-            "is_deleted": {"$ne": True},
-            "status": {"$ne": "eliminado"},
-        })
-        if existing:
-            existing_dados = existing.get("dados_pessoais") or {}
-            existing_contacto = existing.get("contacto") or {}
-            matched_fields = []
-            if (
-                (nif_hash and existing_dados.get("nif_hash") == nif_hash)
-                or (sanitized_nif and existing_dados.get("nif") == sanitized_nif)
-            ):
-                matched_fields.append("nif")
-            if (
-                (email_hash and existing_contacto.get("email_hash") == email_hash)
-                or (sanitized_email and existing_contacto.get("email") == sanitized_email.lower())
-            ):
-                matched_fields.append("email")
-            existing_name = existing.get("nome") or "Cliente existente"
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "message": f"Já existe um cliente com este NIF ou Email: {existing_name}",
-                    "existing_client_id": existing.get("id"),
-                    "existing_client_name": existing_name,
-                    "matched_fields": matched_fields or ["nif", "email"],
-                },
-            )
-    
     now = datetime.now(timezone.utc).isoformat()
     
     client = Client(
@@ -430,6 +377,13 @@ async def run_update_client(
             log_sanitization_rejection("nome", client_data.nome, "Nome vazio ou inválido após sanitização")
             raise HTTPException(status_code=400, detail="Nome inválido. Use apenas letras e espaços.")
     
+    # Unicidade (Lote 2, ponto 4): guardamos o que ESTA submissão traz, e
+    # nunca o resultado do merge com o que já está em base. O valor em base
+    # está ENCRIPTADO, e calcular o índice cego sobre um criptograma dá um
+    # hash que nunca casa — a guarda passaria sempre, calada.
+    email_submetido: Optional[str] = None
+    nif_submetido: Optional[str] = None
+
     sanitized_contacto = None
     if client_data.contacto:
         contact_dump = client_data.contacto.model_dump(exclude_unset=True)
@@ -439,6 +393,7 @@ async def run_update_client(
                 log_sanitization_rejection("contacto.email", contact_dump["email"], "Email inválido após sanitização")
                 raise HTTPException(status_code=400, detail="Formato de email inválido.")
             contact_dump["email"] = s_email
+            email_submetido = s_email
         if "telefone" in contact_dump and contact_dump["telefone"]:
             contact_dump["telefone"] = sanitize_phone(contact_dump["telefone"]) or contact_dump["telefone"]
         if "telefone_secundario" in contact_dump and contact_dump["telefone_secundario"]:
@@ -456,6 +411,7 @@ async def run_update_client(
                 log_sanitization_rejection("dados_pessoais.nif", pessoais_dump["nif"], "NIF inválido após sanitização")
                 raise HTTPException(status_code=400, detail="NIF inválido. Deve ter 9 dígitos.")
             pessoais_dump["nif"] = s_nif
+            nif_submetido = s_nif
         for str_field in ["nome", "documento_id", "morada_fiscal", "phone", "telefone", "nacionalidade", "profissao"]:
             if str_field in pessoais_dump and pessoais_dump[str_field]:
                 pessoais_dump[str_field] = sanitize_string(str(pessoais_dump[str_field]), max_length=200)
@@ -464,7 +420,14 @@ async def run_update_client(
         sanitized_dados_pessoais = {**existing_pessoais, **pessoais_dump}
     
     sanitized_notas = sanitize_string(client_data.notas, max_length=500) if client_data.notas is not None else None
-    
+
+    # ── Unicidade de NIF/Email na EDIÇÃO (Lote 2, ponto 4) ─────────────
+    # A criação já recusava; aqui não havia guarda nenhuma, pelo que
+    # bastava abrir um cliente e trocar o NIF para o de outro. A mesma
+    # função das duas portas, com `excluir_id`: sem ele o cliente casava
+    # CONSIGO PRÓPRIO e gravar sem mexer no NIF devolvia 409.
+    await assert_cliente_unico(nif_submetido, email_submetido, excluir_id=client_id)
+
     update_dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
 
     if sanitized_nome:

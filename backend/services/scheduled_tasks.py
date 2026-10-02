@@ -1038,7 +1038,22 @@ class ScheduledTasksService:
             freq_label = {"daily": "diário", "weekly": "semanal", "monthly": "mensal"}.get(frequency, frequency)
             logger.info(f"Não é o momento do relatório {freq_label} - ignorando")
             return False
-        
+
+        # Lote 2, ponto 1 — MESMA falha do relatório do CEO: `should_send`
+        # acima é verdade durante TODAS as 24 passagens horárias do dia
+        # escolhido, e não havia marca de "já enviei". A marca é por
+        # PERÍODO (dia/semana/mês) e não por semana: num relatório diário,
+        # uma marca semanal trocava 24 emails a mais por 6 a menos.
+        from services.relatorio_semanal_agenda import (
+            ja_enviado_no_periodo,
+            marcar_enviado_no_periodo,
+        )
+
+        CHAVE_DA_AGENDA = "relatorio_ia"
+        if await ja_enviado_no_periodo(CHAVE_DA_AGENDA, frequency, today):
+            logger.info("Relatório de IA já saiu neste período — a ignorar")
+            return False
+
         logger.info(f"A gerar e enviar relatório de IA ({frequency})...")
         
         # Gerar dados do relatório
@@ -1276,6 +1291,9 @@ class ScheduledTasksService:
             )
             
             if result.get("success"):
+                # Marca DEPOIS do envio confirmado: marcar antes perdia o
+                # período inteiro se o SMTP falhasse.
+                await marcar_enviado_no_periodo(CHAVE_DA_AGENDA, frequency, today)
                 logger.info(f"Relatório {period_label.lower()} de IA enviado para {len(recipient_emails)} destinatário(s)")
                 return True
             else:
@@ -1286,24 +1304,39 @@ class ScheduledTasksService:
             logger.error(f"Erro ao enviar relatório de IA: {e}")
             return False
     
-    async def send_weekly_ceo_report(self) -> bool:
+    async def send_weekly_ceo_report(self, *, forcado: bool = False) -> bool:
         """
         Envia o relatório semanal de produtividade da equipa ao CEO.
 
-        Corre todas as Segundas-feiras às ~06:00 (quando run_all_tasks
-        é invocado pelo worker/scheduler). Gera o relatório via
-        analytics_service, formata HTML profissional e envia para o
-        e-mail definido na variável de ambiente CEO_EMAIL (ou, em
-        fallback, para todos os utilizadores com role=ceo).
+        **Segundas-feiras, a partir das 06:00 UTC, UMA vez por semana.**
+        A agenda vive em `services/relatorio_semanal_agenda.py` — ver lá o
+        detalhe. Até ao Lote 2 essa frase estava só nesta docstring: a
+        guarda real era `if today.weekday() != 0`, o `run_all_tasks` corre
+        de hora a hora e não havia marca de "já enviei" — pelo que o
+        relatório saía **24 vezes** à segunda-feira, à hora a que o
+        Processador tivesse arrancado.
+
+        `forcado=True` (botão «Forçar Execução» do painel) salta a janela
+        de dia/hora mas **não** a marca da semana.
+
+        Âmbito CONSOLIDADO por decisão de produto — é a única excepção
+        deliberada ao isolamento por rede (D-7, agora fechada).
 
         Returns:
             True se o email foi enviado, False caso contrário
         """
+        from services.relatorio_semanal_agenda import (
+            deve_enviar_relatorio_semanal,
+            destinatarios_configurados,
+            marcar_enviado,
+        )
+
+        CHAVE_DA_AGENDA = "relatorio_semanal_ceo"
         today = datetime.now(timezone.utc)
 
-        # Só enviar à Segunda-feira (weekday 0)
-        if today.weekday() != 0:
-            logger.info("[CEO Report] Hoje não é Segunda-feira — a ignorar")
+        if not await deve_enviar_relatorio_semanal(
+            CHAVE_DA_AGENDA, momento=today, forcado=forcado
+        ):
             return False
 
         logger.info("[CEO Report] A gerar relatório semanal de produtividade para o CEO...")
@@ -1318,12 +1351,7 @@ class ScheduledTasksService:
             html_content = format_report_html(report)
 
             # 3. Determinar destinatário(s)
-            ceo_email = os.environ.get("CEO_EMAIL", "").strip()
-            recipient_emails: List[str] = []
-
-            if ceo_email:
-                # Suporta múltiplos e-mails separados por vírgula
-                recipient_emails = [e.strip() for e in ceo_email.split(",") if e.strip()]
+            recipient_emails: List[str] = destinatarios_configurados()
 
             if not recipient_emails:
                 # Fallback: buscar utilizadores com role ceo na base de dados
@@ -1367,6 +1395,9 @@ class ScheduledTasksService:
             )
 
             if result.get("success"):
+                # A marca é gravada DEPOIS do envio confirmado: marcar antes
+                # perdia a semana inteira se o SMTP falhasse.
+                await marcar_enviado(CHAVE_DA_AGENDA, today)
                 logger.info(
                     f"[CEO Report] Relatório enviado para {len(recipient_emails)} destinatário(s)"
                 )

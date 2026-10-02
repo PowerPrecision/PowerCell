@@ -175,6 +175,18 @@ TTL_INDEXES = [
         "description": "Purga rascunhos de email antigos após 7 dias de inatividade",
         "partial_filter": {"status": "draft"},  # Só aplica a rascunhos
     },
+    {
+        # Fila do Processador (Lote 2, ponto 1). Uma fila sem purga cresce
+        # para sempre com tarefas já concluídas — e o épico de custos do
+        # Mongo (D-13) existe precisamente por colecções assim. `_dt` é
+        # datetime NATIVO de propósito: o TTL não funciona sobre uma string
+        # ISO (foi o que inutilizou o `idx_ttl` descontinuado).
+        "collection": "task_queue",
+        "field": "finished_at_dt",
+        "seconds": 604800,  # 7 dias
+        "name": "ttl_task_queue",
+        "description": "Purga tarefas terminadas da fila após 7 dias",
+    },
 ]
 
 
@@ -774,6 +786,37 @@ async def create_ttl_indexes(db) -> dict:
     ]
     for idx in user_email_config_indexes:
         await _create_index_safe(db.user_email_configs, idx, "user_email_configs", results)
+
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'task_queue' (fila do Processador — Lote 2)
+    # ====================================================================
+    # Declarados AQUI e não num passo de operações: um índice criado à mão
+    # em produção deixa dev e CI sem ele, que é onde as consultas se
+    # escrevem (lição de Set 2026, `idx_network_scope`).
+    #
+    # A ordem das chaves do índice da reclamação segue a consulta do
+    # `get_next_task`: `status` é o prefixo mais selectivo e mais presente,
+    # `disponivel_em` o intervalo, e `created_at` serve o `sort` FIFO sem
+    # um segundo índice.
+    task_queue_indexes = [
+        {
+            "keys": [("status", 1), ("disponivel_em", 1), ("created_at", 1)],
+            "name": "idx_task_queue_reclamar",
+        },
+        # Pedidos de execução forçada por job (painel «Estado do Motor»).
+        {"keys": [("type", 1), ("status", 1)], "name": "idx_task_queue_tipo_estado"},
+        {"keys": [("id", 1)], "name": "idx_task_queue_id", "unique": True},
+    ]
+    for idx in task_queue_indexes:
+        await _create_index_safe(db.task_queue, idx, "task_queue", results)
+
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'job_schedule_marks' (agenda dos relatórios)
+    # ====================================================================
+    # Uma marca por job: é o que impede o relatório semanal de sair 24
+    # vezes à segunda-feira (Lote 2, ponto 1).
+    for idx in [{"keys": [("chave", 1)], "name": "idx_job_schedule_chave", "unique": True}]:
+        await _create_index_safe(db.job_schedule_marks, idx, "job_schedule_marks", results)
 
     return results
 
