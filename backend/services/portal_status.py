@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import HTTPException
 
 from database import db
+from services.document_portal_counts import parse_expected_count
 from services.portal_doc_categories import (
     DOCUMENT_CATEGORY_MAP,
     PORTAL_HIDDEN_CATEGORIES,
@@ -72,6 +73,14 @@ async def run_get_portal_status(client_data: dict):
                     "status": d.get("status"),
                     "source": d.get("source"),
                     "is_optional": bool(d.get("is_optional", False)),
+                    # Lote 3, ponto 4 — o caminho do cliente AINDA SEM
+                    # PROCESSO (onboarding) é o PRIMEIRO que ele vê, e o
+                    # `filename` aqui é só o upload mais recente. Sem o
+                    # array, quem envia 5 ficheiros antes de ter processo vê
+                    # um nome. Este `entry` serve as DUAS listas.
+                    "attached_files": d.get("attached_files") or [],
+                    "expected_count": parse_expected_count(d),
+                    "uploaded_count": len(d.get("attached_files") or []),
                 }
                 if status in ("REQUESTED", "PENDING"):
                     requested_docs.append(entry)
@@ -229,6 +238,24 @@ async def run_get_portal_status(client_data: dict):
             "notes": notes_str,
             "requested_at": doc.get("created_at", doc.get("uploaded_at", "")),
             "is_optional": bool(doc.get("is_optional", False)),
+            # Lote 3, ponto 4 — os ficheiros JÁ submetidos para este pedido.
+            #
+            # Faltavam aqui. São TRÊS serializações nesta função (requested /
+            # uploaded / received) e o PACOTE DE só acrescentou
+            # `attached_files` à terceira: a explicação da correcção está
+            # escrita nesse bloco, três dezenas de linhas abaixo destas duas
+            # que ficaram de fora. É a lição do Lote 5 — inventariar os sítios
+            # que SERIALIZAM, não só o primeiro que se encontra.
+            #
+            # Consequência exacta: um cliente que envia 5 ficheiros para um
+            # pedido que continua REQUESTED (porque `expected_count` ainda não
+            # foi atingido) via lista nenhuma, e o único nome no ecrã era o
+            # campo `filename` de topo — ou seja, O ÚLTIMO.
+            "attached_files": doc.get("attached_files") or [],
+            # O progresso pedido/entregue, pela MESMA regra do resto do
+            # sistema (nunca uma contagem escrita à mão aqui).
+            "expected_count": parse_expected_count(doc),
+            "uploaded_count": len(doc.get("attached_files") or []),
         })
 
     # ── Documentos submetidos (UPLOADED/SUBMITTED) ──
@@ -260,6 +287,11 @@ async def run_get_portal_status(client_data: dict):
             "file_size": doc.get("file_size"),
             "status": doc.get("status", "UPLOADED"),
             "s3_path": doc.get("s3_path") or doc.get("file_key"),
+            # Lote 3, ponto 4 — o `filename` de topo é só o upload MAIS
+            # RECENTE. Sem o array, um pedido com 5 ficheiros mostrava um.
+            "attached_files": doc.get("attached_files") or [],
+            "expected_count": parse_expected_count(doc),
+            "uploaded_count": len(doc.get("attached_files") or []),
         })
 
     # ── Documentos recebidos pelo admin (marcados como RECEIVED) ──
@@ -292,6 +324,12 @@ async def run_get_portal_status(client_data: dict):
             # Permite ao frontend listar todos os ficheiros por categoria em
             # vez de mostrar apenas o mais recente (campo `s3_path` top-level).
             "attached_files": doc.get("attached_files") or [],
+            # Lote 3, ponto 4 — a forma é UNIFORME nas seis serializações.
+            # Um pedido RECEIVED está completo por definição, mas fazer a UI
+            # saber de que lista veio para decidir se pode ler estes campos
+            # é a bifurcação que produz o próximo esquecimento.
+            "expected_count": parse_expected_count(doc),
+            "uploaded_count": len(doc.get("attached_files") or []),
         })
 
     # ── Fallback: se não há docs REQUESTED, calcular pendentes a partir do
@@ -350,6 +388,13 @@ async def run_get_portal_status(client_data: dict):
                         "notes": "",
                         "requested_at": None,
                         "is_optional": is_optional,
+                        # Vazio e NÃO ausente: este pedido vem da checklist do
+                        # SystemConfig e ainda não existe em `db.documents`,
+                        # logo não há ficheiros nenhuns. A chave presente
+                        # poupa à UI a distinção entre "não há" e "não sei".
+                        "attached_files": [],
+                        "expected_count": parse_expected_count(item),
+                        "uploaded_count": 0,
                     })
 
         has_pending = any(not d.get("is_optional") for d in requested_docs)

@@ -7244,3 +7244,176 @@ Duas regras ficaram afirmadas em teste:
 Os estados de "concluído" vêm de `document_portal_counts`, nunca de uma
 lista escrita no sítio novo: duas listas de estados divergem na primeira
 vez que aparecer um estado novo.
+
+## Quatro ecrãs, e dois deles não eram do frontend (Out 2026)
+
+Lote 3. Pedido como «estritamente de interface e extração» — e dois dos
+quatro pontos exigiram uma linha do servidor, porque **a UI não pode
+mostrar o que não lhe é dado**.
+
+### O «Analisar IA» nunca funcionou
+
+O `S3FileManager` chama `POST /documents/{doc_id}/ai-analyze-review` e tira
+o id de `file.doc_id || file.id`, com um comentário a afirmar:
+
+> «O listing de ficheiros (`GET /client/{process_id}/files`) expõe o ID do
+> document_metadata em `file.doc_id`.»
+
+Nunca expôs. O `s3_service.list_files` devolve
+`name/path/size/size_formatted/last_modified/category/temporary_url` — sem
+`id`. E a projecção do enriquecimento pedia **catorze** campos do
+`document_metadata` e não o `id`. Logo `doc_id` era sempre `undefined`, o
+handler caía no `toast.error("doc_id em falta")` e o botão **nunca** chegou
+a chamar o endpoint.
+
+É a mesma forma da fila Mongo do Lote 2: **uma crença escrita em
+comentário, nunca um contrato, e ninguém verificou se o campo existia.**
+Duas vezes em dois lotes, e nos dois casos a frase estava correcta sobre a
+intenção e falsa sobre o código.
+
+O ficheiro acabado de carregar fica com `doc_id` a `None` de propósito — a
+categorização corre em background, e a UI tem de poder distinguir "ainda
+não dá" de "avariou".
+
+### Da modal sobreposta ao preenchimento em linha
+
+O resultado da extracção vivia num diálogo que TAPAVA a ficha: para
+comparar um NIF com o resto dos dados era preciso fechá-lo, e a decisão era
+um bloco — aceitar sete campos para corrigir um.
+
+Agora a sugestão aparece no campo, com fundo amarelado e aprovar/rejeitar
+ao lado. `utils/sugestoesEmLinha.js` é a máquina de estados, pura, e é lá
+que está a única coisa que importa proteger:
+
+**Mostrar não é gravar.** `valorAMostrar` devolve o valor sugerido mesmo
+enquanto está PENDENTE — é esse o ponto do preenchimento em linha. Mas
+`valoresAprovados` só devolve o que foi aprovado, e é dela que sai o
+payload. São duas funções diferentes de propósito: se um dia a gravação
+voltar a partir do `extractedData`, a interface fica exactamente igual e a
+regra de ouro desaparece sem deixar rasto. É o pior tipo de regressão que
+este sistema pode ter, e é por isso que tem teste próprio.
+
+Três detalhes:
+* `persistAISuggestions` continua a ter **um só chamador** — o guarda
+  `aiWriteGuard.test.js` foi actualizado para o mecanismo novo, não
+  apagado, e o que ele afirmava («o diálogo abre em qualquer extracção»)
+  era o mecanismo; a propriedade é «qualquer extracção levanta revisão» e
+  continua afirmada;
+* um «aprovar todas» **não reabre** o que já foi rejeitado — reabrir
+  gravava o que o consultor acabou de recusar, em silêncio;
+* um campo rejeitado não volta a pendente. O consultor já respondeu, e
+  repor a pergunta a cada render fazia o ecrã perguntar para sempre.
+
+### «IA 100%» ao lado de um campo vazio
+
+`getConfidenceIndicator` decidia assim, e nada mais:
+
+    const conf = aiFieldConfidence?.[fieldName];
+    if (conf === undefined || conf === null || !aiExtractedData) return null;
+
+Olhava para o número e **nunca para o valor**. O input do NIF tem
+`placeholder="9 dígitos"`: com o campo vazio, o browser desenha esse texto
+cinzento, e ao lado dele o badge anunciava «IA 100%».
+
+**É o badge que faz o placeholder parecer um dado.** Sem ele, um campo
+vazio lê-se como um campo vazio. Dar confiança máxima a uma extracção nula
+desliga a desconfiança exactamente no campo que mais precisa dela.
+
+`utils/aiConfidence.js` recusa três casos: valor vazio, valor igual ao
+placeholder (um modo de falha real da extracção por visão — a IA que lê um
+formulário EM BRANCO devolve o texto de ajuda como se fosse o valor) e
+valor que a validação do próprio campo recusa (o `validateNIF` corre ali ao
+lado, no `onChange`; dizer "100%" sobre um valor que o formulário já sabe
+que é inválido é uma afirmação contraditória).
+
+Os validadores são os que o formulário **já** usa. Inventar validação nova
+aqui era mudar regras de negócio por uma porta lateral.
+
+### O cadeado, e um `fetch` cru à sexta
+
+«Dados Verificados» era um `Alert` de largura inteira com um botão
+«Desbloquear Dados» — uma faixa permanente para o estado que é, quase
+sempre, o normal e desejado. Um aviso que está sempre lá deixa de ser
+lido, e ocupava o espaço dos avisos que importam. Passou a um ícone com
+nome acessível (um ícone sozinho não é um botão, é um enigma) e com
+confirmação antes de destrancar: o cadeado é discreto, o efeito — a IA
+volta a poder sobrepor a ficha — não é.
+
+O mesmo componente fazia as suas duas chamadas por `fetch` cru com
+`API_URL` e o token à mão: **sexta instância** da regra de 2026-09-21.
+Passaram a Axios.
+
+### O ecrã branco no Voltar: uma fronteira que não tratava o erro
+
+`LazyChunkErrorBoundary` embrulha **todas** as rotas do `App.js`. Tinha
+três defeitos sobrepostos.
+
+1. **A lista de causas era larga demais.** Incluía
+   `includes("Unexpected token")` e `includes("Script error")`.
+   `JSON.parse` falhado levanta `Unexpected token` — ou seja, **qualquer
+   falha de parsing em qualquer página era classificada como erro de
+   chunk** e desencadeava um `window.location.replace`. O defeito real
+   nunca chegava ao Sentry.
+
+2. **O ecrã branco.** Para tudo o que não fosse chunk devolvia
+   `{ hasError: false }`. Um boundary que não muda de estado **não trata o
+   erro**: o React volta a renderizar os mesmos filhos, eles levantam
+   outra vez e, sem fronteira a assumir a falha, o React **desmonta a
+   árvore inteira**. Como cada rota tem a sua própria fronteira, o que
+   chega aqui é o que vive FORA delas — contextos, `DashboardLayout`,
+   `ProtectedRoute`, o router — e é precisamente isso que o Voltar do
+   browser volta a montar de uma vez.
+
+3. **O recarregamento acumulava e matava o histórico.**
+   `window.location.search` já inclui o `?`, logo a segunda passagem dava
+   `/x?_t=1&_t=2` e a terceira `/x?_t=1&_t=2&_t=3` — o comentário dizia
+   que era «para evitar ciclo infinito» e o que fazia era deixar o URL
+   crescer. E usava `location.replace`, que **apaga a entrada do
+   histórico**: a correcção do ecrã branco estragava o Voltar por si
+   mesma.
+
+Hoje: a detecção vive em `utils/chunkErrors.js` com os sinais que são
+específicos do carregamento de módulos (e a lista das rejeitadas, **com o
+motivo escrito**, para não voltarem); o efeito secundário saiu da fase de
+render para o `componentDidCatch`; usa-se `assign` e não `replace`; e um
+erro da aplicação tem **um ecrã com uma saída** em vez de nada.
+
+### O multi-upload do Portal: quatro de seis serializações
+
+O Portal mostrava `2/5` durante o envio e «2 erros no último envio» no fim
+— nunca um nome de ficheiro. E a lista de anexados não aparecia porque o
+servidor não a enviava.
+
+`/portal/status` tem **seis** sítios a serializar um documento. O PACOTE DE
+acrescentou `attached_files` a **um** deles, e a explicação da correcção
+está escrita nesse bloco, a poucas linhas dos outros. Faltava em:
+
+* `requested_docs` — o caso normal: um pedido que ainda não atingiu o
+  `expected_count` mostrava lista NENHUMA;
+* `uploaded_docs` — e aqui o campo `filename` de topo é, por desenho, o
+  upload **mais recente**: era este o «só o nome do último ficheiro»;
+* os dois `append(entry)` do caminho do cliente **sem processo** — que é o
+  primeiro ecrã que ele vê;
+* o fallback do SystemConfig, onde a lista é legitimamente vazia (o pedido
+  ainda não existe em `db.documents`) mas a chave vai mesmo assim, para a
+  UI não ter de distinguir "não há" de "não sei".
+
+Do lado do cliente, `utils/portalUploadStaging.js`: o lote nasce no instante
+da selecção com o NOME de cada ficheiro, o estado é por ficheiro, o erro
+fica **no ficheiro que falhou** (era `errors[0].error`, a mensagem do
+primeiro) e o resumo **nomeia** o que falhou em vez de contar erros — «2
+erros» manda o cliente adivinhar; o que ele precisa é de saber o que
+repetir.
+
+### A modal «Novo Processo»
+
+`DialogContent` tem `max-h-[90vh] overflow-y-auto` na **grelha inteira**: o
+rodapé rolava com o conteúdo. E `overflow-y:auto` com `overflow-x:visible`
+faz o CSS promover o eixo X também a `auto` — qualquer filho mais largo do
+que a modal cria barra horizontal e empurra o botão da direita para fora.
+Era isto o "botão cortado".
+
+Hoje: `overflow-hidden flex flex-col` no contentor (rodapé sempre visível),
+scroll só no corpo com `min-h-0` (sem ele um filho flex recusa-se a encolher
+e o `overflow-y` nunca dispara), `max-w-lg` em vez de `max-w-md` e
+`flex-wrap` no rodapé. O padrão já existia no `DocumentReviewModal`.

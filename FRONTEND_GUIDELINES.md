@@ -1767,3 +1767,100 @@ funcionar — o `setState` é assíncrono e não chegaria a tempo do payload —
 pelo que o código parecia idiomático e dependia do contrário. Quando se
 encontra um par assim, a pergunta não é qual dos dois tirar: é porque é
 que a regra está ali.
+
+## 27.23 — Mostrar uma sugestão da IA não é gravá-la
+
+O preenchimento em linha (Lote 3, ponto 1) substitui o diálogo sobreposto
+de resultados: a sugestão aparece NO campo, com fundo amarelado e
+aprovar/rejeitar ao lado.
+
+**A regra que isto não pode quebrar:** o input desenha o valor sugerido
+enquanto ele está PENDENTE — é esse o ponto de o preenchimento ser em
+linha —, mas o que vai no payload é só o que foi APROVADO. São duas
+funções diferentes em `utils/sugestoesEmLinha.js` (`valorAMostrar` e
+`valoresAprovados`) e a separação é deliberada: se a gravação voltar a
+partir do `extractedData`, **a interface fica exactamente igual e a regra
+de ouro desaparece sem deixar rasto**.
+
+Três regras do mecanismo:
+1. **«Aprovar todas» nunca reabre o que já foi rejeitado.** Reabrir
+   gravava o que o consultor acabou de recusar, em silêncio.
+2. **Um campo rejeitado não volta a pendente.** Ele já respondeu; repor a
+   pergunta a cada render faz o ecrã perguntar para sempre.
+3. **O destaque é temporário.** Amarelo enquanto pende (é um pedido de
+   atenção), verde um instante quando é aprovado, nada quando é rejeitado
+   (o valor voltou a ser o da ficha — destacá-lo dizia o contrário). Um
+   destaque permanente deixa de ser um destaque.
+
+E cada botão leva o NOME DO CAMPO no nome acessível: com dez sugestões no
+ecrã, dez botões «Aprovar» são indistinguíveis para quem usa leitor de
+ecrã — e impossíveis de consultar num teste.
+
+## 27.24 — Um badge de confiança tem de olhar para o VALOR
+
+`getConfidenceIndicator` decidia só pelo número da IA. O input do NIF tem
+`placeholder="9 dígitos"`: com o campo vazio o browser desenha esse texto,
+e ao lado dele aparecia «IA 100%».
+
+**É o badge que faz o placeholder parecer um dado.** Sem ele, um campo
+vazio lê-se como um campo vazio.
+
+**Regra:** um indicador de proveniência ou de confiança recusa-se a
+aparecer quando (a) o valor está vazio, (b) o valor é igual ao texto do
+placeholder — a IA que lê um formulário EM BRANCO devolve o texto de ajuda
+como se fosse o valor, e é um modo de falha real da extracção por visão —
+ou (c) o valor falha a validação que o próprio campo já corre.
+
+Os placeholders e os validadores vivem num ponto único
+(`utils/aiConfidence.js`). Escritos ao lado de cada `placeholder=`
+divergiriam dele em silêncio, e a divergência fazia o indicador voltar a
+aprovar o placeholder.
+
+## 27.25 — Um `ErrorBoundary` que não muda de estado não trata o erro
+
+`LazyChunkErrorBoundary` devolvia `{ hasError: false }` para tudo o que não
+fosse um erro de chunk. Isso **não é deixar passar** — é dizer ao React que
+tratou. O React volta a renderizar os mesmos filhos, eles levantam outra
+vez e, sem fronteira a assumir a falha, **desmonta a árvore inteira**: ecrã
+branco.
+
+Aparecia no Voltar do browser porque as rotas têm fronteira própria; o que
+chega à fronteira de cima é o que vive FORA delas — contextos, layout,
+router — e é isso que uma navegação para trás volta a montar de uma vez.
+
+**Três regras:**
+1. **Toda a fronteira renderiza algo.** Nunca `null`, nunca os filhos que
+   acabaram de levantar.
+2. **A classificação de erros é por sinais ESPECÍFICOS.**
+   `includes("Unexpected token")` apanha qualquer `JSON.parse` falhado;
+   `includes("Script error")` apanha o erro opaco de outra origem. Uma
+   sub-cadeia larga transforma um defeito de dados num recarregamento, e o
+   erro real nunca chega ao Sentry. As rejeitadas ficam listadas **com o
+   motivo** (`utils/chunkErrors.js`), senão alguém volta a acrescentá-las.
+3. **Efeitos secundários não vivem em `getDerivedStateFromError`.** Corre
+   na fase de render, pode correr duas vezes em StrictMode e pode correr
+   num render descartado. Vão para `componentDidCatch`.
+
+E ao recarregar: `location.assign` e não `replace` — o `replace` apaga a
+entrada do histórico e com ela o sítio onde o utilizador estava, ou seja, a
+correcção do ecrã branco estragava o Voltar. O cache-busting substitui o
+`_t` em vez de o acumular (`?_t=1&_t=2&_t=3` era o que acontecia) e
+desiste à segunda: recarregar em ciclo é pior do que mostrar o erro, porque
+o utilizador não chega a ler o que aconteceu.
+
+## 27.26 — Uma modal densa: cabeçalho, corpo com scroll, rodapé fixo
+
+`DialogContent` tem `max-h-[90vh] overflow-y-auto` na GRELHA inteira: o
+rodapé rola com o conteúdo e, num ecrã baixo, sai de vista. E
+`overflow-y:auto` com `overflow-x:visible` faz o CSS promover o eixo X
+também a `auto` — qualquer filho mais largo do que a modal cria barra
+horizontal e **empurra o botão da direita para fora**.
+
+**Regra para qualquer modal com mais de um ecrã de conteúdo:**
+`overflow-hidden flex flex-col` no `DialogContent`, `shrink-0` no cabeçalho
+e no rodapé, e `flex-1 min-h-0 overflow-y-auto overflow-x-hidden` no corpo.
+O `min-h-0` não é decorativo: sem ele um filho flex recusa-se a encolher
+abaixo do seu conteúdo e o `overflow-y` nunca dispara.
+
+No rodapé, `flex-wrap`: num ecrã estreito os botões passam a duas linhas em
+vez de um deles sair do ecrã.

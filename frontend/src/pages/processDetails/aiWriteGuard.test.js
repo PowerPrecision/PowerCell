@@ -95,22 +95,62 @@ describe("A escrita da IA na ficha", () => {
     );
   });
 
-  it("o diálogo de revisão abre em qualquer extracção em lote", () => {
+  it("a revisão é sempre levantada em qualquer extracção em lote", () => {
+    // LEGADO ACTUALIZADO (Lote 3, ponto 1): a revisão deixou de ser um
+    // diálogo sobreposto e passou a ser PREENCHIMENTO EM LINHA. O que este
+    // teste afirmava — «setShowAIReviewDialog(true)» — era o mecanismo, não
+    // a propriedade. A propriedade é a mesma e continua afirmada: QUALQUER
+    // extracção levanta revisão, com ou sem conflitos.
     const commit = CODIGO.slice(
       CODIGO.indexOf("const commitAIExtractedData"),
       CODIGO.indexOf("const handleDocumentDataExtracted"),
     );
-    assert.ok(commit.includes("setShowAIReviewDialog(true)"), "revisão não abre");
+    assert.ok(
+      commit.includes("setSugestoesIA(criarSugestoes(revisao))"),
+      "a extracção em lote não levanta sugestões para revisão",
+    );
 
-    // A afirmação que interessa é a AUSÊNCIA do ramo: a versão anterior
-    // deste teste procurava só `setShowAIReviewDialog(true)` — que JÁ
-    // existia dentro do `if (conflicts.length > 0)`. Passava com o defeito
-    // presente, e um teste assim é pior do que não existir.
+    // A afirmação que interessa é a AUSÊNCIA do ramo: a versão original
+    // deste teste procurava só a abertura do diálogo — que JÁ existia dentro
+    // do `if (conflicts.length > 0)`. Passava com o defeito presente, e um
+    // teste assim é pior do que não existir.
     assert.ok(
       !/conflicts\s*&&\s*conflicts\.length\s*>\s*0/.test(commit),
-      "A abertura da revisão voltou a depender de haver conflitos. " +
+      "A revisão voltou a depender de haver conflitos. " +
         "Sem conflitos é justamente o caso em que a ficha está vazia e " +
         "tudo o que a IA leu vai entrar.",
+    );
+  });
+
+  it("um campo PENDENTE não entra no que se grava", () => {
+    // A regra de ouro no mecanismo novo: o input já desenha o valor
+    // sugerido, e é `valoresAprovados` que decide o que vai no payload.
+    // Se a gravação passasse a usar `extractedData` outra vez, a interface
+    // ficava igual e a regra desaparecia sem deixar rasto.
+    const confirmar = CODIGO.slice(
+      CODIGO.indexOf("const handleConfirmAIReview"),
+      CODIGO.indexOf("const decidirSugestao"),
+    );
+    assert.ok(confirmar.length > 0, "handleConfirmAIReview não encontrado");
+    assert.ok(
+      confirmar.includes("valoresAprovados("),
+      "a gravação deixou de partir das sugestões APROVADAS",
+    );
+    assert.ok(
+      !/persistAISuggestions\(\s*extractedData/.test(confirmar),
+      "a gravação voltou a enviar tudo o que a IA leu, e não só o aprovado",
+    );
+  });
+
+  it("aprovar/rejeitar não grava — só muda o estado da sugestão", () => {
+    const decidir = CODIGO.slice(
+      CODIGO.indexOf("const decidirSugestao"),
+      CODIGO.indexOf("const handleAprovarSugestao"),
+    );
+    assert.ok(decidir.length > 0, "decidirSugestao não encontrado");
+    assert.ok(
+      !decidir.includes("persistAISuggestions("),
+      "a decisão por campo passou a gravar directamente",
     );
   });
 

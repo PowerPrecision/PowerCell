@@ -100,12 +100,29 @@ import {
   getProcessLabels,
 } from "../services/api";
 import ProcessDomainTabsList from "../components/processDetails/ProcessDomainTabsList";
-import AIReviewDialog from "../components/processDetails/dialogs/AIReviewDialog";
 import {
   aplicarDecisaoNaRevisao,
   prepararRevisaoDaExtraccao,
 } from "../utils/documentExtraction";
 import { resumirAnaliseEmLote } from "../utils/analiseEmLoteFeedback";
+import {
+  aprovar as aprovarSugestao,
+  aprovarTodas as aprovarTodasSugestoes,
+  contarPorEstado,
+  criarSugestoes,
+  limparDecididas,
+  rejeitar as rejeitarSugestao,
+  rejeitarTodas as rejeitarTodasSugestoes,
+  sugestaoDoCampo,
+  todasDecididas,
+  valoresAprovados,
+} from "../utils/sugestoesEmLinha";
+import { BarraDeSugestoes } from "../components/ui/InlineAISuggestion";
+import {
+  PLACEHOLDERS_POR_CAMPO,
+  indicadorDeConfianca,
+  validadoresPadrao,
+} from "../utils/aiConfidence";
 import RGPDRequestDialog from "../components/processDetails/dialogs/RGPDRequestDialog";
 import TitularChoiceDialog from "../components/processDetails/dialogs/TitularChoiceDialog";
 import useTaskEvents from "../hooks/useTaskEvents";
@@ -179,6 +196,10 @@ import {
   cleanFinancialDataForSubmit,
 } from "./processDetails/processFormCleaners";
 import { validateNIF } from "../utils/validateNIF";
+// Os validadores do indicador de confiança são os MESMOS que o formulário já
+// corre no `onChange` (Lote 3, ponto 2). Uma validação própria aqui mudava as
+// regras de negócio por uma porta lateral.
+const validadoresDeCampo = validadoresPadrao({ validateNIF });
 import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
@@ -676,7 +697,11 @@ const ProcessDetails = () => {
   const [aiExtractedData, setAiExtractedData] = useState(null);
   const [aiFieldConfidence, setAiFieldConfidence] = useState({});
   const [aiConflicts, setAiConflicts] = useState([]);
-  const [showAIReviewDialog, setShowAIReviewDialog] = useState(false);
+  // Lote 3, ponto 1 — PREENCHIMENTO EM LINHA. As sugestões da IA deixaram de
+  // viver num diálogo sobreposto que tapava a ficha: aparecem no campo, com
+  // destaque, e decidem-se uma a uma. A regra de ouro continua intacta —
+  // mostrar não é gravar (ver `utils/sugestoesEmLinha`).
+  const [sugestoesIA, setSugestoesIA] = useState(null);
   // Épico 9 — extracção por ficheiro à espera de confirmação.
   // Enquanto isto não for `null`, NADA foi escrito: nem no formulário, nem
   // na base de dados. É o que separa este caminho do da análise em lote.
@@ -867,7 +892,7 @@ const ProcessDetails = () => {
       if (revisao) {
         setAiConflicts(revisao.conflicts);
         setRevisaoPendente(revisao);
-        setShowAIReviewDialog(true);
+        setSugestoesIA(criarSugestoes(revisao));
         if (revisao.conflicts.length > 0) {
           toast.info(
             `${revisao.conflicts.length} conflito(s) detectado(s). Reveja os valores.`,
@@ -926,7 +951,7 @@ const ProcessDetails = () => {
 
     setAiConflicts(revisao.conflicts);
     setRevisaoPendente(revisao);
-    setShowAIReviewDialog(true);
+    setSugestoesIA(criarSugestoes(revisao));
   };
 
   // Handler para dados extraídos pela IA dos documentos
@@ -1601,40 +1626,82 @@ const ProcessDetails = () => {
     ),
   );
 
-  // O diálogo de revisão não anuncia nada: diz que o utilizador confirmou
-  // e o contentor é que sabe que isso implica fechar e avisar para guardar.
-  const handleConfirmAIReview = useCallback(async () => {
-    setShowAIReviewDialog(false);
+  // Gravar o que foi APROVADO em linha (Lote 3, ponto 1).
+  //
+  // Continua a ser o ÚNICO chamador de `persistAISuggestions` — é isso que o
+  // guarda `aiWriteGuard.test.js` afirma, e o que mantém a regra de ouro:
+  // nenhum caminho escreve dados pessoais ou financeiros sem passar por aqui.
+  //
+  // O que mudou é a FONTE: antes era o `extractedData` inteiro (o consultor
+  // confirmava um bloco), agora é `valoresAprovados(...)` — só os campos que
+  // ele aprovou um a um. Um campo pendente já aparece no ecrã e não entra.
+  const handleConfirmAIReview = useCallback(async (sugestoesDecididas) => {
 
-    // Caminho do Épico 9: nada foi aplicado ainda. A confirmação do
-    // consultor é o que autoriza escrever no formulário e na ficha.
-    if (revisaoPendente) {
-      const { extractedData, targetTitular, documentsProcessed } =
-        revisaoPendente;
-      setRevisaoPendente(null);
-      applySharedExtractedFields(extractedData);
-      applyPersonalAndFinancialToTitular(extractedData, targetTitular);
-      await persistAISuggestions(
-        extractedData,
-        documentsProcessed || 1,
-        targetTitular,
-      );
-      setActiveTab("personal");
+    const sugestoes = sugestoesDecididas || sugestoesIA;
+    const aprovados = valoresAprovados(sugestoes);
+    const { targetTitular, documentsProcessed } = revisaoPendente || {};
+
+    setRevisaoPendente(null);
+    setSugestoesIA((anterior) => limparDecididas(anterior));
+
+    if (Object.keys(aprovados).length === 0) {
+      // Rejeitou tudo. Não há nada a gravar, e dizê-lo é melhor do que um
+      // silêncio que se lê como falha.
+      toast.info("Nenhuma sugestão aprovada — a ficha fica como estava.");
       return;
     }
 
-    // Caminho da análise em lote: os campos já tinham sido pré-preenchidos
-    // antes de o diálogo abrir; só falta avisar que é preciso guardar.
-    toast.success("Campos actualizados. Não esqueça de guardar!");
-  }, [revisaoPendente]);
+    applySharedExtractedFields(aprovados);
+    applyPersonalAndFinancialToTitular(aprovados, targetTitular || "titular1");
+    await persistAISuggestions(
+      aprovados,
+      documentsProcessed || 1,
+      targetTitular || "titular1",
+    );
+    setActiveTab("personal");
+  }, [revisaoPendente, sugestoesIA]);
 
-  // Fechar o diálogo sem confirmar DESCARTA a extracção pendente. Guardá-la
-  // seria pior do que inútil: a próxima confirmação escreveria dados de um
-  // documento que o consultor já tinha rejeitado.
-  const handleAIReviewOpenChange = useCallback((aberto) => {
-    setShowAIReviewDialog(aberto);
-    if (!aberto) setRevisaoPendente(null);
-  }, []);
+  // ── Decisão campo a campo ────────────────────────────────────────
+  // Aprovar/rejeitar NÃO grava: muda o estado da sugestão. A gravação
+  // acontece quando não falta nenhuma decisão — uma ida ao servidor por
+  // extracção, com consentimento explícito campo por campo.
+  const decidirSugestao = useCallback((campo, decisao) => {
+    setSugestoesIA((anterior) => {
+      const seguinte = decisao === "aprovar"
+        ? aprovarSugestao(anterior, campo)
+        : rejeitarSugestao(anterior, campo);
+      if (todasDecididas(seguinte)) {
+        // Fora do setter para não gravar durante um render.
+        Promise.resolve().then(() => handleConfirmAIReview(seguinte));
+      }
+      return seguinte;
+    });
+  }, [handleConfirmAIReview]);
+
+  const handleAprovarSugestao = useCallback(
+    (campo) => decidirSugestao(campo, "aprovar"),
+    [decidirSugestao],
+  );
+  const handleRejeitarSugestao = useCallback(
+    (campo) => decidirSugestao(campo, "rejeitar"),
+    [decidirSugestao],
+  );
+
+  const handleAprovarTodasSugestoes = useCallback(() => {
+    setSugestoesIA((anterior) => {
+      const seguinte = aprovarTodasSugestoes(anterior);
+      Promise.resolve().then(() => handleConfirmAIReview(seguinte));
+      return seguinte;
+    });
+  }, [handleConfirmAIReview]);
+
+  const handleRejeitarTodasSugestoes = useCallback(() => {
+    setSugestoesIA((anterior) => {
+      const seguinte = rejeitarTodasSugestoes(anterior);
+      Promise.resolve().then(() => handleConfirmAIReview(seguinte));
+      return seguinte;
+    });
+  }, [handleConfirmAIReview]);
 
   // ── Escolha de titular para documentos ambíguos (Épico 8) ────────
   // O diálogo é de apresentação: diz qual foi a escolha, o contentor é que
@@ -1932,17 +1999,29 @@ const ProcessDetails = () => {
   };
 
   // Helper: indicador visual de confiança da IA para campos extraídos
+  // Indicador de confiança da IA por campo (Lote 3, ponto 2).
+  //
+  // A versão antiga olhava SÓ para o número e nunca para o valor, pelo que
+  // um NIF vazio — que desenha o `placeholder="9 dígitos"` — aparecia com o
+  // badge «IA 100%» ao lado. Era o badge a fazer o placeholder parecer um
+  // dado: sem ele, um campo vazio lê-se como um campo vazio.
+  //
+  // A regra vive em `utils/aiConfidence.js` (pura, testada): sem valor, com
+  // o texto do placeholder, ou com um valor que a validação do próprio
+  // campo recusa, não há indicador nenhum.
   const getConfidenceIndicator = (fieldName) => {
-    const conf = aiFieldConfidence?.[fieldName];
-    if (conf === undefined || conf === null || !aiExtractedData) return null;
-    const pct = Math.round(conf * 100);
-    if (conf >= 0.8) {
-      return { badge: "bg-green-100 text-green-700 border-green-300", label: `${pct}%`, borderClass: "border-l-4 border-l-green-400", level: "high" };
-    } else if (conf >= 0.6) {
-      return { badge: "bg-amber-100 text-amber-700 border-amber-300", label: `${pct}%`, borderClass: "border-l-4 border-l-amber-400", level: "medium" };
-    } else {
-      return { badge: "bg-red-100 text-red-700 border-red-300", label: `${pct}%`, borderClass: "border-l-4 border-l-red-400", level: "low" };
-    }
+    const origem =
+      fieldName in (personalData || {}) ? personalData
+      : fieldName in (financialData || {}) ? financialData
+      : fieldName in (realEstateData || {}) ? realEstateData
+      : personalData;
+    return indicadorDeConfianca({
+      valor: origem?.[fieldName],
+      confianca: aiFieldConfidence?.[fieldName],
+      houveExtraccao: Boolean(aiExtractedData),
+      placeholder: PLACEHOLDERS_POR_CAMPO[fieldName],
+      validar: validadoresDeCampo[fieldName],
+    });
   };
 
   // ── Helper: detect if a card has no meaningful data ────────────
@@ -2688,6 +2767,22 @@ const ProcessDetails = () => {
                     <CardTitle className="text-lg">Dados do Processo</CardTitle>
                   </CardHeader>
                   <CardContent>
+                    {/* Preenchimento em linha (Lote 3, ponto 1): a barra
+                        substitui o diálogo sobreposto. Fica ACIMA dos
+                        separadores porque as sugestões podem tocar campos de
+                        mais do que um — escondê-la dentro de um separador
+                        fazia-a desaparecer ao mudar de aba. */}
+                    {sugestoesIA && (
+                      <div className="mb-4">
+                        <BarraDeSugestoes
+                          contagem={contarPorEstado(sugestoesIA)}
+                          sourceDocument={sugestoesIA.sourceDocument}
+                          onAprovarTodas={handleAprovarTodasSugestoes}
+                          onRejeitarTodas={handleRejeitarTodasSugestoes}
+                          onFechar={() => setSugestoesIA(null)}
+                        />
+                      </div>
+                    )}
                     <Tabs value={activeTab} onValueChange={(v) => {
                       setEditingCardId(null);
                       setActiveTab(v);
@@ -2709,6 +2804,9 @@ const ProcessDetails = () => {
                       canEditPersonal={canEditPersonal}
                       CardHeaderWithEdit={CardHeaderWithEdit}
                       getConfidenceIndicator={getConfidenceIndicator}
+                      sugestaoDoCampo={(campo) => sugestaoDoCampo(sugestoesIA, campo)}
+                      onAprovarSugestao={handleAprovarSugestao}
+                      onRejeitarSugestao={handleRejeitarSugestao}
                       getFieldMetaFor={getFieldMetaFor}
                       fetchData={fetchData}
                       financialData={financialData}
@@ -3087,16 +3185,11 @@ const ProcessDetails = () => {
         onSave={handleSaveAssignment}
       />
 
-      {/* Dialog de Revisão de Conflitos IA */}
-      <AIReviewDialog
-        open={showAIReviewDialog}
-        conflicts={aiConflicts}
-        newValues={revisaoPendente?.newValues || []}
-        sourceDocument={revisaoPendente?.sourceDocument || ""}
-        onOpenChange={handleAIReviewOpenChange}
-        onResolve={resolveAIConflict}
-        onConfirmAll={handleConfirmAIReview}
-      />
+      {/* O `AIReviewDialog` SAIU (Lote 3, ponto 1). A revisão é agora em
+          linha, nos próprios campos — `BarraDeSugestoes` acima dos
+          separadores e `InlineAISuggestion` ao lado de cada campo. Deixar
+          aqui um diálogo cuja flag nunca passa a `true` era código
+          adormecido, e código adormecido é um convite a religá-lo. */}
 
       {/* Dialog: documento ambíguo → Titular 1 / Titular 2 / Ignorar */}
       <TitularChoiceDialog

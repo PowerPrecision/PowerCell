@@ -1602,6 +1602,21 @@ export const updateAutomationRule = (id, data) =>
   api.put(`/admin/automation/rules/${id}`, data);
 export const deleteAutomationRule = (id) => api.delete(`/admin/automation/rules/${id}`);
 // `getWorkflowStatuses` já existe mais acima neste ficheiro — não repetir.
+/**
+ * Conflitos de dados IA vs ficha (Lote 3, ponto 2 — 6.ª instância da regra).
+ *
+ * O `DataConflictResolver` fazia estas duas chamadas por `fetch` cru com
+ * `API_URL` e o token à mão. O interceptor que injecta `X-Company-Id` /
+ * `X-Active-Role` vive no cliente Axios, e um `fetch` só leva o que lhe
+ * escreverem: sem os cabeçalhos, o backend resolve a empresa por
+ * `user.company` (o NOME, não o id) — a confusão de 2026-09-21.
+ */
+export const resolveProcessDataConflict = (processId, payload) =>
+  api.post(`/processes/${processId}/resolve-conflict`, payload);
+
+export const confirmProcessData = (processId, confirmed) =>
+  api.post(`/processes/${processId}/confirm-data`, { confirmed });
+
 // Sinais vitais do motor de background (leitura).
 export const getAutomationsEngineStatus = () => api.get("/automations");
 

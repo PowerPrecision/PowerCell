@@ -9262,3 +9262,152 @@ existir", agora pela porta da correspondência de texto.
    É a armadilha do Lote 5 outra vez — um guarda sobre o orquestrador
    passa a verde com a correcção em sítio nenhum.
 3. **O guarda da sétima mutação era satisfeito pela linha errada**, acima.
+
+---
+
+# Iteração `ux-da-ia-e-formularios` — 2026-10-02
+
+Lote 3: UX de IA e formulários. Pedido como «estritamente de interface e
+extração» — e **dois dos quatro pontos não eram**: a UI não pode mostrar
+o que não lhe é dado. Digo-o aqui porque é a parte do diagnóstico que
+contraria o enunciado.
+
+## Ponto 1 — o «Analisar IA» nunca funcionou
+
+O `S3FileManager` tira o id de `file.doc_id || file.id`, com um comentário
+a afirmar que «o listing de ficheiros expõe o ID do document_metadata em
+`file.doc_id`».
+
+Nunca expôs. O `s3_service.list_files` devolve
+`name/path/size/size_formatted/last_modified/category/temporary_url` — sem
+`id` — e a projecção do enriquecimento pedia **catorze** campos do
+`document_metadata` e não o `id`. Logo `doc_id` era sempre `undefined` e o
+handler caía no `toast.error("doc_id em falta")`. O botão nunca chegou a
+chamar o endpoint.
+
+**É a mesma forma da fila Mongo do Lote 2**: uma crença escrita em
+comentário, nunca um contrato, e ninguém verificou se o campo existia.
+Duas vezes em dois lotes.
+
+### Do diálogo sobreposto ao preenchimento em linha
+
+A modal tapava a ficha (para comparar um NIF era preciso fechá-la) e a
+decisão era um bloco. Agora a sugestão aparece no campo, com fundo
+amarelado e aprovar/rejeitar ao lado.
+
+`utils/sugestoesEmLinha.js` é a máquina de estados, pura. O que importa
+proteger: **mostrar não é gravar.** `valorAMostrar` devolve o valor
+sugerido enquanto pende — é esse o ponto do preenchimento em linha — e
+`valoresAprovados` devolve só o aprovado, que é de onde sai o payload. Se
+a gravação voltar a partir do `extractedData`, a interface fica igual e a
+regra de ouro desaparece sem deixar rasto.
+
+`persistAISuggestions` continua com UM só chamador. Dois guardas de legado
+foram **actualizados e não apagados** (`aiWriteGuard`, `vlmSilencioGuard`):
+o que eles afirmavam era o MECANISMO («o diálogo abre»); a propriedade é
+«qualquer extracção levanta revisão», e continua afirmada.
+
+## Ponto 2 — «IA 100%» ao lado de um campo vazio
+
+`getConfidenceIndicator` olhava para o número e nunca para o valor. O input
+do NIF tem `placeholder="9 dígitos"`: com o campo vazio o browser desenha
+esse texto cinzento, e ao lado dele o badge dizia «IA 100%».
+
+**É o badge que faz o placeholder parecer um dado.** Sem ele, um campo
+vazio lê-se como um campo vazio. E dar confiança máxima a uma extracção
+nula desliga a desconfiança exactamente no campo que mais precisa dela.
+
+Três recusas em `utils/aiConfidence.js`: vazio, igual ao placeholder (modo
+de falha real da extracção por visão — a IA que lê um formulário EM BRANCO
+devolve o texto de ajuda) e valor que a validação do próprio campo recusa.
+Os validadores são os que o formulário já corre.
+
+O «Desbloquear Dados» era uma faixa de largura inteira para o estado que é
+quase sempre o normal — um aviso permanente deixa de ser lido. Passou a
+ícone com nome acessível e confirmação: o cadeado é discreto, o efeito (a
+IA volta a poder sobrepor a ficha) não é.
+
+E o mesmo componente fazia as duas chamadas por `fetch` cru: **sexta
+instância** da regra de 2026-09-21. Passaram a Axios.
+
+## Ponto 3 — o ecrã branco era uma fronteira que não tratava o erro
+
+Três defeitos sobrepostos no `LazyChunkErrorBoundary`, que embrulha TODAS
+as rotas:
+
+1. `includes("Unexpected token")` na lista de causas — qualquer
+   `JSON.parse` falhado era classificado como erro de chunk e
+   desencadeava um recarregamento. O erro real nunca chegava ao Sentry.
+2. **O ecrã branco:** devolvia `{hasError: false}` para tudo o que não
+   fosse chunk. Um boundary que não muda de estado não TRATA o erro — o
+   React volta a renderizar os mesmos filhos, eles levantam outra vez e,
+   sem fronteira a assumir a falha, desmonta a árvore inteira. Aparecia no
+   Voltar porque as rotas têm fronteira própria: o que chega aqui é o que
+   vive FORA delas, e é isso que uma navegação para trás volta a montar.
+3. O cache-busting acumulava (`?_t=1&_t=2&_t=3` — o comentário dizia que
+   era «para evitar ciclo infinito») e usava `location.replace`, que apaga
+   a entrada do histórico: **a correcção estragava o Voltar por si mesma.**
+
+A modal «Novo Processo»: `overflow-y:auto` com `overflow-x:visible` faz o
+CSS promover o eixo X também a `auto` — um filho mais largo cria barra
+horizontal e empurra o botão da direita para fora. Era isto o "cortado".
+
+## Ponto 4 — quatro de SEIS serializações
+
+O Portal mostrava `2/5` e «2 erros no último envio» — nunca um nome. E a
+lista não aparecia porque o servidor não a enviava: `/portal/status` tem
+**seis** sítios a serializar um documento e o PACOTE DE acrescentou
+`attached_files` a **um**. A explicação da correcção está escrita nesse
+bloco, a poucas linhas dos outros.
+
+Faltava no caso normal (`requested_docs`), no `uploaded_docs` — onde o
+`filename` de topo é por desenho o upload mais recente, e era este o «só o
+nome do último ficheiro» — e nos dois `append(entry)` do caminho do cliente
+SEM processo, que é o primeiro ecrã que ele vê.
+
+Do lado do cliente, `utils/portalUploadStaging.js`: o lote nasce na
+selecção com o nome de cada ficheiro, o estado é por ficheiro, o erro fica
+NO ficheiro que falhou (era `errors[0].error`) e o resumo **nomeia** o que
+falhou — «2 erros» manda o cliente adivinhar.
+
+## Validação
+
+* `flake8` (selecção do CI) limpo; `eslint --quiet` limpo; `yarn build` verde.
+* Backend `tests/unit`: **4335 passed, 5 skipped** (eram 4316 — **+19**).
+* Frontend: **1410 passed**, 117 ficheiros (eram 1302 — **+108**).
+
+### Seis mutações, seis mortes — a última depois de corrigir o teste
+
+| Mutação | Mortes |
+|---|---|
+| `valoresAprovados` passa a devolver tudo (pendentes incluídos) | 5 |
+| O indicador de confiança volta a ignorar o valor | 5 |
+| «Unexpected token» volta à lista de erros de chunk | 3 |
+| O resumo do lote volta a contar erros em vez de os nomear | 2 |
+| A projecção do `doc_id` sai | 2 |
+| `attached_files` sai de UMA das seis serializações | 2 |
+
+**A sexta sobreviveu à primeira tentativa.** A guarda fazia
+`assert "attached_files" in bloco` sobre o dicionário renderizado — e isso
+é satisfeito por `"uploaded_count": len(d.get("attached_files") or [])`, em
+que a subcadeia aparece **dentro de outra expressão**. Passou a comparar as
+CHAVES do dicionário por AST. É a mesma armadilha do Lote 2 (`tipos=` é
+subcadeia de `excluir_tipos=`), agora por dentro de uma expressão: duas
+iterações seguidas em que o guarda de fonte foi satisfeito pela linha
+errada.
+
+## Erros meus neste lote
+
+1. **O meu inventário das serializações do Portal estava incompleto.**
+   Contei três (`requested`/`uploaded`/`received`) e são **seis** — há dois
+   `append(entry)` no caminho do cliente sem processo e um no fallback do
+   SystemConfig. Foi o teste que eu próprio escrevi a apanhá-lo, ao falhar
+   com `fonte.index(...)` a acertar no sítio errado. O teste passou a
+   enumerar por AST e a afirmar o NÚMERO, para o próximo sítio novo ter de
+   ser verificado.
+2. **O guarda da sexta mutação era satisfeito por outra expressão** (acima).
+3. Escrevi um teste que dependia da mensagem do V8 (`JSON.parse("{mau")` dá
+   «Expected property name or '}'» nesta versão, não «Unexpected token»).
+   Um teste preso à mensagem de uma versão falha noutro runtime por um
+   motivo que não é o do teste — passou a afirmar o literal e, ao lado, que
+   nenhuma mensagem real deste runtime é classificada como chunk.

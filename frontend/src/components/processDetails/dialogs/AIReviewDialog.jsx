@@ -1,4 +1,17 @@
 /**
+ * ⚠️ SUBSTITUÍDO pelo PREENCHIMENTO EM LINHA (Lote 3, ponto 1).
+ *
+ * Nenhum ecrã monta este diálogo. A revisão das sugestões da IA passou a
+ * acontecer NOS CAMPOS do formulário: `BarraDeSugestoes` acima dos
+ * separadores, `InlineAISuggestion` ao lado de cada campo, e a máquina de
+ * estados em `utils/sugestoesEmLinha.js`.
+ *
+ * Fica aqui, com os seus testes, por uma razão operacional: se o
+ * preenchimento em linha precisar de recuo, é este o caminho de volta. Não
+ * voltar a ligá-lo sem decidir o que fazer ao outro — DOIS caminhos de
+ * revisão divergem, e o que divergir é a regra de ouro (a IA não grava sem
+ * confirmação).
+ *
  * AIReviewDialog — resolução de conflitos da análise IA (Épico 8, Eixo 1).
  *
  * Quando a extracção automática devolve, para um campo, um valor diferente
