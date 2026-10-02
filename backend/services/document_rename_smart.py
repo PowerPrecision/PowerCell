@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from database import db
+from services.document_visibility import assert_can_manage_process_documents
 from services.document_constants import (
     DEFAULT_CLIENT_NAME,
     ERROR_DOC_NOT_CATEGORIZED,
@@ -70,8 +71,16 @@ def build_renamed_s3_path(s3_path: str, new_filename: str) -> str:
 async def run_rename_document_smart(
     process_id: str,
     data: dict,
+    *,
+    user: dict | None = None,
 ) -> dict[str, Any]:
-    """Renomeia um documento (nome IA ou manual)."""
+    """Renomeia um documento (nome IA ou manual).
+
+    A permissão é GESTÃO OU ATRIBUÍDO e vive aqui, não na rota: o
+    `require_roles` decide pelo cargo e não vê o processo, logo nunca
+    poderia deixar passar o consultor dono do processo — que é
+    exactamente o 403 que o QA reportou.
+    """
     s3_path = data.get("s3_path")
     apply_ai_name = data.get("apply_ai_name", True)
     novo_nome = data.get("novo_nome")
@@ -82,6 +91,8 @@ async def run_rename_document_smart(
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+
+    assert_can_manage_process_documents(user or {}, process)
 
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     old_filename = s3_path.rsplit("/", 1)[-1] if "/" in s3_path else s3_path

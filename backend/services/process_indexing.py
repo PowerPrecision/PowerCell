@@ -79,14 +79,21 @@ def build_indexacao_update_set(
 
 
 def collect_assigned_user_ids(process: dict) -> list[str]:
-    """IDs únicos de consultores/mediadores/indexação atribuídos ao processo."""
-    return list(set(filter(None, (
-        (process.get("assigned_consultor_ids") or []) +
-        ([process["assigned_consultor_id"]] if process.get("assigned_consultor_id") else []) +
-        (process.get("assigned_mediador_ids") or []) +
-        ([process["assigned_mediador_id"]] if process.get("assigned_mediador_id") else []) +
-        ([process["assigned_indexacao_id"]] if process.get("assigned_indexacao_id") else [])
-    ))))
+    """IDs únicos dos atribuídos ao processo. Delega no ponto único.
+
+    Esta função tinha a lista de campos escrita à mão, com CINCO campos:
+    faltavam-lhe `consultor_id`, `consultant_id` e `mediador_id` — os
+    singulares legados que a dupla auto-atribuição escrevia sozinhos.
+
+    É ela que o `document_visibility` consulta, logo um consultor
+    atribuído só por esses campos levava **403** na listagem de
+    documentos enquanto via o processo em "Os Meus Processos" (essa
+    listagem lê `consultant_id`). Ler a mesma lista que os escritores
+    carimbam é o que faz as duas respostas concordarem.
+    """
+    from services.process_staff_assignment import collect_assigned_ids
+
+    return collect_assigned_ids(process)
 
 
 def assert_mark_indexed_permission(user_role: str, all_roles: list) -> None:

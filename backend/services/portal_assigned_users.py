@@ -7,36 +7,21 @@ from __future__ import annotations
 
 
 def get_all_assigned_user_ids(process: dict) -> list:
-    """Lista deduplicada de TODOS os user_ids atribuídos ao processo.
+    """Lista deduplicada de TODOS os user_ids atribuídos. Delega no ponto único.
 
-    Inclui consultores, mediadores, indexação e parceiro.
-    Usa os campos novos (_ids) com fallback para os antigos (_id).
+    A docstring desta função chamava-se a si mesma "fonte de verdade"
+    (ver `process_portal_messages.collect_assigned_user_ids`) e era uma
+    das TRÊS cópias da lista de campos, com SEIS campos escritos à mão.
+    Faltavam-lhe `consultor_id`, `consultant_id` e `mediador_id`, pelo
+    que um processo atribuído só por esses campos não notificava
+    ninguém — nem o consultor que trata dele.
+
+    A fonte de verdade é o `ASSIGNMENT_ID_FIELDS`, que vive ao lado dos
+    campos que os escritores carimbam e deriva deles.
     """
-    ids = set()
+    from services.process_staff_assignment import collect_assigned_ids
 
-    for uid in (process.get("assigned_consultor_ids") or []):
-        if uid:
-            ids.add(uid)
-    uid = process.get("assigned_consultor_id")
-    if uid:
-        ids.add(uid)
-
-    for uid in (process.get("assigned_mediador_ids") or []):
-        if uid:
-            ids.add(uid)
-    uid = process.get("assigned_mediador_id")
-    if uid:
-        ids.add(uid)
-
-    uid = process.get("assigned_indexacao_id")
-    if uid:
-        ids.add(uid)
-
-    uid = process.get("assigned_parceiro_id")
-    if uid:
-        ids.add(uid)
-
-    return list(ids)
+    return collect_assigned_ids(process)
 
 
 # Compat alias (routes.portal used underscore prefix)

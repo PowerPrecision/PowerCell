@@ -6908,3 +6908,99 @@ Hoje o id decide a colecção (`COLECCOES_DA_TRILHA`) e a permissão é a
 mesma nas duas: dono ou admin. Uma entrada de **sistema** (sem
 `user_id`) não tem dono e só o admin a rectifica — tratar "sem dono"
 como "de todos" abriria a trilha de auditoria a qualquer utilizador.
+
+
+## Quem está atribuído, a chave da IA e dois cabeçalhos (Set 2026)
+
+Quatro defeitos de produção com uma raiz comum em três deles: **a mesma
+pergunta respondida em sítios diferentes, por código diferente.**
+
+### O 403 falso positivo nos documentos — três listas de campos
+
+O QA reportou "tenho o processo atribuído e os documentos dão 403". As
+duas coisas eram verdade ao mesmo tempo:
+
+| Leitor | Campos |
+|---|---|
+| `process_list_filters.ASSIGNMENT_ID_FIELDS` | 15 |
+| `process_indexing.collect_assigned_user_ids` | 5, à mão |
+| `portal_assigned_users.get_all_assigned_user_ids` | 6, à mão |
+
+Às duas últimas faltavam `consultor_id`, `consultant_id` e `mediador_id`
+— os singulares legados que a dupla auto-atribuição escrevia **sozinhos**
+antes da correcção dos escritores canónicos. O consultor via o processo
+em "Os Meus Processos" (essa listagem lê `consultant_id`) e levava 403 na
+listagem de documentos (o `document_visibility` chama o
+`collect_assigned_user_ids`, que não lê). Foi a metade que funcionava que
+escondeu a outra — a forma do `run_get_my_tasks`.
+
+E a ironia do nome: `process_portal_messages` chama o
+`get_all_assigned_user_ids` **"fonte de verdade"** numa docstring, e ele
+era uma das cópias incompletas. Um nome não torna nada canónico.
+
+`ASSIGNMENT_ID_FIELDS` + `collect_assigned_ids` vivem agora em
+`process_staff_assignment`, ao lado dos campos que os ESCRITORES
+carimbam, e **derivam** deles. Os três leitores delegam, e o teste compara
+os leitores REAIS **entre si** em vez de cada um contra uma expectativa —
+uma quarta expectativa seria a quarta cópia.
+
+### `rename-smart`: gestão OU atribuído
+
+Estava em `require_roles([ADMIN, CEO, DIRETOR])` — a regra documentada, a
+funcionar. O dono mudou-a: *"não faz sentido o dono do processo não poder
+organizar os próprios ficheiros"*.
+
+**O `require_roles` não podia resolver isto:** decide pelo CARGO e não vê
+o processo, logo nunca sabe responder "está atribuído?". A guarda
+(`can_manage_process_documents`) vive no serviço, onde o processo já está
+carregado, e a atribuição vem do ponto único — repetir aqui uma lista à
+mão reproduzia o 403 numa operação de **escrita**.
+
+### O 401 da OpenAI — a armadilha do nome igual
+
+As variáveis estavam definidas no Render e a API respondia *"you didn't
+provide an API key"*. `services/ai_document.py` tinha:
+
+```python
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')   # no import
+_openai_client = AsyncOpenAI(api_key=EMERGENT_LLM_KEY)
+```
+
+Três defeitos: lê **só** `EMERGENT_LLM_KEY` (a `OPENAI_API_KEY` nunca é
+consultada, logo o cliente nasce com `api_key=""`); lê no **import**, não
+na chamada; e nunca passa `organization`. Mais dois guardas
+`if not EMERGENT_LLM_KEY` que recusavam o trabalho **antes de tentar**,
+com a chave certa definida.
+
+**E o construtor correcto já existia, com o mesmo nome**, no módulo
+vizinho: `ai_document_analyzer.get_openai_client` faz
+`OPENAI_API_KEY` > `EMERGENT_LLM_KEY`, trata o `base_url` das chaves
+`sk-emerg` e passa o `organization`. Duas funções homónimas, uma correcta
+e uma partida — e quem lê `get_openai_client()` não tem como saber qual
+é. A ingénua delega agora na completa, e levanta `RuntimeError` sem
+chave: devolver `None` dava um `AttributeError` numa linha que não diz
+nada sobre configuração.
+
+### `media-src` e o microfone — dois cabeçalhos, três sítios
+
+**1. Nenhum CSP declarava `media-src`.** Ele **não herda** o `img-src`:
+cai no `default-src 'self'` e o `blob:` das notas de voz é recusado.
+
+**2. `Permissions-Policy: microphone=()`** — a lista **vazia** desliga o
+microfone para **todas** as origens. O `getUserMedia` falha com
+`NotAllowedError` **sem o browser pedir permissão**, que era a parte do
+sintoma reportado ("aparece 'Acesso ao microfone recusado' sem que o
+browser pergunte") que nenhuma outra hipótese explicava.
+
+*Correcção a uma suposição minha:* eu tinha apontado o contexto seguro
+(HTTPS) como causa provável do microfone. Não era. O HTTPS explicaria a
+falha mas não a ausência de prompt — e foi a ausência de prompt que
+apontou para a política.
+
+Corrigido nos **três** blocos: os dois do `frontend/vercel.json`
+(`/portal(.*)` e o resto — o Portal também reproduz áudio) e o do
+`server.py`. O `vercel.json` governa a PÁGINA, o `server.py` governa as
+respostas da API; corrigir um e esquecer o outro é a forma do "Menu e
+rotas têm de concordar" — divergem sem dar erro e o sintoma volta pelo
+outro caminho. Há teste a afirmar que a câmara continua desligada e que o
+`media-src` não abriu para `*` nem `http:`.

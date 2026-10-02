@@ -191,22 +191,15 @@ def build_role_visibility_conditions(
 
 # Campos de atribuição canónicos + aliases legados. Usados tanto em
 # GET /processes/me (mine_only) como no filtro "Atribuído a".
-ASSIGNMENT_ID_FIELDS: tuple[str, ...] = (
-    "assigned_to",
-    "assigned_consultor_ids",
-    "assigned_consultor_id",
-    "assigned_consultant_ids",
-    "assigned_consultant_id",
-    "assigned_mediador_ids",
-    "assigned_mediador_id",
-    "assigned_indexacao_id",
-    "assigned_parceiro_id",
-    "assigned_users",
-    "assigned_user_ids",
-    "consultant_id",
-    "consultor_id",
-    "mediador_id",
-    "manager_id",
+#
+# RE-EXPORTADO do ponto único (Set 2026). Esta era a mais completa das
+# TRÊS listas que existiam, e foi a divergência entre elas que produziu o
+# 403 falso positivo nos documentos: esta listagem reconhecia o consultor
+# legado (`consultant_id`) e o guard dos documentos não. O nome fica aqui
+# por compatibilidade — os chamadores deste módulo não têm de saber que a
+# constante mudou de casa.
+from services.process_staff_assignment import (  # noqa: E402
+    ASSIGNMENT_ID_FIELDS,
 )
 
 _SENTINEL_IDS = frozenset({"", "all", "undefined", "null"})

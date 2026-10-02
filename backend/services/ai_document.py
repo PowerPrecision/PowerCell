@@ -58,7 +58,36 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+#: OMISSÃO legada, mantida só para quem a importe deste módulo. **Não
+#: decide nada**: é lida no import, logo congela o ambiente do arranque.
+#: Quem precisa de saber se há chave chama `chave_de_ia_configurada()`.
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+
+#: Variáveis que podem conter a chave, por ordem de prioridade — a MESMA
+#: ordem do construtor canónico (`ai_document_analyzer.get_openai_client`).
+VARIAVEIS_DA_CHAVE_DE_IA: tuple[str, ...] = (
+    "OPENAI_API_KEY",
+    "EMERGENT_LLM_KEY",
+)
+
+
+def chave_de_ia_configurada() -> bool:
+    """Há chave de IA utilizável? Lida na CHAMADA, não no import.
+
+    PORQUE É QUE ISTO EXISTE (401 em produção, Set 2026)
+    ====================================================
+    Dois guardas deste módulo faziam `if not EMERGENT_LLM_KEY` e
+    devolviam "Serviço AI não configurado". Com a `OPENAI_API_KEY`
+    definida no Render — e válida — recusavam o trabalho antes de
+    tentar, porque essa variável nunca era consultada.
+
+    Ler na chamada e não no import não é zelo: uma constante de módulo
+    congela o ambiente do arranque, e o sintoma disso é indistinguível
+    de "a chave está errada".
+    """
+    return any(
+        (os.environ.get(nome) or "").strip() for nome in VARIAVEIS_DA_CHAVE_DE_IA
+    )
 
 # Modelo de OMISSÃO, não o modelo em uso. Quem manda é o painel de IA
 # (tarefa `document_analysis`); ver `resolve_ai_model` mais abaixo. Este valor
@@ -71,10 +100,43 @@ from openai import AsyncOpenAI
 _openai_client: Optional[AsyncOpenAI] = None
 
 def get_openai_client() -> AsyncOpenAI:
-    """Obter ou criar cliente OpenAI assíncrono."""
+    """Cliente OpenAI assíncrono — delega no construtor CANÓNICO.
+
+    A ARMADILHA DO NOME (401 em produção, Set 2026)
+    ===============================================
+    Esta função construía o cliente à mão com
+    `AsyncOpenAI(api_key=EMERGENT_LLM_KEY)`: nunca lia a
+    `OPENAI_API_KEY`, nunca passava `organization`, e lia a chave no
+    import. Com a `OPENAI_API_KEY` definida no Render, o cliente nascia
+    com `api_key=""` → **401**.
+
+    E o construtor certo já existia, com o **mesmo nome**, no módulo
+    vizinho: `ai_document_analyzer.get_openai_client` faz
+    `OPENAI_API_KEY` > `EMERGENT_LLM_KEY`, trata o `base_url` das chaves
+    `sk-emerg` e passa o `organization`. Duas funções homónimas, uma
+    correcta e uma partida — e quem lê `get_openai_client()` no código
+    não tem como saber qual delas é.
+
+    O import é tardio pelo mesmo motivo que em `resolve_ai_model`: o
+    `ai_document_analyzer` importa deste módulo, e um import no topo
+    fecharia o ciclo.
+    """
     global _openai_client
     if _openai_client is None:
-        _openai_client = AsyncOpenAI(api_key=EMERGENT_LLM_KEY)
+        from services.ai_document_analyzer import (
+            get_openai_client as construir_cliente_canonico,
+        )
+
+        cliente = construir_cliente_canonico()
+        if cliente is None:
+            # O construtor canónico devolve `None` sem chave. Deixar
+            # passar daria um `AttributeError` numa linha que não diz
+            # nada sobre configuração — e era esse o diagnóstico difícil.
+            raise RuntimeError(
+                "Nenhuma chave de IA configurada (OPENAI_API_KEY ou "
+                "EMERGENT_LLM_KEY). O cliente OpenAI não pode ser criado."
+            )
+        _openai_client = cliente
     return _openai_client
 
 
@@ -1310,8 +1372,10 @@ async def analyze_document_from_base64(base64_content: str, mime_type: str, docu
     Returns:
         Dados extraídos
     """
-    if not EMERGENT_LLM_KEY:
-        logger.error("EMERGENT_LLM_KEY não configurada")
+    if not chave_de_ia_configurada():
+        logger.error(
+            "Nenhuma chave de IA configurada (OPENAI_API_KEY ou EMERGENT_LLM_KEY)"
+        )
         return {"error": "Serviço AI não configurado", "extracted_data": {}}
     
     # Decodificar base64
@@ -1361,8 +1425,10 @@ async def analyze_document_from_url(document_url: str, document_type: str) -> Di
     Returns:
         Dados extraídos
     """
-    if not EMERGENT_LLM_KEY:
-        logger.error("EMERGENT_LLM_KEY não configurada")
+    if not chave_de_ia_configurada():
+        logger.error(
+            "Nenhuma chave de IA configurada (OPENAI_API_KEY ou EMERGENT_LLM_KEY)"
+        )
         return {"error": "Serviço AI não configurado", "extracted_data": {}}
     
     try:

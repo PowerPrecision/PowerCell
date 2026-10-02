@@ -1,4 +1,28 @@
 ---
+Task ID: atribuidos-chave-cabecalhos
+Agent: Cloud Agent
+Task: 403 falso positivo nos documentos, rename-smart para o dono, 401 da OpenAI e os cabeçalhos de media/microfone
+
+Date: 2026-10-02
+
+Work Log:
+- O 403 DOS DOCUMENTOS: "tenho o processo atribuído e dá 403" era verdade NAS DUAS PONTAS. Inventariei os leitores e havia TRÊS listas de campos: `process_list_filters.ASSIGNMENT_ID_FIELDS` (15), `process_indexing.collect_assigned_user_ids` (5, à mão), `portal_assigned_users.get_all_assigned_user_ids` (6, à mão). Às duas últimas faltavam `consultor_id`, `consultant_id`, `mediador_id` — os singulares que a dupla auto-atribuição escrevia sozinhos.
+- Consequência exacta: a listagem "Os Meus Processos" lê `consultant_id` e reconhecia; o `document_visibility` chama o `collect_assigned_user_ids` e não reconhecia. Foi a metade que funcionava que escondeu a outra, outra vez.
+- IRONIA REGISTADA: o `process_portal_messages` chama o `get_all_assigned_user_ids` "fonte de verdade" numa docstring, e ele era uma das cópias incompletas. Um nome não torna nada canónico.
+- `ASSIGNMENT_ID_FIELDS` + `collect_assigned_ids` passaram para o `process_staff_assignment`, ao lado dos campos que os ESCRITORES carimbam, e DERIVAM deles. O teste compara os três leitores REAIS entre si — uma expectativa escrita no teste seria a quarta cópia. E há contraprova de que a unificação não ENCOLHEU o conjunto: ficar pela interseção retirava acesso a quem o tem hoje.
+- RENAME-SMART: não era bug, era a regra do AGENTS.md (`require_roles([ADMIN, CEO, DIRETOR])`) a funcionar — o QA testou com consultor. Disse-o ao dono antes de mexer e ele mudou a regra. O ponto técnico que importa: o `require_roles` NUNCA podia resolver isto, porque decide pelo cargo e não vê o processo. A guarda teve de ir para o serviço, onde o processo já está carregado.
+- O 401 DA OPENAI: o dono suspeitou do código e tinha razão. `ai_document.py` lia SÓ `EMERGENT_LLM_KEY`, no IMPORT, e nunca passava `organization` — com a `OPENAI_API_KEY` definida, o cliente nascia com `api_key=""`. Mais dois guardas `if not EMERGENT_LLM_KEY` que recusavam o trabalho antes de tentar.
+- A ARMADILHA: o construtor certo já existia com o MESMO NOME no módulo vizinho (`ai_document_analyzer.get_openai_client`). Duas funções homónimas, uma correcta e uma partida, e quem lê a chamada não distingue. A ingénua delega agora na completa; sem chave levanta `RuntimeError` em vez de devolver `None`, que dava um `AttributeError` numa linha que não diz nada sobre configuração.
+- CSP E MICROFONE: `media-src` não herda o `img-src` — cai no `default-src 'self'` e recusa o `blob:`. E o `Permissions-Policy: microphone=()` é a lista VAZIA: desliga o microfone para todas as origens, e o `getUserMedia` falha SEM prompt.
+- CORRECÇÃO A UMA SUPOSIÇÃO MINHA: eu tinha apontado o HTTPS como causa provável do microfone. Não era. O HTTPS explicaria a falha mas não a AUSÊNCIA DE PROMPT — e foi essa parte do sintoma que apontou para a política. Fica registado porque a hipótese errada era plausível e teria custado tempo.
+- Corrigido nos TRÊS blocos (dois do vercel.json, incluindo o do Portal que também reproduz áudio, e o do server.py). Teste a afirmar que a câmara continua desligada e que o `media-src` não abriu para `*` nem `http:` — relaxar uma política é o tipo de alteração que se alarga sozinha.
+- UM DEFEITO NO MEU PRÓPRIO TESTE, apanhado a medir a mutação: com o `media-src` ausente o teste morria com `IndexError` em vez de dizer o que faltava. Corrigido — um teste que falha mal é um teste que manda procurar no sítio errado.
+- Provas: backend 4158 passed / 5 skipped (era 4108/5, +50). flake8 limpo. Quatro mutações, quatro mortes.
+- POR FAZER do lote do dono: unicidade de NIF/Email, limitação do Diretor às atribuições, UI dos grupos de empresas em chips. E do lote anterior: notas em processos alheios, filtro "Por Atribuir", ecrã branco no Voltar, multi-upload do Portal.
+
+---
+
+---
 Task ID: pool-webmail-trilha
 Agent: Cloud Agent
 Task: P0 das fugas de isolamento (Registos + contas do Webmail) e o 404 do Histórico

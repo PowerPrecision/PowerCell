@@ -209,6 +209,10 @@ async def add_security_headers(request, call_next):
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: https: cid: blob:; "
+        # `media-src` NAO herda o `img-src` — sem esta linha cai no
+        # `default-src 'self'` e as notas de voz (que o browser serve de
+        # um `blob:`) sao recusadas pelo CSP.
+        "media-src 'self' blob:; "
         "font-src 'self' data:; "
         "connect-src 'self' https: wss:; "
         "frame-ancestors 'none';"
@@ -221,7 +225,11 @@ async def add_security_headers(request, call_next):
         "geolocation=(), "
         "gyroscope=(), "
         "magnetometer=(), "
-        "microphone=(), "
+        # `microphone=()` e a lista VAZIA: desliga o microfone para
+        # TODAS as origens, e o `getUserMedia` falha com
+        # `NotAllowedError` SEM o browser pedir permissao — era a causa
+        # do "Acesso ao microfone recusado" nas notas de voz.
+        "microphone=(self), "
         "payment=(), "
         "usb=()"
     )

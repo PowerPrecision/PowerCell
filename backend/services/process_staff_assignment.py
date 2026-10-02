@@ -133,6 +133,70 @@ MEDIADOR_ID_FIELDS: tuple[str, ...] = (
 MEDIADOR_NAME_FIELDS: tuple[str, ...] = ("mediador_name",)
 
 
+# ────────────────────────────────────────────────────────────────────
+# QUEM ESTÁ ATRIBUÍDO — UMA LISTA, NÃO QUATRO (Set 2026)
+# ────────────────────────────────────────────────────────────────────
+# O QA reportou "tenho o processo atribuído e os documentos dão 403". As
+# duas coisas eram verdade, porque cada lado lia uma lista diferente:
+#
+#   `process_list_filters.ASSIGNMENT_ID_FIELDS`       15 campos
+#   `process_indexing.collect_assigned_user_ids`       5, à mão
+#   `portal_assigned_users.get_all_assigned_user_ids`  6, à mão
+#
+# Às duas últimas faltavam `consultor_id`, `consultant_id` e
+# `mediador_id` — os singulares legados que a dupla auto-atribuição
+# escrevia SOZINHOS. O consultor via o processo em "Os Meus Processos"
+# (essa listagem lê `consultant_id`) e levava 403 nos documentos. Foi a
+# metade que funcionava que escondeu a outra.
+#
+# A lista vive aqui porque é aqui que vivem os campos que os ESCRITORES
+# carimbam: derivada deles, não pode divergir deles.
+
+#: Campos que podem nomear um atribuído. Os dos escritores primeiro
+#: (derivados, nunca repetidos à mão), depois as listas e os aliases
+#: legados que só existem em documentos antigos.
+ASSIGNMENT_ID_FIELDS: tuple[str, ...] = (
+    "assigned_consultor_ids",
+    *CONSULTOR_ID_FIELDS,
+    "assigned_mediador_ids",
+    *MEDIADOR_ID_FIELDS,
+    # Carimbos próprios (fora das tuplas acima porque não são atribuições
+    # de consultor/mediador — ver `PAPEL_DA_INDEXACAO`).
+    "assigned_indexacao_id",
+    "assigned_parceiro_id",
+    # Aliases e formas legadas. Mantidos porque documentos antigos ainda
+    # os têm: tirá-los daqui retiraria acesso a quem o tem hoje.
+    "assigned_to",
+    "assigned_consultant_ids",
+    "assigned_consultant_id",
+    "assigned_users",
+    "assigned_user_ids",
+    "manager_id",
+)
+
+
+def collect_assigned_ids(process: dict) -> list[str]:
+    """IDs de todos os atribuídos ao processo. PURA.
+
+    Ponto ÚNICO para a pergunta "esta pessoa está atribuída?". Aceita
+    campos escalares e de lista — `ASSIGNMENT_ID_FIELDS` tem dos dois — e
+    deduplica preservando a ordem de descoberta.
+
+    Quem precisa desta resposta chama isto. Uma lista escrita à mão num
+    leitor divergirá dos escritores, e quem divergir **recusa acesso a
+    quem está atribuído** sem dar erro nenhum.
+    """
+    vistos: list[str] = []
+    for campo in ASSIGNMENT_ID_FIELDS:
+        valor = (process or {}).get(campo)
+        candidatos = valor if isinstance(valor, (list, tuple, set)) else [valor]
+        for item in candidatos:
+            texto = str(item).strip() if item is not None else ""
+            if texto and texto not in vistos:
+                vistos.append(texto)
+    return vistos
+
+
 def _build_assignee_fields(
     ids: list[str],
     names: list[str],

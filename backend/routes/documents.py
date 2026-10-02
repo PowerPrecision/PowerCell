@@ -933,12 +933,16 @@ async def organize_documents_after_analysis(
 async def rename_document_smart(
     process_id: str,
     data: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
+    user: dict = Depends(get_current_user),
 ):
     """
     Renomeia um documento de forma inteligente baseado na análise IA.
 
-    Restrito a cargos de gestão (admin, CEO, diretor / "gestor").
+    Permissão: GESTÃO **ou** atribuído ao processo (Set 2026). Estava em
+    `require_roles([ADMIN, CEO, DIRETOR])`, que recusava o consultor
+    dono do processo — o 403 reportado pelo QA. A verificação passou
+    para o serviço porque o `require_roles` decide pelo cargo e não vê
+    o processo, logo não sabe responder "está atribuído?".
     
     Body:
     - s3_path: Caminho actual do ficheiro no S3
@@ -951,7 +955,7 @@ async def rename_document_smart(
     - new_name: Novo nome
     - new_path: Novo caminho no S3
     """
-    return await run_rename_document_smart(process_id, data)
+    return await run_rename_document_smart(process_id, data, user=user)
 
 
 
