@@ -10,6 +10,12 @@ def test_deadlines_api_modules_exist():
         "deadlines_api_crud.py",
         "deadlines_api_helpers.py",
         "deadlines_api_list.py",
+        # Lote 7 — o contexto de acesso (papel efectivo + redes + processos
+        # visíveis) resolvido UMA vez por pedido. Vive num módulo próprio
+        # porque as TRÊS superfícies precisam dele (listagem, update e
+        # delete) e três cópias da mesma resolução divergem na primeira
+        # mudança — e a que divergir deixa ver ou deixa escrever.
+        "deadlines_api_scope.py",
     ]
     for name in expected:
         assert (services_dir / name).exists(), f"missing {name}"

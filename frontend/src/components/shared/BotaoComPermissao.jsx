@@ -23,6 +23,15 @@
  * 3. **Nunca se renderiza um `<button disabled>` dentro de um `<Tooltip>` sem
  *    um invólucro**: um elemento desactivado não emite eventos de rato, e o
  *    tooltip nunca abriria. O `<span>` é o que recebe o hover.
+ * 4. **O nome acessível do botão bloqueado DIZ qual é a acção** (Lote 7). A
+ *    primeira versão fazia `typeof children === "string" ? children : "Acção"`
+ *    — e `children` quase nunca é uma string: o padrão da casa é ícone +
+ *    rótulo, logo um array. O resultado era que TODOS os botões bloqueados do
+ *    sistema se anunciavam como «Acção — sem permissão»: um leitor de ecrã não
+ *    distinguia «Novo Processo» de «Exportar Excel», e por `getByRole("button",
+ *    {name: /exportar/i})` o botão deixava de existir. Um botão sem nome
+ *    acessível é um bug de acessibilidade E um teste impossível — foi o teste
+ *    de página do Kanban a dar com ele. `textoDosFilhos` percorre a árvore.
  */
 import React from "react";
 import { Lock } from "lucide-react";
@@ -38,6 +47,29 @@ import { motivoDoBloqueio, podeFazer } from "@/utils/capacidades";
 
 export const MODO_CADEADO = "cadeado";
 export const MODO_OCULTAR = "ocultar";
+
+/**
+ * O texto legível de uma árvore de `children`.
+ *
+ * Percorre arrays e elementos; ignora o que não tem texto (ícones, `null`,
+ * booleanos) e junta o resto com um espaço. É o que dá nome acessível ao
+ * botão bloqueado — sem isto, ícone + rótulo resolvia para nada.
+ */
+export function textoDosFilhos(children) {
+  if (children === null || children === undefined || typeof children === "boolean") {
+    return "";
+  }
+  if (typeof children === "string" || typeof children === "number") {
+    return String(children).trim();
+  }
+  if (Array.isArray(children)) {
+    return children.map(textoDosFilhos).filter(Boolean).join(" ").trim();
+  }
+  if (React.isValidElement(children)) {
+    return textoDosFilhos(children.props?.children);
+  }
+  return "";
+}
 
 const BotaoComPermissao = ({
   user,
@@ -62,6 +94,10 @@ const BotaoComPermissao = ({
   if (modo === MODO_OCULTAR) return null;
 
   const texto = motivo || motivoDoBloqueio(capacidade);
+  // O rótulo sai do TEXTO dos filhos, não de `typeof children === "string"`:
+  // o padrão da casa é ícone + rótulo (um array), e a versão antiga dava
+  // «Acção» a todos os botões bloqueados do sistema.
+  const nomeDaAccao = textoDosFilhos(children) || "Acção";
 
   return (
     <TooltipProvider>
@@ -74,7 +110,7 @@ const BotaoComPermissao = ({
               {...props}
               disabled
               aria-disabled="true"
-              aria-label={`${typeof children === "string" ? children : "Acção"} — sem permissão`}
+              aria-label={`${nomeDaAccao} — sem permissão`}
             >
               <Lock className="h-4 w-4 mr-2" aria-hidden="true" />
               {children}

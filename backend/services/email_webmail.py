@@ -1037,7 +1037,9 @@ async def run_webmail_sync(
             logger.error(f"Erro na sincronização webmail: {e}", exc_info=True)
             await job_service.fail_job(job_id, str(e))
     
-    asyncio.create_task(run_sync())
+    from services.background_tasks import spawn_background_task
+
+    spawn_background_task(run_sync())
     
     return {
         "success": True,
@@ -1141,7 +1143,9 @@ async def run_webmail_sync_user(
                 logger.error(f"Erro na sincronização shared role emails: {e}", exc_info=True)
                 await job_service.fail_job(job_id, str(e))
         
-        asyncio.create_task(run_shared_sync())
+        from services.background_tasks import spawn_background_task
+
+        spawn_background_task(run_shared_sync())
         
         return {
             "success": True,
@@ -1212,7 +1216,15 @@ async def run_webmail_sync_user(
             logger.error(f"Erro na sincronização user emails: {e}", exc_info=True)
             await job_service.fail_job(job_id, str(e))
     
-    asyncio.create_task(run_user_sync())
+    # LOTE 7 — `spawn_background_task` e não `asyncio.create_task`: a task
+    # crua não tem referência forte e **pode ser recolhida pelo GC** (regra
+    # do `services/background_tasks.py`). Quando isso acontece o job fica
+    # para sempre em `pending` e o `pollJobStatus` do ecrã desiste com
+    # "Sincronização a demorar demasiado" — um erro que aponta para o
+    # servidor de email quando a causa é o garbage collector.
+    from services.background_tasks import spawn_background_task
+
+    spawn_background_task(run_user_sync())
     
     return {
         "success": True,

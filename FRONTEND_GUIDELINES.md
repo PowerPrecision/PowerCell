@@ -2104,3 +2104,127 @@ discreta de uma parede não valer nada.
   pesquisável no dia em que o nome passa a aparecer;
 * **duas fichas na mesma pasta não escolhem um nome** — mostra-se o nome cru e
   um crachá com a contagem. Escolher um faria a colisão parecer resolvida.
+
+## 27.38 — A forma de uma lista do servidor normaliza-se UMA vez, não em cada leitor
+
+O `KanbanBoard` lia `column.processes.filter(...)` em quatro sítios **sem**
+guarda e com `|| []` em dois. Os dois protegidos eram os do arrasto, que só
+correm depois de um movimento local — a metade rara estava defendida e a normal
+não. Uma coluna sem a chave `processes` dava `Cannot read properties of undefined
+(reading 'filter')`: ecrã em branco na página de entrada do sistema.
+
+E não era hipotético: a fusão das duas consultas do quadro substitui a coluna
+**inteira** pela da consulta de concluídos, pelo que a forma da coluna fundida
+passa a ser a que o OUTRO endpoint devolver.
+
+**A regra:** quando uma resposta do servidor atravessa vários leitores, a forma
+garante-se num ponto único à entrada (`utils/kanbanColunas.js`) e ninguém a
+seguir volta a perguntar. Seis cópias da mesma guarda divergem sem dar erro, e
+foi assim que quatro delas ficaram sem ela.
+
+**Dois corolários:**
+
+* **`Array.isArray`, nunca `|| []`.** Um objecto é *truthy*, logo `x || []`
+  devolve o objecto e o erro muda de sítio em vez de desaparecer (§ 27.7).
+* **Um contador DERIVA da lista.** O `count` vem calculado do servidor, mas
+  depois do arrasto optimista e do filtro em memória deixa de corresponder ao
+  ecrã. Um contador que contradiz a coluna é o rodapé a discordar da lista.
+
+## 27.39 — O nome acessível de um botão bloqueado DIZ qual é a acção
+
+O `BotaoComPermissao` (§ 27.34) montava o `aria-label` com
+`typeof children === "string" ? children : "Acção"`. **`children` quase nunca é
+uma string:** o padrão desta casa é ícone + rótulo, logo um array. O resultado era
+que todos os botões bloqueados do sistema se anunciavam como
+«Acção — sem permissão» — um leitor de ecrã não distinguia «Novo Processo» de
+«Exportar Excel», e `getByRole("button", { name: /exportar/i })` não encontrava
+nada.
+
+As duas consequências são a mesma regra: **um botão sem nome acessível é um bug
+de acessibilidade e um teste impossível.** O rótulo sai do TEXTO dos filhos
+(`textoDosFilhos` percorre a árvore); o recuo genérico fica só para um botão sem
+texto nenhum, e tem contraprova.
+
+## 27.40 — A mesma acção em dois sítios do ecrã tem de ter a mesma regra
+
+O Kanban tem dois botões «Exportar Excel»: o da página e o do cabeçalho do
+quadro. O fecho dos botões fantasma (Lote 6) gatiu o primeiro e **não viu** o
+segundo — que não tinha gate nenhum e exporta NIF, telefone e email. Um perfil
+sem a capacidade via um cadeado ao lado de um botão a funcionar.
+
+É o «menu e rotas têm de concordar» (§ 27.9) aplicado a botões: a mesma acção
+desenhada em dois sítios diverge sem dar erro. **Ao gatir uma acção, inventariar
+TODOS os sítios que a desenham** — e o teste afirma sobre `getAllByRole`, nunca
+sobre `getByRole`, senão prova metade.
+
+O papel desce por **prop** (página → contentor → apresentação) e não de um
+`useAuth` no componente de apresentação: o cabeçalho apresenta, quem conhece o
+contexto é o contentor (§ 20). E é sempre o papel **EFECTIVO**, porque o gate do
+outro sítio também é — dois gates com noções de papel diferentes dão as duas
+respostas erradas.
+
+## 27.41 — Um nome no ecrã sem ligação é texto morto
+
+O calendário geral recebia `client_name` em cada evento e mostrava-o num
+parágrafo do painel do dia. O utilizador lia o nome do cliente, abria a pesquisa
+e procurava-o à mão — o ecrã sabia a resposta e não a dava.
+
+**A regra:** quando o ecrã mostra o nome de uma entidade que tem ficha, mostra
+também o caminho para ela. E separa-se em duas peças, como o `nomeVisivel` do
+Explorador (§ 27.37): **o que se MOSTRA** (`etiquetaDoCliente`) e **para onde se
+VAI** (`rotaDaFicha`).
+
+**Três corolários:**
+
+* **Sem destino não se desenha a ligação.** `rotaDaFicha` devolve `null` e quem
+  recebe `null` renderiza texto — um link que não leva a lado nenhum é pior do
+  que nenhum link.
+* **Um recuo do servidor não é um nome.** O backend escreve `"Evento Geral"` e
+  `"Ausência"` em `client_name` quando não há processo; mostrá-los punha «Evento
+  Geral» onde devia estar o nome de uma pessoa. Os recuos conhecidos vivem numa
+  lista de exclusão no utilitário, não em cada ecrã.
+* **A ligação fica FORA do botão da linha.** Um `<button>` dentro de outro
+  `<button>` é HTML inválido e o clique interior deixa de ser alcançável pelo
+  teclado.
+
+## 27.42 — Num ecrã de equipa, o rótulo responde «de quem é», não «quem trata»
+
+O chip do calendário mostrava `[Responsável] Título`. Com doze «Escritura» num
+dia, o prefixo do responsável não distingue nada: a pergunta de quem olha para
+uma agenda de equipa é de QUEM é o evento.
+
+**A regra:** o rótulo muda com a vista. Em vista de equipa o cliente vem primeiro
+(`Cliente · Título`); na agenda pessoal fica só o título, porque o utilizador já
+sabe que é dele e o cliente aparece no painel do dia — repeti-lo gasta a largura
+da célula. E **não se repete o nome quando o título já o contém** («Escritura Ana
+Martins» não vira «Ana Martins · Escritura Ana Martins»).
+
+## 27.43 — Um toast informa; um ESTADO é o que sobrevive ao separador fechado
+
+A sincronização de email falhava com a password expirada e o ecrã mostrava um
+toast. Para o caminho MANUAL chega — alguém está a olhar. Para o caminho
+automático (de 10 em 10 minutos, o que mantém a caixa fresca) não há ninguém a
+olhar: a caixa deixava de receber email e o ecrã mostrava a lista antiga **sem
+um único aviso**.
+
+**A regra:** uma condição que PERSISTE pede um estado persistido e uma faixa no
+ecrã, não uma notificação. Um toast é para o que acabou de acontecer; um estado
+é para o que continua a acontecer — fica enquanto o problema existir e desaparece
+quando a condição se resolver.
+
+**Três corolários:**
+
+* **Só se avisa do que a pessoa pode resolver.** Credenciais recusadas exigem
+  acção; um servidor inatingível passa sozinho. Avisar dos dois com a mesma força
+  ensina a ignorar os dois (é o `desactivado ≠ em baixo` do painel de sinais
+  vitais).
+* **A classificação é do SERVIDOR, não do ecrã.** Duas classificações da mesma
+  mensagem divergem, e a que divergir avisa do que não deve.
+* **O aviso diz desde QUANDO.** «Desde ontem» e «há duas semanas» exigem
+  urgências diferentes, e é esse número que distingue um soluço de uma caixa
+  parada. Uma data no futuro (relógios dessincronizados) não produz «há -2 dias»:
+  omite-se a antiguidade.
+
+E a mensagem **técnica** do servidor não vai para o ecrã — pode trazer o host
+interno e o código do erro. Vai a que diz o que fazer, com o caminho para o
+fazer.

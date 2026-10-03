@@ -1740,20 +1740,52 @@ async def sync_webmail_emails(
                         all_addresses.discard("")
                         
                         if all_addresses:
-                            # Procurar processo activo cujo client_email esteja nos endereços
-                            matched_process = await db.processes.find_one(
-                                {
-                                    "$or": [
-                                        {"client_email": {"$in": list(all_addresses)}},
-                                        {"monitored_emails": {"$in": list(all_addresses)}},
-                                    ],
-                                    "status": {"$nin": ["concluido", "cancelado", "arquivado"]},
-                                },
-                                {"_id": 0, "id": 1}
+                            # LOTE 7 — a associação por endereço passou para o
+                            # ponto único `email_client_match`. O que estava
+                            # aqui conhecia só `client_email` e
+                            # `monitored_emails`: um email do **2.º titular**
+                            # — que é co-mutuário e escreve sobre o mesmo
+                            # crédito — nunca era ligado ao processo, apesar de
+                            # o sentido INVERSO da mesma relação
+                            # (`collect_emails_from_process_doc`) conhecer o
+                            # campo desde sempre. Era também um `find_one` sem
+                            # verificação de unicidade (o mesmo cliente com
+                            # dois processos ficava ligado ao que o Mongo
+                            # calhasse devolver) e sem filtro de REDE.
+                            from services.email_client_match import (
+                                resolver_processo_por_endereco,
                             )
-                            if matched_process:
-                                resolved_process_id = matched_process["id"]
-                                logger.info(f"[Client Email Match] Email {msg_id[:30]} associado ao processo {resolved_process_id} via endereço de cliente")
+
+                            # Sem `network_id`: esta sincronização é das
+                            # contas partilhadas, que vêm de variáveis de
+                            # ambiente e não têm utilizador. A ausência torna a
+                            # exigência de unicidade VÁLIDA SOBRE O SISTEMA
+                            # INTEIRO — mais estrita, não menos: dois
+                            # candidatos em redes diferentes dão ambíguo e o
+                            # email fica geral. O carimbo de rede em
+                            # `db.emails` continua a ser a D-8.
+                            resolucao = await resolver_processo_por_endereco(
+                                all_addresses, network_id=None,
+                            )
+                            if resolucao.process_id:
+                                resolved_process_id = resolucao.process_id
+                                logger.info(
+                                    "[Client Email Match] Email %s associado ao "
+                                    "processo %s via %s",
+                                    msg_id[:30], resolved_process_id,
+                                    resolucao.motivo,
+                                )
+                            elif resolucao.ambiguo:
+                                # "Não encontrei" e "encontrei dois" são
+                                # respostas diferentes: com dois candidatos o
+                                # email fica GERAL em vez de entrar na ficha
+                                # errada (a regra do auto-mapeamento de pastas).
+                                logger.info(
+                                    "[Client Email Match] Email %s com %d "
+                                    "processos candidatos — fica geral: %s",
+                                    msg_id[:30], len(resolucao.candidatos),
+                                    resolucao.candidatos[:5],
+                                )
                     
                     email_doc = {
                         "id": str(uuid.uuid4()),
@@ -1937,6 +1969,25 @@ async def sync_user_emails(
     total_duplicates = 0
     total_errors = 0
     
+    # LOTE 7 — a rede de quem está a sincronizar, resolvida UMA vez.
+    # A associação por endereço fica limitada a ela: sem isto, um email cujo
+    # remetente coincida com o cliente de outra rede entrava na ficha dessa
+    # rede. `None` quando a rede não é determinável — e aí a exigência de
+    # unicidade vale sobre o sistema inteiro, que é mais estrito e não menos.
+    rede_do_sincronizador = None
+    try:
+        from services.tenant_network import resolve_tenant_stamp
+
+        _carimbo = await resolve_tenant_stamp(
+            {"id": user_id, "company": company_id},
+            active_company_id=company_id,
+        )
+        rede_do_sincronizador = (_carimbo or {}).get("network_id")
+    except Exception as _exc:
+        logger.warning(
+            "[User Email Sync] Rede não determinável para %s: %s", user_id, _exc,
+        )
+
     try:
         loop = asyncio.get_event_loop()
         
@@ -1959,6 +2010,18 @@ async def sync_user_emails(
                 logger.warning(f"[User Email Sync] Rate limit IMAP para {account.email}: {conn_err[:200]}")
             else:
                 logger.error(f"[User Email Sync] Erro IMAP: {conn_err}")
+            # LOTE 7 — PERSISTIR o estado. Um toast informa quem está a olhar;
+            # a sincronização automática (de 10 em 10 minutos, a que mantém a
+            # caixa fresca) não tem ninguém a olhar e morria num
+            # `logger.warning`. A caixa deixava de receber email e o ecrã
+            # mostrava a lista antiga sem um único aviso.
+            from services.mailbox_health import registar_falha
+
+            await registar_falha(
+                user_id, conn_err,
+                company_id=company_id,
+                account_id=(resolved_config or {}).get("id"),
+            )
             return {
                 "success": False,
                 "total_synced": 0,
@@ -2095,7 +2158,46 @@ async def sync_user_emails(
                         if proc_exists:
                             resolved_process_id = tag_process_id
                             logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id}")
-                
+
+                # === LOTE 7 — ASSOCIAÇÃO POR ENDEREÇO ===
+                # Isto NÃO EXISTIA nesta função. A sincronização pessoal — a
+                # caixa de cada consultor, que o worker corre de 10 em 10
+                # minutos — só herdava o processo do email-pai de uma conversa
+                # e lia a etiqueta `[Proc-xxx]` do assunto. Um email de um
+                # cliente para o consultor só entrava na ficha se a conversa já
+                # estivesse ligada ou se alguém tivesse posto a etiqueta à mão,
+                # e eram esses dois caminhos a funcionar que escondiam o
+                # terceiro em falta (a forma do `run_get_my_tasks`).
+                if not resolved_process_id:
+                    from services.email_client_match import (
+                        resolver_processo_por_endereco,
+                    )
+
+                    enderecos_do_email = {
+                        (em.get("from_email") or "").lower().strip(),
+                        *[(e or "").lower().strip() for e in (em.get("to_emails") or [])],
+                        *[(e or "").lower().strip() for e in (em.get("cc_emails") or [])],
+                    }
+                    enderecos_do_email.discard("")
+                    if enderecos_do_email:
+                        resolucao = await resolver_processo_por_endereco(
+                            enderecos_do_email, network_id=rede_do_sincronizador,
+                        )
+                        if resolucao.process_id:
+                            resolved_process_id = resolucao.process_id
+                            logger.info(
+                                "[Client Email Match] Email %s associado ao "
+                                "processo %s via %s (caixa pessoal)",
+                                msg_id[:30], resolved_process_id, resolucao.motivo,
+                            )
+                        elif resolucao.ambiguo:
+                            logger.info(
+                                "[Client Email Match] Email %s com %d processos "
+                                "candidatos — fica geral: %s",
+                                msg_id[:30], len(resolucao.candidatos),
+                                resolucao.candidatos[:5],
+                            )
+
                 email_doc = {
                     "id": str(uuid.uuid4()),
                     "process_id": resolved_process_id,
@@ -2145,11 +2247,32 @@ async def sync_user_emails(
                 total_errors += 1
         
         logger.info(f"[User Email Sync] User {user_id}: {total_synced} novos, {total_duplicates} duplicados")
-        
+
+        # LOTE 7 — a ligação IMAP funcionou: LIMPAR o erro guardado. Sem isto,
+        # o aviso ficava no ecrã para sempre depois de a password ser
+        # corrigida, e um aviso que não desaparece é indistinguível de um
+        # aviso falso.
+        from services.mailbox_health import registar_sucesso
+
+        await registar_sucesso(
+            user_id,
+            company_id=company_id,
+            account_id=(resolved_config or {}).get("id"),
+        )
+
     except Exception as e:
         logger.error(f"[User Email Sync] Erro: {e}")
         total_errors += 1
-    
+        # Uma excepção aqui é tão opaca para o utilizador como uma falha de
+        # ligação: ele vê a caixa parada e mais nada.
+        from services.mailbox_health import registar_falha
+
+        await registar_falha(
+            user_id, str(e),
+            company_id=company_id,
+            account_id=(resolved_config or {}).get("id"),
+        )
+
     return {
         "success": total_errors == 0 or total_synced > 0,
         "total_synced": total_synced,

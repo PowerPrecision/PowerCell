@@ -45,6 +45,7 @@ import { safeDateStr } from '../lib/utils';
 
 // React Query hooks
 import { useKanbanQuery } from '../hooks/queries/useKanbanQuery';
+import { contarCartoes, fundirColunasDeConcluidos } from '../utils/kanbanColunas';
 import { useKanbanCompletedQuery } from '../hooks/queries/useKanbanCompletedQuery';
 import { useKanbanRealtime } from '../hooks/queries/useKanbanRealtime';
 import { useCompletedDaysFilter } from '../hooks/queries/useCompletedDaysFilter';
@@ -109,7 +110,10 @@ const KanbanBoard = ({
   mediadorFilter = 'all', 
   indexacaoFilter = 'all',
   parceiroFilter = 'all',
-  indexStatusFilter = 'all' 
+  indexStatusFilter = 'all',
+  // Lote 7 — o papel ACTIVO desce da página para o gate da exportação no
+  // cabeçalho. O quadro não o resolve: quem conhece o contexto é a página.
+  papelEfectivo = null,
 }) => {
   // === ESTADO LOCAL (apenas UI state, não server state) ===
   const [searchTerm, setSearchTerm] = useState('');
@@ -213,22 +217,20 @@ const KanbanBoard = ({
   // Substituir as colunas concluidos/desistencias da query activa pelos dados
   // da query isolada de Concluídos. Isto garante que quando o utilizador muda
   // o período, apenas as colunas inactivas são actualizadas.
-  const columns = useMemo(() => {
-    if (!activeColumns.length) return activeColumns;
-
-    const completedMap = new Map(
-      completedColumns.map(col => [col.name, col])
-    );
-
-    return activeColumns.map(col => {
-      // Se é coluna concluidos/desistencias, usar dados da query isolada
-      if (completedMap.has(col.name)) {
-        return completedMap.get(col.name);
-      }
-      // Caso contrário, manter dados da query activa (não afectada pelo filtro)
-      return col;
-    });
-  }, [activeColumns, completedColumns]);
+  // Lote 7 (D-20) — a fusão e a NORMALIZAÇÃO da forma num ponto único.
+  // A substituição troca a coluna INTEIRA pela da consulta de concluídos,
+  // logo a forma da coluna fundida é a que o OUTRO endpoint devolver: uma
+  // coluna sem `processes` dava `Cannot read properties of undefined
+  // (reading 'filter')` no `filteredColumns` abaixo — ecrã em branco na
+  // página de entrada do sistema. Havia `|| []` em dois sítios (os do
+  // arrasto, que só correm depois de um movimento local) e em nenhum dos
+  // quatro do caminho normal; era a metade rara a estar protegida. Seis
+  // cópias da mesma guarda divergem sem dar erro, por isso a forma
+  // garante-se aqui e ninguém a seguir volta a perguntar.
+  const columns = useMemo(
+    () => fundirColunasDeConcluidos(activeColumns, completedColumns),
+    [activeColumns, completedColumns],
+  );
 
   const totalInactive = completedColumns.reduce((acc, col) => acc + (col.count || 0), 0);
 
@@ -504,7 +506,7 @@ const KanbanBoard = ({
       <KanbanHeader
         totalProcesses={totalProcesses}
         totalInactive={totalInactive}
-        visibleCount={filteredColumns.reduce((acc, col) => acc + col.processes.length, 0)}
+        visibleCount={contarCartoes(filteredColumns)}
         isConnected={isConnected}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
@@ -533,6 +535,8 @@ const KanbanBoard = ({
         showOnlyPendingActions={showOnlyPendingActions}
         onTogglePendingActions={() => setShowOnlyPendingActions(prev => !prev)}
         pendingActionsCount={pendingActionsCount}
+        user={user}
+        papelEfectivo={papelEfectivo}
       />
 
       {/* Search Results List View */}

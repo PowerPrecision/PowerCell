@@ -796,8 +796,6 @@ export const deleteProcessOneDriveLink = (processId, linkId) =>
 // OneDrive (Legacy - API based) - DEPRECATED, use S3 instead
 export const getOneDriveFiles = (folder) => 
   api.get("/onedrive/files", { params: { folder } });
-export const getClientOneDriveFiles = (clientName, subfolder) => 
-  api.get(`/onedrive/files/${encodeURIComponent(clientName)}`, { params: { subfolder } });
 export const getOneDriveDownloadUrl = (itemId) => 
   api.get(`/onedrive/download/${itemId}`);
 export const getOneDriveStatus = () => api.get("/onedrive/status");

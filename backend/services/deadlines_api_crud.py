@@ -4,6 +4,7 @@ Extraído de `routes/deadlines.py`.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -15,10 +16,20 @@ from database import db
 from models.auth import UserRole
 from models.deadline import DeadlineCreate, DeadlineUpdate, DeadlineResponse
 from services.auth import get_active_company_id_async
+from services.deadline_scope import (
+    pode_apontar_para_o_processo,
+    pode_mexer_no_evento,
+)
 from services.deadlines_api_helpers import end_is_before_start, is_absence_type
+from services.deadlines_api_scope import (
+    ERRO_EVENTO_NAO_ENCONTRADO,
+    carregar_contexto_de_acesso,
+)
 from services.history import log_history
 from services.notification_service import send_notification_with_preference_check
 from utils.input_sanitization import sanitize_string
+
+logger = logging.getLogger(__name__)
 
 
 async def run_create_deadline(
@@ -60,13 +71,30 @@ async def run_create_deadline(
                 status_code=404, detail="Processo não encontrado"
             )
 
-    company_id = user.get("company")
+    # Lote 7 — O CARIMBO.
+    #
+    # Isto era `company_id = user.get("company")`, e `users.company` é o
+    # **NOME** da empresa, não o id (a confusão de 2026-09-21). Um evento
+    # criado sem o header `X-Company-Id` ficava com o nome no campo
+    # `company_id`, e o calendário da equipa compara-o com o ID da empresa
+    # activa: o evento não casava com o ramo da empresa NEM com o ramo do
+    # legado (que exige `null`/`""`/`default`), logo **desaparecia do
+    # calendário de todos**. Um evento que desaparece não produz erro
+    # nenhum, que é a forma de defeito desta casa.
+    #
+    # E faltava a REDE. Sem `network_id` o evento cai na pilha por
+    # carimbar, que o ramo de legado do calendário aceita — ou seja, um
+    # evento novo da Domus entrava no calendário da Power.
+    #
+    # `resolve_tenant_stamp` é o ponto único (resolve a empresa na BD e
+    # devolve `None` quando não sabe a rede, porque carimbar a rede errada
+    # é permanente e pior do que não carimbar).
+    from services.tenant_network import resolve_tenant_stamp
+
+    header_company = None
     if request is not None:
         header_company = await get_active_company_id_async(request, user)
-        if header_company and header_company != "default":
-            company_id = header_company
-        elif not company_id:
-            company_id = header_company
+    carimbo = await resolve_tenant_stamp(user, active_company_id=header_company)
 
     deadline_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -98,7 +126,9 @@ async def run_create_deadline(
         # PACOTE DQ — Ausências e blocos de dia inteiro.
         "all_day": all_day,
         "end_date": end_date,
-        "company_id": company_id,
+        # O carimbo (company_id + company_name + network_id) ou nada:
+        # meio carimbo era pior do que nenhum.
+        **(carimbo or {}),
     }
 
     await db.deadlines.insert_one(deadline_doc)
@@ -130,9 +160,19 @@ async def run_create_deadline(
 
 
 async def run_update_deadline(
-    deadline_id: str, data: DeadlineUpdate, user: dict,
+    deadline_id: str,
+    data: DeadlineUpdate,
+    user: dict,
+    request: Optional[Request] = None,
 ):
-    """Atualiza um prazo existente."""
+    """Atualiza um prazo existente.
+
+    Lote 7 — A GUARDA DE POSSE. Isto lia o evento por id e escrevia: um
+    consultor de outra rede editava qualquer evento do sistema sabendo o
+    id, e podia **repontar `process_id`** para um processo que não pode ver
+    — e aí o calendário dessa rede ganhava uma linha com o nome e o email
+    do cliente (`_enrich_calendar_rows` devolve os dois).
+    """
     if user["role"] == UserRole.CLIENTE:
         raise HTTPException(
             status_code=403, detail="Clientes não podem editar prazos"
@@ -140,7 +180,19 @@ async def run_update_deadline(
 
     deadline = await db.deadlines.find_one({"id": deadline_id}, {"_id": 0})
     if not deadline:
-        raise HTTPException(status_code=404, detail="Prazo não encontrado")
+        raise HTTPException(status_code=404, detail=ERRO_EVENTO_NAO_ENCONTRADO)
+
+    contexto = await carregar_contexto_de_acesso(user, request)
+    if not pode_mexer_no_evento(
+        deadline,
+        user_id=user.get("id"),
+        papel=contexto.papel,
+        redes=contexto.redes,
+        processos_visiveis=contexto.processos,
+    ):
+        # 404 e não 403: distinguir "não existe" de "não é teu" confirma o
+        # id a quem está a adivinhar (precedente das notificações).
+        raise HTTPException(status_code=404, detail=ERRO_EVENTO_NAO_ENCONTRADO)
 
     update_data = {}
     if data.title is not None:
@@ -154,6 +206,17 @@ async def run_update_deadline(
     if "process_id" in data.model_fields_set:
         update_data["process_id"] = data.process_id or None
         if update_data["process_id"]:
+            # O DESTINO é uma pergunta diferente da posse do evento: esta
+            # é sobre para onde ele vai. Sem ela, um editor legítimo movia
+            # um evento para o processo de outra rede.
+            if not pode_apontar_para_o_processo(
+                update_data["process_id"],
+                papel=contexto.papel,
+                processos_visiveis=contexto.processos,
+            ):
+                raise HTTPException(
+                    status_code=404, detail="Processo não encontrado"
+                )
             process = await db.processes.find_one(
                 {"id": update_data["process_id"]}, {"_id": 0}
             )
@@ -217,9 +280,52 @@ async def run_update_deadline(
     return DeadlineResponse(**updated)
 
 
-async def run_delete_deadline(deadline_id: str, user: dict):
-    """Elimina um prazo existente."""
+async def run_delete_deadline(
+    deadline_id: str, user: dict, request: Optional[Request] = None,
+):
+    """Elimina um prazo existente.
+
+    Lote 7 — Isto era literalmente `delete_one({"id": deadline_id})`. A
+    rota tinha `require_roles` com todos os perfis de staff, logo um
+    consultor da Domus — que é uma ilha — apagava um evento da Power
+    sabendo o id. Sem posse, sem rede, e sem rasto.
+    """
+    if user.get("role") == UserRole.CLIENTE:
+        raise HTTPException(
+            status_code=403, detail="Clientes não podem eliminar prazos"
+        )
+
+    deadline = await db.deadlines.find_one({"id": deadline_id}, {"_id": 0})
+    if not deadline:
+        raise HTTPException(status_code=404, detail=ERRO_EVENTO_NAO_ENCONTRADO)
+
+    contexto = await carregar_contexto_de_acesso(user, request)
+    if not pode_mexer_no_evento(
+        deadline,
+        user_id=user.get("id"),
+        papel=contexto.papel,
+        redes=contexto.redes,
+        processos_visiveis=contexto.processos,
+    ):
+        raise HTTPException(status_code=404, detail=ERRO_EVENTO_NAO_ENCONTRADO)
+
     result = await db.deadlines.delete_one({"id": deadline_id})
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Prazo não encontrado")
+        raise HTTPException(status_code=404, detail=ERRO_EVENTO_NAO_ENCONTRADO)
+
+    # Eliminar um prazo de um processo deixa rasto, como qualquer outra
+    # alteração a esse processo. Nunca faz a operação falhar: o evento já
+    # saiu, e levantar aqui mostraria um erro sobre uma operação que
+    # correu bem (regra do `document_portal_revoke`).
+    if deadline.get("process_id"):
+        try:
+            await log_history(
+                deadline["process_id"], user, "Eliminou prazo", "deadline",
+                deadline.get("title") or "", "eliminado",
+            )
+        except Exception as exc:  # pragma: no cover - rasto nunca propaga
+            logger.warning(
+                "[DEADLINES] Falha a registar a eliminação do prazo %s: %s",
+                deadline_id, exc,
+            )
     return {"message": "Prazo eliminado"}

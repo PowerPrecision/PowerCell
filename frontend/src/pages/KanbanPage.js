@@ -308,6 +308,7 @@ const KanbanPage = () => {
               indexacaoFilter={indexacaoFilter}
               parceiroFilter={parceiroFilter}
               indexStatusFilter={indexStatusFilter}
+              papelEfectivo={effectiveRole}
             />
           </CardContent>
         </Card>

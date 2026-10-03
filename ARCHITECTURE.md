@@ -7939,3 +7939,249 @@ servidor, que falha fechado.
 O gate da Pool era `userRole !== "indexacao"` — uma lista de **exclusão** escrita
 à mão, sobre o papel do JWT. Um perfil novo sem direito a criar processos passava
 a ver o botão, porque a exclusão não o conhece.
+
+## Medir antes de apagar: o custo do recurso por nome (D-19)
+
+A identidade da pasta documental deriva do ID desde o Lote 6, mas a LEITURA de
+uma ficha sem `s3_folder` gravado continua a procurar a pasta pelo nome (match
+exacto). Apagar esse recurso é o fecho da D-19 — e apagá-lo às cegas esconde
+documentos que existem, sem produzir erro nenhum.
+
+**`services/s3_name_fallback_audit.py`** (puro) classifica cada ficha — processo
+E cliente, porque a colisão atravessa as colecções — em cinco veredictos e diz
+quantos DOCUMENTOS desaparecem do ecrã:
+
+```
+mapeado           tem s3_folder e a pasta existe → o corte não lhe toca
+mapeado_quebrado  tem s3_folder e a pasta não existe → já partido hoje
+sem_pasta         sem mapeamento, o nome não resolve → nada a perder
+depende_do_nome   sem mapeamento, o nome resolve, a pasta TEM ficheiros
+colisao_de_nome   o mesmo, com DUAS OU MAIS fichas na MESMA pasta
+```
+
+**`scripts/diagnose_s3_name_fallback.py`** lê o Mongo e o bucket, imprime o
+relatório e escreve a lista accionável em CSV (pior caso primeiro: a colisão
+antes do volume, porque partilhar documentação é um risco de RGPD e perder vista
+é um incómodo). Corre contra produção **de propósito** — como o
+`diagnose_assignment_drift.py`, não chama `require_non_production_db` — e é **só
+de leitura**, afirmado por guarda sobre a fonte com contraprova. Religar é uma
+decisão humana, no painel de Administração.
+
+**Quatro regras que não se podem perder:**
+
+1. **A colisão é uma propriedade do CONJUNTO.** Classificar ficha a ficha dá
+   `depende_do_nome` às duas e o pior caso fica invisível — é como a D-19 nasceu.
+   Daí as duas passagens: classificar, depois agrupar por pasta.
+2. **Os ficheiros contam-se por PASTA, uma vez.** Somar por ficha anuncia o dobro
+   dos documentos que existem numa colisão, e um relatório que exagera o custo
+   nunca autoriza o corte.
+3. **Uma medição que FALHOU não é um custo zero.** Sem inventário do bucket tudo
+   cai em `sem_pasta` e a conclusão lê-se como «pode apagar-se». `auditar`
+   levanta `InventarioIndisponivel` e o script sai com código 2. É a regra do
+   `rede_consensual` do `backfill_network_id`: perante uma pergunta sem resposta,
+   não adivinhar.
+4. **A regra de medição é a de PRODUÇÃO.** O oráculo de
+   `nomes_de_pasta_candidatos` é o `_nomes_de_pasta_candidatos` real do
+   `s3_storage`, comparado caso a caso num teste. Mais larga prometia
+   religamentos que o código nunca faria; mais estreita escondia custo.
+
+### A superfície que tomava o caminho legado SEMPRE
+
+`GET /api/onedrive/files/{client_name}` resolvia o processo por `$regex` parcial
+e **não escapado** sobre `client_name` e chamava `list_files` **sem**
+`s3_folder` — logo pelo recurso por nome mesmo para uma ficha correctamente
+mapeada — com `Depends(get_current_user)` e nada mais: nem
+`assert_can_view_process_documents`, nem rede, nem atribuição. Qualquer sessão
+autenticada enumerava os documentos de um cliente escrevendo o nome no URL.
+
+Responde **410**, não endurece: um nome não é uma identidade, e dois homónimos
+exactos continuariam a servir os documentos de um deles à escolha do Mongo. O
+caminho canónico recebe um id (`GET /api/documents/client/{id}/files`). 410 e não
+404/405 pelo precedente do `POST /api/activities` — o caminho `/onedrive/files`
+continua a existir para a listagem por pasta. A recusa é a primeira instrução e o
+módulo já não importa a base de dados: depois do `find_one`, o código de resposta
+distinguia um nome existente de um inexistente e o endpoint continuava a
+responder a «este cliente existe?».
+
+## Calendários: posse dos eventos, fronteira de rede e identidade do cliente
+
+Há duas vistas — o **Calendário Geral** (`/calendario`, `GET /api/deadlines/calendar`,
+eventos de toda a equipa) e a **Agenda do Portal** (`GET /api/portal/events`, o que
+o cliente vê do seu processo). A auditoria do Lote 7 pediu três respostas.
+
+### Filtros e fugas de dados
+
+A agenda do Portal **filtra na base de dados** (`build_portal_events_filter`:
+`process_id` + `visible_to_client` + não concluído + não ausência) e serializa
+só campos client-friendly — essa estava correcta.
+
+O lado do CRM tinha **três buracos**:
+
+1. **`DELETE /deadlines/{id}` era `delete_one({"id": deadline_id})`.** A rota
+   tinha `require_roles` com todos os perfis de staff, logo um consultor da
+   Domus — que é uma ilha — apagava um evento da Power sabendo o id. Sem posse,
+   sem rede, sem rasto.
+2. **`PUT /deadlines/{id}` lia por id e escrevia**, e deixava **repontar
+   `process_id`** para qualquer processo: o calendário da outra rede ganhava uma
+   linha com o nome e o email do cliente (`_enrich_calendar_rows` devolve os dois).
+3. **`GET /deadlines?process_id=X` filtrava só por `process_id`**, e
+   ADMIN/CEO/ADMINISTRATIVO recebiam `query = {}` — todos os prazos de todas as
+   redes, por **papel do JWT** e não o efectivo (4.ª ocorrência da forma do
+   `history._is_stealth_user`).
+
+E o calendário geral **falhava ABERTO**: o ramo final de
+`run_get_calendar_deadlines` dizia em comentário «comportamento legado admin/CEO»
+e, com `deadline_query` vazio, consultava `{}`. Um diretor sem `X-Company-Id`
+via o calendário da Domus.
+
+**Hoje:** `services/deadline_scope.py` (puro) responde «pode mexer neste
+evento?» e `services/deadlines_api_scope.py` resolve UMA vez por pedido o papel
+efectivo, as redes e os processos visíveis — as três superfícies partilham-no,
+porque três cópias da resolução divergem e a que divergir deixa escrever. A
+condição de rede (`build_network_scope_condition` + `com_isolamento`) envolve
+**todas** as consultas; o filtro de empresa continua a existir dentro dela (a
+rede é a fronteira de segurança, a empresa é uma vista).
+
+**Quatro regras:**
+
+1. **404, nunca 403** — distinguir «não existe» de «não é teu» confirma o id a
+   quem adivinha (precedente das notificações). O legítimo nunca vê este 404,
+   porque o evento aparece-lhe na lista.
+2. **O diretor tem bypass DENTRO da sua rede, não fora.** Só ADMIN/CEO
+   atravessam redes, porque são eles que reconciliam a pilha por carimbar.
+3. **Quem CRIOU o evento pode sempre mexer-lhe.** Um evento pessoal não tem
+   processo nem empresa, logo nenhuma condição de rede o alcança; sem esta regra
+   o autor deixava de poder apagar a própria ausência — e isso nota-se, ao
+   contrário de uma fuga.
+4. **Leitura generosa, escrita estrita.** Um evento por carimbar entra na
+   leitura (senão desaparecem eventos que existem) e na escrita exige ligação
+   provada: pessoa, autoria, ou processo visível. É a assimetria do `sub35`.
+
+O **carimbo na criação** também mudou: era `company_id = user.get("company")` —
+e `users.company` é o **NOME** (a confusão de 2026-09-21). Um evento criado sem
+o header não casava com o ramo da empresa NEM com o ramo de legado (que exige
+`null`/`""`/`default`): **desaparecia do calendário de todos**. Hoje usa
+`resolve_tenant_stamp`, que devolve `None` quando não sabe a rede — meio carimbo
+é pior do que nenhum. O `_enrich_calendar_rows` passou também a usar
+`PROJECCAO_DO_PROCESSO` em vez de `{"_id": 0}`, que trazia o processo inteiro
+com o bloco de dados pessoais desencriptado para cada linha.
+
+### Identidade visual
+
+O backend devolve `client_name` desde o Pacote DQ e o ecrã **quase não o usava**:
+o chip da grelha mostrava `[Responsável] Título` — e o responsável responde «quem
+trata», não «de quem é» (doze «Escritura» num dia não se distinguem). O nome do
+cliente aparecia só no painel do dia, como **texto morto**: não havia como chegar
+à ficha; lia-se o nome, abria-se a pesquisa e procurava-se à mão.
+
+`utils/calendarioIdentidade.js` separa as duas peças, como o `nomeVisivel` do
+Explorador — o que se MOSTRA (`etiquetaDoCliente`, `resumoDoChip`) e para onde se
+VAI (`rotaDaFicha`, `textoDaFicha`). Três detalhes:
+
+* a rota **prefere o PROCESSO** (`/processo/{id}`: é onde está a documentação e a
+  timeline) e cai no cliente (`/cliente/{id}`) para quem vive na Pool sem
+  processo — daí o `client_id` ter entrado na linha do calendário;
+* **sem destino não se desenha a ligação** — um link que não leva a lado nenhum é
+  pior do que texto;
+* os recuos que o SERVIDOR escreve em `client_name` (`"Evento Geral"`,
+  `"Ausência"`) estão numa lista de exclusão: mostrá-los punha «Evento Geral»
+  onde devia estar o nome de alguém.
+
+Cobertura: `tests/unit/test_calendario_posse_e_rede.py` (35, com `TestAExploracao`
+escrita para morder primeiro), `utils/calendarioIdentidade.test.js` (17),
+`pages/__tests__/CalendarPage.test.jsx` (11, com o `GlobalCalendar` real).
+
+## Webmail: associação ao cliente e saúde da caixa
+
+### Associação por endereço — `services/email_client_match.py`
+
+Havia **dois** sincronizadores e faziam coisas diferentes:
+
+* `sync_webmail_emails` (contas partilhadas `power`/`precision`, de variáveis
+  de ambiente) resolvia por endereço, com uma consulta escrita à mão que
+  conhecia **só** `client_email` e `monitored_emails`;
+* `sync_user_emails` (a caixa **pessoal** de cada consultor, que o worker
+  sincroniza de 10 em 10 minutos) **não resolvia por endereço nenhum.** Só
+  herdava o `process_id` do email-pai de uma conversa e lia a etiqueta
+  `[Proc-xxx]` do assunto.
+
+Um email de um cliente para o consultor só entrava na ficha se a conversa já
+estivesse ligada ou se alguém tivesse posto a etiqueta à mão — e eram esses dois
+caminhos a funcionar que escondiam o terceiro em falta (a forma do
+`run_get_my_tasks`).
+
+Três defeitos no que existia:
+
+1. **Só o titular 1.** O 2.º titular é co-mutuário e escreve sobre o mesmo
+   crédito. E o sentido INVERSO da mesma relação —
+   `email_process_crud.collect_emails_from_process_doc`, que lista os endereços
+   de um processo — conhecia `titular2_data.email` desde sempre: **as duas
+   direcções da mesma relação tinham conjuntos de campos diferentes, e só a
+   menos usada estava certa.** Há um teste a cruzá-las, com a função de
+   produção como oráculo.
+2. **`find_one` sem unicidade.** O mesmo cliente com dois processos ficava
+   ligado ao que o Mongo calhasse devolver, de forma permanente. Hoje dois
+   candidatos dão `ambiguo` e o email fica **geral** — entrar na ficha errada é
+   um cruzamento de dados e sair dela exige alguém que repare.
+3. **Sem noção de rede.** A sincronização pessoal passa o `network_id` (resolve
+   `resolve_tenant_stamp` uma vez por passagem); a das contas partilhadas não
+   tem utilizador, e aí **a exigência de unicidade vale sobre o sistema
+   inteiro** — mais estrita, não menos: dois candidatos em redes diferentes dão
+   ambíguo. O carimbo de rede em `db.emails` continua a ser a D-8.
+
+A lista de fases fechadas vem do **motor** (`nomes_terminais`): estava escrita à
+mão como `["concluido", "cancelado", "arquivado"]`, que inclui o typo legado e
+**não** o valor canónico `arquivo`, e ignorava qualquer fase nova fechada pelo
+administrador.
+
+### Saúde da caixa — `services/mailbox_health.py`
+
+Quando a password do IMAP expira, o sistema sabe-o. O que fazia com essa
+informação dependia do caminho:
+
+* **manual** (o botão): falha o job, o `pollJobStatus` recebe `failed`, o ecrã
+  mostra um **toast** — transitório;
+* **automático** (`webmail_worker_sync`, de 10 em 10 minutos, o que mantém a
+  caixa fresca): `logger.warning` e **mais nada**. A caixa deixava de receber
+  email, o ecrã mostrava a lista antiga sem um único aviso, e o ciclo falhava
+  para sempre. Não havia **nada persistido** — `user_email_configs` não tinha um
+  campo sobre o estado da última sincronização, e `publicize_email_account`
+  devolvia a conta como se estivesse boa.
+
+Hoje o estado é gravado na config pela mesma função, nos dois caminhos, e vai no
+contrato da UI (`resumo_para_o_ecra` dentro do `publicize_email_account`).
+**Quatro decisões:**
+
+1. **Distingue-se AUTENTICAÇÃO de REDE e de LIMITE.** Só a primeira exige acção
+   da pessoa; as outras passam sozinhas, e avisar das três com a mesma força
+   ensina a ignorar as três (é o `desactivado ≠ em baixo` do painel de sinais
+   vitais). A ordem das verificações põe o **limite antes** da autenticação: «too
+   many login attempts» tem as duas palavras, e tratá-lo como password errada
+   mandava mudar uma password que está certa.
+2. **O sucesso LIMPA o erro.** Um aviso que não desaparece depois de a password
+   ser corrigida é indistinguível de um aviso falso.
+3. **Gravar NUNCA propaga** — observa, não intercepta (regra do `job_heartbeat`).
+4. **Contam-se as falhas CONSECUTIVAS, não um histórico.** Dois números — desde
+   quando e quantas vezes — respondem à única pergunta que interessa («soluço ou
+   parado?») sem fazer a colecção crescer.
+
+No ecrã, `components/webmail/AvisoDeCaixaAFalhar.jsx` é um **estado** e não um
+toast: fica enquanto o problema existir, diz desde quando (`utils/saudeDaCaixa.js`)
+e leva a quem resolve. A mensagem **técnica** do servidor não vai para o ecrã
+(traz o host e o código do erro); vai a que diz o que fazer.
+
+### Performance e anexos
+
+A sincronização IMAP e o download de anexos correm num `ThreadPoolExecutor`
+dedicado (`_email_executor`, 4 workers) por `run_in_executor` — **não bloqueiam
+o event loop**; o download é `StreamingResponse` e passa por
+`_assert_email_readable`. O defeito nesse eixo era outro: o job de sincronização
+nascia de um `asyncio.create_task` **cru**, que não tem referência forte e pode
+ser recolhido pelo GC. Quando isso acontece o job fica para sempre em `pending` e
+o ecrã desiste com «Sincronização a demorar demasiado» — um erro que aponta para
+o servidor de email quando a causa é o garbage collector. Os três passaram a
+`spawn_background_task`.
+
+Cobertura: `tests/unit/test_email_client_match.py` (21),
+`tests/unit/test_mailbox_health.py` (32), `utils/saudeDaCaixa.test.js` (17),
+`components/webmail/__tests__/AvisoDeCaixaAFalhar.test.jsx` (7).
