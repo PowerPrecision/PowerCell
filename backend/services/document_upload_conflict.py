@@ -17,6 +17,7 @@ from services.document_constants import (
 )
 from services.document_filenames import normalize_filename
 from services.s3_storage import s3_service, sanitize_folder_name
+from services.s3_document_root import pasta_gravada
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,11 @@ def resolve_upload_base_path(
     process_id: str,
 ) -> str:
     """Caminho base S3 do processo (s3_folder ou path derivado)."""
-    s3_folder = process.get("s3_folder")
+    # Uma lista é truthy: sem `pasta_gravada`, o `if` passava e o
+    # `.rstrip` rebentava a verificação de conflitos (Lote 8).
+    s3_folder = pasta_gravada(
+        process.get("s3_folder"), contexto=f"processo {process.get('id')}"
+    )
     if s3_folder:
         return s3_folder.rstrip("/")
 

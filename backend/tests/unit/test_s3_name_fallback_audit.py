@@ -17,6 +17,7 @@ import pytest
 from services.s3_document_root import RAIZ
 from services.s3_name_fallback_audit import (
     InventarioIndisponivel,
+    VEREDICTO_ANOMALIA,
     VEREDICTO_COLISAO,
     VEREDICTO_DEPENDE_DO_NOME,
     VEREDICTO_MAPEADO,
@@ -200,6 +201,9 @@ class TestAAritmeticaDoRelatorio:
             "fichas_em_risco": 0,
             "pastas_em_risco": 0,
             "ficheiros_em_risco": 0,
+            # Contagem própria desde o hotfix do Lote 8: o `s3_folder`
+            # gravado como lista não é custo do corte, é avaria a corrigir.
+            "anomalias": 0,
         }
 
 
@@ -232,6 +236,9 @@ class TestAListaAccionavel:
             "s3_folder_sugerido": f"{RAIZ}Ana Costa",
             "ficheiros": 4,
             "partilhada_com": [],
+            # `None` no caso normal: só a anomalia de tipo leva valor cru,
+            # e sem ele quem corrige o registo ia ao Mongo à mão.
+            "valor_cru": None,
         }]
 
     def test_quem_nao_custa_nao_entra_na_lista(self):
@@ -459,3 +466,119 @@ class TestAMedicaoQueNaoAconteceu:
             ),
         )
         assert asyncio.run(modulo.principal()) == 2
+
+
+class TestOS3FolderQueNaoEUmaString:
+    """Produção tem `s3_folder` gravado como LISTA — e a medição rebentou.
+
+    O erro real, ao correr o diagnóstico contra produção:
+
+        gravado = (ficha.s3_folder or "").strip().rstrip("/")
+        AttributeError: 'list' object has no attribute 'strip'
+
+    Uma lista é **truthy**, logo o `or ""` não a substitui e o `.strip()`
+    corre sobre ela. É a regra do `Array.isArray` do frontend escrita em
+    Python: `|| []` (aqui `or ""`) não protege de um valor do tipo errado,
+    só muda o sítio onde o erro acontece.
+
+    A decisão de desenho que estes testes fixam: **não se adivinha**.
+    Apanhar `[0]` ligava a ficha a uma pasta à ordem de inserção — é o
+    `find_one` sem unicidade outra vez, e permanente. `str(valor)` dava
+    `"['...']"`, um caminho que classificava como `mapeado_quebrado` e se
+    lê como «já estava partido, o corte não agrava» — subestimar o custo
+    é o erro que autoriza o corte errado. Logo: veredicto PRÓPRIO.
+    """
+
+    def test_uma_lista_NAO_rebenta_a_medicao(self):
+        # O teste que o erro de produção pediu.
+        resultados = auditar(
+            [_processo("p1", "Ana Costa", s3_folder=[f"{RAIZ}Ana_Costa"])],
+            [Pasta(nome="ana costa", ficheiros=3)],
+        )
+        assert len(resultados) == 1
+
+    def test_uma_lista_e_uma_ANOMALIA_e_nao_um_dos_outros_cinco(self):
+        resultados = auditar(
+            [_processo("p1", "Ana Costa", s3_folder=[f"{RAIZ}Ana_Costa"])],
+            [Pasta(nome="ana costa", ficheiros=3)],
+        )
+        assert resultados[0].veredicto == VEREDICTO_ANOMALIA
+        # Nenhum dos cinco: cada um destes seria uma conclusão errada.
+        assert resultados[0].veredicto not in (
+            VEREDICTO_MAPEADO,          # não se confia no valor
+            VEREDICTO_MAPEADO_QUEBRADO,  # lê-se como "não agrava"
+            VEREDICTO_SEM_PASTA,         # lê-se como "não custa nada"
+            VEREDICTO_DEPENDE_DO_NOME,
+            VEREDICTO_COLISAO,
+        )
+
+    def test_a_anomalia_PRESERVA_o_valor_cru_para_a_pessoa_decidir(self):
+        # Sem o valor cru no relatório, quem o vai corrigir tem de ir ao
+        # Mongo à mão descobrir o que lá está.
+        resultados = auditar(
+            [_processo("p1", "Ana", s3_folder=["a", "b"])],
+            [Pasta(nome="x", ficheiros=1)],
+        )
+        assert resultados[0].valor_cru == "['a', 'b']"
+
+    @pytest.mark.parametrize("valor", [
+        ["a"], [], {"p": "a"}, 123, 12.5, True, ("a",),
+    ])
+    def test_qualquer_tipo_que_nao_seja_string_e_anomalia(self, valor):
+        resultados = auditar(
+            [_processo("p1", "Ana", s3_folder=valor)],
+            [Pasta(nome="ana", ficheiros=1)],
+        )
+        assert resultados[0].veredicto == VEREDICTO_ANOMALIA
+
+    def test_None_continua_a_cair_no_recurso_por_NOME_e_nao_em_anomalia(self):
+        # Contraprova: `None` é a ausência normal de mapeamento, que é
+        # exactamente o que esta medição existe para contar. Confundi-la
+        # com a anomalia esvaziava o relatório.
+        resultados = auditar(
+            [_processo("p1", "Ana Costa", s3_folder=None)],
+            [Pasta(nome="ana costa", ficheiros=3)],
+        )
+        assert resultados[0].veredicto == VEREDICTO_DEPENDE_DO_NOME
+
+    def test_a_anomalia_entra_na_lista_ACCIONAVEL(self):
+        # Hoje estas fichas rebentam a aba Documentos em produção (o
+        # `list_files` faz o mesmo `.rstrip`), logo exigem acção AGORA —
+        # independentemente do corte.
+        linhas = para_religar(auditar(
+            [_processo("p1", "Ana", s3_folder=["x"])],
+            [Pasta(nome="ana", ficheiros=1)],
+        ))
+        assert [linha["id"] for linha in linhas] == ["p1"]
+        assert linhas[0]["veredicto"] == VEREDICTO_ANOMALIA
+
+    def test_a_anomalia_aparece_no_resumo_com_contagem_propria(self):
+        resumo = resumir(auditar(
+            [
+                _processo("p1", "Ana", s3_folder=["x"]),
+                _processo("p2", "Rui Dias"),
+            ],
+            [Pasta(nome="rui dias", ficheiros=2)],
+        ))
+        assert resumo["anomalias"] == 1
+        assert resumo["por_veredicto"][VEREDICTO_ANOMALIA] == 1
+
+    def test_a_anomalia_NAO_entra_nos_ficheiros_em_risco_do_corte(self):
+        # Honestidade da aritmética: o corte do recurso por nome não muda
+        # nada para esta ficha (o valor é truthy, nunca chega ao ramo do
+        # nome). Contá-la no custo do corte inflacionava o número que
+        # decide, e um relatório que exagera nunca autoriza o corte.
+        resumo = resumir(auditar(
+            [_processo("p1", "Ana", s3_folder=["x"])],
+            [Pasta(nome="ana", ficheiros=9)],
+        ))
+        assert resumo["ficheiros_em_risco"] == 0
+        assert resumo["fichas_em_risco"] == 0
+
+    def test_uma_string_com_espacos_continua_a_ser_uma_string(self):
+        # Contraprova de que a guarda nova não mordeu o caso normal.
+        resultados = auditar(
+            [_processo("p1", "Ana", s3_folder=f"  {RAIZ}Ana_Costa/  ")],
+            [Pasta(nome="ana_costa", ficheiros=3)],
+        )
+        assert resultados[0].veredicto == VEREDICTO_MAPEADO

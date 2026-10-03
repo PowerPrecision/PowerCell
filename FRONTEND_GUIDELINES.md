@@ -2125,7 +2125,14 @@ foi assim que quatro delas ficaram sem ela.
 **Dois corolários:**
 
 * **`Array.isArray`, nunca `|| []`.** Um objecto é *truthy*, logo `x || []`
-  devolve o objecto e o erro muda de sítio em vez de desaparecer (§ 27.7).
+  devolve o objecto e o erro muda de sítio em vez de desaparecer (§ 27.7). Esta
+  regra não é do frontend: é da linguagem. No backend tem a forma `(x or "")`
+  seguida de um método de string, e foi exactamente assim que o `s3_folder`
+  gravado como lista rebentou onze leitores de produção com
+  `AttributeError: 'list' object has no attribute 'strip'` — o `or ""` não
+  substitui uma lista (é *truthy*), só muda o sítio onde o erro acontece. Ver o
+  bullet do `pasta_gravada` no `AGENTS.md` e a secção do Lote 8 no
+  `ARCHITECTURE.md`.
 * **Um contador DERIVA da lista.** O `count` vem calculado do servidor, mas
   depois do arrasto optimista e do filtro em memória deixa de corresponder ao
   ecrã. Um contador que contradiz a coluna é o rodapé a discordar da lista.

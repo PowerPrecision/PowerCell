@@ -11,6 +11,7 @@ import tempfile
 import shutil
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, BinaryIO, Any
+from services.s3_document_root import pasta_gravada
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,7 @@ class LocalStorageAdapter(StorageAdapter):
         s3_folder: str = None,
     ) -> Optional[str]:
         try:
+            s3_folder = pasta_gravada(s3_folder)
             if s3_folder:
                 base = os.path.join(self.base_path, s3_folder.replace("/", os.sep).lstrip(os.sep))
             else:
@@ -182,6 +184,7 @@ class LocalStorageAdapter(StorageAdapter):
         second_client_name: str = None,
         s3_folder: str = None,
     ) -> Dict[str, Any]:
+        s3_folder = pasta_gravada(s3_folder)
         if s3_folder:
             base = os.path.join(self.base_path, s3_folder.replace("/", os.sep).lstrip(os.sep))
         else:

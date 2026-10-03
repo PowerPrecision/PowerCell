@@ -14,15 +14,34 @@ from fastapi import HTTPException
 from database import db
 from services.s3_document_root import RAIZ, e_id_gerado
 from services.process_status import ARCHIVED_STATUSES, DELETED_STATUS_VALUES
+from services.s3_document_root import pasta_gravada
 
 logger = logging.getLogger(__name__)
 
 
 def _clean_s3_folder(s3_folder: Optional[str]) -> Optional[str]:
-    """Validar s3_folder — não guardar "undefined", "null" ou strings inválidas."""
-    if s3_folder in [None, "", "undefined", "null", "None"]:
+    """Validar s3_folder — nem sentinelas de texto, nem valores de outro TIPO.
+
+    A TORNEIRA DO LOTE 8
+    Os endpoints em lote (`/process-s3-mappings/batch` e o alias
+    `/client-s3-mappings/bulk`) recebem `List[dict]`, e um `dict` não é
+    validado pelo FastAPI: os valores entram como vierem. A versão
+    anterior desta função perguntava só
+
+        if s3_folder in [None, "", "undefined", "null", "None"]
+
+    e `["a"] in [...]` é `False` — logo a lista era devolvida tal e qual
+    e gravada no Mongo. Foi assim que o campo passou a ter valores que
+    rebentam o `list_files` com `AttributeError`.
+
+    Corrigir os leitores e deixar isto aberto era esfregar o chão com a
+    torneira aberta (regra do `assignment_drift`): a ordem é sempre o
+    escritor primeiro.
+    """
+    limpo = pasta_gravada(s3_folder, contexto="escrita de mapeamento")
+    if limpo is None or limpo.lower() in ("undefined", "null", "none"):
         return None
-    return s3_folder
+    return limpo
 
 
 async def run_get_process_s3_mappings(
@@ -194,7 +213,9 @@ async def run_fix_missing_client_names(user: dict):
         new_name = None
 
         # 1. Tentar extrair da pasta S3
-        s3_folder = process.get("s3_folder")
+        s3_folder = pasta_gravada(
+            process.get("s3_folder"), contexto=f"processo {process.get('id')}"
+        )
         if s3_folder:
             # Extrair nome da pasta: "Documentação Clientes/Nome_Cliente" -> "Nome Cliente"
             folder_name = s3_folder.replace(RAIZ, "").rstrip("/")

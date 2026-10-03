@@ -69,6 +69,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from services.s3_document_root import RAIZ  # noqa: E402
 from services.s3_name_fallback_audit import (  # noqa: E402
     InventarioIndisponivel,
+    VEREDICTO_ANOMALIA,
     VEREDICTO_COLISAO,
     VEREDICTO_DEPENDE_DO_NOME,
     VEREDICTO_MAPEADO,
@@ -82,6 +83,7 @@ from services.s3_name_fallback_audit import (  # noqa: E402
 )
 
 ORDEM_DOS_VEREDICTOS = [
+    VEREDICTO_ANOMALIA,
     VEREDICTO_COLISAO,
     VEREDICTO_DEPENDE_DO_NOME,
     VEREDICTO_MAPEADO_QUEBRADO,
@@ -90,6 +92,7 @@ ORDEM_DOS_VEREDICTOS = [
 ]
 
 ROTULOS = {
+    VEREDICTO_ANOMALIA: "ANOMALIA: s3_folder não é texto (rebenta HOJE)",
     VEREDICTO_COLISAO: "colisão de nome (duas fichas, uma pasta)",
     VEREDICTO_DEPENDE_DO_NOME: "depende do nome (perde documentos no corte)",
     VEREDICTO_MAPEADO_QUEBRADO: "mapeado quebrado (já partido hoje)",
@@ -232,6 +235,21 @@ def _imprimir(resultados, pastas, args) -> None:
               "ANTES de apagar o recurso.")
     print("-" * 70)
 
+    # Bloco PRÓPRIO e depois da conclusão do corte, de propósito: a
+    # anomalia não é um custo do corte (estas fichas nunca chegam ao ramo
+    # do nome, logo contá-la lá inflacionava o número que decide), mas é
+    # uma aba Documentos que responde 500 HOJE. Misturar as duas coisas
+    # fazia perder as duas: ou o corte parecia mais caro do que é, ou a
+    # avaria passava despercebida debaixo de um "pode apagar-se".
+    if resumo["anomalias"]:
+        print(f"  ⚠ ANOMALIAS DE DADOS: {resumo['anomalias']} ficha(s) com "
+              "`s3_folder` gravado com o tipo errado.")
+        print("    Estas fichas rebentam a aba Documentos hoje "
+              "(AttributeError no list_files).")
+        print("    Corrigir o registo (ou religar no painel) — "
+              "independentemente do corte.")
+        print("-" * 70)
+
     if linhas:
         print(f"ACCIONÁVEIS (pior caso primeiro, {min(len(linhas), args.limite_exemplos)}"
               f" de {len(linhas)}):")
@@ -243,15 +261,20 @@ def _imprimir(resultados, pastas, args) -> None:
             etiqueta = f" [{linha['etiqueta']}]" if linha["etiqueta"] else ""
             print(f"  {linha['veredicto']:<16} {linha['tipo']}:{linha['id']}"
                   f"{etiqueta} «{linha['nome']}»")
-            print(f"      → {linha['s3_folder_sugerido']}  "
-                  f"({linha['ficheiros']} ficheiro(s)){partilha}")
+            if linha["valor_cru"] is not None:
+                # Sem o valor cru, quem corrige vai ao Mongo à mão
+                # descobrir o que lá está.
+                print(f"      → gravado: {linha['valor_cru']}")
+            else:
+                print(f"      → {linha['s3_folder_sugerido']}  "
+                      f"({linha['ficheiros']} ficheiro(s)){partilha}")
 
     if args.csv:
         destino = Path(args.csv)
         with destino.open("w", newline="", encoding="utf-8") as fh:
             escritor = csv.DictWriter(fh, fieldnames=[
                 "veredicto", "tipo", "id", "etiqueta", "nome",
-                "s3_folder_sugerido", "ficheiros", "partilhada_com",
+                "s3_folder_sugerido", "ficheiros", "partilhada_com", "valor_cru",
             ])
             escritor.writeheader()
             for linha in linhas:

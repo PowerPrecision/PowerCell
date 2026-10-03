@@ -7948,15 +7948,16 @@ exacto). Apagar esse recurso é o fecho da D-19 — e apagá-lo às cegas escond
 documentos que existem, sem produzir erro nenhum.
 
 **`services/s3_name_fallback_audit.py`** (puro) classifica cada ficha — processo
-E cliente, porque a colisão atravessa as colecções — em cinco veredictos e diz
+E cliente, porque a colisão atravessa as colecções — em seis veredictos e diz
 quantos DOCUMENTOS desaparecem do ecrã:
 
 ```
-mapeado           tem s3_folder e a pasta existe → o corte não lhe toca
-mapeado_quebrado  tem s3_folder e a pasta não existe → já partido hoje
-sem_pasta         sem mapeamento, o nome não resolve → nada a perder
-depende_do_nome   sem mapeamento, o nome resolve, a pasta TEM ficheiros
-colisao_de_nome   o mesmo, com DUAS OU MAIS fichas na MESMA pasta
+mapeado            tem s3_folder e a pasta existe → o corte não lhe toca
+mapeado_quebrado   tem s3_folder e a pasta não existe → já partido hoje
+sem_pasta          sem mapeamento, o nome não resolve → nada a perder
+depende_do_nome    sem mapeamento, o nome resolve, a pasta TEM ficheiros
+colisao_de_nome    o mesmo, com DUAS OU MAIS fichas na MESMA pasta
+anomalia_de_dados  o campo existe e NÃO é texto → rebenta a aba HOJE
 ```
 
 **`scripts/diagnose_s3_name_fallback.py`** lê o Mongo e o bucket, imprime o
@@ -7966,6 +7967,85 @@ antes do volume, porque partilhar documentação é um risco de RGPD e perder vi
 `diagnose_assignment_drift.py`, não chama `require_non_production_db` — e é **só
 de leitura**, afirmado por guarda sobre a fonte com contraprova. Religar é uma
 decisão humana, no painel de Administração.
+
+### O TIPO do campo vem antes da verdade do campo (Lote 8)
+
+A primeira execução contra produção morreu na primeira ficha:
+
+```
+gravado = (ficha.s3_folder or "").strip().rstrip("/")
+AttributeError: 'list' object has no attribute 'strip'
+```
+
+Há fichas com `s3_folder` gravado como **lista**. O script foi só o mensageiro:
+onze sítios da aplicação leem o mesmo campo com a mesma forma —
+
+```python
+if s3_folder:
+    base_path = s3_folder.rstrip("/")
+```
+
+— e **uma lista é truthy**. A guarda passa e o erro acontece na linha seguinte.
+É a regra do `Array.isArray` do `FRONTEND_GUIDELINES.md` § 27.38 escrita em
+Python: um `or ""` (como um `|| []`) não protege de um valor do TIPO errado, só
+muda o sítio onde rebenta. Para essas fichas o `list_files` responde 500 e a aba
+Documentos não abre — hoje, sem ninguém cortar nada.
+
+**`s3_document_root.pasta_gravada` é o ponto único** (ao lado do `normalizar` e
+do `dentro_da_pasta`): devolve texto utilizável ou `None`, **com `warning` que
+nomeia o tipo e o contexto**. `None` faz o chamador cair no caminho de «sem
+mapeamento», que é o degradado certo — numa LEITURA procura-se pelo nome (os
+documentos podem estar lá), numa ESCRITA deriva-se do ID (nunca do nome, Lote 6
+ponto 1). Nenhum dos dois inventa uma pasta a partir de um valor ilegível.
+
+**Cinco decisões com teste:**
+
+1. **Não se adivinha.** Apanhar `[0]` ligava a ficha a uma pasta à ordem de
+   inserção do Mongo — é o `find_one` sem unicidade outra vez, e permanente.
+   E `str(valor)` dava `"['...']"`, um caminho que classificava como
+   `mapeado_quebrado` e se lê como «já estava partido, o corte não agrava»:
+   **subestimar o custo é o erro que autoriza o corte errado**. Daí um
+   veredicto PRÓPRIO, e não um dos cinco que já existiam.
+2. **`None` e `""` NÃO são corrupção.** São a ausência normal de mapeamento, que
+   tem caminho próprio e documentado (o recurso por nome) — e é precisamente o
+   que esta medição existe para contar. Confundi-las esvaziava o relatório e
+   enchia os logs.
+3. **A anomalia não entra no custo do CORTE.** Estas fichas têm valor truthy,
+   logo nunca chegam ao ramo do nome: contá-las em `ficheiros_em_risco`
+   inflacionava o número que decide, e um relatório que exagera nunca autoriza
+   o corte. Tem contagem (`anomalias`) e bloco próprios no relatório, depois da
+   conclusão do corte — misturar as duas coisas perdia as duas.
+4. **Entra na lista ACCIONÁVEL, à frente da colisão**, e leva o `valor_cru`
+   (também em coluna do CSV): sem ele, quem corrige o registo tem de ir ao
+   Mongo à mão descobrir o que lá está.
+5. **Nunca em silêncio.** O `normalizar` já recusava não-strings — e devolvia
+   `""`, pelo que `leituras_do_mapeamento` dava lista vazia e a ficha perdia os
+   documentos **sem erro nenhum**. Um degradado calado é a forma de defeito
+   desta casa; o `warning` é metade da correcção.
+
+**E a torneira.** Corrigir os leitores e deixar o escritor a aceitar listas era
+esfregar o chão com a torneira aberta (regra do `assignment_drift`: código
+primeiro, dados depois). O escritor é o `_clean_s3_folder` de
+`admin_s3_process_mappings`, que perguntava só
+
+```python
+if s3_folder in [None, "", "undefined", "null", "None"]
+```
+
+e `["a"] in [...]` é `False` — logo a lista era devolvida tal e qual e gravada.
+Chega-se lá por `POST /admin/process-s3-mappings/batch` e pelo alias
+`/client-s3-mappings/bulk`, ambos `mappings: List[dict] = Body(...)`: **um
+`dict` não é validado pelo FastAPI**, os valores entram como vierem. São de
+ADMIN, logo não é uma fuga — é por onde o lixo entrou. Hoje passa pelo ponto
+único.
+
+A guarda do inventário (`test_s3_folder_corrompido.py::TestOsLeitoresDeProducao`)
+é por FONTE e faz análise por FUNÇÃO: um nome é seguro se vier de
+`pasta_gravada(...)` nessa função. Olhar só para o nome não servia (depois da
+correcção a variável continua a chamar-se `s3_folder`), e uma verificação global
+ao módulo deixava passar o defeito das quatro cópias do Kanban — chamar o ponto
+único numa função e não noutra. Falha por OMISSÃO para qualquer leitor novo, com
+as duas contraprovas obrigatórias (o leitor lê mesmo; o sítio certo chama mesmo).
 
 **Quatro regras que não se podem perder:**
 

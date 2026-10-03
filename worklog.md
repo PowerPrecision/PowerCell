@@ -10449,3 +10449,130 @@ que diz o que fazer.
 Testes novos: `test_email_client_match.py` (21), `test_mailbox_health.py` (32),
 `utils/saudeDaCaixa.test.js` (17), `AvisoDeCaixaAFalhar.test.jsx` (7). Oito
 mutações, oito mortes.
+
+---
+
+# Iteração `hotfix-s3-folder-corrompido` — 2026-10-03
+
+A medição da D-19 correu contra produção e morreu na primeira ficha:
+
+```
+File "/app/services/s3_name_fallback_audit.py", line 241, in auditar
+  gravado = (ficha.s3_folder or "").strip().rstrip("/")
+AttributeError: 'list' object has no attribute 'strip'
+```
+
+Há fichas com `s3_folder` gravado como **lista**. O pedido era corrigir o
+script; o script era o menor dos três problemas.
+
+## A forma do defeito
+
+Onze sítios da aplicação leem o campo assim:
+
+```python
+if s3_folder:
+    base_path = s3_folder.rstrip("/")
+```
+
+**Uma lista é truthy.** A guarda passa e o erro acontece na linha seguinte. É a
+regra do `Array.isArray` (`FRONTEND_GUIDELINES.md` § 27.38) escrita em Python:
+um `or ""` — que é o `|| []` com outra sintaxe — não protege de um valor do TIPO
+errado, só muda o sítio onde rebenta.
+
+Consequência que não estava no relato: para essas fichas o `list_files` levanta
+o MESMO `AttributeError` e a **aba Documentos responde 500 hoje**, sem ninguém
+cortar nada. O `upload_file` idem.
+
+## Eixo 1 — A medição: um veredicto novo, sem adivinhar
+
+As três saídas que o pedido sugeria (`[0]`, `str(valor)`, ou reportar) não são
+equivalentes, e duas estão erradas:
+
+* **`[0]`** liga a ficha a uma pasta à ordem de inserção do Mongo. É o `find_one`
+  sem unicidade do auto-mapeamento, outra vez — e permanente.
+* **`str(valor)`** dá `"['Documentação Clientes/Ana']"`, um caminho que não
+  existe, logo classifica como `mapeado_quebrado` — que se lê como «já estava
+  partido, o corte não agrava». **Subestimar o custo é o erro que autoriza o
+  corte errado.** A mutação M4 é exactamente esta, e morre.
+
+Daí o sexto veredicto, `anomalia_de_dados`, com quatro propriedades:
+
+1. **Não entra no custo do CORTE.** O valor é truthy, logo a ficha nunca chega
+   ao ramo do nome: contá-la em `ficheiros_em_risco` inflacionava o número que
+   decide, e um relatório que exagera nunca autoriza o corte. Tem contagem
+   (`anomalias`) e bloco próprios, **depois** da conclusão do corte — misturar
+   as duas coisas perdia as duas (ou o corte parecia mais caro, ou a avaria
+   passava debaixo de um «pode apagar-se»).
+2. **Entra na lista accionável, à frente da colisão** — a colisão é um risco que
+   o corte cria, a anomalia é uma aba que rebenta agora.
+3. **Leva o `valor_cru`** (ecrã e coluna do CSV): sem ele, quem corrige vai ao
+   Mongo à mão descobrir o que lá está.
+4. **`None` e `""` continuam a NÃO ser anomalia** — são a ausência normal de
+   mapeamento, que é o que esta medição existe para contar. Confundi-las
+   esvaziava o relatório (mutação M2).
+
+## Eixo 2 — A aplicação: ponto único e nunca em silêncio
+
+`s3_document_root.pasta_gravada` devolve texto utilizável ou `None`, **com
+`warning` que nomeia o tipo e a ficha**. `None` faz o chamador cair no caminho
+de «sem mapeamento», que é o degradado certo: numa LEITURA procura-se pelo nome
+(os documentos podem estar lá), numa ESCRITA deriva-se do ID.
+
+O `normalizar` já recusava não-strings — **e devolvia `""` em silêncio**, pelo
+que `leituras_do_mapeamento` dava lista vazia e a ficha perdia os documentos sem
+erro nenhum. Defensivo e calado é o degradado desta casa; o `warning` é metade
+da correcção.
+
+Ligado aos onze sítios: `s3_storage` (`list_files`, `upload_file` e as duas
+variantes de pré-assinado, `ensure_client_folder_mapping`),
+`s3_mapping_on_create`, `document_upload_conflict`, `document_delete` (guarda de
+posse — `None` torna a condição falsa, que é o lado seguro),
+`s3_folder_coverage` (3), `admin_s3_process_mappings` e `storage_service` (2).
+
+## Eixo 3 — A torneira
+
+Corrigir os leitores e deixar o escritor a aceitar listas era esfregar o chão
+com a torneira aberta. O escritor é o `_clean_s3_folder`:
+
+```python
+if s3_folder in [None, "", "undefined", "null", "None"]:
+    return None
+return s3_folder          # ["a"] chega aqui
+```
+
+`["a"] in [...]` é `False`, logo a lista era devolvida tal e qual e gravada.
+Chega-se lá por `POST /admin/process-s3-mappings/batch` e pelo alias
+`/client-s3-mappings/bulk`, ambos `mappings: List[dict] = Body(...)` — **um
+`dict` não é validado pelo FastAPI**, os valores entram como vierem. São de
+ADMIN, logo não é uma fuga; é por onde o lixo entrou. O frontend envia string
+nos dois caminhos, pelo que a origem concreta destes registos não está provada
+(operação manual, script antigo ou chamada directa à API) e **não a invento**.
+
+## Dois erros meus, pelo caminho
+
+* A guarda de inventário começou a olhar só para o **nome** da variável, e
+  depois da correcção a variável continua a chamar-se `s3_folder` — sete falsos
+  positivos. Passou a fazer análise por FUNÇÃO: um nome é seguro se vier de
+  `pasta_gravada(...)` nessa função. Global ao módulo não servia — chamar o
+  ponto único numa função e não noutra é o defeito das quatro cópias do Kanban.
+* Passei um **caminho** ao `codigo_sem_comentarios`, que recebe **texto**: ele
+  analisou a string `"services/s3_storage.py"` como Python, não encontrou nada e
+  a guarda ficou verde a provar zero. Foi a contraprova obrigatória que o
+  denunciou — e o espécime do defeito tem de estar em **código**, não numa
+  docstring, porque o helper remove docstrings.
+
+## Medição
+
+| Bateria | Antes | Depois |
+|---|---|---|
+| backend `tests/unit` | 4802 / 5 skip | **4884 / 5 skip** |
+
+Testes novos: `test_s3_folder_corrompido.py` (36) e 11 em
+`test_s3_name_fallback_audit.py` (37 → 48). Dois testes antigos **actualizados,
+não apagados**: afirmavam a forma exacta do resumo e da linha accionável, que
+ganharam `anomalias` e `valor_cru` de propósito. Catorze mutações, catorze mortes — a
+M13 à segunda, porque a primeira âncora ia mal escapada e um disparo falhado
+não é uma mutação sobrevivente (nem o contrário).
+
+**O que falta:** a execução contra produção abortou na primeira anomalia, logo
+**não há números da D-19**. O script corrigido está pronto a correr de novo.
