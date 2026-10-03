@@ -48,6 +48,8 @@ import CreateProcessModal from "../components/CreateProcessModal";
 // PACOTE CX — ClientDetailsModal para popup de detalhes ao clicar no nome
 import ClientDetailsModal from "../components/ClientDetailsModal";
 import { useAuth } from "../contexts/AuthContext";
+import BotaoComPermissao from "../components/shared/BotaoComPermissao";
+import { CRIAR_PROCESSO, EXPORTAR_PROCESSO } from "../utils/capacidades";
 import { safeString } from "../utils/safeString";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import ProcessFilters from "../components/filters/ProcessFilters";
@@ -823,11 +825,15 @@ const ProcessesPage = () => {
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
-                <Button
+                <BotaoComPermissao
+                  user={user}
+                  capacidade={EXPORTAR_PROCESSO}
+                  papel={effectiveRole}
                   variant="outline"
                   className="gap-2"
                   onClick={handleExportExcel}
                   disabled={exporting}
+                  testId="btn-exportar-excel"
                 >
                   {exporting ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -835,14 +841,25 @@ const ProcessesPage = () => {
                     <Download className="h-4 w-4" />
                   )}
                   Exportar Excel
-                </Button>
-                <Button
+                </BotaoComPermissao>
+                {/* Lote 6, ponto 3 — o botão fantasma. O registo canónico de
+                    capacidades já dizia que o perfil `indexacao` não cria
+                    processos; o ecrã é que não o consultava, e quem não podia
+                    descobria pelo erro. Fica VISÍVEL e desactivado, com
+                    cadeado e motivo: um ecrã que muda de forma a cada perfil
+                    é impossível de apoiar ao telefone. O papel é o EFECTIVO,
+                    o mesmo que a rota lê. */}
+                <BotaoComPermissao
+                  user={user}
+                  capacidade={CRIAR_PROCESSO}
+                  papel={effectiveRole}
                   className="gap-2"
                   onClick={() => setShowCreateProcess(true)}
+                  testId="btn-novo-processo"
                 >
                   <Plus className="h-4 w-4" />
                   Novo Processo
-                </Button>
+                </BotaoComPermissao>
               </div>
             </div>
           </CardHeader>

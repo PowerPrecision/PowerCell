@@ -7798,3 +7798,144 @@ escritura; este é uma oportunidade que não aparece numa lista. A lista de
 excepções tem o seu próprio teste a exigir que ainda divergem — sem ele,
 encher-se-ia de casos que já concordam e passaria a esconder uma divergência
 nova.
+
+## O religamento, o arrasto e os botões que não podiam (Out 2026)
+
+Segunda metade do Lote 6. O primeiro ponto do lote tirou a identidade documental
+dos nomes; estes três fecham o que isso deixou em aberto e dois defeitos de UX
+que vivem do mesmo erro — **a UI a adivinhar o que o servidor já sabe**.
+
+### 1. Religamento manual — a válvula que o automatismo exige
+
+`services/s3_relink.py` + `GET/POST /api/admin/s3-relink`.
+
+Quando o automatismo deixou de adivinhar (o auto-mapeamento recusa a pasta
+ambígua em vez de escolher uma ficha à sorte), ficaram em aberto os casos que só
+uma pessoa resolve: o mapeamento que aponta para a pasta legada errada, duas
+fichas a partilhar pasta (D-19), uma ligação partida por um `rename` antigo, uma
+pasta nova em uuid que se quer consolidar numa com histórico.
+
+**A ferramenta que existia só sabia PROCESSOS** — a rota de "cliente" era um
+alias que recebia `process_id`. Um cliente da Pool que nunca teve processo não
+tinha como ser religado, e é precisamente ele que vive sozinho na raiz
+documental.
+
+Seis regras, cada uma com teste:
+
+1. **Só ADMIN.** Não é hierarquia: esta escrita move a fronteira de posse —
+   depois dela, `assert_s3_file_belongs_to_process` autoriza tudo o que estiver
+   na pasta escolhida.
+2. **A pasta tem de estar dentro da raiz documental.** Um `backups/` gravado
+   aqui transformava a guarda de posse num passe para o bucket inteiro: é o
+   "prefixo de dono ENVENENADO" que a guarda da raiz do Portal foi escrita para
+   travar, e aqui estaria a ser gravado de propósito.
+3. **A raiz NUA é recusada** — autorizaria a árvore toda.
+4. **Apontar para uma pasta COM dono é permitido, com aviso que os NOMEIA.**
+   Consolidar duas fichas é um uso legítimo; proibi-lo tirava à ferramenta
+   metade dos casos.
+5. **Deixa rasto no trilho**, com o papel EFECTIVO em `metadata`, e **nunca
+   falha a operação** (quando o registo se escreve, o mapeamento já mudou).
+6. **Remover o mapeamento é explícito.** Uma string vazia remove; um `/` ou
+   `///` é **recusado** — tratá-lo como remoção respondia a uma pergunta
+   diferente da feita.
+
+Nada aqui MOVE objectos: religar é mudar o ponteiro. Mover é o `rename` do
+Explorador, que foi o que produziu as 205 ligações partidas.
+
+### 2. O uuid no ecrã — e a regressão que o ponto 1 tinha deixado
+
+O Explorador mostrava `11111111-…` onde devia estar o nome do cliente. A
+resolução vive no `s3_explorer_scope.carregar_pastas`, que agora tem **três
+caminhos** em vez de um:
+
+1. `processes.s3_folder` — o original, e continua a ser a fonte da REDE (é o
+   processo que é carimbado na criação, o cliente não);
+2. `clients.s3_folder` — dá o NOME e é o único dono de uma pasta de cliente que
+   ainda não tem processo;
+3. **pelo ID, quando o segmento é um uuid gerado.**
+
+**O terceiro não é conveniência — é a correcção de uma regressão que eu próprio
+introduzi no ponto 1.** Com a pasta do processo a viver DENTRO da do cliente
+(`{cid}/processos/{pid}`), nenhum processo aponta para `{cid}`: a pasta de topo
+passou a contar como ÓRFÃ, e uma órfã só é visível a ADMIN/CEO. Ou seja, a
+correcção da colisão tornava invisível ao staff normal a pasta de **todos os
+clientes novos**. Nenhum teste do ponto 1 o apanhou, porque lá a pergunta era
+outra.
+
+A fronteira de rede **não se alarga**: o passo 3 encontra apenas os processos
+que já existiam, com a rede que já tinham, e há um teste a afirmar que uma pasta
+da Domus continua invisível à Power.
+
+`nome_legivel` só substitui quando o nome cru é um uuid gerado **e** há
+exactamente um nome: duas fichas na mesma pasta é a colisão do D-19, e mostrar
+um dos nomes faria a colisão parecer resolvida. Sem dono, o uuid fica como está
+— inventar um nome seria pior, porque a órfã tem de se ver como órfã.
+
+**E `e_id_gerado` não é `id_valido`.** A primeira guarda que escrevi para não
+gravar um uuid como nome de cliente usou `id_valido`, que pergunta "serve como
+segmento de caminho?" — e `Rui_Pereira` serve. O reparador deixava de reparar
+nomes legítimos. São duas perguntas diferentes.
+
+### 3. Arrastar e largar — e o gesto que já existia
+
+`utils/dropzone.js` (puro) + `components/shared/Dropzone.jsx`.
+
+No Portal já havia um `onDrop` na linha de cada pedido, mas sem contador de
+entradas/saídas: o realce piscava ao passar sobre o conteúdo. No separador
+Documentos do CRM havia `onDrop` em cada categoria — **mas só para MOVER**
+ficheiros entre elas; um ficheiro arrastado do Finder não fazia nada, porque o
+`handleDrop` lia o estado interno (`draggedFiles`) e ignorava
+`dataTransfer.files`.
+
+Daí a guarda central: `eArrastoDeFicheiros` distingue os dois gestos pelo
+`dataTransfer.types`. **Sem ela, ligar o upload por arrasto partia o mover** —
+dois gestos chegam pelo mesmo `onDrop`, e é a metade que se parte sem dar erro.
+
+O upload foi EXTRAÍDO, não duplicado: `enviarFicheiros(ficheiros, categoria)`
+serve o botão e o arrasto, com a mesma verificação de conflitos e o mesmo pedido
+de NIF ao perfil de indexação. Largar numa categoria envia para ELA — mais útil
+do que uma zona genérica, e é o que as zonas já sugeriam visualmente.
+
+A lista de tipos é **uma constante por superfície**, usada pelo `accept` do
+botão e pelo filtro do arrasto. Em dois sítios divergiriam, e a divergência tem
+uma forma concreta: o botão recusa e o arrasto deixa passar. A parede real é a
+quarentena de magic bytes do servidor; isto é para o cliente não descobrir pelo
+erro depois de a rede ter transportado o ficheiro.
+
+### 4. Os botões fantasma — o registo que ninguém consultava
+
+`services/capability_gate.py` + `utils/capacidades.js` +
+`components/shared/BotaoComPermissao.jsx`.
+
+O sistema **já tinha** um registo canónico de capacidades por cargo, e lá estava
+escrito que o perfil `indexacao` não cria processos (`PROCESS_CREATE: False`). O
+ecrã não o consultava.
+
+E a resolução que existia tinha um defeito mais fundo: `resolve_capability` lê
+`user["role"]` — o cargo do **JWT** —, enquanto a porta do servidor
+(`require_roles`) usa o cargo EFECTIVO. Terceira ocorrência da forma do
+`history._is_stealth_user`: **duas noções de papel no mesmo caminho dão as duas
+respostas erradas.**
+
+`capacidades_do_papel(user, papel)` resolve as defaults do papel PEDIDO e aplica
+por cima os overrides pessoais (que são do UTILIZADOR, não do cargo — é o que faz
+uma excepção concedida a alguém continuar a valer quando essa pessoa troca de
+chapéu). O `/auth/me` devolve `capabilities_por_papel`, um mapa por cargo, para o
+ecrã escolher pelo perfil activo **sem duplicar a tabela de defaults**.
+
+**A rota deixou de ser mais larga do que o botão.**
+`POST /processes/create-client` entrava com `get_current_user` — sem restrição
+nenhuma: um `indexacao` podia criar um processo pela API. Hoje entra por
+`exigir_capacidade("PROCESS_CREATE")`, que lê o mesmo papel efectivo. E traduz o
+sentinel `__all_roles__` com `authorization_role`: sem isso, o modo "todos os
+perfis" chegava à resolução como nome de papel, não casava com nenhuma default e
+recusava TUDO.
+
+**Do lado do ecrã, sem contrato deixa-se passar.** Uma sessão anterior ao deploy
+não tem `capabilities_por_papel`; falhar fechado aí esconderia todos os botões a
+todos os utilizadores, e um ecrã sem botões não produz erro nenhum. A parede é o
+servidor, que falha fechado.
+
+O gate da Pool era `userRole !== "indexacao"` — uma lista de **exclusão** escrita
+à mão, sobre o papel do JWT. Um perfil novo sem direito a criar processos passava
+a ver o botão, porque a exclusão não o conhece.

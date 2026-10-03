@@ -7,6 +7,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import BotaoComPermissao from "../components/shared/BotaoComPermissao";
+import { CRIAR_PROCESSO, EXPORTAR_PROCESSO } from "../utils/capacidades";
 import DashboardLayout from "../layouts/DashboardLayout";
 import KanbanBoard from "../components/KanbanBoard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -22,7 +24,7 @@ import { BACKEND_URL as RESOLVED_BACKEND_URL } from "../utils/apiBaseUrl";
 
 const BACKEND_URL = RESOLVED_BACKEND_URL;
 const KanbanPage = () => {
-  const { token, user } = useAuth();
+  const { token, user, effectiveRole } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
@@ -186,11 +188,15 @@ const KanbanPage = () => {
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button
+            <BotaoComPermissao
+              user={user}
+              capacidade={EXPORTAR_PROCESSO}
+              papel={effectiveRole}
               variant="outline"
               className="gap-2"
               onClick={handleExportExcel}
               disabled={exporting}
+              testId="btn-exportar-excel"
             >
               {exporting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -198,14 +204,21 @@ const KanbanPage = () => {
                 <Download className="h-4 w-4" />
               )}
               Exportar Excel
-            </Button>
-            <Button
+            </BotaoComPermissao>
+            {/* Ver a nota em ProcessesPage: mesma capacidade, mesmo papel
+                efectivo. Dois ecrãs com o mesmo botão têm de dar a mesma
+                resposta — e davam duas, porque nenhum perguntava. */}
+            <BotaoComPermissao
+              user={user}
+              capacidade={CRIAR_PROCESSO}
+              papel={effectiveRole}
               className="gap-2"
               onClick={() => setShowCreateProcess(true)}
+              testId="btn-novo-processo"
             >
               <Plus className="h-4 w-4" />
               Novo Processo
-            </Button>
+            </BotaoComPermissao>
           </div>
         </div>
 

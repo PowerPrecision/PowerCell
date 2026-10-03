@@ -19,6 +19,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { CRIAR_PROCESSO, podeFazer } from "../utils/capacidades";
 import { deleteClient, getClient, getRegisteredClients } from "../services/api";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -173,7 +174,16 @@ const ClientRegistrationsPage = () => {
   const isIndexacao = userRole === "indexacao";
   
   // Verificar permissões
-  const canAssign = userRole !== "indexacao";
+  //
+  // LOTE 6, ponto 3: era `userRole !== "indexacao"` — uma lista de EXCLUSÃO
+  // escrita à mão, e sobre o papel do JWT. Duas coisas erradas: um perfil novo
+  // sem direito a criar processos passava a ver o botão (a exclusão não o
+  // conhece), e quem tem perfil base de indexação a agir COMO consultor não o
+  // via, embora a rota — que lê o papel EFECTIVO — o deixe passar.
+  // Hoje é um registo POSITIVO, o mesmo que o servidor consulta.
+  // (Declarado DEPOIS do `papelActivo`: um `const` usado antes da declaração
+  // está na zona morta temporal e rebenta no próprio render — é o defeito que
+  // o teste de integração do WebmailPage apanhou, e eu acabei de o repetir.)
 
   // Ponto 2 (Lote 4) — eliminar da Pool: só Administração/Direção.
   // O papel é o EFECTIVO e não o do JWT, porque é o efectivo que o
@@ -183,6 +193,7 @@ const ClientRegistrationsPage = () => {
   // duas respostas erradas.
   const papelActivo = (effectiveRole || userRole || "").toLowerCase();
   const podeEliminar = MANAGEMENT_ROLES.includes(papelActivo);
+  const canAssign = podeFazer(user, CRIAR_PROCESSO, papelActivo);
   const [eliminarDialog, setEliminarDialog] = useState({ open: false, client: null });
   const [aEliminar, setAEliminar] = useState(false);
 

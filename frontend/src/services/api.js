@@ -938,6 +938,31 @@ export const saveClientS3Mapping = (processId, s3Folder) =>
     skipErrorToast: true,
   });
 
+// ── Religamento manual de pastas S3 (admin) — Lote 6, ponto 2 ──
+//
+// Cobre clientes E processos. A ferramenta antiga (`client-s3-mappings`) era um
+// alias que recebia `process_id`: um cliente da Pool sem processo não tinha
+// como ser religado, e é precisamente ele que vive sozinho na raiz documental.
+//
+// Vai por Axios e não por `fetch`: é o interceptor que injecta
+// `X-Company-Id`/`X-Active-Role`, e o backend resolve o papel EFECTIVO para o
+// trilho de auditoria.
+export const getS3Relink = (params) =>
+  api.get("/admin/s3-relink", { params, skipErrorToast: true });
+
+export const setS3Relink = ({ tipo, entityId, s3Folder }) =>
+  api.post("/admin/s3-relink", null, {
+    params: {
+      tipo,
+      entity_id: entityId,
+      // String vazia e `undefined` são respostas DIFERENTES no backend:
+      // vazia remove o mapeamento, ausente também — mas um `/` ou `///` é
+      // recusado (400). Aqui normaliza-se para a forma explícita.
+      ...(s3Folder ? { s3_folder: s3Folder } : {}),
+    },
+    skipErrorToast: true,
+  });
+
 // ── Geração de minutas a partir do processo ──
 export const generateProcessTemplate = (processId, template) =>
   api.get(`/templates/process/${processId}/generate/${template}/download`, {

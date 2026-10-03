@@ -2004,3 +2004,103 @@ Duas regras:
 - **quem decide continua a ser o servidor.** O componente nunca recalcula
   a regra para a "confirmar" — duas contas da mesma regra divergem no dia
   de um aniversário. Ele lê a flag e explica-a.
+
+## 27.34 — Um botão que não pode diz-se, não desaparece
+
+O registo canónico de capacidades (`models/permissions.ROLE_CAPABILITY_DEFAULTS`)
+já dizia que o perfil `indexacao` não cria processos. O ecrã é que não o
+consultava: o botão "Novo Processo" aparecia a todos e quem não podia descobria
+pelo erro.
+
+**A regra:** `BotaoComPermissao` com `modo="cadeado"` (omissão) — o botão fica
+VISÍVEL, desactivado, com cadeado e um tooltip que DIZ o motivo. `modo="ocultar"`
+reserva-se para acções cuja mera existência revela algo (gestão, eliminação em
+massa) e para barras onde um botão morto é só ruído.
+
+Porque é que a omissão é o cadeado e não a ocultação: um ecrã que muda de forma
+a cada perfil é impossível de apoiar ao telefone, e esconder ensina menos do que
+explicar. Um cadeado sem motivo, por outro lado, manda o utilizador perguntar a
+alguém — por isso `motivoDoBloqueio` nunca devolve vazio.
+
+**Três detalhes do componente que não se podem perder:**
+
+1. **O tooltip traz o seu próprio `TooltipProvider`.** Não há provider global
+   neste projecto; um componente que dependa de o chamador o ter funciona numa
+   página e falha noutra — sem erro, só sem tooltip.
+2. **O `disabled` vai no botão**, não um `pointer-events: none` no contentor:
+   um contentor sem eventos tira o tooltip E o foco do teclado.
+3. **Um `<button disabled>` não emite eventos de rato**, logo o `TooltipTrigger`
+   envolve-o num `<span>` — sem isso o tooltip nunca abriria.
+
+## 27.35 — Capacidades: registo POSITIVO, pelo papel EFECTIVO, e sem contrato não se esconde
+
+O gate antigo da Pool era `userRole !== "indexacao"`. Dois defeitos numa linha:
+
+* **lista de EXCLUSÃO** — um perfil novo sem direito a criar processos passava a
+  ver o botão, porque a exclusão não o conhece;
+* **papel do JWT** — quem tem perfil base de indexação a agir COMO consultor não
+  via o botão, embora a rota (que lê o papel EFECTIVO) o deixe passar. É a forma
+  do `history._is_stealth_user` e do botão de eliminar cliente: duas noções de
+  papel no mesmo caminho dão as duas respostas erradas.
+
+Hoje: `podeFazer(user, CAPACIDADE, effectiveRole)` (`utils/capacidades.js`), com
+as capacidades a vir do `/auth/me` em **`capabilities_por_papel`** — um mapa por
+cargo, porque o perfil activo muda sem recarregar a sessão. **Nunca duplicar a
+tabela de defaults no frontend:** uma cópia divergiria em silêncio.
+
+**E a decisão que parece ao contrário: sem contrato, deixa-se passar.** Uma
+sessão anterior ao deploy não tem `capabilities_por_papel`; falhar fechado aí
+esconderia TODOS os botões a TODOS os utilizadores, um ecrã sem botões não
+produz erro nenhum e parece que a aplicação está partida. A parede é o
+`exigir_capacidade` do servidor, que falha FECHADO. `capacidadesDoPapel` devolve
+`null` para "não sei" e `{}` para "sei que não tem nenhuma" — tratá-los como o
+mesmo era o erro.
+
+## 27.36 — Arrastar ficheiros: três armadilhas, um módulo
+
+`utils/dropzone.js` (puro) + `components/shared/Dropzone.jsx`.
+
+1. **`onDragLeave` dispara ao passar sobre um FILHO.** Uma zona que só faça
+   `setDragOver(false)` no leave pisca enquanto o rato atravessa o conteúdo, e
+   com o realce apagado o utilizador larga sem saber se vai acertar. Conta-se
+   entradas e saídas (`arrastoEntrou`/`arrastoSaiu`).
+2. **O arrasto do SISTEMA e o arrasto INTERNO são eventos diferentes com o
+   mesmo nome.** No separador Documentos, arrastar entre categorias MOVE; do
+   Finder, ENVIA. `eArrastoDeFicheiros` distingue-os pelo `dataTransfer.types`
+   conter `"Files"` — sem esta guarda, ligar o upload por arrasto partia o mover
+   que já existia.
+3. **O botão filtra tipos e o arrasto não.** O `<input>` tem `accept`; o caminho
+   do `drop` não passa por ele, e largar um `.exe` ia direito ao upload. A lista
+   de tipos é UMA constante por superfície, usada pelo `accept` E pelo filtro do
+   arrasto — em dois sítios divergiriam, e a divergência tem uma forma concreta:
+   o botão recusa e o arrasto deixa passar.
+
+**A ordem dos callbacks é significativa:** `onFicheiros` ANTES de
+`onRecusados`. Ao contrário, um largar MISTO apagava o aviso — quem trata os
+aceites limpa o estado do envio anterior, e esse "limpar" apagava a recusa
+acabada de escrever. Com esta ordem, um largar limpo também limpa um aviso
+antigo.
+
+**E a mensagem de recusa NOMEIA os ficheiros.** No Portal ela vive em estado
+PRÓPRIO e não no `result`: a forma do `result` serve o resumo do lote e os
+crachás de sucesso, e nenhum ramo do render mostrava uma mensagem de falha —
+escrever lá era escrever para ninguém.
+
+## 27.37 — O nome que se MOSTRA nunca é o que se USA para operar
+
+Desde que a identidade documental deriva do ID, a pasta de um cliente novo
+chama-se `11111111-…`. O backend resolve o nome real e envia-o em
+`display_name`; `utils/pastaS3.js` é o ponto único do lado do ecrã.
+
+`path` e `name` continuam a ser a autoridade de TODAS as operações (entrar,
+renomear, apagar, descarregar). Mostrar uma coisa e operar noutra é a forma
+discreta de uma parede não valer nada.
+
+**Três regras:**
+
+* **o nome cru fica à vista** quando foi substituído — quem precisa do uuid (um
+  log, um pedido de suporte) não pode perdê-lo;
+* **a pesquisa casa contra os dois** (visível e cru), senão o uuid deixa de ser
+  pesquisável no dia em que o nome passa a aparecer;
+* **duas fichas na mesma pasta não escolhem um nome** — mostra-se o nome cru e
+  um crachá com a contagem. Escolher um faria a colisão parecer resolvida.

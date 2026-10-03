@@ -90,6 +90,14 @@ import {
   CloudOff,
 } from "lucide-react";
 import { toast } from "sonner";
+
+import {
+  casaPesquisa,
+  nomeFoiResolvido,
+  nomeVisivel,
+  ordenarPastas,
+  temColisao,
+} from "@/utils/pastaS3";
 import { pt } from "date-fns/locale";
 import { safeFormat } from "../lib/utils";
 
@@ -385,15 +393,16 @@ const FilesExplorerPage = () => {
     }, 300);
   };
 
-  const filteredFolders = searchQuery.trim()
-    ? folders.filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    : folders;
+  // Lote 6: a pesquisa e a ordenação das PASTAS passam pelo nome VISÍVEL (o do
+  // cliente, resolvido do mapeamento) e também pelo nome cru — quem cola um
+  // uuid de um log tem de encontrar a pasta. Ver `utils/pastaS3.js`.
+  const filteredFolders = folders.filter((f) => casaPesquisa(f, searchQuery));
   const filteredFiles = searchQuery.trim()
     ? files.filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
     : files;
 
   // ── Sort: folders first, then files alphabetically ───────────────────────
-  const sortedFolders = [...filteredFolders].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedFolders = ordenarPastas(filteredFolders);
   const sortedFiles = [...filteredFiles].sort((a, b) => a.name.localeCompare(b.name));
 
   // ── S3 Not Configured Banner ─────────────────────────────────────────
@@ -726,7 +735,24 @@ const FilesExplorerPage = () => {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm">{folder.name}</span>
+                              <span className="font-medium text-sm">{nomeVisivel(folder)}</span>
+                              {/* O nome do bucket fica à vista quando foi
+                                  substituído: sem isto, quem precisa do uuid
+                                  (um log, um pedido de suporte) deixa de o ter.
+                                  O `title` leva o caminho completo. */}
+                              {nomeFoiResolvido(folder) && (
+                                <span
+                                  className="text-[10px] text-muted-foreground font-mono truncate max-w-[12rem]"
+                                  title={folder.path}
+                                >
+                                  {folder.name}
+                                </span>
+                              )}
+                              {temColisao(folder) && (
+                                <Badge variant="destructive" className="text-[10px] px-1.5">
+                                  {folder.nomes_dos_clientes.length} fichas
+                                </Badge>
+                              )}
                               <Badge variant="secondary" className="text-[10px] px-1.5 hidden sm:inline-flex">
                                 Pasta
                               </Badge>

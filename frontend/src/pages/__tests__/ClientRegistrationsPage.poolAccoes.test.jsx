@@ -28,9 +28,19 @@ vi.mock("react-router-dom", () => ({
 }));
 
 let papelActivo = "diretor";
+// As capacidades por papel vêm do `/auth/me` (Lote 6, ponto 3). `null` =
+// sessão sem o contrato, que é o caso de uma sessão anterior ao deploy.
+let capacidadesPorPapel = null;
 vi.mock("../../contexts/AuthContext", () => ({
   useAuth: () => ({
-    user: { id: "u1", name: "Quem Apaga", role: "consultor" },
+    user: {
+      id: "u1",
+      name: "Quem Apaga",
+      role: "consultor",
+      ...(capacidadesPorPapel
+        ? { capabilities_por_papel: capacidadesPorPapel }
+        : {}),
+    },
     // O papel do PERFIL ACTIVO difere do papel base de propósito: é
     // esse o caso que o gate antigo (pelo `user.role`) decidia mal.
     effectiveRole: papelActivo,
@@ -283,5 +293,74 @@ describe("Pool — Próximo/Anterior no diálogo (ponto 3)", () => {
       expect(within(navegacao).getByRole("button", { name: "Cliente anterior" })).toBeDisabled();
       expect(within(navegacao).getByRole("button", { name: "Cliente seguinte" })).toBeDisabled();
     }
+  });
+});
+
+
+// ════════════════════════════════════════════════════════════════════
+// LOTE 6, ponto 3 — os botões fantasma
+// ════════════════════════════════════════════════════════════════════
+
+describe("Pool — «Criar Processo» só a quem pode", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    responder();
+  });
+
+  const comCapacidades = (mapa) => {
+    capacidadesPorPapel = mapa;
+  };
+
+  it("o perfil de indexação NÃO vê «Criar Processo»", async () => {
+    papelActivo = "indexacao";
+    comCapacidades({ indexacao: { PROCESS_CREATE: false } });
+    await montar();
+    expect(screen.queryByRole("button", { name: /criar processo/i })).toBeNull();
+  });
+
+  it("o consultor vê — contraprova de que o gate não esconde a todos", async () => {
+    papelActivo = "consultor";
+    comCapacidades({ consultor: { PROCESS_CREATE: true } });
+    await montar();
+    // Duas linhas sem processo (Ana e Carla).
+    expect(
+      screen.getAllByRole("button", { name: /criar processo/i })
+    ).toHaveLength(2);
+  });
+
+  it("o PAPEL ACTIVO decide, não o cargo base", async () => {
+    // Cargo base de indexação, a agir COMO consultor: a rota — que lê o papel
+    // efectivo — deixa passar, logo o botão tem de aparecer. O gate antigo
+    // (`userRole !== "indexacao"`, sobre o papel do JWT) escondia-o.
+    papelActivo = "consultor";
+    comCapacidades({
+      indexacao: { PROCESS_CREATE: false },
+      consultor: { PROCESS_CREATE: true },
+    });
+    await montar();
+    expect(
+      screen.getAllByRole("button", { name: /criar processo/i }).length
+    ).toBeGreaterThan(0);
+  });
+
+  it("sem o contrato no `/auth/me`, o botão NÃO desaparece", async () => {
+    // Falhar fechado aqui esconderia os botões a todos no dia de um deploy
+    // desalinhado — e um ecrã sem botões não produz erro nenhum. A parede é
+    // o servidor, que falha fechado.
+    papelActivo = "consultor";
+    comCapacidades(null);
+    await montar();
+    expect(
+      screen.getAllByRole("button", { name: /criar processo/i }).length
+    ).toBeGreaterThan(0);
+  });
+
+  it("o admin tem bypass mesmo sem a capacidade no mapa", async () => {
+    papelActivo = "admin";
+    comCapacidades({ admin: {} });
+    await montar();
+    expect(
+      screen.getAllByRole("button", { name: /criar processo/i }).length
+    ).toBeGreaterThan(0);
   });
 });

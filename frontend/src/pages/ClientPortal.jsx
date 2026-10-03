@@ -77,6 +77,7 @@ import {
   Bell,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import Dropzone from "@/components/shared/Dropzone";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 // PACOTE DE — Lista de ficheiros anexados por categoria (append, nunca replace)
@@ -236,15 +237,22 @@ function WorkflowStepper({ stepper }) {
 // ====================================================================
 // SINGLE DOCUMENT UPLOAD ITEM (supports multi-file via drag & drop / multiple)
 // ====================================================================
+/**
+ * Os tipos que o Portal aceita — UMA lista, usada pelo `accept` do botão E
+ * pelo filtro do arrasto. Em dois sítios divergiriam, e a divergência tem uma
+ * forma concreta: o botão recusa e o arrasto deixa passar.
+ */
+const TIPOS_ACEITES_NO_PORTAL = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
+
 function DocumentUploadItem({ doc, onUploadSuccess }) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
-  const [dragOver, setDragOver] = useState(false);
   // Lote 3, ponto 4 — o lote em envio, com NOME por ficheiro. Antes eram
   // duas contagens (`uploadCount`/`uploadTotal`) que davam "2/5" e nunca
   // diziam QUAL era o segundo. A lógica vive em `utils/portalUploadStaging`.
   const [lote, setLote] = useState([]);
+  const [recusa, setRecusa] = useState("");
   const fileInputRef = useRef(null);
 
   const doUpload = async (file) => {
@@ -302,6 +310,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
     setUploading(true);
     setProgress(0);
     setResult(null);
+    setRecusa("");
 
     // O lote nasce ANTES do primeiro envio: é isso que faz os nomes
     // aparecerem no ecrã desde o instante da selecção, em vez de só uma
@@ -330,10 +339,20 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
     setUploading(false);
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    if (e.dataTransfer.files.length > 0) uploadFiles(Array.from(e.dataTransfer.files));
+  /**
+   * Os recusados pelo ARRASTO (Lote 6, ponto 3).
+   *
+   * O botão tinha `accept` e o caminho do `drop` não: largar um `.exe` ia
+   * direito ao upload. A parede real é a quarentena de magic bytes do servidor
+   * — isto é para o cliente não descobrir pelo erro, depois de a rede ter
+   * transportado o ficheiro.
+   */
+  const aoRecusarFicheiros = (_recusados, mensagem) => {
+    // Estado PRÓPRIO, e não o `result`: a forma do `result` serve o resumo do
+    // lote (`resumirLote`) e os crachás de sucesso, e nenhum ramo do render
+    // mostra uma mensagem de falha. Escrever lá seria escrever para ninguém —
+    // a mesma armadilha da notificação sem destinatário.
+    setRecusa(mensagem);
   };
 
   const handleFileChange = (e) => {
@@ -346,12 +365,21 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
   const ficheirosNoEcra = listaUnificada(doc.attached_files, lote);
 
   return (
-    <div
-      className={`border rounded-xl p-3 transition-all ${uploading ? 'border-emerald-300 bg-emerald-50/50' : result?.success ? 'border-emerald-200 bg-emerald-50' : dragOver ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 bg-white'}`}
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-      onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={handleDrop}
+    /* A zona de largar é TODA a área útil do pedido, não só o botão
+       (Lote 6, ponto 3). Era já um `div` com `onDrop`, mas com um
+       `onDragLeave` sem contador: o realce piscava ao passar sobre o conteúdo
+       e o cliente largava sem saber se ia acertar. O `Dropzone` partilhado
+       conta entradas e saídas, aplica o MESMO `accept` do botão e distingue um
+       arrasto de ficheiros de qualquer outro. */
+    <Dropzone
+      onFicheiros={uploadFiles}
+      onRecusados={aoRecusarFicheiros}
+      accept={TIPOS_ACEITES_NO_PORTAL}
+      disabled={uploading}
+      testId={`zona-upload-${doc.id || doc.label || 'documento'}`}
+      rotulo="Largue aqui os ficheiros deste pedido"
+      className={`border rounded-xl p-3 transition-all ${uploading ? 'border-emerald-300 bg-emerald-50/50' : result?.success ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-white'}`}
+      classeActiva="border-emerald-400 bg-emerald-50"
     >
       <div className="flex items-center gap-3">
         <span className="text-xl flex-shrink-0">{doc.icon}</span>
@@ -370,7 +398,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
             múltiplos ficheiros por batch). */}
         {!uploading && (
           <>
-            <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" multiple={true}
+            <input ref={fileInputRef} type="file" className="hidden" accept={TIPOS_ACEITES_NO_PORTAL} multiple={true}
               onChange={handleFileChange} />
             <button onClick={() => fileInputRef.current?.click()}
               className="flex-shrink-0 px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1">
@@ -408,6 +436,15 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
           </div>
         )}
       </div>
+
+      {/* O que o arrasto recusou — NOMEADO. «2 ficheiros» manda adivinhar
+          qual, e o cliente precisa de saber o que repetir. */}
+      {recusa && (
+        <p className="mt-2 text-xs text-red-600 flex items-start gap-1">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          {recusa}
+        </p>
+      )}
 
       {/* Lista UNIFICADA: os ficheiros já no servidor mais o lote em envio
           (Lote 3, ponto 4). Duas listas lado a lado faziam o mesmo ficheiro
@@ -507,7 +544,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
           </button>
         </div>
       )}
-    </div>
+    </Dropzone>
   );
 }
 

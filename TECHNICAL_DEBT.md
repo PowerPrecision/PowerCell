@@ -330,9 +330,44 @@ vêem a documentação um do outro. É um cruzamento de dados pessoais, e a
 tolerância é zero — mas é agora um conjunto muito menor do que era.
 
 **O que é preciso para fechar:** medir quantos processos ativos estão sem
-`s3_folder` (`scripts/medir_cobertura_s3.py` já dá o número), religá-los com a
-ferramenta de mapeamento manual, e depois **apagar o recurso por nome**, com os
-testes de leitura invertidos em vez de apagados.
+`s3_folder` (`scripts/medir_cobertura_s3.py` já dá o número), religá-los, e
+depois **apagar o recurso por nome**, com os testes de leitura invertidos em vez
+de apagados.
+
+**Progresso (iteração `religamento-arrasto-e-permissoes`):** a ferramenta de
+religamento manual já existe (`services/s3_relink.py` + painel em Manutenção) e
+cobre clientes E processos; o Explorador já marca as pastas reclamadas por mais
+do que uma ficha com um crachá de contagem, o que torna a colisão VISÍVEL em vez
+de inferida. Falta a medição e a remoção do recurso por nome — e a remoção é o
+passo que não se dá sem a medição, porque é ela que diz quantos documentos
+desapareceriam do ecrã.
+
+### D-20 · A Listagem de Processos e o Kanban não têm teste que monte a página
+**Onde:** `frontend/src/pages/ProcessesPage.js`,
+`frontend/src/pages/KanbanPage.js`.
+
+As duas páginas receberam o gate de permissões dos botões
+(`BotaoComPermissao`), e a ligação está afirmada por uma **guarda sobre a
+fonte** (`pages/__tests__/botoesFantasma.ligacao.test.js`): que o rótulo vive
+dentro do componente, que não sobrou um `<Button>` cru com o mesmo texto, e que
+o papel usado é o efectivo. A Pool, que já tinha arnês, tem teste MONTADO.
+
+**Porque foi adiado:** montar estas duas é um trabalho próprio — fetchers com
+dependências estáveis (a `ProcessesPage` já teve um loop infinito por um array
+novo a cada render), filtros em URL, e o Kanban a medir elementos que no jsdom
+têm dimensão zero. Fazê-lo no mesmo lote em que se mexe nos botões misturava
+duas coisas de risco diferente.
+
+**Quem é atingido se explodir:** é a regra que este projecto aprendeu três vezes
+(`WebmailPage`, `UsersAccessAdminTab`, `SystemConfigPage`) — um componente novo
+numa página não montada pode rebentar a página inteira (um `const` na zona morta
+temporal, um `section.title` de `undefined`) e nenhum teste de componente o vê.
+Nesta iteração criei exactamente esse defeito na Pool e **só não passou porque a
+Pool tem teste montado.**
+
+**O que é preciso para fechar:** um teste de integração por página, com as
+fronteiras falseadas (`DashboardLayout`, `AuthContext`, os hooks de dados) e os
+filtros e handlers REAIS — o molde é o `ProcessDetails.test.jsx`.
 
 ---
 

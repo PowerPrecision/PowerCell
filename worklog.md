@@ -9859,3 +9859,170 @@ Dez mutações, dez mortes:
 | Uma data desconhecida de um comprador deixa de bloquear | 5 |
 | A condição Mongo perde os compradores | 5 |
 | A guarda do uuid-como-nome volta a usar `id_valido` | 1 |
+
+---
+
+# Iteração `religamento-arrasto-e-permissoes` — 2026-10-03
+
+**Pedido (Lote 6, segunda parte):** a ferramenta de religamento manual na área
+de mapeamento S3 das Configurações (exclusiva da Administração, e o Explorador a
+não mostrar um uuid quando consegue resolver o nome), arrastar e largar no
+Portal e na ficha do processo, e os botões fantasma (um `index` vê "Novo
+Processo" e não pode criar).
+
+## 1. Religamento manual
+
+`services/s3_relink.py` + `GET/POST /api/admin/s3-relink` + o painel dentro do
+bloco de mapeamento S3.
+
+**A ferramenta que existia só sabia PROCESSOS** — a rota de "cliente" era um
+alias que recebia `process_id`. Um cliente da Pool que nunca teve processo não
+tinha como ser religado, e é precisamente ele que vive sozinho na raiz
+documental.
+
+Seis regras, cada uma com teste. As duas que não eram óbvias:
+
+* **apontar para uma pasta que JÁ tem dono é permitido**, com aviso que NOMEIA
+  os donos actuais. Consolidar duas fichas é um uso legítimo (um cliente com dois
+  registos); proibi-lo tirava à ferramenta metade dos casos;
+* **um `/` ou `///` é recusado**, não tratado como "remover". Remover é uma
+  string vazia, explícita — tratar uma normalização falhada como remoção
+  respondia a uma pergunta diferente da feita. Foi o único teste que falhou à
+  primeira, e tinha razão.
+
+## 2. Uma regressão minha, do ponto 1, que nenhum teste do ponto 1 podia apanhar
+
+O Explorador resolvia a pertença de uma pasta lendo **só** `processes.s3_folder`.
+Com a pasta do processo a viver DENTRO da do cliente (`{cid}/processos/{pid}`),
+**nenhum processo aponta para `{cid}`**: a pasta de topo passou a contar como
+órfã, e uma órfã só é visível a ADMIN/CEO.
+
+Ou seja: a correcção da colisão de identidade tornava invisível ao staff normal a
+pasta de **todos os clientes novos**. Encontrei-a a escrever o teste do nome
+visível, não a procurá-la — a pergunta do ponto 1 era outra.
+
+`carregar_pastas` tem agora três caminhos (mapeamento do processo, mapeamento do
+cliente, e pelo ID quando o segmento é um uuid gerado), com um teste a afirmar
+que a fronteira de rede **não se alarga**: uma pasta da Domus continua invisível
+à Power.
+
+## 3. Arrastar e largar
+
+O que faltava não era a zona — era o GESTO certo:
+
+* no **Portal** já havia `onDrop` na linha de cada pedido, mas sem contador de
+  entradas/saídas (o realce piscava ao passar sobre o conteúdo) e **sem filtro de
+  tipos**: o botão tinha `accept`, o `drop` não, e largar um `.exe` ia direito ao
+  upload;
+* no **separador Documentos** havia `onDrop` em cada categoria — **só para
+  MOVER**. Um ficheiro vindo do Finder não fazia nada: o `handleDrop` lia o
+  estado interno e ignorava `dataTransfer.files`.
+
+Daí a guarda central (`eArrastoDeFicheiros`, pelo `dataTransfer.types`): **sem
+ela, ligar o upload por arrasto partia o mover que já existia.** Dois gestos
+chegam pelo mesmo `onDrop`, e é a metade que se parte sem dar erro.
+
+O upload foi **extraído, não duplicado** (`enviarFicheiros(ficheiros, categoria)`
+serve o botão e o arrasto, com a mesma verificação de conflitos e o mesmo pedido
+de NIF à indexação), e a lista de tipos passou a ser **uma constante** por
+superfície — em dois sítios divergiriam, e a divergência tem uma forma concreta:
+o botão recusa e o arrasto deixa passar.
+
+**Duas coisas que só o teste revelou:**
+
+1. **A ordem dos callbacks importa.** Com `onRecusados` antes de `onFicheiros`,
+   um largar MISTO apagava o aviso: quem trata os aceites limpa o estado do envio
+   anterior, e esse "limpar" apagava a recusa acabada de escrever. Inverti a
+   ordem — e um largar limpo passou também a limpar um aviso antigo.
+2. **A mensagem de recusa não tinha onde aparecer.** Escrevi-a no `result`, e
+   nenhum ramo do render do Portal mostra uma mensagem de falha — era escrever
+   para ninguém, a mesma armadilha da notificação sem destinatário. Ganhou estado
+   próprio e uma linha no ecrã, com os nomes dos ficheiros.
+
+## 4. Os botões fantasma
+
+O sistema **já tinha** o registo canónico de capacidades por cargo, e lá estava
+escrito que `indexacao` não cria processos. O ecrã não o consultava.
+
+E a resolução que existia lia `user["role"]` — o cargo do JWT — enquanto a porta
+do servidor usa o EFECTIVO. Terceira ocorrência da forma do
+`history._is_stealth_user`: **duas noções de papel no mesmo caminho dão as duas
+respostas erradas.**
+
+Três decisões:
+
+* **cadeado visível, não ocultação** (por omissão): um ecrã que muda de forma a
+  cada perfil é impossível de apoiar ao telefone, e esconder ensina menos do que
+  explicar. `modo="ocultar"` fica para acções cuja existência revela algo;
+* **a rota deixou de ser mais larga do que o botão** —
+  `POST /processes/create-client` entrava com `get_current_user`, sem restrição
+  nenhuma: um `indexacao` podia criar um processo pela API;
+* **sem contrato, o ecrã não esconde nada.** Uma sessão anterior ao deploy não
+  tem `capabilities_por_papel`; falhar fechado aí esconderia todos os botões a
+  todos, e um ecrã sem botões não produz erro nenhum. A parede é o servidor.
+
+O gate da Pool era `userRole !== "indexacao"` — lista de **exclusão** escrita à
+mão: um perfil novo sem direito a criar processos passava a ver o botão.
+
+## Erros meus nesta iteração
+
+1. **Criei uma zona morta temporal.** Pus `const canAssign = podeFazer(…,
+   papelActivo)` **acima** da declaração de `papelActivo` — um `const` na TDZ,
+   avaliado no próprio render. É o defeito que o teste de integração do
+   `WebmailPage` apanhou em 2026, e repeti-o.
+2. **A minha guarda de fonte leu os meus próprios comentários.** Afirmava que
+   `userRole !== "indexacao"` tinha desaparecido, e o texto estava no comentário
+   que explica o defeito antigo. Ficou vermelha com razão: uma guarda que lê
+   comentários proíbe a explicação do defeito que previne. Ganhou um
+   `semComentarios` com contraprova (não decapita um `https://`).
+3. **Usei `id_valido` onde precisava de `e_id_gerado`** (arrastado do ponto 1):
+   a primeira pergunta é "serve como segmento de caminho?", e `Rui_Pereira`
+   serve.
+4. **Um fixture colidiu consigo mesmo** no teste do painel: o nome do cliente
+   aparece na linha E nas opções do `<select>`, e o `getByText` deu "Found
+   multiple elements". É a terceira vez (o chip da Domus no Lote 4) — a consulta
+   passou a ser pela LINHA.
+5. **Lintei os ficheiros que EDITEI e não os que CRIEI.** `yarn eslint --quiet
+   src` apanhou dois `no-undef` nos meus testes novos — `__dirname` (o projecto é
+   ESM) e `global` — e neste repositório o `no-undef` é **erro**, logo bloqueava
+   o CI. A lição é sobre o comando, não sobre o código: a verificação tem de
+   correr sobre a ÁRVORE, porque é isso que o CI faz.
+
+## Medição
+
+| | |
+|---|---|
+| backend `tests/unit` | **4665 passed**, 5 skipped (era 4609) |
+| frontend | **1572 passed**, 132 ficheiros (era 1460 / 122) |
+| `eslint --quiet src` / `yarn build` / `flake8` | limpos |
+
+Doze mutações, doze mortes — **uma sobreviveu à primeira tentativa e tinha
+razão.** `nome_legivel` a escolher um nome mesmo com dois atravessou os testes
+porque o meu teste da colisão usava uma pasta LEGADA: aí o nome não é um uuid e
+a decisão "quantos nomes há" nem chega a correr. A colisão que importa é a da
+pasta POR ID, e faltava-lhe o caso. É a distinção entre mutação perdida e
+**teste fraco** — terceira ocorrência no projecto, e desta vez foi teste fraco.
+
+| Mutação | Testes que morreram |
+|---|---|
+| O arrasto interno passa a contar como arrasto de ficheiros | 2 |
+| A ordem dos callbacks do `Dropzone` volta a trás | 2 |
+| O filtro de tipos deixa passar tudo | 7 |
+| O gate de permissões autoriza sempre | 10 |
+| O gate falha FECHADO sem contrato | 3 |
+| A pasta com duas fichas deixa de se anunciar | 2 |
+| A Pool volta à lista de exclusão pelo papel do JWT | 3 |
+| `nome_legivel` escolhe um nome mesmo com dois (2.ª tentativa) | 1 |
+| A resolução da pasta por ID desaparece | 4 |
+| `validar_pasta` aceita fora da raiz documental | 3 |
+| As capacidades voltam a sair do cargo do JWT | 1 |
+| O sentinel «todos os perfis» deixa de ser traduzido | 1 |
+
+Testes novos: `test_s3_religamento_manual.py` (26),
+`test_explorador_nome_da_pasta.py` (11), `test_capacidades_pelo_papel_efectivo.py`
+(17), `utils/pastaS3.test.js` (17), `utils/dropzone.test.js` (16),
+`utils/capacidades.test.js` (12), `Dropzone.test.jsx` (11),
+`BotaoComPermissao.test.jsx` (6), `S3RelinkPanel.test.jsx` (13),
+`MaintenanceSection.religamento.test.jsx` (5),
+`ClientPortal.arrastar.test.jsx` (5), `S3FileManager.arrastar.test.jsx` (5),
+`botoesFantasma.ligacao.test.js` (17). Mais 5 na Pool, que já tinha arnês.

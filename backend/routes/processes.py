@@ -19,6 +19,7 @@ from models.auth import UserRole
 from models.process import (
     ProcessCreate, ProcessUpdate, ProcessResponse
 )
+from services.capability_gate import exigir_capacidade
 from services.auth import get_current_user, require_roles, require_staff, get_effective_role, get_all_user_roles, get_active_company_id_async
 from services.notification_service import send_to_admins
 from services.history import log_history
@@ -224,7 +225,7 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
 async def create_client_process(
     request: Request,
     data: ProcessCreate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(exigir_capacidade("PROCESS_CREATE")),
 ):
     """
     Criar processo staff associado a cliente existente (client_id obrigatório).
