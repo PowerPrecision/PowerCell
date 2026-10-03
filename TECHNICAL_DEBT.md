@@ -338,36 +338,38 @@ de apagados.
 religamento manual já existe (`services/s3_relink.py` + painel em Manutenção) e
 cobre clientes E processos; o Explorador já marca as pastas reclamadas por mais
 do que uma ficha com um crachá de contagem, o que torna a colisão VISÍVEL em vez
-de inferida. Falta a medição e a remoção do recurso por nome — e a remoção é o
-passo que não se dá sem a medição, porque é ela que diz quantos documentos
-desapareceriam do ecrã.
+de inferida.
 
-### D-20 · A Listagem de Processos e o Kanban não têm teste que monte a página
-**Onde:** `frontend/src/pages/ProcessesPage.js`,
-`frontend/src/pages/KanbanPage.js`.
+**Progresso (iteração `medicao-d19-e-paginas-montadas`): a medição existe.**
+`services/s3_name_fallback_audit.py` (puro, 37 testes) + 
+`scripts/diagnose_s3_name_fallback.py` (**só de leitura**, com guarda sobre a
+fonte a afirmá-lo) classificam cada ficha — processo E cliente — em cinco
+veredictos e dizem quantos DOCUMENTOS desaparecem do ecrã se o recurso por nome
+cair: `mapeado`, `mapeado_quebrado`, `sem_pasta`, `depende_do_nome` e
+`colisao_de_nome`. Três coisas que a medição obrigou a decidir:
 
-As duas páginas receberam o gate de permissões dos botões
-(`BotaoComPermissao`), e a ligação está afirmada por uma **guarda sobre a
-fonte** (`pages/__tests__/botoesFantasma.ligacao.test.js`): que o rótulo vive
-dentro do componente, que não sobrou um `<Button>` cru com o mesmo texto, e que
-o papel usado é o efectivo. A Pool, que já tinha arnês, tem teste MONTADO.
+* **a colisão é uma propriedade do CONJUNTO**, não da ficha — classificar ficha a
+  ficha dá `depende_do_nome` às duas e o pior caso fica invisível, que é como a
+  D-19 nasceu;
+* **os ficheiros contam-se por PASTA, uma vez** — somar por ficha anunciaria o
+  dobro dos documentos que existem numa colisão;
+* **uma medição que FALHOU não é um custo zero.** A primeira execução correu em
+  dev, sem S3: o inventário saiu vazio, tudo caiu em `sem_pasta` e o relatório
+  imprimiu «o recurso por nome pode ser apagado sem esconder documento nenhum» —
+  a frase mais perigosa que ali podia aparecer. Hoje `auditar` levanta
+  `InventarioIndisponivel` e o script sai com código 2.
 
-**Porque foi adiado:** montar estas duas é um trabalho próprio — fetchers com
-dependências estáveis (a `ProcessesPage` já teve um loop infinito por um array
-novo a cada render), filtros em URL, e o Kanban a medir elementos que no jsdom
-têm dimensão zero. Fazê-lo no mesmo lote em que se mexe nos botões misturava
-duas coisas de risco diferente.
+Fechou-se também a superfície que tomava o caminho legado **SEMPRE**:
+`GET /onedrive/files/{client_name}` resolvia o processo por `$regex` **parcial e
+não escapado** sobre `client_name` e chamava `list_files` **sem `s3_folder`**, com
+`Depends(get_current_user)` e mais nada — nem guarda de visibilidade, nem rede,
+nem atribuição. Responde 410 (precedente do `POST /api/activities`), porque
+endurecer não resolve o fundo: **um nome não é uma identidade**.
 
-**Quem é atingido se explodir:** é a regra que este projecto aprendeu três vezes
-(`WebmailPage`, `UsersAccessAdminTab`, `SystemConfigPage`) — um componente novo
-numa página não montada pode rebentar a página inteira (um `const` na zona morta
-temporal, um `section.title` de `undefined`) e nenhum teste de componente o vê.
-Nesta iteração criei exactamente esse defeito na Pool e **só não passou porque a
-Pool tem teste montado.**
-
-**O que é preciso para fechar:** um teste de integração por página, com as
-fronteiras falseadas (`DashboardLayout`, `AuthContext`, os hooks de dados) e os
-filtros e handlers REAIS — o molde é o `ProcessDetails.test.jsx`.
+**O que falta:** correr a medição contra produção, religar as fichas que a lista
+accionável nomeia (`--csv`) e só então apagar `_find_client_folder_combined` /
+`_get_possible_client_paths`, com os testes de leitura invertidos em vez de
+apagados.
 
 ---
 
@@ -384,5 +386,6 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 | D-1 | `confirm-upload` do CRM sem posse nem quarentena | Iteração `posse-e-segredo-gov` — era **escalada de privilégio** e não integridade de dados: sem guarda de posse e a devolver `temporary_url` pré-assinado para a chave do corpo do pedido (o Incidente P0 do Portal, no CRM) |
 | D-3 | `GOV_AUTH_JWT_SECRET` com valor por omissão | Iteração `posse-e-segredo-gov` — fail-closed em produção, segredo efémero em dev, e o ramo que aceitava tokens por assinar removido dos dois lados |
 | D-16 | Eliminar um cliente não deixava entrada no trilho de auditoria | Iteração `sub35-estrito-e-auditoria` — `audit_trail_service.log_audit_event` nos **dois** pontos de saída do `run_delete_client` (o cliente pode viver em `processes` ou em `clients`, e um registo escrito só num ramo era a forma de defeito desta casa); com IP, papel EFECTIVO em `metadata` (o campo partilhado guarda o do JWT) e os ids da cascata. O registo é escrito DEPOIS da eliminação e nunca a faz falhar |
+| D-20 | A Listagem de Processos e o Kanban sem teste que monte a página | Iteração `medicao-d19-e-paginas-montadas` — `ProcessesPage.test.jsx` (14) e `KanbanPage.test.jsx` (14, com o `KanbanBoard` REAL). Apanharam três defeitos que nenhum teste de componente podia ver: uma coluna sem `processes` rebentava o quadro (`filter` de `undefined` — havia `|| []` nos dois sítios do arrasto e em nenhum dos quatro do caminho normal), o botão «Exportar Excel» do cabeçalho do quadro tinha ficado FORA do fecho dos botões fantasma (sem gate, e exporta NIF/telefone/email), e o `BotaoComPermissao` dava nome acessível «Acção — sem permissão» a TODOS os botões bloqueados do sistema (o `typeof children === "string"` nunca é verdadeiro com ícone + rótulo) |
 | D-17 | Os `co_buyers` não tinham data de nascimento | Iteração `identidade-documental-e-d17` — a data entrou no esquema de extracção do CPCV (opcional, e com instrução explícita de NÃO inferir: uma data inventada é pior do que nenhuma) e a regra estrita estendeu-se aos compradores, em Python e na condição Mongo (`$nor` + `$elemMatch`, porque o quantificador é «todos» e no Mongo isso não tem forma positiva). A desduplicação por identidade é o que impede a regra de se desligar a si mesma — ver D-18 |
 | D-7 | Relatório semanal do CEO com âmbito global | Iteração `motor-fila-e-agenda` — decisão de produto tomada (a Direcção quer o CONSOLIDADO, e fica a única excepção deliberada ao isolamento por rede); a dívida fechou com o defeito que ninguém tinha visto ao lado dela — o «às 06:00» vivia só na docstring e o relatório saía **24 vezes** à segunda-feira |

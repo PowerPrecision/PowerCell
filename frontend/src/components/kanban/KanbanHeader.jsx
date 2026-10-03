@@ -12,6 +12,8 @@ import { memo, useCallback, useState } from 'react';
 import ProcessLabelFilter from '../processDetails/ProcessLabelFilter';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
+import BotaoComPermissao from '../shared/BotaoComPermissao';
+import { EXPORTAR_PROCESSO } from '../../utils/capacidades';
 import { 
   Select, 
   SelectContent, 
@@ -72,6 +74,14 @@ const KanbanHeader = memo(({
   showOnlyPendingActions = false,
   onTogglePendingActions,
   pendingActionsCount = 0,
+  // Lote 7 — o utilizador e o PAPEL ACTIVO, para o gate da exportação.
+  // Vêm por prop (página → quadro → cabeçalho) e não de `useAuth` aqui:
+  // o cabeçalho apresenta, quem sabe de contexto é o contentor. E é o
+  // papel EFECTIVO, nunca o `user.role`: o gate da página usa o efectivo
+  // e dois gates com noções de papel diferentes dão as duas respostas
+  // erradas (forma do `history._is_stealth_user`).
+  user = null,
+  papelEfectivo = null,
 }) => {
   const [exporting, setExporting] = useState(false);
 
@@ -356,13 +366,23 @@ const KanbanHeader = memo(({
           {visibleCount} processos visíveis
         </span>
         
-        {/* Exportar Excel */}
-        <Button
+        {/* Exportar Excel — Lote 7: este botão tinha ficado FORA do
+            fecho dos botões fantasma do Lote 6. A página tem o seu, gatido
+            por EXPORTAR_PROCESSO; este, dentro do quadro, não tinha gate
+            nenhum e exporta NIF, telefone e email dos clientes. Um perfil
+            sem a capacidade via um cadeado ao lado de um botão a funcionar
+            — a forma do «menu e rotas têm de concordar», com a mesma acção
+            desenhada em dois sítios e duas regras. */}
+        <BotaoComPermissao
+          user={user}
+          capacidade={EXPORTAR_PROCESSO}
+          papel={papelEfectivo}
           variant="outline"
           size="sm"
           className="h-8 text-xs gap-1.5 shrink-0"
           onClick={handleExportExcel}
           disabled={exporting || columns.length === 0}
+          testId="btn-exportar-excel-quadro"
         >
           {exporting ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -370,7 +390,7 @@ const KanbanHeader = memo(({
             <Download className="h-3.5 w-3.5" />
           )}
           Exportar Excel
-        </Button>
+        </BotaoComPermissao>
       </div>
     </>
   );

@@ -7939,3 +7939,66 @@ servidor, que falha fechado.
 O gate da Pool era `userRole !== "indexacao"` — uma lista de **exclusão** escrita
 à mão, sobre o papel do JWT. Um perfil novo sem direito a criar processos passava
 a ver o botão, porque a exclusão não o conhece.
+
+## Medir antes de apagar: o custo do recurso por nome (D-19)
+
+A identidade da pasta documental deriva do ID desde o Lote 6, mas a LEITURA de
+uma ficha sem `s3_folder` gravado continua a procurar a pasta pelo nome (match
+exacto). Apagar esse recurso é o fecho da D-19 — e apagá-lo às cegas esconde
+documentos que existem, sem produzir erro nenhum.
+
+**`services/s3_name_fallback_audit.py`** (puro) classifica cada ficha — processo
+E cliente, porque a colisão atravessa as colecções — em cinco veredictos e diz
+quantos DOCUMENTOS desaparecem do ecrã:
+
+```
+mapeado           tem s3_folder e a pasta existe → o corte não lhe toca
+mapeado_quebrado  tem s3_folder e a pasta não existe → já partido hoje
+sem_pasta         sem mapeamento, o nome não resolve → nada a perder
+depende_do_nome   sem mapeamento, o nome resolve, a pasta TEM ficheiros
+colisao_de_nome   o mesmo, com DUAS OU MAIS fichas na MESMA pasta
+```
+
+**`scripts/diagnose_s3_name_fallback.py`** lê o Mongo e o bucket, imprime o
+relatório e escreve a lista accionável em CSV (pior caso primeiro: a colisão
+antes do volume, porque partilhar documentação é um risco de RGPD e perder vista
+é um incómodo). Corre contra produção **de propósito** — como o
+`diagnose_assignment_drift.py`, não chama `require_non_production_db` — e é **só
+de leitura**, afirmado por guarda sobre a fonte com contraprova. Religar é uma
+decisão humana, no painel de Administração.
+
+**Quatro regras que não se podem perder:**
+
+1. **A colisão é uma propriedade do CONJUNTO.** Classificar ficha a ficha dá
+   `depende_do_nome` às duas e o pior caso fica invisível — é como a D-19 nasceu.
+   Daí as duas passagens: classificar, depois agrupar por pasta.
+2. **Os ficheiros contam-se por PASTA, uma vez.** Somar por ficha anuncia o dobro
+   dos documentos que existem numa colisão, e um relatório que exagera o custo
+   nunca autoriza o corte.
+3. **Uma medição que FALHOU não é um custo zero.** Sem inventário do bucket tudo
+   cai em `sem_pasta` e a conclusão lê-se como «pode apagar-se». `auditar`
+   levanta `InventarioIndisponivel` e o script sai com código 2. É a regra do
+   `rede_consensual` do `backfill_network_id`: perante uma pergunta sem resposta,
+   não adivinhar.
+4. **A regra de medição é a de PRODUÇÃO.** O oráculo de
+   `nomes_de_pasta_candidatos` é o `_nomes_de_pasta_candidatos` real do
+   `s3_storage`, comparado caso a caso num teste. Mais larga prometia
+   religamentos que o código nunca faria; mais estreita escondia custo.
+
+### A superfície que tomava o caminho legado SEMPRE
+
+`GET /api/onedrive/files/{client_name}` resolvia o processo por `$regex` parcial
+e **não escapado** sobre `client_name` e chamava `list_files` **sem**
+`s3_folder` — logo pelo recurso por nome mesmo para uma ficha correctamente
+mapeada — com `Depends(get_current_user)` e nada mais: nem
+`assert_can_view_process_documents`, nem rede, nem atribuição. Qualquer sessão
+autenticada enumerava os documentos de um cliente escrevendo o nome no URL.
+
+Responde **410**, não endurece: um nome não é uma identidade, e dois homónimos
+exactos continuariam a servir os documentos de um deles à escolha do Mongo. O
+caminho canónico recebe um id (`GET /api/documents/client/{id}/files`). 410 e não
+404/405 pelo precedente do `POST /api/activities` — o caminho `/onedrive/files`
+continua a existir para a listagem por pasta. A recusa é a primeira instrução e o
+módulo já não importa a base de dados: depois do `find_one`, o código de resposta
+distinguia um nome existente de um inexistente e o endpoint continuava a
+responder a «este cliente existe?».

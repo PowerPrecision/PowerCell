@@ -5,8 +5,9 @@ import userEvent from "@testing-library/user-event";
 
 import BotaoComPermissao, {
   MODO_OCULTAR,
+  textoDosFilhos,
 } from "../BotaoComPermissao";
-import { CRIAR_PROCESSO } from "@/utils/capacidades";
+import { CRIAR_PROCESSO, EXPORTAR_PROCESSO } from "@/utils/capacidades";
 
 const INDEXADOR = {
   id: "u",
@@ -130,5 +131,81 @@ describe("BotaoComPermissao", () => {
       </BotaoComPermissao>
     );
     expect(screen.getByRole("button")).not.toBeDisabled();
+  });
+});
+
+describe("BotaoComPermissao — o nome acessível do botão bloqueado (Lote 7)", () => {
+  /**
+   * A primeira versão fazia `typeof children === "string" ? children : "Acção"`
+   * e `children` quase nunca é uma string: o padrão da casa é ícone + rótulo,
+   * logo um array. Resultado: TODOS os botões bloqueados do sistema se
+   * anunciavam como «Acção — sem permissão» — um leitor de ecrã não distinguia
+   * «Novo Processo» de «Exportar Excel», e o botão desaparecia de qualquer
+   * `getByRole("button", {name: ...})`. Um botão sem nome acessível é um bug de
+   * acessibilidade E um teste impossível; foi o teste de página do Kanban que
+   * deu com ele.
+   */
+  const SEM_NADA = { id: "u1", capabilities_por_papel: { indexacao: {} } };
+
+  it("mantém o rótulo quando os filhos são ícone + texto", () => {
+    render(
+      <BotaoComPermissao
+        user={SEM_NADA}
+        capacidade={EXPORTAR_PROCESSO}
+        papel="indexacao"
+      >
+        <span aria-hidden="true">icone</span>
+        Exportar Excel
+      </BotaoComPermissao>,
+    );
+    const botao = screen.getByRole("button", { name: /exportar excel/i });
+    expect(botao).toBeDisabled();
+    expect(botao).toHaveAttribute("aria-label", expect.stringContaining("sem permissão"));
+  });
+
+  it("encontra o texto dentro de elementos aninhados", () => {
+    render(
+      <BotaoComPermissao
+        user={SEM_NADA}
+        capacidade={EXPORTAR_PROCESSO}
+        papel="indexacao"
+      >
+        <span><strong>Exportar</strong> Excel</span>
+      </BotaoComPermissao>,
+    );
+    expect(
+      screen.getByRole("button", { name: /exportar excel/i }),
+    ).toBeDisabled();
+  });
+
+  it("cai em «Acção» só quando não há texto nenhum", () => {
+    // Contraprova do recuo: um botão só de ícone não tem rótulo a usar, e
+    // «Acção — sem permissão» é melhor do que « — sem permissão».
+    render(
+      <BotaoComPermissao
+        user={SEM_NADA}
+        capacidade={EXPORTAR_PROCESSO}
+        papel="indexacao"
+      >
+        <span aria-hidden="true" />
+      </BotaoComPermissao>,
+    );
+    expect(
+      screen.getByRole("button", { name: /acção — sem permissão/i }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("textoDosFilhos", () => {
+  it("ignora o que não tem texto e junta o resto", () => {
+    expect(textoDosFilhos(["Novo", null, false, undefined, "Processo"])).toBe(
+      "Novo Processo",
+    );
+  });
+
+  it("aceita números e devolve vazio para o vazio", () => {
+    expect(textoDosFilhos(7)).toBe("7");
+    expect(textoDosFilhos(null)).toBe("");
+    expect(textoDosFilhos([])).toBe("");
   });
 });

@@ -10026,3 +10026,162 @@ Testes novos: `test_s3_religamento_manual.py` (26),
 `MaintenanceSection.religamento.test.jsx` (5),
 `ClientPortal.arrastar.test.jsx` (5), `S3FileManager.arrastar.test.jsx` (5),
 `botoesFantasma.ligacao.test.js` (17). Mais 5 na Pool, que já tinha arnês.
+
+---
+
+# Iteração `medicao-d19-e-paginas-montadas` — 2026-10-03
+
+**Pedido (Lote 7, pontos 1 e 2):** medir quantos processos/documentos
+desapareceriam da interface se cortarmos o caminho de leitura legado que resolve
+a pasta pelo nome do cliente (D-19), e escrever os testes de página que faltavam
+à Listagem de Processos e ao Kanban (D-20).
+
+## 1. A medição da D-19
+
+A pergunta que faltava responder antes de apagar código: **quantas fichas deixam
+de ver os seus documentos, e quantos ficheiros são?** O `list_files` decide por
+uma coisa só — o `s3_folder` que lhe passam. Com valor, lê a união derivada dele
+e nunca procura por nome; sem valor, cai em `_get_possible_client_paths`, que
+deriva palpites do nome. Cortar o recurso é fazer esse segundo ramo devolver
+nada, logo o custo mede-se nas fichas **sem `s3_folder`**.
+
+`services/s3_name_fallback_audit.py` é puro — recebe fichas e um inventário de
+pastas e devolve veredictos — e `scripts/diagnose_s3_name_fallback.py` lê o Mongo
+e o bucket. Cinco veredictos, e só dois custam:
+
+| Veredicto | O que o corte lhe faz |
+|---|---|
+| `mapeado` | nada |
+| `mapeado_quebrado` | nada — **já está partido hoje** |
+| `sem_pasta` | nada: já não vê documentos |
+| `depende_do_nome` | **perde documentos.** Religável, a pasta é conhecida |
+| `colisao_de_nome` | o mesmo, com ≥2 fichas na MESMA pasta — a D-19 pura |
+
+**Três decisões que a medição obrigou a tomar.**
+
+**A colisão é uma propriedade do CONJUNTO, não da ficha.** Classificar ficha a
+ficha dá `depende_do_nome` às duas e a colisão — o pior caso, o que é um
+cruzamento de dados pessoais — fica invisível. É literalmente como a D-19 nasceu,
+e por isso o `auditar` faz duas passagens: classifica, e só depois agrupa por
+pasta e reclassifica os grupos de dois ou mais.
+
+**Os ficheiros contam-se por PASTA, uma vez.** Numa colisão, duas fichas apontam
+para a mesma pasta; somar por ficha anunciava o dobro dos documentos que
+existem. Um relatório que exagera o custo nunca autoriza o corte.
+
+**Uma medição que FALHOU não é um custo zero.** A primeira execução correu em
+dev, onde o S3 não está configurado: o inventário saiu vazio, todas as fichas
+caíram em `sem_pasta` e o relatório imprimiu *«o recurso por nome pode ser
+apagado sem esconder documento nenhum»*. A medição não aconteceu e a conclusão
+era a mais perigosa que ali podia aparecer — exactamente a forma de defeito desta
+casa: o degradado que não dá erro e parece uma resposta. Hoje `auditar` levanta
+`InventarioIndisponivel` e o script sai com **código 2** (um 0 fazia um laço de
+CI tratar a não-medição como sucesso).
+
+Dois detalhes menores com teste: os `.keep` não contam (uma pasta recém-criada
+tem seis e zero documentos, e o `list_files` salta-os), e um `s3_folder` de
+PROCESSO (`{cid}/processos/{pid}`) valida-se contra a pasta de TOPO — o
+inventário é listado com `Delimiter="/"`, logo comparar o caminho inteiro fazia
+todo o mapeamento aninhado do Lote 6 aparecer como quebrado, centenas de falsos
+positivos a tapar os casos verdadeiros.
+
+**A regra de medição é a de produção, provada por teste.** O oráculo de
+`nomes_de_pasta_candidatos` é o `_nomes_de_pasta_candidatos` real do
+`s3_storage`, comparado caso a caso. Medir com uma regra mais larga prometia
+religamentos que o código nunca faria; mais estreita escondia custo.
+
+O script é **só de leitura** e isso é afirmado sobre a fonte (sem `update_one`,
+`$set`, `insert_one`…) com a contraprova de que as duas leituras continuam lá —
+sem ela, apagar o script satisfazia o guarda. Corre contra produção de propósito,
+como o `diagnose_assignment_drift.py`, e não chama `require_non_production_db`.
+
+## 2. A superfície que tomava o caminho legado SEMPRE
+
+Ao inventariar os chamadores do `list_files` apareceu um que não passa
+`s3_folder`: `services/onedrive_files.py`, atrás de
+`GET /api/onedrive/files/{client_name}`. Três defeitos numa linha:
+
+1. **Nenhuma guarda de visibilidade.** Só `Depends(get_current_user)` — qualquer
+   sessão autenticada (`indexacao`, `parceiro`, um consultor de outra rede)
+   enumerava os documentos de um cliente escrevendo o nome no URL. Nem
+   `assert_can_view_process_documents`, nem rede, nem atribuição.
+2. **Regex parcial e não escapado.** `/onedrive/files/a` casava com o primeiro
+   processo com um «a» no nome; um parêntese no nome ia cru para o motor. É o
+   defeito que o auto-mapeamento corrigiu com `re.escape`, aqui por outra porta.
+3. **O recurso por nome, incondicionalmente** — mesmo para uma ficha
+   correctamente mapeada pelo ID. Era a ÚNICA superfície assim.
+
+**Fecha-se, não se endurece.** Uma guarda de visibilidade não resolve o fundo:
+um nome não é uma identidade, e dois homónimos exactos continuariam a servir os
+documentos de um deles à escolha do Mongo. Responde **410** (precedente do
+`POST /api/activities`: o caminho `/onedrive/files` continua a existir para a
+listagem por pasta, e um 405 lê-se como avaria de encaminhamento), com a mensagem
+a dizer para onde ir. A recusa é a primeira instrução e o módulo já não importa a
+base de dados — se viesse depois do `find_one`, o código de resposta distinguia
+um nome existente de um inexistente e o endpoint continuava a responder à
+pergunta «este cliente existe?». No frontend o `getClientOneDriveFiles` saiu
+(zero chamadores).
+
+## 3. As páginas montadas (D-20), e os três defeitos que elas deram
+
+`ProcessesPage.test.jsx` (14) e `KanbanPage.test.jsx` (14). O Kanban monta o
+`KanbanBoard` **real** de propósito: falsear o quadro tornava o teste inútil,
+porque o que falta cobrir é precisamente a ligação página ↔ quadro. A forma dos
+dados foi lida no backend antes de escrever os testes (`build_process_list_response`
+e `build_kanban_response`), e os valores do fixture são diferentes das omissões —
+com valores iguais aos defaults, um erro de leitura é indistinguível de uma
+leitura correcta.
+
+**Primeiro defeito: uma coluna sem `processes` rebentava o quadro.**
+`Cannot read properties of undefined (reading 'filter')` → ecrã em branco na
+página de entrada do sistema. Havia `|| []` em **dois** sítios e em nenhum dos
+**quatro** do caminho normal — e os dois protegidos eram os do arrasto, que só
+correm depois de um movimento local (`optimisticColumns` devolve `columns`
+intacto quando não há movimentos). Era a metade rara a estar protegida e a
+normal a não estar, que é a forma do `run_get_my_tasks`.
+
+E há um caminho real que o produz: o merge das duas consultas substitui a coluna
+**inteira** pela da consulta de concluídos, logo a forma da coluna fundida passa
+a ser a que o OUTRO endpoint devolver — duas respostas, uma só suposição. A saída
+não é um sétimo `|| []`: `utils/kanbanColunas.js` é o ponto único
+(`normalizarColunas` / `fundirColunasDeConcluidos` / `contarCartoes`), com
+`Array.isArray` e não `|| []` (um objecto é truthy, e aí o erro muda de sítio em
+vez de desaparecer — a lição da colisão de chaves de cache). O `count` **deriva**
+da lista: depois do arrasto optimista e do filtro em memória, o do servidor
+contradiz o ecrã.
+
+**Segundo defeito: há DOIS botões «Exportar Excel» no Kanban, e só um tinha
+gate.** O da página foi gatido no Lote 6; o do `KanbanHeader`, dentro do quadro,
+não tinha gate nenhum — e exporta NIF, telefone e email dos clientes. Um perfil
+sem `PROCESS_EXPORT` via um cadeado ao lado de um botão a funcionar: é o «menu e
+rotas têm de concordar» com a mesma acção desenhada em dois sítios e duas regras.
+O papel desce por prop (página → quadro → cabeçalho) e não de um `useAuth` no
+cabeçalho: o cabeçalho apresenta, quem conhece o contexto é o contentor. E é o
+papel **efectivo**, porque o gate da página também é — dois gates com noções de
+papel diferentes dão as duas respostas erradas.
+
+**Terceiro defeito, meu, do Lote 6: todos os botões bloqueados do sistema
+chamavam-se «Acção».** O `BotaoComPermissao` fazia
+`typeof children === "string" ? children : "Acção"` para o `aria-label`, e
+`children` quase nunca é uma string — o padrão da casa é ícone + rótulo, logo um
+array. Um leitor de ecrã não distinguia «Novo Processo» de «Exportar Excel», e
+por `getByRole("button", {name: /exportar/i})` o botão deixava de existir. É um
+bug de acessibilidade E um teste impossível, as duas faces da mesma regra desta
+casa, e foi o teste de página a dar com ele. `textoDosFilhos` percorre a árvore;
+o recuo para «Acção» fica só para um botão sem texto nenhum, com contraprova.
+
+## Medição
+
+| | antes | depois |
+|---|---|---|
+| backend `tests/unit` | 4665 | **4710** passed, 5 skipped |
+| frontend | 1572 / 132 ficheiros | **1618 / 135** |
+
+`flake8 --select=E9,F63,F7,F82` limpo; `yarn eslint --quiet src` exit 0;
+`yarn build` verde.
+
+Testes novos: `test_s3_name_fallback_audit.py` (37),
+`test_documentos_por_nome_de_cliente.py` (7),
+`pages/__tests__/ProcessesPage.test.jsx` (14),
+`pages/__tests__/KanbanPage.test.jsx` (14), `utils/kanbanColunas.test.js` (13).
+Mais 5 no `BotaoComPermissao.test.jsx`.
