@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
 from services.s3_explorer_paths import RAIZ_DO_EXPLORADOR
+from services.s3_document_root import pasta_gravada
 
 logger = logging.getLogger(__name__)
 
@@ -112,14 +113,16 @@ def analisar(
     processos = list(processos)
     reclamacoes: dict[str, list[dict]] = {}
     for p in processos:
-        pasta = (p.get("s3_folder") or "").rstrip("/")
+        pasta = (pasta_gravada(p.get("s3_folder")) or "").rstrip("/")
         if pasta:
             reclamacoes.setdefault(pasta, []).append(p)
 
     cobertura = Cobertura(
         pastas_no_s3=len(pastas),
         processos_totais=len(processos),
-        processos_com_pasta=sum(1 for p in processos if (p.get("s3_folder") or "").strip()),
+        processos_com_pasta=sum(
+            1 for p in processos if pasta_gravada(p.get("s3_folder"))
+        ),
     )
 
     for pasta in pastas:
@@ -158,7 +161,7 @@ def _propor_correspondencias(
     """
     por_nome: dict[str, list[dict]] = {}
     for p in processos:
-        if (p.get("s3_folder") or "").strip():
+        if pasta_gravada(p.get("s3_folder")):
             continue  # já tem pasta; não se rouba um mapeamento existente
         chave = normalizar_para_comparacao(p.get("client_name") or "")
         if chave:

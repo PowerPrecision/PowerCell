@@ -23,6 +23,7 @@ from services.history import log_history
 from services.s3_document_root import dentro_da_pasta
 from services.s3_storage import s3_service
 from services.document_portal_revoke import revoke_portal_files_on_delete
+from services.s3_document_root import pasta_gravada
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,12 @@ def process_references_document(
                 ):
                     return True
 
-    other_s3_folder = other_proc.get("s3_folder")
+    # Esta guarda decide se um ficheiro é de OUTRO processo. Um valor
+    # ilegível não pode rebentar aqui (Lote 8) nem autorizar: `None`
+    # faz a condição ser falsa, que é o lado seguro.
+    other_s3_folder = pasta_gravada(
+        other_proc.get("s3_folder"), contexto=f"processo {other_proc.get('id')}"
+    )
     if other_s3_folder and file_path.startswith(other_s3_folder.rstrip("/") + "/"):
         return True
 

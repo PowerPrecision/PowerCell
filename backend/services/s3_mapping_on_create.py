@@ -51,6 +51,7 @@ from typing import Any, Optional
 from database import db
 from services.s3_document_root import pasta_do_cliente
 from services.s3_storage import s3_service
+from services.s3_document_root import pasta_gravada
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +229,12 @@ async def ensure_s3_mapping_on_process_create(
     if not client_doc or not client_doc.get("id"):
         return outcome
 
-    existing = (client_doc.get("s3_folder") or "").strip()
+    # `pasta_gravada` e não `or ""`: uma lista é truthy e o `.strip()`
+    # rebentava a criação do processo (Lote 8).
+    existing = pasta_gravada(
+        client_doc.get("s3_folder"),
+        contexto=f"cliente {client_doc.get('id')}",
+    ) or ""
     if existing and existing.lower() not in ("undefined", "null", "none"):
         return outcome  # cliente já tem mapeamento válido
 

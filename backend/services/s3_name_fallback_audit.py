@@ -75,7 +75,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
-from services.s3_document_root import RAIZ, e_id_gerado
+from services.s3_document_root import (
+    RAIZ,
+    e_id_gerado,
+    e_pasta_gravada_corrompida,
+)
 
 #: Nome da pasta → caminho completo, em minúsculas, como o
 #: `_find_client_folder_combined` compara. É a ÚNICA forma de comparação
@@ -86,6 +90,14 @@ VEREDICTO_MAPEADO_QUEBRADO = "mapeado_quebrado"
 VEREDICTO_SEM_PASTA = "sem_pasta"
 VEREDICTO_DEPENDE_DO_NOME = "depende_do_nome"
 VEREDICTO_COLISAO = "colisao_de_nome"
+
+#: O campo existe e NÃO é texto (produção tem listas gravadas). Não é
+#: um custo do corte — é lixo na base de dados que rebenta a aba
+#: Documentos HOJE. Veredicto próprio porque nenhum dos outros cinco se
+#: lê correctamente: `mapeado` confia num valor que não se entende,
+#: `mapeado_quebrado` lê-se como «já estava partido, o corte não agrava»
+#: e `sem_pasta` lê-se como «não custa nada apagar».
+VEREDICTO_ANOMALIA = "anomalia_de_dados"
 
 #: Os dois que o corte do recurso por nome faz perder documentos.
 VEREDICTOS_QUE_CUSTAM = (VEREDICTO_DEPENDE_DO_NOME, VEREDICTO_COLISAO)
@@ -183,6 +195,9 @@ class Resultado:
     pasta: Optional[str] = None
     ficheiros: int = 0
     partilhada_com: list[str] = field(default_factory=list)
+    #: O que está REALMENTE gravado, quando não é texto. Sem ele, quem vai
+    #: corrigir o registo tem de ir ao Mongo à mão descobrir o que lá está.
+    valor_cru: Optional[str] = None
 
 
 def _indice_de_pastas(pastas: Iterable[Pasta]) -> dict[str, Pasta]:
@@ -238,6 +253,19 @@ def auditar(
 
     preliminares: list[Resultado] = []
     for ficha in fichas:
+        # A PRIMEIRA pergunta é sobre o TIPO, antes de qualquer método de
+        # string: uma lista é truthy, logo `or ""` não a apanha e o
+        # `.strip()` da linha seguinte levantava `AttributeError` e matava
+        # a medição inteira por causa de uma ficha. Não se adivinha o
+        # valor certo (ver `VEREDICTO_ANOMALIA`): classifica-se e segue-se.
+        if e_pasta_gravada_corrompida(ficha.s3_folder):
+            preliminares.append(Resultado(
+                ficha=ficha,
+                veredicto=VEREDICTO_ANOMALIA,
+                valor_cru=repr(ficha.s3_folder),
+            ))
+            continue
+
         gravado = (ficha.s3_folder or "").strip().rstrip("/")
         if gravado and gravado.lower() not in ("undefined", "null", "none"):
             nome_gravado = gravado[len(RAIZ):] if gravado.startswith(RAIZ) else gravado
@@ -317,6 +345,9 @@ def resumir(resultados: Iterable[Resultado]) -> dict:
         ),
         "pastas_em_risco": len(pastas_em_risco),
         "ficheiros_em_risco": sum(pastas_em_risco.values()),
+        # Contagem SEPARADA: não é custo do corte (estas fichas nunca
+        # chegam ao ramo do nome), é uma avaria a corrigir já.
+        "anomalias": por_veredicto.get(VEREDICTO_ANOMALIA, 0),
     }
 
 
@@ -329,11 +360,16 @@ def para_religar(resultados: Iterable[Resultado]) -> list[dict]:
     começar.
     """
     accionaveis = [
-        r for r in resultados if r.veredicto in VEREDICTOS_QUE_CUSTAM
+        r for r in resultados
+        if r.veredicto in VEREDICTOS_QUE_CUSTAM
+        or r.veredicto == VEREDICTO_ANOMALIA
     ]
+    #: A anomalia vem antes da colisão: a colisão é um risco que o corte
+    #: cria, a anomalia é uma aba Documentos que rebenta hoje.
+    ordem = {VEREDICTO_ANOMALIA: 0, VEREDICTO_COLISAO: 1}
     accionaveis.sort(
         key=lambda r: (
-            0 if r.veredicto == VEREDICTO_COLISAO else 1,
+            ordem.get(r.veredicto, 2),
             -r.ficheiros,
             r.ficha.id,
         )
@@ -348,6 +384,7 @@ def para_religar(resultados: Iterable[Resultado]) -> list[dict]:
             "s3_folder_sugerido": r.pasta,
             "ficheiros": r.ficheiros,
             "partilhada_com": r.partilhada_com,
+            "valor_cru": r.valor_cru,
         }
         for r in accionaveis
     ]
@@ -356,6 +393,7 @@ def para_religar(resultados: Iterable[Resultado]) -> list[dict]:
 __all__ = [
     "InventarioIndisponivel",
     "inventario_utilizavel",
+    "VEREDICTO_ANOMALIA",
     "VEREDICTO_MAPEADO",
     "VEREDICTO_MAPEADO_QUEBRADO",
     "VEREDICTO_SEM_PASTA",

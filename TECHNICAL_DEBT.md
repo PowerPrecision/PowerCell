@@ -343,7 +343,7 @@ de inferida.
 **Progresso (iteração `medicao-d19-e-paginas-montadas`): a medição existe.**
 `services/s3_name_fallback_audit.py` (puro, 37 testes) + 
 `scripts/diagnose_s3_name_fallback.py` (**só de leitura**, com guarda sobre a
-fonte a afirmá-lo) classificam cada ficha — processo E cliente — em cinco
+fonte a afirmá-lo) classificam cada ficha — processo E cliente — em seis
 veredictos e dizem quantos DOCUMENTOS desaparecem do ecrã se o recurso por nome
 cair: `mapeado`, `mapeado_quebrado`, `sem_pasta`, `depende_do_nome` e
 `colisao_de_nome`. Três coisas que a medição obrigou a decidir:
@@ -358,6 +358,34 @@ cair: `mapeado`, `mapeado_quebrado`, `sem_pasta`, `depende_do_nome` e
   imprimiu «o recurso por nome pode ser apagado sem esconder documento nenhum» —
   a frase mais perigosa que ali podia aparecer. Hoje `auditar` levanta
   `InventarioIndisponivel` e o script sai com código 2.
+
+**Progresso (iteração `hotfix-s3-folder-corrompido`, Lote 8): a execução contra
+produção encontrou lixo de TIPO.** O diagnóstico morreu na primeira ficha com
+`AttributeError: 'list' object has no attribute 'strip'` — há fichas com
+`s3_folder` gravado como **lista**. Três consequências, todas tratadas:
+
+* o veredicto `anomalia_de_dados` (o sexto) classifica-as **sem adivinhar**:
+  apanhar `[0]` era o `find_one` sem unicidade e `str(valor)` produzia um
+  caminho falso que se lia como «já partido, o corte não agrava». Não entra no
+  custo do corte (o valor é truthy, nunca chega ao ramo do nome) e tem bloco
+  próprio no relatório, com o valor cru e coluna no CSV;
+* **a aplicação tinha a mesma falha em onze sítios** — `list_files`,
+  `upload_file`, a criação de mapeamento, a verificação de conflitos, a guarda
+  de posse do `document_delete`, a cobertura e o `storage_service` local. Uma
+  lista é truthy, logo o `if s3_folder:` passava e o método de string rebentava
+  a seguir: para essas fichas a aba Documentos responde 500 **hoje**. Ponto
+  único novo: `s3_document_root.pasta_gravada` (texto utilizável ou `None`, com
+  `warning`), com guarda de inventário por fonte e análise por função;
+* **a torneira era o `_clean_s3_folder`** (`["a"] in [None, "", ...]` é `False`,
+  logo a lista era gravada tal e qual), alcançável pelos dois endpoints em lote
+  que recebem `List[dict]` — um `dict` não é validado pelo FastAPI. Corrigido
+  primeiro o escritor, como manda a regra do `assignment_drift`.
+
+**Ainda em falta para fechar:** correr o diagnóstico contra produção **até ao
+fim** (a execução que o encontrou abortou na primeira anomalia, logo não há
+números), religar os accionáveis e os anómalos no painel, e só então apagar
+`_find_client_folder_combined` / `_get_possible_client_paths` com os testes de
+leitura **invertidos** em vez de apagados.
 
 Fechou-se também a superfície que tomava o caminho legado **SEMPRE**:
 `GET /onedrive/files/{client_name}` resolvia o processo por `$regex` **parcial e

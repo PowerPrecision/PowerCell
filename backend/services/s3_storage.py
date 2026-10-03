@@ -8,6 +8,7 @@ import logging
 import boto3
 from botocore.exceptions import ClientError
 from typing import List, Dict, Optional, BinaryIO
+from services.s3_document_root import pasta_gravada
 
 logger = logging.getLogger(__name__)
 
@@ -410,9 +411,15 @@ class S3Service:
             logger.error("S3 não configurado")
             return None
 
-        # Usar s3_folder configurado se existir, senão usar path automático
-        if s3_folder:
-            base_path = s3_folder.rstrip('/')
+        # Usar s3_folder configurado se existir, senão usar path automático.
+        # `pasta_gravada` porque uma lista é truthy: o `if` passava e o
+        # `.rstrip` rebentava na linha seguinte (Lote 8). Um valor
+        # ilegível vira `None` e o caminho deriva do ID, nunca do nome.
+        pasta_do_mapeamento = pasta_gravada(
+            s3_folder, contexto=f"upload de {client_id}"
+        )
+        if pasta_do_mapeamento:
+            base_path = pasta_do_mapeamento.rstrip('/')
         else:
             base_path = self._get_client_base_path_for_upload(client_id, client_name, second_client_name)
         if not base_path:
@@ -495,6 +502,12 @@ class S3Service:
             leituras_do_mapeamento,
         )
 
+        # Ver a nota em `upload_file`: o tipo vem primeiro que a verdade.
+        # Com mapeamento ilegível cai-se no recurso por nome, que é o
+        # degradado certo para uma LEITURA (os documentos podem estar lá).
+        s3_folder = pasta_gravada(
+            s3_folder, contexto=f"listagem de {client_id}"
+        )
         if s3_folder:
             s3_folder = s3_folder.rstrip('/')
             leituras = leituras_do_mapeamento(s3_folder)
@@ -1009,7 +1022,9 @@ class S3Service:
             return result
 
         # 1. Reutilizar mapeamento existente se ainda for válido
-        clean_existing = existing_s3_folder.strip() if existing_s3_folder else None
+        clean_existing = pasta_gravada(
+            existing_s3_folder, contexto=f"mapeamento de {client_id}"
+        )
         if clean_existing and clean_existing.lower() not in ("undefined", "null", "none"):
             try:
                 if self._folder_exists(clean_existing):
@@ -1240,9 +1255,15 @@ class S3Service:
             logger.error("S3 não configurado")
             return None
         
-        # Usar s3_folder configurado se existir, senão usar path automático
-        if s3_folder:
-            base_path = s3_folder.rstrip('/')
+        # Usar s3_folder configurado se existir, senão usar path automático.
+        # `pasta_gravada` porque uma lista é truthy: o `if` passava e o
+        # `.rstrip` rebentava na linha seguinte (Lote 8). Um valor
+        # ilegível vira `None` e o caminho deriva do ID, nunca do nome.
+        pasta_do_mapeamento = pasta_gravada(
+            s3_folder, contexto=f"upload de {client_id}"
+        )
+        if pasta_do_mapeamento:
+            base_path = pasta_do_mapeamento.rstrip('/')
         else:
             base_path = self._get_client_base_path_for_upload(client_id, client_name, second_client_name)
         if not base_path:
@@ -1330,9 +1351,15 @@ class S3Service:
             logger.error("S3 não configurado")
             return None
         
-        # Usar s3_folder configurado se existir, senão usar path automático
-        if s3_folder:
-            base_path = s3_folder.rstrip('/')
+        # Usar s3_folder configurado se existir, senão usar path automático.
+        # `pasta_gravada` porque uma lista é truthy: o `if` passava e o
+        # `.rstrip` rebentava na linha seguinte (Lote 8). Um valor
+        # ilegível vira `None` e o caminho deriva do ID, nunca do nome.
+        pasta_do_mapeamento = pasta_gravada(
+            s3_folder, contexto=f"upload de {client_id}"
+        )
+        if pasta_do_mapeamento:
+            base_path = pasta_do_mapeamento.rstrip('/')
         else:
             base_path = self._get_client_base_path_for_upload(client_id, client_name, second_client_name)
         if not base_path:

@@ -118,6 +118,57 @@ class Leitura:
     excluir_processos: bool = False
 
 
+def e_pasta_gravada_corrompida(valor: Any) -> bool:
+    """O campo `s3_folder` tem valor mas NÃO é texto — logo não é uma pasta.
+
+    Produção tem fichas com `s3_folder` gravado como LISTA, e foi a
+    medição da D-19 a dar com elas:
+
+        gravado = (ficha.s3_folder or "").strip()
+        AttributeError: 'list' object has no attribute 'strip'
+
+    **Uma lista é truthy.** O `or ""` não a substitui e o `if s3_folder:`
+    deixa-a passar — é a regra do `Array.isArray` do frontend escrita em
+    Python: um valor do tipo errado não desaparece com um `or`, só muda o
+    sítio onde o erro acontece (aqui, a linha seguinte).
+
+    `None` e `""` respondem **False**: são a ausência NORMAL de
+    mapeamento, que tem caminho próprio e documentado (o recurso por
+    nome). Confundir as duas fazia a ausência comum parecer corrupção.
+    """
+    return valor is not None and not isinstance(valor, str)
+
+
+def pasta_gravada(valor: Any, *, contexto: str = "") -> Optional[str]:
+    """O `s3_folder` gravado como texto utilizável, ou `None` — com registo.
+
+    O ponto único por onde todos os leitores de `s3_folder` passam antes
+    de lhe aplicarem um método de string. Devolver `None` faz o chamador
+    cair no caminho de «sem mapeamento», que é o degradado CERTO: para
+    uma leitura, procura-se pelo nome; para uma escrita, deriva-se do ID
+    (nunca de um nome — Lote 6, ponto 1). Nenhum dos dois inventa uma
+    pasta a partir de um valor que não se entende.
+
+    **Nunca em silêncio.** Um `s3_folder` corrompido é lixo na base de
+    dados que alguém tem de corrigir, e um degradado calado é a forma de
+    defeito desta casa: os documentos deixavam de aparecer e ninguém
+    sabia porquê. Daí o `warning` com o valor cru e o contexto.
+    """
+    if e_pasta_gravada_corrompida(valor):
+        logger.warning(
+            "[S3-PASTA] `s3_folder` corrompido (%s, não é texto): %r%s. "
+            "Tratado como SEM mapeamento; corrigir o registo.",
+            type(valor).__name__,
+            valor,
+            f" — {contexto}" if contexto else "",
+        )
+        return None
+    if not isinstance(valor, str):
+        return None
+    limpo = valor.strip()
+    return limpo or None
+
+
 def id_valido(valor: Any) -> bool:
     """O valor serve como segmento de caminho?"""
     if not isinstance(valor, str):
