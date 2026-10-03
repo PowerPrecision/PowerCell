@@ -1,7 +1,31 @@
-"""Calendar deadlines enrichment handler.
+"""Calendário geral — eventos enriquecidos, dentro da REDE.
 
-Extraído de `routes/deadlines.py`.
 PACOTE DQ — visibilidade por cargo efectivo (X-Active-Role) e empresa activa.
+
+LOTE 7 — DUAS COISAS QUE A AUDITORIA ENCONTROU
+==============================================
+1. **«Sem empresa → todos os eventos».** O ramo final dizia, em comentário,
+   «comportamento legado admin/CEO»: com `deadline_query` vazio, a consulta
+   era `{}` — **todos os eventos da base de dados, de todas as redes**. Um
+   diretor sem `X-Company-Id` (um atalho antigo, um pedido sem o header) via
+   o calendário da Domus, que é uma ilha. Falha ABERTA no sítio onde não
+   pode falhar aberta.
+
+2. **O âmbito era só por EMPRESA, e o ramo de legado aceitava a pilha por
+   carimbar.** `company_event_or_clauses` inclui
+   `{"company_id": {"$in": [None, "", "default"]}}` — e, até este lote, o
+   `run_create_deadline` não carimbava a rede e gravava o **NOME** da
+   empresa no campo `company_id` (a confusão de 2026-09-21). A combinação é
+   a do `build_company_scope_condition` placebo do Lote 4: uma cláusula que
+   admite documentos sem marca mais escritores que não marcam = tudo casa.
+
+Hoje a condição de REDE (`build_network_scope_condition`, o ponto único)
+envolve sempre a consulta, e o ramo de empresa continua a existir **dentro**
+dela: a rede é a fronteira de segurança, a empresa é uma vista.
+
+O enriquecimento resolve os processos por `{"id": {"$in": ...}}` e devolve
+`client_name` e `client_email`. É por isso que um evento a mais não é um
+incómodo de UI: é o nome e o email de um cliente de outra rede no ecrã.
 """
 from __future__ import annotations
 
@@ -46,13 +70,29 @@ async def _process_ids_for_company(company_id: Optional[str]) -> list[str]:
     return [p["id"] for p in docs if p.get("id")]
 
 
+#: Só os campos que o enriquecimento usa. Era `{"_id": 0}` — o processo
+#: INTEIRO, com o bloco de dados pessoais já desencriptado, para cada linha
+#: do calendário. A regra é a do `diagnose_assignment_drift`: ler o que se
+#: precisa, nunca o documento todo.
+PROJECCAO_DO_PROCESSO = {
+    "_id": 0,
+    "id": 1,
+    "client_id": 1,
+    "client_name": 1,
+    "client_email": 1,
+    "status": 1,
+    "assigned_consultor_id": 1,
+    "assigned_mediador_id": 1,
+}
+
+
 async def _enrich_calendar_rows(deadlines: list[dict]) -> list[dict]:
     process_ids = [d.get("process_id") for d in deadlines if d.get("process_id")]
     process_map: dict = {}
     if process_ids:
         processes = await db.processes.find(
             {"id": {"$in": list(set(process_ids))}},
-            {"_id": 0},
+            PROJECCAO_DO_PROCESSO,
         ).to_list(2000)
         process_map = {p["id"]: p for p in processes if p.get("id")}
 
@@ -103,6 +143,12 @@ async def _enrich_calendar_rows(deadlines: list[dict]) -> list[dict]:
             "all_day": bool(d.get("all_day")),
             "end_date": d.get("end_date") or None,
             "client_name": client_name,
+            # Lote 7 — o `client_id` vai na linha para o calendário poder
+            # LIGAR o evento à ficha. Sem ele, o nome do cliente era texto
+            # morto: o ecrã dizia de quem era o evento e não havia como
+            # chegar lá (e um evento de um cliente da Pool não tem processo
+            # para onde navegar).
+            "client_id": process.get("client_id") or "",
             "client_email": process.get("client_email", ""),
             "process_status": process.get("status", ""),
             "assigned_consultor_id": (
@@ -142,6 +188,19 @@ async def run_get_calendar_deadlines(
     team_view = sees_team_calendar(effective_role, user)
     deadline_query: dict = {}
 
+    # LOTE 7 — a fronteira de REDE, sempre. Não substitui o filtro de
+    # empresa (que é uma vista mais estreita): envolve-o.
+    from services.deadline_scope import e_papel_sem_fronteira
+    from services.tenant_network import (
+        build_network_scope_condition,
+        com_isolamento,
+        resolve_tenant_scope,
+    )
+
+    condicao_de_rede = build_network_scope_condition(
+        await resolve_tenant_scope(user)
+    )
+
     if team_view:
         company_pids = await _process_ids_for_company(company_id)
         company_clauses = company_event_or_clauses(company_id, company_pids)
@@ -170,10 +229,24 @@ async def run_get_calendar_deadlines(
                 deadline_query["$or"] = person_or
         elif company_clauses:
             deadline_query["$or"] = company_clauses
-        # else: sem empresa → todos os eventos (comportamento legado admin/CEO)
+        elif not e_papel_sem_fronteira(effective_role):
+            # LOTE 7 — era aqui que o calendário falhava ABERTO. Sem
+            # empresa activa, `deadline_query` ficava `{}` e a consulta
+            # devolvia TODOS os eventos de TODAS as redes (o comentário
+            # chamava-lhe "comportamento legado admin/CEO", mas o ramo
+            # alcançava qualquer papel de equipa — um diretor sem o header
+            # `X-Company-Id` via o calendário da Domus). Falha FECHADA
+            # para a vista da equipa: sem empresa, a agenda da equipa é a
+            # do próprio. ADMIN/CEO mantêm a vista global por desenho —
+            # são eles que reconciliam a pilha.
+            my_process_ids = await _process_ids_for_user(user["id"])
+            deadline_query["$or"] = personal_deadline_or_clauses(
+                user["id"], my_process_ids,
+            )
     else:
         my_process_ids = await _process_ids_for_user(user["id"])
         deadline_query["$or"] = personal_deadline_or_clauses(user["id"], my_process_ids)
 
-    deadlines = await db.deadlines.find(deadline_query, {"_id": 0}).to_list(1000)
+    final = com_isolamento(condicao_de_rede, deadline_query)
+    deadlines = await db.deadlines.find(final, {"_id": 0}).to_list(1000)
     return await _enrich_calendar_rows(deadlines)

@@ -6,6 +6,7 @@
  * @route /calendario
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { PageHeader } from "../components/shared/PageHeader";
@@ -38,11 +39,17 @@ import {
   isAbsenceEvent,
   isTeamCalendarRole,
 } from "../utils/agendaCalendar";
+import {
+  etiquetaDoCliente,
+  rotaDaFicha,
+  textoDaFicha,
+} from "../utils/calendarioIdentidade";
 import GlobalCalendar from "../components/calendar/GlobalCalendar";
 import CreateEventDialog from "../components/admin/CreateEventDialog";
 
 export default function CalendarPage() {
   const { user, effectiveRole } = useAuth();
+  const navegar = useNavigate();
   const isTeamView = isTeamCalendarRole(effectiveRole);
 
   const [events, setEvents] = useState([]);
@@ -212,6 +219,7 @@ export default function CalendarPage() {
                 viewerId={user?.id}
                 onEventClick={handleEventClick}
                 onCreate={openCreate}
+                onAbrirFicha={(rota) => navegar(rota)}
               />
             </div>
             <Card className="border-border h-fit">
@@ -251,6 +259,11 @@ export default function CalendarPage() {
                                       isTeamView,
                                     })}
                                   </p>
+                                  {etiquetaDoCliente(event) && (
+                                    <p className="text-xs font-normal text-muted-foreground truncate">
+                                      {etiquetaDoCliente(event)}
+                                    </p>
+                                  )}
                                   <p className="text-xs text-muted-foreground">
                                     {formatDate(safeDateStr(event.due_date))}
                                     {formatEventClockRange(event) ? ` · ${formatEventClockRange(event)}` : ""}
@@ -262,6 +275,17 @@ export default function CalendarPage() {
                                 <div className="flex flex-col items-end gap-1">
                                   {isAbsenceEvent(event) && (
                                     <Badge variant="secondary" className="text-[10px]">Ausência</Badge>
+                                  )}
+                                  {rotaDaFicha(event) && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 px-2 text-xs"
+                                      onClick={() => navegar(rotaDaFicha(event))}
+                                      data-testid="proxima-abrir-ficha"
+                                    >
+                                      {textoDaFicha(event)}
+                                    </Button>
                                   )}
                                   <Button
                                     variant="ghost"

@@ -2162,3 +2162,39 @@ O papel desce por **prop** (página → contentor → apresentação) e não de 
 contexto é o contentor (§ 20). E é sempre o papel **EFECTIVO**, porque o gate do
 outro sítio também é — dois gates com noções de papel diferentes dão as duas
 respostas erradas.
+
+## 27.41 — Um nome no ecrã sem ligação é texto morto
+
+O calendário geral recebia `client_name` em cada evento e mostrava-o num
+parágrafo do painel do dia. O utilizador lia o nome do cliente, abria a pesquisa
+e procurava-o à mão — o ecrã sabia a resposta e não a dava.
+
+**A regra:** quando o ecrã mostra o nome de uma entidade que tem ficha, mostra
+também o caminho para ela. E separa-se em duas peças, como o `nomeVisivel` do
+Explorador (§ 27.37): **o que se MOSTRA** (`etiquetaDoCliente`) e **para onde se
+VAI** (`rotaDaFicha`).
+
+**Três corolários:**
+
+* **Sem destino não se desenha a ligação.** `rotaDaFicha` devolve `null` e quem
+  recebe `null` renderiza texto — um link que não leva a lado nenhum é pior do
+  que nenhum link.
+* **Um recuo do servidor não é um nome.** O backend escreve `"Evento Geral"` e
+  `"Ausência"` em `client_name` quando não há processo; mostrá-los punha «Evento
+  Geral» onde devia estar o nome de uma pessoa. Os recuos conhecidos vivem numa
+  lista de exclusão no utilitário, não em cada ecrã.
+* **A ligação fica FORA do botão da linha.** Um `<button>` dentro de outro
+  `<button>` é HTML inválido e o clique interior deixa de ser alcançável pelo
+  teclado.
+
+## 27.42 — Num ecrã de equipa, o rótulo responde «de quem é», não «quem trata»
+
+O chip do calendário mostrava `[Responsável] Título`. Com doze «Escritura» num
+dia, o prefixo do responsável não distingue nada: a pergunta de quem olha para
+uma agenda de equipa é de QUEM é o evento.
+
+**A regra:** o rótulo muda com a vista. Em vista de equipa o cliente vem primeiro
+(`Cliente · Título`); na agenda pessoal fica só o título, porque o utilizador já
+sabe que é dele e o cliente aparece no painel do dia — repeti-lo gasta a largura
+da célula. E **não se repete o nome quando o título já o contém** («Escritura Ana
+Martins» não vira «Ana Martins · Escritura Ana Martins»).

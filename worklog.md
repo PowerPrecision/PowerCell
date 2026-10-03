@@ -10185,3 +10185,146 @@ Testes novos: `test_s3_name_fallback_audit.py` (37),
 `pages/__tests__/ProcessesPage.test.jsx` (14),
 `pages/__tests__/KanbanPage.test.jsx` (14), `utils/kanbanColunas.test.js` (13).
 Mais 5 no `BotaoComPermissao.test.jsx`.
+
+---
+
+# Iteração `auditoria-aos-calendarios` — 2026-10-03
+
+**Pedido (Lote 7, ponto 3):** auditoria profunda aos dois calendários — filtros e
+fugas de dados, identidade visual dos eventos, e a regra de visibilidade nas
+queries.
+
+## As três respostas
+
+**O calendário do cliente filtra na base de dados.** `build_portal_events_filter`
+exige `process_id` + `visible_to_client` + não concluído + não ausência, e
+`serialize_portal_event` devolve seis campos escolhidos — sem `_id`, sem
+`assigned_user_ids`. Esta metade estava correcta e não lhe toquei.
+
+**O calendário geral tinha três buracos de posse e um de fronteira.** E o pior
+não era um filtro fraco: eram duas escritas sem guarda nenhuma.
+
+**A identidade visual era NÃO nas duas perguntas** — o evento não dizia de quem
+era, e não havia como chegar à ficha.
+
+## 1. `DELETE` e `PUT` sem posse
+
+`run_delete_deadline` era, literalmente:
+
+```python
+result = await db.deadlines.delete_one({"id": deadline_id})
+```
+
+A rota tem `require_roles` com todos os perfis de staff — o que parece uma
+guarda e não é: autoriza o VERBO, não o OBJECTO. Um consultor da Domus, que é
+uma ilha, apagava um evento da Power sabendo o id. Sem posse, sem rede e sem
+rasto no histórico.
+
+O `PUT` tinha a mesma forma e mais uma consequência: deixava **repontar
+`process_id`** para qualquer processo. O evento passava a pertencer a um
+processo que quem edita não pode ver — e o `_enrich_calendar_rows` devolve
+`client_name` **e** `client_email`, logo o calendário da outra rede ganhava uma
+linha com o nome e o email de um cliente que não é dela.
+
+Por isso são duas perguntas e duas funções: `pode_mexer_no_evento` (sobre o
+evento que já existe) e `pode_apontar_para_o_processo` (sobre o DESTINO).
+Juntá-las numa deixava a segunda por fazer, que é exactamente o que estava.
+
+## 2. O calendário geral falhava ABERTO
+
+```python
+elif company_clauses:
+    deadline_query["$or"] = company_clauses
+# else: sem empresa → todos os eventos (comportamento legado admin/CEO)
+```
+
+Com `deadline_query` vazio a consulta é `{}`: **todos os eventos da base de
+dados, de todas as redes**. O comentário chamava-lhe «legado admin/CEO», mas o
+ramo alcançava qualquer papel de equipa — um diretor sem `X-Company-Id` (um
+atalho antigo, um pedido sem o header) via o calendário da Domus.
+
+E o âmbito era só por EMPRESA, com `company_event_or_clauses` a incluir
+`{"company_id": {"$in": [None, "", "default"]}}`. Combinado com o
+`run_create_deadline` que **não carimbava a rede**, é o placebo do
+`build_company_scope_condition` do Lote 4 outra vez: uma cláusula que admite
+documentos sem marca mais escritores que não marcam = tudo casa.
+
+## 3. O carimbo que gravava o NOME no campo do ID
+
+```python
+company_id = user.get("company")
+```
+
+`users.company` é o **NOME** da empresa — a confusão de 2026-09-21, aqui com uma
+consequência nova. O calendário da equipa compara esse campo com o ID da empresa
+activa: um evento criado sem o header não casava com o ramo da empresa NEM com o
+ramo de legado (que exige `null`/`""`/`default`) e **desaparecia do calendário de
+todos**. Um evento que desaparece não produz erro nenhum.
+
+Hoje é `resolve_tenant_stamp`, que lê a empresa na base de dados e devolve `None`
+quando não sabe a rede: **meio carimbo é pior do que nenhum**, porque carimbar a
+rede errada é permanente.
+
+De passagem: o `_enrich_calendar_rows` lia os processos com `{"_id": 0}` — o
+documento INTEIRO, com o bloco de dados pessoais já desencriptado, para cada
+linha do calendário. Passou a ter `PROJECCAO_DO_PROCESSO`.
+
+## 4. O papel era o do JWT
+
+`run_get_deadlines` e `run_get_my_deadlines` decidiam por `user["role"]`. Duas
+respostas erradas pelo mesmo motivo: quem tem perfil base de consultor e entra
+COMO diretor caía no ramo restrito; quem é admin de base mantinha a isenção
+`query = {}` com outro perfil activo. Quarta ocorrência da forma do
+`history._is_stealth_user`.
+
+`deadlines_api_scope.carregar_contexto_de_acesso` resolve **uma vez por pedido**
+o papel efectivo, as redes e os processos visíveis, e as três superfícies
+partilham-no. Três cópias da mesma resolução divergem na primeira mudança, e a
+que divergir não dá erro: deixa ver, ou deixa escrever.
+
+Dois detalhes que ficaram com teste: o conjunto de processos visíveis **falha
+fechado** (sem ele, a posse passaria a depender só da pessoa e da rede; devolver
+"todos" era a saída cómoda e abria o calendário por causa de um soluço), e
+`{"process_id": None}` como «nada» — o padrão antigo — **casa com todos os
+eventos gerais**, que é o contrário do pretendido; usa-se `$in: []`.
+
+## 5. Identidade visual: o nome era texto morto
+
+O chip da grelha mostrava `[Responsável] Título`. O responsável responde «quem
+trata», não «de quem é» — e doze «Escritura» no mesmo dia não se distinguem. O
+`client_name` existia na resposta desde o Pacote DQ e aparecia só no painel do
+dia seleccionado, **sem ligação nenhuma**: o utilizador lia o nome, abria a
+pesquisa e procurava à mão.
+
+`utils/calendarioIdentidade.js` separa o que se MOSTRA do para onde se VAI (a
+regra do `nomeVisivel` do Explorador). Na vista de equipa o chip passa a
+`Cliente · Título`, e não repete o nome quando o título já o contém; na agenda
+pessoal fica só o título, porque o utilizador já sabe que é dele. A rota prefere
+o **processo** (é onde está a documentação) e cai na ficha do cliente para quem
+vive na Pool sem processo — foi por isso que o `client_id` entrou na linha.
+
+Duas coisas que o teste obrigou a tratar: os recuos que o SERVIDOR escreve em
+`client_name` (`"Evento Geral"`, `"Ausência"`) não podem aparecer como nome de
+alguém; e a ligação **só se desenha quando há destino**, porque um link que não
+leva a lado nenhum é pior do que texto.
+
+## Consequência operacional a saber
+
+A vista de equipa passou a **falhar fechada** sem empresa activa: um diretor cujo
+pedido não traga `X-Company-Id` vê a sua agenda pessoal em vez da agenda de toda
+a gente. ADMIN/CEO mantêm a vista global por desenho.
+
+## Medição
+
+| | antes | depois |
+|---|---|---|
+| backend `tests/unit` | 4710 | **4747** passed, 5 skipped |
+| frontend | 1618 / 135 | **1646 / 137** |
+
+Testes novos: `test_calendario_posse_e_rede.py` (35, com `TestAExploracao`
+escrita para morder primeiro), `utils/calendarioIdentidade.test.js` (17),
+`pages/__tests__/CalendarPage.test.jsx` (11, com o `GlobalCalendar` REAL).
+Quatro mutações, quatro mortes. O `test_deadlines_calendar_scope.py` legado foi
+**actualizado, não apagado**: a asserção era `"$or" in director_query` e a forma
+mudou de propósito (a empresa vive agora dentro de um `$and` com a rede), pelo
+que passou a procurar em profundidade e a exigir as DUAS condições.

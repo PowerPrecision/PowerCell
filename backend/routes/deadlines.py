@@ -39,17 +39,20 @@ async def create_deadline(
 
 @router.get("", response_model=List[DeadlineResponse])
 async def get_deadlines(
+    request: Request,
     process_id: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
-    """Obter prazos/eventos do utilizador."""
-    return await run_get_deadlines(process_id, user)
+    """Obter prazos/eventos do utilizador (âmbito pelo cargo EFECTIVO)."""
+    return await run_get_deadlines(process_id, user, request)
 
 
 @router.get("/my-deadlines", response_model=List[DeadlineResponse])
-async def get_my_deadlines(user: dict = Depends(get_current_user)):
+async def get_my_deadlines(
+    request: Request, user: dict = Depends(get_current_user),
+):
     """Obter APENAS prazos onde o utilizador tem acesso ao processo."""
-    return await run_get_my_deadlines(user)
+    return await run_get_my_deadlines(user, request)
 
 
 @router.get("/calendar")
@@ -69,15 +72,21 @@ async def get_calendar_deadlines(
 async def update_deadline(
     deadline_id: str,
     data: DeadlineUpdate,
+    request: Request,
     user: dict = Depends(get_current_user),
 ):
-    """Atualiza um prazo existente."""
-    return await run_update_deadline(deadline_id, data, user)
+    """Atualiza um prazo existente.
+
+    O `request` é obrigatório: só ele traz o `X-Active-Role` de que a
+    guarda de posse precisa (o papel EFECTIVO, nunca o do JWT).
+    """
+    return await run_update_deadline(deadline_id, data, user, request)
 
 
 @router.delete("/{deadline_id}")
 async def delete_deadline(
     deadline_id: str,
+    request: Request,
     user: dict = Depends(
         require_roles([
             UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
@@ -86,5 +95,5 @@ async def delete_deadline(
         ])
     ),
 ):
-    """Elimina um prazo existente."""
-    return await run_delete_deadline(deadline_id, user)
+    """Elimina um prazo existente (com guarda de posse — ver o serviço)."""
+    return await run_delete_deadline(deadline_id, user, request)

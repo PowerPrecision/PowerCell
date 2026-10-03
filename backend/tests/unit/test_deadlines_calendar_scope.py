@@ -227,7 +227,37 @@ def test_calendar_director_scopes_to_company_consultor_to_self():
 
     director_events, director_query, consultor_query = asyncio.run(_run())
     assert any(e.get("responsible_name") == "Flávio Silva" for e in director_events)
-    assert "$or" in director_query
-    assert {"company_id": "acme"} in director_query["$or"]
-    assert consultor_query["$or"]
-    assert {"assigned_user_ids": "u-flavio"} in consultor_query["$or"]
+
+    # LOTE 7 — a forma da consulta MUDOU de propósito: a condição de EMPRESA
+    # passou a viver DENTRO de um `$and` com a condição de REDE
+    # (`com_isolamento`). O calendário filtrava só por empresa e o ramo de
+    # legado aceitava a pilha por carimbar, o que — com um
+    # `run_create_deadline` que não carimbava a rede — fazia um evento da
+    # Domus entrar no calendário da Power. A asserção é agora mais forte:
+    # as DUAS condições têm de estar lá, e por isso procura-se em
+    # profundidade em vez de no topo.
+    def _ramos(query):
+        """Todos os `$or` de uma consulta, a qualquer profundidade."""
+        encontrados = []
+        if isinstance(query, dict):
+            for chave, valor in query.items():
+                if chave in ("$and", "$or") and isinstance(valor, list):
+                    if chave == "$or":
+                        encontrados.append(valor)
+                    for sub in valor:
+                        encontrados.extend(_ramos(sub))
+        return encontrados
+
+    ramos_do_diretor = _ramos(director_query)
+    assert any(
+        {"company_id": "acme"} in ramo for ramo in ramos_do_diretor
+    ), "o filtro de empresa activa desapareceu da consulta do diretor"
+    assert "$and" in director_query, (
+        "a consulta deixou de ser envolvida pela condição de rede — é a fuga "
+        "que o Lote 7 fechou"
+    )
+
+    ramos_do_consultor = _ramos(consultor_query)
+    assert any(
+        {"assigned_user_ids": "u-flavio"} in ramo for ramo in ramos_do_consultor
+    ), "a agenda pessoal do consultor perdeu o ramo da atribuição"

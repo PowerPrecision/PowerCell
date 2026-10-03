@@ -8002,3 +8002,91 @@ continua a existir para a listagem por pasta. A recusa é a primeira instrução
 módulo já não importa a base de dados: depois do `find_one`, o código de resposta
 distinguia um nome existente de um inexistente e o endpoint continuava a
 responder a «este cliente existe?».
+
+## Calendários: posse dos eventos, fronteira de rede e identidade do cliente
+
+Há duas vistas — o **Calendário Geral** (`/calendario`, `GET /api/deadlines/calendar`,
+eventos de toda a equipa) e a **Agenda do Portal** (`GET /api/portal/events`, o que
+o cliente vê do seu processo). A auditoria do Lote 7 pediu três respostas.
+
+### Filtros e fugas de dados
+
+A agenda do Portal **filtra na base de dados** (`build_portal_events_filter`:
+`process_id` + `visible_to_client` + não concluído + não ausência) e serializa
+só campos client-friendly — essa estava correcta.
+
+O lado do CRM tinha **três buracos**:
+
+1. **`DELETE /deadlines/{id}` era `delete_one({"id": deadline_id})`.** A rota
+   tinha `require_roles` com todos os perfis de staff, logo um consultor da
+   Domus — que é uma ilha — apagava um evento da Power sabendo o id. Sem posse,
+   sem rede, sem rasto.
+2. **`PUT /deadlines/{id}` lia por id e escrevia**, e deixava **repontar
+   `process_id`** para qualquer processo: o calendário da outra rede ganhava uma
+   linha com o nome e o email do cliente (`_enrich_calendar_rows` devolve os dois).
+3. **`GET /deadlines?process_id=X` filtrava só por `process_id`**, e
+   ADMIN/CEO/ADMINISTRATIVO recebiam `query = {}` — todos os prazos de todas as
+   redes, por **papel do JWT** e não o efectivo (4.ª ocorrência da forma do
+   `history._is_stealth_user`).
+
+E o calendário geral **falhava ABERTO**: o ramo final de
+`run_get_calendar_deadlines` dizia em comentário «comportamento legado admin/CEO»
+e, com `deadline_query` vazio, consultava `{}`. Um diretor sem `X-Company-Id`
+via o calendário da Domus.
+
+**Hoje:** `services/deadline_scope.py` (puro) responde «pode mexer neste
+evento?» e `services/deadlines_api_scope.py` resolve UMA vez por pedido o papel
+efectivo, as redes e os processos visíveis — as três superfícies partilham-no,
+porque três cópias da resolução divergem e a que divergir deixa escrever. A
+condição de rede (`build_network_scope_condition` + `com_isolamento`) envolve
+**todas** as consultas; o filtro de empresa continua a existir dentro dela (a
+rede é a fronteira de segurança, a empresa é uma vista).
+
+**Quatro regras:**
+
+1. **404, nunca 403** — distinguir «não existe» de «não é teu» confirma o id a
+   quem adivinha (precedente das notificações). O legítimo nunca vê este 404,
+   porque o evento aparece-lhe na lista.
+2. **O diretor tem bypass DENTRO da sua rede, não fora.** Só ADMIN/CEO
+   atravessam redes, porque são eles que reconciliam a pilha por carimbar.
+3. **Quem CRIOU o evento pode sempre mexer-lhe.** Um evento pessoal não tem
+   processo nem empresa, logo nenhuma condição de rede o alcança; sem esta regra
+   o autor deixava de poder apagar a própria ausência — e isso nota-se, ao
+   contrário de uma fuga.
+4. **Leitura generosa, escrita estrita.** Um evento por carimbar entra na
+   leitura (senão desaparecem eventos que existem) e na escrita exige ligação
+   provada: pessoa, autoria, ou processo visível. É a assimetria do `sub35`.
+
+O **carimbo na criação** também mudou: era `company_id = user.get("company")` —
+e `users.company` é o **NOME** (a confusão de 2026-09-21). Um evento criado sem
+o header não casava com o ramo da empresa NEM com o ramo de legado (que exige
+`null`/`""`/`default`): **desaparecia do calendário de todos**. Hoje usa
+`resolve_tenant_stamp`, que devolve `None` quando não sabe a rede — meio carimbo
+é pior do que nenhum. O `_enrich_calendar_rows` passou também a usar
+`PROJECCAO_DO_PROCESSO` em vez de `{"_id": 0}`, que trazia o processo inteiro
+com o bloco de dados pessoais desencriptado para cada linha.
+
+### Identidade visual
+
+O backend devolve `client_name` desde o Pacote DQ e o ecrã **quase não o usava**:
+o chip da grelha mostrava `[Responsável] Título` — e o responsável responde «quem
+trata», não «de quem é» (doze «Escritura» num dia não se distinguem). O nome do
+cliente aparecia só no painel do dia, como **texto morto**: não havia como chegar
+à ficha; lia-se o nome, abria-se a pesquisa e procurava-se à mão.
+
+`utils/calendarioIdentidade.js` separa as duas peças, como o `nomeVisivel` do
+Explorador — o que se MOSTRA (`etiquetaDoCliente`, `resumoDoChip`) e para onde se
+VAI (`rotaDaFicha`, `textoDaFicha`). Três detalhes:
+
+* a rota **prefere o PROCESSO** (`/processo/{id}`: é onde está a documentação e a
+  timeline) e cai no cliente (`/cliente/{id}`) para quem vive na Pool sem
+  processo — daí o `client_id` ter entrado na linha do calendário;
+* **sem destino não se desenha a ligação** — um link que não leva a lado nenhum é
+  pior do que texto;
+* os recuos que o SERVIDOR escreve em `client_name` (`"Evento Geral"`,
+  `"Ausência"`) estão numa lista de exclusão: mostrá-los punha «Evento Geral»
+  onde devia estar o nome de alguém.
+
+Cobertura: `tests/unit/test_calendario_posse_e_rede.py` (35, com `TestAExploracao`
+escrita para morder primeiro), `utils/calendarioIdentidade.test.js` (17),
+`pages/__tests__/CalendarPage.test.jsx` (11, com o `GlobalCalendar` real).

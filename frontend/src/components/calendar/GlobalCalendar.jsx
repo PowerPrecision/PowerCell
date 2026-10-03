@@ -13,6 +13,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
   Plus,
 } from "lucide-react";
 import {
@@ -40,9 +41,23 @@ import {
   isAbsenceEvent,
   weekDaysFrom,
 } from "../../utils/agendaCalendar";
+// Lote 7 — de quem é o evento, e para onde se vai a partir dele.
+import {
+  etiquetaDoCliente,
+  resumoDoChip,
+  rotaDaFicha,
+  textoDaFicha,
+} from "../../utils/calendarioIdentidade";
 
 function EventChip({ event, isTeamView, viewerId, onClick, compact }) {
-  const title = formatCalendarEventTitle(event, { viewerId, isTeamView });
+  // Lote 7 — na vista de EQUIPA o chip diz de quem é o evento. O prefixo do
+  // responsável responde «quem trata», não «de quem é», e doze «Escritura»
+  // no mesmo dia não se distinguem. O cliente só entra quando o título não o
+  // repete — ver `resumoDoChip`.
+  const resumo = resumoDoChip(event, { isTeamView });
+  const title = formatCalendarEventTitle(
+    { ...event, title: resumo }, { viewerId, isTeamView },
+  );
   const chip = calendarEventChipStyle(event);
   const absence = isAbsenceEvent(event);
   const clock = compact ? formatEventStartTime(event) : formatEventClockRange(event);
@@ -74,6 +89,9 @@ export default function GlobalCalendar({
   viewerId,
   onEventClick,
   onCreate,
+  // Lote 7 — navegar para a ficha do cliente/processo do evento. Quem
+  // navega é a PÁGINA (tem o `useNavigate`); o calendário só diz para onde.
+  onAbrirFicha,
   className,
 }) {
   const [view, setView] = useState("month");
@@ -276,10 +294,38 @@ export default function GlobalCalendar({
                         <p className="text-xs text-muted-foreground mt-0.5 truncate">
                           {isAbsenceEvent(event)
                             ? (event.responsible_name || event.description || "Ausência / Férias")
-                            : (event.client_name || event.description)}
+                            : (etiquetaDoCliente(event) || event.description)}
                         </p>
                       )}
                     </button>
+                    {/* Lote 7 — o nome do cliente era TEXTO MORTO: o ecrã
+                        dizia de quem era o evento e não havia como chegar à
+                        ficha (o utilizador lia o nome, abria a pesquisa e
+                        procurava à mão). A ligação só se desenha quando há
+                        destino: um link que não leva a lado nenhum é pior do
+                        que texto. Fica FORA do botão do evento — um botão
+                        dentro de outro botão é HTML inválido e o clique
+                        interior deixa de ser alcançável pelo teclado. */}
+                    {rotaDaFicha(event) && (
+                      <div className="mt-1 pl-1">
+                        <a
+                          href={rotaDaFicha(event)}
+                          onClick={(e) => {
+                            if (!onAbrirFicha) return;
+                            e.preventDefault();
+                            onAbrirFicha(rotaDaFicha(event), event);
+                          }}
+                          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                          data-testid="calendar-abrir-ficha"
+                        >
+                          <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                          {textoDaFicha(event)}
+                          {etiquetaDoCliente(event)
+                            ? ` — ${etiquetaDoCliente(event)}`
+                            : ""}
+                        </a>
+                      </div>
+                    )}
                   </li>
                 );
               })}
