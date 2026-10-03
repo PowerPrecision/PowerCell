@@ -10328,3 +10328,124 @@ Quatro mutações, quatro mortes. O `test_deadlines_calendar_scope.py` legado fo
 **actualizado, não apagado**: a asserção era `"$or" in director_query` e a forma
 mudou de propósito (a empresa vive agora dentro de um `$and` com a rede), pelo
 que passou a procurar em profundidade e a exigir as DUAS condições.
+
+---
+
+# Iteração `auditoria-ao-webmail` — 2026-10-03
+
+**Pedido (Lote 7, ponto 4):** inspecção profunda ao Webmail em três eixos —
+associação de clientes, performance e anexos, e falhas de autenticação.
+
+## Eixo 1 — Associação de clientes: não, na caixa que mais importa
+
+Há **dois** sincronizadores, e a diferença entre eles é a resposta:
+
+* `sync_webmail_emails` (contas partilhadas, de variáveis de ambiente)
+  resolvia por endereço — com uma consulta escrita à mão que conhecia **só**
+  `client_email` e `monitored_emails`;
+* `sync_user_emails` — **a caixa pessoal de cada consultor**, que o worker
+  corre de 10 em 10 minutos — **não resolvia por endereço nenhum.**
+
+Um email de um cliente para o consultor só entrava na ficha se a conversa já
+estivesse ligada (herança do `In-Reply-To`) ou se alguém tivesse posto
+`[Proc-xxx]` no assunto. E foi por esses dois caminhos funcionarem que o
+terceiro em falta nunca se notou — a forma do `run_get_my_tasks`, outra vez.
+
+**O achado mais limpo da iteração:** o sentido INVERSO da mesma relação já
+estava certo. `email_process_crud.collect_emails_from_process_doc` vai do
+processo para os endereços (serve a listagem de emails de um processo) e conhece
+`titular2_data.email` desde sempre. **As duas direcções da mesma relação tinham
+conjuntos de campos diferentes, e só a menos usada estava completa.** Daí o
+teste `test_as_DUAS_direccoes_da_relacao_conhecem_os_mesmos_campos`, com a
+função de produção como oráculo e nunca uma terceira lista.
+
+Consequência concreta: um email do **2.º titular** — que é co-mutuário e
+escreve sobre o mesmo crédito — nunca era ligado ao processo.
+
+Mais dois defeitos no que existia:
+
+* **`find_one` sem unicidade.** O mesmo cliente com dois processos ficava
+  ligado ao que o Mongo calhasse devolver, de forma permanente. «Não encontrei»
+  e «encontrei dois» são respostas diferentes — é a lição do
+  `run_auto_map_client_s3_folders`, aqui com dados pessoais pelo meio. Hoje dois
+  candidatos dão `ambiguo` e o email fica **geral**: entrar na ficha errada é um
+  cruzamento, e sair dela exige alguém que repare.
+* **Sem noção de rede.** A sincronização pessoal passa o `network_id`; a das
+  contas partilhadas não tem utilizador, e aí a unicidade vale sobre o sistema
+  inteiro — **mais estrita, não menos**: dois candidatos em redes diferentes dão
+  ambíguo em vez de entrar num deles em silêncio.
+
+E a lista de fases fechadas estava escrita à mão como
+`["concluido", "cancelado", "arquivado"]`: inclui o typo legado `arquivado` e
+**não** o valor canónico `arquivo` (a D-6 com outro nome), e ignorava qualquer
+fase nova fechada pelo administrador. Vem agora do motor.
+
+## Eixo 2 — Performance e anexos: não bloqueiam, mas o job podia evaporar
+
+A sincronização e o download de anexos correm num `ThreadPoolExecutor` dedicado
+(`_email_executor`, 4 workers) por `run_in_executor`: **não bloqueiam o event
+loop**. O download é `StreamingResponse` e passa por `_assert_email_readable`.
+Este eixo estava sólido.
+
+O defeito era outro: o job de sincronização nascia de um **`asyncio.create_task`
+cru** — sem referência forte, logo recolhível pelo GC (a regra do
+`services/background_tasks.py`, que o próprio projecto já tinha escrito). Quando
+isso acontece o job fica para sempre em `pending` e o `pollJobStatus` desiste com
+«Sincronização a demorar demasiado» — **um erro que aponta para o servidor de
+email quando a causa é o garbage collector**. Eram três, todos em
+`email_webmail.py`.
+
+## Eixo 3 — Falhas de autenticação: as duas coisas, em caminhos diferentes
+
+O sistema SABE quando a password expira: `_fetch_all_from_folder_sync` devolve
+`connection_error` com a mensagem certa. O que fazia com essa informação
+dependia do caminho:
+
+* **manual** (o botão) — falha o job, o ecrã mostra um **toast**. Funciona, mas
+  é transitório: fecha-se o separador e não resta nada;
+* **automático** (de 10 em 10 minutos, o que mantém a caixa fresca) —
+  `logger.warning` e **mais nada**. A caixa deixava de receber email, o ecrã
+  mostrava a lista antiga sem um único aviso, e o ciclo voltava a falhar para
+  sempre.
+
+E **nada era persistido**: a colecção `user_email_configs` não tinha um único
+campo sobre o estado da última sincronização, e o `publicize_email_account`
+devolvia a conta como se estivesse boa. O utilizador só descobre quando repara
+que não recebe email há dias — e o diagnóstico natural («o servidor está em
+baixo») aponta para o sítio errado. É a forma de defeito desta casa: **o
+degradado que não produz erro nenhum**, a mesma de uma notificação sem `user_id`
+e de uma coluna de notas sempre vazia.
+
+`services/mailbox_health.py` grava o estado nos DOIS caminhos. Quatro decisões:
+
+**Distingue-se AUTENTICAÇÃO de REDE e de LIMITE**, e só a primeira pede acção da
+pessoa. Avisar das três com a mesma força ensina a ignorar as três — é o
+`desactivado ≠ em baixo` do painel de sinais vitais. E a ordem das verificações
+põe o **limite antes** da autenticação: «too many login attempts» tem as duas
+palavras, e tratá-lo como password errada mandava alguém mudar uma password que
+está certa, num problema que se resolve sozinho.
+
+**O sucesso LIMPA o erro.** Um aviso que não desaparece depois de a password ser
+corrigida é indistinguível de um aviso falso.
+
+**Gravar nunca propaga** (observa, não intercepta — regra do `job_heartbeat`), e
+contam-se as falhas **consecutivas** com a data de início preservada: dois
+números respondem à única pergunta que interessa, «soluço ou parado?», e
+reescrever o `desde` a cada ciclo fazia um problema de três dias parecer
+acabado de acontecer.
+
+No ecrã, `AvisoDeCaixaAFalhar` é um **estado** e não um toast: fica enquanto o
+problema existir, diz desde quando e leva a quem resolve. A mensagem **técnica**
+do servidor fica na config (traz o host e o código do erro); para o ecrã vai a
+que diz o que fazer.
+
+## Medição
+
+| | antes | depois |
+|---|---|---|
+| backend `tests/unit` | 4747 | **4802** passed, 5 skipped |
+| frontend | 1646 / 137 | **1670 / 139** |
+
+Testes novos: `test_email_client_match.py` (21), `test_mailbox_health.py` (32),
+`utils/saudeDaCaixa.test.js` (17), `AvisoDeCaixaAFalhar.test.jsx` (7). Oito
+mutações, oito mortes.

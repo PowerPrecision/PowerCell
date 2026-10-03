@@ -136,6 +136,13 @@ async def list_company_email_configs(
     return await cursor.to_list(50)
 
 
+def _saude_da_caixa(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """O resumo de saúde, importado tardiamente para não fechar um ciclo."""
+    from services.mailbox_health import resumo_para_o_ecra
+
+    return resumo_para_o_ecra(doc)
+
+
 def publicize_email_account(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Serializa uma config sem secrets (password / refresh token)."""
     if not doc:
@@ -164,6 +171,12 @@ def publicize_email_account(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "auth_method": auth_method,
         "google_email": doc.get("google_email"),
         "oauth_connected_at": doc.get("oauth_connected_at"),
+        # LOTE 7 — a SAÚDE da caixa vai no contrato. Sem isto, o ecrã mostrava
+        # a conta como configurada e a funcionar enquanto a sincronização
+        # automática falhava de 10 em 10 minutos num `logger.warning`. A
+        # mensagem TÉCNICA do servidor não vem (pode trazer o host e o código
+        # do erro) — vem a que diz o que fazer. Ver `services/mailbox_health.py`.
+        **_saude_da_caixa(doc),
     }
 
 

@@ -2198,3 +2198,33 @@ uma agenda de equipa é de QUEM é o evento.
 sabe que é dele e o cliente aparece no painel do dia — repeti-lo gasta a largura
 da célula. E **não se repete o nome quando o título já o contém** («Escritura Ana
 Martins» não vira «Ana Martins · Escritura Ana Martins»).
+
+## 27.43 — Um toast informa; um ESTADO é o que sobrevive ao separador fechado
+
+A sincronização de email falhava com a password expirada e o ecrã mostrava um
+toast. Para o caminho MANUAL chega — alguém está a olhar. Para o caminho
+automático (de 10 em 10 minutos, o que mantém a caixa fresca) não há ninguém a
+olhar: a caixa deixava de receber email e o ecrã mostrava a lista antiga **sem
+um único aviso**.
+
+**A regra:** uma condição que PERSISTE pede um estado persistido e uma faixa no
+ecrã, não uma notificação. Um toast é para o que acabou de acontecer; um estado
+é para o que continua a acontecer — fica enquanto o problema existir e desaparece
+quando a condição se resolver.
+
+**Três corolários:**
+
+* **Só se avisa do que a pessoa pode resolver.** Credenciais recusadas exigem
+  acção; um servidor inatingível passa sozinho. Avisar dos dois com a mesma força
+  ensina a ignorar os dois (é o `desactivado ≠ em baixo` do painel de sinais
+  vitais).
+* **A classificação é do SERVIDOR, não do ecrã.** Duas classificações da mesma
+  mensagem divergem, e a que divergir avisa do que não deve.
+* **O aviso diz desde QUANDO.** «Desde ontem» e «há duas semanas» exigem
+  urgências diferentes, e é esse número que distingue um soluço de uma caixa
+  parada. Uma data no futuro (relógios dessincronizados) não produz «há -2 dias»:
+  omite-se a antiguidade.
+
+E a mensagem **técnica** do servidor não vai para o ecrã — pode trazer o host
+interno e o código do erro. Vai a que diz o que fazer, com o caminho para o
+fazer.

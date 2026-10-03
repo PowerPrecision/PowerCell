@@ -55,6 +55,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import WebmailCompanyTabs from "../components/webmail/WebmailCompanyTabs";
+// Lote 7 — o aviso de uma caixa que deixou de receber email. A sincronização
+// automática (10 min) morria num `logger.warning` e o ecrã mostrava a lista
+// antiga sem dizer nada.
+import AvisoDeCaixaAFalhar from "../components/webmail/AvisoDeCaixaAFalhar";
 import { useWebmailCompaniesQuery } from "../hooks/queries/useWebmailCompaniesQuery";
 import { resolverEmpresaActiva } from "../utils/webmailEmpresas";
 // Ponto 8, Fase 2 — TUDO pelo cliente Axios. Só o interceptor injecta os
@@ -1781,6 +1785,11 @@ const WebmailPage = () => {
           ultimaSinc={lastSyncTime}
           onSync={handleSyncEmails}
         />
+
+        {/* Lote 7 — um ESTADO, não um toast: fica enquanto o problema
+            existir e desaparece quando a próxima sincronização correr bem.
+            Só aparece para a falha que a pessoa tem de resolver. */}
+        <AvisoDeCaixaAFalhar contas={personalAccounts} />
 
         {/* ===== THREE PANE LAYOUT (Outlook) ===== */}
         <div className="flex-1 overflow-hidden min-h-0">

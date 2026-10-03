@@ -8090,3 +8090,98 @@ VAI (`rotaDaFicha`, `textoDaFicha`). Três detalhes:
 Cobertura: `tests/unit/test_calendario_posse_e_rede.py` (35, com `TestAExploracao`
 escrita para morder primeiro), `utils/calendarioIdentidade.test.js` (17),
 `pages/__tests__/CalendarPage.test.jsx` (11, com o `GlobalCalendar` real).
+
+## Webmail: associação ao cliente e saúde da caixa
+
+### Associação por endereço — `services/email_client_match.py`
+
+Havia **dois** sincronizadores e faziam coisas diferentes:
+
+* `sync_webmail_emails` (contas partilhadas `power`/`precision`, de variáveis
+  de ambiente) resolvia por endereço, com uma consulta escrita à mão que
+  conhecia **só** `client_email` e `monitored_emails`;
+* `sync_user_emails` (a caixa **pessoal** de cada consultor, que o worker
+  sincroniza de 10 em 10 minutos) **não resolvia por endereço nenhum.** Só
+  herdava o `process_id` do email-pai de uma conversa e lia a etiqueta
+  `[Proc-xxx]` do assunto.
+
+Um email de um cliente para o consultor só entrava na ficha se a conversa já
+estivesse ligada ou se alguém tivesse posto a etiqueta à mão — e eram esses dois
+caminhos a funcionar que escondiam o terceiro em falta (a forma do
+`run_get_my_tasks`).
+
+Três defeitos no que existia:
+
+1. **Só o titular 1.** O 2.º titular é co-mutuário e escreve sobre o mesmo
+   crédito. E o sentido INVERSO da mesma relação —
+   `email_process_crud.collect_emails_from_process_doc`, que lista os endereços
+   de um processo — conhecia `titular2_data.email` desde sempre: **as duas
+   direcções da mesma relação tinham conjuntos de campos diferentes, e só a
+   menos usada estava certa.** Há um teste a cruzá-las, com a função de
+   produção como oráculo.
+2. **`find_one` sem unicidade.** O mesmo cliente com dois processos ficava
+   ligado ao que o Mongo calhasse devolver, de forma permanente. Hoje dois
+   candidatos dão `ambiguo` e o email fica **geral** — entrar na ficha errada é
+   um cruzamento de dados e sair dela exige alguém que repare.
+3. **Sem noção de rede.** A sincronização pessoal passa o `network_id` (resolve
+   `resolve_tenant_stamp` uma vez por passagem); a das contas partilhadas não
+   tem utilizador, e aí **a exigência de unicidade vale sobre o sistema
+   inteiro** — mais estrita, não menos: dois candidatos em redes diferentes dão
+   ambíguo. O carimbo de rede em `db.emails` continua a ser a D-8.
+
+A lista de fases fechadas vem do **motor** (`nomes_terminais`): estava escrita à
+mão como `["concluido", "cancelado", "arquivado"]`, que inclui o typo legado e
+**não** o valor canónico `arquivo`, e ignorava qualquer fase nova fechada pelo
+administrador.
+
+### Saúde da caixa — `services/mailbox_health.py`
+
+Quando a password do IMAP expira, o sistema sabe-o. O que fazia com essa
+informação dependia do caminho:
+
+* **manual** (o botão): falha o job, o `pollJobStatus` recebe `failed`, o ecrã
+  mostra um **toast** — transitório;
+* **automático** (`webmail_worker_sync`, de 10 em 10 minutos, o que mantém a
+  caixa fresca): `logger.warning` e **mais nada**. A caixa deixava de receber
+  email, o ecrã mostrava a lista antiga sem um único aviso, e o ciclo falhava
+  para sempre. Não havia **nada persistido** — `user_email_configs` não tinha um
+  campo sobre o estado da última sincronização, e `publicize_email_account`
+  devolvia a conta como se estivesse boa.
+
+Hoje o estado é gravado na config pela mesma função, nos dois caminhos, e vai no
+contrato da UI (`resumo_para_o_ecra` dentro do `publicize_email_account`).
+**Quatro decisões:**
+
+1. **Distingue-se AUTENTICAÇÃO de REDE e de LIMITE.** Só a primeira exige acção
+   da pessoa; as outras passam sozinhas, e avisar das três com a mesma força
+   ensina a ignorar as três (é o `desactivado ≠ em baixo` do painel de sinais
+   vitais). A ordem das verificações põe o **limite antes** da autenticação: «too
+   many login attempts» tem as duas palavras, e tratá-lo como password errada
+   mandava mudar uma password que está certa.
+2. **O sucesso LIMPA o erro.** Um aviso que não desaparece depois de a password
+   ser corrigida é indistinguível de um aviso falso.
+3. **Gravar NUNCA propaga** — observa, não intercepta (regra do `job_heartbeat`).
+4. **Contam-se as falhas CONSECUTIVAS, não um histórico.** Dois números — desde
+   quando e quantas vezes — respondem à única pergunta que interessa («soluço ou
+   parado?») sem fazer a colecção crescer.
+
+No ecrã, `components/webmail/AvisoDeCaixaAFalhar.jsx` é um **estado** e não um
+toast: fica enquanto o problema existir, diz desde quando (`utils/saudeDaCaixa.js`)
+e leva a quem resolve. A mensagem **técnica** do servidor não vai para o ecrã
+(traz o host e o código do erro); vai a que diz o que fazer.
+
+### Performance e anexos
+
+A sincronização IMAP e o download de anexos correm num `ThreadPoolExecutor`
+dedicado (`_email_executor`, 4 workers) por `run_in_executor` — **não bloqueiam
+o event loop**; o download é `StreamingResponse` e passa por
+`_assert_email_readable`. O defeito nesse eixo era outro: o job de sincronização
+nascia de um `asyncio.create_task` **cru**, que não tem referência forte e pode
+ser recolhido pelo GC. Quando isso acontece o job fica para sempre em `pending` e
+o ecrã desiste com «Sincronização a demorar demasiado» — um erro que aponta para
+o servidor de email quando a causa é o garbage collector. Os três passaram a
+`spawn_background_task`.
+
+Cobertura: `tests/unit/test_email_client_match.py` (21),
+`tests/unit/test_mailbox_health.py` (32), `utils/saudeDaCaixa.test.js` (17),
+`components/webmail/__tests__/AvisoDeCaixaAFalhar.test.jsx` (7).
