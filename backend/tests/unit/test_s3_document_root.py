@@ -21,6 +21,8 @@ Estes testes afirmam as duas metades da correcção:
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from services import s3_document_root as raiz
@@ -317,38 +319,52 @@ class TestQuemAindaPodeProcurarPorNome:
     onde um upload NOVO vai.
     """
 
-    def test_o_match_por_similaridade_saiu(self):
-        from services.s3_storage import S3Service
-        from tests.unit.helpers_fonte import codigo_da_funcao_sem_comentarios
+    # INVERTIDOS no Lote 8 (D-19 fechada). Estes três testes afirmavam
+    # que a procura por nome existia e era EXACTA — o Lote 6 tirou-lhe o
+    # score e manteve-a para ler fichas legadas. A medição em produção
+    # contou zero fichas a depender dela e o recurso foi apagado, logo a
+    # pergunta mudou: já não é «o match é exacto?», é «ele não voltou?».
+    # Invertidos em vez de apagados, porque um teste apagado não impede o
+    # regresso do defeito que ele descrevia.
 
-        fonte = codigo_da_funcao_sem_comentarios(
-            S3Service._find_client_folder_combined
+    def test_a_procura_por_NOME_foi_apagada_do_servico(self):
+        from services.s3_storage import S3Service
+
+        for funcao in (
+            "_find_client_folder_combined",
+            "_find_client_folder",
+            "_nomes_de_pasta_candidatos",
+            "_get_possible_client_paths",
+        ):
+            assert not hasattr(S3Service, funcao), (
+                f"`{funcao}` voltou ao S3Service — era por aqui que a "
+                "«Carolina Agostinho da Silva» herdava a pasta da "
+                "«Carolina Silva»"
+            )
+
+    def test_nem_o_match_EXACTO_sobreviveu(self):
+        # Não foi uma despromoção, foi um corte: mesmo o match exacto saiu,
+        # porque dois homónimos EXACTOS continuavam a partilhar pasta — o
+        # resíduo que mantinha a D-19 aberta.
+        from tests.unit.helpers_fonte import codigo_sem_comentarios
+
+        caminho = (
+            Path(__file__).resolve().parents[2] / "services" / "s3_storage.py"
         )
-        for vestigio in ("best_score", "intersection", "score"):
-            assert vestigio not in fonte, f"o match flexível voltou: {vestigio}"
-        # Contraprova: o match exacto continua lá.
-        assert "_nomes_de_pasta_candidatos" in fonte
+        with open(caminho, encoding="utf-8") as fh:
+            fonte = codigo_sem_comentarios(fh.read())
+        assert "def list_files" in fonte, "o leitor não leu o módulo certo"
+        for vestigio in ("best_score", "intersection", "name_variations"):
+            assert vestigio not in fonte, f"o match por nome voltou: {vestigio}"
 
-    def test_as_grafias_candidatas_sao_as_duas_que_o_sistema_produziu(self):
-        from services.s3_storage import S3Service
-
-        servico = S3Service.__new__(S3Service)
-        assert servico._nomes_de_pasta_candidatos("João Silva") == [
-            "joão silva",
-            "joão_silva",
-        ]
-        assert servico._nomes_de_pasta_candidatos("João Silva", "Maria Santos") == [
-            "joão silva e maria santos",
-            "joão_silva_e_maria_santos",
-        ]
-
-    def test_nome_parecido_JA_NAO_e_candidato(self):
-        from services.s3_storage import S3Service
-
-        servico = S3Service.__new__(S3Service)
-        candidatos = servico._nomes_de_pasta_candidatos("Carolina Agostinho da Silva")
-        assert "carolina silva" not in candidatos
-        assert "carolina_silva" not in candidatos
+    def test_a_identidade_passou_a_vir_SO_do_id(self):
+        # Contraprova no sentido oposto: apagar a procura por nome não pode
+        # ter levado a derivação canónica com ela.
+        assert raiz.pasta_do_cliente("0b1c2d3e-4f50-6171-8291-a2b3c4d5e6f7")
+        assert raiz.pasta_do_processo(
+            "0b1c2d3e-4f50-6171-8291-a2b3c4d5e6f7",
+            client_id="11111111-1111-1111-1111-111111111111",
+        )
 
 
 class TestOProcessoQueHERDAAPastaDoCliente:

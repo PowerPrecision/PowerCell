@@ -210,8 +210,44 @@ class TestOsLeitoresDeProducao:
                                 seguros.add(alvo.id)
             return seguros
 
+        def nomes_contaminados(corpo, seguros):
+            """Nomes que recebem o `s3_folder` CRU, com outro nome.
+
+            A mutação N11 mostrou que seguir só identificadores com
+            «s3_folder» não chega: o `move_file` fazia
+            `client_folder = s3_folder` e depois `.rstrip()` — um nome
+            intermédio basta para escapar. Segue-se um salto de
+            atribuição, que é o que o defeito real usava.
+
+            Uma origem JÁ SANEADA não contamina: `folder_name =
+            s3_folder.replace(...)` onde o `s3_folder` veio do
+            `pasta_gravada` é seguro, e tratá-lo como cru era um falso
+            positivo desta guarda (apanhado a medir a N11).
+            """
+            contaminados = set()
+            for no in corpo:
+                for sub in ast.walk(no):
+                    if not isinstance(sub, ast.Assign):
+                        continue
+                    if ha_ponto_unico(sub.value):
+                        continue
+                    origens = {
+                        n.id for n in ast.walk(sub.value)
+                        if isinstance(n, ast.Name) and "s3_folder" in n.id
+                    } | {
+                        "s3_folder" for c in ast.walk(sub.value)
+                        if isinstance(c, ast.Constant) and c.value == "s3_folder"
+                    }
+                    if not origens or origens <= seguros:
+                        continue
+                    for alvo in sub.targets:
+                        if isinstance(alvo, ast.Name):
+                            contaminados.add(alvo.id)
+            return contaminados
+
         def analisar(corpo, onde):
             seguros = nomes_saneados(corpo)
+            contaminados = nomes_contaminados(corpo, seguros) - seguros
             for no in corpo:
                 for sub in ast.walk(no):
                     if not isinstance(sub, ast.Call):
@@ -231,7 +267,8 @@ class TestOsLeitoresDeProducao:
                     # `x.replace(...).rstrip(...)`.
                     nomes = {
                         n.id for n in ast.walk(alvo)
-                        if isinstance(n, ast.Name) and "s3_folder" in n.id
+                        if isinstance(n, ast.Name)
+                        and ("s3_folder" in n.id or n.id in contaminados)
                     }
                     campo_cru = any(
                         isinstance(c, ast.Constant) and c.value == "s3_folder"
@@ -286,6 +323,40 @@ class TestOsLeitoresDeProducao:
         assert "pasta_gravada" in codigo, (
             f"{modulo} não passa pelo ponto único `pasta_gravada`"
         )
+
+
+class TestOMoveFile:
+    """A mutação N11 sobreviveu — e isso era um teste fraco, não uma
+    mutação perdida (terceira variante da lição já registada).
+
+    A guarda por AST segue nomes que CONTÊM `s3_folder`. No `move_file` o
+    valor cru era atribuído a `client_folder` e aí a guarda não o via:
+    um nome intermédio é suficiente para escapar a uma guarda que olha
+    só para o identificador. Daí um teste de COMPORTAMENTO ao lado dela
+    — o que a guarda não consegue afirmar, afirma-se a correr o código.
+    """
+
+    @pytest.mark.parametrize("valor", VALORES_CORROMPIDOS)
+    def test_mover_com_mapeamento_corrompido_recusa_sem_rebentar(self, valor):
+        from services.s3_storage import S3Service
+
+        servico = S3Service.__new__(S3Service)
+        servico.s3_client = object()  # basta não ser None
+        assert servico.move_file(
+            "Documentação Clientes/x/Outros/a.pdf", valor, "Pessoais", "a.pdf"
+        ) is False
+
+    def test_mover_sem_mapeamento_e_REGISTADO(self, caplog):
+        from services.s3_storage import S3Service
+
+        servico = S3Service.__new__(S3Service)
+        servico.s3_client = object()
+        with caplog.at_level("WARNING"):
+            servico.move_file(
+                "Documentação Clientes/x/Outros/a.pdf", ["x"], "Pessoais",
+                "a.pdf",
+            )
+        assert caplog.records, "recusar em silêncio esconde a causa"
 
 
 class TestOEscritorQueDeixouEntrar:

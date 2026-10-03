@@ -625,8 +625,16 @@ class TestConfirmUploadTaskLog:
         from services import document_direct_upload as mod
         from services import task_log_service as tls_mod
 
+        # LOTE 8: o processo leva o `s3_folder` que o fluxo real sempre
+        # tem. Antes, o fixture tinha só o `client_name` e a guarda de
+        # posse derivava o prefixo do NOME — com o recurso por nome
+        # apagado (D-19), um processo sem mapeamento não prova posse de
+        # nada, e é isso que produção faz. O comentário abaixo já dizia
+        # que este fixture usava valores que o fluxo real não produz.
         await fake_async_db.processes.insert_one({
-            "id": "p-up", "client_name": "Cliente Upload",
+            "id": "p-up",
+            "client_name": "Cliente Upload",
+            "s3_folder": "Documentação Clientes/Cliente Upload",
         })
 
         fake_s3 = MagicMock()

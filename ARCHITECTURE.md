@@ -7968,6 +7968,155 @@ antes do volume, porque partilhar documentação é um risco de RGPD e perder vi
 de leitura**, afirmado por guarda sobre a fonte com contraprova. Religar é uma
 decisão humana, no painel de Administração.
 
+### D-19 fechada: o recurso por NOME foi apagado (Lote 8)
+
+A medição contra produção deu **zero** fichas a perder documentos, o que
+autorizou o corte. O recurso por nome saiu do `s3_storage` —
+`_find_client_folder_combined`, `_find_client_folder`,
+`_nomes_de_pasta_candidatos` e `_get_possible_client_paths` — **apagado e
+não desligado** (código adormecido atrás de um `raise` é um convite a
+religá-lo; precedente do `POST /api/activities`).
+
+**A medição respondeu a UMA pergunta, e o corte dependia de DUAS.** Ela
+contou as fichas sem `s3_folder`. A outra — *«que CHAMADORES se esquecem
+de passar o `s3_folder`?»* — não aparece em medição nenhuma, porque para
+eles a ficha ESTÁ mapeada e o ramo do nome era o único que corria. Havia
+dois, e ambos já estavam partidos em produção:
+
+* **`run_categorize_all_documents`** chamava `list_files` sem o
+  `s3_folder`. Para uma ficha mapeada por ID o nome não resolve pasta
+  nenhuma, logo «Categorizar Todos» — e «Renomear IA», que o chama
+  primeiro — processava **zero documentos em silêncio** em todos os
+  clientes criados depois do Lote 6.
+* **`move_file`** recebia o `client_name` e resolvia a pasta de destino
+  por nome: um ESCRITOR a derivar identidade de um nome, o defeito do
+  Lote 6 na forma mais directa. O «organizar após análise» respondia
+  «Pasta do cliente não encontrada» nos mesmos clientes.
+
+Os dois passaram a receber o mapeamento. **Sem mapeamento não se
+adivinha:** `list_files` devolve vazio **e di-lo** (`warning` com o id e
+o nome, a apontar o religamento manual) — um vazio silencioso aqui é o
+documento a desaparecer do ecrã sem erro em sítio nenhum, que é a forma
+de defeito desta casa.
+
+#### A metade de SEGURANÇA, que não estava no enunciado
+
+`document_process_resolve.build_s3_valid_prefixes` é o ponto único dos
+prefixos de posse (`assert_s3_file_belongs_to_process` deriva dele). Sem
+`s3_folder`, derivava-os do **NOME**:
+
+```
+Documentação Clientes/{client_name}      e a grafia sanitizada
+```
+
+Dois homónimos **exactos** produziam o MESMO prefixo, logo cada um
+autorizava os ficheiros do outro — e isso é alcançável de **fora**, pelo
+`portal_upload_ops._dono_do_prefixo_s3`. Era a D-19 na guarda de posse, e
+não só na leitura: a parte que o enunciado não pedia e que era a que
+tinha consequência de RGPD.
+
+Hoje o prefixo deriva do **ID** (`pasta_do_processo` / `pasta_do_cliente`,
+canónicos desde o Lote 6). Não alarga nada — a pasta derivada do id de
+uma ficha é, por construção, a pasta dela — e um id que não sirva como
+segmento não produz prefixo, pelo que a lista fica vazia e **recusa
+tudo**, que é a regra que já existia.
+
+**`_dono_do_prefixo_s3` faz DUAS passagens, e a ordem foi um defeito meu
+que um teste legado apanhou.** Com uma passagem só, o processo ganhava
+por ter `id`: um processo ainda sem mapeamento sob um cliente JÁ mapeado
+— o onboarding do Portal, exactamente — passava a receber 403, porque o
+prefixo derivava do id do processo e o ficheiro estava na pasta do
+cliente. A 1.ª passagem é de quem tem mapeamento GRAVADO (o processo
+primeiro, que é a pasta que o `upload-url` escolhe); o ID é o recurso
+quando ninguém tem. O nome continua a viajar, mas **só para o log**: é o
+que torna um 403 diagnosticável sem abrir o Mongo, e já não entra em
+decisão nenhuma.
+
+#### O que fica medido, e o que fica inverso
+
+A medição (`services/s3_name_fallback_audit.py`) **não** se apaga: o
+veredicto `anomalia_de_dados` continua útil e o relatório é o registo
+histórico do corte. O que perdeu foi o ORÁCULO — o teste de concordância
+comparava `nomes_de_pasta_candidatos` com o método real de produção, que
+já não existe. A regra que lá fica é hoje um **instantâneo congelado** e
+o teste foi **invertido**: afirma que o oráculo desapareceu, e fica
+vermelho se a procura por nome voltar ao `s3_storage`.
+
+Invertidos pelo mesmo motivo: as grafias candidatas
+(`test_s3_document_root.py`) e os dois da guarda de posse
+(`test_posse_s3_fronteira_de_segmento.py`), que afirmavam que o ficheiro
+na pasta com o nome do próprio cliente passava a guarda. Um teste
+apagado não impede o regresso do defeito que ele descrevia.
+
+Cobertura: `tests/unit/test_fim_do_recurso_por_nome.py` (inclui o
+inventário por AST dos chamadores de `list_files`, que falha por OMISSÃO
+para um chamador novo).
+
+### Sanar o `s3_folder` gravado como par (Lote 8)
+
+O relatório deu a forma exacta das 10 anomalias:
+
+```
+gravado: [True, 'Documentação Clientes/Nome_do_Cliente']
+```
+
+É o `(sucesso, caminho)` que `initialize_client_folders` devolve: alguém
+gravou o PAR em vez de extrair a string. `services/s3_folder_anomaly_repair.py`
+(puro) + `scripts/fix_s3_folder_anomalies.py` (leitura por omissão,
+escrita só com `--aplicar`).
+
+**Não é um `valor[1]`.** Para a forma acima é exactamente isso, mas um
+script que escreve em produção não confia numa forma que viu dez vezes.
+Três veredictos recusam-se, e `--aplicar` não os converte — a bandeira
+autoriza a escrita, **não substitui a prova** (regra do
+`assignment_drift`):
+
+1. **`par_de_falha`** (`[False, caminho]`) — o par diz que a operação
+   FALHOU. O caminho está lá, mas é o que o código tentou e não
+   conseguiu usar; gravá-lo cimenta um mapeamento que o próprio sistema
+   rejeitou.
+2. **`fora_da_raiz`** — e este é a parede, não zelo. O `s3_folder`
+   gravado É o prefixo de posse: um `backups/dump.zip` aqui não corrige
+   um registo, **abre o bucket** a partir do Portal. É a regra 1 do
+   `s3_relink` («prefixo de dono ENVENENADO»), e a raiz NUA é a regra 2.
+   A pergunta da raiz vem **antes** da do sucesso, senão um
+   `[True, "backups/x.zip"]` saía classificado como problema de dados.
+3. **`irreconhecivel`** — `[]`, `[None]`, três elementos, o par
+   invertido, um `dict`. O índice 1 de cada um dá algo diferente e nenhum
+   é um caminho.
+
+**A ordem em relação ao corte não é opcional.** Estes registos têm um
+`s3_folder` que o `pasta_gravada` recusa, logo a aplicação trata-os como
+**sem mapeamento** e servia-lhes os documentos pelo recurso por nome.
+Apagar o recurso primeiro fá-los perder os documentos; a migração é que
+lhes dá um mapeamento explícito que sobrevive ao corte.
+
+#### A armadilha da semântica de ARRAYS no Mongo
+
+A primeira versão da consulta era
+
+```python
+{"$nor": [{"s3_folder": {"$type": "string"}}]}
+```
+
+e encontrou **1 de 7** registos semeados num `mongod` real. Numa consulta
+a um campo que contém um ARRAY, o Mongo compara o array **E cada
+elemento**: `$type: "string"` é verdadeiro para `[True, "Documentação…"]`,
+porque há ali um elemento string — o `$nor` excluía precisamente as
+fichas que o script existe para encontrar. E o relatório dizia «1
+anomalia», que se lê como «as outras já estão sãs».
+
+É a família da lição do `$nor` no duplo de Mongo, e **só um Mongo REAL a
+revela** (o duplo in-memory não implementa `$type`). A pergunta passou a
+ser positiva e em dois ramos: `$type: "array"` (o Mongo trata "array"
+como «o campo É um array») para o caso dos 10, e `$not`/`$type: "string"`
+para os tipos que não são arrays, onde a comparação elemento a elemento
+não se aplica.
+
+Provado contra um `mongod` avulso com os sete casos semeados: converge
+numa passagem (3 reparadas, as 4 que exigem decisão intactas, a ficha sã
+por tocar), a segunda passagem repara 0.
+
 ### O TIPO do campo vem antes da verdade do campo (Lote 8)
 
 A primeira execução contra produção morreu na primeira ficha:
