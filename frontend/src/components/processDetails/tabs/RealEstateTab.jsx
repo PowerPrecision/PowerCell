@@ -14,12 +14,17 @@ import {
   SelectValue,
 } from "../../ui/select";
 import { AIBadge } from "../../ui/AIBadge";
+import { InlineAISuggestion } from "../../ui/InlineAISuggestion";
 // PACOTE DH — Badge necessário para a lista de características (localização)
 import { Badge } from "../../ui/badge";
 import { Building2, Search, MapPin, FileSignature, Users } from "lucide-react";
 
 export default function RealEstateTab({
   financialData, setFinancialData, realEstateData, setRealEstateData, editingCardId, canEditRealEstate, CardHeaderWithEdit, getFieldMetaFor, shouldCardBeCollapsed,
+  // Lote 4 — preenchimento em linha nos dados do imóvel. `area` é o
+  // nome da SUGESTÃO; o campo da ficha é `area_bruta`, e é o
+  // `AI_SUGGESTION_FIELD_MAP` do backend que faz essa tradução.
+  sugestaoDoCampo, onAprovarSugestao, onRejeitarSugestao,
 }) {
   return (
     <>
@@ -130,7 +135,16 @@ export default function RealEstateTab({
                                 </Select>
                               </div>
                               <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Tipologia</Label>
+                                <div className="flex items-center gap-1">
+                                  <Label className="text-xs text-muted-foreground">Tipologia</Label>
+                                  <InlineAISuggestion
+                                    campo="tipologia"
+                                    rotulo="Tipologia"
+                                    sugestao={sugestaoDoCampo?.("tipologia")}
+                                    onAprovar={onAprovarSugestao}
+                                    onRejeitar={onRejeitarSugestao}
+                                  />
+                                </div>
                                 <Input
                                   value={realEstateData.tipologia || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, tipologia: e.target.value })}
@@ -143,6 +157,13 @@ export default function RealEstateTab({
                                 <div className="flex items-center gap-1">
                                   <Label className="text-xs text-muted-foreground">Valor do Imóvel (€)</Label>
                                   <AIBadge {...(getFieldMetaFor("real_estate_data.valor_imovel") || {})} />
+                                  <InlineAISuggestion
+                                    campo="valor_imovel"
+                                    rotulo="Valor do Imóvel"
+                                    sugestao={sugestaoDoCampo?.("valor_imovel")}
+                                    onAprovar={onAprovarSugestao}
+                                    onRejeitar={onRejeitarSugestao}
+                                  />
                                 </div>
                                 <Input
                                   type="number"
@@ -178,7 +199,16 @@ export default function RealEstateTab({
                                 />
                               </div>
                               <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Área Bruta (m²)</Label>
+                                <div className="flex items-center gap-1">
+                                  <Label className="text-xs text-muted-foreground">Área Bruta (m²)</Label>
+                                  <InlineAISuggestion
+                                    campo="area"
+                                    rotulo="Área Bruta"
+                                    sugestao={sugestaoDoCampo?.("area")}
+                                    onAprovar={onAprovarSugestao}
+                                    onRejeitar={onRejeitarSugestao}
+                                  />
+                                </div>
                                 <Input
                                   type="number"
                                   value={realEstateData.area_bruta || ""}
@@ -210,7 +240,16 @@ export default function RealEstateTab({
                                 />
                               </div>
                               <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Artigo Matricial</Label>
+                                <div className="flex items-center gap-1">
+                                  <Label className="text-xs text-muted-foreground">Artigo Matricial</Label>
+                                  <InlineAISuggestion
+                                    campo="artigo_matricial"
+                                    rotulo="Artigo Matricial"
+                                    sugestao={sugestaoDoCampo?.("artigo_matricial")}
+                                    onAprovar={onAprovarSugestao}
+                                    onRejeitar={onRejeitarSugestao}
+                                  />
+                                </div>
                                 <Input
                                   value={realEstateData.artigo_matricial || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, artigo_matricial: e.target.value })}
@@ -293,7 +332,16 @@ export default function RealEstateTab({
                             <>
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                               <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Localização Pretendida</Label>
+                                <div className="flex items-center gap-1">
+                                  <Label className="text-xs text-muted-foreground">Localização Pretendida</Label>
+                                  <InlineAISuggestion
+                                    campo="localizacao"
+                                    rotulo="Localização"
+                                    sugestao={sugestaoDoCampo?.("localizacao")}
+                                    onAprovar={onAprovarSugestao}
+                                    onRejeitar={onRejeitarSugestao}
+                                  />
+                                </div>
                                 <Input
                                   value={realEstateData.localizacao || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, localizacao: e.target.value })}

@@ -19,7 +19,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, Request
 
 from models.client import Client, ClientCreate, ClientUpdate
-from services.auth import get_current_user, require_roles
+from services.auth import get_current_user, get_effective_role_async, require_roles
 from models.auth import UserRole
 
 from services.client_me import run_get_my_assigned_clients
@@ -39,7 +39,7 @@ from services.client_process_ops import (
 )
 from services.client_portal_access import run_resend_portal_access
 from services.client_find_or_create import run_find_or_create_client
-from services.client_delete import run_delete_client
+from services.client_delete import PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES, run_delete_client
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
 
@@ -234,14 +234,15 @@ async def get_client_processes(
     include_archived: bool = Query(False),
     user: dict = Depends(get_current_user)
 ):
-    return await run_get_client_processes(
-        client_id, user, include_archived=include_archived,
-    )
+    return await run_get_client_processes(client_id, user, include_archived=include_archived)
 
 
 @router.delete("/{client_id}")
 async def delete_client(
+    request: Request,
     client_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    # Papéis e papel EFECTIVO: ver `run_delete_client` (ponto 2, Lote 4).
+    user: dict = Depends(require_roles(list(PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES))),
 ):
-    return await run_delete_client(client_id, user)
+    papel = await get_effective_role_async(request, user)
+    return await run_delete_client(client_id, user, papel_efectivo=papel, request=request)

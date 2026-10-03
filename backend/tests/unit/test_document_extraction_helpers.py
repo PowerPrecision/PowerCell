@@ -147,8 +147,12 @@ class TestPortalRequestHelpers:
 
 class TestS3AccessHelpers:
     def test_build_prefixes_with_s3_folder(self):
+        # LOTE 6: o prefixo vem SEM barra final — quem compara usa
+        # `s3_document_root.dentro_da_pasta`, que trata a fronteira de
+        # segmento. A barra na lista levava cada chamador a fazer o seu
+        # `startswith`, e um deles (a eliminação em massa) fazia-o sem ela.
         prefixes = build_s3_valid_prefixes({"s3_folder": "Documentação Clientes/Foo/"})
-        assert prefixes == ["Documentação Clientes/Foo/"]
+        assert prefixes == ["Documentação Clientes/Foo"]
 
     def test_assert_belongs_ok_and_denied(self):
         process = {"s3_folder": "Documentação Clientes/Foo"}

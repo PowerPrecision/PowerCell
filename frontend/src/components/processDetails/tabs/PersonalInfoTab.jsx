@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "../../ui/select";
 import { AIBadge } from "../../ui/AIBadge";
+import { InlineAISuggestion } from "../../ui/InlineAISuggestion";
 import SecondTitularCard from "../../SecondTitularCard";
 import { User, Phone, CreditCard, Users, MapPin } from "lucide-react";
 import { formatDateForInput } from "../../../pages/processDetails/processFormCleaners";
@@ -24,6 +25,8 @@ import { safeString } from "../../../utils/safeString";
 
 export default function PersonalInfoTab({
   personalData, setPersonalData, process, setProcess, clientId, nifError, setNifError, editingCardId, canEditPersonal, CardHeaderWithEdit, getConfidenceIndicator, getFieldMetaFor, fetchData, financialData,
+  // Lote 3, ponto 1 — preenchimento em linha das sugestões da IA.
+  sugestaoDoCampo, onAprovarSugestao, onRejeitarSugestao,
 }) {
   return (
     <>
@@ -98,6 +101,13 @@ export default function PersonalInfoTab({
                                 <div className="flex items-center gap-1">
                                   <Label className="text-xs text-muted-foreground">NIF</Label>
                                   <AIBadge {...(getFieldMetaFor("dados_pessoais.nif") || {})} />
+                                  <InlineAISuggestion
+                                    campo="nif"
+                                    rotulo="NIF"
+                                    sugestao={sugestaoDoCampo?.("nif")}
+                                    onAprovar={onAprovarSugestao}
+                                    onRejeitar={onRejeitarSugestao}
+                                  />
                                 </div>
                                 {getConfidenceIndicator("nif") && (
                                   <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("nif").badge}`}>
@@ -139,6 +149,13 @@ export default function PersonalInfoTab({
                                   <Label className="text-xs text-muted-foreground">Nº Documento (CC)</Label>
                                   <AIBadge {...(getFieldMetaFor("dados_pessoais.documento_id") || {})} />
                                 </div>
+                                <InlineAISuggestion
+                                  campo="documento_id"
+                                  rotulo="Nº do Documento"
+                                  sugestao={sugestaoDoCampo?.("documento_id")}
+                                  onAprovar={onAprovarSugestao}
+                                  onRejeitar={onRejeitarSugestao}
+                                />
                                 {getConfidenceIndicator("documento_id") && (
                                   <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("documento_id").badge}`}>
                                     IA {getConfidenceIndicator("documento_id").label}

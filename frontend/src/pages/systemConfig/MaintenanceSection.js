@@ -6,6 +6,7 @@
  */
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
+import S3RelinkPanel from "../../components/admin/S3RelinkPanel";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Badge } from "../../components/ui/badge";
@@ -675,6 +676,14 @@ export default function MaintenanceSection({ token, user }) {
             </div>
           )}
         </div>
+
+        {/* ═══ Religamento manual (Lote 6, ponto 2) ═══
+            Vive dentro da área de mapeamento S3, logo a seguir ao bloco acima:
+            aquele só conhece PROCESSOS, e um cliente da Pool sem processo é
+            precisamente quem vive sozinho na raiz documental. Exclusivo da
+            Administração — a rota entra por `require_roles([ADMIN])` e esta
+            escrita move a fronteira de posse de documentos. */}
+        {hasRole(user, "admin") && <S3RelinkPanel />}
 
         {/* ═══ Sincronização Produção → Desenvolvimento (RGPD) ═══ */}
         {isDevEnvironment && hasRole(user, "admin") && (

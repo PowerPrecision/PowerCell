@@ -938,6 +938,31 @@ export const saveClientS3Mapping = (processId, s3Folder) =>
     skipErrorToast: true,
   });
 
+// ── Religamento manual de pastas S3 (admin) — Lote 6, ponto 2 ──
+//
+// Cobre clientes E processos. A ferramenta antiga (`client-s3-mappings`) era um
+// alias que recebia `process_id`: um cliente da Pool sem processo não tinha
+// como ser religado, e é precisamente ele que vive sozinho na raiz documental.
+//
+// Vai por Axios e não por `fetch`: é o interceptor que injecta
+// `X-Company-Id`/`X-Active-Role`, e o backend resolve o papel EFECTIVO para o
+// trilho de auditoria.
+export const getS3Relink = (params) =>
+  api.get("/admin/s3-relink", { params, skipErrorToast: true });
+
+export const setS3Relink = ({ tipo, entityId, s3Folder }) =>
+  api.post("/admin/s3-relink", null, {
+    params: {
+      tipo,
+      entity_id: entityId,
+      // String vazia e `undefined` são respostas DIFERENTES no backend:
+      // vazia remove o mapeamento, ausente também — mas um `/` ou `///` é
+      // recusado (400). Aqui normaliza-se para a forma explícita.
+      ...(s3Folder ? { s3_folder: s3Folder } : {}),
+    },
+    skipErrorToast: true,
+  });
+
 // ── Geração de minutas a partir do processo ──
 export const generateProcessTemplate = (processId, template) =>
   api.get(`/templates/process/${processId}/generate/${template}/download`, {
@@ -1602,8 +1627,37 @@ export const updateAutomationRule = (id, data) =>
   api.put(`/admin/automation/rules/${id}`, data);
 export const deleteAutomationRule = (id) => api.delete(`/admin/automation/rules/${id}`);
 // `getWorkflowStatuses` já existe mais acima neste ficheiro — não repetir.
+/**
+ * Conflitos de dados IA vs ficha (Lote 3, ponto 2 — 6.ª instância da regra).
+ *
+ * O `DataConflictResolver` fazia estas duas chamadas por `fetch` cru com
+ * `API_URL` e o token à mão. O interceptor que injecta `X-Company-Id` /
+ * `X-Active-Role` vive no cliente Axios, e um `fetch` só leva o que lhe
+ * escreverem: sem os cabeçalhos, o backend resolve a empresa por
+ * `user.company` (o NOME, não o id) — a confusão de 2026-09-21.
+ */
+export const resolveProcessDataConflict = (processId, payload) =>
+  api.post(`/processes/${processId}/resolve-conflict`, payload);
+
+export const confirmProcessData = (processId, confirmed) =>
+  api.post(`/processes/${processId}/confirm-data`, { confirmed });
+
 // Sinais vitais do motor de background (leitura).
 export const getAutomationsEngineStatus = () => api.get("/automations");
+
+/**
+ * Corre um automatismo agora (Lote 2, ponto 1).
+ *
+ * A resposta traz `modo`: `executado_agora` (job do processo web, correu
+ * já) ou `pedido_ao_worker` (job do Processador, ficou um pedido na fila
+ * que é reclamado no ciclo seguinte). A UI tem de distinguir os dois —
+ * dizer "correu" a um pedido que só foi entregue é o botão a mentir.
+ *
+ * Vai por Axios como todo o resto: um `fetch` cru perderia o
+ * `X-Company-Id`/`X-Active-Role` que o interceptor injecta.
+ */
+export const forcarExecucaoDeAutomatismo = (chave) =>
+  api.post(`/automations/${encodeURIComponent(chave)}/executar`);
 
 /**
  * Empresas do âmbito do utilizador (a sua REDE), paginadas.

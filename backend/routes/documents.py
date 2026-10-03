@@ -87,7 +87,6 @@ from services.document_process_resolve import (
     resolve_process_from_flexible_id,
     extract_second_client_name,
     assert_s3_file_belongs_to_process,
-    build_s3_valid_prefixes,
 )
 from services.document_expiring_dashboard import run_get_expiring_documents_dashboard
 from services.document_portal_request import (
@@ -226,6 +225,17 @@ async def list_client_files(
             {"process_id": effective_id},
             {
                 "_id": 0,
+                # BUGFIX (Lote 3, ponto 1): o `id` do document_metadata TEM de
+                # vir na projecção. Sem ele, o enriquecimento não podia pôr
+                # `doc_id` em cada ficheiro e o botão «Analisar IA» do
+                # S3FileManager — que chama `POST /documents/{doc_id}/
+                # ai-analyze-review` — morria sempre em "doc_id em falta".
+                # O comentário no frontend afirmava que esta listagem «expõe o
+                # ID do document_metadata em `file.doc_id`»: era uma crença
+                # escrita, nunca um contrato (o `s3_service.list_files` devolve
+                # name/path/size/category/temporary_url, e esta projecção tinha
+                # catorze campos e não o `id`).
+                "id": 1,
                 "s3_path": 1,
                 "ai_analyzed": 1,
                 "ai_analyzed_at": 1,
@@ -258,6 +268,12 @@ async def list_client_files(
                     continue
                 for f in file_list:
                     meta = meta_by_path.get(f.get("path") or "", {})
+                    # O identificador do registo de metadados. Um ficheiro
+                    # ainda sem registo (upload acabado de fazer, categorização
+                    # em background a correr) fica com `doc_id` a None de
+                    # propósito — a UI tem de distinguir "não dá para analisar
+                    # ainda" de "avariou".
+                    f["doc_id"] = meta.get("id")
                     f["ai_analyzed"] = bool(meta.get("ai_analyzed"))
                     f["ai_analyzed_at"] = meta.get("ai_analyzed_at")
                     f["is_categorized"] = bool(meta.get("is_categorized"))
@@ -933,12 +949,16 @@ async def organize_documents_after_analysis(
 async def rename_document_smart(
     process_id: str,
     data: dict,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
+    user: dict = Depends(get_current_user),
 ):
     """
     Renomeia um documento de forma inteligente baseado na análise IA.
 
-    Restrito a cargos de gestão (admin, CEO, diretor / "gestor").
+    Permissão: GESTÃO **ou** atribuído ao processo (Set 2026). Estava em
+    `require_roles([ADMIN, CEO, DIRETOR])`, que recusava o consultor
+    dono do processo — o 403 reportado pelo QA. A verificação passou
+    para o serviço porque o `require_roles` decide pelo cargo e não vê
+    o processo, logo não sabe responder "está atribuído?".
     
     Body:
     - s3_path: Caminho actual do ficheiro no S3
@@ -951,7 +971,7 @@ async def rename_document_smart(
     - new_name: Novo nome
     - new_path: Novo caminho no S3
     """
-    return await run_rename_document_smart(process_id, data)
+    return await run_rename_document_smart(process_id, data, user=user)
 
 
 

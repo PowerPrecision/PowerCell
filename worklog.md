@@ -1,4 +1,28 @@
 ---
+Task ID: atribuidos-chave-cabecalhos
+Agent: Cloud Agent
+Task: 403 falso positivo nos documentos, rename-smart para o dono, 401 da OpenAI e os cabeçalhos de media/microfone
+
+Date: 2026-10-02
+
+Work Log:
+- O 403 DOS DOCUMENTOS: "tenho o processo atribuído e dá 403" era verdade NAS DUAS PONTAS. Inventariei os leitores e havia TRÊS listas de campos: `process_list_filters.ASSIGNMENT_ID_FIELDS` (15), `process_indexing.collect_assigned_user_ids` (5, à mão), `portal_assigned_users.get_all_assigned_user_ids` (6, à mão). Às duas últimas faltavam `consultor_id`, `consultant_id`, `mediador_id` — os singulares que a dupla auto-atribuição escrevia sozinhos.
+- Consequência exacta: a listagem "Os Meus Processos" lê `consultant_id` e reconhecia; o `document_visibility` chama o `collect_assigned_user_ids` e não reconhecia. Foi a metade que funcionava que escondeu a outra, outra vez.
+- IRONIA REGISTADA: o `process_portal_messages` chama o `get_all_assigned_user_ids` "fonte de verdade" numa docstring, e ele era uma das cópias incompletas. Um nome não torna nada canónico.
+- `ASSIGNMENT_ID_FIELDS` + `collect_assigned_ids` passaram para o `process_staff_assignment`, ao lado dos campos que os ESCRITORES carimbam, e DERIVAM deles. O teste compara os três leitores REAIS entre si — uma expectativa escrita no teste seria a quarta cópia. E há contraprova de que a unificação não ENCOLHEU o conjunto: ficar pela interseção retirava acesso a quem o tem hoje.
+- RENAME-SMART: não era bug, era a regra do AGENTS.md (`require_roles([ADMIN, CEO, DIRETOR])`) a funcionar — o QA testou com consultor. Disse-o ao dono antes de mexer e ele mudou a regra. O ponto técnico que importa: o `require_roles` NUNCA podia resolver isto, porque decide pelo cargo e não vê o processo. A guarda teve de ir para o serviço, onde o processo já está carregado.
+- O 401 DA OPENAI: o dono suspeitou do código e tinha razão. `ai_document.py` lia SÓ `EMERGENT_LLM_KEY`, no IMPORT, e nunca passava `organization` — com a `OPENAI_API_KEY` definida, o cliente nascia com `api_key=""`. Mais dois guardas `if not EMERGENT_LLM_KEY` que recusavam o trabalho antes de tentar.
+- A ARMADILHA: o construtor certo já existia com o MESMO NOME no módulo vizinho (`ai_document_analyzer.get_openai_client`). Duas funções homónimas, uma correcta e uma partida, e quem lê a chamada não distingue. A ingénua delega agora na completa; sem chave levanta `RuntimeError` em vez de devolver `None`, que dava um `AttributeError` numa linha que não diz nada sobre configuração.
+- CSP E MICROFONE: `media-src` não herda o `img-src` — cai no `default-src 'self'` e recusa o `blob:`. E o `Permissions-Policy: microphone=()` é a lista VAZIA: desliga o microfone para todas as origens, e o `getUserMedia` falha SEM prompt.
+- CORRECÇÃO A UMA SUPOSIÇÃO MINHA: eu tinha apontado o HTTPS como causa provável do microfone. Não era. O HTTPS explicaria a falha mas não a AUSÊNCIA DE PROMPT — e foi essa parte do sintoma que apontou para a política. Fica registado porque a hipótese errada era plausível e teria custado tempo.
+- Corrigido nos TRÊS blocos (dois do vercel.json, incluindo o do Portal que também reproduz áudio, e o do server.py). Teste a afirmar que a câmara continua desligada e que o `media-src` não abriu para `*` nem `http:` — relaxar uma política é o tipo de alteração que se alarga sozinha.
+- UM DEFEITO NO MEU PRÓPRIO TESTE, apanhado a medir a mutação: com o `media-src` ausente o teste morria com `IndexError` em vez de dizer o que faltava. Corrigido — um teste que falha mal é um teste que manda procurar no sítio errado.
+- Provas: backend 4158 passed / 5 skipped (era 4108/5, +50). flake8 limpo. Quatro mutações, quatro mortes.
+- POR FAZER do lote do dono: unicidade de NIF/Email, limitação do Diretor às atribuições, UI dos grupos de empresas em chips. E do lote anterior: notas em processos alheios, filtro "Por Atribuir", ecrã branco no Voltar, multi-upload do Portal.
+
+---
+
+---
 Task ID: pool-webmail-trilha
 Agent: Cloud Agent
 Task: P0 das fugas de isolamento (Registos + contas do Webmail) e o 404 do Histórico
@@ -9009,3 +9033,996 @@ válidas, 2 com perfil `indexacao`). O script:
 
 Backend **4035 passed, 5 skipped** (eram 4019). Os 16 testes novos falham
 contra o código anterior.
+
+---
+
+# Iteração `motor-fila-e-agenda` — 2026-10-02
+
+Lote 2: tarefas de fundo e automações. Quatro pontos, e o primeiro
+desmentiu o sintoma que o trouxe.
+
+## Ponto 1 — o «Nunca correu» não era um worker em baixo
+
+O painel mostrava as tarefas do Processador como **Nunca correu** e o
+pedido trazia a hipótese "possível worker inativo". Fui verificar antes
+de aceitar, e a causa era outra.
+
+`worker.py` chama quatro métodos que **não existem** em
+`TaskQueueService` — que é ARQ/Redis e não tem `__getattr__`:
+`get_next_task`, `complete_task`, `fail_task`, `add_task`. Confirmado no
+interpretador antes de mexer em nada:
+
+    add_task -> False    get_next_task -> False
+    fail_task -> False   enqueue -> True
+    AttributeError: 'TaskQueueService' object has no attribute 'add_task'
+
+Três consequências:
+
+1. **`worker_loop` rebentava a cada 5 segundos, desde sempre.** O
+   despachante `process_task` — scrape de imóveis, matching, email —
+   nunca correu uma única vez.
+2. **A excepção do matching saltava o resto do ciclo.** O `add_task`
+   estava dentro do `async with heartbeat("lead_matching")`; a excepção
+   subia e o `except` do laço apanhava-a. O bloco de sincronização de
+   webmail vinha **depois**, logo nunca era alcançado — e é por isso que
+   `webmail_worker_sync` aparecia como «Nunca correu». Uma linha
+   inalcançável por uma excepção lançada três linhas acima.
+3. **`last_runs[...]` era escrito depois do trabalho**, logo um job que
+   falhasse voltava a tentar dentro de 60 segundos em vez de esperar o
+   seu intervalo.
+
+**A ironia:** a docstring do `client_portal_email.py` afirma que «o
+worker de produção arranca com `python worker.py` (loop próprio que
+processa a **fila Mongo** por `task_type`)». Essa fila nunca foi escrita.
+A crença estava registada em dois sítios e era falsa nos dois.
+
+### O que fiz
+
+`services/task_queue_mongo.py` — a fila que o código já dizia que
+existia. Mongo e não ARQ porque o `enqueue` ARQ funciona e **não tem
+consumidor** (`arq worker.config.WorkerSettings` nunca é lançado), que é
+como o email de boas-vindas do Portal morreu em silêncio.
+
+Três decisões: **backoff** (sem ele, uma tarefa que falhe sempre punha o
+`worker_loop` — que só dorme com a fila vazia — a girar a 100% de CPU:
+trocava um worker parado por um worker a arder); **reclamação atómica**;
+e **recuperação de tarefas sem consumidor** no caminho da própria
+leitura, para não precisar de um laço novo que também pudesse estar em
+baixo.
+
+`scheduler_loop` reestruturado: um `try` POR JOB (com um `try`
+partilhado, o primeiro a rebentar leva os seguintes), o relógio a
+avançar ANTES do trabalho, e as cadências **derivadas** de
+`JOBS_DECLARADOS` — estavam escritas à mão no worker (3600/1800/600) E no
+registo declarado, duas cópias que divergem na primeira afinação e aí o
+painel anuncia um horário que o laço não cumpre.
+
+`run_scheduled_tasks` foi **removida, não desligada**: o trabalho é agora
+o executor, e código adormecido é um convite a religá-lo.
+
+### «Forçar Execução» — a objecção estava certa
+
+O painel era read-only e dizia porquê: «um disparo manual a partir da web
+não chegaria ao processo worker». Está certo. A fila responde-lhe sem a
+negar: job do web corre ali, job do Processador fica como PEDIDO. E a
+resposta diz **qual dos dois** aconteceu — dar "pedido entregue" por "a
+correr" seria o botão a mentir, que é o que a objecção queria evitar.
+
+**O pedido que ninguém reclama é o diagnóstico.** Prova que o
+Processador não está a ouvir, em vez de deixar a dúvida entre "o job
+falhou" e "o processo não está lá" — a pergunta que este lote levantou e
+que nenhum estado do painel sabia responder.
+
+`job_executors.EXECUTORES` é UM registo que o laço e o botão partilham,
+com inventário nos dois sentidos contra `JOBS_DECLARADOS`. Duas
+extracções foram precisas, e cada uma corrigiu um defeito:
+
+* `background_job_sweep.py` — o varrimento estava dentro do `while`;
+* `webmail_worker_sync.py` — e aqui o defeito era maior: o
+  `_bater_webmail_worker_sync` abria e fechava o batimento com um `pass`
+  e o trabalho corria **fora do envelope**. O painel dizia `ok` a um
+  ciclo em que todas as caixas podiam ter falhado, com duração de
+  microssegundos.
+
+**Um job desactivado não se força** — guarda única em `executar_job`, não
+um `if` por executor. 409 e não 403: não é permissão, é o job estar
+desligado neste ambiente.
+
+### Erro meu, apanhado a desenhar
+
+Pus os dois laços (`worker_loop` e `scheduler_loop`) a consumir a mesma
+fila, e o scheduler devolvia com `fail_task` o que não soubesse tratar —
+**gastando-lhe uma tentativa**. Três ciclos e a tarefa morria `falhada`
+sem nunca ter chegado a quem a sabia correr. Corrigido com filtro por
+tipo (`tipos` / `excluir_tipos`), complementares por construção.
+
+### O horário que vivia na docstring (D-7 fechada)
+
+`send_weekly_ceo_report` abria com «Corre todas as Segundas-feiras às
+~06:00». A guarda real era `if today.weekday() != 0: return False`, e o
+`run_all_tasks` corre de **hora a hora**:
+
+1. **Não havia hora nenhuma** — saía à hora a que o Processador tivesse
+   arrancado. Um deploy às 14h punha o relatório semanal a sair às 14h
+   para sempre, com a docstring a prometer 06:00.
+2. **Saía 24 VEZES** — `weekday() == 0` é verdade durante 24 ciclos
+   horários e não havia marca de "já enviei". O `send_weekly_ai_report`
+   tem a mesma forma.
+
+Um horário escrito só numa docstring não é um horário — é uma intenção.
+
+`services/relatorio_semanal_agenda.py`: marca **persistida**
+(`job_schedule_marks` — o `last_runs` morre em cada reinício, e o Render
+reinicia por deploy, por OOM e por manutenção), **semana ISO** (não "há 7
+dias", que faz o envio deslizar até à quarta), **"a partir das" 06:00**
+(uma igualdade perdia a semana se o ciclo das 06h falhasse), **etiqueta
+por periodicidade** (uma marca semanal num relatório diário trocava 24
+emails a mais por 6 a menos) e **falha fechada** (sem base de dados
+assume que já enviou — um relatório em atraso nota-se; 24 emails ao CEO
+ensinam-no a ignorá-lo).
+
+A decisão que fecha a D-7: âmbito **consolidado**, e fica registado como
+a ÚNICA excepção deliberada ao isolamento por rede.
+
+## Ponto 2 — o email passou a ser um recibo
+
+O gatilho já existia, ligado aos dois caminhos de upload e idempotente.
+Faltava a **lista de nomes**: confirmava "toda a documentação" sem dizer
+qual, e uma confirmação que não enumera não serve de recibo — quem a lê
+não detecta que faltou uma peça.
+
+Duas regras ficaram em teste: **os nomes no corpo, os ficheiros nunca em
+anexo** (reenviar o que o cliente acabou de submeter põe dados pessoais a
+circular sem necessidade; sem teste, "juntar os anexos" é a melhoria
+óbvia que alguém faz a seguir) e **o nome do ficheiro é texto do
+cliente**, logo leva escape. Os estados de "concluído" vêm de
+`document_portal_counts`, nunca de uma lista nova.
+
+## Ponto 3 — a regra que vivia num ecrã
+
+A sincronização «Créditos Ativos → Contas Bancárias» estava no
+`executeSave` do `ProcessDetails.js`: corria quando um humano carregava
+em Gravar naquela página, e só então. A IA — que é quem preenche os
+créditos a partir do mapa de responsabilidades, o caso mais comum — o
+`ai-apply-suggestions`, o motor financeiro e qualquer importação passavam
+ao lado. É o `assigned_to` noutro eixo, e não dava erro: a lista ficava
+incompleta.
+
+TRÊS nomes para a mesma pergunta: `bancos_creditos` usa `banco`,
+`creditos_ativos` (IA) usa `instituicao`, e o bloco do frontend só
+conhecia o primeiro. A mesma cópia incompleta estava no
+`email_documentation`, pelo que um banco extraído pela IA também não
+bloqueava o envio de documentação para ele.
+
+`financial_bank_sync.py` é o ponto único, ligado aos dois escritores
+reais; **nunca remove** (uma conta inserida à mão é informação legítima)
+e devolve `None` sem alteração, para não encher a auditoria com diffs
+vazios. O bloco do frontend foi removido com a explicação no lugar.
+
+Detalhe que vale guardar: o bloco antigo mutava `financialData` em sítio
+**e** chamava `setFinancialData`. Era a mutação que o fazia funcionar — o
+código parecia idiomático e dependia do contrário.
+
+## Ponto 4 — a porta fechada e a janela aberta
+
+`run_create_client` recusava NIF/Email repetido com 409 desde o PACOTE
+10. `run_update_client` **não verificava nada**: trocar o NIF de um
+cliente para o de outro gravava, sem erro em sítio nenhum. A edição é a
+pior das duas, porque fabrica a colisão em cima de dados que já existem.
+
+`client_uniqueness.py`, a mesma função nas duas portas. A peça que as
+distingue é o **`excluir_id`**: na edição o cliente casa consigo próprio,
+e sem ele gravar sem tocar no NIF devolvia 409 contra o próprio registo —
+uma guarda que impede a edição de tudo é pior do que guarda nenhuma, e
+tem teste nos dois sentidos.
+
+Dois detalhes: **os dois ramos da procura** (índice cego para os
+migrados, valor em claro para os antigos — só o hash deixava passar os
+mais velhos da base) e **a edição verifica o que foi SUBMETIDO**, nunca o
+merge: o valor em base está encriptado e o hash de um criptograma nunca
+casa, logo a guarda passaria calada.
+
+O formulário **público** fica de fora por decisão, registada em **D-14**:
+um 409 numa porta externa perde a lead em vez de a tratar.
+
+## Validação
+
+* `flake8 --select=E9,F63,F7,F82` limpo em `services/ routes/ tests/unit/
+  server.py worker.py`.
+* Backend `tests/unit`: **4316 passed, 5 skipped** (eram 4158 — **+158**).
+* Frontend: **1302 passed**, 113 ficheiros. `eslint --quiet` limpo.
+
+### Sete mutações, sete mortes — a última só depois de corrigir o teste
+
+| Mutação | Mortes |
+|---|---|
+| Tirar o `excluir_id` da edição | 1 |
+| Fila de créditos só com `bancos_creditos` (sem a chave da IA) | 4 |
+| Tirar o backoff da fila | 1 |
+| Guarda do relatório só pelo dia da semana | 2 |
+| Deixar forçar um job desactivado | 1 |
+| Tirar o escape do nome do ficheiro no HTML | 2 |
+| Scheduler a reclamar TODAS as tarefas | 1 |
+
+**A sétima sobreviveu à primeira tentativa**, e o motivo é instrutivo: o
+guarda fazia `assert "tipos=[TIPO_FORCAR_JOB]" in fonte`, e
+`tipos=[...]` é **subcadeia** de `excluir_tipos=[...]` — era satisfeito
+pela linha do OUTRO laço. Passou a afirmar a chamada inteira com o nome
+da função, e a exigir que nenhum dos dois reclame sem filtro. Mais uma
+variante de "um teste que pode passar sem provar nada é pior do que não
+existir", agora pela porta da correspondência de texto.
+
+## Erros meus neste lote
+
+1. **Pus dois consumidores na mesma fila** sem filtro, com o scheduler a
+   gastar tentativas de tarefas que não sabe tratar. Apanhado antes de
+   commit, ao reler o próprio desenho.
+2. **Um guarda de fonte apontado à função errada** (`run_update_process`
+   em vez de `apply_staff_business_updates`, onde o merge vive de facto).
+   É a armadilha do Lote 5 outra vez — um guarda sobre o orquestrador
+   passa a verde com a correcção em sítio nenhum.
+3. **O guarda da sétima mutação era satisfeito pela linha errada**, acima.
+
+---
+
+# Iteração `ux-da-ia-e-formularios` — 2026-10-02
+
+Lote 3: UX de IA e formulários. Pedido como «estritamente de interface e
+extração» — e **dois dos quatro pontos não eram**: a UI não pode mostrar
+o que não lhe é dado. Digo-o aqui porque é a parte do diagnóstico que
+contraria o enunciado.
+
+## Ponto 1 — o «Analisar IA» nunca funcionou
+
+O `S3FileManager` tira o id de `file.doc_id || file.id`, com um comentário
+a afirmar que «o listing de ficheiros expõe o ID do document_metadata em
+`file.doc_id`».
+
+Nunca expôs. O `s3_service.list_files` devolve
+`name/path/size/size_formatted/last_modified/category/temporary_url` — sem
+`id` — e a projecção do enriquecimento pedia **catorze** campos do
+`document_metadata` e não o `id`. Logo `doc_id` era sempre `undefined` e o
+handler caía no `toast.error("doc_id em falta")`. O botão nunca chegou a
+chamar o endpoint.
+
+**É a mesma forma da fila Mongo do Lote 2**: uma crença escrita em
+comentário, nunca um contrato, e ninguém verificou se o campo existia.
+Duas vezes em dois lotes.
+
+### Do diálogo sobreposto ao preenchimento em linha
+
+A modal tapava a ficha (para comparar um NIF era preciso fechá-la) e a
+decisão era um bloco. Agora a sugestão aparece no campo, com fundo
+amarelado e aprovar/rejeitar ao lado.
+
+`utils/sugestoesEmLinha.js` é a máquina de estados, pura. O que importa
+proteger: **mostrar não é gravar.** `valorAMostrar` devolve o valor
+sugerido enquanto pende — é esse o ponto do preenchimento em linha — e
+`valoresAprovados` devolve só o aprovado, que é de onde sai o payload. Se
+a gravação voltar a partir do `extractedData`, a interface fica igual e a
+regra de ouro desaparece sem deixar rasto.
+
+`persistAISuggestions` continua com UM só chamador. Dois guardas de legado
+foram **actualizados e não apagados** (`aiWriteGuard`, `vlmSilencioGuard`):
+o que eles afirmavam era o MECANISMO («o diálogo abre»); a propriedade é
+«qualquer extracção levanta revisão», e continua afirmada.
+
+## Ponto 2 — «IA 100%» ao lado de um campo vazio
+
+`getConfidenceIndicator` olhava para o número e nunca para o valor. O input
+do NIF tem `placeholder="9 dígitos"`: com o campo vazio o browser desenha
+esse texto cinzento, e ao lado dele o badge dizia «IA 100%».
+
+**É o badge que faz o placeholder parecer um dado.** Sem ele, um campo
+vazio lê-se como um campo vazio. E dar confiança máxima a uma extracção
+nula desliga a desconfiança exactamente no campo que mais precisa dela.
+
+Três recusas em `utils/aiConfidence.js`: vazio, igual ao placeholder (modo
+de falha real da extracção por visão — a IA que lê um formulário EM BRANCO
+devolve o texto de ajuda) e valor que a validação do próprio campo recusa.
+Os validadores são os que o formulário já corre.
+
+O «Desbloquear Dados» era uma faixa de largura inteira para o estado que é
+quase sempre o normal — um aviso permanente deixa de ser lido. Passou a
+ícone com nome acessível e confirmação: o cadeado é discreto, o efeito (a
+IA volta a poder sobrepor a ficha) não é.
+
+E o mesmo componente fazia as duas chamadas por `fetch` cru: **sexta
+instância** da regra de 2026-09-21. Passaram a Axios.
+
+## Ponto 3 — o ecrã branco era uma fronteira que não tratava o erro
+
+Três defeitos sobrepostos no `LazyChunkErrorBoundary`, que embrulha TODAS
+as rotas:
+
+1. `includes("Unexpected token")` na lista de causas — qualquer
+   `JSON.parse` falhado era classificado como erro de chunk e
+   desencadeava um recarregamento. O erro real nunca chegava ao Sentry.
+2. **O ecrã branco:** devolvia `{hasError: false}` para tudo o que não
+   fosse chunk. Um boundary que não muda de estado não TRATA o erro — o
+   React volta a renderizar os mesmos filhos, eles levantam outra vez e,
+   sem fronteira a assumir a falha, desmonta a árvore inteira. Aparecia no
+   Voltar porque as rotas têm fronteira própria: o que chega aqui é o que
+   vive FORA delas, e é isso que uma navegação para trás volta a montar.
+3. O cache-busting acumulava (`?_t=1&_t=2&_t=3` — o comentário dizia que
+   era «para evitar ciclo infinito») e usava `location.replace`, que apaga
+   a entrada do histórico: **a correcção estragava o Voltar por si mesma.**
+
+A modal «Novo Processo»: `overflow-y:auto` com `overflow-x:visible` faz o
+CSS promover o eixo X também a `auto` — um filho mais largo cria barra
+horizontal e empurra o botão da direita para fora. Era isto o "cortado".
+
+## Ponto 4 — quatro de SEIS serializações
+
+O Portal mostrava `2/5` e «2 erros no último envio» — nunca um nome. E a
+lista não aparecia porque o servidor não a enviava: `/portal/status` tem
+**seis** sítios a serializar um documento e o PACOTE DE acrescentou
+`attached_files` a **um**. A explicação da correcção está escrita nesse
+bloco, a poucas linhas dos outros.
+
+Faltava no caso normal (`requested_docs`), no `uploaded_docs` — onde o
+`filename` de topo é por desenho o upload mais recente, e era este o «só o
+nome do último ficheiro» — e nos dois `append(entry)` do caminho do cliente
+SEM processo, que é o primeiro ecrã que ele vê.
+
+Do lado do cliente, `utils/portalUploadStaging.js`: o lote nasce na
+selecção com o nome de cada ficheiro, o estado é por ficheiro, o erro fica
+NO ficheiro que falhou (era `errors[0].error`) e o resumo **nomeia** o que
+falhou — «2 erros» manda o cliente adivinhar.
+
+## Validação
+
+* `flake8` (selecção do CI) limpo; `eslint --quiet` limpo; `yarn build` verde.
+* Backend `tests/unit`: **4335 passed, 5 skipped** (eram 4316 — **+19**).
+* Frontend: **1410 passed**, 117 ficheiros (eram 1302 — **+108**).
+
+### Seis mutações, seis mortes — a última depois de corrigir o teste
+
+| Mutação | Mortes |
+|---|---|
+| `valoresAprovados` passa a devolver tudo (pendentes incluídos) | 5 |
+| O indicador de confiança volta a ignorar o valor | 5 |
+| «Unexpected token» volta à lista de erros de chunk | 3 |
+| O resumo do lote volta a contar erros em vez de os nomear | 2 |
+| A projecção do `doc_id` sai | 2 |
+| `attached_files` sai de UMA das seis serializações | 2 |
+
+**A sexta sobreviveu à primeira tentativa.** A guarda fazia
+`assert "attached_files" in bloco` sobre o dicionário renderizado — e isso
+é satisfeito por `"uploaded_count": len(d.get("attached_files") or [])`, em
+que a subcadeia aparece **dentro de outra expressão**. Passou a comparar as
+CHAVES do dicionário por AST. É a mesma armadilha do Lote 2 (`tipos=` é
+subcadeia de `excluir_tipos=`), agora por dentro de uma expressão: duas
+iterações seguidas em que o guarda de fonte foi satisfeito pela linha
+errada.
+
+## Erros meus neste lote
+
+1. **O meu inventário das serializações do Portal estava incompleto.**
+   Contei três (`requested`/`uploaded`/`received`) e são **seis** — há dois
+   `append(entry)` no caminho do cliente sem processo e um no fallback do
+   SystemConfig. Foi o teste que eu próprio escrevi a apanhá-lo, ao falhar
+   com `fonte.index(...)` a acertar no sítio errado. O teste passou a
+   enumerar por AST e a afirmar o NÚMERO, para o próximo sítio novo ter de
+   ser verificado.
+2. **O guarda da sexta mutação era satisfeito por outra expressão** (acima).
+3. Escrevi um teste que dependia da mensagem do V8 (`JSON.parse("{mau")` dá
+   «Expected property name or '}'» nesta versão, não «Unexpected token»).
+   Um teste preso à mensagem de uma versão falha noutro runtime por um
+   motivo que não é o do teste — passou a afirmar o literal e, ao lado, que
+   nenhuma mensagem real deste runtime é classificada como chunk.
+
+# Iteração `navegacao-pool-e-sub35` — 2026-10-02
+
+Lote 4: UX de navegação, Pool e Sub35. Cinco pontos, mais a limpeza do
+`AIReviewDialog` órfão e a extensão do preenchimento em linha aos dados
+financeiros e do imóvel, ambas autorizadas pelo dono do produto.
+
+## Ponto 1 — a etiqueta Sub35 existia e nunca apareceu
+
+`PROCESS_KANBAN_PROJECTION` tinha `"under_35": 1`. `KanbanCard`,
+`SearchResultsList` e `FilteredProcessList` tinham, cada um, o seu
+`{process.under_35 && <Badge>&lt;35 anos</Badge>}`. **Nenhum ficheiro do
+backend escreve `under_35`** — `grep -rn "under_35" backend/` dá uma
+linha, a da projecção.
+
+**Terceiro lote seguido com a mesma forma:** a fila Mongo do Lote 2, o
+`doc_id` do Lote 3, este. A UI a ler um contrato que o servidor nunca
+cumpriu, e em todos os casos a intenção estava escrita e o campo não.
+
+E a mesma pergunta tinha quatro respostas:
+
+| Onde | O que fazia |
+|---|---|
+| `alerts.check_age_alert` | `age < 35` — um cliente de 35 anos, elegível, NÃO recebia o alerta |
+| `idade_menos_35` | booleano persistido, escrito `False` à letra pelo registo público, calculado por ninguém |
+| `under_35` | projectado, lido por três ecrãs, escrito por ninguém |
+| a data | vive em `birth_date` **e** `data_nascimento`, e o `client_crud` sincroniza as duas entradas do formulário para `personal_data.data_nascimento` — o nome que o `check_age_alert` não lia |
+
+`services/sub35.py` é o ponto único. A regra do produto é **menos de
+36** (até aos 35 inclusive, como os apoios jovem), o que corrige o ano de
+clientes que o alerta deixava de fora.
+
+**O teste que justifica o módulo** é o de concordância: o predicado em
+Python (que decide a ETIQUETA) e a condição Mongo (que decide a LISTA
+FILTRADA) correm sobre os mesmos catorze documentos e têm de dar o mesmo
+veredicto. Apanhou um defeito meu na primeira execução — uma data no
+FUTURO (gralha `2206` por `2006`) entrava na lista filtrada e não tinha
+etiqueta no ecrã, porque a condição só tinha limite de baixo.
+
+O filtro entra nos DOIS construtores de query **e no endpoint dos
+vizinhos**: um filtro que existisse na listagem e não ali fazia a seta
+da fronteira da página levar a um processo que a lista não contém.
+
+### Achado de caminho: o filtro de etiquetas do Kanban não fazia nada
+
+Ponto 15 do Lote 2, meu. Os dois hooks do quadro têm um
+`fetchX(token, filters)` que lê `filters.labels` — e destruturam uma
+lista FIXA de opções, descartam as etiquetas e reconstroem um objecto
+novo para o `queryFn`. A canalização está cortada ao meio. Pior: como as
+etiquetas também não entram na CHAVE, mudar o filtro não provocava nem um
+pedido. E não há filtragem local de etiquetas em sítio nenhum — o efeito
+era exactamente zero.
+
+`utils/kanbanFiltros.js` faz os parâmetros e a chave descerem do mesmo
+objecto, com um teste que flipa **cada** filtro e exige que ambos mudem.
+
+## Ponto 2 — eliminar da Pool, e duas noções de papel
+
+A rota entrava por `require_roles` (cargo EFECTIVO) e o serviço tinha
+`if user.get("role") not in [...]` (cargo do JWT). Quem tem perfil base
+de consultor e entra COMO diretor passava a porta e levava 403 na
+segunda. Forma exacta do `history._is_stealth_user` do Lote 4. No
+sentido inverso não há escalada — a porta recusa primeiro — logo o modo
+de falha era a recusa indevida.
+
+O botão novo é gated pelo mesmo papel efectivo, e o diálogo de
+confirmação diz o que a eliminação ARRASTA (processo, documentos,
+tarefas) e o que não (um 2.º titular é desligado, o processo do 1.º fica
+activo).
+
+## Ponto 3 — Próximo/Anterior na Pool
+
+Reaproveitei o mecanismo do Ponto 17 em vez de escrever outro: a lista
+aberta já está em memória, e `vizinhosNoContexto` responde sem pedido
+nenhum. O `ProcessNavigator` passou a ter rótulos parametrizáveis — o
+mesmo componente, não uma cópia.
+
+O `total` do contexto é o da lista CARREGADA (a Pool pede `limit=100`
+sem paginação): "100 / 100" é verdade e o botão desactivado é honesto,
+enquanto "12 / 243" prometia um 101.º que a seta nunca alcança.
+
+## Ponto 4 — o cabeçalho fixo que nunca colou
+
+`sticky z-50 h-14` **sem `top`**. O valor inicial de `top` é `auto` e um
+sticky com `top: auto` comporta-se como estático. Havia até um efeito de
+scroll escrito para quando o cabeçalho acompanha a página — a intenção
+estava lá, a propriedade não.
+
+O único caminho em que funcionava era a IMPERSONAÇÃO, onde um `style` em
+linha punha `top: 48px`. Quem testou "ver como cliente" viu-o a
+funcionar. E o padrão certo já existia noutro ficheiro:
+`PendingItemsList.js` escreve o `top` nos dois ramos.
+
+Camadas: o cabeçalho desceu para `z-40`. Com `z-50` nos dois, decidia a
+ordem no DOM e o cabeçalho tapava o logótipo da gaveta lateral em ecrã
+estreito — invisível enquanto o cabeçalho não era fixo.
+
+## Ponto 5 — o grupo das empresas
+
+A tabela de Empresas mostrava Nome, NIF, Email e Estado e **não mostrava
+a rede** — o campo que decide quem vê os dados de quem. Para saber o
+grupo de uma empresa era preciso abrir o diálogo de edição, uma a uma.
+
+O chip embeleza (`grupo_power_precision` → "Power Precision") mas **não
+unifica**: se dois slugs distintos no mesmo ecrã derem o mesmo rótulo,
+mostram-se os dois crus. É o mesmo risco contra o qual o
+`CompanyNetworkField` foi construído, e a etiqueta bonita podia
+escondê-lo. "Sem grupo" tem aparência própria, porque uma empresa sem
+rede é uma ilha.
+
+## Limpeza e extensão (autorizadas)
+
+- `AIReviewDialog.jsx` + os seus 35 testes **apagados**. O preenchimento
+  em linha foi validado e não há caminho de volta.
+- `InlineAISuggestion` ligado a `monthly_income`, `rendimento_bruto`,
+  `employer_name`, `categoria_profissional` (Financeiros) e
+  `valor_imovel`, `tipologia`, `area`, `artigo_matricial`,
+  `localizacao` (Imóvel).
+- **Achado ao fazê-lo:** `naturalidade` estava no mapa que PRODUZ
+  sugestões e não no que as GRAVA — e o apply descarta em silêncio o que
+  não conhece. O consultor aprovava, recebia 200 e nada era gravado.
+  `test_mapas_de_sugestoes_da_ia.py` compara os dois conjuntos por AST.
+
+## Medição
+
+| | |
+|---|---|
+| backend `tests/unit` | **4426 passed**, 5 skipped (era 4335) |
+| frontend | **1460 passed**, 122 ficheiros (era 1410/117, com 35 testes apagados) |
+| `flake8` / `eslint --quiet` / `yarn build` | limpos |
+
+Doze mutações, doze mortes:
+
+| Mutação | Testes que morreram |
+|---|---|
+| A regra volta a `< 35` | 8 |
+| O filtro Mongo perde o limite de cima | 1 (o de concordância) |
+| O Kanban deixa de escrever a etiqueta | 1 |
+| Os vizinhos deixam de receber o filtro | 2 |
+| A projecção da listagem perde os campos | 1 |
+| A guarda interna volta a ler o papel do JWT | 2 |
+| O apply volta a descartar a `naturalidade` | 2 |
+| A chave de cache perde o `sub35` | 1 |
+| O cabeçalho fica `sticky` sem `top` | 2 |
+| O chip embeleza sempre | 2 |
+| O botão de eliminar volta ao papel base | 1 |
+| A etiqueta deixa de ler o campo novo | 3 |
+
+## Erros meus neste lote
+
+1. **Uma das mutações não mutou nada.** A âncora apanhou o bloco de
+   comentário antes do `**PROJECCAO_SUB35` e a substituição acrescentou
+   uma linha mantendo o spread — "SOBREVIVEU" com o código intacto. É a
+   lição do Épico 9 (distinguir mutação perdida de teste fraco): com a
+   âncora certa, morreu. Uma mutação tem de ser VERIFICADA antes de se
+   concluir algo do resultado.
+2. **O meu primeiro teste de concordância tinha a amostra certa e a
+   condição errada** — foi ele a dizer-me que o filtro aceitava datas no
+   futuro. Conta como acerto do método e erro meu no desenho: escrevi a
+   condição Mongo antes de pensar no limite de cima.
+3. **Passei o `routes/clients.py` dos 250 linhas** que o guarda de
+   "thin stubs" permite, com comentários que pertenciam ao serviço. Baixei
+   o ficheiro em vez de levantar o limiar: o guarda existe para a lógica
+   não voltar às rotas, e relaxá-lo pela primeira coisa que o toca é como
+   se perde.
+4. **Um fixture meu tinha o nome da empresa igual ao do grupo**
+   ("Domus"), e o teste falhou com "Found multiple elements". Era o teste
+   a estar mal, não o código — mas um fixture cujo valor colide com outro
+   campo esconde qual dos dois a asserção apanhou.
+
+# Iteração `sub35-estrito-e-auditoria` — 2026-10-02
+
+Lote 5: as três decisões de negócio que o Lote 4 deixou em aberto, mais o
+fecho da D-16. Nenhuma delas era um defeito meu a corrigir — eram
+perguntas que fiz e que o dono do produto respondeu.
+
+## 1 — Sub35 estrito: a condição é sobre TODOS os compradores
+
+Regra confirmada: o apoio do Estado exige que todos os compradores tenham
+35 anos ou menos. A do Lote 4 olhava só para o titular 1.
+
+```
+marca manual   OU   (titular 1 é Sub35   E   o 2.º titular não bloqueia)
+```
+
+**A decisão que mais me deu que pensar** foi a data DESCONHECIDA de um 2.º
+titular real. Bloqueia. «Todos têm 35 ou menos» não se afirma de quem não
+tem data na ficha, e os dois erros não custam o mesmo: uma etiqueta a mais
+faz o consultor prometer uma isenção que a AT recusa em cima da
+escritura; uma etiqueta a menos é uma oportunidade que alguém confirma à
+mão. Falha fechada, como a audiência dos alertas do Lote 6.
+
+**A armadilha que quase apanhei de novo:** `titular2_data` existe quase
+sempre — o registo público grava-o com as chaves PRESENTES E VAZIAS. Um
+`if doc.get("titular2_data")` teria retirado a etiqueta a **todos** os
+processos vindos do portal. É a lição do RGPD do 2.º titular («presente
+mas vazio» não é «presente»), e desta vez lembrei-me antes de escrever o
+código — mas só porque está no AGENTS.md.
+
+**A condição Mongo sem `$nor`.** «Não há 2.º titular» é um `$and` de
+`{campo: {"$in": [None, ""]}}` (casa com ausente, `null` e `""`) em vez de
+uma negação. O duplo de teste implementa `$or`/`$and`/`$in` e **ignora** o
+`$nor`: com negação, o teste de concordância ficava verde a provar menos
+do que parece. É a armadilha do duplo demasiado esperto evitada na
+escolha dos operadores, não no teste.
+
+A amostra da concordância passou de 14 para **24** documentos, dez do 2.º
+titular. O predicado e a condição Mongo concordam em todos.
+
+**Os `co_buyers` ficam de fora** porque a estrutura que a IA grava do CPCV
+não tem data de nascimento nenhuma — bloquear por eles era bloquear por
+dados que não existem. D-17, com o que falta para fechar.
+
+## 2 — A porta não pode ser mais larga do que o botão
+
+`ADMINISTRATIVO` saiu de `PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES`. O botão da
+Pool já só aparecia a Administração/Direção; uma rota mais larga é o
+«menu e rotas têm de concordar» com as consequências ao contrário — a UI
+não mostra e o endpoint aceita.
+
+Os dois testes do legado foram **invertidos**, não apagados, e há um novo
+a cruzar a constante do backend com a lista do gate da UI: são duas
+listas em linguagens diferentes e ninguém as cruzava.
+
+## 3 — D-16 fechada: quem apagou o quê
+
+`log_audit_event` nos **dois** pontos de saída do `run_delete_client` (o
+cliente vive em `processes` ou em `clients`). Um registo escrito só num
+ramo é a forma de defeito desta casa há seis lotes — há um teste por ramo
+e um a afirmar que são dois.
+
+Três detalhes: o trilho e não o `db.history` (indexado por `process_id`, e
+um cliente da Pool pode não ter processo); o papel no registo é o
+**efectivo**, em `metadata`, porque o campo partilhado guarda o do JWT; e
+o registo nunca falha a eliminação — é escrito depois, e um 404 não deixa
+rasto nenhum.
+
+## Medição
+
+| | |
+|---|---|
+| backend `tests/unit` | **4462 passed**, 5 skipped (era 4426) |
+| frontend | **1460 passed**, 122 ficheiros |
+| `flake8` / `eslint --quiet` / `yarn build` | limpos |
+
+Seis mutações, seis mortes:
+
+| Mutação | Testes que morreram |
+|---|---|
+| Uma data desconhecida deixa de bloquear | 4 |
+| `titular2_data` vazio conta como titular | 3 |
+| A condição Mongo perde a restrição do 2.º titular | 4 |
+| O `administrativo` volta a poder eliminar | 4 |
+| O ramo do cliente deixa de registar a auditoria | 3 |
+| O helper de auditoria deixa de engolir o erro | 1 |
+
+## Erros meus neste lote
+
+1. **Escrevi uma guarda de fonte com aspas duplas.** O
+   `codigo_sem_comentarios` passa pelo `ast.unparse`, que NORMALIZA as
+   aspas — `"success"` chega ao teste como `'success'`. Está escrito no
+   AGENTS.md, escrito por mim, e falhei-o. O teste apanhou-se a si
+   próprio, mas é a segunda vez que esta regra me morde.
+2. **Passei outra vez o `routes/clients.py` dos 250 linhas** do guarda de
+   thin stubs, agora com o `request=` a mais na chamada. Comprimi a
+   chamada em vez de levantar o limiar, como no lote anterior — mas é
+   sinal de que este ficheiro está no limite e a próxima linha vai ter de
+   pagar com uma extracção, não com formatação.
+
+---
+
+# Iteração `identidade-documental-e-d17` — 2026-10-02
+
+**Pedido (Lote 6, pontos 1 e 3):** a colisão de identidade nas pastas de
+documentos (uma cliente nova mapeada para a pasta de uma existente) e o fecho
+da D-17 (Sub35 para os `co_buyers`). Os pontos 2, 4 e 5 do lote ficam para a
+iteração seguinte.
+
+## O que estava mal
+
+### A colisão não era o *fuzzy match* a falhar
+
+Fez exactamente o que estava escrito. A aritmética do
+`_find_client_folder_combined`, reproduzida antes de tocar em código:
+
+| Nome novo | Pasta existente | Score | |
+|---|---|---|---|
+| Carolina Agostinho da Silva | `carolina_silva` | **0.867** | colide |
+| Ana Maria Costa | `ana_costa` | **0.867** | colide |
+| Maria Silva | `joao_silva` | 0.500 | ok |
+
+2/3 de palavras em comum (`da` é descartada como palavra comum) + 0.2 de bónus
+por o primeiro nome aparecer na pasta, contra um limiar de 0.7. A **assinatura**
+é *mesmo primeiro nome + um conjunto de nomes contido no outro*: mãe e filha,
+dois irmãos, e sobretudo a mesma pessoa inserida com nome curto e com nome
+completo.
+
+### O mecanismo de desambiguação não existia
+
+`_get_client_base_path` — a única função que acrescentava `_2`/`_3` — **não
+tinha um único chamador**. A que corria diz na própria docstring que não usa
+incrementador. Dois homónimos nunca tiveram pastas separadas, e o
+`s3_folder_relink.py` documentava o `_2` como "precisamente como o sistema
+desambigua homónimos". Foi apagada.
+
+### Cinco escritores derivavam o caminho do nome
+
+`ensure_client_folder_mapping` (criar cliente, criar processo, atribuir, upload
+do Portal, 2 scripts), `initialize_client_folders` (registo público,
+init-folders), `_get_client_base_path_for_upload` (análise IA ×2, conflito de
+nomes), o `generate_upload_presigned_*` por dentro — e um **quarto, em linha**,
+que só apareceu a ler o `client_assign`: um "fallback determinístico" que
+gravava `Documentação Clientes/{Safe_Name}` **directamente no documento do
+processo**. Dois homónimos recebiam ali o mesmo `s3_folder`, e como o `ensure`
+honra o que já está gravado (passo 1), essa colisão **sobrevivia a qualquer
+correcção feita só no `ensure`**.
+
+### A guarda de posse tinha um buraco que não precisava do *fuzzy match*
+
+```python
+"Documentação Clientes/Carolina Silva Agostinho/Financeiros/irs.pdf" \
+    .startswith("Documentação Clientes/Carolina Silva")   # → True
+```
+
+Sem `s3_folder`, `assert_s3_file_belongs_to_process` construía o prefixo a
+partir do nome **sem barra final**. Alcançável do **Portal**, a única superfície
+externa. E `build_s3_valid_prefixes` tinha o mesmo defeito com um chamador que
+fazia o seu próprio `startswith` — duas verificações a degradar de maneiras
+diferentes.
+
+### O botão que fabricava a colisão
+
+`run_auto_map_client_s3_folders` fazia `find_one` com
+`{"client_name": {"$regex": f"{primeiro}.*{último}"}}` e ficava com o primeiro
+que o Mongo devolvesse, sem verificar unicidade — e gravava.
+
+## O que ficou
+
+`services/s3_document_root.py` como ponto único:
+`Documentação Clientes/{client_id}/` e `.../processos/{process_id}/`. A raiz
+canónica é a mesma (alargar a parede de segurança para caber a correcção é como
+o Incidente P0 começou), **nada se migra e nada se move** (mover objectos
+produziu as 205 ligações partidas do Épico 10), e a leitura de um processo é uma
+**união** — a subpasta dele mais a raiz do cliente sem a subárvore `processos/`
+—, senão o onboarding do Portal desaparecia do separador Documentos.
+
+A procura por nome não foi apagada: foi **despromovida**. Perdeu o score (só
+match exacto) e serve agora a leitura de um processo legado sem mapeamento e a
+sugestão ao administrador. O resíduo dos homónimos exactos ficou em D-19.
+
+## D-17, e o que apareceu ao fechá-la
+
+A data de nascimento entrou no esquema de extracção do CPCV — **opcional, e com
+instrução explícita de não inferir**: um CPCV português identifica as partes por
+NIF/CC e estado civil e muitas vezes não indica a data; exigi-la levaria o
+modelo a inventá-la, e a regra sabe tratar "não sei" (bloqueia), não sabe tratar
+uma mentira.
+
+**`co_buyers` tem dois significados** (D-18): o mapeador do CPCV grava TODOS os
+compradores com o titular 1 no elemento 0; o `build_add_client_update` grava só
+os ADICIONAIS. Sem desduplicar por identidade, a regra estrita contava o titular
+1 duas vezes e — como as datas raramente vêm no CPCV — **retirava a etiqueta a
+qualquer processo analisado, mesmo com um só comprador**. A regra foi escrita
+para ser correcta sob os dois significados.
+
+A comparação de identidade é **exacta** (NIF/CC em dígitos, nome normalizado
+sem acentos). Foi um score de similaridade entre nomes que produziu a colisão de
+pastas deste mesmo lote; usá-lo aqui seria incoerente, e abriria a etiqueta —
+o sentido errado.
+
+Duas perguntas que tive de separar para decidir bem: **"há aqui alguém?"** (uma
+chave de identidade com valor) e **"sei dizer quem?"** (um token comparável).
+Uma linha que a extracção deixou vazia não é uma pessoa e salta; uma linha com
+algo escrito mas incomparável é uma pessoa que não sei identificar, e aí vale a
+falha fechada. É também o que alinha o predicado com a condição Mongo, que
+decide por valor presente (`$nin: [None, ""]`).
+
+### O duplo de Mongo teve de aprender `$nor` e `$elemMatch`
+
+O quantificador é **TODOS**, e no Mongo isso não tem forma positiva. O
+`FakeAsyncCollection` não implementava nenhum dos dois, e o efeito **não era
+"ignorar"**: o `$nor` caía no `_lookup_path`, comparava-se com uma lista, e a
+query deixava de casar com nada — fail-closed e igualmente enganador, porque o
+teste mostraria uma lista vazia em vez do defeito. A nota do Lote 5 no
+`AGENTS.md` dizia "ignorado"; **era pior do que isso, e corrigi a nota**. A
+semântica dos dois operadores é afirmada um nível abaixo, em
+`test_duplo_de_mongo_nor_e_elemmatch.py`.
+
+### A assimetria que decidi manter, e afirmar
+
+O predicado desduplica; a condição Mongo não consegue (o `nif`/`cc` estão
+encriptados em repouso). Num caso enumerado — CPCV de um só comprador sem datas
+— o processo tem etiqueta e **não aparece** na lista filtrada.
+
+Escolhi este sentido de propósito: a etiqueta é o que o consultor vê e tem de
+ser a autoridade; o filtro é conveniência. O erro ao contrário seria prometer
+uma isenção de IMT que a AT recusa em cima da escritura. A propriedade
+`test_o_filtro_NUNCA_mostra_uma_linha_sem_etiqueta` corre sobre a amostra
+inteira, e a lista de excepções tem um teste a exigir que ainda divergem —
+sem ele encher-se-ia de casos que já concordam e esconderia uma divergência
+nova.
+
+## Um efeito colateral que a correcção criou, e que apanhei a lê-la
+
+Dois reparadores de `client_name` extraem o nome **DA PASTA**
+(`run_fix_missing_client_names`, `run_auto_map_client_s3_folders`). Com a pasta
+a derivar do ID, passavam a gravar um **uuid como nome do cliente** — e esse
+nome sai depois em emails, PDFs e documentos RGPD.
+
+E a primeira guarda que escrevi estava errada: usei `id_valido`, que pergunta
+*"serve como segmento de caminho?"* — e `Rui_Pereira` serve. O reparador deixava
+de reparar nomes legítimos. São **duas perguntas diferentes**, e `e_id_gerado`
+(a forma do `uuid4`) é a segunda. Um id legado que não seja uuid responde
+`False`, e aí a pasta é tratada como pasta por nome: falhar para o lado antigo é
+seguro, o contrário escreve um uuid onde vai um nome.
+
+## O que fica a saber
+
+As pastas NOVAS aparecem no Explorador de Ficheiros e no diálogo de mapeamento
+como um **uuid**, até o ponto 2 deste lote (o religamento manual) acrescentar a
+resolução do nome a partir do mapeamento. Fica dito de propósito: é o custo
+conhecido de a identidade deixar de ser o nome, e tem um lado bom — uma listagem
+de pastas deixa de revelar os nomes dos clientes, que é uma preocupação já
+escrita no `s3_explorer_scope` ("o nome da pasta É o nome do cliente —
+confirmaria a carteira da concorrência").
+
+## Medição
+
+| | |
+|---|---|
+| Testes novos | `test_s3_document_root.py` (57), `test_posse_s3_fronteira_de_segmento.py` (11), `test_automap_pastas_ambiguas.py` (8), `test_duplo_de_mongo_nor_e_elemmatch.py` (15), `test_cpcv_data_de_nascimento.py` (5) |
+| Testes invertidos | 4 em `test_s3_ensure_client_folder_mapping.py` (afirmavam a procura por nome), 1 em `test_sub35.py` (afirmava o adiamento da D-17) |
+
+Dez mutações, dez mortes:
+
+| Mutação | Testes que morreram |
+|---|---|
+| `dentro_da_pasta` perde a fronteira de segmento | 7 |
+| A pasta do processo deixa de ficar sob a do cliente | 4 |
+| A leitura da raiz do cliente deixa de excluir os processos | 1 |
+| `client_assign` volta a derivar o caminho do nome | 1 |
+| O auto-map volta a mapear a pasta ambígua | 2 |
+| Sem nome, os prefixos de posse voltam a ser a raiz nua | 2 |
+| Os `co_buyers` deixam de bloquear | 7 |
+| A desduplicação por identidade desaparece | 4 |
+| Uma data desconhecida de um comprador deixa de bloquear | 5 |
+| A condição Mongo perde os compradores | 5 |
+| A guarda do uuid-como-nome volta a usar `id_valido` | 1 |
+
+---
+
+# Iteração `religamento-arrasto-e-permissoes` — 2026-10-03
+
+**Pedido (Lote 6, segunda parte):** a ferramenta de religamento manual na área
+de mapeamento S3 das Configurações (exclusiva da Administração, e o Explorador a
+não mostrar um uuid quando consegue resolver o nome), arrastar e largar no
+Portal e na ficha do processo, e os botões fantasma (um `index` vê "Novo
+Processo" e não pode criar).
+
+## 1. Religamento manual
+
+`services/s3_relink.py` + `GET/POST /api/admin/s3-relink` + o painel dentro do
+bloco de mapeamento S3.
+
+**A ferramenta que existia só sabia PROCESSOS** — a rota de "cliente" era um
+alias que recebia `process_id`. Um cliente da Pool que nunca teve processo não
+tinha como ser religado, e é precisamente ele que vive sozinho na raiz
+documental.
+
+Seis regras, cada uma com teste. As duas que não eram óbvias:
+
+* **apontar para uma pasta que JÁ tem dono é permitido**, com aviso que NOMEIA
+  os donos actuais. Consolidar duas fichas é um uso legítimo (um cliente com dois
+  registos); proibi-lo tirava à ferramenta metade dos casos;
+* **um `/` ou `///` é recusado**, não tratado como "remover". Remover é uma
+  string vazia, explícita — tratar uma normalização falhada como remoção
+  respondia a uma pergunta diferente da feita. Foi o único teste que falhou à
+  primeira, e tinha razão.
+
+## 2. Uma regressão minha, do ponto 1, que nenhum teste do ponto 1 podia apanhar
+
+O Explorador resolvia a pertença de uma pasta lendo **só** `processes.s3_folder`.
+Com a pasta do processo a viver DENTRO da do cliente (`{cid}/processos/{pid}`),
+**nenhum processo aponta para `{cid}`**: a pasta de topo passou a contar como
+órfã, e uma órfã só é visível a ADMIN/CEO.
+
+Ou seja: a correcção da colisão de identidade tornava invisível ao staff normal a
+pasta de **todos os clientes novos**. Encontrei-a a escrever o teste do nome
+visível, não a procurá-la — a pergunta do ponto 1 era outra.
+
+`carregar_pastas` tem agora três caminhos (mapeamento do processo, mapeamento do
+cliente, e pelo ID quando o segmento é um uuid gerado), com um teste a afirmar
+que a fronteira de rede **não se alarga**: uma pasta da Domus continua invisível
+à Power.
+
+## 3. Arrastar e largar
+
+O que faltava não era a zona — era o GESTO certo:
+
+* no **Portal** já havia `onDrop` na linha de cada pedido, mas sem contador de
+  entradas/saídas (o realce piscava ao passar sobre o conteúdo) e **sem filtro de
+  tipos**: o botão tinha `accept`, o `drop` não, e largar um `.exe` ia direito ao
+  upload;
+* no **separador Documentos** havia `onDrop` em cada categoria — **só para
+  MOVER**. Um ficheiro vindo do Finder não fazia nada: o `handleDrop` lia o
+  estado interno e ignorava `dataTransfer.files`.
+
+Daí a guarda central (`eArrastoDeFicheiros`, pelo `dataTransfer.types`): **sem
+ela, ligar o upload por arrasto partia o mover que já existia.** Dois gestos
+chegam pelo mesmo `onDrop`, e é a metade que se parte sem dar erro.
+
+O upload foi **extraído, não duplicado** (`enviarFicheiros(ficheiros, categoria)`
+serve o botão e o arrasto, com a mesma verificação de conflitos e o mesmo pedido
+de NIF à indexação), e a lista de tipos passou a ser **uma constante** por
+superfície — em dois sítios divergiriam, e a divergência tem uma forma concreta:
+o botão recusa e o arrasto deixa passar.
+
+**Duas coisas que só o teste revelou:**
+
+1. **A ordem dos callbacks importa.** Com `onRecusados` antes de `onFicheiros`,
+   um largar MISTO apagava o aviso: quem trata os aceites limpa o estado do envio
+   anterior, e esse "limpar" apagava a recusa acabada de escrever. Inverti a
+   ordem — e um largar limpo passou também a limpar um aviso antigo.
+2. **A mensagem de recusa não tinha onde aparecer.** Escrevi-a no `result`, e
+   nenhum ramo do render do Portal mostra uma mensagem de falha — era escrever
+   para ninguém, a mesma armadilha da notificação sem destinatário. Ganhou estado
+   próprio e uma linha no ecrã, com os nomes dos ficheiros.
+
+## 4. Os botões fantasma
+
+O sistema **já tinha** o registo canónico de capacidades por cargo, e lá estava
+escrito que `indexacao` não cria processos. O ecrã não o consultava.
+
+E a resolução que existia lia `user["role"]` — o cargo do JWT — enquanto a porta
+do servidor usa o EFECTIVO. Terceira ocorrência da forma do
+`history._is_stealth_user`: **duas noções de papel no mesmo caminho dão as duas
+respostas erradas.**
+
+Três decisões:
+
+* **cadeado visível, não ocultação** (por omissão): um ecrã que muda de forma a
+  cada perfil é impossível de apoiar ao telefone, e esconder ensina menos do que
+  explicar. `modo="ocultar"` fica para acções cuja existência revela algo;
+* **a rota deixou de ser mais larga do que o botão** —
+  `POST /processes/create-client` entrava com `get_current_user`, sem restrição
+  nenhuma: um `indexacao` podia criar um processo pela API;
+* **sem contrato, o ecrã não esconde nada.** Uma sessão anterior ao deploy não
+  tem `capabilities_por_papel`; falhar fechado aí esconderia todos os botões a
+  todos, e um ecrã sem botões não produz erro nenhum. A parede é o servidor.
+
+O gate da Pool era `userRole !== "indexacao"` — lista de **exclusão** escrita à
+mão: um perfil novo sem direito a criar processos passava a ver o botão.
+
+## Erros meus nesta iteração
+
+1. **Criei uma zona morta temporal.** Pus `const canAssign = podeFazer(…,
+   papelActivo)` **acima** da declaração de `papelActivo` — um `const` na TDZ,
+   avaliado no próprio render. É o defeito que o teste de integração do
+   `WebmailPage` apanhou em 2026, e repeti-o.
+2. **A minha guarda de fonte leu os meus próprios comentários.** Afirmava que
+   `userRole !== "indexacao"` tinha desaparecido, e o texto estava no comentário
+   que explica o defeito antigo. Ficou vermelha com razão: uma guarda que lê
+   comentários proíbe a explicação do defeito que previne. Ganhou um
+   `semComentarios` com contraprova (não decapita um `https://`).
+3. **Usei `id_valido` onde precisava de `e_id_gerado`** (arrastado do ponto 1):
+   a primeira pergunta é "serve como segmento de caminho?", e `Rui_Pereira`
+   serve.
+4. **Um fixture colidiu consigo mesmo** no teste do painel: o nome do cliente
+   aparece na linha E nas opções do `<select>`, e o `getByText` deu "Found
+   multiple elements". É a terceira vez (o chip da Domus no Lote 4) — a consulta
+   passou a ser pela LINHA.
+5. **Lintei os ficheiros que EDITEI e não os que CRIEI.** `yarn eslint --quiet
+   src` apanhou dois `no-undef` nos meus testes novos — `__dirname` (o projecto é
+   ESM) e `global` — e neste repositório o `no-undef` é **erro**, logo bloqueava
+   o CI. A lição é sobre o comando, não sobre o código: a verificação tem de
+   correr sobre a ÁRVORE, porque é isso que o CI faz.
+
+## Medição
+
+| | |
+|---|---|
+| backend `tests/unit` | **4665 passed**, 5 skipped (era 4609) |
+| frontend | **1572 passed**, 132 ficheiros (era 1460 / 122) |
+| `eslint --quiet src` / `yarn build` / `flake8` | limpos |
+
+Doze mutações, doze mortes — **uma sobreviveu à primeira tentativa e tinha
+razão.** `nome_legivel` a escolher um nome mesmo com dois atravessou os testes
+porque o meu teste da colisão usava uma pasta LEGADA: aí o nome não é um uuid e
+a decisão "quantos nomes há" nem chega a correr. A colisão que importa é a da
+pasta POR ID, e faltava-lhe o caso. É a distinção entre mutação perdida e
+**teste fraco** — terceira ocorrência no projecto, e desta vez foi teste fraco.
+
+| Mutação | Testes que morreram |
+|---|---|
+| O arrasto interno passa a contar como arrasto de ficheiros | 2 |
+| A ordem dos callbacks do `Dropzone` volta a trás | 2 |
+| O filtro de tipos deixa passar tudo | 7 |
+| O gate de permissões autoriza sempre | 10 |
+| O gate falha FECHADO sem contrato | 3 |
+| A pasta com duas fichas deixa de se anunciar | 2 |
+| A Pool volta à lista de exclusão pelo papel do JWT | 3 |
+| `nome_legivel` escolhe um nome mesmo com dois (2.ª tentativa) | 1 |
+| A resolução da pasta por ID desaparece | 4 |
+| `validar_pasta` aceita fora da raiz documental | 3 |
+| As capacidades voltam a sair do cargo do JWT | 1 |
+| O sentinel «todos os perfis» deixa de ser traduzido | 1 |
+
+Testes novos: `test_s3_religamento_manual.py` (26),
+`test_explorador_nome_da_pasta.py` (11), `test_capacidades_pelo_papel_efectivo.py`
+(17), `utils/pastaS3.test.js` (17), `utils/dropzone.test.js` (16),
+`utils/capacidades.test.js` (12), `Dropzone.test.jsx` (11),
+`BotaoComPermissao.test.jsx` (6), `S3RelinkPanel.test.jsx` (13),
+`MaintenanceSection.religamento.test.jsx` (5),
+`ClientPortal.arrastar.test.jsx` (5), `S3FileManager.arrastar.test.jsx` (5),
+`botoesFantasma.ligacao.test.js` (17). Mais 5 na Pool, que já tinha arnês.

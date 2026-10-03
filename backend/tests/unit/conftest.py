@@ -162,7 +162,36 @@ class FakeAsyncCollection:
                 if not all(FakeAsyncCollection._matches(doc, q) for q in expected):
                     return False
                 continue
+            # LOTE 6 — $nor e $elemMatch.
+            #
+            # Antes não estavam implementados, e o efeito NÃO era "ignorar":
+            # um `$nor` caía no `_lookup_path` (devolve None), comparava-se com
+            # uma lista e a query deixava de casar com NADA. Fail-closed, mas
+            # igualmente enganador — um teste de filtro mostraria a lista vazia
+            # em vez do defeito. (A nota do Lote 5 em AGENTS.md dizia
+            # "ignorado"; era pior do que isso.)
+            #
+            # São precisos para o quantificador "TODOS os elementos de um
+            # array": no Mongo não existe forma positiva de o dizer, e a
+            # regra Sub35 dos `co_buyers` (D-17) exige-o. A semântica de cada
+            # um é afirmada um nível ABAIXO, em
+            # `test_duplo_de_mongo_nor_e_elemmatch.py`, porque aqui está a ser
+            # implementada lógica em que os outros testes passam a confiar.
+            if key == "$nor":
+                if any(FakeAsyncCollection._matches(doc, q) for q in expected):
+                    return False
+                continue
             value = FakeAsyncCollection._lookup_path(doc, key)
+            if isinstance(expected, dict) and "$elemMatch" in expected:
+                sub = expected["$elemMatch"]
+                if not isinstance(value, (list, tuple)):
+                    return False
+                if not any(
+                    isinstance(el, dict) and FakeAsyncCollection._matches(el, sub)
+                    for el in value
+                ):
+                    return False
+                continue
             if isinstance(expected, dict):
                 matched_operator = False
                 if "$ne" in expected:
@@ -308,7 +337,14 @@ class FakeAsyncCollection:
             self.docs.append(dict(doc))
         return MagicMock(inserted_ids=["fake-inserted-id"] * len(docs))
 
-    async def find_one_and_update(self, query: dict, update: dict, return_document: bool = False):
+    async def find_one_and_update(
+        self,
+        query: dict,
+        update: dict,
+        return_document: bool = False,
+        sort: list = None,
+        projection: dict = None,
+    ):
         """``find_one_and_update`` (PACOTE 10 — usado por
         ``task_log_service.update_task`` para as transições do monitor
         global de tarefas).
@@ -317,14 +353,35 @@ class FakeAsyncCollection:
         actualizado (o Mongo real devolve before/after conforme
         ``return_document``; o serviço espera o doc actualizado —
         ``return_document=True`` é aceito e ignorado).
+
+        ``sort`` e ``projection`` (Lote 2): a reclamação de tarefas da fila
+        do Processador (`task_queue_mongo.get_next_task`) precisa de FIFO e
+        de excluir o ``_id``. **Este duplo não prova atomicidade** — ele
+        reimplementa a escolha-e-actualiza num só passo porque é
+        single-thread, e um duplo que reimplementa a lógica valida o duplo
+        (lição de Set 2026). Que a reclamação seja UMA operação e não um
+        find-depois-update é afirmado um nível abaixo, sobre os parâmetros
+        que saem.
         """
-        for doc in self.docs:
+        candidatos = self.docs
+        if sort:
+            for chave, direccao in reversed(list(sort)):
+                candidatos = sorted(
+                    candidatos,
+                    key=lambda d: (d.get(chave) is None, d.get(chave)),
+                    reverse=direccao < 0,
+                )
+        for doc in candidatos:
             if self._matches(doc, query):
                 self._apply_set(doc, update.get("$set", {}))
                 push_ops = update.get("$push")
                 if push_ops:
                     self._apply_push(doc, push_ops)
-                return dict(doc)
+                resultado = dict(doc)
+                if projection:
+                    excluir = {k for k, v in projection.items() if not v}
+                    resultado = {k: v for k, v in resultado.items() if k not in excluir}
+                return resultado
         return None
 
     async def delete_one(self, query: dict):

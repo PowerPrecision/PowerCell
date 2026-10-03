@@ -58,7 +58,36 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+#: OMISSÃO legada, mantida só para quem a importe deste módulo. **Não
+#: decide nada**: é lida no import, logo congela o ambiente do arranque.
+#: Quem precisa de saber se há chave chama `chave_de_ia_configurada()`.
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+
+#: Variáveis que podem conter a chave, por ordem de prioridade — a MESMA
+#: ordem do construtor canónico (`ai_document_analyzer.get_openai_client`).
+VARIAVEIS_DA_CHAVE_DE_IA: tuple[str, ...] = (
+    "OPENAI_API_KEY",
+    "EMERGENT_LLM_KEY",
+)
+
+
+def chave_de_ia_configurada() -> bool:
+    """Há chave de IA utilizável? Lida na CHAMADA, não no import.
+
+    PORQUE É QUE ISTO EXISTE (401 em produção, Set 2026)
+    ====================================================
+    Dois guardas deste módulo faziam `if not EMERGENT_LLM_KEY` e
+    devolviam "Serviço AI não configurado". Com a `OPENAI_API_KEY`
+    definida no Render — e válida — recusavam o trabalho antes de
+    tentar, porque essa variável nunca era consultada.
+
+    Ler na chamada e não no import não é zelo: uma constante de módulo
+    congela o ambiente do arranque, e o sintoma disso é indistinguível
+    de "a chave está errada".
+    """
+    return any(
+        (os.environ.get(nome) or "").strip() for nome in VARIAVEIS_DA_CHAVE_DE_IA
+    )
 
 # Modelo de OMISSÃO, não o modelo em uso. Quem manda é o painel de IA
 # (tarefa `document_analysis`); ver `resolve_ai_model` mais abaixo. Este valor
@@ -71,10 +100,43 @@ from openai import AsyncOpenAI
 _openai_client: Optional[AsyncOpenAI] = None
 
 def get_openai_client() -> AsyncOpenAI:
-    """Obter ou criar cliente OpenAI assíncrono."""
+    """Cliente OpenAI assíncrono — delega no construtor CANÓNICO.
+
+    A ARMADILHA DO NOME (401 em produção, Set 2026)
+    ===============================================
+    Esta função construía o cliente à mão com
+    `AsyncOpenAI(api_key=EMERGENT_LLM_KEY)`: nunca lia a
+    `OPENAI_API_KEY`, nunca passava `organization`, e lia a chave no
+    import. Com a `OPENAI_API_KEY` definida no Render, o cliente nascia
+    com `api_key=""` → **401**.
+
+    E o construtor certo já existia, com o **mesmo nome**, no módulo
+    vizinho: `ai_document_analyzer.get_openai_client` faz
+    `OPENAI_API_KEY` > `EMERGENT_LLM_KEY`, trata o `base_url` das chaves
+    `sk-emerg` e passa o `organization`. Duas funções homónimas, uma
+    correcta e uma partida — e quem lê `get_openai_client()` no código
+    não tem como saber qual delas é.
+
+    O import é tardio pelo mesmo motivo que em `resolve_ai_model`: o
+    `ai_document_analyzer` importa deste módulo, e um import no topo
+    fecharia o ciclo.
+    """
     global _openai_client
     if _openai_client is None:
-        _openai_client = AsyncOpenAI(api_key=EMERGENT_LLM_KEY)
+        from services.ai_document_analyzer import (
+            get_openai_client as construir_cliente_canonico,
+        )
+
+        cliente = construir_cliente_canonico()
+        if cliente is None:
+            # O construtor canónico devolve `None` sem chave. Deixar
+            # passar daria um `AttributeError` numa linha que não diz
+            # nada sobre configuração — e era esse o diagnóstico difícil.
+            raise RuntimeError(
+                "Nenhuma chave de IA configurada (OPENAI_API_KEY ou "
+                "EMERGENT_LLM_KEY). O cliente OpenAI não pode ser criado."
+            )
+        _openai_client = cliente
     return _openai_client
 
 
@@ -346,6 +408,15 @@ def get_document_tool_definition(document_type: str) -> dict:
                                     "nome_completo": {"type": "string", "description": "Nome completo do comprador/proponente"},
                                     "nif": {"type": "string", "description": "NIF do comprador (9 dígitos)"},
                                     "cc": {"type": "string", "description": "Número do Cartão de Cidadão"},
+                                    # D-17 (Lote 6): sem este campo a idade de um
+                                    # terceiro comprador não existia na base de
+                                    # dados e a regra Sub35 — que exige TODOS os
+                                    # compradores com 35 anos ou menos — não o
+                                    # podia considerar. Um CPCV português muitas
+                                    # vezes NÃO indica a data; é por isso que o
+                                    # campo é opcional e que "não sei" tem de se
+                                    # distinguir de "não é elegível".
+                                    "data_nascimento": {"type": "string", "description": "Data de nascimento do comprador (YYYY-MM-DD). Deixar vazio se o contrato não a indicar — NÃO inferir da idade nem do número do CC."},
                                     "estado_civil": {"type": "string", "description": "Estado civil (Solteiro/Casado/Divorciado/Viúvo/União de Facto)"},
                                     "regime_bens": {"type": "string", "description": "Regime de bens (Comunhão de adquiridos/Separação de bens/etc)"},
                                     "profissao": {"type": "string", "description": "Profissão"},
@@ -1310,8 +1381,10 @@ async def analyze_document_from_base64(base64_content: str, mime_type: str, docu
     Returns:
         Dados extraídos
     """
-    if not EMERGENT_LLM_KEY:
-        logger.error("EMERGENT_LLM_KEY não configurada")
+    if not chave_de_ia_configurada():
+        logger.error(
+            "Nenhuma chave de IA configurada (OPENAI_API_KEY ou EMERGENT_LLM_KEY)"
+        )
         return {"error": "Serviço AI não configurado", "extracted_data": {}}
     
     # Decodificar base64
@@ -1361,8 +1434,10 @@ async def analyze_document_from_url(document_url: str, document_type: str) -> Di
     Returns:
         Dados extraídos
     """
-    if not EMERGENT_LLM_KEY:
-        logger.error("EMERGENT_LLM_KEY não configurada")
+    if not chave_de_ia_configurada():
+        logger.error(
+            "Nenhuma chave de IA configurada (OPENAI_API_KEY ou EMERGENT_LLM_KEY)"
+        )
         return {"error": "Serviço AI não configurado", "extracted_data": {}}
     
     try:
@@ -2598,6 +2673,10 @@ def build_update_data_from_extraction(
                 "nome": comprador.get('nome_completo') or comprador.get('nome'),
                 "nif": comprador.get('nif'),
                 "cc": comprador.get('cc'),
+                # D-17: o nome do campo é o canónico do `services.sub35`
+                # (`CAMPOS_DE_NASCIMENTO`). Um nome novo aqui seria o quinto
+                # nome da mesma data e a regra não o leria.
+                "data_nascimento": comprador.get('data_nascimento'),
                 "estado_civil": comprador.get('estado_civil'),
                 "regime_bens": comprador.get('regime_bens'),
                 "profissao": comprador.get('profissao'),
@@ -2618,6 +2697,8 @@ def build_update_data_from_extraction(
                 if i == 0:
                     if buyer_data.get('nif'):
                         personal_update['nif'] = buyer_data['nif']
+                    if buyer_data.get('data_nascimento'):
+                        personal_update['data_nascimento'] = buyer_data['data_nascimento']
                     if buyer_data.get('cc'):
                         personal_update['documento_id'] = buyer_data['cc']
                     if buyer_data.get('morada'):
@@ -2979,6 +3060,16 @@ def build_update_data_from_extraction(
             else:
                 update_data["ai_extracted_notes"] = new_notes
     
+    # === Créditos Ativos → Contas Bancárias (Lote 2, ponto 3) ===
+    # Aplicado no ÚNICO ponto de saída desta função, antes do log, para o
+    # log mostrar o que de facto vai ser gravado. É aqui que a IA do mapa
+    # de responsabilidades preenche `creditos_ativos` — o caso mais comum,
+    # e o que a regra antiga (só no `executeSave` do ProcessDetails) nunca
+    # alcançava.
+    from services.financial_bank_sync import aplicar_a_update_data
+
+    aplicar_a_update_data(update_data)
+
     # === LOG FINAL DO UPDATE_DATA ===
     logger.info(f"[BUILD_UPDATE] Tipo: {document_type}, Campos a actualizar: {list(update_data.keys())}")
     if update_data.get('financial_data'):

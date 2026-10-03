@@ -28,6 +28,7 @@ Lógica:
 ====================================================================
 """
 import asyncio
+import html
 import logging
 import smtplib
 import ssl
@@ -38,9 +39,72 @@ from email.mime.text import MIMEText
 from typing import Optional
 
 from database import db
-from services.document_portal_counts import parse_expected_count
+from services.document_portal_counts import (
+    COMPLETED_PORTAL_STATUSES,
+    parse_expected_count,
+)
 
 logger = logging.getLogger(__name__)
+
+# De onde sai o nome legível de um pedido, por ordem de preferência. O
+# `custom_label` é o que foi PEDIDO ("Recibo de Vencimento"); o
+# `original_filename` é o que o cliente chamou ao ficheiro. Listar o
+# primeiro é o que faz o email confirmar o pedido, e não o upload.
+CAMPOS_DO_NOME_DO_PEDIDO: tuple[str, ...] = (
+    "custom_label",
+    "original_filename",
+    "filename",
+    "category",
+)
+
+
+def nome_legivel_do_pedido(doc: Optional[dict]) -> str:
+    """O nome de um documento recebido, como o cliente o reconhece."""
+    if not isinstance(doc, dict):
+        return ""
+    for campo in CAMPOS_DO_NOME_DO_PEDIDO:
+        valor = doc.get(campo)
+        if valor is not None and str(valor).strip():
+            return str(valor).strip()
+    return ""
+
+
+async def nomes_dos_documentos_recebidos(process_id: str) -> list[str]:
+    """Os documentos que o cliente submeteu, para a lista do email.
+
+    Lote 2, ponto 2: o email confirmava "toda a documentação" sem dizer
+    QUAL — e uma confirmação que não enumera o que recebeu não serve de
+    recibo. Quem a lê não consegue detectar que faltou uma peça.
+
+    Os estados de "concluído" vêm de `document_portal_counts`, nunca de
+    uma lista escrita aqui: duas listas de estados divergem na primeira
+    vez que aparecer um estado novo.
+
+    NUNCA levanta — um email sem a lista é melhor do que email nenhum.
+    """
+    try:
+        recebidos = await db.documents.find(
+            {"process_id": process_id, "status": {"$in": list(COMPLETED_PORTAL_STATUSES)}},
+            {"_id": 0, "custom_label": 1, "original_filename": 1, "filename": 1,
+             "category": 1, "attached_files": 1},
+        ).to_list(200)
+    except Exception as e:  # pragma: no cover - degradação
+        logger.warning("[DocsComplete] Não foi possível listar os documentos: %s", e)
+        return []
+
+    nomes: list[str] = []
+    vistos: set[str] = set()
+    for doc in recebidos:
+        nome = nome_legivel_do_pedido(doc)
+        if not nome or nome.lower() in vistos:
+            continue
+        vistos.add(nome.lower())
+        # Quando o pedido trouxe mais do que um ficheiro, dizê-lo: é a
+        # diferença entre "recebemos os recibos" e "recebemos 3 recibos",
+        # e é por aí que o cliente confirma a quantidade.
+        quantos = len(doc.get("attached_files") or [])
+        nomes.append(f"{nome} ({quantos} ficheiros)" if quantos > 1 else nome)
+    return nomes
 
 
 async def check_and_notify_documents_complete(
@@ -107,16 +171,29 @@ async def check_and_notify_documents_complete(
             chosen_intermediary = uid
             break
 
+    # Lote 2, ponto 2: a confirmação ENUMERA o que foi recebido. Os nomes
+    # vão no CORPO e os ficheiros NUNCA em anexo — reenviar ao cliente os
+    # documentos que ele acabou de submeter põe dados pessoais a circular
+    # por email sem necessidade nenhuma, e o Portal é onde eles vivem.
+    nomes_recebidos = await nomes_dos_documentos_recebidos(process_id)
+
     subject = "Documentação Recebida com Sucesso - Em Análise"
+    lista_em_texto = (
+        "\nDocumentos recebidos:\n"
+        + "".join(f"  - {nome}\n" for nome in nomes_recebidos)
+        if nomes_recebidos
+        else ""
+    )
     text_body = (
         f"Olá {client_name},\n\n"
         "Recebemos com sucesso toda a documentação submetida via Portal do Cliente.\n"
-        "O seu processo entrou agora em fase de Análise de Crédito e entraremos em "
+        f"{lista_em_texto}"
+        "\nO seu processo entrou agora em fase de Análise de Crédito e entraremos em "
         "contacto brevemente para os próximos passos.\n\n"
         # PACOTE DI — marca client-facing actualizada para Precision Crédito.
         "Obrigado pela confiança,\nEquipa Precision Crédito"
     )
-    html_body = _build_documents_complete_html(client_name)
+    html_body = _build_documents_complete_html(client_name, nomes_recebidos)
 
     sent = False
     source = None
@@ -235,7 +312,32 @@ async def _send_via_smtp(smtp_server, smtp_port, from_email, password,
         return False
 
 
-def _build_documents_complete_html(client_name: str) -> str:
+def _escapar(texto: str) -> str:
+    """O nome do documento vem de um ficheiro que o CLIENTE nomeou.
+
+    Entra num corpo HTML, logo é conteúdo externo: sem escape, um nome
+    com `<` parte o email, e com `<script>` leva-o lá dentro.
+    """
+    return html.escape(str(texto or ""), quote=True)
+
+
+def _lista_de_nomes_em_html(nomes: list[str]) -> str:
+    """A lista de documentos recebidos. Vazia não desenha caixa nenhuma —
+    uma caixa com o título e nada dentro lê-se como um erro."""
+    if not nomes:
+        return ""
+    itens = "".join(f"<li style=\"margin:0 0 4px;\">{_escapar(n)}</li>" for n in nomes)
+    return (
+        '<div style="background:#f9fafb;border:1px solid #e5e7eb;padding:14px 16px;'
+        'margin:0 0 16px;border-radius:4px;">'
+        '<p style="margin:0 0 8px;font-weight:bold;">Documentos recebidos:</p>'
+        f'<ul style="margin:0;padding-left:20px;">{itens}</ul>'
+        "</div>"
+    )
+
+
+def _build_documents_complete_html(client_name: str, nomes_recebidos: Optional[list] = None) -> str:
+    lista = _lista_de_nomes_em_html(nomes_recebidos or [])
     return f"""
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;
                 color:#1f2937;line-height:1.6;">
@@ -248,6 +350,7 @@ def _build_documents_complete_html(client_name: str) -> str:
           Recebemos com sucesso <strong>toda a documentação</strong> que submeteu através
           do Portal do Cliente. Obrigado pela rapidez.
         </p>
+        {lista}
         <div style="background:#ecfdf5;border-left:4px solid #0f766e;padding:14px 16px;
                     margin:0 0 16px;border-radius:4px;">
           <strong>O seu processo entrou agora em fase de «Análise de Crédito».</strong>

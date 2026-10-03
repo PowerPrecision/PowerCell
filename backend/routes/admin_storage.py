@@ -13,9 +13,10 @@ from typing import List
 from fastapi import APIRouter, Depends, Query, Body, Request, UploadFile, File, Form
 
 from models.auth import UserRole
-from services.auth import require_roles
+from services.auth import get_effective_role_async, require_roles
 
 from services.admin_s3_client_mappings import run_auto_map_client_s3_folders
+from services.s3_relink import run_get_s3_relink, run_set_s3_mapping
 from services.admin_s3_user_mappings import (
     run_get_user_s3_mappings,
     run_update_user_s3_mapping,
@@ -106,6 +107,41 @@ async def auto_map_client_s3_folders(
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     return await run_auto_map_client_s3_folders(user)
+
+
+# ============== RELIGAMENTO MANUAL (Lote 6) ==============
+# Cobre clientes E processos — a ferramenta antiga só sabia processos, e um
+# cliente da Pool sem processo era precisamente o que ficava sem religamento.
+# Só ADMIN: esta escrita move a fronteira de posse de documentos.
+
+@router.get("/s3-relink")
+async def get_s3_relink(
+    search: str = Query(None),
+    tipo: str = Query(None, description="processo | cliente"),
+    apenas_por_resolver: bool = Query(False),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    user: dict = Depends(require_roles([UserRole.ADMIN])),
+):
+    return await run_get_s3_relink(
+        search=search, tipo=tipo, apenas_por_resolver=apenas_por_resolver,
+        page=page, limit=limit, user=user,
+    )
+
+
+@router.post("/s3-relink")
+async def set_s3_relink(
+    request: Request,
+    tipo: str = Query(..., description="processo | cliente"),
+    entity_id: str = Query(...),
+    s3_folder: str = Query(None),
+    user: dict = Depends(require_roles([UserRole.ADMIN])),
+):
+    papel = await get_effective_role_async(request, user)
+    return await run_set_s3_mapping(
+        tipo=tipo, entity_id=entity_id, s3_folder=s3_folder, user=user,
+        papel_efectivo=papel, request=request,
+    )
 
 
 # ============== MAPEAMENTO UTILIZADORES-S3 ==============

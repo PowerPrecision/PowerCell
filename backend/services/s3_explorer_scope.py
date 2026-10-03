@@ -54,6 +54,7 @@ from fastapi import HTTPException
 from database import db
 from models.auth import UserRoleEnum as UserRole
 from services.realtime_audience import Audiencia, passa_a_rede
+from services.s3_document_root import e_id_gerado
 from services.s3_explorer_paths import (
     RAIZ_DO_EXPLORADOR,
     normalizar_caminho,
@@ -68,7 +69,14 @@ logger = logging.getLogger(__name__)
 PAPEIS_DE_RECONCILIACAO = frozenset({UserRole.ADMIN, UserRole.CEO})
 
 PROJECCAO = {"_id": 0, "id": 1, "s3_folder": 1, "network_id": 1,
-             "company_id": 1, "company_name": 1}
+             "company_id": 1, "company_name": 1, "client_id": 1,
+             "client_name": 1}
+
+#: Projecção dos CLIENTES. Entram na resolução por duas razões (Lote 6):
+#: dão o NOME de uma pasta cujo segmento é um id, e são o único dono de uma
+#: pasta de cliente que ainda não tem processo.
+PROJECCAO_DO_CLIENTE = {"_id": 0, "id": 1, "nome": 1, "s3_folder": 1,
+                        "network_id": 1, "company_id": 1, "company_name": 1}
 
 
 @dataclass(frozen=True)
@@ -80,6 +88,10 @@ class PastaDoExplorador:
     company_ids: frozenset[str] = field(default_factory=frozenset)
     company_names: frozenset[str] = field(default_factory=frozenset)
     orfa: bool = False
+    #: Os nomes dos clientes que reclamam esta pasta. Mais do que um é a
+    #: colisão de identidade do D-19, e é por isso que é um conjunto e não um
+    #: campo: escolher um faria a colisão parecer resolvida.
+    nomes: frozenset[str] = field(default_factory=frozenset)
 
     @property
     def ambigua(self) -> bool:
@@ -99,11 +111,40 @@ def _normalizar(caminho: str) -> str:
     return (caminho or "").rstrip("/")
 
 
+def _id_da_pasta(normalizado: str) -> Optional[str]:
+    """O id gerado que dá nome a esta pasta, se for esse o caso.
+
+    `e_id_gerado` e não `id_valido`: a segunda pergunta "serve como segmento
+    de caminho?", e `Joao_Silva` serve — tratá-lo como id mandaria procurar um
+    cliente com esse id, que não existe, e a pasta ficava órfã.
+    """
+    segmento = primeiro_segmento(normalizado)
+    return segmento if e_id_gerado(segmento) else None
+
+
 async def carregar_pastas(caminhos: Sequence[str]) -> dict[str, PastaDoExplorador]:
-    """Pertença de várias pastas, numa **única** leitura.
+    """Pertença de várias pastas, em leituras EM LOTE.
 
     A chave do resultado é o caminho TAL COMO VEIO, para o chamador não ter
     de reconciliar formas (com e sem barra final).
+
+    TRÊS CAMINHOS DE RESOLUÇÃO (Lote 6), e cada um existe por um motivo:
+
+    1. **`processes.s3_folder`** — o original, e continua a ser a fonte da
+       REDE: é o processo que é carimbado na criação (`resolve_tenant_stamp`),
+       o cliente não.
+
+    2. **`clients.s3_folder`** — dá o NOME e é o único dono de uma pasta de
+       cliente que ainda não tem processo.
+
+    3. **pelo ID, quando o segmento é um uuid gerado.** Sem este, a correcção
+       do ponto 1 tornava invisível ao staff normal a pasta de TODOS os
+       clientes novos: a pasta do processo passou a viver DENTRO da do cliente
+       (`{cid}/processos/{pid}`), logo nenhum processo aponta para `{cid}` e
+       ela contava como ÓRFÃ — e uma órfã só é visível a ADMIN/CEO.
+
+    A fronteira de rede **não se alarga**: o passo 3 encontra apenas os
+    processos que já existiam, com a rede que já tinham.
     """
     if not caminhos:
         return {}
@@ -112,38 +153,101 @@ async def carregar_pastas(caminhos: Sequence[str]) -> dict[str, PastaDoExplorado
     for bruto in caminhos:
         por_normalizado.setdefault(_normalizar(bruto), []).append(bruto)
 
+    # Caminho → id do cliente (só para as pastas nomeadas por um id gerado).
+    ids_por_caminho = {
+        normalizado: _id_da_pasta(normalizado) for normalizado in por_normalizado
+    }
+    ids = sorted({i for i in ids_por_caminho.values() if i})
+
     donos: dict[str, list[dict]] = {}
+
+    def _registar(normalizado: Optional[str], doc: dict) -> None:
+        if normalizado and normalizado in por_normalizado:
+            donos.setdefault(normalizado, []).append(doc)
+
     try:
-        cursor = db.processes.find(
-            {"s3_folder": {"$in": list(por_normalizado)}}, PROJECCAO
-        )
+        condicoes: list[dict] = [{"s3_folder": {"$in": list(por_normalizado)}}]
+        if ids:
+            condicoes.append({"client_id": {"$in": ids}})
+        cursor = db.processes.find({"$or": condicoes}, PROJECCAO)
         for doc in await cursor.to_list(50000):
-            donos.setdefault(_normalizar(doc.get("s3_folder")), []).append(doc)
+            _registar(_normalizar(doc.get("s3_folder")), doc)
+            cliente = _texto(doc.get("client_id"))
+            for normalizado, ident in ids_por_caminho.items():
+                if ident and ident == cliente:
+                    _registar(normalizado, doc)
     except Exception as exc:
         # Falha fechada: sem saber a quem pertence, ninguém vê. Uma leitura
         # falhada não pode abrir o que a leitura bem sucedida fecharia.
         logger.warning("[S3-SCOPE] Falha a ler a pertença das pastas (%s).", exc)
         donos = {}
 
+    try:
+        condicoes_cliente: list[dict] = [
+            {"s3_folder": {"$in": list(por_normalizado)}}
+        ]
+        if ids:
+            condicoes_cliente.append({"id": {"$in": ids}})
+        cursor = db.clients.find({"$or": condicoes_cliente}, PROJECCAO_DO_CLIENTE)
+        for doc in await cursor.to_list(50000):
+            _registar(_normalizar(doc.get("s3_folder")), doc)
+            ident_do_cliente = _texto(doc.get("id"))
+            for normalizado, ident in ids_por_caminho.items():
+                if ident and ident == ident_do_cliente:
+                    _registar(normalizado, doc)
+    except Exception as exc:
+        logger.warning("[S3-SCOPE] Falha a ler os clientes das pastas (%s).", exc)
+
     resultado: dict[str, PastaDoExplorador] = {}
     for normalizado, brutos in por_normalizado.items():
-        processos = donos.get(normalizado) or []
+        reclamantes = donos.get(normalizado) or []
+        # Um mesmo documento pode ter sido registado duas vezes (pelo
+        # `s3_folder` e pelo id); os conjuntos tratam disso, e para os nomes
+        # é a identidade do documento que conta.
         pasta = PastaDoExplorador(
             caminho=normalizado,
             network_ids=frozenset(
-                r for r in (_texto(p.get("network_id")) for p in processos) if r
+                r for r in (_texto(p.get("network_id")) for p in reclamantes) if r
             ),
             company_ids=frozenset(
-                c for c in (_texto(p.get("company_id")) for p in processos) if c
+                c for c in (_texto(p.get("company_id")) for p in reclamantes) if c
             ),
             company_names=frozenset(
-                c for c in (_texto(p.get("company_name")) for p in processos) if c
+                c for c in (_texto(p.get("company_name")) for p in reclamantes) if c
             ),
-            orfa=not processos,
+            orfa=not reclamantes,
+            nomes=frozenset(
+                n
+                for n in (
+                    _texto(p.get("client_name")) or _texto(p.get("nome"))
+                    for p in reclamantes
+                )
+                if n
+            ),
         )
         for bruto in brutos:
             resultado[bruto] = pasta
     return resultado
+
+
+def nome_legivel(pasta: Optional[PastaDoExplorador], nome_cru: str) -> str:
+    """O nome a MOSTRAR para uma pasta — nunca o que se usa para operar nela.
+
+    Só substitui quando o nome cru é um id gerado (um nome legível não se
+    troca por nada) e quando há **exactamente um** nome: dois nomes na mesma
+    pasta é a colisão do D-19, e mostrar um deles faria a colisão parecer
+    resolvida. Sem dono, o id fica como está — inventar um nome seria pior do
+    que mostrar um uuid, porque a órfã tem de se ver como órfã.
+
+    O caminho continua a ser a autoridade de TODAS as operações (renomear,
+    apagar, descarregar). Mostrar uma coisa e operar noutra é a forma discreta
+    de uma parede não valer nada.
+    """
+    if not e_id_gerado(nome_cru):
+        return nome_cru
+    if pasta is None or len(pasta.nomes) != 1:
+        return nome_cru
+    return next(iter(pasta.nomes))
 
 
 def pode_ver(
@@ -196,14 +300,30 @@ async def filtrar_subpastas(
     """Deixa passar só as subpastas que este utilizador pode ver.
 
     Uma leitura em lote para a página inteira — é este o ponto em que o
-    desenho compra a performance.
+    desenho compra a performance. E é também onde se acrescenta o
+    `display_name`, porque o mapa de donos já está aqui: pedi-lo numa segunda
+    leitura seria duplicar a consulta que decide a parede.
+
+    `name` e `path` ficam INTACTOS — são o que as operações usam. O
+    `display_name` é só para o ecrã.
     """
     entradas = [p for p in subpastas if p and p.get("path")]
     if not entradas:
         return []
 
     mapa = await carregar_pastas([p["path"] for p in entradas])
-    return [p for p in entradas if pode_ver(mapa.get(p["path"]), scope, role=role)]
+    visiveis = []
+    for entrada in entradas:
+        pasta = mapa.get(entrada["path"])
+        if not pode_ver(pasta, scope, role=role):
+            continue
+        visiveis.append({
+            **entrada,
+            "display_name": nome_legivel(pasta, entrada.get("name") or ""),
+            "nomes_dos_clientes": sorted(pasta.nomes) if pasta else [],
+            "orfa": bool(pasta.orfa) if pasta else True,
+        })
+    return visiveis
 
 
 async def assert_pasta_no_ambito(

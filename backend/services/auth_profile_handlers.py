@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from database import db
 from utils.input_sanitization import log_sanitization_rejection, sanitize_email_signature
 from services.auth import get_user_companies, get_active_company_id_async
+from services.capability_gate import capacidades_por_papel
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,22 @@ async def run_get_me(request, user: dict):
         "companies": user_companies or [],
         "company_roles": user_companies or [],  # alias (Área Pessoal / Header)
         "active_company_id": active_company_id or user.get("company"),
+        # ── Capacidades POR PAPEL (Lote 6, ponto 3) ──
+        #
+        # O `permissions` acima resolve-se pelo cargo do JWT. Isso basta
+        # enquanto ninguém troca de chapéu — e o produto é feito para trocar.
+        # Um mapa por papel deixa o ecrã escolher pelo perfil activo sem uma
+        # segunda chamada e, sobretudo, **sem duplicar a tabela de defaults no
+        # frontend**: uma cópia divergiria em silêncio, que é o defeito dos
+        # campos canónicos de atribuição com outro nome.
+        "capabilities_por_papel": capacidades_por_papel(
+            user,
+            [
+                user.get("role"),
+                *(user.get("additional_roles") or []),
+                *[c.get("role") for c in (user_companies or [])],
+            ],
+        ),
     }
 
     # Popular campos detalhados da empresa activa

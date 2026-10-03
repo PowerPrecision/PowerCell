@@ -70,6 +70,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { invalidateEmailQueries } from "../hooks/useNewEmailRealtime";
 import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS, canAccessOrgAdmin } from "../utils/roleUtils";
 import { resolveActiveCompanyName } from "../utils/userProfiles";
+import { classesDoCabecalhoFixo } from "../utils/stickyHeader";
 import ErrorBoundary from "../components/ErrorBoundary";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -573,7 +574,6 @@ const DashboardLayout = ({ children, title }) => {
   
   // Impersonate offset (isImpersonating already consumed above)
   const impersonateOffset = isImpersonating ? 'top-12' : 'top-0';
-  const headerStyle = isImpersonating ? { top: '48px' } : {};
 
   return (
     <div className="min-h-screen bg-background">
@@ -764,10 +764,12 @@ const DashboardLayout = ({ children, title }) => {
       {/* Main content — min-w-0 prevents flex children from expanding beyond container */}
       <div className={`lg:pl-64 min-w-0 ${isImpersonating ? 'pt-12' : ''}`}>
         {/* Top bar - Fixed height to prevent layout shift */}
-        <header 
-          className="border-b border-border bg-card sticky z-50 h-14"
-          style={headerStyle}
-        >
+        {/* Ponto 4 — Cabeçalho FIXO. O `sticky` estava aqui desde sempre e
+            nunca colou: faltava o `top`, cujo valor inicial (`auto`) faz
+            um sticky comportar-se como estático. Regra e camadas em
+            `utils/stickyHeader.js`; o `style` em linha saiu, porque era
+            ele que fazia a impersonação ser o único caso que funcionava. */}
+        <header className={classesDoCabecalhoFixo({ isImpersonating })}>
           <div className={`flex items-center justify-between h-full px-2 lg:px-6 gap-1 sm:gap-2`}>
             <div className="flex items-center gap-1 sm:gap-2 min-w-0 flex-1">
               <Button

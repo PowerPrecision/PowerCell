@@ -98,6 +98,37 @@ sai da mesma estrutura, em vez de ser uma segunda lista à mão.
 
 ## Correcção e modelo de dados
 
+### D-15 · A data de nascimento é PII e está em claro
+**Onde:** `backend/services/encryption.py` (`SENSITIVE_FIELDS`,
+`CLIENT_SENSITIVE_FIELDS`), `personal_data.birth_date` /
+`personal_data.data_nascimento`, `dados_pessoais.*`.
+
+O NIF, o documento de identificação, a morada fiscal e o telefone são
+encriptados em repouso. A **data de nascimento não está em nenhuma das duas
+listas** — está em texto simples em `processes` e em `clients`. Com o nome,
+é dos campos que mais contribui para identificar uma pessoa, e a avaliação
+de impacto do RGPD trata-a como PII.
+
+**Porque foi adiado (Lote 4):** encriptá-la **parte o filtro Sub35**. A
+condição Mongo de `services/sub35.py` compara a data com um limite
+(`$gte`/`$lt` sobre a data ISO), o que só funciona em claro. Encriptar
+exigiria uma das três: (a) um blind index por FAIXA (um campo derivado
+`nascimento_ano` ou `sub35_ate`, que tem de ser recalculado — e um valor
+derivado gravado volta a ficar errado no dia do aniversário, que é o
+defeito que o Lote 4 acabou de fechar); (b) filtrar em Python depois de
+desencriptar, o que obriga a ler a colecção inteira; (c) aceitar que o
+filtro deixa de existir.
+
+**Decisão registada (Lote 5):** o dono do produto confirmou o adiamento —
+fica para uma sprint dedicada à criptografia, de propósito, para não partir o
+filtro Sub35 recém-construído.
+
+**O que é preciso para fechar:** decidir entre o filtro e a encriptação, com
+o DPO. Se a escolha for encriptar, a opção (a) com um campo `ano_de_nascimento`
+(não a idade, não um booleano) é a única que não quebra a pesquisa nem precisa
+de recálculo: o ano não muda, e o limiar de "menos de 36" calcula-se sobre ele
+com uma margem de um ano a resolver em Python.
+
 ### D-12 · Os limiares de SLA guardam-se por empresa e leem-se globalmente
 **Onde:** `backend/services/stats_sla.py::_limiares`,
 `backend/models/system_config.py::DashboardSlaConfig`
@@ -210,22 +241,6 @@ do passo 2.
 
 ## Produto e âmbito
 
-### D-7 · Relatório semanal do CEO mantém âmbito global
-**Onde:** `backend/services/analytics_service.py::generate_weekly_team_report`
-
-Sem `user`, o relatório atravessa todas as redes e regista um `warning`. A
-chamada agendada de segunda-feira não passa utilizador.
-
-**Porque foi adiado:** é uma **decisão de produto** (a Direcção quer o
-consolidado) e não um defeito. Fica registada porque é a única excepção
-deliberada ao isolamento por rede do Lote 4/5.
-
-**Para fechar:** decidir se o email de segunda é consolidado (e então
-documentá-lo como excepção explícita, com destinatários credenciados nas três
-empresas) ou segmentado por rede.
-
----
-
 ### D-8 · `db.emails` não tem carimbo de rede
 **Onde:** colecção `emails`
 
@@ -234,6 +249,125 @@ lote do webmail.
 
 **Para fechar:** carimbo na escrita (`resolve_tenant_stamp`) + backfill com a
 regra do `rede_consensual` (recusa adivinhar quando há mais de uma candidata).
+
+---
+
+### D-14 · O formulário público pode criar um cliente com NIF repetido
+**Onde:** `backend/services/public_registration.py` (`db.clients.insert_one`)
+
+O Lote 2 (ponto 4) fechou a unicidade de NIF/Email nas duas portas do CRM —
+criação e edição — com o ponto único `services/client_uniqueness.py`. O
+formulário **público** continua a inserir sem essa guarda, pelo que a
+invariante não é uma invariante: um cliente que se registe duas vezes pelo
+site cria o duplicado que a edição já não deixa fabricar.
+
+**Porque foi adiado:** não é esquecimento, é uma decisão de produto que não se
+toma dentro de uma correcção técnica. Um 409 numa porta EXTERNA perde a lead
+em vez de a tratar, e o que ali faz sentido é reaproveitar o cliente
+existente — o que muda o fluxo de negócio (a quem fica atribuído? o que
+acontece aos dados novos que ele submeteu? e aos documentos?).
+
+**Para fechar:** decidir entre (a) reaproveitar o cliente existente e anexar a
+submissão nova ao registo que já existe, (b) criar sempre e sinalizar para a
+Sala de Triagem fundir, ou (c) recusar com uma mensagem que mande o cliente
+usar o Portal. Qualquer das três reutiliza `encontrar_cliente_duplicado`, que
+já existe e é o que a criação e a edição usam.
+
+### D-18 · `co_buyers` tem dois significados
+**Onde:** `backend/services/ai_document.py::build_update_data_from_extraction`
+(mapeador do CPCV), `backend/services/process_clients_nm.py::build_add_client_update`.
+
+O mesmo campo é escrito com dois significados diferentes:
+
+* o mapeador do CPCV grava **TODOS** os compradores — o elemento 0 é o
+  titular 1, e é dele que o mapeador copia o `personal_data`;
+* o `build_add_client_update` grava apenas os compradores **ADICIONAIS**, e usa
+  `co_buyers[0]` para construir o `titular2_data`.
+
+Encontrado ao fechar a D-17: a regra Sub35 estrita conta "compradores a mais",
+e sob o primeiro significado o titular 1 era contado duas vezes. Como um CPCV
+português muitas vezes não indica datas de nascimento, isso retirava a etiqueta
+a qualquer processo cujo CPCV tivesse sido analisado — **mesmo com um só
+comprador**.
+
+**Porque foi adiado:** a correcção óbvia (passar o mapeador a gravar
+`compradores[1:]`) criaria um TERCEIRO significado durante a transição, porque
+os documentos já gravados mantêm o primeiro. E o campo é lido por
+`ai_bulk_clients`, `client_process_ops`, `gdpr`, `encryption` e
+`process_service`, nenhum dos quais distingue os dois casos. A regra Sub35 foi
+por isso escrita para ser correcta sob **os dois** significados, desduplicando
+por identidade (`sub35.compradores_que_bloqueiam`) — o que é mais robusto do
+que escolher um e migrar o resto.
+
+**Quem é atingido se explodir:** qualquer regra nova que conte elementos de
+`co_buyers` (número de compradores, LTV por comprador, rateio de comissões)
+dá um resultado diferente conforme quem escreveu o array.
+
+**O que é preciso para fechar:** decidir o significado único (o nome do campo e
+o `titular2_data` apontam para "os adicionais"), migrar os documentos escritos
+pelo mapeador do CPCV — identificáveis porque `co_buyers[0]` tem a identidade
+do titular 1 — e só então simplificar a desduplicação.
+
+### D-19 · Homónimos exactos ainda partilham pasta na LEITURA legada
+**Onde:** `backend/services/s3_storage.py::_find_client_folder_combined`,
+`_get_possible_client_paths`.
+
+A identidade da pasta passou a derivar do ID (Lote 6), mas a LEITURA de um
+processo que nunca teve `s3_folder` gravado continua a procurar a pasta pelo
+nome. O match por similaridade foi removido — era ele que ligava "Carolina
+Agostinho da Silva" a `carolina_silva` — e ficou só o match **exacto**.
+
+Dois clientes com o nome EXACTAMENTE igual continuam, nesse caminho de recurso,
+a resolver para a mesma pasta.
+
+**Porque foi adiado:** a alternativa — não devolver nada sem mapeamento — faria
+desaparecer documentos que existem, em número desconhecido (a medição de
+produção do Épico 10 contou 2.650 pastas órfãs). Um documento que desaparece
+não produz erro nenhum, e esse é o defeito que esta casa produz há sete lotes.
+
+**Quem é atingido se explodir:** dois clientes homónimos sem mapeamento gravado
+vêem a documentação um do outro. É um cruzamento de dados pessoais, e a
+tolerância é zero — mas é agora um conjunto muito menor do que era.
+
+**O que é preciso para fechar:** medir quantos processos ativos estão sem
+`s3_folder` (`scripts/medir_cobertura_s3.py` já dá o número), religá-los, e
+depois **apagar o recurso por nome**, com os testes de leitura invertidos em vez
+de apagados.
+
+**Progresso (iteração `religamento-arrasto-e-permissoes`):** a ferramenta de
+religamento manual já existe (`services/s3_relink.py` + painel em Manutenção) e
+cobre clientes E processos; o Explorador já marca as pastas reclamadas por mais
+do que uma ficha com um crachá de contagem, o que torna a colisão VISÍVEL em vez
+de inferida. Falta a medição e a remoção do recurso por nome — e a remoção é o
+passo que não se dá sem a medição, porque é ela que diz quantos documentos
+desapareceriam do ecrã.
+
+### D-20 · A Listagem de Processos e o Kanban não têm teste que monte a página
+**Onde:** `frontend/src/pages/ProcessesPage.js`,
+`frontend/src/pages/KanbanPage.js`.
+
+As duas páginas receberam o gate de permissões dos botões
+(`BotaoComPermissao`), e a ligação está afirmada por uma **guarda sobre a
+fonte** (`pages/__tests__/botoesFantasma.ligacao.test.js`): que o rótulo vive
+dentro do componente, que não sobrou um `<Button>` cru com o mesmo texto, e que
+o papel usado é o efectivo. A Pool, que já tinha arnês, tem teste MONTADO.
+
+**Porque foi adiado:** montar estas duas é um trabalho próprio — fetchers com
+dependências estáveis (a `ProcessesPage` já teve um loop infinito por um array
+novo a cada render), filtros em URL, e o Kanban a medir elementos que no jsdom
+têm dimensão zero. Fazê-lo no mesmo lote em que se mexe nos botões misturava
+duas coisas de risco diferente.
+
+**Quem é atingido se explodir:** é a regra que este projecto aprendeu três vezes
+(`WebmailPage`, `UsersAccessAdminTab`, `SystemConfigPage`) — um componente novo
+numa página não montada pode rebentar a página inteira (um `const` na zona morta
+temporal, um `section.title` de `undefined`) e nenhum teste de componente o vê.
+Nesta iteração criei exactamente esse defeito na Pool e **só não passou porque a
+Pool tem teste montado.**
+
+**O que é preciso para fechar:** um teste de integração por página, com as
+fronteiras falseadas (`DashboardLayout`, `AuthContext`, os hooks de dados) e os
+filtros e handlers REAIS — o molde é o `ProcessDetails.test.jsx`.
 
 ---
 
@@ -249,3 +383,6 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 | D-11 | Sourcemaps servidos em produção | Iteração `slas-e-sourcemaps` — `utils/buildSourcemap.js`: sem `SENTRY_AUTH_TOKEN` um build de produção não gera mapas (provado com o build real: 0 `.map` em `dist/`) |
 | D-1 | `confirm-upload` do CRM sem posse nem quarentena | Iteração `posse-e-segredo-gov` — era **escalada de privilégio** e não integridade de dados: sem guarda de posse e a devolver `temporary_url` pré-assinado para a chave do corpo do pedido (o Incidente P0 do Portal, no CRM) |
 | D-3 | `GOV_AUTH_JWT_SECRET` com valor por omissão | Iteração `posse-e-segredo-gov` — fail-closed em produção, segredo efémero em dev, e o ramo que aceitava tokens por assinar removido dos dois lados |
+| D-16 | Eliminar um cliente não deixava entrada no trilho de auditoria | Iteração `sub35-estrito-e-auditoria` — `audit_trail_service.log_audit_event` nos **dois** pontos de saída do `run_delete_client` (o cliente pode viver em `processes` ou em `clients`, e um registo escrito só num ramo era a forma de defeito desta casa); com IP, papel EFECTIVO em `metadata` (o campo partilhado guarda o do JWT) e os ids da cascata. O registo é escrito DEPOIS da eliminação e nunca a faz falhar |
+| D-17 | Os `co_buyers` não tinham data de nascimento | Iteração `identidade-documental-e-d17` — a data entrou no esquema de extracção do CPCV (opcional, e com instrução explícita de NÃO inferir: uma data inventada é pior do que nenhuma) e a regra estrita estendeu-se aos compradores, em Python e na condição Mongo (`$nor` + `$elemMatch`, porque o quantificador é «todos» e no Mongo isso não tem forma positiva). A desduplicação por identidade é o que impede a regra de se desligar a si mesma — ver D-18 |
+| D-7 | Relatório semanal do CEO com âmbito global | Iteração `motor-fila-e-agenda` — decisão de produto tomada (a Direcção quer o CONSOLIDADO, e fica a única excepção deliberada ao isolamento por rede); a dívida fechou com o defeito que ninguém tinha visto ao lado dela — o «às 06:00» vivia só na docstring e o relatório saía **24 vezes** à segunda-feira |

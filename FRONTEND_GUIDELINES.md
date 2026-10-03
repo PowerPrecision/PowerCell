@@ -1714,3 +1714,393 @@ filtro de tenant num endpoint, verifica-se no mesmo lote quem o chama** —
 um endpoint que passa a filtrar e um chamador que não manda os
 cabeçalhos produzem uma lista vazia ou errada que ninguém liga à
 alteração do backend.
+
+## 27.21 — Um painel de operação diz QUAL caminho aconteceu, não só que correu
+
+`EngineStatusPanel` ganhou botões «Forçar Execução» (Lote 2, ponto 1). O
+motor vive em DOIS processos do `render.yaml`, e o botão faz coisas
+diferentes conforme o job:
+
+* job da **Aplicação** → corre no processo que serve o pedido;
+* job do **Processador** → fica um PEDIDO na fila, reclamado no ciclo
+  seguinte (até 1 minuto).
+
+**A mensagem vem do SERVIDOR.** Escrevê-la no frontend obrigaria a UI a
+saber em que processo vive cada job — uma segunda cópia dessa regra, a
+divergir da do backend sem dar erro. E a UI tem de **distinguir os dois**:
+dizer "correu" a um pedido que só foi entregue é o painel a mentir, que é
+exactamente o motivo por que ele era read-only antes.
+
+Três regras que vieram deste componente:
+
+1. **Quem pode ser accionado é decisão do servidor** (`pode_forcar`), e o
+   motivo de não poder vai à vista (`motivo_sem_forcar`). Um botão em
+   falta sem explicação manda o utilizador procurar o que não existe. Uma
+   lista de "quem se pode forçar" no frontend divergiria da do backend —
+   e aí o botão aparece para um job que o servidor recusa.
+2. **O estado "a carregar" guarda a CHAVE, não um booleano.** Com um
+   booleano, clicar num job desativava o botão de todos.
+3. **Recarregar o estado depois de accionar, inclusive quando FALHA.** Sem
+   isso o painel continua a dizer «Nunca correu» a seguir ao clique e o
+   utilizador conclui que o botão não faz nada; e um pedido registado
+   antes da falha continua a ser informação.
+
+O teste legado que afirmava «não oferece nenhuma acção sobre o motor» foi
+**INVERTIDO, não apagado**: continua a valer que um job sem autorização do
+servidor não mostra botão nenhum.
+
+## 27.22 — Uma regra de negócio não vive num `executeSave`
+
+A sincronização «Créditos Ativos → Contas Bancárias» estava dentro do
+`executeSave` do `pages/ProcessDetails.js`. Corria quando um humano
+carregava em Gravar naquela página, e só então: a IA, o
+`ai-apply-suggestions`, o motor financeiro e qualquer importação passavam
+todos ao lado, e a lista ficava incompleta **sem dar erro nenhum**.
+
+**Regra:** uma transformação que tenha de valer para TODOS os escritores
+de um campo vive no backend, no caminho da escrita — não no handler de
+gravação de um ecrã. O ecrã é um dos escritores, não o escritor.
+
+O bloco antigo tem um detalhe que vale guardar: mutava `financialData` em
+sítio **e** chamava `setFinancialData`. Era a MUTAÇÃO que o fazia
+funcionar — o `setState` é assíncrono e não chegaria a tempo do payload —
+pelo que o código parecia idiomático e dependia do contrário. Quando se
+encontra um par assim, a pergunta não é qual dos dois tirar: é porque é
+que a regra está ali.
+
+## 27.23 — Mostrar uma sugestão da IA não é gravá-la
+
+O preenchimento em linha (Lote 3, ponto 1) substitui o diálogo sobreposto
+de resultados: a sugestão aparece NO campo, com fundo amarelado e
+aprovar/rejeitar ao lado.
+
+**A regra que isto não pode quebrar:** o input desenha o valor sugerido
+enquanto ele está PENDENTE — é esse o ponto de o preenchimento ser em
+linha —, mas o que vai no payload é só o que foi APROVADO. São duas
+funções diferentes em `utils/sugestoesEmLinha.js` (`valorAMostrar` e
+`valoresAprovados`) e a separação é deliberada: se a gravação voltar a
+partir do `extractedData`, **a interface fica exactamente igual e a regra
+de ouro desaparece sem deixar rasto**.
+
+Três regras do mecanismo:
+1. **«Aprovar todas» nunca reabre o que já foi rejeitado.** Reabrir
+   gravava o que o consultor acabou de recusar, em silêncio.
+2. **Um campo rejeitado não volta a pendente.** Ele já respondeu; repor a
+   pergunta a cada render faz o ecrã perguntar para sempre.
+3. **O destaque é temporário.** Amarelo enquanto pende (é um pedido de
+   atenção), verde um instante quando é aprovado, nada quando é rejeitado
+   (o valor voltou a ser o da ficha — destacá-lo dizia o contrário). Um
+   destaque permanente deixa de ser um destaque.
+
+E cada botão leva o NOME DO CAMPO no nome acessível: com dez sugestões no
+ecrã, dez botões «Aprovar» são indistinguíveis para quem usa leitor de
+ecrã — e impossíveis de consultar num teste.
+
+## 27.24 — Um badge de confiança tem de olhar para o VALOR
+
+`getConfidenceIndicator` decidia só pelo número da IA. O input do NIF tem
+`placeholder="9 dígitos"`: com o campo vazio o browser desenha esse texto,
+e ao lado dele aparecia «IA 100%».
+
+**É o badge que faz o placeholder parecer um dado.** Sem ele, um campo
+vazio lê-se como um campo vazio.
+
+**Regra:** um indicador de proveniência ou de confiança recusa-se a
+aparecer quando (a) o valor está vazio, (b) o valor é igual ao texto do
+placeholder — a IA que lê um formulário EM BRANCO devolve o texto de ajuda
+como se fosse o valor, e é um modo de falha real da extracção por visão —
+ou (c) o valor falha a validação que o próprio campo já corre.
+
+Os placeholders e os validadores vivem num ponto único
+(`utils/aiConfidence.js`). Escritos ao lado de cada `placeholder=`
+divergiriam dele em silêncio, e a divergência fazia o indicador voltar a
+aprovar o placeholder.
+
+## 27.25 — Um `ErrorBoundary` que não muda de estado não trata o erro
+
+`LazyChunkErrorBoundary` devolvia `{ hasError: false }` para tudo o que não
+fosse um erro de chunk. Isso **não é deixar passar** — é dizer ao React que
+tratou. O React volta a renderizar os mesmos filhos, eles levantam outra
+vez e, sem fronteira a assumir a falha, **desmonta a árvore inteira**: ecrã
+branco.
+
+Aparecia no Voltar do browser porque as rotas têm fronteira própria; o que
+chega à fronteira de cima é o que vive FORA delas — contextos, layout,
+router — e é isso que uma navegação para trás volta a montar de uma vez.
+
+**Três regras:**
+1. **Toda a fronteira renderiza algo.** Nunca `null`, nunca os filhos que
+   acabaram de levantar.
+2. **A classificação de erros é por sinais ESPECÍFICOS.**
+   `includes("Unexpected token")` apanha qualquer `JSON.parse` falhado;
+   `includes("Script error")` apanha o erro opaco de outra origem. Uma
+   sub-cadeia larga transforma um defeito de dados num recarregamento, e o
+   erro real nunca chega ao Sentry. As rejeitadas ficam listadas **com o
+   motivo** (`utils/chunkErrors.js`), senão alguém volta a acrescentá-las.
+3. **Efeitos secundários não vivem em `getDerivedStateFromError`.** Corre
+   na fase de render, pode correr duas vezes em StrictMode e pode correr
+   num render descartado. Vão para `componentDidCatch`.
+
+E ao recarregar: `location.assign` e não `replace` — o `replace` apaga a
+entrada do histórico e com ela o sítio onde o utilizador estava, ou seja, a
+correcção do ecrã branco estragava o Voltar. O cache-busting substitui o
+`_t` em vez de o acumular (`?_t=1&_t=2&_t=3` era o que acontecia) e
+desiste à segunda: recarregar em ciclo é pior do que mostrar o erro, porque
+o utilizador não chega a ler o que aconteceu.
+
+## 27.26 — Uma modal densa: cabeçalho, corpo com scroll, rodapé fixo
+
+`DialogContent` tem `max-h-[90vh] overflow-y-auto` na GRELHA inteira: o
+rodapé rola com o conteúdo e, num ecrã baixo, sai de vista. E
+`overflow-y:auto` com `overflow-x:visible` faz o CSS promover o eixo X
+também a `auto` — qualquer filho mais largo do que a modal cria barra
+horizontal e **empurra o botão da direita para fora**.
+
+**Regra para qualquer modal com mais de um ecrã de conteúdo:**
+`overflow-hidden flex flex-col` no `DialogContent`, `shrink-0` no cabeçalho
+e no rodapé, e `flex-1 min-h-0 overflow-y-auto overflow-x-hidden` no corpo.
+O `min-h-0` não é decorativo: sem ele um filho flex recusa-se a encolher
+abaixo do seu conteúdo e o `overflow-y` nunca dispara.
+
+No rodapé, `flex-wrap`: num ecrã estreito os botões passam a duas linhas em
+vez de um deles sair do ecrã.
+
+## 27.27 — `position: sticky` sem `top` não cola
+
+O valor inicial de `top` é `auto`, e um elemento `sticky` com `top: auto`
+**não tem limiar onde colar**: comporta-se como `static`. A classe
+`sticky` sozinha não dá erro, não dá aviso do Tailwind e o ecrã parece
+normal — só não cola.
+
+```jsx
+// ERRADO — e foi o cabeçalho do CRM durante meses
+<header className="sticky z-50 h-14" style={isImpersonating ? { top: '48px' } : {}}>
+
+// CERTO — o `top` nos DOIS ramos, por classe
+<header className={classesDoCabecalhoFixo({ isImpersonating })}>
+```
+
+Três regras:
+
+1. **As classes de posição vivem num ponto único** (`utils/stickyHeader.js`),
+   com teste a exigir um `top-*` em **cada** ramo. Era ter `top` só num
+   deles que fazia a impersonação ser o único caso funcional.
+2. **Classes Tailwind LITERAIS, nunca compostas.** `z-${CAMADA}` não
+   existe como texto no ficheiro, o Tailwind não gera a regra e o
+   resultado é o mesmo nada que o `top` em falta produzia.
+3. **Uma barra fixa fica ABAIXO da gaveta lateral e do seu fundo.** Com
+   camadas iguais decide a ordem no DOM, e o cabeçalho vem depois: em
+   ecrã estreito tapava o logótipo e o botão de fechar da gaveta.
+
+O jsdom não calcula posicionamento: um `sticky` que cola e um que não
+cola renderizam igual. Não há teste de render que apanhe isto — o que se
+afirma é a REGRA (no módulo puro) e a LIGAÇÃO (guarda sobre a fonte do
+layout).
+
+## 27.28 — Um filtro que vai nos parâmetros TEM de ir na chave de cache
+
+O filtro de etiquetas do Kanban não fazia nada. O fetcher lia
+`filters.labels` e montava `params.append('labels', …)`; o hook
+destruturava uma lista FIXA de opções, descartava-as e reconstruía um
+objecto novo para o `queryFn`. E, por não entrarem na chave, mudar o
+filtro **não provocava sequer um pedido**.
+
+```js
+// ERRADO — duas listas escritas à mão, em quatro sítios
+const { token, consultorFilter = 'all', … } = options;   // sem labels
+const filters = { consultor, mediador, … };              // sem labels
+useQuery({ queryKey: keys.kanban(filters),               // sem labels
+           queryFn: () => fetch(token, { consultorFilter, … }) });  // sem labels
+
+// CERTO — um objecto canónico, e dele saem os DOIS lados
+const filters = normalizarFiltros(options);
+useQuery({ queryKey: keys.kanban(filters),
+           queryFn: () => fetch(token, filters) });
+```
+
+O teste é da FORMA e não do filtro: flipar **cada** campo e exigir que
+os parâmetros E a chave mudem, com a contraprova de que filtros iguais
+dão a mesma chave (senão um valor aleatório passava e destruía a cache a
+cada render). Cuidado com `|| 30` sobre um `completedDays` que pode ser
+`0`: "sem limite" é falsy e virava "30 dias" em silêncio.
+
+## 27.29 — Um gate de UI lê o papel EFECTIVO, o mesmo que o backend lê
+
+`require_roles` decide pelo cargo efectivo (UCR + `X-Active-Role`). Um
+botão escondido por `user.role` dá as duas respostas erradas: a Direção
+a trabalhar a partir de um perfil base de consultor não vê o botão, e um
+admin de base a agir como consultor vê-o e leva 403.
+
+```jsx
+const papelActivo = (effectiveRole || user?.role || "").toLowerCase();
+const podeEliminar = MANAGEMENT_ROLES.includes(papelActivo);
+```
+
+O teste tem de usar um utilizador cujo `role` do JWT DIFIRA do perfil
+activo — com os dois iguais, passa com o defeito presente.
+
+## 27.30 — Uma etiqueta bonita não pode fazer duas coisas parecerem uma
+
+O chip do grupo de empresas mostra `grupo_power_precision` como
+"Power Precision". Mas `grupo_power` em vez de `grupo_power_precision`
+não dá erro nenhum: cria uma rede nova de uma empresa só e o isolamento
+quebra AO CONTRÁRIO (esconde dados de quem os devia ver). Se dois slugs
+distintos no mesmo ecrã derem o mesmo rótulo, mostram-se os dois CRUS —
+a etiqueta embeleza, nunca unifica.
+
+Duas consequências a manter:
+
+- **"Sem grupo" tem aparência própria.** Uma empresa sem `network_id` é
+  uma ILHA; desenhá-la como as outras fazia o estado mais consequente do
+  ecrã passar por um campo em branco.
+- **Nada de contagens sobre uma PÁGINA.** "Esta rede tem uma empresa só"
+  é falso para toda a rede cujas empresas estejam partidas entre páginas,
+  e um aviso errado sobre a fronteira de isolamento é pior do que aviso
+  nenhum.
+
+## 27.31 — Uma confirmação destrutiva diz o que ARRASTA
+
+Eliminar um registo da Pool faz soft delete em cascata (processo,
+documentos, tarefas) quando o cliente é 1.º titular, e apenas DESLIGA a
+associação quando é 2.º — o processo do 1.º fica activo. O diálogo
+escreve as duas coisas. Um "Tem a certeza?" sem dizer o que arrasta é um
+aviso que não informa.
+
+E a mensagem de erro é a DO SERVIDOR: um "Erro ao eliminar" genérico
+esconde a diferença entre 403 (permissão) e 404 (já não existe), que é
+exactamente o que quem está no ecrã precisa de saber.
+
+## 27.32 — Navegação Próximo/Anterior: o mecanismo é um só
+
+A Pool navega entre CLIENTES e os Detalhes entre PROCESSOS, e é o mesmo
+`ProcessNavigator` com os rótulos parametrizados — "Processo anterior"
+num diálogo de cliente seria mentira para um leitor de ecrã, e uma
+segunda cópia do componente divergiria. As regras que se mantêm:
+
+- **um lado sem vizinho é um botão DESACTIVADO, não ausente** (o controlo
+  não pode saltar de sítio a meio de uma revisão);
+- **sem contexto, sem setas**: quem chega por notificação (`?clientId=`)
+  não veio de listagem nenhuma, e inventar-lhe uma vizinhança promete uma
+  ordem que não existe;
+- **o total é o da lista EM MÃO.** A Pool pede `limit=100` sem paginação:
+  dizer "12 / 243" prometia um 101.º que a seta nunca alcança.
+
+## 27.33 — Uma etiqueta que explica uma regra muda COM a regra
+
+O `Sub35Badge` prometia, no `title`, «Titular com menos de 36 anos». Com
+a regra estrita do Lote 5 — o apoio exige que **todos** os compradores
+cumpram o requisito — esse texto passou a prometer menos do que a
+condição exige, e é o texto que o consultor lê antes de falar com o
+cliente. A diferença entre «o titular» e «todos os titulares» é a
+diferença entre uma oportunidade e uma isenção de IMT recusada pela
+Autoridade Tributária em cima da escritura.
+
+Duas regras:
+
+- **o texto da explicação vive ao lado do componente, num ponto único**
+  (`EXPLICACAO_SUB35`), e o teste afirma o seu CONTEÚDO, não só a sua
+  presença. Um `toBeTruthy()` sobre o `title` não distingue uma
+  explicação certa de uma desactualizada;
+- **quem decide continua a ser o servidor.** O componente nunca recalcula
+  a regra para a "confirmar" — duas contas da mesma regra divergem no dia
+  de um aniversário. Ele lê a flag e explica-a.
+
+## 27.34 — Um botão que não pode diz-se, não desaparece
+
+O registo canónico de capacidades (`models/permissions.ROLE_CAPABILITY_DEFAULTS`)
+já dizia que o perfil `indexacao` não cria processos. O ecrã é que não o
+consultava: o botão "Novo Processo" aparecia a todos e quem não podia descobria
+pelo erro.
+
+**A regra:** `BotaoComPermissao` com `modo="cadeado"` (omissão) — o botão fica
+VISÍVEL, desactivado, com cadeado e um tooltip que DIZ o motivo. `modo="ocultar"`
+reserva-se para acções cuja mera existência revela algo (gestão, eliminação em
+massa) e para barras onde um botão morto é só ruído.
+
+Porque é que a omissão é o cadeado e não a ocultação: um ecrã que muda de forma
+a cada perfil é impossível de apoiar ao telefone, e esconder ensina menos do que
+explicar. Um cadeado sem motivo, por outro lado, manda o utilizador perguntar a
+alguém — por isso `motivoDoBloqueio` nunca devolve vazio.
+
+**Três detalhes do componente que não se podem perder:**
+
+1. **O tooltip traz o seu próprio `TooltipProvider`.** Não há provider global
+   neste projecto; um componente que dependa de o chamador o ter funciona numa
+   página e falha noutra — sem erro, só sem tooltip.
+2. **O `disabled` vai no botão**, não um `pointer-events: none` no contentor:
+   um contentor sem eventos tira o tooltip E o foco do teclado.
+3. **Um `<button disabled>` não emite eventos de rato**, logo o `TooltipTrigger`
+   envolve-o num `<span>` — sem isso o tooltip nunca abriria.
+
+## 27.35 — Capacidades: registo POSITIVO, pelo papel EFECTIVO, e sem contrato não se esconde
+
+O gate antigo da Pool era `userRole !== "indexacao"`. Dois defeitos numa linha:
+
+* **lista de EXCLUSÃO** — um perfil novo sem direito a criar processos passava a
+  ver o botão, porque a exclusão não o conhece;
+* **papel do JWT** — quem tem perfil base de indexação a agir COMO consultor não
+  via o botão, embora a rota (que lê o papel EFECTIVO) o deixe passar. É a forma
+  do `history._is_stealth_user` e do botão de eliminar cliente: duas noções de
+  papel no mesmo caminho dão as duas respostas erradas.
+
+Hoje: `podeFazer(user, CAPACIDADE, effectiveRole)` (`utils/capacidades.js`), com
+as capacidades a vir do `/auth/me` em **`capabilities_por_papel`** — um mapa por
+cargo, porque o perfil activo muda sem recarregar a sessão. **Nunca duplicar a
+tabela de defaults no frontend:** uma cópia divergiria em silêncio.
+
+**E a decisão que parece ao contrário: sem contrato, deixa-se passar.** Uma
+sessão anterior ao deploy não tem `capabilities_por_papel`; falhar fechado aí
+esconderia TODOS os botões a TODOS os utilizadores, um ecrã sem botões não
+produz erro nenhum e parece que a aplicação está partida. A parede é o
+`exigir_capacidade` do servidor, que falha FECHADO. `capacidadesDoPapel` devolve
+`null` para "não sei" e `{}` para "sei que não tem nenhuma" — tratá-los como o
+mesmo era o erro.
+
+## 27.36 — Arrastar ficheiros: três armadilhas, um módulo
+
+`utils/dropzone.js` (puro) + `components/shared/Dropzone.jsx`.
+
+1. **`onDragLeave` dispara ao passar sobre um FILHO.** Uma zona que só faça
+   `setDragOver(false)` no leave pisca enquanto o rato atravessa o conteúdo, e
+   com o realce apagado o utilizador larga sem saber se vai acertar. Conta-se
+   entradas e saídas (`arrastoEntrou`/`arrastoSaiu`).
+2. **O arrasto do SISTEMA e o arrasto INTERNO são eventos diferentes com o
+   mesmo nome.** No separador Documentos, arrastar entre categorias MOVE; do
+   Finder, ENVIA. `eArrastoDeFicheiros` distingue-os pelo `dataTransfer.types`
+   conter `"Files"` — sem esta guarda, ligar o upload por arrasto partia o mover
+   que já existia.
+3. **O botão filtra tipos e o arrasto não.** O `<input>` tem `accept`; o caminho
+   do `drop` não passa por ele, e largar um `.exe` ia direito ao upload. A lista
+   de tipos é UMA constante por superfície, usada pelo `accept` E pelo filtro do
+   arrasto — em dois sítios divergiriam, e a divergência tem uma forma concreta:
+   o botão recusa e o arrasto deixa passar.
+
+**A ordem dos callbacks é significativa:** `onFicheiros` ANTES de
+`onRecusados`. Ao contrário, um largar MISTO apagava o aviso — quem trata os
+aceites limpa o estado do envio anterior, e esse "limpar" apagava a recusa
+acabada de escrever. Com esta ordem, um largar limpo também limpa um aviso
+antigo.
+
+**E a mensagem de recusa NOMEIA os ficheiros.** No Portal ela vive em estado
+PRÓPRIO e não no `result`: a forma do `result` serve o resumo do lote e os
+crachás de sucesso, e nenhum ramo do render mostrava uma mensagem de falha —
+escrever lá era escrever para ninguém.
+
+## 27.37 — O nome que se MOSTRA nunca é o que se USA para operar
+
+Desde que a identidade documental deriva do ID, a pasta de um cliente novo
+chama-se `11111111-…`. O backend resolve o nome real e envia-o em
+`display_name`; `utils/pastaS3.js` é o ponto único do lado do ecrã.
+
+`path` e `name` continuam a ser a autoridade de TODAS as operações (entrar,
+renomear, apagar, descarregar). Mostrar uma coisa e operar noutra é a forma
+discreta de uma parede não valer nada.
+
+**Três regras:**
+
+* **o nome cru fica à vista** quando foi substituído — quem precisa do uuid (um
+  log, um pedido de suporte) não pode perdê-lo;
+* **a pesquisa casa contra os dois** (visível e cru), senão o uuid deixa de ser
+  pesquisável no dia em que o nome passa a aparecer;
+* **duas fichas na mesma pasta não escolhem um nome** — mostra-se o nome cru e
+  um crachá com a contagem. Escolher um faria a colisão parecer resolvida.

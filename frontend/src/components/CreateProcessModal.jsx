@@ -243,8 +243,20 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
+      {/* Lote 3, ponto 3 — estrutura cabeçalho / corpo com scroll / rodapé.
+          O `DialogContent` base tem `max-h-[90vh] overflow-y-auto` na GRELHA
+          inteira, pelo que o rodapé rolava com o conteúdo e, num ecrã baixo,
+          saía de vista. E `overflow-y:auto` com `overflow-x:visible` faz o
+          CSS promover o eixo X também a `auto`: qualquer filho mais largo do
+          que a modal cria uma barra horizontal e empurra o botão da direita
+          para fora — era isto o "botão cortado".
+
+          Hoje: `overflow-hidden` + `flex flex-col` no contentor (o rodapé
+          fica SEMPRE visível), o scroll vive só no corpo, e `max-w-lg` em
+          vez de `max-w-md` dá às duas colunas de cartões o espaço que elas
+          já pediam. O padrão é o do `DocumentReviewModal`, que já o fazia. */}
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
             Novo Processo
@@ -254,7 +266,9 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        {/* `min-h-0` é obrigatório: um filho flex sem ele recusa-se a
+            encolher abaixo do seu conteúdo e o `overflow-y` nunca dispara. */}
+        <div className="space-y-4 py-2 flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
           {/* ── Cliente pré-selecionado (bloqueado) ─────────────────── */}
           {isClientLocked && selectedClient ? (
             <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg border">
@@ -553,7 +567,10 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
           </div>
         </div>
 
-        <DialogFooter>
+        {/* `shrink-0` para o rodapé não ser comprimido pelo corpo, e
+            `flex-wrap` para que num ecrã estreito os botões passem para
+            duas linhas em vez de um deles sair do ecrã. */}
+        <DialogFooter className="shrink-0 flex-wrap gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancelar
           </Button>

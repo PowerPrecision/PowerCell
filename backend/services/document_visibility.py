@@ -194,6 +194,53 @@ def user_can_view_process_documents(
     return False
 
 
+def can_manage_process_documents(user: dict, process: dict) -> bool:
+    """Pode OPERAR sobre os documentos do processo (renomear, organizar)?
+
+    Gestão OU atribuído — decisão de produto (Set 2026). O
+    `rename-smart` estava em `require_roles([ADMIN, CEO, DIRETOR])`, que
+    é a regra antiga do `AGENTS.md`, e por isso recusava o consultor
+    **dono** do processo: "não faz sentido o dono do processo não poder
+    organizar os próprios ficheiros".
+
+    O `require_roles` nunca poderia resolver isto: decide pelo CARGO e
+    não vê o processo, logo não sabe responder "está atribuído?". Daí
+    esta guarda viver aqui, onde o processo já está carregado.
+
+    A atribuição vem de `collect_assigned_ids`, o PONTO ÚNICO: foi a
+    divergência entre listas de campos escritas à mão que produziu o 403
+    falso positivo na listagem, e repeti-la aqui reproduzia o defeito
+    numa operação de ESCRITA.
+
+    PURA: não toca na base de dados.
+    """
+    from services.process_staff_assignment import collect_assigned_ids
+
+    if _user_allows(user) & _ADMIN_BYPASS_ROLES:
+        return True
+
+    uid = (user or {}).get("id")
+    return bool(uid and uid in set(collect_assigned_ids(process)))
+
+
+def assert_can_manage_process_documents(user: dict, process: dict) -> None:
+    """Levanta 403 quando `can_manage_process_documents` recusa."""
+    if can_manage_process_documents(user, process):
+        return
+    logger.warning(
+        "[DOCS-MANAGE] Operação negada: user=%s role=%s ao processo %s "
+        "(não é gestão nem está atribuído)",
+        (user or {}).get("id"), (user or {}).get("role"), (process or {}).get("id"),
+    )
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Só os utilizadores atribuídos a este processo (ou a gestão) "
+            "podem reorganizar os documentos."
+        ),
+    )
+
+
 async def assert_can_view_process_documents(user: dict, process: dict) -> None:
     """
     Guarda de permissão para endpoints de leitura/listagem de documentos.

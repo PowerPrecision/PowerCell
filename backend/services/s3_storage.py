@@ -213,214 +213,141 @@ class S3Service:
         """
         return self.s3_client is not None and bool(self.bucket_name)
 
-    def _get_client_base_path(
-        self, 
-        client_id: str, 
-        client_name: str,
-        second_client_name: str = None
-    ) -> str:
-        """
-        Gera o caminho base para um cliente.
-        
-        Se houver segundo titular, o nome da pasta incluirá ambos os nomes
-        separados por " e " (ex: "João Silva e Maria Santos").
-        
-        Formato: Documentação Clientes/{nome_completo}
-        Se já existir, adiciona incrementador: {nome_completo}_2, {nome_completo}_3, etc.
-        
-        Args:
-            client_id: ID do processo/cliente (usado internamente para verificações)
-            client_name: Nome do primeiro titular
-            second_client_name: Nome do segundo titular (opcional)
-        
-        Returns:
-            Caminho base no S3
-        """
-        safe_name = sanitize_folder_name(client_name)
-        
-        # Incluir segundo titular se existir
-        if second_client_name and second_client_name.strip():
-            safe_second_name = sanitize_folder_name(second_client_name)
-            combined_name = f"{safe_name}_e_{safe_second_name}"
-            # Limitar tamanho total para evitar paths muito longos
-            if len(combined_name) > 100:
-                combined_name = combined_name[:100]
-            base_name = combined_name
-        else:
-            base_name = safe_name
-        
-        # Verificar se pasta já existe e adicionar incrementador se necessário
-        final_name = base_name
-        counter = 1
-        
-        while self._folder_exists(f"Documentação Clientes/{final_name}"):
-            counter += 1
-            final_name = f"{base_name}_{counter}"
-            # Limite de segurança para evitar loop infinito
-            if counter > 100:
-                # Fallback: usar parte do ID
-                final_name = f"{base_name}_{client_id[-6:]}"
-                break
-        
-        return f"Documentação Clientes/{final_name}"
-    
     def _get_client_base_path_for_upload(
-        self, 
-        client_id: str, 
-        client_name: str,
-        second_client_name: str = None
-    ) -> str:
+        self,
+        client_id: str,
+        client_name: str = None,
+        second_client_name: str = None,
+        *,
+        owner_client_id: str = None,
+    ) -> Optional[str]:
         """
-        Gera o caminho base para upload de ficheiros.
-        
-        IMPORTANTE: Esta função NÃO cria pastas novas com incrementador.
-        Se a pasta já existir, usa a existente. Só cria nova se não existir nenhuma.
-        
+        O caminho base da pasta de uma entidade — derivado do ID, nunca do nome.
+
+        LOTE 6, ponto 1 — A COLISÃO DE IDENTIDADE
+        =========================================
+        Esta função derivava o caminho do NOME e, antes de o usar, procurava
+        uma pasta parecida (`_find_client_folder_combined`, score >= 0.7). Os
+        documentos de uma cliente nova ("Carolina Agostinho da Silva") foram
+        por isso servidos na pasta de uma existente ("Carolina Silva"):
+        2/3 de palavras em comum + 0.2 de bónus pelo primeiro nome = 0.867.
+
+        E não havia rede: a única função que acrescentava `_2` a um nome
+        repetido (`_get_client_base_path`) **não tinha um único chamador** e
+        foi apagada com esta correcção — dois clientes com o mesmo nome nunca
+        tiveram pastas separadas, por muito que o `s3_folder_relink`
+        documentasse o contrário.
+
+        Hoje a identidade é o id, e o ponto único é `services.s3_document_root`.
+
+        `client_name` fica na assinatura porque todos os chamadores o passam
+        (e é útil no log), mas **não participa no caminho**. Devolver `None`
+        quando o id não serve é deliberado: um caminho adivinhado grava-se uma
+        vez e vale para sempre.
+
         Args:
-            client_id: ID do processo/cliente
-            client_name: Nome do primeiro titular
-            second_client_name: Nome do segundo titular (opcional)
-        
-        Returns:
-            Caminho base no S3
+            client_id: id da entidade a mapear (cliente OU processo).
+            client_name: só para o log.
+            second_client_name: ignorado (vivia no nome da pasta).
+            owner_client_id: quando dado e diferente, `client_id` é um
+                PROCESSO e a pasta nasce sob a do cliente.
         """
-        # Validar entradas
-        if not client_name:
-            client_name = "cliente"
-        
-        try:
-            safe_name = sanitize_folder_name(client_name)
-        except Exception as e:
-            logger.warning(f"Erro ao sanitizar nome do cliente: {e}")
-            safe_name = "cliente"
-        
-        # Incluir segundo titular se existir
-        if second_client_name and second_client_name.strip():
-            try:
-                safe_second_name = sanitize_folder_name(second_client_name)
-            except Exception as e:
-                logger.warning(f"Erro ao sanitizar nome do segundo titular: {e}")
-                safe_second_name = "titular2"
-            combined_name = f"{safe_name}_e_{safe_second_name}"
-            if len(combined_name) > 100:
-                combined_name = combined_name[:100]
-            base_name = combined_name
+        from services.s3_document_root import pasta_do_cliente, pasta_do_processo
+
+        if owner_client_id and owner_client_id != client_id:
+            caminho = pasta_do_processo(client_id, client_id=owner_client_id)
         else:
-            base_name = safe_name
-        
-        # PRIMEIRO: Tentar encontrar pasta existente (case-insensitive)
-        # Isto é crucial para evitar criar pastas duplicadas
-        try:
-            existing_folder = self._find_client_folder_combined(client_name, second_client_name)
-            if existing_folder:
-                logger.info(f"Pasta existente encontrada para {client_name}: {existing_folder}")
-                return existing_folder
-        except Exception as e:
-            logger.warning(f"Erro ao procurar pasta existente: {e}")
-            # Continuar com o nome sanitizado
-        
-        # Se não existe, usar o nome sanitizado (sem incrementador)
-        base_path = f"Documentação Clientes/{base_name}"
-        logger.info(f"Nova pasta será usada para {client_name}: {base_path}")
-        return base_path
-    
-    def _find_client_folder_combined(self, client_name: str, second_client_name: str = None) -> Optional[str]:
+            caminho = pasta_do_cliente(client_id)
+
+        if caminho is None:
+            logger.error(
+                "[S3-PATH] Id inutilizável como pasta (%r, cliente=%r) — "
+                "recusado em vez de derivar do nome.",
+                client_id, client_name,
+            )
+            return None
+        return caminho
+
+    def _find_client_folder_combined(
+        self, client_name: str, second_client_name: str = None
+    ) -> Optional[str]:
         """
-        Procura a pasta real do cliente no S3, suportando clientes com dois titulares.
-        Faz match case-insensitive e flexível para encontrar a pasta correta.
+        Procura a pasta de um cliente por nome EXACTO (ignorando maiúsculas).
+
+        LOTE 6 — O SCORE SAIU DAQUI
+        ===========================
+        Havia um match flexível: palavras em comum / palavras totais, mais 0.2
+        se o primeiro nome aparecesse na pasta, aceitando a partir de 0.7.
+        "Carolina Agostinho da Silva" contra a pasta `carolina_silva` dava
+        **0.867** e as duas fichas passavam a partilhar documentação. A
+        assinatura era "mesmo primeiro nome + um conjunto de nomes contido no
+        outro" — mãe e filha, dois irmãos, e sobretudo a MESMA pessoa inserida
+        com nome curto e com nome completo.
+
+        O que fica é o match EXACTO, nas duas grafias que o sistema produz
+        (com espaços e com underscores). Serve para:
+          * **ler** a pasta de um processo legado sem `s3_folder` gravado
+            (`_get_possible_client_paths`), onde não devolver nada esconderia
+            documentos que existem;
+          * **sugerir** uma pasta ao administrador no religamento manual.
+
+        NUNCA para decidir onde um upload NOVO vai: essa identidade sai do id
+        (`_get_client_base_path_for_upload`). Homónimos exactos continuam a
+        colidir na LEITURA legada — é residual, está em `TECHNICAL_DEBT.md` e
+        a saída é o religamento manual.
         """
         if not self.is_configured() or not client_name:
             return None
-        
+
         try:
-            # Listar pastas em "Documentação Clientes/"
             response = self.s3_client.list_objects_v2(
                 Bucket=self.bucket_name,
                 Prefix="Documentação Clientes/",
-                Delimiter="/"
+                Delimiter="/",
             )
-            
-            # Se não houver pastas, retornar None
             if not response.get("CommonPrefixes"):
                 return None
-            
-            # Construir nome de busca
-            clean_name = client_name.strip() if client_name else ""
-            if not clean_name:
-                return None
-            search_name = clean_name.lower()
-            
-            # Se há segundo titular, incluir na busca
-            if second_client_name and second_client_name.strip():
-                clean_second = second_client_name.strip()
-                search_name = f"{clean_name.lower()} e {clean_second.lower()}"
-                # Também buscar versão com underscore
-                safe_name = sanitize_folder_name(client_name)
-                safe_second = sanitize_folder_name(second_client_name)
-                search_name_underscore = f"{safe_name.lower()}_e_{safe_second.lower()}"
-            else:
-                search_name_underscore = sanitize_folder_name(client_name).lower()
-            
-            best_match = None
-            best_score = 0
-            
-            for prefix in response.get("CommonPrefixes", []):
-                folder_path = prefix.get("Prefix", "").rstrip("/")
-                folder_name = folder_path.replace("Documentação Clientes/", "")
-                folder_lower = folder_name.lower()
-                
-                # Match exato (case-insensitive)
-                if folder_lower == search_name or folder_lower == search_name_underscore:
-                    return folder_path
-                
-                # Match flexível - calcular score de similaridade
-                # Comparar palavras
-                search_words = set(search_name.replace("_", " ").split())
-                folder_words = set(folder_lower.replace("_", " ").split())
-                
-                # Ignorar palavras comuns que não ajudam no match
-                common_words = {"de", "da", "do", "dos", "das", "e", "a", "o"}
-                search_words_filtered = search_words - common_words
-                folder_words_filtered = folder_words - common_words
-                
-                # Inicializar score
-                score = 0
-                
-                if search_words_filtered and folder_words_filtered:
-                    # Calcular interseção
-                    intersection = search_words_filtered & folder_words_filtered
-                    max_len = max(len(search_words_filtered), len(folder_words_filtered))
-                    if max_len > 0:
-                        score = len(intersection) / max_len
-                    
-                    # Bonus se o primeiro nome está presente
-                    first_name_parts = clean_name.split()
-                    if first_name_parts:
-                        first_name = first_name_parts[0].lower()
-                        if first_name in folder_lower:
-                            score += 0.2
-                    
-                    # Bonus se segundo titular está presente
-                    if second_client_name and second_client_name.strip():
-                        second_parts = second_client_name.strip().split()
-                        if second_parts:
-                            second_first_name = second_parts[0].lower()
-                            if second_first_name in folder_lower:
-                                score += 0.2
-                    
-                    if score > best_score and score >= 0.7:
-                        best_score = score
-                        best_match = folder_path
-            
-            if best_match:
-                logger.info(f"Encontrada pasta por similaridade ({best_score:.2f}): {best_match}")
-                return best_match
-                        
+
+            for alvo in self._nomes_de_pasta_candidatos(
+                client_name, second_client_name
+            ):
+                for prefix in response.get("CommonPrefixes", []):
+                    folder_path = prefix.get("Prefix", "").rstrip("/")
+                    folder_name = folder_path.replace("Documentação Clientes/", "")
+                    if folder_name.lower() == alvo:
+                        return folder_path
         except Exception as e:
             logger.warning(f"Erro ao procurar pasta do cliente: {e}")
-        
+
         return None
-    
+
+    def _nomes_de_pasta_candidatos(
+        self, client_name: str, second_client_name: str = None
+    ) -> List[str]:
+        """As grafias EXACTAS que o sistema já produziu para este nome.
+
+        Duas, porque houve dois escritores: com espaços (`João Silva e Maria`)
+        e sanitizado (`Joao_Silva_e_Maria`). Em minúsculas, para a comparação
+        ser insensível a maiúsculas sem ser insensível a palavras.
+        """
+        nome = (client_name or "").strip()
+        if not nome:
+            return []
+        segundo = (second_client_name or "").strip()
+        if segundo:
+            candidatos = [
+                f"{nome} e {segundo}",
+                f"{sanitize_folder_name(nome)}_e_{sanitize_folder_name(segundo)}",
+            ]
+        else:
+            candidatos = [nome, sanitize_folder_name(nome)]
+        vistos: List[str] = []
+        for c in candidatos:
+            baixo = c.lower()
+            if baixo and baixo not in vistos:
+                vistos.append(baixo)
+        return vistos
+
     def _folder_exists(self, folder_path: str) -> bool:
         """
         Verifica se uma pasta existe no S3.
@@ -488,6 +415,10 @@ class S3Service:
             base_path = s3_folder.rstrip('/')
         else:
             base_path = self._get_client_base_path_for_upload(client_id, client_name, second_client_name)
+        if not base_path:
+            # Id inutilizável: recusa-se em vez de escrever num caminho
+            # adivinhado a partir do nome (Lote 6, ponto 1).
+            return None
         
         # Categoria "all" deve ser tratada como "Outros"
         if category.lower() == "all":
@@ -544,22 +475,44 @@ class S3Service:
         if not self.is_configured():
             return {"error": "S3 não configurado", "files": {}}
 
-        # CRÍTICO: Se temos um s3_folder configurado, usar APENAS esse path.
-        # NÃO adicionar fallbacks — isso poderia listar ficheiros de outro cliente
-        # com nome similar após a pasta ficar vazia (ex: após eliminação).
-        possible_paths = []
+        # CRÍTICO: Se temos um s3_folder configurado, usar APENAS esse mapeamento.
+        # NÃO adicionar fallbacks por nome — isso listaria ficheiros de outro
+        # cliente de nome parecido depois de a pasta ficar vazia.
+        #
+        # LOTE 6: com a pasta do processo a viver DENTRO da do cliente, um
+        # mapeamento de processo lê-se como UNIÃO (a subpasta do processo + a
+        # raiz do cliente sem a subárvore `processos/`). Sem isso, tudo o que o
+        # cliente enviou antes de o processo existir — o onboarding do Portal
+        # inteiro — desaparecia do separador Documentos, e um documento que
+        # desaparece não produz erro nenhum.
+        #
+        # `parar_no_primeiro` distingue as duas intenções: a união TEM de varrer
+        # todos os prefixos; o recurso por nome continua a parar no primeiro que
+        # dê ficheiros (é uma lista de palpites de grafia, não um conjunto).
+        from services.s3_document_root import (
+            Leitura,
+            chave_pertence_a_leitura,
+            leituras_do_mapeamento,
+        )
+
         if s3_folder:
-            # Remover trailing slash se existir
             s3_folder = s3_folder.rstrip('/')
-            possible_paths.append(s3_folder)
+            leituras = leituras_do_mapeamento(s3_folder)
+            parar_no_primeiro = False
         else:
-            # Apenas usar paths automáticos como fallback se NÃO houver s3_folder
-            possible_paths.extend(self._get_possible_client_paths(client_id, client_name, second_client_name))
-        
+            leituras = [
+                Leitura(prefixo=caminho)
+                for caminho in self._get_possible_client_paths(
+                    client_id, client_name, second_client_name
+                )
+            ]
+            parar_no_primeiro = True
+
         files_by_category = {cat: [] for cat in DEFAULT_CATEGORIES}
         found_path = None
-        
-        for base_path in possible_paths:
+
+        for leitura in leituras:
+            base_path = leitura.prefixo
             prefix = f"{base_path}/"
             
             try:
@@ -580,6 +533,11 @@ class S3Service:
                         
                         # Ignorar ficheiros .keep (marcadores de pasta)
                         if key.endswith('.keep'):
+                            continue
+
+                        # Na raiz do CLIENTE, os documentos dos processos ficam
+                        # de fora: são do processo do lado, não deste.
+                        if not chave_pertence_a_leitura(key, leitura):
                             continue
                         
                         # Extrair categoria do path
@@ -625,8 +583,9 @@ class S3Service:
                         else:
                             files_by_category["Outros"].append(file_info)
                 
-                # Se encontrou ficheiros neste path, não precisa continuar
-                if found_path:
+                # Recurso por nome: o primeiro path que dê ficheiros ganha.
+                # Na união (mapeamento por id) varrem-se TODOS os prefixos.
+                if found_path and parar_no_primeiro:
                     break
                     
             except ClientError as e:
@@ -724,18 +683,12 @@ class S3Service:
                 folder_path = prefix.get("Prefix", "").rstrip("/")
                 folder_name = folder_path.replace("Documentação Clientes/", "")
                 
+                # Só match EXACTO (ver `_find_client_folder_combined`): o
+                # ramo dos 80% de palavras em comum ligava "Ana Costa" à
+                # pasta "Ana Maria Costa" e vice-versa.
                 if folder_name.lower() == search_name:
                     return folder_path
                 
-                # Match parcial (primeiros nomes)
-                if search_name.split()[0].lower() in folder_name.lower():
-                    # Verificar se é o mesmo cliente comparando mais palavras
-                    search_words = set(search_name.lower().split())
-                    folder_words = set(folder_name.lower().split())
-                    # Se mais de 80% das palavras coincidem
-                    if len(search_words & folder_words) >= len(search_words) * 0.8:
-                        return folder_path
-                        
         except Exception as e:
             logger.warning(f"Erro ao procurar pasta do cliente: {e}")
         
@@ -916,10 +869,13 @@ class S3Service:
             return False
 
     def initialize_client_folders(
-        self, 
-        client_id: str, 
-        client_name: str,
-        second_client_name: str = None
+        self,
+        client_id: str,
+        client_name: str = None,
+        second_client_name: str = None,
+        *,
+        base_path: str = None,
+        owner_client_id: str = None,
     ) -> tuple:
         """
         Cria a estrutura de pastas padrão para um novo cliente no S3.
@@ -947,17 +903,26 @@ class S3Service:
         """
         if not self.is_configured():
             return (False, None)
-        
-        # PRIMEIRO: Verificar se já existe pasta para este cliente
-        existing_folder = self._find_client_folder_combined(client_name, second_client_name)
-        if existing_folder:
-            logger.info(f"Usando pasta existente para {client_name}: {existing_folder}")
-            base_path = existing_folder
-        else:
-            # Só criar nova pasta se não existir nenhuma
-            base_path = self._get_client_base_path_for_upload(client_id, client_name, second_client_name)
-            logger.info(f"Criando nova pasta para {client_name}: {base_path}")
-            
+
+        # LOTE 6: a procura por nome saiu daqui. Era ela que fazia um cliente
+        # novo herdar a pasta de um cliente de nome parecido — e aqui o efeito
+        # era permanente, porque o caminho devolvido é o que se grava em
+        # `s3_folder`. Quem quiser reaproveitar uma pasta existente passa-a em
+        # `base_path` (é o que o religamento manual faz); por omissão, a pasta
+        # deriva do id.
+        if base_path is None:
+            base_path = self._get_client_base_path_for_upload(
+                client_id, client_name, second_client_name,
+                owner_client_id=owner_client_id,
+            )
+        if not base_path:
+            logger.error(
+                "[S3-INIT] Sem caminho utilizável para %s (%s) — pastas não criadas.",
+                client_id, client_name,
+            )
+            return (False, None)
+        logger.info(f"Estrutura de pastas em {base_path} para {client_id}")
+
         try:
             for category in DEFAULT_CATEGORIES:
                 safe_category = sanitize_folder_name(category)
@@ -986,9 +951,11 @@ class S3Service:
     def ensure_client_folder_mapping(
         self,
         client_id: str,
-        client_name: str,
+        client_name: str = None,
         second_client_name: str = None,
         existing_s3_folder: str = None,
+        *,
+        owner_client_id: str = None,
     ) -> Dict:
         """
         Garante, de forma robusta e idempotente, que existe um mapeamento
@@ -999,12 +966,18 @@ class S3Service:
         ``backend/scripts/hotfix_restore_s3_mappings.py`` para reparar
         mapeamentos em falta em clientes já existentes.
 
-        Ordem de resolução:
+        Ordem de resolução (LOTE 6 — a procura por nome saiu do meio):
         1. Se ``existing_s3_folder`` for fornecido e a pasta ainda existir
            no S3, é reutilizado sem qualquer alteração (não recria nada).
-        2. Caso contrário, procura uma pasta já existente para o cliente
-           por nome (case-insensitive / fuzzy), para evitar duplicados.
-        3. Se não encontrar nenhuma, cria a estrutura de pastas padrão.
+           É isto que mantém intactos os 12.450 mapeamentos já gravados.
+        2. Caso contrário, a pasta deriva do **ID** e a estrutura é criada
+           (``Documentação Clientes/{client_id}[/processos/{process_id}]``).
+
+        O passo do meio — "procurar uma pasta parecida por nome" — era a
+        colisão de identidade: 0.867 de score punha "Carolina Agostinho da
+        Silva" na pasta da "Carolina Silva". Reaproveitar uma pasta por nome
+        passou a ser uma decisão HUMANA (religamento manual), nunca um
+        palpite automático gravado para sempre.
 
         Esta função NUNCA escreve na base de dados — apenas devolve o
         caminho resolvido/criado no S3. A persistência (via ``$set``
@@ -1035,10 +1008,6 @@ class S3Service:
             logger.error("S3 não configurado — não é possível garantir mapeamento.")
             return result
 
-        if not client_name or not client_name.strip():
-            logger.warning(f"Cliente {client_id} sem nome válido — não é possível criar pasta S3.")
-            return result
-
         # 1. Reutilizar mapeamento existente se ainda for válido
         clean_existing = existing_s3_folder.strip() if existing_s3_folder else None
         if clean_existing and clean_existing.lower() not in ("undefined", "null", "none"):
@@ -1049,20 +1018,14 @@ class S3Service:
             except Exception as e:
                 logger.warning(f"Erro ao validar mapeamento S3 existente para {client_id}: {e}")
 
-        # 2. Procurar pasta já existente por nome (evita duplicados)
-        try:
-            found = self._find_client_folder_combined(client_name, second_client_name)
-            if found:
-                logger.info(f"[ENSURE-S3-MAPPING] Pasta existente encontrada para {client_name}: {found}")
-                result.update(success=True, s3_folder=found, reused_existing=True)
-                return result
-        except Exception as e:
-            logger.warning(f"Erro ao procurar pasta existente para {client_id}: {e}")
-
-        # 3. Nenhuma pasta encontrada — criar estrutura nova
+        # 2. A pasta deriva do ID. (Era aqui que vivia a procura por nome com
+        #    score >= 0.7 — o ponto exacto onde a cliente nova herdava a pasta
+        #    da cliente antiga. Reaproveitar uma pasta por nome deixou de ser
+        #    automático: é uma decisão humana, no religamento manual.)
         try:
             success, folder_path = self.initialize_client_folders(
-                client_id, client_name, second_client_name
+                client_id, client_name, second_client_name,
+                owner_client_id=owner_client_id,
             )
             if success and folder_path:
                 logger.info(f"[ENSURE-S3-MAPPING] Pasta criada para {client_name}: {folder_path}")
@@ -1282,6 +1245,10 @@ class S3Service:
             base_path = s3_folder.rstrip('/')
         else:
             base_path = self._get_client_base_path_for_upload(client_id, client_name, second_client_name)
+        if not base_path:
+            # Id inutilizável: recusa-se em vez de escrever num caminho
+            # adivinhado a partir do nome (Lote 6, ponto 1).
+            return None
         
         # Categoria "all" deve ser tratada como "Outros"
         if category.lower() == "all":
@@ -1368,6 +1335,10 @@ class S3Service:
             base_path = s3_folder.rstrip('/')
         else:
             base_path = self._get_client_base_path_for_upload(client_id, client_name, second_client_name)
+        if not base_path:
+            # Id inutilizável: recusa-se em vez de escrever num caminho
+            # adivinhado a partir do nome (Lote 6, ponto 1).
+            return None
         
         # Categoria "all" deve ser tratada como "Outros"
         if category.lower() == "all":

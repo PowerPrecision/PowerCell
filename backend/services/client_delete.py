@@ -11,7 +11,7 @@ import copy
 import re
 import os
 import unicodedata
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, Request
@@ -23,7 +23,11 @@ from models.client import (
     find_or_create_client_key,
     generate_portal_access_code,
 )
-from services.auth import get_effective_role
+from services.auth import (
+    authorization_role,
+    effective_role_is_allowed,
+    get_effective_role,
+)
 from models.auth import UserRole
 from services.encryption import (
     encryption_service,
@@ -44,9 +48,98 @@ from utils.search_filters import create_accent_insensitive_regex, build_multiwor
 
 logger = logging.getLogger(__name__)
 
+#: Quem pode eliminar um cliente. UMA lista: a da rota
+#: (`require_roles`) e a da guarda interna derivam desta, senão divergem
+#: — é o defeito dos campos canónicos de atribuição (Lote 5) noutro eixo.
+#:
+#: LOTE 5 — `ADMINISTRATIVO` SAIU (decisão do dono do produto). Eliminar
+#: arrasta o processo, os documentos, as tarefas e os pedidos RGPD em
+#: cascata; é poder de Administração e Direção, e o botão da Pool já só
+#: aparecia a esses três. Uma rota mais larga do que o botão é o defeito
+#: do "Menu e rotas têm de concordar" com as consequências ao contrário:
+#: a UI não mostra, mas o endpoint aceita.
+#:
+#: O administrativo mantém o que não destrói: desligar um processo de um
+#: cliente (`/unlink-process`) continua a admiti-lo.
+PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES = (
+    UserRole.ADMIN,
+    UserRole.CEO,
+    UserRole.DIRETOR,
+)
+
+
+async def _registar_eliminacao_na_auditoria(
+    *,
+    client_id: str,
+    nome: Optional[str],
+    user: dict,
+    papel_efectivo: Optional[str],
+    origem: str,
+    request: Any = None,
+    detalhes: Optional[dict] = None,
+) -> None:
+    """Deixa no trilho de auditoria quem eliminou o quê (D-16, Lote 5).
+
+    PORQUE É QUE NÃO BASTAVA O `deleted_by`
+    A eliminação já gravava `deleted_at`/`deleted_by` nos documentos
+    afectados — e isso é o que o RESTAURO lê, não um trilho consultável:
+    para responder a "quem apagou este cliente?" era preciso ir ao
+    documento eliminado, e para "o que foi apagado esta semana?" não
+    havia resposta nenhuma. Com o botão novo na Pool a operação passou a
+    estar a um clique da Direção.
+
+    PORQUE É O `audit_trail` E NÃO O `db.history`
+    O histórico é indexado por `process_id` e um cliente da Pool pode não
+    ter processo nenhum — não há âncora. O `audit_trail` é o trilho de
+    conformidade (IP, retenção, consulta por utilizador e por data) e é
+    deliberadamente o único sítio que o perfil `indexacao` não silencia.
+    Aqui isso não chega a ser questão: `indexacao` não está em
+    `PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES` e leva 403 antes de chegar cá.
+
+    DUAS REGRAS:
+      1. **nunca falha a operação.** O registo é escrito DEPOIS de a
+         eliminação estar feita; falhar aqui e propagar deixaria o
+         cliente eliminado e a resposta em erro, que é o pior dos dois
+         mundos. `log_audit_event` já engole as suas excepções, e este
+         `try` cobre o resto (import, serialização).
+      2. **o papel que vai no registo é o EFECTIVO.** O
+         `log_audit_event` grava `user["role"]` — o do JWT — e quem
+         autorizou esta operação foi o perfil activo. Vai em `metadata`
+         para não mudar a semântica de um campo compartilhado por todos
+         os outros chamadores.
+    """
+    try:
+        from services.audit_trail_service import log_audit_event
+
+        await log_audit_event(
+            process_id=client_id,
+            user=user,
+            action=f"Registo de cliente eliminado: {nome or client_id}",
+            field="client_delete",
+            old_value=nome,
+            new_value=None,
+            request=request,
+            source="web",
+            metadata={
+                "client_id": client_id,
+                "papel_efectivo": (papel_efectivo or user.get("role") or "").lower(),
+                "origem": origem,
+                **(detalhes or {}),
+            },
+        )
+    except Exception as e:  # noqa: BLE001 — observar nunca é interceptar
+        logger.warning(
+            f"Eliminação de {client_id} feita, mas o registo de auditoria "
+            f"falhou: {e}"
+        )
+
+
 async def run_delete_client(
     client_id: str,
-    user: dict
+    user: dict,
+    *,
+    papel_efectivo: Optional[str] = None,
+    request: Any = None,
 ):
     """
     Eliminar um cliente/processo (sempre soft delete, nunca hard delete).
@@ -79,10 +172,24 @@ async def run_delete_client(
     destruía processos que ainda tinham um 1º titular ativo, causando perda
     silenciosa de dados e bloqueio do trabalho do consultor responsável.
 
-    Apenas Admin, CEO, Diretor e Administrativo podem eliminar.
+    Apenas Admin, CEO, Diretor e Administrativo podem eliminar
+    (`PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES`).
+
+    CORRECÇÃO (Lote 4, ponto 2) — a guarda interna olhava para o papel
+    ERRADO. A rota entra por `require_roles`, que decide pelo cargo
+    EFECTIVO (UCR + `X-Active-Role`); esta linha lia `user["role"]`, o
+    cargo do JWT. Quem tem perfil base de consultor e entra COMO diretor
+    passava a porta e levava 403 aqui — o botão aparece, o pedido sai e o
+    servidor recusa, sem nada a explicar porquê. É a forma exacta do
+    `history._is_stealth_user` do Lote 4: duas noções de papel, e a
+    segunda a não ser a que manda.
+
+    Hoje as duas pontas derivam do mesmo par de funções e da mesma
+    constante, e o papel efectivo é passado pela rota (só ela tem o
+    `Request` de onde ele sai).
     """
-    # Verificar também se é diretor ou administrativo
-    if user.get("role") not in ["admin", "ceo", "diretor", "administrativo"]:
+    papel = authorization_role(papel_efectivo or user.get("role"), user)
+    if not effective_role_is_allowed(papel, list(PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES)):
         raise HTTPException(status_code=403, detail="Sem permissão para eliminar clientes")
 
     now = datetime.now(timezone.utc).isoformat()
@@ -201,6 +308,20 @@ async def run_delete_client(
             f"processo(s): {unlinked_process_ids}"
         )
 
+        await _registar_eliminacao_na_auditoria(
+            client_id=client_id,
+            nome=process.get("client_name"),
+            user=user,
+            papel_efectivo=papel_efectivo,
+            origem="processes",
+            request=request,
+            detalhes={
+                "titulares_desligados": second_titular_unlinks,
+                "processos_desligados": unlinked_process_ids,
+                "estado_anterior": process.get("status"),
+            },
+        )
+
         return {
             "success": True,
             "message": f"Cliente '{process.get('client_name')}' movido para o lixo",
@@ -297,6 +418,20 @@ async def run_delete_client(
         f"Cliente {client_id} movido para lixo por {user.get('email')} | "
         f"cascade 1º titular: {cascade_count} processo(s) {primary_cascade_ids} | "
         f"2º titular desligado: {second_titular_unlinks} processo(s) {unlinked_process_ids}"
+    )
+
+    await _registar_eliminacao_na_auditoria(
+        client_id=client_id,
+        nome=client.get("nome") or client.get("name"),
+        user=user,
+        papel_efectivo=papel_efectivo,
+        origem="clients",
+        request=request,
+        detalhes={
+            "processos_em_cascata": primary_cascade_ids,
+            "titulares_desligados": second_titular_unlinks,
+            "processos_desligados": unlinked_process_ids,
+        },
     )
 
     return {

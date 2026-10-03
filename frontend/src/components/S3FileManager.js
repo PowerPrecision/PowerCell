@@ -84,6 +84,13 @@ import {
   SelectValue,
 } from "./ui/select";
 import { toast } from "sonner";
+
+import {
+  eArrastoDeFicheiros,
+  ficheirosDoEvento,
+  mensagemDeRecusa,
+  separarPorTipoAceite,
+} from "@/utils/dropzone";
 import { resumirAnaliseEmLote } from "../utils/analiseEmLoteFeedback";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
@@ -203,6 +210,14 @@ const CATEGORIES = [
 // ====================================================================
 const INDEX_CATEGORY_ID = "Index";
 const INDEX_CATEGORY_ALLOWED_ROLES = ["admin", "ceo", "diretor", "indexacao"];
+
+/**
+ * Os tipos que o upload aceita — UMA lista, usada pelo `accept` do botão E
+ * pelo filtro do arrasto. Em dois sítios divergiriam, e a divergência aqui
+ * tem uma forma concreta: o botão recusa e o arrasto deixa passar.
+ */
+const TIPOS_ACEITES_NO_UPLOAD =
+  ".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp";
 
 // Ícone baseado na extensão do ficheiro
 const FileIcon = ({ filename }) => {
@@ -652,12 +667,21 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
   };
 
   // Upload de ficheiro
-  const handleUpload = async (e) => {
-    const selectedFiles = Array.from(e.target.files || []);
-    if (selectedFiles.length === 0) return;
-
-    // Determinar categoria (quando está no tab "all", usar "Outros")
-    const category = activeTab === "all" ? "Outros" : activeTab;
+  /**
+   * O caminho de upload, partilhado pelo BOTÃO e pelo ARRASTO (Lote 6).
+   *
+   * Extraído do `handleUpload` sem lhe mudar a lógica: a verificação de
+   * conflitos, o pedido de NIF ao perfil de indexação e o upload são os
+   * mesmos. Era isto que faltava para o arrasto existir — havia `onDrop` nas
+   * categorias, mas só para MOVER ficheiros entre elas; um ficheiro vindo do
+   * sistema não fazia nada.
+   *
+   * A categoria é um ARGUMENTO: largar numa categoria envia para ELA, que é
+   * mais útil do que uma zona genérica e é o que as zonas de `onDrop` já
+   * sugeriam visualmente.
+   */
+  const enviarFicheiros = async (selectedFiles, category) => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
 
     // Verificar conflitos antes de fazer upload
     const filenames = selectedFiles.map(f => f.name);
@@ -694,7 +718,14 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
     // Upload normal para outros utilizadores
     await executeUpload(selectedFiles);
   };
-  
+
+  /** A categoria de destino quando não há uma escolhida (separador "all"). */
+  const categoriaDeDestino = () => (activeTab === "all" ? "Outros" : activeTab);
+
+  const handleUpload = async (e) => {
+    await enviarFicheiros(Array.from(e.target.files || []), categoriaDeDestino());
+  };
+
   // Resolver conflito individual
   const handleConflictResolution = (action, customName = null) => {
     const { currentConflictIndex, resolutions } = uploadConflictDialog;
@@ -1788,7 +1819,26 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
     e.preventDefault();
     setDropTarget(null);
     setDragCounter(0);
-    
+
+    // DOIS gestos com o mesmo nome (Lote 6, ponto 3):
+    //   * arrastar do Finder/Explorador → ENVIAR para esta categoria;
+    //   * arrastar um ficheiro de outra categoria → MOVER (o que já existia).
+    // `eArrastoDeFicheiros` distingue-os pelo `dataTransfer.types`; sem esta
+    // guarda, ligar o upload por arrasto partia o mover.
+    if (eArrastoDeFicheiros(e)) {
+      const { aceites, recusados } = separarPorTipoAceite(
+        ficheirosDoEvento(e),
+        TIPOS_ACEITES_NO_UPLOAD
+      );
+      if (recusados.length > 0) {
+        toast.error(mensagemDeRecusa(recusados, TIPOS_ACEITES_NO_UPLOAD));
+      }
+      if (aceites.length > 0) {
+        await enviarFicheiros(aceites, targetCategory || categoriaDeDestino());
+      }
+      return;
+    }
+
     // Determinar quais ficheiros mover
     const filesToMove = draggedFiles.length > 0 ? draggedFiles : (draggedFile ? [draggedFile] : []);
     
@@ -2206,7 +2256,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
                 multiple
                 onChange={handleUpload}
                 className="hidden"
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp"
+                accept={TIPOS_ACEITES_NO_UPLOAD}
               />
             </div>
           </div>
@@ -2341,13 +2391,14 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
                         onDragEnter={(e) => handleDragEnter(e, cat.id)}
                         onDragLeave={(e) => handleDragLeave(e, cat.id)}
                         onDrop={(e) => handleDrop(e, cat.id)}
+                        data-testid={`zona-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
                         className={`relative ${isDropTarget ? "ring-2 ring-teal-500 ring-inset bg-teal-50 dark:bg-teal-950/30 rounded" : ""}`}
                       >
                         <button
                           onClick={() => setSelectedCategory(cat.id)}
                           className={`w-full px-1 py-2 text-xs flex items-center justify-center hover:bg-accent/50 transition-colors ${selectedCategory === cat.id ? "bg-accent" : ""}`}
                           data-testid={`folder-${cat.id.toLowerCase().replace(/\s/g, '-')}`}
-                          title={`${cat.label} (${count}) - Arraste ficheiros para mover`}
+                          title={`${cat.label} (${count}) — arraste para mover, ou do computador para enviar`}
                         >
                           <Icon className={`h-4 w-4 ${isDropTarget ? "text-teal-600" : selectedCategory === cat.id ? "text-primary font-bold" : colorMap[cat.color] || "text-gray-500"}`} />
                         </button>

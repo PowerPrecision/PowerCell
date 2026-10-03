@@ -5,6 +5,7 @@ Extraído de `routes/portal.py`.
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -336,12 +337,18 @@ async def run_generate_portal_upload_url(data: dict, client_data: dict):
     if not s3_folder:
         titular2_upload = (process or {}).get("titular2_data") or {}
         second_client_name = (process or {}).get("second_client_name") or titular2_upload.get("nome") or titular2_upload.get("name")
+        # `owner_client_id` faz a pasta do PROCESSO nascer sob a do cliente
+        # (Lote 6). Sem ele, o processo ganharia uma raiz própria e os
+        # documentos do onboarding ficariam numa árvore à parte.
         mapping = await asyncio.to_thread(
-            s3_service.ensure_client_folder_mapping,
-            storage_id,
-            client_name,
-            second_client_name,
-            s3_folder,
+            partial(
+                s3_service.ensure_client_folder_mapping,
+                storage_id,
+                client_name,
+                second_client_name,
+                s3_folder,
+                owner_client_id=client_id if process else None,
+            )
         )
         if mapping.get("success") and mapping.get("s3_folder"):
             s3_folder = mapping["s3_folder"]

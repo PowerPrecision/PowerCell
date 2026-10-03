@@ -141,42 +141,54 @@ def assert_s3_file_belongs_to_process(file_path: str, process: dict) -> None:
     """
     Garante que `file_path` pertence ao prefixo S3 do processo.
 
+    A comparação é por SEGMENTO de caminho (`s3_document_root.dentro_da_pasta`),
+    nunca por texto. Com um `startswith` cru sobre
+    `Documentação Clientes/Carolina Silva`, a chave
+    `Documentação Clientes/Carolina Silva Agostinho/Financeiros/irs.pdf`
+    passava: um processo autorizava a pasta inteira de quem tem o nome mais
+    longo. O buraco não precisava do `fuzzy match` nenhum — bastava um nome
+    ser prefixo do outro — e é alcançável do PORTAL (ver
+    `portal_upload_ops.assert_portal_file_key_e_do_cliente`), para um cliente
+    que ainda não tenha `s3_folder`. É a mesma regra que o
+    `s3_folder_relink.reescrever_prefixo` já aplicava.
+
+    Sem `s3_folder` E sem nome não há posse que se prove, e recusa-se: o
+    degradado antigo produzia o prefixo `Documentação Clientes/` e aceitava a
+    árvore de documentos inteira.
+
     Raises:
         HTTPException(403) se o path estiver fora do scope do cliente/processo.
     """
-    from services.s3_storage import sanitize_folder_name
     from services.document_constants import ERROR_FILE_ACCESS_DENIED
+    from services.s3_document_root import dentro_da_pasta
 
-    s3_folder = process.get("s3_folder")
-    if s3_folder:
-        s3_prefix = s3_folder.rstrip("/")
-        if not file_path.startswith(f"{s3_prefix}/"):
-            raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
-        return
-
-    client_name = process.get("client_name", "") or ""
-    safe_name = sanitize_folder_name(client_name) if client_name else ""
-    clean_name = client_name.strip() if client_name else ""
-    valid_prefixes = [
-        f"Documentação Clientes/{clean_name}",
-        f"Documentação Clientes/{safe_name}",
-    ]
-    if not any(file_path.startswith(prefix) for prefix in valid_prefixes):
-        raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
+    for prefixo in build_s3_valid_prefixes(process):
+        if dentro_da_pasta(file_path, prefixo):
+            return
+    raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
 
 
 def build_s3_valid_prefixes(process: dict) -> list[str]:
-    """Prefixos S3 válidos para um processo (batch delete / list checks)."""
+    """Prefixos S3 válidos para um processo (batch delete / list checks).
+
+    Ponto único dos prefixos de posse: `assert_s3_file_belongs_to_process`
+    deriva daqui em vez de repetir a lista. Duas cópias da mesma lista
+    divergem sem dar erro — foi assim que a eliminação em massa ficou com um
+    degradado e a verificação individual com outro.
+
+    Devolve prefixos SEM barra final: quem compara usa
+    `s3_document_root.dentro_da_pasta`, que trata a fronteira. Uma lista
+    VAZIA significa "não há posse demonstrável" e recusa tudo.
+    """
+    from services.s3_document_root import RAIZ, normalizar
     from services.s3_storage import sanitize_folder_name
 
     s3_folder = process.get("s3_folder")
-    if s3_folder:
-        return [f"{s3_folder.rstrip('/')}/"]
+    if s3_folder and normalizar(s3_folder):
+        return [normalizar(s3_folder)]
 
-    client_name = process.get("client_name", "") or ""
-    safe_name = sanitize_folder_name(client_name) if client_name else ""
-    clean_name = client_name.strip() if client_name else ""
-    return [
-        f"Documentação Clientes/{clean_name}",
-        f"Documentação Clientes/{safe_name}",
-    ]
+    client_name = (process.get("client_name") or "").strip()
+    if not client_name:
+        return []
+    nomes = {client_name, sanitize_folder_name(client_name)}
+    return [f"{RAIZ}{nome}" for nome in sorted(n for n in nomes if n)]

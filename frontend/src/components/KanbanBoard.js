@@ -120,6 +120,10 @@ const KanbanBoard = ({
   // é um parâmetro do pedido e não um filtro em memória.
   const [labelsFilter, setLabelsFilter] = useState([]);
   const [labelsLogic, setLabelsLogic] = useState('OR');
+  // Ponto 1 (Lote 4) — Sub35. Como as etiquetas: é um parâmetro do
+  // PEDIDO (o quadro pede ao servidor só os processos elegíveis) e não
+  // um filtro em memória, logo vive no contentor.
+  const [sub35, setSub35] = useState(false);
   const [etiquetasDisponiveis, setEtiquetasDisponiveis] = useState([]);
 
   useEffect(() => {
@@ -180,7 +184,7 @@ const KanbanBoard = ({
 
   // === REACT QUERY - DATA FETCHING (QUERIES SEPARADAS) ===
   // Memoize filters to prevent infinite re-renders in dependent hooks
-  const filters = useMemo(() => ({ consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labels: labelsFilter, labelsLogic }), [consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labelsFilter, labelsLogic]);
+  const filters = useMemo(() => ({ consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labels: labelsFilter, labelsLogic, sub35 }), [consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labelsFilter, labelsLogic, sub35]);
 
   // QUERY 1: Colunas ACTIVAS (sem completedDays — não re-fetch quando o filtro muda)
   const {
@@ -516,6 +520,8 @@ const KanbanBoard = ({
         onLabelsChange={setLabelsFilter}
         labelsLogic={labelsLogic}
         onLabelsLogicChange={setLabelsLogic}
+        sub35={sub35}
+        onSub35Change={setSub35}
         completedDays={completedDays}
         onCompletedDaysChange={setCompletedDays}
         onScrollLeft={() => scrollContainer('left')}

@@ -120,6 +120,7 @@ async def run_get_process_neighbours(
     process_type: Optional[str] = None,
     labels: Optional[Any] = None,
     labels_logic: Optional[str] = "OR",
+    sub35: Optional[bool] = None,
 ) -> dict:
     """
     Orquestra GET /processes/{id}/neighbours.
@@ -153,6 +154,11 @@ async def run_get_process_neighbours(
         process_type=process_type,
         labels=labels,
         labels_logic=labels_logic,
+        # Ponto 1 — o vizinho tem de ser o vizinho DENTRO do que o
+        # utilizador está a ver. Um filtro que existisse na listagem e
+        # não aqui fazia a seta da fronteira da página saltar para um
+        # processo que a lista filtrada não contém.
+        sub35=sub35,
         terminais=nomes_terminais(await carregar_fases()),
     )
 

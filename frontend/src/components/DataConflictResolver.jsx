@@ -18,15 +18,20 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { formatCurrency } from "../utils/formatCurrency";
+import { confirmProcessData, resolveProcessDataConflict } from "../services/api";
 import { 
   AlertTriangle, Check, X, FileText, ArrowRight, 
-  Sparkles, Shield, Loader2, ChevronDown, ChevronUp
+  Sparkles, Shield, Loader2, ChevronDown, ChevronUp, Lock, Unlock
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
 import { toast } from "sonner";
 import { pt } from "date-fns/locale";
 import { safeFormat } from "../lib/utils";
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Mapeamento de campos para labels legíveis
 const FIELD_LABELS = {
@@ -66,29 +71,19 @@ const DataConflictResolver = ({
   const [confirming, setConfirming] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  // Destrancar expõe a ficha a sobreposição automática pela IA — confirma-se
+  // antes (Lote 3, ponto 2). O cadeado é discreto; o efeito não é.
+  const [showUnlockDialog, setShowUnlockDialog] = useState(false);
 
   const handleResolve = async (suggestion, choice) => {
     setResolving(suggestion.id);
     try {
-      const response = await fetch(`${API_URL}/api/processes/${processId}/resolve-conflict`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          field: suggestion.field,
-          choice: choice,
-          suggestion_id: suggestion.id
-        })
+      const response = await resolveProcessDataConflict(processId, {
+        field: suggestion.field,
+        choice: choice,
+        suggestion_id: suggestion.id,
       });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || "Erro ao resolver conflito");
-      }
-
-      const result = await response.json();
+      const result = response.data;
       toast.success(result.message);
       
       if (onResolve) {
@@ -104,21 +99,8 @@ const DataConflictResolver = ({
   const handleConfirmData = async (confirmed) => {
     setConfirming(true);
     try {
-      const response = await fetch(`${API_URL}/api/processes/${processId}/confirm-data`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ confirmed })
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || "Erro ao confirmar dados");
-      }
-
-      const result = await response.json();
+      const response = await confirmProcessData(processId, confirmed);
+      const result = response.data;
       toast.success(result.message);
       setShowConfirmDialog(false);
       
@@ -147,26 +129,91 @@ const DataConflictResolver = ({
     return null;
   }
 
-  // Se dados confirmados, mostrar badge e botão para desbloquear
+  // Dados confirmados: CADEADO DISCRETO (Lote 3, ponto 2).
+  //
+  // Era um `Alert` de largura inteira com um botão «Desbloquear Dados» —
+  // uma faixa permanente no topo da ficha para um estado que é, quase
+  // sempre, o estado NORMAL e desejado. Um aviso que está sempre lá deixa
+  // de ser lido, e ocupava o espaço de avisos que importam.
+  //
+  // Hoje é um ícone ao lado do rótulo, com o nome acessível a dizer o que
+  // faz (um ícone sozinho não é um botão — é um enigma) e confirmação
+  // antes de desbloquear: destrancar expõe a ficha a sobreposição
+  // automática pela IA, e isso não se faz num clique distraído.
   if (isDataConfirmed) {
     return (
-      <Alert className="border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-800">
-        <Shield className="h-4 w-4 text-green-600" />
-        <AlertTitle className="text-green-800 dark:text-green-300">Dados Verificados</AlertTitle>
-        <AlertDescription className="text-green-700 dark:text-green-400">
-          Os dados deste cliente foram confirmados. A IA não irá sobrepor informações automaticamente.
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="ml-4"
-            onClick={() => handleConfirmData(false)}
-            disabled={confirming}
-          >
-            {confirming ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Desbloquear Dados
-          </Button>
-        </AlertDescription>
-      </Alert>
+      <TooltipProvider delayDuration={200}>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex items-center gap-1 text-green-700 dark:text-green-400">
+                <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Dados verificados</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs">
+              <p>
+                Os dados foram confirmados. A IA não sobrepõe informação
+                automaticamente enquanto estiverem trancados.
+              </p>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                onClick={() => setShowUnlockDialog(true)}
+                disabled={confirming}
+                aria-label="Desbloquear dados verificados"
+                data-testid="desbloquear-dados"
+              >
+                {confirming ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Unlock className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Desbloquear dados verificados</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Dialog open={showUnlockDialog} onOpenChange={setShowUnlockDialog}>
+            <DialogContent
+              className="sm:max-w-md"
+              title="Desbloquear dados verificados"
+              description="A IA volta a poder sobrepor estes dados."
+            >
+              <DialogHeader>
+                <DialogTitle>Desbloquear dados verificados?</DialogTitle>
+                <DialogDescription>
+                  A partir de agora a IA volta a poder sobrepor automaticamente
+                  os dados deste cliente. Pode trancar outra vez a qualquer
+                  momento.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowUnlockDialog(false)}>
+                  Manter trancado
+                </Button>
+                <Button
+                  onClick={async () => {
+                    setShowUnlockDialog(false);
+                    await handleConfirmData(false);
+                  }}
+                  disabled={confirming}
+                >
+                  Desbloquear
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </TooltipProvider>
     );
   }
 

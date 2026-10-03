@@ -27,6 +27,18 @@ import {
   obrigatoriosEmFalta,
 } from '../utils/portalProfile';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
+import {
+  A_ENVIAR,
+  A_ESPERA,
+  ENVIADO,
+  FALHOU,
+  concluidos as concluidosDoLote,
+  criarLote,
+  etiquetaDeProgresso,
+  listaUnificada,
+  marcar as marcarFicheiro,
+  resumirLote,
+} from '../utils/portalUploadStaging';
 import useSlidingSession from '../hooks/useSlidingSession';
 import {
   FileText,
@@ -65,6 +77,7 @@ import {
   Bell,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import Dropzone from "@/components/shared/Dropzone";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 // PACOTE DE — Lista de ficheiros anexados por categoria (append, nunca replace)
@@ -224,13 +237,22 @@ function WorkflowStepper({ stepper }) {
 // ====================================================================
 // SINGLE DOCUMENT UPLOAD ITEM (supports multi-file via drag & drop / multiple)
 // ====================================================================
+/**
+ * Os tipos que o Portal aceita — UMA lista, usada pelo `accept` do botão E
+ * pelo filtro do arrasto. Em dois sítios divergiriam, e a divergência tem uma
+ * forma concreta: o botão recusa e o arrasto deixa passar.
+ */
+const TIPOS_ACEITES_NO_PORTAL = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
+
 function DocumentUploadItem({ doc, onUploadSuccess }) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
-  const [dragOver, setDragOver] = useState(false);
-  const [uploadCount, setUploadCount] = useState(0);
-  const [uploadTotal, setUploadTotal] = useState(1);
+  // Lote 3, ponto 4 — o lote em envio, com NOME por ficheiro. Antes eram
+  // duas contagens (`uploadCount`/`uploadTotal`) que davam "2/5" e nunca
+  // diziam QUAL era o segundo. A lógica vive em `utils/portalUploadStaging`.
+  const [lote, setLote] = useState([]);
+  const [recusa, setRecusa] = useState("");
   const fileInputRef = useRef(null);
 
   const doUpload = async (file) => {
@@ -286,37 +308,51 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
     if (!files || files.length === 0) return;
 
     setUploading(true);
-    setUploadTotal(files.length);
-    setUploadCount(0);
     setProgress(0);
     setResult(null);
+    setRecusa("");
+
+    // O lote nasce ANTES do primeiro envio: é isso que faz os nomes
+    // aparecerem no ecrã desde o instante da selecção, em vez de só uma
+    // contagem a correr.
+    let actual = criarLote(files);
+    setLote(actual);
 
     const results = [];
     for (let i = 0; i < files.length; i++) {
-      setUploadCount(i + 1);
+      actual = marcarFicheiro(actual, i, A_ENVIAR);
+      setLote(actual);
       const res = await doUpload(files[i]);
       results.push(res);
+      // O erro fica NO ficheiro que falhou — era `errors[0].error` que
+      // escondia quais dos cinco não chegaram.
+      actual = marcarFicheiro(actual, i, res.success ? ENVIADO : FALHOU, res.error || null);
+      setLote(actual);
     }
 
-    const successes = results.filter(r => r.success);
-    const errors = results.filter(r => r.error);
-
-    if (errors.length === 0) {
-      setResult({ success: true, count: successes.length });
+    // O resumo NOMEIA os ficheiros que falharam: «2 erros» manda o cliente
+    // adivinhar, e o que ele precisa é de saber o que repetir.
+    setResult(resumirLote(actual));
+    if (results.some((r) => r.success)) {
       setTimeout(() => onUploadSuccess && onUploadSuccess(), 800);
-    } else if (successes.length > 0) {
-      setResult({ success: true, count: successes.length, errorCount: errors.length });
-      setTimeout(() => onUploadSuccess && onUploadSuccess(), 800);
-    } else {
-      setResult({ error: errors[0].error });
     }
     setUploading(false);
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    if (e.dataTransfer.files.length > 0) uploadFiles(Array.from(e.dataTransfer.files));
+  /**
+   * Os recusados pelo ARRASTO (Lote 6, ponto 3).
+   *
+   * O botão tinha `accept` e o caminho do `drop` não: largar um `.exe` ia
+   * direito ao upload. A parede real é a quarentena de magic bytes do servidor
+   * — isto é para o cliente não descobrir pelo erro, depois de a rede ter
+   * transportado o ficheiro.
+   */
+  const aoRecusarFicheiros = (_recusados, mensagem) => {
+    // Estado PRÓPRIO, e não o `result`: a forma do `result` serve o resumo do
+    // lote (`resumirLote`) e os crachás de sucesso, e nenhum ramo do render
+    // mostra uma mensagem de falha. Escrever lá seria escrever para ninguém —
+    // a mesma armadilha da notificação sem destinatário.
+    setRecusa(mensagem);
   };
 
   const handleFileChange = (e) => {
@@ -324,17 +360,26 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
     e.target.value = '';
   };
 
-  const progressLabel = uploadTotal > 1
-    ? `${uploadCount}/${uploadTotal}`
-    : `${progress}%`;
+  const progressLabel = etiquetaDeProgresso(lote, progress);
+  // UMA lista: o que já está no servidor mais o lote em curso.
+  const ficheirosNoEcra = listaUnificada(doc.attached_files, lote);
 
   return (
-    <div
-      className={`border rounded-xl p-3 transition-all ${uploading ? 'border-emerald-300 bg-emerald-50/50' : result?.success ? 'border-emerald-200 bg-emerald-50' : dragOver ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 bg-white'}`}
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-      onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={handleDrop}
+    /* A zona de largar é TODA a área útil do pedido, não só o botão
+       (Lote 6, ponto 3). Era já um `div` com `onDrop`, mas com um
+       `onDragLeave` sem contador: o realce piscava ao passar sobre o conteúdo
+       e o cliente largava sem saber se ia acertar. O `Dropzone` partilhado
+       conta entradas e saídas, aplica o MESMO `accept` do botão e distingue um
+       arrasto de ficheiros de qualquer outro. */
+    <Dropzone
+      onFicheiros={uploadFiles}
+      onRecusados={aoRecusarFicheiros}
+      accept={TIPOS_ACEITES_NO_PORTAL}
+      disabled={uploading}
+      testId={`zona-upload-${doc.id || doc.label || 'documento'}`}
+      rotulo="Largue aqui os ficheiros deste pedido"
+      className={`border rounded-xl p-3 transition-all ${uploading ? 'border-emerald-300 bg-emerald-50/50' : result?.success ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-white'}`}
+      classeActiva="border-emerald-400 bg-emerald-50"
     >
       <div className="flex items-center gap-3">
         <span className="text-xl flex-shrink-0">{doc.icon}</span>
@@ -353,7 +398,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
             múltiplos ficheiros por batch). */}
         {!uploading && (
           <>
-            <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" multiple={true}
+            <input ref={fileInputRef} type="file" className="hidden" accept={TIPOS_ACEITES_NO_PORTAL} multiple={true}
               onChange={handleFileChange} />
             <button onClick={() => fileInputRef.current?.click()}
               className="flex-shrink-0 px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1">
@@ -392,25 +437,57 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
         )}
       </div>
 
-      {/* PACOTE DE — Lista de ficheiros anexados por categoria (append, nunca replace).
-          Mostra todos os ficheiros já submetidos para este pedido/categoria,
-          com tamanho e botão de download individual. Usa tokens Shadcn para
-          suportar dark mode (não introduz novas cores cruas). */}
-      {doc.attached_files && doc.attached_files.length > 0 && (
+      {/* O que o arrasto recusou — NOMEADO. «2 ficheiros» manda adivinhar
+          qual, e o cliente precisa de saber o que repetir. */}
+      {recusa && (
+        <p className="mt-2 text-xs text-red-600 flex items-start gap-1">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          {recusa}
+        </p>
+      )}
+
+      {/* Lista UNIFICADA: os ficheiros já no servidor mais o lote em envio
+          (Lote 3, ponto 4). Duas listas lado a lado faziam o mesmo ficheiro
+          aparecer duas vezes no instante em que termina — a desduplicação é
+          por nome, que é o que o cliente reconhece.
+
+          O `attached_files` vem agora nas TRÊS serializações do
+          `/portal/status`: faltava em `requested_docs` e `uploaded_docs`, e
+          era por isso que um pedido ainda incompleto mostrava lista nenhuma
+          e o único nome no ecrã era o `filename` de topo (O ÚLTIMO). */}
+      {ficheirosNoEcra.length > 0 && (
         <ScrollArea className="h-fit max-h-[200px] mt-2 rounded-md border border-border">
-          <div className="p-2 space-y-1.5">
-            {doc.attached_files.map((file, idx) => (
-              <div key={file.file_id || idx} className="flex items-center justify-between gap-2 p-1.5 rounded bg-secondary/30">
+          <div className="p-2 space-y-1.5" data-testid="portal-lista-ficheiros">
+            {ficheirosNoEcra.map((file, idx) => (
+              <div
+                key={file.id || idx}
+                data-testid={`portal-ficheiro-${file.nome}`}
+                className={`flex items-center justify-between gap-2 p-1.5 rounded ${
+                  file.estado === FALHOU ? 'bg-destructive/10' : 'bg-secondary/30'
+                }`}
+              >
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span className="text-xs truncate text-foreground">{file.filename || file.original_filename}</span>
+                  {file.estado === A_ENVIAR ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-emerald-600" />
+                  ) : file.estado === FALHOU ? (
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+                  ) : file.estado === A_ESPERA ? (
+                    <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="text-xs truncate text-foreground">{file.nome}</span>
+                  {file.erro && (
+                    <span className="text-[10px] text-destructive truncate">{file.erro}</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  {file.file_size && (
+                  {file.tamanho ? (
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                      {(file.file_size / 1024).toFixed(0)} KB
+                      {(file.tamanho / 1024).toFixed(0)} KB
                     </Badge>
-                  )}
+                  ) : null}
+                  {file.noServidor && file.s3_path ? (
                   <button
                     className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                     onClick={async () => {
@@ -434,6 +511,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
                   >
                     <Download className="h-3 w-3" />
                   </button>
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -441,23 +519,32 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
         </ScrollArea>
       )}
 
-      {/* Progress bar */}
+      {/* Progress bar — do LOTE quando são vários, do ficheiro quando é um. */}
       {uploading && (
         <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2.5">
           <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300"
-            style={{ width: `${uploadTotal > 1 ? ((uploadCount / uploadTotal) * 100) : progress}%` }} />
+            style={{ width: `${lote.length > 1 ? ((concluidosDoLote(lote) / lote.length) * 100) : progress}%` }} />
         </div>
       )}
 
-      {/* Error */}
-      {result?.error && !result?.success && (
-        <div className="mt-2 flex items-center gap-1.5 text-xs text-red-600">
-          <AlertCircle className="w-3.5 h-3.5" />
-          <span>{result.error}</span>
-          <button onClick={() => setResult(null)} className="ml-auto text-red-400 hover:text-red-600">Tentar</button>
+      {/* Resultado do lote — com os NOMES do que falhou (Lote 3, ponto 4). */}
+      {result && (
+        <div
+          data-testid="portal-resultado-lote"
+          className={`mt-2 flex items-start gap-1.5 text-xs ${
+            result.tipo === "sucesso" ? "text-emerald-700" : "text-red-600"
+          }`}
+        >
+          {result.tipo === "sucesso"
+            ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            : <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />}
+          <span className="flex-1">{result.texto}</span>
+          <button onClick={() => setResult(null)} className="shrink-0 text-gray-400 hover:text-gray-600">
+            Fechar
+          </button>
         </div>
       )}
-    </div>
+    </Dropzone>
   );
 }
 

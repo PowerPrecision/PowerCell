@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
+from services.s3_document_root import pasta_do_processo
 from services.tenant_network import resolve_tenant_stamp
 from services.process_staff_assignment import (
     PAPEIS_COMO_CONSULTOR,
@@ -209,12 +210,14 @@ async def run_assign_client_to_user(
             titular2_data.pop("nif_hash", None)
         second_client_name = titular2_data.get("name") if titular2_data else None
         
-        # Fallback determinístico (mesma convenção de naming do serviço S3)
-        safe_name = "_".join(w.capitalize() for w in client_name.strip().split()) if client_name else process_id[:8]
-        s3_folder = f"Documentação Clientes/{safe_name}"
-        if second_client_name:
-            safe_second_name = "_".join(w.capitalize() for w in second_client_name.strip().split())
-            s3_folder = f"Documentação Clientes/{safe_name}_e_{safe_second_name}"
+        # LOTE 6, ponto 1 — este valor inicial era derivado do NOME, e era uma
+        # TERCEIRA cópia da convenção de caminhos escrita à mão. Dois clientes
+        # homónimos recebiam aqui o MESMO `s3_folder`, gravado directamente na
+        # base de dados — e o `ensure_s3_mapping_on_process_create` que corre a
+        # seguir honra o que já está gravado (passo 1), pelo que a colisão
+        # sobrevivia a qualquer correcção feita só no `ensure`. Hoje o caminho
+        # deriva do id, do mesmo ponto único que todos os outros.
+        s3_folder = pasta_do_processo(process_id, client_id=client_id)
         
         process_doc = {
             "id": process_id,

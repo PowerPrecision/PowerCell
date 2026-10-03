@@ -13,6 +13,7 @@ import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Search, Phone, Eye } from 'lucide-react';
+import Sub35Badge from "../shared/Sub35Badge";
 import { statusColors } from './constants';
 import { safeString } from '../../utils/safeString';
 
@@ -75,11 +76,7 @@ const SearchResultsList = memo(({
                           <p className="text-xs text-muted-foreground font-semibold">
                             #{process.process_number || '—'}
                           </p>
-                          {process.under_35 && (
-                            <Badge variant="outline" className="text-[10px] bg-green-50 text-green-700 mt-1">
-                              &lt;35 anos
-                            </Badge>
-                          )}
+                          <Sub35Badge processo={process} className="mt-1" />
                         </div>
                       </TableCell>
                       <TableCell>

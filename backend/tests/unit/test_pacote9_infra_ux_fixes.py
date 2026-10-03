@@ -57,12 +57,17 @@ class TestS3MappingOnCreate:
         proc = await fake_async_db.processes.find_one({"id": "proc-1"})
         cli = await fake_async_db.clients.find_one({"id": "cli-1"})
         assert proc["s3_folder"] == "Documentação Clientes/Joao_Silva"
-        assert cli["s3_folder"] == "Documentação Clientes/Joao_Silva"
+        # LOTE 6: o cliente recebe a SUA raiz, não a pasta do processo.
+        # Partilharem o caminho prendia a ficha do cliente ao primeiro
+        # processo dele; com a pasta do processo a viver DENTRO da do
+        # cliente, a raiz contém-nas todas e nada se perde.
+        assert cli["s3_folder"] == "Documentação Clientes/cli-1"
 
-        # ensure chamado em thread (boto3 síncrono) com os nomes certos
-        fake_s3.ensure_client_folder_mapping.assert_called_once_with(
-            "proc-1", "João Silva", None, None,
-        )
+        # ensure chamado em thread (boto3 síncrono), com o cliente a dizer
+        # sob que raiz a pasta do processo nasce.
+        chamada = fake_s3.ensure_client_folder_mapping.call_args
+        assert chamada.args == ("proc-1", "João Silva", None, None)
+        assert chamada.kwargs == {"owner_client_id": "cli-1"}
 
     async def test_client_with_valid_folder_is_not_overwritten(self, fake_async_db):
         from services import s3_mapping_on_create as mod
@@ -372,7 +377,13 @@ class TestAssignmentGuards:
             skip_welcome_email=True,
         )
 
+        from services import client_uniqueness
+
+        # `client_uniqueness` também (Lote 2, ponto 4): a verificação de
+        # duplicados saiu para o ponto único partilhado com a edição, e cada
+        # módulo tem a SUA referência ao proxy do `db` (AGENTS.md).
         with patch.object(client_crud, "db", fake_async_db), \
+             patch.object(client_uniqueness, "db", fake_async_db), \
              patch.object(client_crud, "s3_service", fake_s3), \
              patch("services.background_tasks.spawn_background_task", MagicMock()):
             created = await client_crud.run_create_client(payload, user)

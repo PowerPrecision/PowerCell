@@ -88,8 +88,13 @@ async def run_initialize_folders(client_id: str) -> dict[str, Any]:
 
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     second_client_name = extract_second_client_name(process)
+    # `effective_id` é o id do PROCESSO; a pasta nasce sob a do cliente para a
+    # documentação dele continuar ao alcance (Lote 6, ponto 1).
     success, s3_folder_path = s3_service.initialize_client_folders(
-        effective_id, client_name, second_client_name=second_client_name
+        effective_id,
+        client_name,
+        second_client_name=second_client_name,
+        owner_client_id=process.get("client_id"),
     )
     if success and s3_folder_path:
         await db.processes.update_one(

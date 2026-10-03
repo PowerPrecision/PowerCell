@@ -23,6 +23,7 @@ import { memo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
+import Sub35Badge from "../shared/Sub35Badge";
 import { Button } from '../ui/button';
 import { GripVertical, Eye, User, Phone, Mail, Lock, Flame, CheckCircle2, MessageSquare, FileText } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
@@ -40,6 +41,7 @@ const arePropsEqual = (prevProps, nextProps) => {
     prevProps.process.prioridade === nextProps.process.prioridade &&
     prevProps.process.priority === nextProps.process.priority &&
     prevProps.process.under_35 === nextProps.process.under_35 &&
+    prevProps.process.is_sub35 === nextProps.process.is_sub35 &&
     prevProps.process.updated_at === nextProps.process.updated_at &&
     prevProps.process.labels === nextProps.process.labels &&
     prevProps.process.has_unread_messages === nextProps.process.has_unread_messages &&
@@ -261,11 +263,11 @@ const KanbanCard = memo(({
                 👥 2 Proponentes
               </span>
             )}
-            {process.under_35 && (
-              <Badge variant="outline" className="text-[9px] bg-green-50 text-green-700 border-green-200 px-1 py-0 h-4">
-                &lt;35
-              </Badge>
-            )}
+            {/* Ponto 1 — a etiqueta passou a vir de um componente só.
+                Eram três cópias com as cores à mão, e nenhuma delas
+                apareceu alguma vez: o `under_35` que liam não era
+                escrito por ninguém no backend. */}
+            <Sub35Badge processo={process} tamanho="sm" />
             {process.process_type && (
               <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 truncate max-w-[100px]">
                 {process.process_type.replace(/_/g, ' ')}

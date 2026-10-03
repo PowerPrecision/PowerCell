@@ -15,7 +15,7 @@ import { Checkbox } from "../ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import { ScrollArea } from "../ui/scroll-area";
-import { Filter, RotateCcw, UserCheck, ChevronDown } from "lucide-react";
+import { Filter, RotateCcw, Sparkles, UserCheck, ChevronDown } from "lucide-react";
 import { PROCESS_TYPE_LABELS } from "../SmartClientSearch";
 import {
   useAssignmentUsersQuery,
@@ -50,6 +50,8 @@ export default function ProcessFilters({
   onAssignedUserIdsChange,
   assignedLogic = "OR",
   onAssignedLogicChange,
+  sub35 = false,
+  onSub35Change,
   onReset,
 }) {
   const { users, isLoading: usersLoading } = useAssignmentUsersQuery();
@@ -87,6 +89,10 @@ export default function ProcessFilters({
   const hasActive =
     (status && status !== "all") ||
     (processType && processType !== "all") ||
+    // O Sub35 ENTRA aqui: um filtro activo com o "Limpar Filtros"
+    // desactivado deixa o utilizador preso numa lista reduzida sem ver
+    // porquê — e sem forma de sair sem mexer no URL.
+    Boolean(sub35) ||
     selectedIds.length > 0;
 
   return (
@@ -196,6 +202,24 @@ export default function ProcessFilters({
           </ToggleGroupItem>
         </ToggleGroup>
       )}
+
+      {/* Ponto 1 — Sub35. Um interruptor e não um `Select` de três
+          valores: "não é Sub35" juntaria quem tem mais de 35 anos com
+          quem não tem data de nascimento na ficha, e o servidor recusa
+          essa pergunta de propósito (ver `services/sub35.py`). */}
+      <Button
+        type="button"
+        variant={sub35 ? "default" : "outline"}
+        size="sm"
+        aria-pressed={Boolean(sub35)}
+        onClick={() => onSub35Change?.(!sub35)}
+        className="gap-2"
+        data-testid="process-sub35-filter"
+        title={sub35 ? "A mostrar só processos Sub35" : "Mostrar só processos Sub35"}
+      >
+        <Sparkles className="h-4 w-4" />
+        Sub35
+      </Button>
 
       <Button
         type="button"

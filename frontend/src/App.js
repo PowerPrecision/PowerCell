@@ -10,6 +10,7 @@ import { queryClient } from "./lib/queryClient";
 import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { eErroDeChunk, urlDeRecarregamento } from "./utils/chunkErrors";
 import { hasPermission, STAFF_ROLES, canAccessByEffectiveRole, canAccessOrgAdmin } from "./utils/roleUtils";
 import React, { Suspense, Component } from "react";
 import * as Sentry from "@sentry/react";
@@ -135,54 +136,83 @@ function RouteBoundary({ children, name }) {
 class LazyChunkErrorBoundary extends Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    // `motivo` e não um booleano: há DOIS desfechos possíveis e tratá-los
+    // com a mesma flag foi o que produziu o ecrã branco (Lote 3, ponto 3).
+    this.state = { motivo: null, error: null };
   }
 
   static getDerivedStateFromError(error) {
-    // Verifica se é um erro de chunk loading
-    const isChunkError =
-      error?.name === "ChunkLoadError" ||
-      error?.code === "MODULE_NOT_FOUND" ||
-      error?.message?.includes("Failed to fetch dynamically imported module") ||
-      error?.message?.includes("Loading chunk") ||
-      error?.message?.includes("Loading CSS chunk") ||
-      error?.message?.includes("text/html") ||
-      error?.message?.includes("MIME type") ||
-      error?.message?.includes("Unexpected token") ||
-      error?.message?.includes("Script error");
-
-    if (isChunkError) {
-      console.warn("[LazyChunkErrorBoundary] Erro de chunk detetado, a recarregar página...");
-      // Limpa a cache do Vite se existir
-      if (typeof window !== "undefined" && window.__vite__ && window.__vite__.clearCache) {
-        window.__vite__.clearCache();
-      }
-      // Força reload limpo com cache-busting para evitar ciclo infinito
-      // (CDN/browser podem servir index.html em cache com hashes antigos)
-      window.location.replace(
-        window.location.pathname +
-        window.location.search +
-        (window.location.search.includes('?') ? '&' : '?') +
-        '_t=' + Date.now()
-      );
-      return { hasError: true, error };
-    }
-
-    // Para outros erros, deixa propagar para o Sentry
-    return { hasError: false, error };
+    // Sem efeitos secundários aqui: `getDerivedStateFromError` corre na fase
+    // de RENDER, pode correr duas vezes em StrictMode e pode correr num
+    // render que o React descarta. O `window.location.replace` passou para
+    // `componentDidCatch`, que é fase de commit.
+    //
+    // E devolve-se SEMPRE um motivo. A versão anterior devolvia
+    // `{ hasError: false }` para tudo o que não fosse chunk — e um boundary
+    // que não muda de estado não TRATA o erro: o React volta a renderizar os
+    // mesmos filhos, eles levantam outra vez e, sem fronteira a assumir a
+    // falha, o React desmonta a árvore inteira. Era esse o ecrã branco, e
+    // aparecia no Voltar do browser porque é aí que tudo o que vive FORA das
+    // fronteiras por rota (contextos, layout, router) volta a montar.
+    return {
+      motivo: eErroDeChunk(error) ? "chunk" : "aplicacao",
+      error,
+    };
   }
 
   componentDidCatch(error, errorInfo) {
-    // Se não for erro de chunk, reporta ao Sentry
-    if (!this.state.hasError) {
-      Sentry.captureException(error, { contexts: { react: { componentStack: errorInfo.componentStack } } });
+    if (this.state.motivo === "chunk") {
+      console.warn("[LazyChunkErrorBoundary] Erro de chunk detetado, a recarregar...");
+      if (typeof window !== "undefined" && window.__vite__?.clearCache) {
+        window.__vite__.clearCache();
+      }
+      const destino = urlDeRecarregamento(window.location);
+      if (destino) {
+        // `assign` e não `replace`: o `replace` apagava a entrada do
+        // histórico, e com ela o sítio onde o utilizador estava — o Voltar
+        // deixava de funcionar por causa da própria correcção.
+        window.location.assign(destino);
+      } else {
+        // Já viemos de um recarregamento. Insistir é um ciclo em que o
+        // utilizador nunca chega a ler o que se passou.
+        console.error("[LazyChunkErrorBoundary] Recarregamento já tentado — a mostrar o erro.");
+        this.setState({ motivo: "aplicacao" });
+      }
+      return;
     }
+    Sentry.captureException(error, {
+      contexts: { react: { componentStack: errorInfo.componentStack } },
+    });
   }
 
   render() {
-    if (this.state.hasError) {
-      // Enquanto recarrega, mostra loading
+    if (this.state.motivo === "chunk") {
+      // Recarregamento em curso.
       return <PageLoadingSkeleton />;
+    }
+    if (this.state.motivo === "aplicacao") {
+      // NUNCA em branco. Um erro fora das fronteiras por rota tem de dizer
+      // o que aconteceu e dar uma saída.
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background p-6">
+          <div className="max-w-md text-center space-y-3">
+            <h1 className="text-lg font-semibold text-foreground">
+              Algo falhou ao carregar esta página
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              O erro foi registado. Pode tentar recarregar; se persistir, avise
+              a equipa com a hora a que aconteceu.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Recarregar
+            </button>
+          </div>
+        </div>
+      );
     }
     return this.props.children;
   }

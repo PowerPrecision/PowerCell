@@ -79,7 +79,9 @@ const notificationColors = {
 // Labels por tipo de notificação
 const notificationLabels = {
   new_registration: "Novo Registo",
-  age_under_35: "Idade < 35",
+  // Lote 4: o critério é menos de 36 (até aos 35, inclusive). "Idade
+  // < 35" dizia, à letra, o que o `check_age_alert` fazia de errado.
+  age_under_35: "Sub35",
   pre_approval_countdown: "Pré-aprovação",
   document_expiry: "Validade Documento",
   document_expiry_watchdog: "Validade Documento",

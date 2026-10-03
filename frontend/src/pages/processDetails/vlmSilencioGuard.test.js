@@ -94,9 +94,14 @@ describe("ProcessDetails — todos os desfechos têm palavra", () => {
     expect(corpo).toMatch(/dizerODesfecho\(\s*false\s*\)[\s\S]{0,40}return;/);
   });
 
-  it("contraprova: o diálogo de revisão continua a abrir quando há o que rever", () => {
+  it("contraprova: a revisão continua a ser levantada quando há o que rever", () => {
     // Uma guarda que só exigisse mensagens seria satisfeita por um
     // componente que nunca mostrasse nada.
-    expect(corpo).toContain("setShowAIReviewDialog(true)");
+    //
+    // O MECANISMO mudou no Lote 3 (ponto 1): a revisão deixou de ser um
+    // diálogo sobreposto e passou a ser preenchimento em linha. A
+    // contraprova é a mesma — alguma coisa tem de aparecer ao consultor —,
+    // e aponta agora para onde a revisão vive.
+    expect(corpo).toContain("setSugestoesIA(criarSugestoes(revisao))");
   });
 });
