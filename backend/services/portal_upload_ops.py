@@ -24,6 +24,7 @@ from services.portal_assigned_users import get_all_assigned_user_ids as _get_all
 from services.portal_onboarding_advance import _trigger_onboarding_check
 from services.notification_service import send_notification_with_preference_check
 from services.redis_cache import invalidate_stats_cache
+from services.s3_document_root import pasta_gravada
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +66,45 @@ def _dono_do_prefixo_s3(
     Sem dono não há como provar posse, e o degradado de
     `assert_s3_file_belongs_to_process` com nome vazio aceitaria toda a raiz
     de documentos: o que num ecrã do CRM é um incómodo, aqui era a fuga.
+
+    LOTE 8 — O **id** ENTRA, E O NOME DEIXA DE DECIDIR
+    ==================================================
+    `build_s3_valid_prefixes` deixou de derivar prefixos do NOME (dois
+    homónimos exactos autorizavam-se um ao outro, e era por AQUI que isso
+    se alcançava de fora). Passou a derivá-los do ID — logo o dono tem de
+    trazer o `id`, senão uma ficha sem `s3_folder` ficava sem prefixo
+    nenhum e o Portal recusava um upload legítimo.
+
+    O nome continua a vir, mas só para o LOG: é o que torna um 403
+    diagnosticável sem abrir o Mongo. Já não entra em nenhuma decisão.
     """
-    # O processo vem primeiro de propósito: é a pasta que o `upload-url`
-    # escolhe quando há processo, e as duas podem divergir.
+    def _dono(candidato: dict) -> dict:
+        return {
+            "id": candidato.get("id"),
+            "s3_folder": candidato.get("s3_folder"),
+            # Só para o LOG: já não entra em nenhuma decisão.
+            "client_name": (
+                candidato.get("client_name") or candidato.get("nome") or ""
+            ),
+        }
+
+    # DUAS passagens, e a ordem foi um defeito meu que um teste legado
+    # apanhou. Com uma passagem só, o processo ganhava por ter `id` e um
+    # processo AINDA SEM MAPEAMENTO sob um cliente JÁ MAPEADO (o
+    # onboarding do Portal, exactamente) passava a receber 403: o prefixo
+    # derivava do id do processo e o ficheiro estava na pasta do cliente.
+    #
+    # 1.ª — quem tem mapeamento GRAVADO. É a pasta real, e o processo vem
+    #       primeiro porque é a que o `upload-url` escolhe quando existe.
     for candidato in (process, client):
-        if not candidato:
-            continue
-        s3_folder = candidato.get("s3_folder")
-        nome = candidato.get("client_name") or candidato.get("nome") or ""
-        if s3_folder or nome.strip():
-            return {"s3_folder": s3_folder, "client_name": nome}
+        if candidato and pasta_gravada(candidato.get("s3_folder")):
+            return _dono(candidato)
+
+    # 2.ª — sem mapeamento em lado nenhum, a posse deriva do ID.
+    for candidato in (process, client):
+        if candidato and candidato.get("id"):
+            return _dono(candidato)
+
     return None
 
 

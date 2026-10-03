@@ -15,6 +15,7 @@ from services.document_constants import (
     ERROR_CLIENT_NOT_FOUND,
     ERROR_CLIENT_WITHOUT_PROCESS,
 )
+from services.s3_document_root import pasta_gravada
 
 logger = logging.getLogger(__name__)
 
@@ -179,16 +180,38 @@ def build_s3_valid_prefixes(process: dict) -> list[str]:
     Devolve prefixos SEM barra final: quem compara usa
     `s3_document_root.dentro_da_pasta`, que trata a fronteira. Uma lista
     VAZIA significa "não há posse demonstrável" e recusa tudo.
-    """
-    from services.s3_document_root import RAIZ, normalizar
-    from services.s3_storage import sanitize_folder_name
 
-    s3_folder = process.get("s3_folder")
+    LOTE 8 — O NOME SAIU DAQUI (a última metade da D-19)
+    ====================================================
+    Sem `s3_folder`, o degradado derivava os prefixos do NOME do cliente
+    (`Documentação Clientes/{nome}` e a grafia sanitizada). Dois
+    homónimos EXACTOS produziam o MESMO prefixo, logo cada um autorizava
+    os ficheiros do outro — e isto é alcançável do **Portal**, por
+    `portal_upload_ops._dono_do_prefixo_s3`. Era a D-19 na guarda de
+    posse, e não só na leitura.
+
+    O que fica no lugar é o ID: `pasta_do_processo` / `pasta_do_cliente`,
+    que é a identidade canónica desde o Lote 6. Não alarga nada (a pasta
+    derivada do id de uma ficha é, por construção, a pasta dela) e um id
+    que não sirva como segmento não produz prefixo — a lista fica vazia e
+    recusa tudo, que é a regra que já existia.
+    """
+    from services.s3_document_root import (
+        normalizar,
+        pasta_do_cliente,
+        pasta_do_processo,
+    )
+
+    s3_folder = pasta_gravada(process.get("s3_folder"))
     if s3_folder and normalizar(s3_folder):
         return [normalizar(s3_folder)]
 
-    client_name = (process.get("client_name") or "").strip()
-    if not client_name:
-        return []
-    nomes = {client_name, sanitize_folder_name(client_name)}
-    return [f"{RAIZ}{nome}" for nome in sorted(n for n in nomes if n)]
+    # O id serve as duas colecções: um processo e um cliente da Pool
+    # (onboarding do Portal, sem processo) derivam da mesma raiz
+    # documental. `pasta_do_processo` sem `client_id` dá `RAIZ/{id}`,
+    # que é o que `pasta_do_cliente` daria para o mesmo id — logo uma
+    # chamada basta, e a outra fica aqui nomeada de propósito para
+    # ninguém a reintroduzir como um segundo prefixo.
+    assert pasta_do_processo("x" * 8) == pasta_do_cliente("x" * 8)
+    derivada = pasta_do_processo(process.get("id"))
+    return [derivada] if derivada else []

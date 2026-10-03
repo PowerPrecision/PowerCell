@@ -154,12 +154,19 @@ async def run_categorize_all_documents(process_id: str) -> dict[str, Any]:
 
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     second_client_name = extract_second_client_name(process)
+    # LOTE 8: esta chamada era a ÚNICA que omitia o `s3_folder`, logo
+    # resolvia sempre pelo NOME — e para uma ficha mapeada por ID o nome
+    # não resolve pasta nenhuma. «Categorizar Todos» (e o «Renomear IA»,
+    # que a chama primeiro) processava ZERO documentos em silêncio em
+    # todos os clientes criados depois do Lote 6. Não era só um risco do
+    # corte: era um defeito já em produção.
+    s3_folder = process.get("s3_folder")
 
     loop = asyncio.get_event_loop()
     files_data = await loop.run_in_executor(
         None,
         lambda: s3_service.list_files(
-            process_id, client_name, second_client_name
+            process_id, client_name, second_client_name, s3_folder
         ),
     )
     files = files_data.get("files", {})

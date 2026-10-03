@@ -10576,3 +10576,136 @@ não é uma mutação sobrevivente (nem o contrário).
 
 **O que falta:** a execução contra produção abortou na primeira anomalia, logo
 **não há números da D-19**. O script corrigido está pronto a correr de novo.
+
+---
+
+# Iteração `fim-do-recurso-por-nome` — 2026-10-03
+
+A D-19 foi medida em produção: **zero fichas a perder documentos**. Com o
+número na mão, o recurso por nome podia cair. Caiu — e pelo caminho
+apareceram **três defeitos que a medição não podia ter visto**, dois deles
+já em produção.
+
+## Ponto 1 — Sanar as anomalias, sem adivinhar
+
+O relatório deu a forma exacta: `[True, 'Documentação Clientes/Nome']`, o
+par `(sucesso, caminho)` gravado em vez da string.
+
+O pedido foi «substituir pelo valor do índice 1». Para esta forma é
+exactamente isso; `services/s3_folder_anomaly_repair.py` recusa as três
+em que um `[1]` cego escreve a coisa errada:
+
+* **`[False, caminho]`** — o par declara FALHA. O caminho está lá, mas é o
+  que o código tentou e não conseguiu usar.
+* **fora da raiz documental** — e esta é a parede, não zelo. O `s3_folder`
+  gravado **É** o prefixo de posse (`build_s3_valid_prefixes` →
+  `assert_s3_file_belongs_to_process`): um `backups/dump.zip` aqui não
+  corrige um registo, **abre o bucket** a partir do Portal. Regra 1 do
+  `s3_relink`; a raiz nua é a regra 2. A pergunta da raiz vem **antes** da
+  do sucesso, senão um `[True, "backups/x.zip"]` saía como «problema de
+  dados» em vez de «tentativa de envenenar o prefixo».
+* **qualquer outra forma** — `[]`, três elementos, o par invertido, um
+  `dict`.
+
+A omissão do script é LER e contar; só `--aplicar` escreve, e só o
+veredicto provado. A bandeira autoriza a escrita, não substitui a prova.
+
+### A armadilha que só o Mongo real revelou
+
+A primeira consulta era `{"$nor": [{"s3_folder": {"$type": "string"}}]}` e
+encontrou **1 de 7** casos semeados. Numa consulta a um campo que contém
+um ARRAY, o Mongo compara o array **e cada elemento**: `$type: "string"` é
+verdadeiro para `[True, "Documentação…"]` — o `$nor` excluía exactamente o
+que o script procura. Pior do que falhar: o relatório dizia «1 anomalia»,
+que se lê como «as outras estão sãs».
+
+Família da lição do `$nor` no duplo de Mongo, e o duplo in-memory não
+implementa `$type`. Hoje a pergunta é positiva: `$type: "array"` para o
+campo que É um array, `$not`/`$type: "string"` para os outros tipos.
+
+**Provado contra um `mongod` avulso**, com sete casos semeados: 7
+encontradas, 3 reparáveis, 4 a exigir decisão, nada gravado sem a
+bandeira; com `--aplicar` converge numa passagem (barra final aparada, os
+4 intactos, a ficha sã por tocar) e a segunda passagem repara 0.
+
+## Ponto 2 — O corte, e a pergunta que a medição não fez
+
+A medição contou as fichas **sem `s3_folder`**. O corte dependia de outra
+pergunta: **«que CHAMADORES se esquecem de passar o `s3_folder`?»** Esses
+não aparecem em medição nenhuma — a ficha está mapeada — e para eles o
+ramo do nome era o **único** que corria.
+
+Havia dois, e **ambos já estavam partidos**:
+
+| Onde | Consequência |
+|---|---|
+| `run_categorize_all_documents` | chamava `list_files` sem o mapeamento. Para uma ficha mapeada por ID o nome não resolve pasta nenhuma → «Categorizar Todos» e «Renomear IA» (que o chama primeiro) processavam **zero documentos em silêncio** em todos os clientes criados depois do Lote 6 |
+| `s3_storage.move_file` | recebia o `client_name` e resolvia a pasta de DESTINO por nome — um escritor a derivar identidade de um nome, o defeito do Lote 6 na forma mais directa. O «organizar após análise» respondia «Pasta do cliente não encontrada» nos mesmos clientes |
+
+Os dois passaram a receber o mapeamento. Sem mapeamento não se adivinha:
+`list_files` devolve vazio **e di-lo**, com o id e o nome e a apontar o
+religamento manual.
+
+### A metade de segurança, que não estava no enunciado
+
+`build_s3_valid_prefixes` derivava os prefixos de **posse** do NOME
+quando não havia `s3_folder`. Dois homónimos **exactos** produziam o
+MESMO prefixo, logo **cada um autorizava os ficheiros do outro** — e isso
+é alcançável de fora, pelo `portal_upload_ops._dono_do_prefixo_s3`.
+
+Era a D-19 na guarda de posse, e não só na leitura. Hoje o prefixo deriva
+do **ID**; um id que não sirva como segmento não produz prefixo e a lista
+vazia recusa tudo.
+
+## Um defeito meu, apanhado por um teste legado
+
+A primeira versão da resolução do dono fazia UMA passagem e o processo
+ganhava só por ter `id`. Um processo **ainda sem mapeamento** sob um
+cliente **já mapeado** — o onboarding do Portal, exactamente — passava a
+receber 403: o prefixo derivava do id do processo e o ficheiro estava na
+pasta do cliente. Hoje são duas passagens (mapeamento gravado primeiro, o
+ID como recurso). O teste `test_processo_sem_marcas_cai_para_o_cliente`
+estava certo e eu estava errado.
+
+Outros dois erros de percurso, ambos de guardas minhas: o `ast.unparse`
+normaliza as aspas (logo `'"--aplicar"' in codigo` dá falso negativo) e
+procurar o texto `[1]` apanhava o `parents[1]` do próprio script.
+
+## Testes legados: invertidos, nunca apagados
+
+| Teste | Afirmava | Afirma agora |
+|---|---|---|
+| `test_s3_name_fallback_audit.py` | a medição concorda com o `_nomes_de_pasta_candidatos` real | o oráculo **já não existe**; a regra da medição é um instantâneo congelado |
+| `test_s3_document_root.py` | a procura por nome é EXACTA | as quatro funções foram apagadas do serviço |
+| `test_posse_s3_fronteira_de_segmento.py` (2) | o ficheiro na pasta com o nome do próprio cliente passa a guarda | o nome **já não prova posse**; passa pelo ID |
+
+Actualizado também o fixture do `test_pacote10_ux_observability.py`: tinha
+só `client_name` e a guarda derivava o prefixo do nome — o comentário do
+próprio teste já dizia que usava valores que o fluxo real não produz.
+
+## Medição
+
+| Bateria | Antes | Depois |
+|---|---|---|
+| backend `tests/unit` | 4884 / 5 skip | **4960 / 5 skip** |
+
+Testes novos: `test_s3_folder_anomaly_repair.py` (35) e
+`test_fim_do_recurso_por_nome.py` (28), mais dois de comportamento no
+`test_s3_folder_corrompido.py`. Quatro ficheiros de testes legados
+actualizados ou invertidos. flake8 crítico limpo.
+**Onze mutações, onze mortes** — a N11 à SEGUNDA, e a primeira passagem
+dela é o achado do lote: sobreviveu porque a guarda por AST do Lote 8
+seguia apenas identificadores que CONTÊM `s3_folder`, e o `move_file`
+fazia `client_folder = s3_folder` antes do `.rstrip()` — **um nome
+intermédio basta para escapar a uma guarda que olha só para o
+identificador**. Não era uma mutação perdida, era um teste fraco (quarta
+variante da lição). A guarda passou a seguir um salto de atribuição, e ao
+alargá-la deu um falso positivo meu que também se corrigiu: uma origem
+JÁ SANEADA não contamina (`folder_name = s3_folder.replace(...)` onde o
+`s3_folder` veio do `pasta_gravada` é seguro). Ao lado dela ficou um
+teste de COMPORTAMENTO, porque o que a guarda não consegue afirmar
+afirma-se a correr o código.
+
+**Nota operacional:** correr `scripts/fix_s3_folder_anomalies.py`
+(primeiro sem bandeira, depois com `--aplicar`) **antes** do próximo
+deploy. A ordem não é opcional — ver a secção do `ARCHITECTURE.md`.

@@ -264,29 +264,44 @@ class TestOsFicheirosUteis:
 
 
 class TestAConcordanciaComProducao:
-    def test_a_regra_de_medicao_e_a_MESMA_do_codigo_de_producao(self):
-        """Medir com outra regra é medir outra coisa.
+    """INVERTIDO no Lote 8: o oráculo de produção deixou de existir.
 
-        O `_nomes_de_pasta_candidatos` do `s3_storage` é o que decide, em
-        produção, se o recurso por nome encontra a pasta. Se a medição for
-        mais LARGA, o relatório promete religamentos que o código nunca
-        faria; se for mais ESTREITA, esconde custo. Por isso o oráculo é o
-        método real, nunca uma terceira cópia da lista.
-        """
+    Este teste exigia que `nomes_de_pasta_candidatos` fosse igual, caso a
+    caso, ao `S3Service._nomes_de_pasta_candidatos` real — porque medir
+    com outra regra é medir outra coisa. Com a D-19 fechada o método de
+    produção foi **apagado**, logo não há oráculo: a regra que fica aqui
+    é um INSTANTÂNEO congelado do que o recurso por nome fazia enquanto
+    existiu, e serve para reler a medição que autorizou o corte.
+
+    O teste inverte-se em vez de se apagar (regra da casa): afirma agora
+    que o oráculo desapareceu. Se alguém reintroduzir a procura por nome
+    no `s3_storage`, isto fica vermelho e obriga a decidir de propósito —
+    em vez de a medição voltar a comparar-se com uma regra nova em
+    silêncio.
+    """
+
+    def test_o_oraculo_de_producao_JA_NAO_EXISTE(self):
         from services.s3_storage import S3Service
 
-        servico = S3Service.__new__(S3Service)
-        casos = [
-            ("Ana Costa", None),
-            ("Ana Costa", "Rui Pereira"),
-            ("José Múrias da Silva", None),
-            ("  Ana  Costa  ", None),
+        assert not hasattr(S3Service, "_nomes_de_pasta_candidatos"), (
+            "a procura por nome voltou ao `s3_storage`: a D-19 foi fechada "
+            "no Lote 8 e esta medição passou a ser um instantâneo histórico"
+        )
+
+    def test_a_regra_CONGELADA_continua_a_ser_a_que_o_relatorio_usou(self):
+        # Os valores exactos que o `_nomes_de_pasta_candidatos` apagado
+        # produzia — escritos à letra, porque já não há de onde os derivar.
+        assert nomes_de_pasta_candidatos("João Silva") == [
+            "joão silva", "joão_silva",
         ]
-        for nome, segundo in casos:
-            producao = servico._nomes_de_pasta_candidatos(nome, segundo)
-            assert nomes_de_pasta_candidatos(nome, segundo) == producao, (
-                f"divergência para {nome!r}/{segundo!r}"
-            )
+        assert nomes_de_pasta_candidatos("João Silva", "Maria Santos") == [
+            "joão silva e maria santos", "joão_silva_e_maria_santos",
+        ]
+        # E o que NUNCA produziu: foi o score a ligar estes dois nomes, e
+        # é por isso que a D-19 existiu.
+        assert "carolina silva" not in nomes_de_pasta_candidatos(
+            "Carolina Agostinho da Silva"
+        )
 
     def test_um_nome_vazio_nao_resolve_para_pasta_nenhuma(self):
         """Senão `""` casaria com a primeira pasta e o relatório inventava custo."""

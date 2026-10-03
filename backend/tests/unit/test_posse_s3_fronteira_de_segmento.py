@@ -73,16 +73,39 @@ class TestOVizinhoDeNomeMaisLongo:
 class TestOQueTemDeCONTINUARAPassar:
     """Contraprova: apertar a guarda não pode fechar o caso legítimo."""
 
-    def test_o_proprio_cliente_passa_com_nome_em_espacos(self):
-        assert_s3_file_belongs_to_process(
-            "Documentação Clientes/Carolina Silva/Financeiros/irs.pdf",
-            PROCESSO_SEM_PASTA,
-        )
+    # INVERTIDOS no Lote 8 (D-19 fechada). Estes dois afirmavam que, sem
+    # `s3_folder`, o ficheiro na pasta com o NOME do próprio cliente
+    # passava a guarda — era a contraprova de que apertar a fronteira de
+    # segmento não fechava o caso legítimo.
+    #
+    # A fronteira continua apertada, mas o prefixo deixou de sair do
+    # nome: dois homónimos EXACTOS produziam o MESMO prefixo e cada um
+    # autorizava os ficheiros do outro, alcançável do Portal. A medição
+    # da D-19 em produção contou zero fichas a depender do nome, logo o
+    # ramo foi apagado e o prefixo passou a derivar do ID.
+    #
+    # Invertidos em vez de apagados: sem eles, reintroduzir o ramo do
+    # nome não ficava vermelho em sítio nenhum.
 
-    def test_o_proprio_cliente_passa_com_nome_sanitizado(self):
-        assert_s3_file_belongs_to_process(
+    def test_o_nome_do_proprio_cliente_JA_NAO_prova_posse(self):
+        for chave in (
+            "Documentação Clientes/Carolina Silva/Financeiros/irs.pdf",
             "Documentação Clientes/Carolina_Silva/Financeiros/irs.pdf",
-            PROCESSO_SEM_PASTA,
+        ):
+            with pytest.raises(HTTPException) as erro:
+                assert_s3_file_belongs_to_process(chave, PROCESSO_SEM_PASTA)
+            assert erro.value.status_code == 403
+
+    def test_e_a_posse_passa_pelo_ID_em_vez_do_nome(self):
+        # O caso legítimo que substitui os dois de cima: a mesma ficha,
+        # com o ficheiro na pasta derivada do seu id.
+        from services import s3_document_root as raiz
+
+        pid = "44444444-4444-4444-8444-444444444444"
+        pasta = raiz.pasta_do_processo(pid)
+        assert_s3_file_belongs_to_process(
+            f"{pasta}/Financeiros/irs.pdf",
+            {"id": pid, "client_name": "Carolina Silva"},
         )
 
     def test_a_pasta_gravada_continua_a_mandar(self):

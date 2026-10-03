@@ -308,99 +308,6 @@ o `titular2_data` apontam para "os adicionais"), migrar os documentos escritos
 pelo mapeador do CPCV — identificáveis porque `co_buyers[0]` tem a identidade
 do titular 1 — e só então simplificar a desduplicação.
 
-### D-19 · Homónimos exactos ainda partilham pasta na LEITURA legada
-**Onde:** `backend/services/s3_storage.py::_find_client_folder_combined`,
-`_get_possible_client_paths`.
-
-A identidade da pasta passou a derivar do ID (Lote 6), mas a LEITURA de um
-processo que nunca teve `s3_folder` gravado continua a procurar a pasta pelo
-nome. O match por similaridade foi removido — era ele que ligava "Carolina
-Agostinho da Silva" a `carolina_silva` — e ficou só o match **exacto**.
-
-Dois clientes com o nome EXACTAMENTE igual continuam, nesse caminho de recurso,
-a resolver para a mesma pasta.
-
-**Porque foi adiado:** a alternativa — não devolver nada sem mapeamento — faria
-desaparecer documentos que existem, em número desconhecido (a medição de
-produção do Épico 10 contou 2.650 pastas órfãs). Um documento que desaparece
-não produz erro nenhum, e esse é o defeito que esta casa produz há sete lotes.
-
-**Quem é atingido se explodir:** dois clientes homónimos sem mapeamento gravado
-vêem a documentação um do outro. É um cruzamento de dados pessoais, e a
-tolerância é zero — mas é agora um conjunto muito menor do que era.
-
-**O que é preciso para fechar:** medir quantos processos ativos estão sem
-`s3_folder` (`scripts/medir_cobertura_s3.py` já dá o número), religá-los, e
-depois **apagar o recurso por nome**, com os testes de leitura invertidos em vez
-de apagados.
-
-**Progresso (iteração `religamento-arrasto-e-permissoes`):** a ferramenta de
-religamento manual já existe (`services/s3_relink.py` + painel em Manutenção) e
-cobre clientes E processos; o Explorador já marca as pastas reclamadas por mais
-do que uma ficha com um crachá de contagem, o que torna a colisão VISÍVEL em vez
-de inferida.
-
-**Progresso (iteração `medicao-d19-e-paginas-montadas`): a medição existe.**
-`services/s3_name_fallback_audit.py` (puro, 37 testes) + 
-`scripts/diagnose_s3_name_fallback.py` (**só de leitura**, com guarda sobre a
-fonte a afirmá-lo) classificam cada ficha — processo E cliente — em seis
-veredictos e dizem quantos DOCUMENTOS desaparecem do ecrã se o recurso por nome
-cair: `mapeado`, `mapeado_quebrado`, `sem_pasta`, `depende_do_nome` e
-`colisao_de_nome`. Três coisas que a medição obrigou a decidir:
-
-* **a colisão é uma propriedade do CONJUNTO**, não da ficha — classificar ficha a
-  ficha dá `depende_do_nome` às duas e o pior caso fica invisível, que é como a
-  D-19 nasceu;
-* **os ficheiros contam-se por PASTA, uma vez** — somar por ficha anunciaria o
-  dobro dos documentos que existem numa colisão;
-* **uma medição que FALHOU não é um custo zero.** A primeira execução correu em
-  dev, sem S3: o inventário saiu vazio, tudo caiu em `sem_pasta` e o relatório
-  imprimiu «o recurso por nome pode ser apagado sem esconder documento nenhum» —
-  a frase mais perigosa que ali podia aparecer. Hoje `auditar` levanta
-  `InventarioIndisponivel` e o script sai com código 2.
-
-**Progresso (iteração `hotfix-s3-folder-corrompido`, Lote 8): a execução contra
-produção encontrou lixo de TIPO.** O diagnóstico morreu na primeira ficha com
-`AttributeError: 'list' object has no attribute 'strip'` — há fichas com
-`s3_folder` gravado como **lista**. Três consequências, todas tratadas:
-
-* o veredicto `anomalia_de_dados` (o sexto) classifica-as **sem adivinhar**:
-  apanhar `[0]` era o `find_one` sem unicidade e `str(valor)` produzia um
-  caminho falso que se lia como «já partido, o corte não agrava». Não entra no
-  custo do corte (o valor é truthy, nunca chega ao ramo do nome) e tem bloco
-  próprio no relatório, com o valor cru e coluna no CSV;
-* **a aplicação tinha a mesma falha em onze sítios** — `list_files`,
-  `upload_file`, a criação de mapeamento, a verificação de conflitos, a guarda
-  de posse do `document_delete`, a cobertura e o `storage_service` local. Uma
-  lista é truthy, logo o `if s3_folder:` passava e o método de string rebentava
-  a seguir: para essas fichas a aba Documentos responde 500 **hoje**. Ponto
-  único novo: `s3_document_root.pasta_gravada` (texto utilizável ou `None`, com
-  `warning`), com guarda de inventário por fonte e análise por função;
-* **a torneira era o `_clean_s3_folder`** (`["a"] in [None, "", ...]` é `False`,
-  logo a lista era gravada tal e qual), alcançável pelos dois endpoints em lote
-  que recebem `List[dict]` — um `dict` não é validado pelo FastAPI. Corrigido
-  primeiro o escritor, como manda a regra do `assignment_drift`.
-
-**Ainda em falta para fechar:** correr o diagnóstico contra produção **até ao
-fim** (a execução que o encontrou abortou na primeira anomalia, logo não há
-números), religar os accionáveis e os anómalos no painel, e só então apagar
-`_find_client_folder_combined` / `_get_possible_client_paths` com os testes de
-leitura **invertidos** em vez de apagados.
-
-Fechou-se também a superfície que tomava o caminho legado **SEMPRE**:
-`GET /onedrive/files/{client_name}` resolvia o processo por `$regex` **parcial e
-não escapado** sobre `client_name` e chamava `list_files` **sem `s3_folder`**, com
-`Depends(get_current_user)` e mais nada — nem guarda de visibilidade, nem rede,
-nem atribuição. Responde 410 (precedente do `POST /api/activities`), porque
-endurecer não resolve o fundo: **um nome não é uma identidade**.
-
-**O que falta:** correr a medição contra produção, religar as fichas que a lista
-accionável nomeia (`--csv`) e só então apagar `_find_client_folder_combined` /
-`_get_possible_client_paths`, com os testes de leitura invertidos em vez de
-apagados.
-
----
-
 ## Fechadas
 
 Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
@@ -408,6 +315,7 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 
 | # | Dívida | Fechada em |
 |---|---|---|
+| D-19 | Homónimos exactos a partilhar pasta na leitura legada | Iteração `fim-do-recurso-por-nome` — **medida antes de apagada**: o `diagnose_s3_name_fallback.py` contra produção contou **zero** fichas a perder documentos, e só então o recurso por nome foi apagado do `s3_storage` (`_find_client_folder_combined`, `_find_client_folder`, `_nomes_de_pasta_candidatos`, `_get_possible_client_paths`) — apagado, não desligado. A medição respondia a UMA pergunta («que fichas não têm `s3_folder`?») e o corte dependia de outra que ela não cobria: **«que chamadores se esquecem de o passar?»** — e havia dois, ambos já partidos em produção (`run_categorize_all_documents` e o `move_file` do «organizar após análise»: para uma ficha mapeada por ID o nome não resolve pasta nenhuma, logo processavam ZERO documentos em silêncio desde o Lote 6). Fechou também a metade de SEGURANÇA, que não estava no enunciado: `build_s3_valid_prefixes` derivava prefixos de posse do NOME, logo dois homónimos exactos autorizavam os ficheiros um do outro, alcançável do **Portal**; o prefixo passou a derivar do ID. Os testes legados foram **invertidos** (a concordância com o oráculo de produção, as grafias candidatas e os dois da guarda de posse), nunca apagados |
 | D-9 | Portal do Cliente em polling das mensagens | Iteração `ws-portal-ui` — ligado a `/api/ws/portal` com o polling mantido como recurso |
 | D-5 | Tolerância a tokens de staff sem `type` | Iteração `slas-e-sourcemaps` — 24h após o deploy que unificou os três produtores; o ramo do `None` saiu e os dois testes foram INVERTIDOS (um token sem `type` é agora recusado no WebSocket e na API) |
 | D-11 | Sourcemaps servidos em produção | Iteração `slas-e-sourcemaps` — `utils/buildSourcemap.js`: sem `SENTRY_AUTH_TOKEN` um build de produção não gera mapas (provado com o build real: 0 `.map` em `dist/`) |

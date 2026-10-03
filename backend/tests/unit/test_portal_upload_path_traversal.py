@@ -531,17 +531,50 @@ class TestDonoDoPrefixo:
     def test_o_nome_do_cliente_vive_em_nome_nao_em_client_name(self):
         """A guarda partilhada fala `client_name`; o cliente grava `nome`.
 
-        Sem a tradução, um cliente sem `s3_folder` ficava sem dono e todos
-        os uploads de onboarding passavam a 403.
+        LOTE 8: a tradução FICA, mas o nome passou a servir só o LOG — a
+        posse deriva do `s3_folder` ou do ID (dois homónimos exactos
+        produziam o mesmo prefixo e autorizavam-se um ao outro). Daí o
+        fixture ter agora o `id` que um cliente real sempre tem: sem ele
+        não há dono, e é isso que o teste a seguir afirma.
         """
-        dono = puo._dono_do_prefixo_s3(None, {"nome": "Ana Legitima"})
+        dono = puo._dono_do_prefixo_s3(
+            None, {"id": "c-1", "nome": "Ana Legitima"}
+        )
         assert dono["client_name"] == "Ana Legitima"
+        assert dono["id"] == "c-1"
+
+    def test_um_cliente_SEM_id_e_sem_pasta_nao_tem_dono(self):
+        """Invertido no Lote 8: o nome, por si, já não prova posse.
+
+        Antes, `{"nome": "Ana"}` dava um dono e a guarda derivava o
+        prefixo `Documentação Clientes/Ana` — que é o mesmo de qualquer
+        outra Ana. Era a D-19 na guarda de posse, alcançável do Portal.
+        """
+        assert puo._dono_do_prefixo_s3(None, {"nome": "Ana Legitima"}) is None
 
     def test_processo_sem_marcas_cai_para_o_cliente(self):
+        """O teste que apanhou uma regressão do Lote 8.
+
+        A primeira versão da resolução por ID fazia UMA passagem e o
+        processo ganhava só por ter `id`: um processo ainda sem
+        mapeamento sob um cliente JÁ mapeado — o onboarding do Portal,
+        exactamente — passava a receber 403, porque o prefixo derivava do
+        id do processo e o ficheiro estava na pasta do cliente.
+        Hoje são duas passagens: quem tem mapeamento GRAVADO ganha
+        primeiro; o ID é o recurso quando ninguém tem.
+        """
         dono = puo._dono_do_prefixo_s3(
-            {"id": "proc-1"}, {"s3_folder": PASTA_LEGITIMA}
+            {"id": "proc-1"}, {"id": "c-1", "s3_folder": PASTA_LEGITIMA}
         )
         assert dono["s3_folder"] == PASTA_LEGITIMA
+
+    def test_o_mapeamento_do_PROCESSO_continua_a_ganhar_ao_do_cliente(self):
+        # Contraprova da ordem: quando os DOIS têm pasta, é a do processo.
+        dono = puo._dono_do_prefixo_s3(
+            {"id": "proc-1", "s3_folder": "Documentação Clientes/Do Processo"},
+            {"id": "c-1", "s3_folder": PASTA_LEGITIMA},
+        )
+        assert dono["s3_folder"] == "Documentação Clientes/Do Processo"
 
     def test_sem_nada_nao_ha_dono(self):
         """E sem dono o chamador recusa — falha FECHADA.

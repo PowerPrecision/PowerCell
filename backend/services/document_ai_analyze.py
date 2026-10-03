@@ -966,12 +966,15 @@ async def run_organize_files_in_folders(
         raise HTTPException(status_code=400, detail=ERROR_NO_ORGANIZATION)
 
     process = await db.processes.find_one(
-        {"id": process_id}, {"_id": 0, "client_name": 1}
+        {"id": process_id}, {"_id": 0, "client_name": 1, "s3_folder": 1}
     )
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
 
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+    # LOTE 8: o destino do movimento vem do MAPEAMENTO. Passava o
+    # `client_name` e o `move_file` resolvia a pasta por nome — para uma
+    # ficha mapeada por ID isso não resolve nada e o movimento falhava.
+    s3_folder = process.get("s3_folder")
     results = {"moved": [], "errors": []}
 
     for item in organization:
@@ -985,7 +988,7 @@ async def run_organize_files_in_folders(
                 )
                 continue
             success = s3_service.move_file(
-                source_path, client_name, target_folder, file_name
+                source_path, s3_folder, target_folder, file_name
             )
             if success:
                 results["moved"].append({"file": file_name, "to": target_folder})
