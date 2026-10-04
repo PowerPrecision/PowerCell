@@ -256,13 +256,13 @@ class TestOEliminarComPosse:
     @pytest.mark.asyncio
     async def test_a_Domus_NAO_apaga_um_evento_da_Power(self, fake_async_db):
         from services import (
-            deadlines_api_crud, deadlines_api_scope, tenant_network,
+            deadlines_api_crud, tenant_access_context, tenant_network,
         )
 
         await _semear(fake_async_db)
         with patch.object(deadlines_api_crud, "db", fake_async_db), \
              patch.object(tenant_network, "db", fake_async_db), \
-             patch.object(deadlines_api_scope, "db", fake_async_db):
+             patch.object(tenant_access_context, "db", fake_async_db):
             with pytest.raises(HTTPException) as exc:
                 await deadlines_api_crud.run_delete_deadline(
                     "ev1", DOMUS, _Pedido(),
@@ -275,13 +275,13 @@ class TestOEliminarComPosse:
     async def test_o_dono_apaga_o_seu_evento(self, fake_async_db):
         """Contraprova: recusar sempre também passava o teste de cima."""
         from services import (
-            deadlines_api_crud, deadlines_api_scope, tenant_network,
+            deadlines_api_crud, tenant_access_context, tenant_network,
         )
 
         await _semear(fake_async_db)
         with patch.object(deadlines_api_crud, "db", fake_async_db), \
              patch.object(tenant_network, "db", fake_async_db), \
-             patch.object(deadlines_api_scope, "db", fake_async_db), \
+             patch.object(tenant_access_context, "db", fake_async_db), \
              patch.object(deadlines_api_crud, "log_history", _nada):
             resposta = await deadlines_api_crud.run_delete_deadline(
                 "ev1", POWER, _Pedido(),
@@ -294,7 +294,7 @@ class TestOEliminarComPosse:
         self, fake_async_db,
     ):
         from services import (
-            deadlines_api_crud, deadlines_api_scope, tenant_network,
+            deadlines_api_crud, tenant_access_context, tenant_network,
         )
 
         await _semear(fake_async_db)
@@ -306,7 +306,7 @@ class TestOEliminarComPosse:
 
         with patch.object(deadlines_api_crud, "db", fake_async_db), \
              patch.object(tenant_network, "db", fake_async_db), \
-             patch.object(deadlines_api_scope, "db", fake_async_db), \
+             patch.object(tenant_access_context, "db", fake_async_db), \
              patch.object(deadlines_api_crud, "log_history", _explode):
             resposta = await deadlines_api_crud.run_delete_deadline(
                 "ev1", POWER, _Pedido(),
@@ -323,13 +323,13 @@ class TestOEditarComPosse:
     async def test_a_Domus_NAO_edita_um_evento_da_Power(self, fake_async_db):
         from models.deadline import DeadlineUpdate
         from services import (
-            deadlines_api_crud, deadlines_api_scope, tenant_network,
+            deadlines_api_crud, tenant_access_context, tenant_network,
         )
 
         await _semear(fake_async_db)
         with patch.object(deadlines_api_crud, "db", fake_async_db), \
              patch.object(tenant_network, "db", fake_async_db), \
-             patch.object(deadlines_api_scope, "db", fake_async_db):
+             patch.object(tenant_access_context, "db", fake_async_db):
             with pytest.raises(HTTPException) as exc:
                 await deadlines_api_crud.run_update_deadline(
                     "ev1", DeadlineUpdate(title="Mexido"), DOMUS, _Pedido(),
@@ -347,13 +347,13 @@ class TestOEditarComPosse:
         """
         from models.deadline import DeadlineUpdate
         from services import (
-            deadlines_api_crud, deadlines_api_scope, tenant_network,
+            deadlines_api_crud, tenant_access_context, tenant_network,
         )
 
         await _semear(fake_async_db)
         with patch.object(deadlines_api_crud, "db", fake_async_db), \
              patch.object(tenant_network, "db", fake_async_db), \
-             patch.object(deadlines_api_scope, "db", fake_async_db):
+             patch.object(tenant_access_context, "db", fake_async_db):
             with pytest.raises(HTTPException) as exc:
                 await deadlines_api_crud.run_update_deadline(
                     "ev1",
@@ -369,13 +369,13 @@ class TestOEditarComPosse:
     async def test_o_dono_edita_o_titulo(self, fake_async_db):
         from models.deadline import DeadlineUpdate
         from services import (
-            deadlines_api_crud, deadlines_api_scope, tenant_network,
+            deadlines_api_crud, tenant_access_context, tenant_network,
         )
 
         await _semear(fake_async_db)
         with patch.object(deadlines_api_crud, "db", fake_async_db), \
              patch.object(tenant_network, "db", fake_async_db), \
-             patch.object(deadlines_api_scope, "db", fake_async_db):
+             patch.object(tenant_access_context, "db", fake_async_db):
             await deadlines_api_crud.run_update_deadline(
                 "ev1", DeadlineUpdate(title="Escritura adiada"), POWER, _Pedido(),
             )
@@ -389,13 +389,13 @@ class TestALeituraPorProcesso:
         self, fake_async_db,
     ):
         from services import (
-            deadlines_api_list, deadlines_api_scope, tenant_network,
+            deadlines_api_list, tenant_access_context, tenant_network,
         )
 
         await _semear(fake_async_db)
         with patch.object(deadlines_api_list, "db", fake_async_db), \
              patch.object(tenant_network, "db", fake_async_db), \
-             patch.object(deadlines_api_scope, "db", fake_async_db):
+             patch.object(tenant_access_context, "db", fake_async_db):
             with pytest.raises(HTTPException) as exc:
                 await deadlines_api_list.run_get_deadlines(
                     "proc-domus", POWER, _Pedido(),
@@ -406,13 +406,13 @@ class TestALeituraPorProcesso:
     async def test_pedir_os_prazos_do_SEU_processo_funciona(self, fake_async_db):
         """Contraprova: recusar sempre tornava o endpoint inútil."""
         from services import (
-            deadlines_api_list, deadlines_api_scope, tenant_network,
+            deadlines_api_list, tenant_access_context, tenant_network,
         )
 
         await _semear(fake_async_db)
         with patch.object(deadlines_api_list, "db", fake_async_db), \
              patch.object(tenant_network, "db", fake_async_db), \
-             patch.object(deadlines_api_scope, "db", fake_async_db):
+             patch.object(tenant_access_context, "db", fake_async_db):
             linhas = await deadlines_api_list.run_get_deadlines(
                 "proc-power", POWER, _Pedido(),
             )

@@ -2235,3 +2235,208 @@ quando a condição se resolver.
 E a mensagem **técnica** do servidor não vai para o ecrã — pode trazer o host
 interno e o código do erro. Vai a que diz o que fazer, com o caminho para o
 fazer.
+
+## 27.44 — O estado da EXTRAÇÃO não é o estado do registo
+
+O quadro de Visitas tem duas perguntas na mesma linha, e confundi-las dá
+duas respostas erradas:
+
+* **o estado da VISITA** — pedida, agendada, concluída, cancelada: o que o
+  consultor e o cliente combinaram;
+* **o estado da EXTRACÇÃO** — se o sistema conseguiu ler o anúncio.
+
+Cinco valores no segundo, e não dois:
+
+| Valor | O que diz no ecrã | Porque é próprio |
+|---|---|---|
+| `sem_url` | nada | não há nada a extrair; um relógio aqui dizia que o sistema estava a trabalhar quando não estava |
+| `pendente` | «A ler o anúncio» | é o único que mantém o polling vivo |
+| `ok` | nada | o resultado está nas outras células |
+| `sem_dados` | «Anúncio sem dados» | o anúncio respondeu 200 com tudo vazio — isto contava como sucesso e a linha ficava vazia sem explicação |
+| `erro` | «Não consegui ler» | falha de leitura, com o motivo no servidor |
+
+**O `sem_dados` não é pendente.** Tratá-lo como tal fazia a página
+recarregar de 3 em 3 segundos durante um minuto, para sempre, sobre um
+trabalho que já terminou.
+
+E a decisão de manter o polling vivo deriva de **um** predicado
+(`extraccaoEmCurso`), não de uma comparação crua `status === "pending"`
+escrita no efeito: era aí que vivia a quinta cópia da leitura das quatro
+colunas com `|| []`.
+
+## 27.45 — Uma lista para COMPARAR é uma tabela; uma lista para MOVER é um quadro
+
+O quadro de Visitas era só kanban. O kanban é a forma certa para gerir um
+fluxo — arrastar entre estados —, e é a forma errada para **comparar**:
+quando o cliente pediu quatro imóveis e a pergunta é «qual deles pelo
+preço, pela tipologia, pela área e pelo estado», uma grelha de cartões
+obriga a ler em zigue-zague e a guardar números de cabeça.
+
+A tabela passou a ser a vista por omissão e o quadro ficou atrás de um
+alternador. **Não se apaga o que funciona:** uma funcionalidade que
+estorva uma regra nova muda-se de sítio (é a regra do botão de nota de
+voz, § 27.19).
+
+Duas regras de ordenação que não se podem perder:
+
+1. **quem precisa de ACÇÃO vem primeiro.** Os pedidos do Portal não têm
+   data de agendamento, logo ordenar a tabela por data punha-os no fim —
+   onde ninguém os vê. Um pedido que ninguém vê é a forma de defeito desta
+   casa;
+2. **dentro do mesmo grupo, ordena-se por data**, e a data de referência
+   cai para `created_at` quando não há agendamento, senão as linhas sem
+   data trocam de posição a cada render.
+
+## 27.46 — A forma da resposta normaliza-se à ENTRADA, e o estado inicial tem essa forma
+
+Terceira ocorrência da mesma armadilha (`KanbanBoard` na D-20, o
+`UsersAccessAdminTab` na colisão de cache, agora a `VisitsPage`):
+
+```js
+// ERRADO — o endpoint devolve um OBJECTO de quatro colunas
+const [visits, setVisits] = useState([]);
+...
+visits.solicitadas.filter(...)   // undefined no primeiro render
+```
+
+O `|| []` por coluna tapa o sintoma e espalha a guarda: foi assim que
+quatro colunas do Kanban ficaram sem ela. A saída é a mesma três vezes:
+
+* **o estado inicial tem a forma final** (`QUADRO_VAZIO`, não `[]`);
+* **a resposta normaliza-se UMA vez, à entrada** (`normalizarQuadro`), num
+  módulo puro e testado;
+* **`Array.isArray`, nunca `|| []`** — um objecto é *truthy*, logo
+  `coluna || []` devolve o objecto e o erro muda de sítio em vez de
+  desaparecer;
+* **as contagens DERIVAM das listas** — o `total` do servidor contradiz o
+  ecrã logo que haja um filtro em memória.
+
+Corolário: o normalizador aceita as DUAS formas que o backend serve (a
+lista de `/visits` e o objecto de `/visits/kanban`), para a página não ter
+de saber de que endpoint vieram os dados — e para trocar de endpoint não
+ser uma alteração de render.
+
+---
+
+## 27.47 — Um dado que o servidor já envia e o ecrã não lê é um dado que não existe
+
+A agência e o comercial de um imóvel eram extraídos pelo scraper desde
+sempre: o prompt da IA pede `agente_nome`, `agente_telefone`,
+`agente_email` e `agencia_nome` pelo nome, e o `property_scraper` já
+construía o `ConsultantInfo`. Ficavam dentro de `scraped_data.consultant`,
+e um `grep` por `consultant|agency|agente` no `visitasDashboard.js` e na
+`VisitasTable.jsx` dava **zero**.
+
+O consultor via o imóvel e **não via a quem ligar** — que é a única coisa
+que lhe permite marcar a partilha. Não houve erro em sítio nenhum: a
+coluna não existia.
+
+Terceira ocorrência da forma «a UI e o servidor não concordam sobre o
+contrato», depois do `under_35` (lido por três componentes, escrito por
+nenhum ficheiro do backend) e das notas do consultor (três nomes de campo
+com zero ocorrências em `backend/`). As duas primeiras eram o ecrã a ler
+o que não existe; esta é o ecrã a **não ler o que existe**, e é a mais
+difícil de notar, porque um ecrã que mostra menos do que podia continua a
+parecer completo.
+
+**Regra:** quando se acrescenta um campo ao servidor, inventariar quem o
+LÊ; e quando se desenha um ecrã sobre dados extraídos, inventariar o que o
+extractor devolve em vez de desenhar o que se lembra. Um campo com um
+produtor e zero consumidores é tão inútil como um consumidor sem produtor,
+e nenhum dos dois produz erro.
+
+## 27.48 — Sem número não se desenha a ligação (e a central leva rótulo)
+
+Extensão da regra do `calendarioIdentidade` / `rotaDaFicha` («sem destino
+não se desenha a ligação») aos contactos:
+
+* `ligacaoTelefonica(numero)` devolve `null` para o que não for marcável, e
+  **quem recebe `null` não desenha o `<a>`**. Um `tel:` vazio abre a
+  aplicação do telefone sem nada marcado, que é pior do que texto;
+* o `+351` é acrescentado na **apresentação**, não gravado: o campo guarda
+  o número nacional (é o que o backend normaliza) e o indicativo é o que
+  faz o telemóvel do consultor marcar em roaming;
+* `telefoneLegivel` agrupa em três **só para ler**, e devolve o original
+  quando não reconhece o formato — nunca inventa um;
+* **o telefone da AGÊNCIA aparece rotulado («central») e nunca no lugar do
+  directo.** São dois campos no servidor por este motivo: sem o rótulo, o
+  consultor liga à recepção convencido de que fala com quem vende o imóvel,
+  e no ecrã os dois números são indistinguíveis.
+
+## 27.49 — Uma coluna nova é também um campo de pesquisa
+
+A coluna «Agência / Comercial» entrou no `CAMPOS_DE_PESQUISA` do
+`visitasDashboard`. Sem isso ficava **visível e não pesquisável**: o
+consultor lê «Predial Atlântico» no ecrã, escreve-o na caixa de pesquisa e
+não encontra nada — o que se lê como «a pesquisa está partida», e não
+como «aquela coluna não conta».
+
+O mesmo vale para os caminhos LEGADOS: a pesquisa lê o campo de topo **e**
+o `scraped_data.consultant`, pelas mesmas razões que a célula o faz (nada
+se migra, e um registo antigo tem de continuar a ser encontrado).
+
+## 27.50 — Um cálculo repetido no JSX é uma cópia de uma guarda
+
+A primeira versão do bloco do anunciante no `VisitCard` chamava
+`contactoDoAnunciante(visit)` **seis vezes** dentro do JSX. Funciona, e é a
+mesma forma das cinco cópias de uma guarda que divergem na primeira
+mudança (§ 27.38): quando alguém mudar a condição de uma das chamadas,
+as outras cinco ficam como estão e o cartão passa a dizer coisas
+incoerentes sobre o mesmo contacto.
+
+Resolve-se UMA vez, no topo de um componente próprio
+(`BlocoDoAnunciante`), que também é o que lhe dá um sítio onde a decisão
+«não há contacto → não há bloco» vive sozinha.
+
+## 27.51 — A vista por omissão é a única que um teste monta
+
+A `VisitsPage` tem alternador Tabela/Quadro e a **Tabela** é a omissão,
+pelo que todos os testes da página que não trocam de vista nunca montam o
+`VisitCard`. Acrescentar algo ao cartão exige um teste que **clique no
+alternador** — é a regra do `SystemConfigPage.seccoes.test.jsx` («um
+separador só está coberto quando a PÁGINA é montada») aplicada a uma vista
+alternativa dentro da mesma página.
+
+Foi por páginas nunca montadas que esta casa encontrou o `useCallback` na
+zona morta temporal do `WebmailPage`, o `useState([])` da própria
+`VisitsPage` e o cartão genérico a renderizar-se a par do dedicado no
+`SystemConfigPage`. Uma vista que nenhum teste monta é uma página nunca
+montada, com outro nome.
+
+## 27.52 — A espera é sobre o elemento que se AFIRMA, nunca sobre a moldura
+
+`await screen.findByTestId("layout")` seguido de um `getByText` sincrónico
+é um teste que **passa ou falha conforme a velocidade da máquina**. O
+`layout` existe desde o primeiro render — envolve também o «A carregar
+visitas...» — logo o `findBy*` resolve no estado INTERMÉDIO e devolve o
+controlo antes de os dados chegarem; a asserção que vem a seguir corre
+contra o ecrã de carregamento. Verde em local, vermelho num CI carregado
+(o `VisitsPage.test.jsx` foi verde três execuções locais e vermelho na
+bateria do CI, com o spinner no `dump` do DOM a dizê-lo).
+
+**A regra:** espera-se no elemento sobre o qual se vai afirmar, e aí a
+PRESENÇA dele é a afirmação:
+
+```jsx
+// Errado — a âncora resolve a carregar
+expect(await screen.findByTestId("layout")).toBeInTheDocument();
+expect(screen.getByText(/sem visitas/i)).toBeInTheDocument();
+
+// Certo — o elemento só existe quando tem o que dizer
+expect(await screen.findByText(/sem visitas/i)).toBeInTheDocument();
+expect(screen.queryByText(/a carregar/i)).not.toBeInTheDocument();
+```
+
+É a § 27.17 (`WebmailCompanyTabs`) do lado do TESTE: lá o defeito era o
+componente a deixar um estado de carregamento cair no ramo de um estado
+de dados; aqui o componente está certo — três estados, três condições — e
+era o teste a ancorar no sítio errado. **Aumentar o `timeout` não é a
+correcção**: trata o sintoma e deixa a asserção a poder passar sem provar
+nada.
+
+Corolário, com teste: três estados pedem uma **contraprova** que prove o
+do meio distinguível dos outros dois — um duplo do `fetch` que fica
+pendurado, a afirmação de que se vê o carregamento e **não** o vazio, e só
+depois a resolução. E o duplo tem de pendurar **só o pedido em causa**: a
+`VisitsPage` faz três (`/visits/kanban` mais o `fetchFormData`) e um
+`resolver` global ficava a ser o do último pedido feito, não o do quadro.

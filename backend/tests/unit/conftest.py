@@ -591,3 +591,42 @@ def _limpar_cache_de_fases():
     invalidar_cache_de_fases()
     yield
     invalidar_cache_de_fases()
+
+
+@pytest.fixture
+def limiter_de_producao_ligado(monkeypatch):
+    """Põe o limiter de PRODUÇÃO no estado em que a produção corre.
+
+    O `server.py` faz `limiter.enabled = False` quando `TESTING == "true"`
+    — e fá-lo no momento do IMPORT, sobre um singleton de módulo. A partir
+    do primeiro teste que importe o `server` (toda a bateria de
+    integração, que corre ANTES de `tests/unit` por ordem alfabética) o
+    travão fica desligado para o RESTO da sessão. Um teste que afirme
+    sobre os decoradores `@limiter.limit` REAIS fica, por isso, verde
+    isolado e vermelho na suite completa, conforme a ORDEM em que o pytest
+    recolhe os ficheiros: é a armadilha do `from database import db` ao
+    nível do módulo (ver AGENTS.md), com outro objecto.
+
+    E o modo de falhar é o pior que há — não dá erro: os pedidos passam
+    todos, os cabeçalhos `X-RateLimit-*` não aparecem e o teste que existe
+    para provar que o travão morde mede o NADA.
+
+    **Não é autouse de propósito.** Ligar o travão a toda a bateria faria
+    um teste que exercite a app real colidir com os 429; pede-o quem
+    precisa dele.
+
+    O `reset()` é obrigatório pela mesma razão: o armazenamento
+    `memory://` também é da SESSÃO, logo um teste anterior que tenha
+    gasto a janela da mesma chave deixava este a 429 sem razão nenhuma.
+    Corre só à ENTRADA, e de propósito: a primeira versão limpava
+    também à saída e a mutação mostrou que **as duas eram
+    indistinguíveis** — com a limpeza de saída, apagar a de entrada não
+    matava teste nenhum. Duas linhas para a mesma propriedade, e nenhuma
+    delas medível; a limpeza de entrada é a que vale, porque é verdadeira
+    qualquer que tenha sido o teste anterior, e a de saída saiu.
+    """
+    from middleware.rate_limit import limiter
+
+    monkeypatch.setattr(limiter, "enabled", True)
+    limiter.reset()
+    return limiter

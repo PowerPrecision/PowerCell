@@ -13,7 +13,7 @@ ENDPOINTS:
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from services.auth import get_current_user
 from services.visit_list_create import run_list_visits, run_create_visit
@@ -32,8 +32,12 @@ async def list_visits(
     process_id: Optional[str] = Query(None, description="Filtrar por process_id"),
     date_from: Optional[str] = Query(None, description="Data início (ISO)"),
     date_to: Optional[str] = Query(None, description="Data fim (ISO)"),
+    request: Request = None,
     user: dict = Depends(get_current_user)
 ):
+    # O `Request` vai a TODAS as superfícies: sem ele o papel efectivo
+    # (`X-Active-Role`) não se resolve e decidia-se pelo cargo do JWT —
+    # a 5.ª ocorrência da forma do `history._is_stealth_user`.
     return await run_list_visits(
         user,
         status=status,
@@ -43,6 +47,7 @@ async def list_visits(
         process_id=process_id,
         date_from=date_from,
         date_to=date_to,
+        request=request,
     )
 
 
@@ -58,31 +63,37 @@ async def create_visit(
 @router.get("/kanban")
 async def get_visits_kanban(
     consultor_id: Optional[str] = Query(None),
+    request: Request = None,
     user: dict = Depends(get_current_user)
 ):
-    return await run_get_visits_kanban(user, consultor_id=consultor_id)
+    return await run_get_visits_kanban(
+        user, consultor_id=consultor_id, request=request,
+    )
 
 
 @router.get("/{visit_id}")
 async def get_visit(
     visit_id: str,
+    request: Request = None,
     user: dict = Depends(get_current_user)
 ):
-    return await run_get_visit(visit_id, user)
+    return await run_get_visit(visit_id, user, request)
 
 
 @router.patch("/{visit_id}")
 async def update_visit(
     visit_id: str,
     data: dict,
+    request: Request = None,
     user: dict = Depends(get_current_user)
 ):
-    return await run_update_visit(visit_id, data, user)
+    return await run_update_visit(visit_id, data, user, request)
 
 
 @router.delete("/{visit_id}")
 async def cancel_visit(
     visit_id: str,
+    request: Request = None,
     user: dict = Depends(get_current_user)
 ):
-    return await run_cancel_visit(visit_id, user)
+    return await run_cancel_visit(visit_id, user, request)

@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from models.lead import ScrapedData, ConsultantInfo
 from services.scraper import property_scraper as deep_scraper
+from services.visit_property_extract import raw_data_do_scraper
 
 logger = logging.getLogger(__name__)
 
@@ -85,20 +86,12 @@ async def extract_with_deep_scraper(url: str) -> ScrapedData:
             photo_url=result.get("foto_principal"),
             consultant=consultant,
             source=result.get("_source") or _detect_source(url),
-            raw_data={
-                "descricao": result.get("descricao"),
-                "caracteristicas": result.get("caracteristicas"),
-                "referencia": result.get("referencia"),
-                "quartos": result.get("quartos"),
-                "casas_banho": result.get("casas_banho"),
-                "certificado_energetico": result.get("certificado_energetico"),
-                "ano_construcao": result.get("ano_construcao"),
-                "deep_scraped": result.get("_deep_scraped", False),
-                "deep_source": result.get("_deep_source"),
-                "deep_agency": result.get("_deep_agency"),
-                "extracted_by": result.get("_extracted_by"),
-                "from_cache": result.get("_from_cache", False),
-            }
+            # LOTE 9 (D-23) — aqui havia uma lista de ONZE chaves escrita
+            # à mão sobre ~30 devolvidas pelo scraper. O `estado` do
+            # imóvel — que o prompt da IA pede pelo nome e que o quadro de
+            # Visitas precisa — desaparecia em silêncio, e qualquer campo
+            # novo desapareceria pelo mesmo caminho. Hoje DERIVA.
+            raw_data=raw_data_do_scraper(result)
         )
         
     except Exception as e:

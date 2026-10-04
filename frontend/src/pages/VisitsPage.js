@@ -12,6 +12,19 @@
  * @route /visitas
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+
+import VisitasTable from "@/components/visitas/VisitasTable";
+import {
+  QUADRO_VAZIO,
+  contactoDoAnunciante,
+  extraccaoEmCurso,
+  filtrarQuadro,
+  ligacaoTelefonica,
+  normalizarQuadro,
+  resumoDoQuadro,
+  telefoneLegivel,
+  temContactoDoAnunciante,
+} from "@/utils/visitasDashboard";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { formatCurrency } from "../utils/formatCurrency";
@@ -130,6 +143,52 @@ const formatPrice = (price) => {
 // ════════════════════════════════════════════════════════════════
 // VISIT CARD — Cartão individual de visita (v2 com dados do scraper)
 // ════════════════════════════════════════════════════════════════
+/**
+ * A quem ligar para marcar a partilha (LOTE 10).
+ *
+ * Fica ACIMA do cliente e do nosso consultor de propósito: é a acção que
+ * falta fazer, e quem precisa de acção vem primeiro — a mesma regra que
+ * põe os pedidos do Portal no topo do `linhasDaTabela`.
+ *
+ * O contacto resolve-se UMA vez. A primeira versão deste bloco chamava o
+ * `contactoDoAnunciante(visit)` seis vezes dentro do JSX: o mesmo
+ * cálculo repetido é como cinco cópias de uma guarda — funciona hoje e
+ * divergem na primeira mudança.
+ */
+function BlocoDoAnunciante({ visit }) {
+  if (!temContactoDoAnunciante(visit)) return null;
+  const contacto = contactoDoAnunciante(visit);
+  // Sem número não se desenha a ligação: um `tel:` vazio abre a
+  // aplicação do telefone sem nada marcado.
+  const directo = ligacaoTelefonica(contacto.telefone);
+
+  return (
+    <div className="flex items-start gap-2 rounded bg-muted/50 px-1.5 py-1">
+      <Building2
+        className="h-4 w-4 text-teal-600 shrink-0 mt-0.5"
+        aria-hidden="true"
+      />
+      <div className="min-w-0 text-xs">
+        {contacto.agencia && (
+          <p className="font-medium truncate">{contacto.agencia}</p>
+        )}
+        {contacto.nome && (
+          <p className="text-muted-foreground truncate">{contacto.nome}</p>
+        )}
+        {directo && (
+          <a
+            href={directo}
+            className="text-primary hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {telefoneLegivel(contacto.telefone)}
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function VisitCard({ visit, onStatusChange, onSchedule }) {
   const status = visit.status || "agendada";
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.agendada;
@@ -228,6 +287,9 @@ function VisitCard({ visit, onStatusChange, onSchedule }) {
             )}
           </div>
         </div>
+
+        {/* Agência / Comercial — LOTE 10. Ver `BlocoDoAnunciante`. */}
+        <BlocoDoAnunciante visit={visit} />
 
         {/* Client */}
         <div className="flex items-center gap-2">
@@ -835,7 +897,13 @@ function ScheduleFromPortalDialog({ open, onOpenChange, visit, onSuccess }) {
 // ════════════════════════════════════════════════════════════════
 const VisitsPage = () => {
   const { token } = useAuth();
-  const [visits, setVisits] = useState([]);
+  // LOTE 9 (Fase B) — o estado inicial era `[]`, um ARRAY, e o endpoint
+  // devolve um OBJECTO com quatro colunas: no primeiro render
+  // `visits.solicitadas` era `undefined` e só um `|| []` por coluna
+  // impedia o `.filter` de rebentar. É a forma do `KanbanBoard` da D-20,
+  // e a saída é a mesma: a forma normaliza-se UMA vez, num ponto único.
+  const [visits, setVisits] = useState(QUADRO_VAZIO);
+  const [viewMode, setViewMode] = useState("tabela");
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [properties, setProperties] = useState([]);
@@ -858,7 +926,7 @@ const VisitsPage = () => {
       });
       if (response.ok) {
         const data = await response.json();
-        setVisits(data);
+        setVisits(normalizarQuadro(data));
       }
     } catch (error) {
       console.error("Erro ao carregar visitas:", error);
@@ -907,14 +975,11 @@ const VisitsPage = () => {
   // Poll kanban while any visit has a pending URL scrape (timeout ~60s)
   const scrapePollStartedRef = useRef(null);
   useEffect(() => {
-    const columns = [
-      ...(visits.solicitadas || []),
-      ...(visits.agendadas || []),
-      ...(visits.concluidas || []),
-      ...(visits.canceladas || []),
-    ];
-    const hasPending = columns.some((v) => v.scraper_status === "pending");
-    if (!hasPending || !token) {
+    // `extraccaoEmCurso` é o ponto único: aqui havia uma quinta cópia da
+    // leitura das quatro colunas com `|| []`, e a comparação crua
+    // `scraper_status === "pending"` deixava de fora o veredicto novo
+    // `sem_dados` — que NÃO é pendente e não deve manter o polling vivo.
+    if (!extraccaoEmCurso(visits) || !token) {
       scrapePollStartedRef.current = null;
       return;
     }
@@ -962,41 +1027,15 @@ const VisitsPage = () => {
     }
   };
 
-  // Filter visits by search term (inclui campos do scraper)
-  const filteredKanban = useMemo(() => {
-    if (!searchTerm) return visits;
+  // O filtro e as contagens vêm do ponto único: as contagens DERIVAM das
+  // listas, porque o `total` do servidor contradizia o ecrã depois de uma
+  // pesquisa em memória (regra do `count` do `KanbanBoard`).
+  const filteredKanban = useMemo(
+    () => filtrarQuadro(visits, searchTerm),
+    [visits, searchTerm]
+  );
 
-    const term = searchTerm.toLowerCase();
-    const filterList = (list) =>
-      (list || []).filter(
-        (v) =>
-          (v.property_title || "").toLowerCase().includes(term) ||
-          (v.client_name || "").toLowerCase().includes(term) ||
-          (v.consultor_name || "").toLowerCase().includes(term) ||
-          (v.notes || "").toLowerCase().includes(term) ||
-          (v.scraped_data?.title || "").toLowerCase().includes(term) ||
-          (v.scraped_data?.location || "").toLowerCase().includes(term) ||
-          (v.scraped_url || "").toLowerCase().includes(term) ||
-          (v.scraped_data?.typology || "").toLowerCase().includes(term)
-      );
-
-    return {
-      solicitadas: filterList(visits.solicitadas),
-      agendadas: filterList(visits.agendadas),
-      concluidas: filterList(visits.concluidas),
-      canceladas: filterList(visits.canceladas),
-      total: visits.total,
-    };
-  }, [visits, searchTerm]);
-
-  // Stats
-  const stats = useMemo(() => ({
-    total: filteredKanban.total || 0,
-    solicitadas: (filteredKanban.solicitadas || []).length,
-    agendadas: (filteredKanban.agendadas || []).length,
-    concluidas: (filteredKanban.concluidas || []).length,
-    canceladas: (filteredKanban.canceladas || []).length,
-  }), [filteredKanban]);
+  const stats = useMemo(() => resumoDoQuadro(filteredKanban), [filteredKanban]);
 
   return (
     <DashboardLayout title="Quadro de Visitas">
@@ -1082,33 +1121,63 @@ const VisitsPage = () => {
           </Select>
         </div>
 
-        {/* ── Kanban Board ── */}
+        {/* ── Alternador de vista ──
+            A TABELA é a vista por omissão: o consultor precisa de comparar
+            os imóveis que o cliente pediu, e uma grelha de cartões obriga a
+            ler em zigue-zague. O quadro por estado fica para quem gere o
+            fluxo — uma funcionalidade que estorva uma regra nova muda-se de
+            sítio, não se apaga. */}
+        <div className="flex gap-2" role="group" aria-label="Modo de vista">
+          <Button
+            type="button"
+            size="sm"
+            variant={viewMode === "tabela" ? "default" : "outline"}
+            onClick={() => setViewMode("tabela")}
+          >
+            Tabela
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={viewMode === "quadro" ? "default" : "outline"}
+            onClick={() => setViewMode("quadro")}
+          >
+            Quadro
+          </Button>
+        </div>
+
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="h-10 w-10 animate-spin text-amber-500" />
             <span className="ml-3 text-muted-foreground">A carregar visitas...</span>
           </div>
+        ) : viewMode === "tabela" ? (
+          <VisitasTable
+            quadro={filteredKanban}
+            onAgendar={handleSchedule}
+            onMudarEstado={handleStatusChange}
+          />
         ) : (
           <div className="flex gap-4 overflow-x-auto pb-4" style={{ scrollbarWidth: "thin" }}>
             <KanbanColumn
               status="solicitada"
-              visits={filteredKanban.solicitadas || []}
+              visits={filteredKanban.solicitadas}
               onStatusChange={handleStatusChange}
               onSchedule={handleSchedule}
             />
             <KanbanColumn
               status="agendada"
-              visits={filteredKanban.agendadas || []}
+              visits={filteredKanban.agendadas}
               onStatusChange={handleStatusChange}
             />
             <KanbanColumn
               status="concluida"
-              visits={filteredKanban.concluidas || []}
+              visits={filteredKanban.concluidas}
               onStatusChange={handleStatusChange}
             />
             <KanbanColumn
               status="cancelada"
-              visits={filteredKanban.canceladas || []}
+              visits={filteredKanban.canceladas}
               onStatusChange={handleStatusChange}
             />
           </div>

@@ -63,6 +63,106 @@ de varrimento ou de esgotamento de recursos.
 teste-inventário como o de
 `test_portal_upload_path_traversal.py::TestOsEndpointsDoPortalTemLimiteDePedidos`.
 
+
+**Medido no Lote 9 (Fase B):** o `/portal/visits/request` ganhou limite
+(fazia o servidor ir buscar um URL escolhido pelo cliente, sem tecto de
+custo de IA). Ficavam **nove POST do Portal sem limite nenhum**, e o Portal
+é a única superfície externa:
+`portal_login`, `verify_portal_login`, `authenticate_portal`,
+`update_client_profile`, `send_portal_message`, `fetch_financas_documents`,
+`fetch_seguranca_social_documents`, `submit_mfa_code` e
+`create_recommendations`. Os três primeiros são de autenticação (força
+bruta de magic link) e os dois dos scrapers governamentais abrem ligações
+de saída — são os de maior consequência.
+
+**Fechado no Lote 10 (o Portal):** os nove ganharam `@limiter.limit` e
+`response: Response`, e a guarda de inventário passou a afirmar a
+PROPRIEDADE (nenhum endpoint de escrita de `routes/portal.py` sem limite),
+derivada das rotas e não de uma lista
+(`tests/unit/test_portal_forca_bruta_e_limites.py`). O login por email
+passou a ter um ponto único (`services/portal_brute_force.py`) em vez de
+~55 linhas à mão mais uma segunda cópia da política no
+`_record_login_attempt`, no mesmo ficheiro.
+
+**Correcção a uma afirmação deste mesmo lote:** disse que o
+`run_verify_portal_login` prometia «5 tentativas, lockout de 15 min» na
+docstring e não tinha código a contar tentativas. **Não era verdade** — o
+travão vive em `portal_security.verify_client_credentials`, está completo e
+diz exactamente esses números. Inventariei um módulo e concluí da
+ausência; o travão que acrescentei era uma segunda política na mesma porta
+e foi retirado.
+
+**O que FICA ABERTO nesta dívida, e é o que importa agora**
+
+O `@limiter.limit` é uma parede com uma porta: a chave vem de
+`_get_rate_limit_key`, que nos endpoints **autenticados** resolve o `sub`
+do JWT (assinado, não falsificável — no Portal é o `process_id`), mas nos
+de **pré-autenticação** cai no IP. E o IP sai de `_get_client_ip`, que lê
+o **primeiro** elemento do `X-Forwarded-For`:
+
+```python
+forwarded_for = request.headers.get("X-Forwarded-For")
+if forwarded_for:
+    return forwarded_for.split(",")[0].strip()
+```
+
+O primeiro elemento é o que o CLIENTE envia — qualquer proxy acrescenta ao
+fim, não ao princípio. **Quem ataca muda-o a cada pedido e o limite por IP
+não morde em lado nenhum do sistema**, não só no Portal. É a forma do
+placebo do `build_company_scope_condition`: a verificação corre, parece
+fechada, e o valor que compara é escolhido por quem se quer verificar.
+
+É por isso que a força bruta do Portal foi fechada pelo eixo da
+IDENTIDADE e não pelo do IP, e por isso é que esta dívida não fecha com
+o Lote 10.
+
+**Porque não se corrigiu agora:** o valor de confiança é contado a partir
+da DIREITA, saltando o número de proxies conhecidos — e esse número
+depende do deploy (Render sozinho é 1; Render atrás de Cloudflare é 2). Com
+o número errado, todos os clientes colapsam numa só chave e o limite
+tranca o sistema inteiro a 10 pedidos/minuto. Mudar isto sem saber a
+topologia é trocar uma porta aberta por uma avaria.
+
+**Para fechar:** `TRUSTED_PROXY_HOPS` (inteiro, explícito, por ambiente) +
+`_get_client_ip` a contar da direita; sem a variável definida, usar o
+`request.client.host` (o peer do socket, não falsificável) e **dizer no
+log** que o limite por IP está a agrupar por proxy. Confirmar a topologia
+do Render antes, e medir numa pré-publicação: a asserção é que dois
+pedidos com `X-Forwarded-For` diferentes e o mesmo peer contam para a
+MESMA chave.
+
+**Segunda metade desta dívida, descoberta no Lote 10 — duas políticas de
+força bruta para as duas portas do mesmo Portal**
+
+| Porta | Onde | Tentativas | Bloqueio | Colecção |
+|---|---|---|---|---|
+| Login (email + código) | `portal_brute_force` | 8 | 10 min | `portal_login_attempts` |
+| Verify (NIF + nº processo) | `portal_security` | 5 | 15 min | `portal_verify_attempts` |
+
+São duas implementações independentes da mesma ideia, e foi essa
+dispersão que me levou a declarar inexistente a segunda (procurei-a no
+handler e ela está na camada abaixo).
+
+**Porque não se consolidou agora:** a consolidação parece uma limpeza e
+tem uma armadilha — **as constantes têm de ficar POR PORTA**. Escolher um
+dos pares mudaria a política da outra em silêncio (apertar o login para 5
+tentativas bloqueia um cliente que erra um código de 6 caracteres cinco
+vezes; alargar o verify para 8/10 abre a porta que tem o espaço de busca
+mais pequeno). Uma consolidação que muda a política não é uma
+consolidação.
+
+**Quem é atingido:** ninguém hoje — as duas portas estão protegidas. O
+custo é de manutenção e de diagnóstico: uma correcção feita numa das
+implementações não chega à outra, e já foi essa divergência a produzir um
+engano de leitura.
+
+**Para fechar:** `portal_brute_force` recebe a política por âmbito
+(`POLITICAS = {porta: (tentativas, minutos, colecção)}`), com os valores
+ACTUAIS de cada porta preservados; `portal_security` passa a chamá-lo e o
+`_record_failed_attempt` desaparece. Teste de concordância a afirmar que
+cada porta mantém os seus números depois da mudança — é essa asserção que
+distingue uma consolidação de uma alteração de política.
+
 ---
 
 ### D-10 · As definições de índices vivem dentro de `create_indexes`
@@ -252,92 +352,6 @@ regra do `rede_consensual` (recusa adivinhar quando há mais de uma candidata).
 
 ---
 
-### D-21 · `db.visits` não tem isolamento de rede nem posse nas escritas
-**Onde:** `backend/services/visit_list_create.py`, `visit_kanban_get.py`,
-`visit_update_cancel.py`, `portal_client_visits.py`
-
-Encontrada ao levantar o terreno para o motor de Visitas (Lote 9, parte 2).
-É a mesma família de `db.tasks` (Lote 4, ponto 12) e dos prazos do
-calendário (Lote 7, ponto 3), com as três formas ao mesmo tempo:
-
-1. **Sem filtro de rede nenhum.** `run_get_visits` e `run_get_visits_kanban`
-   abrem com `query = {}`. O único recorte é
-   `if user_role in ["consultor", "intermediario"]` por atribuição — logo um
-   **diretor, administrativo, admin ou CEO vê as visitas de TODAS as redes**,
-   e o documento leva `client_name`, `client_email` e `client_phone`. A Domus
-   é uma ilha. Os dois papéis que escapam escapam **por acidente**, como o
-   `run_get_my_tasks`, e foi essa metade a funcionar que escondeu a outra.
-2. **Sem posse nas escritas.** `run_get_visit`, `run_update_visit` e
-   `run_cancel_visit` fazem `find_one({"id": visit_id})` e mais nada. O
-   `require_roles` da rota autoriza o VERBO, não o OBJECTO — é literalmente
-   o `run_delete_deadline` do Lote 7.
-3. **O carimbo está errado na criação.** `visit_list_create` grava
-   `"company_id": user.get("company_id")`, e o documento de utilizador tem
-   `company` (o NOME); o `company_id` vive no UCR. Ou seja: **toda a visita
-   criada pela equipa nasce com `company_id: None`**. O Portal carimba o
-   `company_id` do processo — duas origens diferentes para o mesmo campo, uma
-   delas sempre vazia. E `network_id` não existe em sítio nenhum da colecção.
-
-O papel é lido de `user["role"]` (o do JWT) e não do EFECTIVO: 5.ª ocorrência
-da forma do `history._is_stealth_user`.
-
-**Porque é que vem antes do ecrã novo:** o Lote 9 pede um dashboard de
-Visitas mais rico. Um ecrã melhor sobre uma colecção sem fronteira mostra
-mais do que hoje mostra — a correcção do isolamento é pré-requisito da UI,
-não um acabamento.
-
-**Para fechar:** `com_isolamento`/`build_tenant_condition` nas DUAS listagens
-e no Kanban; uma função de posse por visita (404, nunca 403 — precedente das
-notificações) ligada ao GET, ao PUT e ao cancelamento; `resolve_tenant_stamp`
-na criação, nos dois escritores, com `network_id`; papel EFECTIVO; e backfill
-com a regra do `rede_consensual` (recusa adivinhar). O teste de exploração
-escreve-se primeiro.
-
----
-
-### D-22 · O modelo de IA do scraper está fixo no código
-**Onde:** `backend/services/scraper.py` (`_extract_with_gemini`)
-
-`_get_ai_model_for_scraping()` lê `scraping_model` da configuração do
-administrador, o resultado é **registado no log** («Usando modelo
-configurado: X») — e depois ignorado: a chamada é
-`genai.GenerativeModel("gemini-2.0-flash")`, literal. Só os modelos `gpt*`
-são honrados, porque esses desviam para `_extract_with_openai`. O
-`ai_usage_tracker` também recebe o literal, pelo que o relatório de custos
-atribui a despesa ao modelo errado.
-
-É o defeito que `test_nenhuma_chamada_usa_a_constante_fixa` existe para
-impedir (regra «Modelo de IA: nunca fixo no código»), num módulo que essa
-guarda não cobre. **O log a dizer o contrário é o que o torna difícil de
-ver.**
-
-**Para fechar:** passar `configured_model` ao construtor e ao tracker, e
-estender a guarda de fonte do `ai_document` a `scraper.py`.
-
----
-
-### D-23 · O mapeador do scraper descarta campos que a IA extrai
-**Onde:** `backend/services/property_scraper.py` (`extract_with_deep_scraper`)
-
-O `scraper.py` devolve ~30 campos (o prompt pede explicitamente `estado`,
-`orientacao_solar`, `condominio`, `piso`, `elevador`, `varanda`, `vista`,
-`url_planta`, `url_video`, `agencia_telefone`) e o mapeador para
-`ScrapedData` tem uma lista escrita à mão de 11 — **tudo o que não está nela
-é silenciosamente perdido**. O `estado` do imóvel (novo/usado/remodelado/para
-renovar) é um dos campos pedidos para o quadro de Visitas e é extraído pela
-IA desde sempre.
-
-Mesma forma de «os dois mapas de campos da IA têm de concordar» (o
-`naturalidade` do `AI_SUGGESTION_FIELD_MAP`): o lado que traduz descarta em
-silêncio o que não conhece, e a extracção parece ter corrido bem.
-
-**Para fechar:** `raw_data` deriva do dicionário devolvido em vez de uma
-lista à mão, ou um teste de concordância entre o esquema do prompt e os
-campos transportados (com a função de produção como oráculo, nunca uma
-terceira lista).
-
----
-
 ### D-14 · O formulário público pode criar um cliente com NIF repetido
 **Onde:** `backend/services/public_registration.py` (`db.clients.insert_one`)
 
@@ -401,6 +415,9 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 
 | # | Dívida | Fechada em |
 |---|---|---|
+| D-23 | O mapeador do scraper descartava campos que a IA extrai | Iteração `motor-de-visitas` — eram **DOIS** mapeadores escritos à mão (o do CRM em `visit_helpers` e o do Portal em `portal_client_visits`) para os MESMOS campos, e **já divergiam**: o do Portal guardava `raw_data`, o do CRM não, pelo que uma visita criada no CRM perdia também quartos, casas de banho, certificado energético, ano de construção, descrição e referência. E a lista de ONZE chaves do `property_scraper`, sobre ~30 devolvidas, perdia o **`estado`** do imóvel — que o prompt da IA pede pelo nome desde sempre. Hoje `services/visit_property_extract.ficha_do_imovel` é o ponto único e o `raw_data` **DERIVA** do dicionário devolvido: um campo novo no prompt chega ao mesmo destino sem ninguém se lembrar. Ganhou um **terceiro veredicto** (`sem_dados`): um anúncio que responde 200 com tudo vazio contava como sucesso e a visita ficava sem um único dado, indistinguível de um imóvel sem informação |
+| D-21 | `db.visits` sem isolamento de rede nem posse nas escritas | Iteração `isolamento-das-visitas` — as TRÊS formas do defeito ao mesmo tempo. As duas listagens (e o Kanban, que tem construtor SEPARADO — a lição do `build_kanban_query`) passaram a derivar do mesmo contexto de acesso e do mesmo `com_isolamento`; a posse vive em `visit_scope.py` (puro) com `exigir_visita_acessivel` ligada à leitura, ao `PATCH` e ao cancelamento, e responde **404 e nunca 403**. A reatribuição ganhou a pergunta do DESTINO (`pode_atribuir_a_consultor`), sem a qual um editor legítimo entregava a um consultor de outra rede o nome, o email e o telefone de um cliente. O carimbo passou a derivar do **PROCESSO** num ponto único (`carimbo_da_visita`): havia dois escritores com origens diferentes para o mesmo campo e uma delas — `user.get("company_id")` — não existe no documento de utilizador, logo toda a visita da equipa nascia sem carimbo. **O `administrativo` ENTROU na vista de equipa** (o back-office coordena visitas) e por isso o âmbito dele estreita de «todas as redes» para «a sua rede» |
+| D-22 | O modelo de IA do scraper estava fixo no código | Iteração `isolamento-das-visitas` — o modelo configurado era lido, **escrito no log** («Usando modelo configurado: X») e depois ignorado: a chamada era `genai.GenerativeModel("gemini-2.0-flash")`, literal, e o `ai_usage_tracker` recebia o mesmo literal, pelo que o relatório de custos atribuía a despesa ao modelo errado. **O log a dizer o contrário é o que tornava isto difícil de ver.** A omissão continua no `_get_ai_model_for_scraping`, que é onde ela pertence; o teste é ao nível da CHAMADA (asserção sobre o parâmetro que sai para o SDK, não sobre o resultado — regra do «duplo demasiado esperto») |
 | D-19 | Homónimos exactos a partilhar pasta na leitura legada | Iteração `fim-do-recurso-por-nome` — **medida antes de apagada**: o `diagnose_s3_name_fallback.py` contra produção contou **zero** fichas a perder documentos, e só então o recurso por nome foi apagado do `s3_storage` (`_find_client_folder_combined`, `_find_client_folder`, `_nomes_de_pasta_candidatos`, `_get_possible_client_paths`) — apagado, não desligado. A medição respondia a UMA pergunta («que fichas não têm `s3_folder`?») e o corte dependia de outra que ela não cobria: **«que chamadores se esquecem de o passar?»** — e havia dois, ambos já partidos em produção (`run_categorize_all_documents` e o `move_file` do «organizar após análise»: para uma ficha mapeada por ID o nome não resolve pasta nenhuma, logo processavam ZERO documentos em silêncio desde o Lote 6). Fechou também a metade de SEGURANÇA, que não estava no enunciado: `build_s3_valid_prefixes` derivava prefixos de posse do NOME, logo dois homónimos exactos autorizavam os ficheiros um do outro, alcançável do **Portal**; o prefixo passou a derivar do ID. Os testes legados foram **invertidos** (a concordância com o oráculo de produção, as grafias candidatas e os dois da guarda de posse), nunca apagados |
 | D-9 | Portal do Cliente em polling das mensagens | Iteração `ws-portal-ui` — ligado a `/api/ws/portal` com o polling mantido como recurso |
 | D-5 | Tolerância a tokens de staff sem `type` | Iteração `slas-e-sourcemaps` — 24h após o deploy que unificou os três produtores; o ramo do `None` saiu e os dois testes foram INVERTIDOS (um token sem `type` é agora recusado no WebSocket e na API) |

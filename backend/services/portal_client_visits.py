@@ -16,6 +16,7 @@ from services.portal_assigned_users import get_all_assigned_user_ids as _get_all
 from services.notification_service import send_notification_with_preference_check
 from services.websocket_manager import WSEventType
 from services.realtime_delivery import entregar_na_sala, sala_do_processo
+from services.visit_helpers import PROJECCAO_DO_PROCESSO, carimbo_da_visita
 
 logger = logging.getLogger(__name__)
 
@@ -29,75 +30,34 @@ async def _background_visit_scraper_and_notify(visit_id: str, url: str, process_
     
     Executa de forma assíncrona após o endpoint devolver 200 ao cliente.
     """
-    # ── Scraper ──
-    scraped_data = None
-    scraper_error = None
+    # ── Extracção (D-23: ponto único, partilhado com o caminho do CRM) ──
+    from services.visit_property_extract import (
+        VEREDICTO_COMPLETA,
+        ficha_do_imovel,
+    )
+
     try:
         from services.property_scraper import extract_property_data
         scraped_result = await extract_property_data(url)
-        scraped_data = {
-            "title": scraped_result.title,
-            "price": scraped_result.price,
-            "location": scraped_result.location,
-            "typology": scraped_result.typology,
-            "area": scraped_result.area,
-            "photo_url": scraped_result.photo_url,
-            "source": scraped_result.source,
-            "url": url,
-            "consultant": {
-                "name": scraped_result.consultant.name if scraped_result.consultant else None,
-                "phone": scraped_result.consultant.phone if scraped_result.consultant else None,
-                "email": scraped_result.consultant.email if scraped_result.consultant else None,
-                "agency_name": scraped_result.consultant.agency_name if scraped_result.consultant else None,
-            } if scraped_result.consultant else None,
-            "raw_data": scraped_result.raw_data,
-        }
-        if scraped_result.source == "error":
-            scraper_error = scraped_result.raw_data.get("error", "Erro desconhecido no scraper")
-    except Exception as e:
-        scraper_error = str(e)
-        logger.warning(f"[PORTAL-BG] Erro no scraper para URL {url}: {e}")
-    
-    # ── Atualizar visita com dados do scraper ──
-    update_fields = {
-        "scraper_status": "completed" if scraped_data and not scraper_error else "error",
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    
-    if scraped_data:
-        update_fields["scraped_data"] = scraped_data
-        
-        # Auto-popular campos com dados extraídos
-        if scraped_data.get("title") and scraped_data.get("source") != "error":
-            update_fields["property_title"] = scraped_data["title"]
-        
-        if scraped_data.get("price"):
-            update_fields["scraped_price"] = scraped_data["price"]
-        
-        if scraped_data.get("photo_url"):
-            update_fields["property_photo"] = scraped_data["photo_url"]
-        
-        if scraped_data.get("location"):
-            update_fields["property_address"] = {
-                "municipality": scraped_data["location"],
-                "district": "",
-            }
-        
-        if scraped_data.get("typology"):
-            update_fields["scraped_typology"] = scraped_data["typology"]
-    
-    if scraper_error:
-        update_fields["scraper_error"] = scraper_error
-    
+    except Exception as exc:
+        logger.warning(f"[PORTAL-BG] Erro no scraper para URL {url}: {exc}")
+        scraped_result = None
+
+    agora = datetime.now(timezone.utc).isoformat()
+    ficha = ficha_do_imovel(scraped_result, url=url, agora=agora)
+    update_fields = ficha.campos
+
     try:
-        await db.visits.update_one(
-            {"id": visit_id},
-            {"$set": update_fields}
-        )
+        await db.visits.update_one({"id": visit_id}, {"$set": update_fields})
         logger.info(f"[PORTAL-BG] Visita {visit_id} atualizada com dados do scraper")
     except Exception as e:
         logger.warning(f"[PORTAL-BG] Erro ao atualizar visita {visit_id}: {e}")
-    
+
+    if ficha.veredicto != VEREDICTO_COMPLETA:
+        logger.warning(
+            f"[PORTAL-BG] Visita {visit_id} sem dados utilizáveis: {ficha.motivo}"
+        )
+
     # ── Notificar equipa atribuída ──
     assigned_ids = _get_all_assigned_user_ids(notify_process)
     process_number = notify_process.get("process_number", "")
@@ -187,9 +147,7 @@ async def run_request_portal_visit(data: dict, background_tasks: BackgroundTasks
             continue
         found = await db.processes.find_one(
             {"id": pid, "status": {"$nin": ["concluido", "cancelado", "arquivado"]}},
-            {"_id": 0, "id": 1, "client_name": 1, "client_email": 1,
-             "client_phone": 1, "company_id": 1, "status": 1,
-             "assigned_consultor_id": 1, "process_number": 1}
+            PROJECCAO_DO_PROCESSO
         )
         if found:
             active_process = found
@@ -207,9 +165,7 @@ async def run_request_portal_visit(data: dict, background_tasks: BackgroundTasks
                     ],
                     "status": {"$nin": ["concluido", "cancelado", "arquivado"]},
                 },
-                {"_id": 0, "id": 1, "client_name": 1, "client_email": 1,
-                 "client_phone": 1, "company_id": 1, "status": 1,
-                 "assigned_consultor_id": 1, "process_number": 1}
+                PROJECCAO_DO_PROCESSO
             )
     
     if active_process:
@@ -252,7 +208,10 @@ async def run_request_portal_visit(data: dict, background_tasks: BackgroundTasks
         "created_at": now,
         "updated_at": now,
         "created_by": "portal_client",
-        "company_id": (active_process or process).get("company_id"),
+        # LOTE 9 (D-21) — o `company_id` do processo sozinho não bastava:
+        # faltava a REDE, que é a fronteira de segurança. Vem do mesmo
+        # ponto único que o escritor da equipa usa.
+        **(await carimbo_da_visita(active_process or process)),
     }
     
     await db.visits.insert_one(visit_doc)

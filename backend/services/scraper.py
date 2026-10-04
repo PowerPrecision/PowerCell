@@ -41,9 +41,23 @@ try:
     CURL_CFFI_AVAILABLE = True
 except ImportError:
     CURL_CFFI_AVAILABLE = False
-    import httpx
+    # O `httpx` importa-se DENTRO do ramo de recurso do `_fetch_url`. O
+    # import aqui era usado pelo `_fetch_page_content`, que foi apagado
+    # (código morto do LOTE 10) — e era ele que mantinha este nome a
+    # parecer necessário, enquanto o `_fetch_page_content` usava `httpx`
+    # INCONDICIONALMENTE: com o `curl_cffi` instalado (o caso normal) este
+    # ramo nunca corria, o nome nunca existia, e a função morta levantava
+    # `NameError` em vez de fazer o que a docstring prometia.
 
 from config import GEMINI_API_KEY
+from services.scraper_anunciante import (
+    alvos_do_anunciante,
+    contexto_para_a_ia,
+    pagina_do_anunciante,
+    prompt_da_extraccao,
+    pagina_do_anuncio,
+    telefone_pt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +96,44 @@ AGGREGATOR_SITES = [
 # Sites que requerem medidas especiais de anti-bot
 PROTECTED_SITES = ["idealista.pt", "idealista.com"]
 
+# ================================================================
+# NAVEGAÇÃO MULTI-NÍVEL (LOTE 10)
+# ================================================================
+# O 1.º GET traz o anúncio; o 2.º traz a página de quem anuncia. Entre
+# os dois há uma PAUSA, e a pausa não é zelo: dois pedidos consecutivos
+# ao mesmo portal em milissegundos é precisamente o padrão que o
+# Cloudflare procura, e o custo de ser apanhado não é este anúncio — é o
+# IP ficar marcado para os seguintes. O único atraso que o motor tinha
+# corria DEPOIS de um 403, ou seja, quando já era tarde.
+PAUSA_ENTRE_PAGINAS_MIN = 1.5
+PAUSA_ENTRE_PAGINAS_MAX = 3.5
+
+# Quantos alvos se seguem por anúncio. UM: o contacto está no perfil do
+# anunciante, não a dois cliques dele, e cada salto a mais dobra o risco
+# de bloqueio e o tempo de um trabalho de fundo que o cliente está a ver
+# em «a ler o anúncio».
+MAXIMO_DE_SALTOS = 1
+
+# As chaves do `AGENCY_PHONE_SELECTORS` não coincidem com as marcas do
+# `AGENCY_DOMAINS`: `era.pt`, `kw.com`, `kwportugal`, `iadportugal` e
+# `easygest.com.pt` são o que o reconhecimento devolve, e `era`, `kw`,
+# `iad` e `easygest` é o que a tabela de selectores tem. O resultado era
+# uma falha SILENCIOSA no Cenário 1 — sem selectores próprios, o motor
+# caía na regex sobre o texto da página inteira e trazia a central da
+# agência em vez do directo do consultor.
+CHAVES_DE_AGENCIA_POR_MARCA = {
+    "era.pt": "era",
+    "kw.com": "kw",
+    "kwportugal": "kw",
+    "iad-": "iad",
+    "iadportugal": "iad",
+    "easygest.com.pt": "easygest",
+    "re/max": "remax",
+    "keller": "kw",
+    "century 21": "century21",
+    "mais consultores": "maisconsultores",
+}
+
 # Domínios de agências imobiliárias (expandido)
 AGENCY_DOMAINS = [
     # Grandes redes internacionais
@@ -98,13 +150,11 @@ AGENCY_DOMAINS = [
     "chaves-chaves", "casayes", "real-estate", "imobiliaria"
 ]
 
-# Textos que indicam links para agências
-AGENCY_LINK_TEXTS = [
-    "ver no site", "link externo", "página da agência", "website",
-    "site do anunciante", "ver anúncio", "contactar agência",
-    "visitar site", "ir para o site", "ver original",
-    "ver detalhes", "mais informação", "contacto direto"
-]
+# O `AGENCY_LINK_TEXTS` vivia aqui e era a lista do `_find_agency_links`
+# (apagado no LOTE 10). O conhecimento mudou-se para
+# `scraper_anunciante.TEXTOS_DO_ANUNCIANTE`, ao lado do
+# `TEXTOS_RECUSADOS_DE_PROPOSITO` — que escreve quais dos textos antigos
+# ficaram de fora e porquê. Uma constante órfã lê-se como código vivo.
 
 # Padrões regex para contactos - formato português
 PHONE_PATTERNS = [
@@ -341,7 +391,13 @@ class PropertyScraper:
     # FETCH COM CURL_CFFI (ANTI-BOT BYPASS)
     # ================================================================
     
-    async def _fetch_url(self, url: str, retries: int = MAX_RETRIES) -> Optional[str]:
+    async def _fetch_url(
+        self,
+        url: str,
+        retries: int = MAX_RETRIES,
+        *,
+        referer: Optional[str] = None,
+    ) -> Optional[str]:
         """
         Obtém HTML de uma URL usando curl_cffi com impersonate.
         
@@ -353,6 +409,12 @@ class PropertyScraper:
         Args:
             url: URL a aceder
             retries: Número de tentativas
+            referer: LOTE 10 — a página de onde se está a navegar. É o
+                ÚNICO cabeçalho que se acrescenta, e de propósito: ao
+                seguir uma ligação um browser envia `Referer`, logo
+                enviá-lo é consistente com o fingerprint do profile,
+                enquanto o `_get_headers()` inteiro o contradiz (é essa a
+                razão de este método não passar headers nenhuns).
             
         Returns:
             HTML content ou None se falhar
@@ -377,7 +439,8 @@ class PropertyScraper:
                     response = await session.get(
                         url,
                         timeout=self.timeout,
-                        allow_redirects=True
+                        allow_redirects=True,
+                        **({"headers": {"Referer": referer}} if referer else {}),
                     )
                     
                     if response.status_code == 200:
@@ -408,7 +471,10 @@ class PropertyScraper:
                         follow_redirects=True,
                         http2=True
                     ) as client:
-                        response = await client.get(url, headers=self._get_headers())
+                        cabecalhos = self._get_headers()
+                        if referer:
+                            cabecalhos["Referer"] = referer
+                        response = await client.get(url, headers=cabecalhos)
                         
                         if response.status_code == 200:
                             return response.text
@@ -665,121 +731,189 @@ class PropertyScraper:
         domain = parsed.netloc.lower()
         return any(agg in domain for agg in AGGREGATOR_SITES)
     
-    def _find_agency_links(self, soup: BeautifulSoup, current_domain: str) -> List[Dict[str, str]]:
+    def _ligacoes_da_pagina(self, soup: BeautifulSoup):
+        """Os pares `(href, texto)` da página. Só leitura de HTML.
+
+        A DECISÃO de qual seguir vive em `scraper_anunciante`, puro e
+        testável sem HTML e sem rede. Aqui fica apenas a extracção.
         """
-        Encontra links para sites de agências imobiliárias na página.
-        
-        Procura:
-        1. Links externos para domínios de agências conhecidas
-        2. Botões/links com textos como "Ver no site", "Link externo", etc.
-        3. Links que saem do domínio atual para agências
-        
-        Returns:
-            Lista de dicts com {url, text, agency} para cada link encontrado
+        return [
+            (a_tag.get("href", ""), a_tag.get_text(strip=True))
+            for a_tag in soup.find_all("a", href=True)
+        ]
+
+    def _alvos_do_anunciante(self, soup: BeautifulSoup, url: str, declarados=()):
+        """As páginas candidatas a ter o contacto de quem anuncia.
+
+        Substitui o `_find_agency_links`, que tinha DOIS defeitos:
+
+        1. descartava toda a ligação do mesmo domínio na primeira linha
+           (`if current_domain in link_domain: continue`) — e no Idealista
+           o perfil do anunciante É uma página do Idealista (`/pro/...`),
+           pelo que o portal que o cliente mais usa era o único que nunca
+           podia ser seguido;
+        2. admitia por uma lista de domínios escrita à mão, logo uma
+           agência que não estivesse lá não era seguida e a visita ficava
+           sem contacto — indistinguível de um anúncio que não o traz.
         """
-        agency_links = []
-        seen_urls = set()
-        
-        for a_tag in soup.find_all('a', href=True):
-            href = a_tag.get('href', '')
-            if not href or href.startswith('#') or href.startswith('javascript:'):
-                continue
-            
-            # Ignorar links relativos
-            if not href.startswith('http'):
-                continue
-            
-            parsed = urlparse(href)
-            link_domain = parsed.netloc.lower()
-            
-            # Ignorar links para o mesmo domínio
-            if current_domain in link_domain or link_domain in current_domain:
-                continue
-            
-            # Verificar se é um domínio de agência
-            matched_agency = None
-            for agency_pattern in AGENCY_DOMAINS:
-                if agency_pattern in link_domain:
-                    matched_agency = agency_pattern
-                    break
-            
-            # Também verificar pelo texto do link
-            link_text = a_tag.get_text(strip=True).lower()
-            is_agency_link_text = any(text in link_text for text in AGENCY_LINK_TEXTS)
-            
-            # Adicionar se for domínio de agência OU tiver texto indicativo
-            if (matched_agency or is_agency_link_text) and href not in seen_urls:
-                agency_links.append({
-                    "url": href,
-                    "text": link_text[:100],
-                    "agency": matched_agency or "unknown",
-                    "domain": link_domain
-                })
-                seen_urls.add(href)
-        
-        # Ordenar por prioridade (agências conhecidas primeiro)
-        agency_links.sort(key=lambda x: 0 if x["agency"] != "unknown" else 1)
-        
-        return agency_links[:5]  # Max 5 links
+        alvos = alvos_do_anunciante(
+            self._ligacoes_da_pagina(soup),
+            url_de_origem=url,
+            dominios_de_agencia=AGENCY_DOMAINS,
+            declarados=declarados,
+        )
+        if alvos:
+            logger.info(
+                "[ANUNCIANTE] %d alvo(s); o primeiro é %s (%s)",
+                len(alvos), alvos[0].url[:80], alvos[0].motivo,
+            )
+        return alvos
+
+    def _dominio_conhecido_do_alvo(self, alvo) -> str:
+        """A marca de agência presente no domínio do alvo, ou `""`.
+
+        Serve para escolher os selectores próprios. Devolve texto vazio
+        quando não reconhece — e não «unknown», porque `unknown` ia como
+        chave para o `AGENCY_PHONE_SELECTORS` e dava sempre miss: um
+        sentinela a fingir que é uma chave.
+        """
+        dominio = urlparse(getattr(alvo, "url", "") or "").netloc.lower()
+        for marca in AGENCY_DOMAINS:
+            if marca in dominio:
+                return marca
+        return ""
+
+    def _chave_da_agencia(self, marca: str) -> str:
+        """A marca reconhecida → a chave do `AGENCY_PHONE_SELECTORS`.
+
+        `era.pt`, `kw.com`, `iadportugal` e `easygest.com.pt` são o que o
+        reconhecimento devolve; `era`, `kw`, `iad` e `easygest` é o que a
+        tabela de selectores tem. Sem esta tradução o Cenário 1 falhava em
+        SILÊNCIO: sem selectores próprios, o motor caía na regex sobre o
+        texto da página inteira e trazia a central da agência em vez do
+        directo do consultor — um telefone errado com ar de certo.
+        """
+        chave = str(marca or "").strip().lower()
+        if not chave:
+            return ""
+        if chave in AGENCY_PHONE_SELECTORS:
+            return chave
+        traduzida = CHAVES_DE_AGENCIA_POR_MARCA.get(chave)
+        if traduzida:
+            return traduzida
+        # Último recurso: a chave de selectores que seja prefixo da marca
+        # (`kwportugal` → `kw`). Determinístico pela ordenação.
+        for candidata in sorted(AGENCY_PHONE_SELECTORS, key=len, reverse=True):
+            if chave.startswith(candidata) or candidata in chave:
+                return candidata
+        return ""
+
+    async def _seguir_para_o_anunciante(self, alvo, url_de_origem: str):
+        """O SEGUNDO GET: a página de quem anuncia.
+
+        Três decisões que não se podem perder:
+
+        1. **A mesma sessão e o MESMO profile.** O `_fetch_url` roda o
+           perfil de impersonate após um 403, que é o certo para uma
+           TENTATIVA repetida; para uma NAVEGAÇÃO é o contrário — um
+           browser que mude de identidade entre duas páginas da mesma
+           visita é mais suspeito do que um que não mude, e perderia os
+           cookies que o 1.º pedido acabou de receber.
+        2. **Uma pausa com jitter ANTES do pedido.** Ver
+           `PAUSA_ENTRE_PAGINAS_*`. Um valor fixo é ele próprio uma
+           assinatura.
+        3. **`Referer` da página de origem, e só esse cabeçalho.** É o que
+           um browser envia ao seguir uma ligação, logo é consistente com
+           o fingerprint; o `_get_headers()` inteiro não, e é por isso que
+           o `_fetch_url` não passa headers nenhuns ao `curl_cffi`.
+        """
+        url = getattr(alvo, "url", None) or str(alvo)
+        pausa = random.uniform(PAUSA_ENTRE_PAGINAS_MIN, PAUSA_ENTRE_PAGINAS_MAX)
+        logger.info("[ANUNCIANTE] Pausa de %.1fs antes do 2.º pedido", pausa)
+        await asyncio.sleep(pausa)
+        return await self._fetch_url(url, referer=url_de_origem)
+
     
-    async def _deep_scrape_agency(self, agency_url: str, agency_name: str) -> Dict[str, Any]:
+    async def _deep_scrape_agency(
+        self,
+        agency_url: str,
+        agency_name: str,
+        *,
+        html: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Faz scraping da página de uma agência para extrair dados do consultor.
-        
+        Extrai os dados do anunciante da página já seguida.
+
+        LOTE 10 — o `html` entra por PARÂMETRO. Antes esta função fazia ela
+        própria o GET, o que obrigava a descarregar a página do anunciante
+        DUAS vezes quando o contexto dela também era preciso para a IA: uma
+        aqui e outra para o prompt. Dois pedidos à mesma página, no mesmo
+        segundo, é o oposto do que a pausa anti-bot existe para evitar.
+
         Args:
-            agency_url: URL da página da agência
-            agency_name: Nome da agência (remax, quatru, etc.)
-            
+            agency_url: URL da página do anunciante
+            agency_name: Marca reconhecida (remax, era.pt, …)
+            html: HTML já obtido. Sem ele, faz o pedido (compatibilidade).
+
         Returns:
-            Dict com dados extraídos (telefone, email, nome do consultor, referência)
+            Dict com nome, telefone, email e referência do anunciante
         """
-        logger.info(f"[DEEP SCRAPE] Navegando para {agency_url[:60]}...")
-        
+        logger.info(f"[DEEP SCRAPE] A ler {agency_url[:60]}...")
+
         result = {
             "deep_scraped": True,
             "source_url": agency_url,
             "source_agency": agency_name
         }
-        
+
         try:
-            html = await self._fetch_url(agency_url)
+            if html is None:
+                html = await self._fetch_url(agency_url)
             if not html:
                 logger.warning(f"[DEEP SCRAPE] Não foi possível aceder {agency_url}")
                 return result
-            
+
             soup = BeautifulSoup(html, 'html.parser')
-            
-            # 1. Tentar selectores específicos da agência
-            if agency_name in AGENCY_PHONE_SELECTORS:
-                for selector in AGENCY_PHONE_SELECTORS[agency_name]:
-                    elements = soup.select(selector)
-                    for el in elements:
-                        text = el.get_text(strip=True)
-                        # Limpar e validar telefone
-                        phone = self._extract_phone_from_text(text)
+
+            # 1. Selectores específicos da agência. A chave TRADUZ-SE: a
+            #    marca reconhecida (`era.pt`) não é a chave da tabela
+            #    (`era`), e sem a tradução este ramo nunca corria.
+            chave = self._chave_da_agencia(agency_name)
+            if chave:
+                for selector in AGENCY_PHONE_SELECTORS[chave]:
+                    for el in soup.select(selector):
+                        phone = self._extract_phone_from_text(el.get_text(strip=True))
                         if phone:
                             result["agente_telefone"] = phone
                             break
                     if result.get("agente_telefone"):
                         break
-            
+                if not result.get("agente_telefone"):
+                    logger.debug(
+                        "[DEEP SCRAPE] Selectores de '%s' não deram telefone", chave
+                    )
+            elif agency_name and agency_name != "unknown":
+                logger.debug(
+                    "[DEEP SCRAPE] Sem selectores próprios para '%s'", agency_name
+                )
+
             # 2. Extrair contactos do texto completo
             clean_text = self._clean_text(html)
             contacts = self._extract_contacts_from_text(clean_text)
-            
+
             if contacts.get("telefones") and not result.get("agente_telefone"):
                 # Priorizar telemóveis sobre fixos
                 phones = contacts["telefones"]
                 mobile = next((p for p in phones if p.startswith("9")), None)
                 result["agente_telefone"] = mobile or phones[0]
-            
+
             if contacts.get("emails"):
                 # Filtrar emails genéricos
-                valid_emails = [e for e in contacts["emails"] 
+                valid_emails = [e for e in contacts["emails"]
                               if not any(x in e.lower() for x in ["noreply", "info@", "geral@", "admin@"])]
                 if valid_emails:
                     result["agente_email"] = valid_emails[0]
-            
+
             # 3. Extrair nome do consultor
             agent_name_selectors = [
                 '.agent-name', '.consultant-name', '.broker-name',
@@ -790,11 +924,18 @@ class PropertyScraper:
                 el = soup.select_one(selector)
                 if el:
                     name = el.get_text(strip=True)
-                    if name and len(name) > 3 and len(name) < 100:
+                    if self._is_valid_name(name):
                         result["agente_nome"] = name
                         break
-            
-            # 4. Extrair referência da agência
+
+            # 4. O nome da AGÊNCIA é uma pergunta diferente do nome do
+            #    consultor, e é o que o consultor nosso lê primeiro para
+            #    saber a quem liga a pedir a partilha.
+            agencia = self._extract_agency_name_from_page(soup, html)
+            if agencia:
+                result["agencia_nome"] = agencia
+
+            # 5. Extrair referência da agência
             ref_patterns = [
                 r'Ref[.:]?\s*([A-Z0-9-]{5,20})',
                 r'Referência[:]?\s*([A-Z0-9-]{5,20})',
@@ -805,13 +946,18 @@ class PropertyScraper:
                 if match:
                     result["referencia_agencia"] = match.group(1)
                     break
-            
-            logger.info(f"[DEEP SCRAPE] Extraídos: tel={result.get('agente_telefone')}, email={result.get('agente_email')}, nome={result.get('agente_nome')}")
-            
+
+            logger.info(
+                "[DEEP SCRAPE] Extraídos: agência=%s, nome=%s, tel=%s, email=%s",
+                result.get("agencia_nome"), result.get("agente_nome"),
+                result.get("agente_telefone"), result.get("agente_email"),
+            )
+
         except Exception as e:
             logger.error(f"[DEEP SCRAPE] Erro: {e}")
-        
+
         return result
+
     
     def _extract_phone_from_text(self, text: str) -> Optional[str]:
         """Extrai e limpa um número de telefone de texto."""
@@ -850,7 +996,14 @@ class PropertyScraper:
         result = main_data.copy()
         
         # Campos onde a agência tem prioridade
-        priority_fields = ["agente_telefone", "agente_email", "agente_nome", "referencia_agencia"]
+        priority_fields = [
+            "agente_telefone", "agente_email", "agente_nome",
+            # LOTE 10 — o nome da AGÊNCIA faltava nesta lista: um anúncio
+            # que trouxesse «Imobiliária» genérico vencia o nome real lido
+            # na página do anunciante.
+            "agencia_nome",
+            "referencia_agencia",
+        ]
         
         for field in priority_fields:
             if deep_data.get(field):
@@ -1515,80 +1668,6 @@ class PropertyScraper:
         
         return contacts
     
-    def _extract_contacts_from_soup(self, soup: BeautifulSoup, agency_type: str = None) -> Dict[str, Any]:
-        """
-        Extrai contactos usando selectores específicos por agência.
-        
-        Args:
-            soup: BeautifulSoup object
-            agency_type: Tipo de agência (remax, era, century21, etc.)
-        
-        Returns:
-            Dict com telefones e emails encontrados
-        """
-        contacts = {"telefones": [], "emails": []}
-        
-        # Selectores genéricos
-        phone_selectors = [
-            'a[href^="tel:"]',
-            '.phone', '.tel', '.telefone',
-            '.agent-phone', '.consultant-phone',
-            '[itemprop="telephone"]',
-        ]
-        
-        email_selectors = [
-            'a[href^="mailto:"]',
-            '.email', '.mail',
-            '.agent-email', '.consultant-email',
-            '[itemprop="email"]',
-        ]
-        
-        # Adicionar selectores específicos da agência
-        if agency_type and agency_type in AGENCY_PHONE_SELECTORS:
-            phone_selectors = AGENCY_PHONE_SELECTORS[agency_type] + phone_selectors
-        
-        # Extrair telefones
-        for selector in phone_selectors:
-            try:
-                elements = soup.select(selector)
-                for elem in elements:
-                    # Tentar href primeiro (para links tel:)
-                    href = elem.get('href', '')
-                    if href.startswith('tel:'):
-                        phone = href.replace('tel:', '').replace('+351', '').replace(' ', '')
-                        if len(phone) == 9 and phone.isdigit():
-                            if phone not in contacts["telefones"]:
-                                contacts["telefones"].append(phone)
-                    else:
-                        # Extrair do texto
-                        text = elem.get_text(strip=True)
-                        phone = re.sub(r'[^\d]', '', text)
-                        if len(phone) >= 9:
-                            phone = phone[-9:]  # Últimos 9 dígitos
-                            if phone not in contacts["telefones"]:
-                                contacts["telefones"].append(phone)
-            except Exception:
-                continue
-        
-        # Extrair emails
-        for selector in email_selectors:
-            try:
-                elements = soup.select(selector)
-                for elem in elements:
-                    href = elem.get('href', '')
-                    if href.startswith('mailto:'):
-                        email = href.replace('mailto:', '').lower().strip()
-                        if '@' in email and email not in contacts["emails"]:
-                            contacts["emails"].append(email)
-                    else:
-                        text = elem.get_text(strip=True).lower()
-                        if '@' in text and '.' in text:
-                            if text not in contacts["emails"]:
-                                contacts["emails"].append(text)
-            except Exception:
-                continue
-        
-        return contacts
     
     def _extract_agent_name(self, soup: BeautifulSoup, text: str) -> Optional[str]:
         """
@@ -1695,130 +1774,7 @@ class PropertyScraper:
         
         return True
     
-    async def _fetch_page_content(self, url: str, use_proxy: bool = True) -> Optional[str]:
-        """
-        Faz download do conteúdo HTML de uma URL.
-        
-        Args:
-            url: URL para fazer download
-            use_proxy: Se True, usa rotação de proxies (se disponíveis)
-        
-        Returns:
-            Conteúdo HTML ou None se falhar
-        """
-        try:
-            await _ensure_public_url(url)
-        except SSRFBlockedURLError as e:
-            logger.warning(f"[SCRAPER] URL recusado por validação SSRF: {e}")
-            return None
-
-        proxy = self._get_next_proxy() if use_proxy else None
-        
-        for verify_ssl in [True, False]:
-            try:
-                await asyncio.sleep(0.5)  # Delay para evitar bloqueios
-                
-                client_kwargs = {
-                    "timeout": self.timeout,
-                    "follow_redirects": True,
-                    "verify": verify_ssl,
-                    "http2": not proxy  # HTTP2 pode não funcionar com proxies
-                }
-                
-                if proxy:
-                    client_kwargs["proxy"] = proxy
-                    logger.debug(f"Usando proxy: {proxy[:30]}...")
-                
-                async with httpx.AsyncClient(**client_kwargs) as client:
-                    response = await client.get(url, headers=self._get_headers())
-                    
-                    if response.status_code == 200:
-                        return response.text
-                    elif response.status_code in [403, 429]:
-                        # Se bloqueado e temos proxies, tenta com próxima
-                        if proxy and self._proxies:
-                            logger.warning(f"Proxy bloqueada ({response.status_code}), tentando próxima...")
-                            continue
-                    
-            except Exception as e:
-                if verify_ssl:
-                    continue
-                logger.debug(f"Erro ao buscar {url}: {e}")
-        
-        return None
     
-    async def _deep_link_contacts(self, soup: BeautifulSoup, current_url: str) -> Dict[str, Any]:
-        """
-        Segue links externos para encontrar dados de contacto.
-        
-        Este método implementa a lógica "Deep Link":
-        1. Procura links para sites de agências na página actual
-        2. Visita cada link encontrado
-        3. Extrai telefones, emails E NOME DO CONSULTOR dessas páginas
-        
-        Returns:
-            Dict com contactos encontrados via deep link
-        """
-        parsed_url = urlparse(current_url)
-        current_domain = parsed_url.netloc.lower()
-        
-        # Encontrar links de agências
-        agency_links = self._find_agency_links(soup, current_domain)
-        
-        if not agency_links:
-            logger.debug(f"Nenhum link de agência encontrado em {current_url}")
-            return {}
-        
-        logger.info(f"Deep Link: Encontrados {len(agency_links)} links de agência em {current_url}")
-        
-        all_contacts = {
-            "telefones": [],
-            "emails": [],
-            "agente_nome": None,
-            "agencia_nome": None,
-            "deep_link_sources": []
-        }
-        
-        for link in agency_links[:3]:  # Limitar a 3 para não sobrecarregar
-            try:
-                html_content = await self._fetch_page_content(link)
-                
-                if not html_content:
-                    continue
-                
-                # Parse HTML
-                link_soup = BeautifulSoup(html_content, 'html.parser')
-                
-                # Extrair contactos do texto limpo
-                clean_text = self._clean_text(html_content)
-                contacts = self._extract_contacts_from_text(clean_text)
-                
-                # Tentar extrair nome do consultor
-                agent_name = self._extract_agent_name(link_soup, clean_text)
-                if agent_name and not all_contacts["agente_nome"]:
-                    all_contacts["agente_nome"] = agent_name
-                    logger.info(f"Deep Link: Nome do agente encontrado: {agent_name}")
-                
-                # Tentar extrair nome da agência
-                agency_name = self._extract_agency_name(link_soup, link)
-                if agency_name and not all_contacts["agencia_nome"]:
-                    all_contacts["agencia_nome"] = agency_name
-                
-                if contacts["telefones"] or contacts["emails"]:
-                    logger.info(f"Deep Link: Encontrados contactos em {link}")
-                    all_contacts["telefones"].extend(contacts["telefones"])
-                    all_contacts["emails"].extend(contacts["emails"])
-                    all_contacts["deep_link_sources"].append(link)
-                
-            except Exception as e:
-                logger.debug(f"Deep Link erro em {link}: {e}")
-                continue
-        
-        # Remover duplicados
-        all_contacts["telefones"] = list(set(all_contacts["telefones"]))[:3]
-        all_contacts["emails"] = list(set(all_contacts["emails"]))[:3]
-        
-        return all_contacts
     
     async def _get_ai_model_for_scraping(self) -> str:
         """
@@ -1850,28 +1806,69 @@ class PropertyScraper:
     # EXTRAÇÃO COM GEMINI (FALLBACK IA)
     # ================================================================
     
-    async def _extract_with_gemini(self, html_content: str, url: str) -> Dict[str, Any]:
+    async def _extract_with_gemini(
+        self,
+        html_content: str,
+        url: str,
+        *,
+        html_do_anunciante: Optional[str] = None,
+        url_do_anunciante: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Usa Gemini 2.0 Flash para extrair dados de imóveis quando 
-        os parsers específicos falham.
+        Usa o modelo configurado para extrair dados de imóveis.
         
         O modelo usado é determinado pela configuração do admin em
         /api/admin/ai-config.
+
+        LOTE 10 — DUAS PÁGINAS, UMA CHAMADA. Quando a navegação
+        multi-nível trouxe a página do anunciante, ela entra no MESMO
+        pedido, num bloco ROTULADO e com orçamento próprio
+        (`scraper_anunciante.contexto_para_a_ia`). Ver o cabeçalho desse
+        módulo para as alternativas que foram pesadas; em resumo, duas
+        chamadas independentes pagam-se duas vezes e, pior, a segunda
+        página sozinha não tem o imóvel — o modelo não poderia decidir se
+        o fixo que lá está é o directo de quem vende ESTE imóvel ou a
+        central da agência, que é precisamente a pergunta.
         
         Args:
-            html_content: Conteúdo HTML da página
-            url: URL da página (para contexto)
+            html_content: HTML da página do anúncio
+            url: URL do anúncio
+            html_do_anunciante: HTML da página de quem anuncia, se seguida
+            url_do_anunciante: URL dessa página
             
         Returns:
             Dict com dados extraídos ou erro
         """
-        # Obter modelo configurado
+        # LOTE 9 (D-22) — ATÉ AQUI, ISTO ERA DECORATIVO.
+        # O modelo configurado era lido, REGISTADO no log («Usando modelo
+        # configurado: X») e depois ignorado: a chamada era
+        # `genai.GenerativeModel("gemini-2.0-flash")`, literal, e o
+        # `ai_usage_tracker` recebia o mesmo literal — logo o relatório de
+        # custos atribuía a despesa ao modelo errado. **O log a dizer o
+        # contrário é o que tornava isto difícil de ver.** É o defeito que
+        # o `test_nenhuma_chamada_usa_a_constante_fixa` existe para
+        # impedir («Modelo de IA: nunca fixo no código»), num módulo que
+        # essa guarda não cobria.
         configured_model = await self._get_ai_model_for_scraping()
         logger.info(f"Usando modelo configurado: {configured_model}")
-        
+
+        # O contexto constrói-se ANTES do desvio: é o mesmo para os dois
+        # motores, e construí-lo só no ramo do Gemini era o que fazia a
+        # página do anunciante desaparecer quando o administrador
+        # configurava um `gpt*`.
+        paginas = [pagina_do_anuncio(self._clean_text(html_content), url)]
+        if html_do_anunciante:
+            paginas.append(
+                pagina_do_anunciante(
+                    self._clean_text(html_do_anunciante),
+                    url_do_anunciante or "",
+                )
+            )
+        contexto = contexto_para_a_ia(paginas)
+
         # Verificar se é Gemini ou OpenAI
         if configured_model.startswith("gpt"):
-            return await self._extract_with_openai(html_content, url, configured_model)
+            return await self._extract_with_openai(contexto, url, configured_model)
         
         # Gemini (default)
         if not GEMINI_API_KEY:
@@ -1889,69 +1886,20 @@ class PropertyScraper:
             # Configurar API
             genai.configure(api_key=GEMINI_API_KEY)
             
-            # Limitar HTML para poupar tokens (15k chars ~= 3-4k tokens)
-            clean_html = self._clean_text(html_content)[:15000]
+            # O contexto vem do módulo PURO, construído acima: cada
+            # página cortada no SEU orçamento, nunca num total
+            # partilhado. Com um orçamento único, a página do anunciante
+            # (quase toda navegação e listas de imóveis) empurrava o
+            # preço e a área para fora da janela — um upgrade de
+            # contactos que piorasse o preço era um mau negócio.
+            clean_html = contexto
             input_tokens = len(clean_html) // 4  # Estimativa: ~4 chars por token
             
-            prompt = f"""Analisa este conteúdo de uma página imobiliária portuguesa e extrai TODOS os dados disponíveis em formato JSON estrito.
-
-URL: {url}
-
-Extrai os seguintes campos (usa null se não encontrares):
-
-DADOS DO IMÓVEL:
-- titulo: título/nome completo do imóvel
-- preco: preço em número (sem €, sem pontos de milhar)
-- preco_m2: preço por m² se disponível
-- localizacao: localização completa (rua, freguesia, concelho, distrito)
-- codigo_postal: código postal se visível
-- tipologia: tipo (T0, T1, T2, T3, T4, T5+, moradia V1-V5+, terreno, loja, armazém)
-- area: área útil em m² (apenas número)
-- area_bruta: área bruta em m² se disponível
-- area_terreno: área do terreno em m²
-- quartos: número de quartos
-- suites: número de suites
-- casas_banho: número de casas de banho
-- garagem: número de lugares de garagem
-- piso: andar/piso do imóvel
-- elevador: true/false se tem elevador
-- varanda: true/false se tem varanda/terraço
-- vista: tipo de vista (mar, rio, cidade, jardim)
-
-CARACTERÍSTICAS:
-- descricao: descrição do imóvel (texto completo)
-- caracteristicas: lista de características (piscina, ar condicionado, lareira, etc)
-- certificacao_energetica: certificado energético (A+, A, B, B-, C, D, E, F, G)
-- ano_construcao: ano de construção
-- estado: estado do imóvel (novo, usado, remodelado, para renovar, em construção)
-- orientacao_solar: orientação (norte, sul, este, oeste)
-- condominio: valor do condomínio mensal se aplicável
-
-CONTACTO:
-- agente_nome: nome do agente/consultor imobiliário
-- agente_telefone: telefone do agente (formato +351 XXX XXX XXX)
-- agente_email: email do agente
-- agencia_nome: nome da agência/imobiliária
-- agencia_telefone: telefone da agência
-- referencia: código de referência do anúncio
-
-LINKS:
-- foto_principal: URL da foto principal
-- url_planta: URL da planta do imóvel se disponível
-- url_video: URL do vídeo se disponível
-
-IMPORTANTE: 
-1. Responde APENAS com o JSON, sem explicações ou markdown
-2. Extrai o máximo de informação possível
-3. Para preços, remove símbolos e converte para número
-4. Para áreas, extrai apenas o número
-
-Conteúdo:
-{clean_html}"""
+            prompt = prompt_da_extraccao(clean_html, url=url)
             
             # Usar Gemini 2.0 Flash com modo JSON nativo
             model = genai.GenerativeModel(
-                "gemini-2.0-flash",
+                configured_model,
                 generation_config={"response_mime_type": "application/json"}
             )
             response = model.generate_content(prompt)
@@ -1974,10 +1922,10 @@ Conteúdo:
             response_time = int((time.time() - start_time) * 1000)
             try:
                 from services.ai_usage_tracker import ai_usage_tracker, estimate_cost
-                cost = estimate_cost("gemini-2.0-flash", input_tokens, output_tokens)
+                cost = estimate_cost(configured_model, input_tokens, output_tokens)
                 await ai_usage_tracker.log_usage(
                     task="scraper_extraction",
-                    model="gemini-2.0-flash",
+                    model=configured_model,
                     provider="gemini",
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -2030,7 +1978,7 @@ Conteúdo:
                 "foto_principal": data.get("foto_principal"),
                 "url_planta": data.get("url_planta"),
                 "url_video": data.get("url_video"),
-                "_extracted_by": "gemini-2.0-flash"
+                "_extracted_by": configured_model
             }
             
         except json.JSONDecodeError as e:
@@ -2039,10 +1987,10 @@ Conteúdo:
             try:
                 from services.ai_usage_tracker import ai_usage_tracker, estimate_cost
                 response_time = int((time.time() - start_time) * 1000)
-                cost = estimate_cost("gemini-2.0-flash", input_tokens, 0)
+                cost = estimate_cost(configured_model, input_tokens, 0)
                 await ai_usage_tracker.log_usage(
                     task="scraper_extraction",
-                    model="gemini-2.0-flash",
+                    model=configured_model,
                     provider="gemini",
                     input_tokens=input_tokens,
                     cost=cost,
@@ -2063,7 +2011,7 @@ Conteúdo:
                     from services.ai_usage_tracker import ai_usage_tracker
                     await ai_usage_tracker.log_usage(
                         task="scraper_extraction",
-                        model="gemini-2.0-flash",
+                        model=configured_model,
                         provider="gemini",
                         success=False,
                         error_message="quota_exceeded"
@@ -2074,13 +2022,22 @@ Conteúdo:
             logger.error(f"Erro Gemini: {type(e).__name__}: {e}")
             return {"_error": str(e)}
     
-    async def _extract_with_openai(self, html_content: str, url: str, model: str) -> Dict[str, Any]:
+    async def _extract_with_openai(self, contexto: str, url: str, model: str) -> Dict[str, Any]:
         """
         Usa OpenAI como alternativa ao Gemini para extracção.
+
+        LOTE 10 — recebe o CONTEXTO já construído (um bloco, ou dois
+        rotulados quando a página do anunciante foi seguida) e usa o
+        MESMO `prompt_da_extraccao` do Gemini. Antes recebia o HTML cru do
+        anúncio e tinha um prompt PRÓPRIO, com uma lista de campos
+        diferente e sem as instruções de validação: qual dos dois corre
+        depende do que o administrador configurou, logo um upgrade num
+        deles era um upgrade que metade dos clientes não recebia — e nada
+        dava erro.
         
         Args:
-            html_content: Conteúdo HTML da página
-            url: URL da página
+            contexto: O conteúdo já limpo e rotulado
+            url: URL do anúncio
             model: Modelo OpenAI a usar (ex: 'gpt-4o-mini')
             
         Returns:
@@ -2095,35 +2052,8 @@ Conteúdo:
         try:
             from emergentintegrations.llm.chat import LlmChat, UserMessage
             
-            clean_html = self._clean_text(html_content)[:20000]
-            
-            prompt = f"""Analisa este conteúdo de uma página imobiliária portuguesa e extrai TODOS os dados disponíveis em formato JSON.
-
-URL: {url}
-
-Extrai os seguintes campos (usa null se não encontrares):
-
-DADOS DO IMÓVEL:
-- titulo, preco (número), preco_m2, localizacao, codigo_postal
-- tipologia (T0-T5+, V1-V5+, moradia, terreno, loja)
-- area (m²), area_bruta, area_terreno, quartos, suites, casas_banho
-- garagem, piso, elevador, varanda, vista
-
-CARACTERÍSTICAS:
-- descricao (texto completo), caracteristicas (lista)
-- certificacao_energetica, ano_construcao, estado, orientacao_solar, condominio
-
-CONTACTO:
-- agente_nome, agente_telefone (+351 XXX XXX XXX), agente_email
-- agencia_nome, agencia_telefone, referencia
-
-LINKS:
-- foto_principal, url_planta, url_video
-
-Responde APENAS com JSON válido. Extrai o máximo de informação.
-
-Conteúdo:
-{clean_html}"""
+            clean_html = contexto
+            prompt = prompt_da_extraccao(clean_html, url=url)
             
             chat = LlmChat(
                 api_key=EMERGENT_LLM_KEY,
@@ -2262,19 +2192,113 @@ Conteúdo:
             parser_used = "generic"
         
         # ============================================================
-        # FALLBACK GEMINI: Se dados essenciais estiverem em falta
+        # NAVEGAÇÃO MULTI-NÍVEL (LOTE 10) — ANTES DA IA, DE PROPÓSITO
         # ============================================================
+        # A ORDEM mudou: o deep scraping corria DEPOIS da chamada à IA,
+        # pelo que a IA nunca via a página do anunciante — e é
+        # precisamente aí que estão o nome, o telefone e o email que o
+        # consultor precisa. Navegar primeiro é o que permite uma só
+        # chamada com o contexto das DUAS páginas.
+        html_do_anunciante = None
+        url_do_anunciante = None
+        agency_key = self._is_agency_site(url)
+
+        if agency_key:
+            # CENÁRIO 3: o URL JÁ é da agência — não há segundo nível a
+            # seguir, a página que temos é a do anunciante.
+            logger.info(f"[CENÁRIO 3] Link directo de agência detectado: {agency_key}")
+            agency_result = await self._scrape_agency_direct(soup, html_content, url, agency_key)
+            result = self._merge_deep_scrape_data(result, agency_result)
+
+        elif is_aggregator:
+            logger.info("[DEEP SCRAPING] Agregador detectado — a procurar o anunciante")
+            # O `agency_link` é o que o parser do portal já DECLAROU — o
+            # `_parse_idealista` chega lá por selectores, JSON-LD,
+            # atributos `data-*` e o texto da descrição. Ignorá-lo e
+            # varrer os `<a>` outra vez era navegar com menos informação
+            # do que a que já estava em mãos.
+            declarados = [
+                ligacao for ligacao in (result.get("agency_link"),) if ligacao
+            ]
+            alvos = self._alvos_do_anunciante(soup, url, declarados=declarados)
+
+            if alvos:
+                # UM salto (`MAXIMO_DE_SALTOS`): o contacto está no perfil
+                # do anunciante, não a dois cliques dele.
+                for alvo in alvos[:MAXIMO_DE_SALTOS]:
+                    pagina = await self._seguir_para_o_anunciante(alvo, url)
+                    if not pagina:
+                        continue
+                    html_do_anunciante = pagina
+                    url_do_anunciante = alvo.url
+                    marca = self._dominio_conhecido_do_alvo(alvo)
+                    deep_data = await self._deep_scrape_agency(
+                        alvo.url, marca, html=pagina
+                    )
+                    result = self._merge_deep_scrape_data(result, deep_data)
+                    break
+            else:
+                # CENÁRIO 2: sem ligação para o anunciante, mas com
+                # referência — pesquisar na agência.
+                extracted_agency = (
+                    result.get("agencia_nome")
+                    or self._extract_agency_name_from_page(soup, html_content)
+                )
+                extracted_ref = (
+                    result.get("referencia")
+                    or self._extract_reference_from_page(soup, html_content)
+                )
+                if extracted_agency and extracted_ref:
+                    logger.info(
+                        f"[CENÁRIO 2] Referência '{extracted_ref}' da "
+                        f"'{extracted_agency}' encontrada, pesquisando..."
+                    )
+                    ref_result = await self._search_agency_by_reference(
+                        extracted_agency, extracted_ref
+                    )
+                    if ref_result.get("agente_telefone") or ref_result.get("agente_nome"):
+                        result = self._merge_deep_scrape_data(result, ref_result)
+                        logger.info("[CENÁRIO 2] Dados encontrados via referência")
+                    else:
+                        logger.info("[CENÁRIO 2] Nenhum dado encontrado via referência")
+                else:
+                    logger.info("[DEEP SCRAPING] Nenhum alvo nem referência encontrados")
+
+        # ============================================================
+        # IA: UMA CHAMADA, O CONTEXTO DAS DUAS PÁGINAS
+        # ============================================================
+        # Duas condições, e só duas:
+        #
+        #  (a) o parser falhou — o caso que já existia;
+        #  (b) seguimos a página do anunciante — e aí a IA faz o que
+        #      nenhum parser faz: CRUZA as duas páginas e decide se o
+        #      número que lá está é o directo de quem vende ESTE imóvel
+        #      ou a central da agência.
+        #
+        # A condição (b) é estreita de propósito: no máximo UMA chamada a
+        # mais por anúncio, e só quando houve mesmo uma segunda página.
+        # Chamar a IA sempre que faltasse um contacto punha o modelo a
+        # correr em todos os scrapes de todos os portais — e o custo da IA
+        # é a despesa que a D-22 acabou de pôr no relatório certo.
         needs_gemini = False
-        
+
         if not result.get("titulo") and not result.get("preco"):
             needs_gemini = True
             logger.info(f"Parser {parser_used} falhou - título e preço em falta")
         elif parser_used == "generic":
             needs_gemini = True
             logger.info("Site genérico - usando Gemini para melhor extração")
-        
+        elif html_do_anunciante:
+            needs_gemini = True
+            logger.info("[ANUNCIANTE] Segunda página obtida — a cruzar na IA")
+
         if needs_gemini:
-            gemini_result = await self._extract_with_gemini(html_content, url)
+            gemini_result = await self._extract_with_gemini(
+                html_content,
+                url,
+                html_do_anunciante=html_do_anunciante,
+                url_do_anunciante=url_do_anunciante,
+            )
             
             if gemini_result and not gemini_result.get("_error"):
                 for key, value in gemini_result.items():
@@ -2288,64 +2312,7 @@ Conteúdo:
                 result["_extracted_by"] = parser_used
         else:
             result["_extracted_by"] = parser_used
-        
-        # ============================================================
-        # 3-CENÁRIO DEEP SCRAPING: Detecção inteligente de contactos
-        # ============================================================
-        # Determinar cenário de extração de contactos
-        agency_key = self._is_agency_site(url)
-        
-        if agency_key:
-            # CENÁRIO 3: Link directo de agência - extração avançada
-            logger.info(f"[CENÁRIO 3] Link directo de agência detectado: {agency_key}")
-            agency_result = await self._scrape_agency_direct(soup, html_content, url, agency_key)
-            result = self._merge_deep_scrape_data(result, agency_result)
-            
-        elif is_aggregator:
-            # CENÁRIO 1 & 2: Agregador - procurar dados na agência
-            logger.info("[DEEP SCRAPING] Site agregador detectado, analisando cenários 1 & 2...")
-            
-            agency_links = self._find_agency_links(soup, current_domain)
-            
-            # Extrair nome da agência e referência para Cenário 2 (fallback)
-            extracted_agency = result.get("agencia_nome")
-            if not extracted_agency:
-                extracted_agency = self._extract_agency_name_from_page(soup, html_content)
-            
-            extracted_ref = result.get("referencia")
-            if not extracted_ref:
-                extracted_ref = self._extract_reference_from_page(soup, html_content)
-            
-            if agency_links:
-                # CENÁRIO 1: Link externo encontrado - deep scraping directo
-                logger.info(f"[CENÁRIO 1] Encontrados {len(agency_links)} links de agências: {[link['agency'] for link in agency_links]}")
-                
-                # Tentar o primeiro link de agência
-                for link_info in agency_links:
-                    deep_data = await self._deep_scrape_agency(
-                        link_info["url"], 
-                        link_info["agency"]
-                    )
-                    
-                    # Se obtivemos dados úteis, fazer merge e parar
-                    if deep_data.get("agente_telefone") or deep_data.get("agente_email"):
-                        result = self._merge_deep_scrape_data(result, deep_data)
-                        logger.info(f"[CENÁRIO 1] Dados da agência {link_info['agency']} incorporados com sucesso")
-                        break
-                    
-            elif extracted_agency and extracted_ref:
-                # CENÁRIO 2: Sem link, mas com referência - pesquisar na agência
-                logger.info(f"[CENÁRIO 2] Referência '{extracted_ref}' da '{extracted_agency}' encontrada, pesquisando...")
-                ref_result = await self._search_agency_by_reference(extracted_agency, extracted_ref)
-                if ref_result.get("agente_telefone") or ref_result.get("agente_nome"):
-                    result = self._merge_deep_scrape_data(result, ref_result)
-                    logger.info(f"[CENÁRIO 2] Dados encontrados via referência")
-                else:
-                    logger.info("[CENÁRIO 2] Nenhum dado encontrado via referência")
-                    
-            else:
-                logger.info("[DEEP SCRAPING] Nenhum link nem referência encontrados")
-        
+
         # Fallback: se ainda não temos contacto, extrair do texto da página original
         if not result.get("agente_telefone") and not result.get("agente_email"):
             clean_text = self._clean_text(html_content)
@@ -2368,7 +2335,28 @@ Conteúdo:
             agent_name = self._extract_agent_name(soup, clean_text)
             if agent_name:
                 result["agente_nome"] = agent_name
-        
+
+        # Normalizar os telefones UMA vez, no fim e num ponto único: a IA
+        # devolve `+351 912 345 678`, os selectores devolvem `912345678` e
+        # a regex devolve o que o HTML tiver. Um telefone que não é um
+        # telefone é PIOR do que nenhum — o consultor liga, fala com quem
+        # não tem nada a ver com o imóvel, e o ecrã continua a dizer que
+        # aquele é o contacto —, logo o que não valida sai.
+        for campo in ("agente_telefone", "agencia_telefone"):
+            if result.get(campo) is not None:
+                normalizado = telefone_pt(result.get(campo))
+                if normalizado:
+                    result[campo] = normalizado
+                else:
+                    logger.info(
+                        "[ANUNCIANTE] %s descartado (não é telefone português): %r",
+                        campo, result.get(campo),
+                    )
+                    result[campo] = None
+
+        if url_do_anunciante:
+            result["_pagina_do_anunciante"] = url_do_anunciante
+
         # ============================================================
         # GUARDAR EM CACHE E RETORNAR
         # ============================================================
@@ -2417,16 +2405,10 @@ Conteúdo:
             data["localizacao"] = location.get_text(strip=True)
         
         # === Referência do anúncio ===
-        # Procurar em múltiplos locais possíveis - inclui formatos de agência
-        ref_patterns = [
-            r'Ref[.:]?\s*([A-Z]{2,4}\d{4,10})',          # ZMPT587270, RM123456 (agência)
-            r'Referência[.:]?\s*([A-Z]{2,4}\d{4,10})',    # Referência ZMPT587270
-            r'Ref[.:]?\s*(\w+)',                            # Ref genérica
-            r'Referência[.:]?\s*(\w+)',                      # Referência genérica
-            r'reference[.:]?\s*(\w+)',                       # reference genérica
-            r'ID[:\s]*([A-Z0-9-]{5,20})',                    # ID: RM123456
-        ]
-        
+        # A lista de padrões que estava aqui era CÓDIGO MORTO: o ciclo que
+        # a consumia foi substituído pelo `_extract_reference_from_page`
+        # (que tem os mesmos padrões e mais alguns) e a lista ficou,
+        # assinalada pelo flake8, a fazer parecer que o parser os tenta.
         # Procurar na classe .reference
         ref_elem = soup.find(class_='reference')
         if ref_elem:

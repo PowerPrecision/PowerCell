@@ -6,17 +6,27 @@ from __future__ import annotations
 
 import uuid
 import logging
-import asyncio
 from typing import Optional
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
+from fastapi import Request
+
 from database import db
+from services.background_tasks import spawn_background_task
+from services.tenant_access_context import carregar_contexto_de_acesso
+from services.tenant_network import com_isolamento
 from services.visit_helpers import (
+    PROJECCAO_DO_PROCESSO,
     _create_calendar_event_for_visit,
     _update_portal_visit_status,
     _run_scraper_for_visit,
+    carimbo_da_visita,
+)
+from services.visit_scope import (
+    build_visit_rbac_condition,
+    e_papel_de_equipa_nas_visitas,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,64 +42,77 @@ async def run_list_visits(
     process_id: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    request: Optional[Request] = None,
 ):
-    """
-    Lista visitas com filtros opcionais.
-    Consultores só vêem as suas visitas; admins/ceo/diretores vêem todas.
-    Suporta filtro por process_id para a aba de Visitas no ProcessDetailsModal.
-    """
-    query = {}
+    """Lista visitas dentro do ÂMBITO do utilizador (Lote 9, D-21).
 
-    # Filtros
+    Antes abria com `query = {}` e o único recorte era
+    `if user_role in ["consultor", "intermediario"]`: um diretor,
+    administrativo, admin ou CEO via as visitas de TODAS as redes, com o
+    nome, o email e o telefone do cliente em cada linha.
+
+    Os filtros entram todos num `$and` em vez do malabarismo de `$or`
+    que havia: a versão anterior tinha de desmontar e remontar o `$or` do
+    `process_id` para lhe juntar o do RBAC, e uma composição assim
+    divergia na primeira condição nova.
+    """
+    contexto = await carregar_contexto_de_acesso(
+        user, request, e_equipa=e_papel_de_equipa_nas_visitas,
+    )
+
+    filtros: list[dict] = []
     if status:
-        query["status"] = status
-
+        filtros.append({"status": status})
     if consultor_id:
-        query["consultor_id"] = consultor_id
+        filtros.append({"consultor_id": consultor_id})
     if property_id:
-        query["property_id"] = property_id
+        filtros.append({"property_id": property_id})
     if client_id:
-        query["client_id"] = client_id
+        filtros.append({"client_id": client_id})
     if process_id:
-        # Suportar ambos: client_id (legacy) e process_id (novo)
-        query["$or"] = [
+        # Suportar ambos: `client_id` (legado) e `process_id` (novo).
+        filtros.append({"$or": [
             {"client_id": process_id},
             {"process_id": process_id},
-        ]
+        ]})
 
-    # Filtro por data
     if date_from or date_to:
         date_query = {}
         if date_from:
             date_query["$gte"] = date_from
         if date_to:
             date_query["$lte"] = date_to
-        query["scheduled_date"] = date_query
+        filtros.append({"scheduled_date": date_query})
 
-    # RBAC: consultores e intermediários só vêem as suas visitas
-    user_role = (user.get("role") or "").lower()
-    if user_role in ["consultor", "intermediario"]:
-        rbac_filter = [
-            {"consultor_id": user.get("id")},
-            {"consultor_ids": user.get("id")},
-        ]
-        # Se já tem $or (do process_id), combinar com $and
-        if "$or" in query:
-            or_clause = query.pop("$or")
-            query["$and"] = [
-                {"$or": or_clause},
-                {"$or": rbac_filter},
-            ]
-        else:
-            query["$or"] = rbac_filter
+    # O recorte por PESSOA. Para os papéis de equipa é `{}` e o âmbito é
+    # a condição de REDE, aplicada por fora pelo `com_isolamento` — nunca
+    # um `{}` escrito à mão que atravessa redes de propósito.
+    rbac = build_visit_rbac_condition(
+        user_id=user.get("id"),
+        papel=contexto.papel,
+        processos_visiveis=contexto.processos,
+    )
+    if rbac:
+        filtros.append(rbac)
 
-    visits = await db.visits.find(query, {"_id": 0, "scraped_data.raw_data": 0}).sort("scheduled_date", 1).to_list(200)
+    if not filtros:
+        query: dict = {}
+    elif len(filtros) == 1:
+        query = filtros[0]
+    else:
+        query = {"$and": filtros}
+
+    final = com_isolamento(contexto.condicao_de_rede, query)
+    visits = await db.visits.find(
+        final, {"_id": 0, "scraped_data.raw_data": 0}
+    ).sort("scheduled_date", 1).to_list(200)
 
     # Enriquecer com nomes (denormalizados, mas confirmamos)
     for visit in visits:
-        # Garantir que temos os nomes
         if not visit.get("property_title") and visit.get("property_id"):
-            prop = await db.properties.find_one({"id": visit["property_id"]}, {"title": 1, "photos": 1})
+            prop = await db.properties.find_one(
+                {"id": visit["property_id"]}, {"title": 1, "photos": 1}
+            )
             if prop:
                 visit["property_title"] = prop.get("title", "")
                 visit["property_photo"] = (prop.get("photos") or [None])[0]
@@ -127,10 +150,9 @@ async def run_create_visit(data: dict, user: dict):
         raise HTTPException(status_code=400, detail="scheduled_date é obrigatório")
 
     # Buscar processo ativo para este client_id e obter o process_id
-    process = await db.processes.find_one({"id": client_id}, {
-        "client_name": 1, "client_email": 1, "client_phone": 1,
-        "status": 1, "assigned_consultor_id": 1,
-    })
+    process = await db.processes.find_one(
+        {"id": client_id}, PROJECCAO_DO_PROCESSO
+    )
     client_name = process.get("client_name", "") if process else ""
     client_email = process.get("client_email", "") if process else ""
     client_phone = process.get("client_phone", "") if process else ""
@@ -172,7 +194,10 @@ async def run_create_visit(data: dict, user: dict):
         "created_at": now,
         "updated_at": now,
         "created_by": user.get("id"),
-        "company_id": user.get("company_id"),
+        # LOTE 9 — era `user.get("company_id")`, campo que o documento de
+        # utilizador NÃO tem: toda a visita da equipa nascia sem carimbo
+        # e invisível ao filtro de empresa. O processo é a autoridade.
+        **(await carimbo_da_visita(process, user)),
     }
 
     # Se tem property_url, adicionar ao documento e lançar scraper em background
@@ -217,7 +242,18 @@ async def run_create_visit(data: dict, user: dict):
 
     # ── Lançar scraper em background se URL fornecida ──
     if property_url:
-        asyncio.create_task(_run_scraper_for_visit(visit_id, property_url))
+        # LOTE 9 — era um `asyncio.create_task` CRU, sem referência forte:
+        # exactamente o que o `services/background_tasks.py` existe para
+        # evitar. Quando a task é recolhida pelo GC, a visita fica para
+        # sempre em `scraper_status: pending` e o ecrã diz «a extrair» de
+        # um trabalho que já ninguém está a fazer — um erro que aponta
+        # para o portal imobiliário quando a causa é o garbage collector.
+        # (É o defeito do `email_webmail` outra vez; o próprio corredor de
+        # testes o denunciava com «Task was destroyed but it is pending».)
+        spawn_background_task(
+            _run_scraper_for_visit(visit_id, property_url),
+            name=f"visita-scraper-{visit_id}",
+        )
         logger.info(f"[VISITS] Scraper lançado em background para visita {visit_id}")
 
     logger.info(f"[VISITS] Visita criada: {visit_id} — Imóvel {property_id or property_url}, Cliente {client_name}")

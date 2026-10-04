@@ -1,4 +1,46 @@
 ---
+Task ID: isolamento-e-motor-de-visitas
+Agent: Cloud Agent
+Task: LOTE 9 parte 2 — isolamento do `db.visits` (D-21), o modelo de IA do scraper (D-22), o motor de extração (D-23) e o dashboard de Visitas
+
+Date: 2026-10-04
+
+Work Log:
+
+FASE A — BLINDAGEM
+- D-21: a colecção `visits` tinha as TRÊS formas do defeito de isolamento AO MESMO TEMPO. (1) Listagens com `query = {}` e recorte só `if user_role in ["consultor","intermediario"]` — um diretor, administrativo, admin ou CEO via as visitas de TODAS as redes, e o documento leva `client_name`, `client_email` e `client_phone`. (2) `run_get_visit`/`run_update_visit`/`run_cancel_visit` eram `find_one({"id": visit_id})` e mais nada. (3) A criação gravava `user.get("company_id")` — campo que o documento de utilizador NÃO tem.
+- Os dois papéis que escapavam (consultor, intermediário) escapavam POR ACIDENTE: filtram por atribuição, que coincide quase sempre com o âmbito. Foi essa metade a funcionar que escondeu a outra — forma do `run_get_my_tasks`, quinta vez.
+- `visit_scope.py` (puro) é a regra; `exigir_visita_acessivel` liga-a à leitura, ao PATCH e ao cancelamento. 404 e NUNCA 403.
+- DUAS perguntas, duas funções: `pode_mexer_na_visita` (a visita que existe) e `pode_atribuir_a_consultor` (o DESTINO). Sem a segunda, um editor legítimo reatribuía a visita a um consultor de outra rede e a lista dele ganhava o nome, o email e o telefone de um cliente que não é dele. É o buraco que o `pode_apontar_para_o_processo` fechou no calendário, no mesmo sítio da árvore.
+- O CARIMBO deriva do PROCESSO, não de quem grava (`carimbo_da_visita`, ponto único dos dois escritores): uma visita é sempre sobre um processo, o processo já leva o carimbo certo desde o Lote 4, e no Portal não há utilizador de equipa de quem derivar. Sem nenhum dos dois devolve `{}` — meio carimbo é pior do que nenhum.
+- O CONTEXTO DE ACESSO saiu do `deadlines_api_scope` para `tenant_access_context.py`, com o predicado de equipa como PARÂMETRO. O `administrativo` ENTROU na equipa das visitas (é o back-office que marca e remarca; estreitá-lo fazia-o perder de vista o que ele próprio agendou) e usar o conjunto do calendário devolvia-lhe só os processos atribuídos a ele, estreitando a vista SEM DAR ERRO. Consequência operacional dita: para o `administrativo` o âmbito estreita de «todas as redes» para «a sua rede».
+- Ao mover a resolução, os testes do calendário falharam ALTO com `AttributeError` no `patch.object(deadlines_api_scope, "db", ...)` — exactamente a regra da ordem de importação do AGENTS.md. Corrigidos para patchar o módulo novo; 38 verdes.
+- D-22: o modelo de IA do scraper era DECORATIVO. O configurado era lido, ESCRITO NO LOG («Usando modelo configurado: X») e depois ignorado — a chamada era `genai.GenerativeModel("gemini-2.0-flash")`, literal, e o `ai_usage_tracker` recebia o mesmo literal, pelo que o relatório de custos atribuía a despesa ao modelo errado. O LOG A DIZER O CONTRÁRIO é o que o tornava difícil de ver: quem fosse verificar encontrava a prova de que estava certo.
+- O teste da D-22 é ao nível da CHAMADA, com um `google.generativeai` falso em `sys.modules` e asserção sobre o parâmetro que SAI — regra do «duplo demasiado esperto». E há contraprova de que a omissão continua no resolvedor, senão a correcção deixava o scraper sem modelo quando nada está configurado.
+
+FASE B — MOTOR E UI
+- D-23: havia DOIS mapeadores escritos à mão para os MESMOS campos — o do CRM e o do Portal — e JÁ DIVERGIAM: o do Portal guardava `raw_data`, o do CRM não, pelo que uma visita criada no CRM perdia quartos, casas de banho, certificado energético, ano de construção, descrição e referência.
+- E o `raw_data` do `property_scraper` era uma lista de ONZE chaves sobre ~30 devolvidas pelo scraper: o `estado` do imóvel, que o prompt da IA pede PELO NOME desde sempre, nunca chegou a sítio nenhum. É a forma do `naturalidade` do `AI_SUGGESTION_FIELD_MAP`.
+- `ficha_do_imovel` é o ponto único e o `raw_data` DERIVA: fora das chaves que já têm nome próprio, tudo passa — um campo novo no prompt chega ao mesmo destino sem ninguém se lembrar.
+- TRÊS veredictos, não dois: `sem_dados` é o caso do meio. Um portal que mude o HTML responde 200 com tudo vazio, e isso contava como `completed` — a visita ficava sem um único dado, indistinguível de um imóvel sem informação.
+- O MEU PRÓPRIO TESTE APANHOU UM DEFEITO MEU: `"185.000 €"` dava `185`. A regra do milhar é agora ESTREITA (só grupos de três dígitos), porque adivinhar ali trocava um preço por outro — e `1234.56`, `95.5` e `120.75` continuam decimais.
+- O `asyncio.create_task` do scraper era CRU, sem referência forte. Recolhido pelo GC, a visita fica para sempre em `pending` e o ecrã diz «a ler o anúncio» de um trabalho que ninguém está a fazer: o defeito do `email_webmail`, e o próprio corredor de testes o denunciava em CADA execução com «Task was destroyed but it is pending».
+- `POST /portal/visits/request` ganhou `@limiter.limit("10/minute")` + `response: Response`: fazia o servidor abrir uma ligação de saída para um URL escolhido pelo cliente, com anti-bot, e chamar um modelo pago — sem tecto, na única superfície externa. O SSRF já estava validado no `scraper.py`, logo não era pivô para a rede interna; o que sobrava era amplificação e custo.
+- FRONTEND: a `VisitsPage` tinha `useState([])` para um endpoint que devolve um OBJECTO de quatro colunas — a forma do `KanbanBoard` da D-20, numa página que (como o Kanban antes da D-20) nunca tinha sido montada num teste. `utils/visitasDashboard.js` é o ponto único; o estado inicial passou a ter a forma final.
+- A TABELA é a vista por omissão (o consultor compara preço/tipologia/área/estado, e cartões obrigam a ler em zigue-zague); o quadro ficou atrás de um alternador, porque uma funcionalidade que estorva uma regra nova muda-se de sítio. Os PEDIDOS DO PORTAL vêm primeiro: ordenar por data punha-os no fim, onde ninguém os vê.
+- O separador «As Minhas Visitas» do Portal estava INALCANÇÁVEL POR TRÊS LINHAS DE COMENTÁRIO (o PACOTE CB comentou o botão e deixou a tab escrita). O endpoint, o scraper e o ecrã existiam todos. Um separador que não existe não produz erro nenhum.
+- Encontrei e corrigi DOIS `|| []` sobre a lista de visitas no `ClientPortal` (um no fetch, outro no handler de submissão) e um terceiro no efeito do polling da `VisitsPage`.
+
+O QUE AS MUTAÇÕES ENSINARAM (46 em quatro voltas)
+- Primeira volta: 13 mortas, 4 vivas, 1 sem âncora. As QUATRO vivas eram TESTES FRACOS meus, não mutações perdidas — e cada uma apontava uma lacuna concreta.
+- Apagar o recorte por PESSOA da listagem não matava nada: todos os testes de listagem usavam um DIRETOR, e para um papel de equipa esse recorte é `{}` por desenho. Faltava o caso em que a rede está certa e a pessoa não.
+- Tirar o `request` das rotas também não: os testes chamam os serviços DIRECTAMENTE. A guarda é um inventário por AST sobre `routes/visits.py` que DERIVA da assinatura de produção — quem aceita `request` tem de o receber — e falha por omissão para um endpoint novo.
+- O predicado de equipa do contexto é observável UM NÍVEL ABAIXO: para um papel de equipa o recorte pessoal é `{}`, logo o conjunto de processos não é consultado e a listagem sai igual. Fica DITO no teste em vez de inventar uma asserção de listagem que passasse sem provar nada.
+- E uma mutação minha estava ERRADA, não o teste: devolver `frozenset(["*"])` no ramo de falha não é fail-open, porque num `$in` não casa com nada. A fail-open real — o ramo não-equipa a ignorar a condição pessoal — morreu à primeira.
+- Fim: 46 mutações, 36 mortas à primeira passagem, e as 10 restantes mortas depois de corrigir o teste ou a mutação. Nenhuma sobrevive hoje.
+- Provas: backend 5725 passed / 5 skipped (eram 5623, +102). Frontend 1729 passed em 142 ficheiros (+59 deste lote: 33 do `visitasDashboard`, 20 da página, 6 do Portal). flake8 do CI limpo, eslint `--quiet` limpo.
+
+---
 Task ID: guarda-de-escrita-do-s3-folder
 Agent: Cloud Agent
 Task: LOTE 9 parte 1 — a guarda de retorno do `s3_folder`, e o levantamento do terreno das Visitas
@@ -10733,3 +10775,310 @@ afirma-se a correr o código.
 **Nota operacional:** correr `scripts/fix_s3_folder_anomalies.py`
 (primeiro sem bandeira, depois com `--aplicar`) **antes** do próximo
 deploy. A ordem não é opcional — ver a secção do `ARCHITECTURE.md`.
+
+---
+
+# Iteração `deep-scraping-do-anunciante` — 2026-10-04
+
+**LOTE 10.** Extracção profunda multi-nível (agência + comercial) e fecho
+da metade do Portal da D-4.
+
+## O terreno, antes de tocar em nada
+
+Três leituras que mudaram o plano:
+
+**(a) O Idealista estava excluído por construção.** `_find_agency_links`
+abria com `if current_domain in link_domain or link_domain in
+current_domain: continue`. No Idealista o perfil do anunciante **É** uma
+página do Idealista (`/pro/<agência>`) — o único ramo que havia era
+deitado fora na primeira linha, antes de qualquer reconhecimento. O
+portal que o cliente mais usa era precisamente o que nunca podia ser
+seguido. Não era um link que faltasse na lista; era o único link que
+havia a ser descartado.
+
+**(b) Havia um SEGUNDO motor de deep link, completo e sem chamador.**
+`_deep_link_contacts` — 73 linhas que fazem exactamente o que o enunciado
+pedia — tinha **uma ocorrência no ficheiro: o seu próprio `def`**. E
+estava partido de três maneiras: chamava `self._get_next_proxy()` e
+`self._proxies`, que **não existem na classe**, e usava `httpx`, que só é
+importado quando o `curl_cffi` FALTA (ou seja, nunca em produção). Tudo
+dentro de um `except Exception: continue`, logo religá-lo devolvia `{}`
+sem um erro no log. Terceiro mecanismo deste projecto a viver na
+documentação e não no código. **Apagado, não desligado** — 197 linhas com
+o `_extract_contacts_from_soup`, também sem chamador.
+
+O único teste que tocava esse motor exercitava a sua **primeira linha** —
+a guarda SSRF — e nada mais. Verde sobre uma função que levantava
+`AttributeError` em todos os outros caminhos.
+
+**(c) Os contactos chegavam ao `ScrapedData` e morriam lá.** O prompt da
+IA pede `agente_nome/telefone/email` e `agencia_nome` pelo nome desde
+sempre; o `property_scraper` já construía o `ConsultantInfo`. Mas
+`grep -r "consultant|agency|agente"` no frontend das Visitas dava
+**zero**, e o veredicto derivava só de `CAMPOS_DA_VISITA` — logo um
+anúncio de que só se lia o comercial saía `sem_dados`.
+
+## O que foi feito
+
+`services/scraper_anunciante.py` (puro) decide **que página seguir** por
+três sinais somados — a ROTA (o que alcança o Idealista), o domínio
+conhecido, o texto da ligação — mais o `agency_link` que o parser já
+**declarou** e que o navegador nunca lia (o `_parse_idealista` gasta seis
+estratégias a encontrá-lo). Um salto e só um; pausa com jitter ENTRE os
+dois pedidos; mesma sessão e mesmo profile; `Referer` como único
+cabeçalho acrescentado.
+
+A IA passou a receber **as duas páginas numa chamada**, em blocos
+rotulados com orçamento próprio, e o prompt deixou de existir em duas
+cópias (o do Gemini e o do OpenAI divergiam na lista de campos).
+
+`CAMPOS_DO_ANUNCIANTE` sobe para o topo da visita, o veredicto deriva dos
+dois conjuntos, e `telefone_pt` recusa o que não for um número português
+válido em vez de adivinhar.
+
+No ecrã: coluna «Agência / Comercial» na tabela e bloco no cartão do
+quadro, com `tel:`/`mailto:`, a central **rotulada**, e os campos novos
+dentro da pesquisa.
+
+**D-4:** os nove POST do Portal ganharam limite e `response: Response`,
+e o login por email passou a ter um ponto único
+(`services/portal_brute_force.py`) em vez de ~55 linhas à mão mais uma
+segunda cópia da política no `_record_login_attempt`, no mesmo ficheiro.
+
+**E aqui enganei-me a sério — ver a secção da correcção, mais abaixo.**
+Afirmei que o `run_verify_portal_login` prometia «5 tentativas, lockout
+de 15 min» na docstring e não tinha código a contar tentativas. O travão
+existe, uma camada abaixo, e diz exactamente esses números.
+
+## Três enganos meus, e um que não era engano
+
+**Duas falhas de teste no primeiro arranque foram testes MEUS errados, não
+o código.** O do orçamento contava `"A"` no contexto inteiro — e os
+rótulos contêm «A» («PÁGINA DO ANÚNCIO»), pelo que media o cabeçalho a
+par do corpo. O do subdomínio estava escrito com um `or` (`== [] or
+interno is True`): **podia passar sem provar nada**, que é o que as
+regras deste projecto proíbem. Ao corrigi-lo encontrei uma decisão
+errada no módulo: comparar o `netloc` cru fazia `pro.idealista.pt` contar
+como «sai do portal» e ganhar o bónus que existe para a página da
+AGÊNCIA. Hoje compara o domínio BASE.
+
+**O terceiro só apareceu na revisão do meu próprio diff, e nenhum teste
+o podia ter apanhado.** Ao inventariar constantes ÓRFÃS no `scraper.py`
+depois da limpeza, o `AGENCY_LINK_TEXTS` apareceu com **uma única
+ocorrência: a definição** — era a lista do `_find_agency_links`, que
+apaguei. E ao comparar o conteúdo com o `TEXTOS_DO_ANUNCIANTE` que
+escrevi, faltavam **nove dos treze** textos. Quatro eram perdas reais
+(«link externo», «visitar site», «ir para o site», «ver original» — é
+assim que os agregadores rotulam a saída para o site PRÓPRIO da agência,
+que é o alvo de maior valor, porque é lá que está o directo do
+consultor); cinco são navegação genérica que qualquer página tem («Ver
+detalhes» aparece em cada cartão de uma lista de resultados) e com UM
+salto por anúncio um alvo errado custa o mesmo que o certo.
+
+Os quatro foram repostos; os cinco ficaram em
+`TEXTOS_RECUSADOS_DE_PROPOSITO`, **escritos em vez de simplesmente
+ausentes**, com dois testes parametrizados e uma contraprova de que as
+listas não se cruzam. Uma ausência não se distingue de um esquecimento; e
+apagar uma constante é apagar conhecimento se não se disser para onde foi.
+
+**O que não era engano:** um teste legado da bateria dos veredictos caiu
+(«um anúncio que responde vazio não é sucesso») porque anulava só os
+campos do imóvel e deixava o consultor do duplo preenchido. Com os campos
+de quem anuncia a contar, isso é — e deve ser — `completed`. Não foi o
+teste a ficar errado nem a regra a abrir-se: foi a **premissa** dele que
+mudou, e a regra nova ficou fixada em dois testes novos em vez de se
+ajustar o antigo e seguir.
+
+## Medição
+
+| | Volta 1 | Volta 2 | Frontend |
+|---|---|---|---|
+| Mutações | 15 | 20 | 9 |
+| Mortas | 13 | — | 9 |
+| Vivas | 2 | — | 0 |
+
+**As duas sobreviventes da volta 1, honestamente:**
+
+**M6** (apagar a tabela `CHAVES_DE_AGENCIA_POR_MARCA`) sobreviveu porque
+o recurso por prefixo já resolve as formas de DOMÍNIO
+(`"era.pt".startswith("era")`), e o meu teste só tinha essas. A tabela é
+indispensável apenas para as formas de **nome visível** — `re/max`,
+`century 21`, `keller`, `mais consultores` —, que vêm do
+`AGENCY_NAME_MAPPING`. Não era uma mutação perdida: era um teste a cobrir
+metade de um mecanismo, e a metade que cobria era a redundante.
+
+**M13** (desligar a passagem dos `declarados`) sobreviveu por um motivo
+mais simples e menos desculpável: acrescentei o parâmetro, dei-lhe o peso
+mais alto de todos, e **nunca o exercitei**. Uma funcionalidade sem teste.
+Ficaram cinco testes, incluindo o que afirma que o declarado passa pelas
+**mesmas recusas** — ganha peso, não dispensa, porque o `agency_link` sai
+de texto de descrição de um anúncio, que é conteúdo de terceiros.
+
+## A correcção: afirmei que uma guarda não existia, e existia
+
+O achado que publiquei como o maior deste lote — «o `verify` prometia
+força bruta na docstring e não tinha código nenhum» — **era falso**.
+
+O travão dessa porta existe em `portal_security.verify_client_credentials`
+e diz **exactamente** o que a docstring promete: `MAX_VERIFY_ATTEMPTS = 5`,
+`VERIFY_LOCKOUT_MINUTES = 15`, colecção `portal_verify_attempts`. Lê o
+bloqueio antes de buscar o cliente, regista a falha em cada ramo 401 e
+limpa o contador no sucesso. Um 400 de formato de NIF já não contava,
+porque o registo só corre nos ramos 401 — ou seja, a guarda que
+acrescentei para isso resolvia um problema que não existia.
+
+**Como me enganei:** li o `run_verify_portal_login`, não encontrei lá
+nada, e concluí da ausência. É literalmente a lição dos três produtores de
+token do CRM — «o erro nasceu de inventariar UM produtor» — e a do
+`assignment_drift`: *uma dedução sobre quem faz o quê vale o inventário
+que a suporta, e o inventário nunca está provado.* A função que faltava
+ver era a que o handler CHAMA.
+
+**O custo da minha correcção foi pior do que o defeito imaginado:** passei
+a ter DUAS políticas de força bruta na mesma porta, com constantes
+diferentes (8/10 contra 5/15) e em colecções diferentes. Dois travões na
+mesma porta podem discordar sobre quem está bloqueado — e isso é um
+defeito a sério, não uma redundância inofensiva. O meu foi retirado.
+
+**O que me mandou olhar foi uma mutação sobrevivente.** A mutação «um 400
+passa a gastar tentativas» não matou teste nenhum: o meu teste usava
+`{"nif": ""}`, que levanta o 400 no corpo da função, **antes** do `try` —
+o `except HTTPException` nunca o vê, logo a guarda não era exercitada por
+ali. Ao procurar o caso em que ela seria observável (um 400 vindo de
+DENTRO do `verify_client_credentials`, que valida o formato do NIF),
+encontrei o travão verdadeiro. **Terceira sobrevivente deste lote, e a
+terceira a apontar para um teste meu a medir o caminho errado — mas a
+única a apontar para uma afirmação minha errada sobre o sistema.**
+
+Os testes do `verify` foram **repontados** para a camada onde a guarda
+vive, em vez de apagados: a porta tem de continuar coberta deste lado.
+
+## O que fica aberto, e é importante
+
+A D-4 **não fecha** com este lote, e a razão está escrita lá. O
+`@limiter.limit` é uma parede com uma porta: `_get_client_ip` lê o
+**primeiro** elemento do `X-Forwarded-For`, que é o que o cliente envia
+(os proxies acrescentam ao FIM). Quem ataca varia-o a cada pedido e **o
+limite por IP não morde em lado nenhum do sistema** — é o placebo do
+`build_company_scope_condition` outra vez. É por isso que a força bruta
+do Portal foi fechada pelo eixo da IDENTIDADE e não pelo do IP.
+
+Corrigir exige saber a topologia de proxies do deploy (contar da direita
+com `TRUSTED_PROXY_HOPS`): com o número errado, todos os clientes
+colapsam numa só chave e o limite tranca o sistema inteiro a 10
+pedidos/minuto. Trocar uma porta aberta por uma avaria não é uma
+correcção.
+
+E fica a dívida que o meu engano revelou, também na D-4: **as duas portas
+do Portal têm duas implementações independentes da mesma política** — o
+login por email em `portal_brute_force` (8 tentativas / 10 min,
+`portal_login_attempts`) e o verify em `portal_security` (5 / 15,
+`portal_verify_attempts`). Consolidar é o passo certo, e a regra para o
+fazer é que **as constantes têm de ficar POR PORTA**: escolher um dos
+pares mudaria a política de uma delas em silêncio, que é o oposto do que
+uma consolidação deve fazer.
+
+---
+
+# Iteração — Dois testes verdes em local e vermelhos no CI (Lote 10, correcção)
+
+O CI do Lote 10 veio vermelho com **quatro falhas em 7843 testes**, e
+nenhuma delas era um defeito do código entregue: eram **quatro testes meus
+a depender de coisas que não controlavam**. Vale a pena separá-las, porque
+são duas armadilhas de natureza diferente e só uma delas estava escrita.
+
+## 1. Backend — três falhas: o travão que a própria bateria desliga
+
+```
+FAILED TestOCaminhoDoSUCESSODevolve200::test_o_login_do_portal_responde_200_e_com_cabecalhos
+  assert 'x-ratelimit-limit' in {'content-type', 'content-length'}
+FAILED TestOCaminhoDoSUCESSODevolve200::test_o_verify_responde_200_e_com_cabecalhos
+FAILED TestOCaminhoDoSUCESSODevolve200::test_o_429_do_limite_tambem_e_o_do_limiter_real
+  assert 12 == 10   # os doze pedidos passaram todos
+```
+
+Os três sintomas são um só: **o limiter não estava ligado**. O `server.py`
+faz `limiter.enabled = False` quando `TESTING == "true"`, no momento do
+import, sobre o singleton de `middleware/rate_limit.py`. A bateria de
+`tests/integration` importa o `server` e corre **antes** de `tests/unit`
+(ordem alfabética), pelo que na bateria completa o travão chega desligado
+aos meus testes. Eu verifiquei com `pytest tests/unit`, onde nada o
+importa antes, e passou.
+
+É a armadilha do `from database import db` ao nível do módulo — que está
+escrita no AGENTS.md desde a bateria financeira — **com outro objecto**. E
+o que a torna perigosa é não dar erro nenhum: os doze pedidos passam, os
+cabeçalhos não aparecem, e um teste escrito precisamente para provar que o
+travão morde passa a medir o nada.
+
+Reproduzi-a antes de corrigir, com um ficheiro `test_aaa_importa_server.py`
+que faz só `import server`: as três falhas do CI, na minha máquina.
+
+**Correcção:** `limiter_de_producao_ligado` em `tests/unit/conftest.py`,
+ao lado do `_limpar_cache_de_fases` que é a mesma lição noutro cache.
+`monkeypatch.setattr` (reposição garantida mesmo com o teste a falhar),
+**não autouse** (ligar um travão global a toda a bateria faria qualquer
+teste da app real colidir com os 429 — que é a razão de o `server.py` o
+desligar) e `reset()` do armazenamento à entrada.
+
+## 2. Frontend — uma falha: a âncora resolve a carregar
+
+```
+FAIL src/pages/__tests__/VisitsPage.test.jsx
+  > uma resposta sem colunas nenhumas não rebenta a página
+  Unable to find an element with the text: /sem visitas/i
+```
+
+O `dump` do DOM do CI diz tudo: lá estava o **«A carregar visitas...»**. O
+teste fazia
+
+```jsx
+expect(await screen.findByTestId("layout")).toBeInTheDocument();
+expect(screen.getByText(/sem visitas/i)).toBeInTheDocument();
+```
+
+e o `layout` existe desde o primeiro render — envolve também o spinner. O
+`findBy*` resolve no estado intermédio, devolve o controlo e a asserção
+sincrónica corre contra o ecrã de carregamento. Passa quando a resolução
+do `fetch` cai dentro da primeira janela de repetição do RTL e falha
+quando não cai: verde três vezes em local, vermelho num CI carregado.
+
+Provei o diagnóstico com um teste avulso e o mesmo duplo atrasado 400 ms:
+a âncora antiga falha com o spinner no DOM (**o erro exacto do CI**) e a
+nova — `await screen.findByText(/sem visitas/i)` — passa, demorando os
+490 ms que mostram que esperou mesmo.
+
+É a § 27.17 (`WebmailCompanyTabs`) do lado do teste: lá o componente
+deixava um estado de carregamento cair no ramo de um estado de dados; aqui
+o componente está certo (três estados, três condições) e era o teste a
+ancorar na moldura. **Aumentar o timeout não era a correcção** — tratava o
+sintoma e deixava a asserção a poder passar sem provar nada.
+
+## Medição
+
+Quatro mutações, as duas últimas sobre a fixture nova:
+
+| # | Mutação | Resultado |
+|---|---|---|
+| M-F1 | o ramo `loading` da `VisitsPage` deixa de existir | **morta** pela contraprova nova |
+| M-F2 | a âncora antiga, com o `fetch` atrasado 400 ms | **morta** (erro idêntico ao do CI) |
+| M34 | a fixture sem `enabled = True` | **morta** — 3 testes |
+| M35 | a fixture sem o `reset()` da ENTRADA | **SOBREVIVEU** |
+
+**M35 sobreviveu e a mutação estava certa.** A primeira versão da fixture
+limpava o armazenamento à entrada *e* à saída, e com a de saída presente
+apagar a de entrada não matava teste nenhum: duas linhas para a mesma
+propriedade e **nenhuma delas medível** — a forma dos dois travões na
+mesma porta, em miniatura. Ficou só a de entrada, que é a que vale (é
+verdadeira qualquer que tenha sido o teste anterior), e acrescentei
+`test_cada_teste_parte_de_uma_janela_LIMPA` — mesmo IP e mesmo endpoint do
+teste dos 429, logo a seguir a ele — que a torna medida: **M35b**, sem
+`reset()` nenhum, morre.
+
+## O que fica
+
+Nenhuma alteração de código de produção: as quatro falhas eram testes.
+Mas duas regras ficaram escritas, porque ambas já tinham custado um CI
+vermelho antes com outra roupagem: a do singleton mutado por outro módulo
+(ARCHITECTURE.md) e a da espera sobre o elemento que se afirma
+(FRONTEND_GUIDELINES.md § 27.52).

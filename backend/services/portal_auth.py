@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import HTTPException, Request
@@ -23,6 +22,14 @@ from services.portal_security import (
     PORTAL_TOKEN_VALIDITY_DAYS,
 )
 from services.auth import require_staff
+from services.portal_brute_force import (
+    AMBITO_DO_LOGIN,
+    MAX_TENTATIVAS,
+    MINUTOS_DE_BLOQUEIO,
+    exigir_sem_bloqueio,
+    limpar,
+    registar_falha,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,38 +62,15 @@ class PortalLoginRequest(BaseModel):
         return code
 
 
-MAX_LOGIN_ATTEMPTS = 8
-LOGIN_LOCKOUT_MINUTES = 10
+# Mantidas como ALIAS do ponto único (`portal_brute_force`), para o
+# código que as importa não partir. Duas constantes com o mesmo
+# significado em módulos diferentes divergem na primeira mudança — e aqui
+# a divergência tinha a forma de duas políticas de força bruta no mesmo
+# ecrã de entrada.
+MAX_LOGIN_ATTEMPTS = MAX_TENTATIVAS
+LOGIN_LOCKOUT_MINUTES = MINUTOS_DE_BLOQUEIO
 
 
-async def _record_login_attempt(lockout_key: str):
-    """
-    Regista uma tentativa falhada de login e aplica lockout se necessário.
-    """
-    now = datetime.now(timezone.utc).isoformat()
-
-    result = await db.portal_login_attempts.update_one(
-        {"_id": lockout_key},
-        {
-            "$inc": {"attempts": 1},
-            "$set": {"last_attempt_at": now},
-        },
-        upsert=True,
-    )
-
-    doc = await db.portal_login_attempts.find_one({"_id": lockout_key})
-    if doc and doc.get("attempts", 0) >= MAX_LOGIN_ATTEMPTS:
-        locked_until_str = (
-            datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
-        ).isoformat()
-        await db.portal_login_attempts.update_one(
-            {"_id": lockout_key},
-            {"$set": {"locked_until": locked_until_str}}
-        )
-        logger.warning(
-            f"[PORTAL LOGIN] Lockout aplicado para {lockout_key} "
-            f"após {MAX_LOGIN_ATTEMPTS} tentativas"
-        )
 
 
 async def run_portal_login(data: PortalLoginRequest):
@@ -111,62 +95,12 @@ async def run_portal_login(data: PortalLoginRequest):
     email = data.email
     access_code = data.access_code
 
-    # ── 1. Verificar rate limiting por email ──
-    lockout_key = f"portal_login:{email}"
-    lockout_doc = await db.portal_login_attempts.find_one({"_id": lockout_key})
-
-    if lockout_doc:
-        attempts = lockout_doc.get("attempts", 0)
-        locked_until = lockout_doc.get("locked_until")
-
-        if locked_until:
-            try:
-                locked_until_dt = datetime.fromisoformat(
-                    locked_until.replace('Z', '+00:00') if isinstance(locked_until, str) else locked_until
-                )
-                if datetime.now(timezone.utc) < locked_until_dt:
-                    remaining_seconds = int((locked_until_dt - datetime.now(timezone.utc)).total_seconds())
-                    remaining_minutes = max(1, remaining_seconds // 60)
-                    logger.warning(
-                        f"[PORTAL LOGIN] Conta bloqueada para email={email}. "
-                        f"Tenta novamente em {remaining_minutes} min."
-                    )
-                    raise HTTPException(
-                        status_code=429,
-                        detail={
-                            "error": "Conta temporariamente bloqueada",
-                            "message": f"Muitas tentativas falhadas. Tente novamente em {remaining_minutes} minutos.",
-                            "retry_after": remaining_seconds,
-                            "retry_after_minutes": remaining_minutes,
-                        },
-                        headers={
-                            "Retry-After": str(remaining_seconds),
-                        }
-                    )
-            except (ValueError, TypeError):
-                pass  # Data inválida, ignorar lockout
-
-        if attempts >= MAX_LOGIN_ATTEMPTS:
-            locked_until_str = (
-                datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
-            ).isoformat()
-            await db.portal_login_attempts.update_one(
-                {"_id": lockout_key},
-                {"$set": {"locked_until": locked_until_str}}
-            )
-            retry_after_seconds = LOGIN_LOCKOUT_MINUTES * 60
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "error": "Conta temporariamente bloqueada",
-                    "message": f"Muitas tentativas falhadas. Conta bloqueada por {LOGIN_LOCKOUT_MINUTES} minutos.",
-                    "retry_after": retry_after_seconds,
-                    "retry_after_minutes": LOGIN_LOCKOUT_MINUTES,
-                },
-                headers={
-                    "Retry-After": str(retry_after_seconds),
-                }
-            )
+    # ── 1. Travão de tentativas, por EMAIL ──
+    # Eram ~55 linhas escritas à mão aqui, e uma segunda cópia da mesma
+    # política no `_record_login_attempt`. Hoje é o `portal_brute_force`,
+    # o MESMO travão que o `verify` passou a usar — que é o ecrã onde ele
+    # não existia apesar de a docstring o prometer.
+    await exigir_sem_bloqueio(db, AMBITO_DO_LOGIN, email)
 
     # ── 2. Pesquisar cliente pelo email ──
     # Tentar via blind index primeiro (dados encriptados)
@@ -214,7 +148,7 @@ async def run_portal_login(data: PortalLoginRequest):
         # Segurança: não revelar que o email não existe — mensagem genérica
         logger.info(f"[PORTAL LOGIN] Email não encontrado: {email[:3]}***@***")
         # Registar tentativa falhada (mesmo sem cliente, para rate limiting)
-        await _record_login_attempt(lockout_key)
+        await registar_falha(db, AMBITO_DO_LOGIN, email)
         raise HTTPException(
             status_code=401,
             detail="Credenciais inválidas. Verifique o seu email e código de acesso."
@@ -225,7 +159,7 @@ async def run_portal_login(data: PortalLoginRequest):
     if not stored_code:
         # Cliente sem código de acesso — pode ser um cliente antigo antes da migração
         logger.warning(f"[PORTAL LOGIN] Cliente {client.get('id')} sem portal_access_code")
-        await _record_login_attempt(lockout_key)
+        await registar_falha(db, AMBITO_DO_LOGIN, email)
         raise HTTPException(
             status_code=401,
             detail="Credenciais inválidas. Verifique o seu email e código de acesso."
@@ -238,14 +172,14 @@ async def run_portal_login(data: PortalLoginRequest):
     import hmac
     if not hmac.compare_digest(stored_code_clean, access_code):
         logger.info(f"[PORTAL LOGIN] Código incorrecto para email={email[:3]}***@***")
-        await _record_login_attempt(lockout_key)
+        await registar_falha(db, AMBITO_DO_LOGIN, email)
         raise HTTPException(
             status_code=401,
             detail="Credenciais inválidas. Verifique o seu email e código de acesso."
         )
 
     # ── 4. Login bem-sucedido — limpar tentativas falhadas ──
-    await db.portal_login_attempts.delete_one({"_id": lockout_key})
+    await limpar(db, AMBITO_DO_LOGIN, email)
 
     client_id = client.get("id")
     client_name = client.get("nome", "Cliente")
@@ -327,7 +261,19 @@ async def run_verify_portal_login(client_id: str, data: dict):
 
     SEGURANÇA:
     - NIF é cruzado via blind index (SHA-256) — nunca exposto em plain text na query
-    - Protecção contra brute-force: 5 tentativas, lockout de 15 min
+    - Protecção contra brute-force: **5 tentativas, lockout de 15 min**,
+      implementada em `portal_security.verify_client_credentials`
+      (`MAX_VERIFY_ATTEMPTS` / `VERIFY_LOCKOUT_MINUTES`, colecção
+      `portal_verify_attempts`) — a camada que conhece as credenciais.
+      Verifica o bloqueio ANTES de buscar o cliente, regista a falha em
+      cada ramo 401 e limpa o contador no sucesso.
+
+      NOTA (LOTE 10): acrescentei aqui um segundo travão por ter
+      inventariado só este módulo e concluído da ausência que esta linha
+      era falsa — não era. Dois travões na mesma porta, com constantes
+      diferentes, é pior do que um; o duplicado foi retirado. A dívida
+      REAL (duas implementações independentes da mesma política para as
+      duas portas do Portal) está registada na D-4.
     - Token de sessão tem validade de 4 horas (mais curto que magic link de 90 dias)
     - Mensagens de erro genéricas (não revelam qual campo está errado)
 
@@ -366,6 +312,9 @@ async def run_verify_portal_login(client_id: str, data: dict):
             f"[PORTAL VERIFY] Falha na verificação para client_id={client_id}: "
             f"status={e.status_code}, detail={e.detail}"
         )
+        # O registo da tentativa é do `verify_client_credentials`, que o
+        # faz em cada ramo 401 — e de propósito NÃO o faz no 400 de
+        # formato de NIF, porque um corpo mal formado não é uma adivinha.
         raise
 
     # Gerar token de sessão verificada

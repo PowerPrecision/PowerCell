@@ -204,3 +204,45 @@ def test_endpoint_limitado_declara_request_e_response(ficheiro, funcao, parametr
         "o slowapi não tem onde pôr os cabeçalhos X-RateLimit-* e o caminho "
         "de SUCESSO responde 500. Acrescenta `response: Response` à assinatura."
     )
+
+
+# ====================================================================
+# 3. OS ENDPOINTS QUE FAZEM O SERVIDOR IR BUSCAR UM URL ESCOLHIDO POR
+#    QUEM CHAMA (Lote 9, Fase B)
+# ====================================================================
+#
+# Família própria porque o custo não é o do pedido: o servidor abre uma
+# ligação de saída, com anti-bot e seguimento de links, e pode chamar um
+# modelo de IA pago. O SSRF está validado no `scraper.py` (IPs privados
+# recusados), logo não é pivô para a rede interna — o que sobra é
+# **amplificação e custo sem tecto**, e no Portal isso vem de fora.
+#
+# A lista é ESCRITA À MÃO de propósito, e isso é uma limitação admitida:
+# a alternativa seria derivar a cadeia rota → serviço → scraper por AST,
+# que aqui obrigava a uma heurística sobre «handlers com corpo» e dava
+# falsos positivos nos GET do mesmo módulo. O trabalho desta guarda é
+# impedir que alguém APAGUE um limite — para o caso de alguém ACRESCENTAR
+# um endpoint destes, a defesa é a revisão e a nota na D-4.
+#
+# A mutação que removeu o `@limiter.limit` do `/portal/visits/request`
+# sobreviveu à primeira medição: a guarda de cima verifica que um endpoint
+# LIMITADO declara `request`/`response`, e nada afirmava que este tinha de
+# estar limitado.
+ENDPOINTS_COM_BUSCA_EXTERNA = [
+    ("portal.py", "request_portal_visit"),
+]
+
+
+@pytest.mark.parametrize("ficheiro,funcao", ENDPOINTS_COM_BUSCA_EXTERNA)
+def test_quem_busca_um_url_externo_tem_de_estar_limitado(ficheiro, funcao):
+    limitados = {(f, n) for f, n, _ in _endpoints_limitados()}
+    assert (ficheiro, funcao) in limitados, (
+        f"{ficheiro}::{funcao} faz o servidor ir buscar um URL que o "
+        "cliente escolhe e perdeu o `@limiter.limit` — é amplificação e "
+        "custo de IA sem tecto, na única superfície externa."
+    )
+
+
+def test_a_lista_da_busca_externa_nao_esta_vazia():
+    """Contraprova: uma lista vazia fazia o teste de cima passar sempre."""
+    assert ENDPOINTS_COM_BUSCA_EXTERNA
