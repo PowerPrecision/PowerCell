@@ -58,7 +58,14 @@ from fastapi import HTTPException
 
 from database import db
 from services.audit_trail_service import log_audit_event
-from services.s3_document_root import RAIZ, dentro_da_pasta, e_id_gerado, normalizar
+from services.s3_document_root import (
+    RAIZ,
+    PastaGravadaInvalida,
+    dentro_da_pasta,
+    e_id_gerado,
+    normalizar,
+    pasta_para_gravar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +88,13 @@ def validar_pasta(s3_folder: Optional[str]) -> Optional[str]:
     Levanta 400 para tudo o que não seja uma pasta DENTRO da raiz documental.
     A raiz nua é recusada: autoriza a árvore inteira.
     """
-    if s3_folder is None or not str(s3_folder).strip():
+    try:
+        texto = pasta_para_gravar(s3_folder, contexto="religamento manual")
+    except PastaGravadaInvalida as erro:
+        raise HTTPException(status_code=400, detail=str(erro))
+    if texto is None:
         return None
-    caminho = normalizar(s3_folder)
+    caminho = normalizar(texto)
     if not caminho:
         # Escreveram algo (`/`, `///`) que não é um caminho. Tratá-lo como
         # "remover o mapeamento" seria responder a uma pergunta diferente da

@@ -24,7 +24,11 @@ from services.portal_assigned_users import get_all_assigned_user_ids as _get_all
 from services.portal_onboarding_advance import _trigger_onboarding_check
 from services.notification_service import send_notification_with_preference_check
 from services.redis_cache import invalidate_stats_cache
-from services.s3_document_root import pasta_gravada
+from services.s3_document_root import (
+    PastaGravadaInvalida,
+    pasta_gravada,
+    pasta_para_gravar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -380,11 +384,29 @@ async def run_generate_portal_upload_url(data: dict, client_data: dict):
                 owner_client_id=client_id if process else None,
             )
         )
-        if mapping.get("success") and mapping.get("s3_folder"):
-            s3_folder = mapping["s3_folder"]
+        # O nome que vai para o `$set` tem UMA origem só, de propósito: o
+        # `s3_folder` acima vem de `process.get(...)`/`client.get(...)` e a
+        # guarda de fonte exige que TODAS as atribuições do nome gravado
+        # passem pelo primitivo — um nome partilhado entre uma leitura e uma
+        # escrita deixa a guarda a provar menos do que parece.
+        # O Portal é a ÚNICA superfície externa: um valor do tipo errado
+        # devolvido pelo `ensure_client_folder_mapping` é um defeito NOSSO, e
+        # um 500 na cara do cliente não o corrige. Regista-se e segue-se sem
+        # mapeamento — o que não se faz é gravar um prefixo de posse que não
+        # se entende.
+        try:
+            pasta_criada = pasta_para_gravar(
+                mapping.get("s3_folder"),
+                contexto=f"hotfix de mapeamento do portal ({storage_id})",
+            ) if mapping.get("success") else None
+        except PastaGravadaInvalida as erro:
+            logger.error("[PORTAL][HOTFIX-S3-MAPPING] %s", erro)
+            pasta_criada = None
+        if pasta_criada:
+            s3_folder = pasta_criada
             await target_collection.update_one(
                 {"id": storage_id},
-                {"$set": {"s3_folder": s3_folder}}
+                {"$set": {"s3_folder": pasta_criada}}
             )
             logger.info(
                 f"[PORTAL][HOTFIX-S3-MAPPING] Mapeamento S3 {'criado' if mapping.get('created') else 'recuperado'} "

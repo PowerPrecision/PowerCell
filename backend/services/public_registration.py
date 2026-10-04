@@ -15,6 +15,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from database import db
+from services.s3_document_root import pasta_para_gravar
 from services.s3_storage import s3_service
 from models.auth import UserRole
 from models.process import PublicClientRegistration
@@ -256,10 +257,13 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             )
             if result and len(result) == 2:
                 success, s3_folder_name = result
-                if success and s3_folder_name:
+                caminho = pasta_para_gravar(
+                    s3_folder_name, contexto=f"registo público do cliente {client_id}"
+                )
+                if success and caminho:
                     await db.clients.update_one(
                         {"id": client_id},
-                        {"$set": {"s3_folder": s3_folder_name}}
+                        {"$set": {"s3_folder": caminho}}
                     )
                     logger.info(f"Pasta S3 criada para cliente {client_id}: {s3_folder_name}")
         except Exception as e:

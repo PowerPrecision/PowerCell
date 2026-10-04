@@ -51,6 +51,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from services.s3_document_root import pasta_para_gravar  # noqa: E402
 from services.s3_folder_anomaly_repair import (  # noqa: E402
     VEREDICTO_FORA_DA_RAIZ,
     VEREDICTO_IRRECONHECIVEL,
@@ -163,10 +164,14 @@ async def _escrever(db, linha: dict, caminho: str) -> bool:
     """`$set` estrito no `s3_folder` + metadados. Devolve True se gravou."""
     coleccao = getattr(db, linha["coleccao"])
     agora = datetime.now(timezone.utc).isoformat()
+    # O veredicto já provou que é uma string dentro da raiz; o primitivo é
+    # a mesma parede que os escritores da aplicação atravessam, e aqui vale
+    # mais do que lá: isto escreve DIRECTAMENTE em produção.
+    pasta = pasta_para_gravar(caminho, contexto=f"reparação de {linha['id']}")
     resultado = await coleccao.update_one(
         {"id": linha["id"]},
         {"$set": {
-            "s3_folder": caminho,
+            "s3_folder": pasta,
             "s3_mapping_updated_at": agora,
             "s3_mapping_updated_by": "script:fix_s3_folder_anomalies",
         }},

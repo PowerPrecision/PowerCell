@@ -13,6 +13,10 @@ from typing import Any
 from fastapi import HTTPException, UploadFile
 
 from database import db
+from services.s3_document_root import (
+    PastaGravadaInvalida,
+    pasta_para_gravar,
+)
 from services.document_constants import (
     DEFAULT_CLIENT_NAME,
     ERROR_DOWNLOAD_URL,
@@ -96,12 +100,23 @@ async def run_initialize_folders(client_id: str) -> dict[str, Any]:
         second_client_name=second_client_name,
         owner_client_id=process.get("client_id"),
     )
-    if success and s3_folder_path:
+    # `initialize_client_folders` devolve o par `(sucesso, caminho)` e foi o
+    # par gravado inteiro que produziu as 10 anomalias de produção. Aqui o
+    # desempacotamento está certo; o primitivo é a rede que o mantém assim.
+    try:
+        caminho = pasta_para_gravar(
+            s3_folder_path, contexto=f"init-folders do processo {effective_id}"
+        )
+    except PastaGravadaInvalida as erro:
+        logger.error("[INIT-FOLDERS] %s", erro)
+        return {"success": False, "s3_folder": None, "erro": str(erro)}
+
+    if success and caminho:
         await db.processes.update_one(
             {"id": effective_id},
-            {"$set": {"s3_folder": s3_folder_path}},
+            {"$set": {"s3_folder": caminho}},
         )
-    return {"success": success, "s3_folder": s3_folder_path}
+    return {"success": success, "s3_folder": caminho}
 
 
 async def run_get_download_url(client_id: str, file_path: str) -> dict[str, Any]:

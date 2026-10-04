@@ -8214,6 +8214,88 @@ as duas contraprovas obrigatórias (o leitor lê mesmo; o sítio certo chama mes
    `s3_storage`, comparado caso a caso num teste. Mais larga prometia
    religamentos que o código nunca faria; mais estreita escondia custo.
 
+### A ESCRITA recusa o que a LEITURA tolera (Lote 9)
+
+O Lote 8 corrigiu os onze LEITORES de `s3_folder` e sanou as 10 fichas
+que produção tinha com o par `(sucesso, caminho)` gravado inteiro. Ficou
+em aberto a outra metade: **nada impedia um escritor novo de o gravar
+outra vez**. Os cinco chamadores de `initialize_client_folders` /
+`ensure_client_folder_mapping` desempacotavam o par corretamente *naquele
+dia*, e uma propriedade que só é verdade hoje não é uma propriedade.
+
+`s3_document_root.pasta_para_gravar` é o ponto único da escrita, gémeo de
+`pasta_gravada` e com o veredicto **invertido de propósito**:
+
+| | valor do tipo errado | `None` / `""` |
+|---|---|---|
+| `pasta_gravada` (LEITURA) | `None` + `warning` → cai em «sem mapeamento» | `None` (ausência normal) |
+| `pasta_para_gravar` (ESCRITA) | **levanta `PastaGravadaInvalida`** | `None` (remoção explícita) |
+
+**Porque é que a escrita não pode degradar.** Devolver `None` parece a
+degradação suave e é a pior das três saídas: o `$set` corre à mesma e
+escreve `None` **por cima** de um mapeamento válido — a ficha perde a
+pasta por causa de um erro de tipo do chamador. Era exactamente isto que
+a correcção do Lote 8 passou a fazer: o `_clean_s3_folder` deixou de
+gravar lixo e começou a **apagar**. Fechar uma torneira a apagar não é
+fechá-la, e o teste que afirmava o `None` foi **invertido**, não apagado.
+
+`None` à entrada continua `None` à saída: é a remoção EXPLÍCITA do
+mapeamento, que o `s3_relink` suporta por desenho (regra 5). O que se
+recusa é o TIPO.
+
+**Dois defeitos que a guarda encontrou ao ser escrita:**
+
+1. `admin_s3_user_mappings.run_update_user_s3_mapping` grava `s3_folder`
+   em `db.users` e **não tinha validação nenhuma** — a anotação
+   `str | None` é documentação, não uma parede. O irmão do lado ganhou o
+   `_clean_s3_folder` no Lote 8 e este ficou de fora: é a forma do
+   defeito do Lote 5 (o `set` e o `clear` a divergirem) aplicada a dois
+   endpoints que gravam o MESMO campo.
+
+2. O meu inventário à mão tinha **onze** escritores. O inventário por AST
+   encontrou **dezasseis**: faltavam `client_crud.run_create_client` (o
+   caminho de produção da criação de um cliente no CRM) e os quatro
+   scripts de operações — `backfill_s3_mappings`,
+   `hotfix_restore_s3_mappings`, `medir_cobertura_s3` e a própria
+   migração `fix_s3_folder_anomalies`. Correm contra produção com o
+   `$set` na mão: é onde um valor do tipo errado tem mais alcance, não
+   menos. **Uma dedução sobre quem escreve o quê vale o inventário que a
+   suporta, e o inventário nunca está provado** — é a mesma lição do
+   `assignment_drift`, agora com uma ferramenta a provar-me errado em vez
+   de um número de produção.
+
+**A guarda é um inventário, e teve um ponto cego que a contraprova
+apanhou.** Percorre `services/`, `routes/` e `scripts/`, resolve o
+payload de cada `update_one`/`insert_one`/… e falha por OMISSÃO. Três
+regras no leitor:
+
+* **varre só o DOCUMENTO, nunca o FILTRO** (`{"s3_folder": antigo}` é uma
+  consulta e não grava nada) — uma guarda que morde o sítio errado é
+  apagada por quem a encontra vermelha;
+* **resolve um nome que apareça como VALOR de um dicionário**:
+  `{"$set": update_fields}` é a forma que metade dos escritores usa, e
+  sem esse salto o leitor era CEGO ali. O teste do veredicto dava verde
+  por cegueira, e foi a contraprova (`o inventário cobre os escritores
+  conhecidos`) a denunciá-lo — um verde desses é pior do que um vermelho;
+* **um nome é seguro se TODAS as suas atribuições passam pelo primitivo**,
+  não se alguma passa. No `portal_upload_ops` o mesmo nome `s3_folder`
+  recebia primeiro `process.get("s3_folder")` (uma leitura) e só depois o
+  valor saneado — com a regra «alguma», a guarda ficava verde sobre um
+  nome que podia chegar ao `$set` pelo ramo cru. É a mutação N11 do Lote
+  8 outra vez: não é uma mutação perdida, é um teste fraco. O escritor
+  passou a usar um nome com UMA origem só.
+
+E ao contrário das outras guardas de fonte deste projecto, esta **não**
+passa pelo `codigo_sem_comentarios`: a análise é por AST, um comentário
+não produz nós e uma docstring produz um `Constant` que nunca é uma
+chamada a `update_one`. Insistir no filtro era pior — ao remover
+docstrings, uma função cujo corpo é só a docstring fica sem corpo e o
+`ast.parse` levanta `IndentationError`, o que deixou a guarda vermelha em
+seis módulos por um motivo que nada tem a ver com o que mede.
+
+Cobertura: `tests/unit/test_guarda_de_escrita_do_s3_folder.py`.
+
+
 ### A superfície que tomava o caminho legado SEMPRE
 
 `GET /api/onedrive/files/{client_name}` resolvia o processo por `$regex` parcial

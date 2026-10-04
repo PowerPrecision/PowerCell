@@ -46,6 +46,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from database import db  # noqa: E402
+from services.s3_document_root import pasta_para_gravar  # noqa: E402
 from services.s3_explorer_paths import RAIZ_DO_EXPLORADOR  # noqa: E402
 from services.s3_folder_coverage import (  # noqa: E402
     analisar,
@@ -105,7 +106,12 @@ async def carregar_processos() -> list[dict]:
 async def aplicar_propostas(propostas: dict[str, str]) -> int:
     """Grava só os mapeamentos inequívocos. Devolve quantos escreveu."""
     escritos = 0
-    for pasta, process_id in propostas.items():
+    for pasta_crua, process_id in propostas.items():
+        pasta = pasta_para_gravar(
+            pasta_crua, contexto=f"cobertura do processo {process_id}"
+        )
+        if not pasta:
+            continue
         resultado = await db.processes.update_one(
             # A condição impede corrida: se entretanto ganhou pasta, não se
             # sobrepõe o que lá está.

@@ -37,6 +37,7 @@ import logging
 from typing import Optional
 
 from database import db
+from services.s3_document_root import PastaGravadaInvalida, pasta_para_gravar
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +83,22 @@ async def religar_apos_rename(antigo: str, novo: str) -> dict:
         ``erro`` é informativo: o chamador não reage, porque o S3 já mudou.
     """
     antigo = (antigo or "").rstrip("/")
-    novo = (novo or "").rstrip("/")
     resultado = {"processos": 0, "documentos": 0, "pedidos_portal": 0, "erro": False}
+
+    # LOTE 9 — aqui o primitivo da escrita NÃO pode propagar. Quando esta
+    # função corre, o objecto JÁ se moveu no S3: levantar mostraria um erro
+    # sobre uma operação bem sucedida e deixaria o ponteiro desactualizado
+    # (a regra do `document_portal_revoke`). Logo apanha-se, regista-se e
+    # devolve-se `erro: True` — que é a forma que esta função já tinha de
+    # dizer «o S3 mudou e a base de dados não acompanhou».
+    try:
+        novo = (
+            pasta_para_gravar(novo, contexto="religamento após rename") or ""
+        ).rstrip("/")
+    except PastaGravadaInvalida as erro:
+        logger.error("[S3-RELINK-RENAME] %s", erro)
+        resultado["erro"] = True
+        return resultado
 
     if not antigo or not novo or antigo == novo:
         return resultado

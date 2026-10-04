@@ -15,7 +15,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from database import db
-from services.s3_document_root import pasta_do_processo_sob_mapeamento_do_cliente
+from services.s3_document_root import (
+    pasta_do_processo_sob_mapeamento_do_cliente,
+    pasta_para_gravar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,8 +134,11 @@ async def create_process_from_client_onboarding(client_id: str) -> dict[str, Any
     # raiz traria os documentos dos outros processos do mesmo cliente. Um
     # mapeamento legado (por nome) ou escolhido à mão é herdado tal e qual: os
     # documentos estão lá, e trocá-lo apontaria o processo para uma pasta vazia.
-    s3_folder = pasta_do_processo_sob_mapeamento_do_cliente(
-        process_id, client_id, client.get("s3_folder")
+    s3_folder = pasta_para_gravar(
+        pasta_do_processo_sob_mapeamento_do_cliente(
+            process_id, client_id, client.get("s3_folder")
+        ),
+        contexto=f"criação do processo {process_id}",
     )
     pending_type = client.get("pending_process_type") or "credito_habitacao"
     titular2 = client.get("titular2_data") or {}

@@ -171,8 +171,14 @@ class TestOsLeitoresDeProducao:
     METODOS = ("strip", "rstrip", "lstrip", "replace", "split",
                "startswith", "endswith", "lower", "upper")
 
-    #: O ponto único por onde um `s3_folder` tem de passar.
-    PONTO_UNICO = "pasta_gravada"
+    #: Os pontos únicos por onde um `s3_folder` tem de passar antes de
+    #: levar um método de string. São DOIS desde o Lote 9, e são
+    #: equivalentes para esta guarda: ambos devolvem `Optional[str]`. O
+    #: que os distingue é o veredicto para um valor do tipo errado —
+    #: `pasta_gravada` degrada (LEITURA), `pasta_para_gravar` recusa
+    #: (ESCRITA) — e isso é a pergunta do
+    #: `test_guarda_de_escrita_do_s3_folder.py`, não desta.
+    PONTOS_UNICOS = ("pasta_gravada", "pasta_para_gravar")
 
     def _chamadas_cruas(self, caminho):
         """Sítios que aplicam um método de string a um `s3_folder` NÃO saneado.
@@ -198,7 +204,8 @@ class TestOsLeitoresDeProducao:
         encontrados = []
 
         def ha_ponto_unico(no):
-            return self.PONTO_UNICO in ast.dump(no)
+            despejo = ast.dump(no)
+            return any(p in despejo for p in self.PONTOS_UNICOS)
 
         def nomes_saneados(corpo):
             seguros = set()
@@ -360,16 +367,28 @@ class TestOMoveFile:
 
 
 class TestOEscritorQueDeixouEntrar:
-    """A torneira: `_clean_s3_folder` aceitava qualquer tipo."""
+    """A torneira: `_clean_s3_folder` aceitava qualquer tipo.
+
+    LOTE 9 — ESTE TESTE FOI INVERTIDO, NÃO APAGADO
+    A versão de cima afirmava que um valor do tipo errado virava `None`.
+    Estava certa sobre «não grava lixo» e errada sobre o resto: o `$set`
+    corre à mesma e escreve `None` POR CIMA de um mapeamento válido, pelo
+    que a correcção do Lote 8 fechou a torneira a APAGAR. O veredicto de
+    hoje é uma recusa, e é aqui que isso fica dito — um teste legado
+    inverte-se, porque um teste apagado não impede o regresso do defeito
+    que descrevia.
+    """
 
     @pytest.mark.parametrize("valor", VALORES_CORROMPIDOS)
-    def test_o_escritor_recusa_um_valor_que_nao_e_texto(self, valor):
+    def test_o_escritor_RECUSA_em_vez_de_apagar(self, valor):
+        from services.s3_document_root import PastaGravadaInvalida
         from services.admin_s3_process_mappings import _clean_s3_folder
 
         # `["a"] in [None, "", "undefined", ...]` é False, logo a lista
-        # era devolvida tal e qual e gravada. Hoje vira `None`, que é o
-        # que o campo significa quando não há mapeamento.
-        assert _clean_s3_folder(valor) is None
+        # era devolvida tal e qual e gravada. Devolver `None` deixou de
+        # gravar lixo e passou a apagar a pasta da ficha; hoje recusa.
+        with pytest.raises(PastaGravadaInvalida):
+            _clean_s3_folder(valor)
 
     @pytest.mark.parametrize("valor", ["undefined", "null", "None", "", None])
     def test_os_sentinelas_continuam_a_virar_None(self, valor):

@@ -54,6 +54,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from services.s3_document_root import pasta_para_gravar  # noqa: E402
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
@@ -218,7 +219,11 @@ async def _restore_one(
         print(f"  ❌ {label}: falha ao criar/resolver pasta S3.")
         return False
 
-    folder_path = mapping["s3_folder"]
+    folder_path = pasta_para_gravar(
+        mapping["s3_folder"], contexto=f"restauro de {doc_id}"
+    )
+    if not folder_path:
+        return False
     action = "criada" if mapping.get("created") else "recuperada (já existia)"
 
     if dry_run:

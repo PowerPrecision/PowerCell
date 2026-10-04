@@ -14,7 +14,11 @@ from fastapi import HTTPException
 from database import db
 from services.s3_document_root import RAIZ, e_id_gerado
 from services.process_status import ARCHIVED_STATUSES, DELETED_STATUS_VALUES
-from services.s3_document_root import pasta_gravada
+from services.s3_document_root import (
+    PastaGravadaInvalida,
+    pasta_gravada,
+    pasta_para_gravar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +41,16 @@ def _clean_s3_folder(s3_folder: Optional[str]) -> Optional[str]:
     Corrigir os leitores e deixar isto aberto era esfregar o chão com a
     torneira aberta (regra do `assignment_drift`): a ordem é sempre o
     escritor primeiro.
+
+    LOTE 9 — FECHAR A TORNEIRA A APAGAR NÃO É FECHÁ-LA
+    A primeira versão usava o `pasta_gravada` (o primitivo da LEITURA),
+    que devolve `None`. O `$set` corria à mesma e escrevia `None` por
+    cima de um mapeamento válido: um lote com um valor do tipo errado
+    deixava de gravar lixo e passava a APAGAR a pasta da ficha. Hoje
+    usa-se o primitivo da ESCRITA, que recusa — e a recusa chega a quem
+    gravou (400 no endpoint singular, entrada em `errors` no lote).
     """
-    limpo = pasta_gravada(s3_folder, contexto="escrita de mapeamento")
+    limpo = pasta_para_gravar(s3_folder, contexto="escrita de mapeamento")
     if limpo is None or limpo.lower() in ("undefined", "null", "none"):
         return None
     return limpo
@@ -163,7 +175,10 @@ async def run_update_process_s3_mapping(process_id: str, s3_folder: Optional[str
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
-    clean_s3_folder = _clean_s3_folder(s3_folder)
+    try:
+        clean_s3_folder = _clean_s3_folder(s3_folder)
+    except PastaGravadaInvalida as erro:
+        raise HTTPException(status_code=400, detail=str(erro))
 
     update_data = {
         "s3_folder": clean_s3_folder,

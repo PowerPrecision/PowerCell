@@ -169,6 +169,53 @@ def pasta_gravada(valor: Any, *, contexto: str = "") -> Optional[str]:
     return limpo or None
 
 
+class PastaGravadaInvalida(ValueError):
+    """Tentou-se GRAVAR em `s3_folder` um valor que não é texto.
+
+    Leva o tipo, o valor cru e o contexto na mensagem: é isso que
+    permite encontrar o chamador sem ir aos logs do servidor.
+    """
+
+    def __init__(self, valor: Any, contexto: str = "") -> None:
+        self.valor = valor
+        self.contexto = contexto
+        super().__init__(
+            "`s3_folder` só aceita texto — recebido "
+            f"{type(valor).__name__}: {valor!r}"
+            + (f" ({contexto})" if contexto else "")
+        )
+
+
+def pasta_para_gravar(valor: Any, *, contexto: str = "") -> Optional[str]:
+    """O valor que PODE ser gravado em `s3_folder` — ou uma recusa.
+
+    Gémea de `pasta_gravada`, com o veredicto **invertido de propósito**:
+
+    - a LER, um valor do tipo errado degrada para «sem mapeamento»: o
+      ecrã serve o que consegue e a ficha não desaparece do sistema;
+    - a GRAVAR, recusa-se — levanta `PastaGravadaInvalida`.
+
+    **Porque é que não devolve `None`.** Devolver `None` aqui parece a
+    degradação suave e é a pior das três saídas: o `$set` continua a
+    correr e escreve `None` POR CIMA de um mapeamento válido, pelo que a
+    ficha perde a pasta por causa de um erro de TIPO do chamador. Era
+    exactamente isso que o `_clean_s3_folder` do Lote 8 passou a fazer —
+    fechou a torneira a APAGAR. Quem grava tem de saber que não gravou.
+
+    `None` à entrada continua `None` à saída: é a remoção EXPLÍCITA do
+    mapeamento, que o `s3_relink` suporta por desenho (regra 5). O que
+    não se aceita é um valor que não seja texto nem ausência — o
+    `(sucesso, caminho)` de `initialize_client_folders` gravado inteiro,
+    que produziu as 10 anomalias medidas em produção.
+    """
+    if valor is None:
+        return None
+    if not isinstance(valor, str):
+        raise PastaGravadaInvalida(valor, contexto)
+    limpo = valor.strip()
+    return limpo or None
+
+
 def id_valido(valor: Any) -> bool:
     """O valor serve como segmento de caminho?"""
     if not isinstance(valor, str):
