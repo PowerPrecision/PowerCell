@@ -33,7 +33,6 @@ from fastapi import HTTPException
 
 from services.portal_brute_force import (
     AMBITO_DO_LOGIN,
-    AMBITO_DO_VERIFY,
     MAX_TENTATIVAS,
     MINUTOS_DE_BLOQUEIO,
     chave_do_travao,
@@ -45,6 +44,11 @@ from services.portal_brute_force import (
 )
 
 AGORA = datetime(2026, 10, 4, 12, 0, 0, tzinfo=timezone.utc)
+
+#: O âmbito é um PARÂMETRO do travão, não uma enumeração fechada: estes
+#: testes usam um âmbito arbitrário de propósito, para afirmarem o
+#: MECANISMO e não uma constante.
+AMBITO_DE_OUTRA_PORTA = "porta_de_teste"
 
 
 class TestADecisaoPura:
@@ -98,7 +102,7 @@ class TestADecisaoPura:
         verificação por processo: são portas diferentes."""
         assert (
             chave_do_travao(AMBITO_DO_LOGIN, "x")
-            != chave_do_travao(AMBITO_DO_VERIFY, "x")
+            != chave_do_travao(AMBITO_DE_OUTRA_PORTA, "x")
         )
 
 
@@ -144,18 +148,18 @@ class TestOTravao:
     async def test_as_primeiras_tentativas_passam(self):
         bd = _BDFalsa(_ColeccaoFalsa())
         for _ in range(MAX_TENTATIVAS - 1):
-            await exigir_sem_bloqueio(bd, AMBITO_DO_VERIFY, "cli-1")
-            await registar_falha(bd, AMBITO_DO_VERIFY, "cli-1")
-        await exigir_sem_bloqueio(bd, AMBITO_DO_VERIFY, "cli-1")
+            await exigir_sem_bloqueio(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
+            await registar_falha(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
+        await exigir_sem_bloqueio(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
 
     async def test_a_tentativa_seguinte_ao_limite_e_429(self):
         coleccao = _ColeccaoFalsa()
         bd = _BDFalsa(coleccao)
         for _ in range(MAX_TENTATIVAS):
-            await registar_falha(bd, AMBITO_DO_VERIFY, "cli-1")
+            await registar_falha(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
 
         with pytest.raises(HTTPException) as erro:
-            await exigir_sem_bloqueio(bd, AMBITO_DO_VERIFY, "cli-1")
+            await exigir_sem_bloqueio(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
 
         assert erro.value.status_code == 429
         assert erro.value.headers["Retry-After"]
@@ -165,9 +169,9 @@ class TestOTravao:
         coleccao = _ColeccaoFalsa()
         bd = _BDFalsa(coleccao)
         for _ in range(MAX_TENTATIVAS):
-            await registar_falha(bd, AMBITO_DO_VERIFY, "cli-1")
+            await registar_falha(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
 
-        doc = coleccao.docs[chave_do_travao(AMBITO_DO_VERIFY, "cli-1")]
+        doc = coleccao.docs[chave_do_travao(AMBITO_DE_OUTRA_PORTA, "cli-1")]
         assert doc.get("locked_until"), (
             "sem `locked_until` as tentativas ficavam no limite e o travão "
             "nunca fechava a janela"
@@ -176,10 +180,10 @@ class TestOTravao:
     async def test_um_cliente_de_outro_processo_nao_e_afectado(self):
         bd = _BDFalsa(_ColeccaoFalsa())
         for _ in range(MAX_TENTATIVAS + 2):
-            await registar_falha(bd, AMBITO_DO_VERIFY, "cli-atacado")
+            await registar_falha(bd, AMBITO_DE_OUTRA_PORTA, "cli-atacado")
 
         # O travão é por IDENTIDADE: o vizinho entra normalmente.
-        await exigir_sem_bloqueio(bd, AMBITO_DO_VERIFY, "cli-vizinho")
+        await exigir_sem_bloqueio(bd, AMBITO_DE_OUTRA_PORTA, "cli-vizinho")
 
     async def test_uma_entrada_bem_sucedida_LIMPA_o_contador(self):
         """Um contador que só sobe mede a vida da conta, não um ataque:
@@ -188,14 +192,14 @@ class TestOTravao:
         coleccao = _ColeccaoFalsa()
         bd = _BDFalsa(coleccao)
         for _ in range(MAX_TENTATIVAS - 1):
-            await registar_falha(bd, AMBITO_DO_VERIFY, "cli-1")
+            await registar_falha(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
 
-        await limpar(bd, AMBITO_DO_VERIFY, "cli-1")
+        await limpar(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
 
         assert coleccao.docs == {}
         for _ in range(MAX_TENTATIVAS - 1):
-            await exigir_sem_bloqueio(bd, AMBITO_DO_VERIFY, "cli-1")
-            await registar_falha(bd, AMBITO_DO_VERIFY, "cli-1")
+            await exigir_sem_bloqueio(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
+            await registar_falha(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
 
     async def test_a_primeira_tentativa_e_PRESERVADA(self):
         """Reescrever o `primeira_em` em cada falha fazia um ataque de
@@ -203,11 +207,11 @@ class TestOTravao:
         `mailbox_health`."""
         coleccao = _ColeccaoFalsa()
         bd = _BDFalsa(coleccao)
-        await registar_falha(bd, AMBITO_DO_VERIFY, "cli-1")
-        primeira = coleccao.docs[chave_do_travao(AMBITO_DO_VERIFY, "cli-1")]["primeira_em"]
-        await registar_falha(bd, AMBITO_DO_VERIFY, "cli-1")
+        await registar_falha(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
+        primeira = coleccao.docs[chave_do_travao(AMBITO_DE_OUTRA_PORTA, "cli-1")]["primeira_em"]
+        await registar_falha(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
         assert (
-            coleccao.docs[chave_do_travao(AMBITO_DO_VERIFY, "cli-1")]["primeira_em"]
+            coleccao.docs[chave_do_travao(AMBITO_DE_OUTRA_PORTA, "cli-1")]["primeira_em"]
             == primeira
         )
 
@@ -216,105 +220,93 @@ class TestOTravao:
         era a base de dados com um soluço a fechar o Portal à chave a
         todos os clientes."""
         bd = _BDFalsa(_ColeccaoFalsa(rebenta=True))
-        await exigir_sem_bloqueio(bd, AMBITO_DO_VERIFY, "cli-1")
+        await exigir_sem_bloqueio(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
 
     async def test_falhar_a_escrever_nao_propaga(self):
         """Mas fica no log: se não se consegue contar, o travão não
         existe, e isso não pode ser invisível."""
         bd = _BDFalsa(_ColeccaoFalsa(rebenta=True))
-        await registar_falha(bd, AMBITO_DO_VERIFY, "cli-1")
-        await limpar(bd, AMBITO_DO_VERIFY, "cli-1")
+        await registar_falha(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
+        await limpar(bd, AMBITO_DE_OUTRA_PORTA, "cli-1")
 
 
 @pytest.mark.asyncio
-class TestOVerifyUsaOTravao:
-    """A LIGAÇÃO — sem ela o módulo é código morto, como o
-    `_deep_link_contacts` era."""
+class TestOVerifyJaEstavaProtegido:
+    """A CORRECÇÃO: o travão do `verify` existe, e não era meu.
 
-    async def test_o_verify_recusa_ANTES_de_olhar_para_a_credencial(self, monkeypatch):
-        """A ordem é a do Incidente P0: a recusa vem primeiro, senão o
-        código de resposta da verificação continua a ser um oráculo sobre
-        a credencial para quem já esgotou as tentativas."""
-        from services import portal_auth
+    A primeira versão deste ficheiro afirmava que o
+    `run_verify_portal_login` prometia «5 tentativas, lockout de 15 min»
+    na docstring e não tinha código a contar tentativas. **Era falso.** O
+    travão vive em `portal_security.verify_client_credentials` — a camada
+    que conhece as credenciais — com exactamente esses números.
 
-        coleccao = _ColeccaoFalsa()
-        monkeypatch.setattr(portal_auth, "db", _BDFalsa(coleccao))
+    O erro nasceu de inventariar UM módulo e concluir da ausência: a
+    lição dos três produtores de token do CRM, outra vez. O travão que eu
+    acrescentei era uma SEGUNDA política na mesma porta (8/10 contra
+    5/15, noutra colecção) e foi retirado.
 
-        chamadas = []
+    Estes testes afirmam o que existe, na camada onde existe — senão a
+    correcção deixava a porta sem teste nenhum do lado deste lote.
+    """
 
-        async def nunca(**kwargs):
-            chamadas.append(kwargs)
-            raise HTTPException(status_code=401, detail="erradas")
+    async def test_a_politica_do_verify_e_a_que_a_docstring_promete(self):
+        from services import portal_security
 
-        monkeypatch.setattr(portal_auth, "verify_client_credentials", nunca)
+        assert portal_security.MAX_VERIFY_ATTEMPTS == 5
+        assert portal_security.VERIFY_LOCKOUT_MINUTES == 15
 
-        for _ in range(MAX_TENTATIVAS):
-            with pytest.raises(HTTPException):
-                await portal_auth.run_verify_portal_login(
-                    "cli-1", {"nif": "123456789", "process_number": 1}
-                )
+    async def test_o_verify_recusa_ANTES_de_buscar_o_cliente(self, monkeypatch):
+        """A ordem do Incidente P0: o código de resposta de uma
+        verificação é informação sobre a credencial."""
+        from services import portal_security
 
-        feitas = len(chamadas)
+        bloqueado = (AGORA + timedelta(minutes=9)).isoformat()
+        tentativas = _ColeccaoFalsa(
+            {"portal_verify:cli-1": {"attempts": 5, "locked_until": bloqueado}}
+        )
+        clientes = _ColeccaoFalsa()
+
+        class _BD:
+            portal_verify_attempts = tentativas
+            clients = clientes
+
+        monkeypatch.setattr(portal_security, "db", _BD())
+
         with pytest.raises(HTTPException) as erro:
-            await portal_auth.run_verify_portal_login(
-                "cli-1", {"nif": "123456789", "process_number": 2}
+            await portal_security.verify_client_credentials(
+                client_id="cli-1", nif="123456789", process_number=1
             )
 
         assert erro.value.status_code == 429
-        assert len(chamadas) == feitas, (
-            "a credencial foi verificada depois do bloqueio — o endpoint "
+        assert clientes.docs == {}, (
+            "o cliente foi procurado depois do bloqueio — o endpoint "
             "continua a responder ao ataque"
         )
 
-    async def test_um_corpo_mal_formado_nao_gasta_tentativas(self, monkeypatch):
-        """Um 400 não é uma adivinha. Contá-lo deixava um cliente com o
-        formulário a dar erro a caminho do bloqueio."""
-        from services import portal_auth
+    async def test_um_NIF_mal_formado_nao_gasta_tentativas(self, monkeypatch):
+        """E já não gastava: o `_record_failed_attempt` só corre nos
+        ramos 401. A guarda que acrescentei para isto resolvia um
+        problema que não existia — foi a mutação que a apagou e
+        SOBREVIVEU que me mandou olhar, e o que encontrei foi o travão
+        verdadeiro uma camada abaixo.
+        """
+        from services import portal_security
 
-        coleccao = _ColeccaoFalsa()
-        monkeypatch.setattr(portal_auth, "db", _BDFalsa(coleccao))
+        tentativas = _ColeccaoFalsa()
 
-        for _ in range(MAX_TENTATIVAS + 3):
-            with pytest.raises(HTTPException) as erro:
-                await portal_auth.run_verify_portal_login("cli-1", {"nif": ""})
-            assert erro.value.status_code == 400
+        class _BD:
+            portal_verify_attempts = tentativas
+            clients = _ColeccaoFalsa()
 
-        assert coleccao.docs == {}, "um corpo inválido não conta como tentativa"
+        monkeypatch.setattr(portal_security, "db", _BD())
 
-    async def test_o_verify_bem_sucedido_limpa_o_contador(self, monkeypatch):
-        from services import portal_auth
+        with pytest.raises(HTTPException) as erro:
+            await portal_security.verify_client_credentials(
+                client_id="cli-1", nif="123", process_number=1
+            )
 
-        coleccao = _ColeccaoFalsa()
-        monkeypatch.setattr(portal_auth, "db", _BDFalsa(coleccao))
-
-        async def falha(**kwargs):
-            raise HTTPException(status_code=401, detail="erradas")
-
-        async def acerta(**kwargs):
-            return {
-                "process_id": "p-1",
-                "client_id": "cli-1",
-                "client_name": "Ana",
-                "process_number": 12,
-            }
-
-        monkeypatch.setattr(portal_auth, "verify_client_credentials", falha)
-        for _ in range(MAX_TENTATIVAS - 1):
-            with pytest.raises(HTTPException):
-                await portal_auth.run_verify_portal_login(
-                    "cli-1", {"nif": "123456789", "process_number": 1}
-                )
-        assert coleccao.docs
-
-        monkeypatch.setattr(portal_auth, "verify_client_credentials", acerta)
-        monkeypatch.setattr(
-            portal_auth, "create_verified_session_token",
-            lambda **kwargs: "token-de-teste",
-        )
-        await portal_auth.run_verify_portal_login(
-            "cli-1", {"nif": "123456789", "process_number": 12}
-        )
-        assert coleccao.docs == {}
+        assert erro.value.status_code == 400
+        assert tentativas.docs == {}
 
 
 class TestOInventarioDosNoveEndpoints:

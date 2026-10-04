@@ -79,12 +79,18 @@ de saída — são os de maior consequência.
 `response: Response`, e a guarda de inventário passou a afirmar a
 PROPRIEDADE (nenhum endpoint de escrita de `routes/portal.py` sem limite),
 derivada das rotas e não de uma lista
-(`tests/unit/test_portal_forca_bruta_e_limites.py`). O achado maior do
-caminho não era o limite: o `run_verify_portal_login` prometia na docstring
-«Protecção contra brute-force: 5 tentativas, lockout de 15 min» e **não
-tinha uma linha de código a contar tentativas** — hoje o travão existe,
-num ponto único (`services/portal_brute_force.py`) partilhado com o login
-por email, que tinha a sua própria cópia escrita à mão.
+(`tests/unit/test_portal_forca_bruta_e_limites.py`). O login por email
+passou a ter um ponto único (`services/portal_brute_force.py`) em vez de
+~55 linhas à mão mais uma segunda cópia da política no
+`_record_login_attempt`, no mesmo ficheiro.
+
+**Correcção a uma afirmação deste mesmo lote:** disse que o
+`run_verify_portal_login` prometia «5 tentativas, lockout de 15 min» na
+docstring e não tinha código a contar tentativas. **Não era verdade** — o
+travão vive em `portal_security.verify_client_credentials`, está completo e
+diz exactamente esses números. Inventariei um módulo e concluí da
+ausência; o travão que acrescentei era uma segunda política na mesma porta
+e foi retirado.
 
 **O que FICA ABERTO nesta dívida, e é o que importa agora**
 
@@ -124,6 +130,38 @@ log** que o limite por IP está a agrupar por proxy. Confirmar a topologia
 do Render antes, e medir numa pré-publicação: a asserção é que dois
 pedidos com `X-Forwarded-For` diferentes e o mesmo peer contam para a
 MESMA chave.
+
+**Segunda metade desta dívida, descoberta no Lote 10 — duas políticas de
+força bruta para as duas portas do mesmo Portal**
+
+| Porta | Onde | Tentativas | Bloqueio | Colecção |
+|---|---|---|---|---|
+| Login (email + código) | `portal_brute_force` | 8 | 10 min | `portal_login_attempts` |
+| Verify (NIF + nº processo) | `portal_security` | 5 | 15 min | `portal_verify_attempts` |
+
+São duas implementações independentes da mesma ideia, e foi essa
+dispersão que me levou a declarar inexistente a segunda (procurei-a no
+handler e ela está na camada abaixo).
+
+**Porque não se consolidou agora:** a consolidação parece uma limpeza e
+tem uma armadilha — **as constantes têm de ficar POR PORTA**. Escolher um
+dos pares mudaria a política da outra em silêncio (apertar o login para 5
+tentativas bloqueia um cliente que erra um código de 6 caracteres cinco
+vezes; alargar o verify para 8/10 abre a porta que tem o espaço de busca
+mais pequeno). Uma consolidação que muda a política não é uma
+consolidação.
+
+**Quem é atingido:** ninguém hoje — as duas portas estão protegidas. O
+custo é de manutenção e de diagnóstico: uma correcção feita numa das
+implementações não chega à outra, e já foi essa divergência a produzir um
+engano de leitura.
+
+**Para fechar:** `portal_brute_force` recebe a política por âmbito
+(`POLITICAS = {porta: (tentativas, minutos, colecção)}`), com os valores
+ACTUAIS de cada porta preservados; `portal_security` passa a chamá-lo e o
+`_record_failed_attempt` desaparece. Teste de concordância a afirmar que
+cada porta mantém os seus números depois da mudança — é essa asserção que
+distingue uma consolidação de uma alteração de política.
 
 ---
 

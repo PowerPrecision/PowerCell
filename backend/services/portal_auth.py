@@ -26,7 +26,6 @@ from services.portal_brute_force import (
     AMBITO_DO_LOGIN,
     MAX_TENTATIVAS,
     MINUTOS_DE_BLOQUEIO,
-    AMBITO_DO_VERIFY,
     exigir_sem_bloqueio,
     limpar,
     registar_falha,
@@ -262,13 +261,19 @@ async def run_verify_portal_login(client_id: str, data: dict):
 
     SEGURANÇA:
     - NIF é cruzado via blind index (SHA-256) — nunca exposto em plain text na query
-    - Protecção contra brute-force: travão por `client_id`
-      (`portal_brute_force`, 8 tentativas, 10 min de bloqueio).
-      **ATÉ AO LOTE 10 ESTA LINHA ERA FALSA**: dizia «5 tentativas,
-      lockout de 15 min» e não havia uma única linha de código a contar
-      tentativas. O ataque é concreto — o `client_id` vem no link, o
-      `process_number` é um inteiro sequencial e o NIF tem nove dígitos:
-      fixando um e iterando o outro, o espaço de busca é pequeno.
+    - Protecção contra brute-force: **5 tentativas, lockout de 15 min**,
+      implementada em `portal_security.verify_client_credentials`
+      (`MAX_VERIFY_ATTEMPTS` / `VERIFY_LOCKOUT_MINUTES`, colecção
+      `portal_verify_attempts`) — a camada que conhece as credenciais.
+      Verifica o bloqueio ANTES de buscar o cliente, regista a falha em
+      cada ramo 401 e limpa o contador no sucesso.
+
+      NOTA (LOTE 10): acrescentei aqui um segundo travão por ter
+      inventariado só este módulo e concluído da ausência que esta linha
+      era falsa — não era. Dois travões na mesma porta, com constantes
+      diferentes, é pior do que um; o duplicado foi retirado. A dívida
+      REAL (duas implementações independentes da mesma política para as
+      duas portas do Portal) está registada na D-4.
     - Token de sessão tem validade de 4 horas (mais curto que magic link de 90 dias)
     - Mensagens de erro genéricas (não revelam qual campo está errado)
 
@@ -287,14 +292,6 @@ async def run_verify_portal_login(client_id: str, data: dict):
     """
     nif = data.get("nif", "").strip()
     process_number = data.get("process_number")
-
-    # O travão corre ANTES da validação do corpo e antes de qualquer
-    # verificação de credencial: o código de resposta de uma verificação é
-    # ele próprio informação sobre a credencial, e continuar a responder a
-    # quem já esgotou as tentativas era continuar a responder ao ataque.
-    # (É a mesma ordem do Incidente P0 do Portal: posse antes de
-    # conteúdo, senão a parede vira oráculo.)
-    await exigir_sem_bloqueio(db, AMBITO_DO_VERIFY, client_id)
 
     if not nif:
         raise HTTPException(status_code=400, detail="NIF é obrigatório.")
@@ -315,14 +312,10 @@ async def run_verify_portal_login(client_id: str, data: dict):
             f"[PORTAL VERIFY] Falha na verificação para client_id={client_id}: "
             f"status={e.status_code}, detail={e.detail}"
         )
-        # Só uma credencial ERRADA conta como tentativa. Um 400 por corpo
-        # mal formado não é uma adivinha, e contá-lo deixava um cliente
-        # com o formulário a dar erro a caminho do bloqueio.
-        if e.status_code not in (400, 422):
-            await registar_falha(db, AMBITO_DO_VERIFY, client_id)
+        # O registo da tentativa é do `verify_client_credentials`, que o
+        # faz em cada ramo 401 — e de propósito NÃO o faz no 400 de
+        # formato de NIF, porque um corpo mal formado não é uma adivinha.
         raise
-
-    await limpar(db, AMBITO_DO_VERIFY, client_id)
 
     # Gerar token de sessão verificada
     session_token = create_verified_session_token(

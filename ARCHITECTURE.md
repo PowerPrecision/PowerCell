@@ -8912,17 +8912,41 @@ Cobertura: `tests/unit/test_extracao_profunda_do_anunciante.py` (49),
 
 ## D-4 no Portal: o travão de tentativas e os nove limites (LOTE 10)
 
-### A guarda que vivia na docstring
+### A guarda que eu disse que não existia — e existia
 
-`run_verify_portal_login` — o ecrã de entrada do Portal, que pede **NIF +
-número do processo** — prometia na própria docstring «Protecção contra
-brute-force: 5 tentativas, lockout de 15 min» e **não tinha uma linha de
-código a contar tentativas**. A frase é exactamente o que faz alguém não ir
-verificar.
+**Afirmei que o `run_verify_portal_login` prometia na docstring «5
+tentativas, lockout de 15 min» e não tinha uma linha de código a contar
+tentativas. Estava errado.** O travão dessa porta existe, está completo e
+diz exactamente 5/15: vive em `portal_security.verify_client_credentials`
+(`MAX_VERIFY_ATTEMPTS`, `VERIFY_LOCKOUT_MINUTES`, colecção
+`portal_verify_attempts`) — a camada que conhece as credenciais. Lê o
+bloqueio **antes** de buscar o cliente, regista a falha em cada ramo 401 e
+limpa o contador no sucesso. E um 400 de formato de NIF já não contava,
+porque o registo só corre nos ramos 401.
 
-O ataque é concreto: o `client_id` vem no link do Portal, o `process_number`
-é um inteiro **sequencial** e o NIF tem nove dígitos com dígito de controlo.
-Fixando um e iterando o outro, o espaço de busca é pequeno.
+O erro nasceu de **inventariar UM módulo e concluir da ausência** — é
+literalmente a lição dos três produtores de token do CRM («o erro nasceu de
+inventariar UM produtor») e a do `assignment_drift` («uma dedução sobre
+quem escreve o quê vale o inventário que a suporta, e o inventário nunca
+está provado»). O travão que acrescentei ao `verify` era uma **segunda
+política na mesma porta**, com constantes diferentes (8/10 contra 5/15) e
+noutra colecção, e foi **retirado**: dois travões na mesma porta é pior do
+que um, porque passam a poder discordar sobre quem está bloqueado.
+
+**Foi uma mutação SOBREVIVENTE que me mandou olhar.** A mutação «um 400
+passa a gastar tentativas» não matou nenhum teste, porque o meu teste usava
+`{"nif": ""}` — um 400 levantado no corpo da função, **antes** do `try`, que
+o `except HTTPException` nunca vê. Ao procurar o caso em que a guarda era
+observável, encontrei o travão verdadeiro uma camada abaixo.
+
+**O que fica deste lote nesta porta:** nada no `verify` — a protecção já
+estava lá — e o ponto único do **login por email**, que tinha a política
+escrita à mão em ~55 linhas mais uma segunda cópia no
+`_record_login_attempt`, no mesmo ficheiro.
+
+A dívida REAL que isto revelou está na D-4: **duas implementações
+independentes da mesma política para as duas portas do mesmo Portal**, com
+constantes e colecções diferentes.
 
 ### Dois eixos, e são precisos os dois
 
@@ -8947,13 +8971,14 @@ número de processo sequencial não é travão nenhum. (E `client_portal` não
 está em `RATE_LIMITS_BY_ROLE`, pelo que cai no `default` de 600 — mais alto
 do que o de `cliente`.)
 
-### `services/portal_brute_force.py` — ponto único
+### `services/portal_brute_force.py` — ponto único do login por email
 
-O login por email já tinha um lockout, escrito à mão em ~55 linhas, com uma
-**segunda cópia** da mesma política no `_record_login_attempt`. Hoje os dois
-ecrãs usam o mesmo módulo, com âmbitos separados (`portal_login:<email>`,
-`portal_verify:<client_id>`): tentativas num não gastam as do outro, porque
-são portas diferentes.
+O login por email tinha um lockout escrito à mão em ~55 linhas, com uma
+**segunda cópia** da mesma política no `_record_login_attempt`, no mesmo
+ficheiro. Duas cópias divergem na primeira mudança, e aqui a divergência
+tinha a forma de dois contadores a tratar o mesmo email. Hoje é um módulo.
+O âmbito da chave (`portal_login:<email>`) é um **parâmetro**, para uma
+porta nova não gastar as tentativas de outra.
 
 Seis regras com teste:
 

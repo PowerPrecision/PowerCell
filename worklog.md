@@ -10840,13 +10840,15 @@ No ecrã: coluna «Agência / Comercial» na tabela e bloco no cartão do
 quadro, com `tel:`/`mailto:`, a central **rotulada**, e os campos novos
 dentro da pesquisa.
 
-**D-4:** os nove POST do Portal ganharam limite e `response: Response`.
-Mas o achado foi outro — o `run_verify_portal_login` prometia na
-docstring «Protecção contra brute-force: 5 tentativas, lockout de 15
-min» e **não tinha uma linha de código a contar tentativas**.
-`services/portal_brute_force.py` é hoje o ponto único, partilhado com o
-login por email (que tinha ~55 linhas à mão e uma segunda cópia da
-política no `_record_login_attempt`).
+**D-4:** os nove POST do Portal ganharam limite e `response: Response`,
+e o login por email passou a ter um ponto único
+(`services/portal_brute_force.py`) em vez de ~55 linhas à mão mais uma
+segunda cópia da política no `_record_login_attempt`, no mesmo ficheiro.
+
+**E aqui enganei-me a sério — ver a secção da correcção, mais abaixo.**
+Afirmei que o `run_verify_portal_login` prometia «5 tentativas, lockout
+de 15 min» na docstring e não tinha código a contar tentativas. O travão
+existe, uma camada abaixo, e diz exactamente esses números.
 
 ## Três enganos meus, e um que não era engano
 
@@ -10912,6 +10914,45 @@ Ficaram cinco testes, incluindo o que afirma que o declarado passa pelas
 **mesmas recusas** — ganha peso, não dispensa, porque o `agency_link` sai
 de texto de descrição de um anúncio, que é conteúdo de terceiros.
 
+## A correcção: afirmei que uma guarda não existia, e existia
+
+O achado que publiquei como o maior deste lote — «o `verify` prometia
+força bruta na docstring e não tinha código nenhum» — **era falso**.
+
+O travão dessa porta existe em `portal_security.verify_client_credentials`
+e diz **exactamente** o que a docstring promete: `MAX_VERIFY_ATTEMPTS = 5`,
+`VERIFY_LOCKOUT_MINUTES = 15`, colecção `portal_verify_attempts`. Lê o
+bloqueio antes de buscar o cliente, regista a falha em cada ramo 401 e
+limpa o contador no sucesso. Um 400 de formato de NIF já não contava,
+porque o registo só corre nos ramos 401 — ou seja, a guarda que
+acrescentei para isso resolvia um problema que não existia.
+
+**Como me enganei:** li o `run_verify_portal_login`, não encontrei lá
+nada, e concluí da ausência. É literalmente a lição dos três produtores de
+token do CRM — «o erro nasceu de inventariar UM produtor» — e a do
+`assignment_drift`: *uma dedução sobre quem faz o quê vale o inventário
+que a suporta, e o inventário nunca está provado.* A função que faltava
+ver era a que o handler CHAMA.
+
+**O custo da minha correcção foi pior do que o defeito imaginado:** passei
+a ter DUAS políticas de força bruta na mesma porta, com constantes
+diferentes (8/10 contra 5/15) e em colecções diferentes. Dois travões na
+mesma porta podem discordar sobre quem está bloqueado — e isso é um
+defeito a sério, não uma redundância inofensiva. O meu foi retirado.
+
+**O que me mandou olhar foi uma mutação sobrevivente.** A mutação «um 400
+passa a gastar tentativas» não matou teste nenhum: o meu teste usava
+`{"nif": ""}`, que levanta o 400 no corpo da função, **antes** do `try` —
+o `except HTTPException` nunca o vê, logo a guarda não era exercitada por
+ali. Ao procurar o caso em que ela seria observável (um 400 vindo de
+DENTRO do `verify_client_credentials`, que valida o formato do NIF),
+encontrei o travão verdadeiro. **Terceira sobrevivente deste lote, e a
+terceira a apontar para um teste meu a medir o caminho errado — mas a
+única a apontar para uma afirmação minha errada sobre o sistema.**
+
+Os testes do `verify` foram **repontados** para a camada onde a guarda
+vive, em vez de apagados: a porta tem de continuar coberta deste lado.
+
 ## O que fica aberto, e é importante
 
 A D-4 **não fecha** com este lote, e a razão está escrita lá. O
@@ -10927,3 +10968,12 @@ com `TRUSTED_PROXY_HOPS`): com o número errado, todos os clientes
 colapsam numa só chave e o limite tranca o sistema inteiro a 10
 pedidos/minuto. Trocar uma porta aberta por uma avaria não é uma
 correcção.
+
+E fica a dívida que o meu engano revelou, também na D-4: **as duas portas
+do Portal têm duas implementações independentes da mesma política** — o
+login por email em `portal_brute_force` (8 tentativas / 10 min,
+`portal_login_attempts`) e o verify em `portal_security` (5 / 15,
+`portal_verify_attempts`). Consolidar é o passo certo, e a regra para o
+fazer é que **as constantes têm de ficar POR PORTA**: escolher um dos
+pares mudaria a política de uma delas em silêncio, que é o oposto do que
+uma consolidação deve fazer.

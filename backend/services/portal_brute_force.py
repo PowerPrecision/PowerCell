@@ -2,18 +2,37 @@
 
 O QUE CORREU MAL (LOTE 10, D-4)
 ===============================
-O `run_verify_portal_login` — o ecrã de login do Portal, que pede **NIF +
-número do processo** — prometia na própria docstring «Protecção contra
-brute-force: 5 tentativas, lockout de 15 min» e **não tinha uma linha de
-código de lockout**. Terceira vez neste projecto que uma guarda vive na
-documentação e não no código (o `_get_client_base_path` da D-19 e o `_2`
-do `s3_folder_relink` foram as outras duas), e a pior das três, porque a
-frase é precisamente o que faz alguém não ir verificar.
+O `run_portal_login` — a entrada por **email + código de acesso** — tinha
+a política de força bruta escrita à mão em ~55 linhas **e uma segunda
+cópia** no `_record_login_attempt`, no mesmo ficheiro. Duas cópias da
+mesma política divergem na primeira mudança, e aqui a divergência tinha a
+forma de dois contadores a tratar o mesmo email.
 
-O ataque é concreto: o `client_id` vem no link do portal, o
-`process_number` é um INTEIRO sequencial e o NIF tem nove dígitos com
-dígito de controlo. Fixando um e iterando o outro, o espaço de busca é
-pequeno — e não havia nada a contar as tentativas.
+Este módulo é o ponto único dessa porta.
+
+**UMA CORRECÇÃO AO QUE ESTE MÓDULO AFIRMOU PRIMEIRO.** A versão inicial
+dizia que o `run_verify_portal_login` prometia «5 tentativas, lockout de
+15 min» na docstring e não tinha código nenhum a contar tentativas.
+**Era falso.** O travão dessa porta existe, está completo e diz
+exactamente 5/15 — vive em `portal_security.verify_client_credentials`
+(`MAX_VERIFY_ATTEMPTS`, `VERIFY_LOCKOUT_MINUTES`, colecção
+`portal_verify_attempts`), que é a camada que conhece as credenciais: lê
+o bloqueio antes de buscar o cliente, regista em cada ramo 401 e limpa no
+sucesso.
+
+O erro nasceu de **inventariar UM módulo e concluir da ausência** — é
+literalmente a lição dos três produtores de token do CRM («o erro nasceu
+de inventariar UM produtor») e a do `assignment_drift` («uma dedução
+sobre quem escreve o quê vale o inventário que a suporta, e o inventário
+nunca está provado»). O travão que acrescentei ao `verify` era uma
+SEGUNDA política na mesma porta, com constantes diferentes (8/10 contra
+5/15) e noutra colecção, e foi retirado: dois travões na mesma porta é
+pior do que um, porque passam a poder discordar sobre quem está
+bloqueado.
+
+A dívida REAL que isto revelou — duas implementações independentes da
+mesma política para as duas portas do mesmo Portal — está registada na
+D-4.
 
 O LIMITE DE PEDIDOS NÃO SUBSTITUI ISTO
 ======================================
@@ -24,9 +43,9 @@ Os dois eixos respondem a perguntas diferentes e são precisos os dois:
   `X-Forwarded-For`, que é um cabeçalho que o cliente envia. Quem
   ataca muda-o a cada pedido e o limite nunca morde. Fica como primeira
   linha, honesta sobre o que vale (ver D-4);
-* o lockout conta por IDENTIDADE (o email no login, o `client_id` no
-  verify), que é o que o atacante NÃO pode variar sem desistir do alvo.
-  É este o eixo que fecha a porta.
+* o lockout conta por IDENTIDADE (o email, aqui; o `client_id`, no
+  travão do `portal_security`), que é o que o atacante NÃO pode variar
+  sem desistir do alvo. É este o eixo que fecha a porta.
 
 CONSEQUÊNCIA QUE SE ASSUME
 ==========================
@@ -53,11 +72,13 @@ MAX_TENTATIVAS = 8
 #: Minutos de bloqueio depois de esgotadas as tentativas.
 MINUTOS_DE_BLOQUEIO = 10
 
-#: Os prefixos de chave em uso. São o ÂMBITO do travão: tentativas de
-#: login por email não gastam as tentativas de verificação por processo.
+#: O prefixo de chave em uso. O âmbito é um PARÂMETRO (`chave_do_travao`
+#: recebe-o), para uma porta nova não gastar as tentativas de outra; mas
+#: só se declara a constante que tem chamador — declarei
+#: `AMBITO_DO_VERIFY` e `AMBITO_DO_MFA` sem os usar, e uma constante sem
+#: chamador lê-se como código vivo (foi o que o `AGENCY_LINK_TEXTS`
+#: ensinou neste mesmo lote).
 AMBITO_DO_LOGIN = "portal_login"
-AMBITO_DO_VERIFY = "portal_verify"
-AMBITO_DO_MFA = "portal_mfa"
 
 
 def chave_do_travao(ambito: str, identidade) -> str:
@@ -223,8 +244,6 @@ async def limpar(db, ambito: str, identidade) -> None:
 
 __all__ = [
     "AMBITO_DO_LOGIN",
-    "AMBITO_DO_MFA",
-    "AMBITO_DO_VERIFY",
     "MAX_TENTATIVAS",
     "MINUTOS_DE_BLOQUEIO",
     "chave_do_travao",
