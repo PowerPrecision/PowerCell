@@ -14,6 +14,69 @@ from database import db
 logger = logging.getLogger(__name__)
 
 
+async def carimbo_da_visita(
+    process: dict | None, user: dict | None = None
+) -> dict:
+    """O carimbo de tenant a gravar numa visita nova (Lote 9, D-21).
+
+    PONTO ÚNICO PARA OS DOIS ESCRITORES
+    ===================================
+    Havia dois, com origens DIFERENTES para o mesmo campo: a criação pela
+    equipa gravava `user.get("company_id")` — que o documento de
+    utilizador **não tem** (tem `company`, o NOME; o `company_id` vive no
+    UCR) — e o Portal gravava o `company_id` do processo. Uma das duas
+    estava sempre vazia, e `network_id` não existia em sítio nenhum.
+
+    **O PROCESSO é a autoridade, não quem grava.** Uma visita é sempre
+    sobre um processo, e o processo já leva o carimbo certo desde o Lote
+    4. Derivar do utilizador deixava a visita na empresa DELE, que pode
+    ser outra empresa da mesma rede — e no Portal não há utilizador de
+    equipa nenhum de quem derivar.
+
+    Recurso: sem processo carimbado, usa-se o `resolve_tenant_stamp` do
+    utilizador (caminho da equipa). Sem nenhum dos dois devolve `{}` —
+    **meio carimbo é pior do que nenhum**, porque carimbar a rede errada
+    é permanente, e sem carimbo a visita cai na pilha por carimbar, que a
+    migração resolve depois.
+    """
+    from services.tenant_network import CAMPO_REDE, resolve_tenant_stamp
+
+    rede = str((process or {}).get(CAMPO_REDE) or "").strip()
+    if rede:
+        carimbo = {
+            "company_id": (process or {}).get("company_id"),
+            "company_name": (process or {}).get("company_name"),
+            CAMPO_REDE: rede,
+        }
+        return {k: v for k, v in carimbo.items() if v}
+
+    if user:
+        try:
+            return await resolve_tenant_stamp(user) or {}
+        except Exception as exc:  # observa, não intercepta
+            logger.warning("[VISITS] Falha a resolver o carimbo: %s", exc)
+    return {}
+
+
+#: A projecção mínima de um processo para carimbar e enriquecer a visita.
+#: Escrita aqui para os dois escritores não divergirem: um projecção sem
+#: `network_id` fazia o carimbo cair sempre no recurso do utilizador, em
+#: silêncio.
+PROJECCAO_DO_PROCESSO = {
+    "_id": 0,
+    "id": 1,
+    "client_name": 1,
+    "client_email": 1,
+    "client_phone": 1,
+    "status": 1,
+    "assigned_consultor_id": 1,
+    "process_number": 1,
+    "company_id": 1,
+    "company_name": 1,
+    "network_id": 1,
+}
+
+
 async def _create_calendar_event_for_visit(visit: dict):
     """
     Cria um registo na coleção de deadlines (calendário do CRM)
@@ -135,94 +198,48 @@ async def _update_portal_visit_status(visit: dict, new_status: str, scheduled_da
 
 
 async def _run_scraper_for_visit(visit_id: str, url: str):
-    """
-    Invoca o scraper em background para extrair dados do imóvel
-    a partir de um URL (Idealista/Imovirtual).
+    """Extrai os dados do imóvel e grava-os na visita (caminho do CRM).
 
-    Atualiza o documento da visita com os dados extraídos.
+    LOTE 9 (D-23) — ESTE MAPEADOR ERA ESCRITO À MÃO, E JÁ DIVERGIA
+    Havia dois — este e o `_background_visit_scraper_and_notify` do
+    Portal — a traduzir o MESMO resultado para os MESMOS campos. E já
+    divergiam: o do Portal guardava `raw_data`, este não, pelo que uma
+    visita criada no CRM perdia também `quartos`, `casas_banho`,
+    `certificado_energetico`, `ano_construcao`, `descricao` e
+    `referencia`. Os dois passaram a derivar de `ficha_do_imovel`.
     """
+    from services.visit_property_extract import (
+        VEREDICTO_ERRO,
+        VEREDICTO_SEM_DADOS,
+        ficha_do_imovel,
+    )
+
     try:
         from services.property_scraper import extract_property_data
         scraped_result = await extract_property_data(url)
+    except Exception as exc:
+        logger.warning("[VISITS] Scraper rebentou para a visita %s: %s",
+                       visit_id, exc)
+        scraped_result = None
 
-        # source == "error" is a soft failure from the scraper — treat as error
-        if scraped_result.source == "error":
-            raw = getattr(scraped_result, "raw_data", None) or {}
-            err_msg = raw.get("error") or "Falha ao extrair dados do imóvel"
-            await db.visits.update_one(
-                {"id": visit_id},
-                {"$set": {
-                    "scraper_status": "error",
-                    "scraper_error": str(err_msg),
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }}
-            )
-            logger.warning(f"[VISITS] Scraper retornou erro para visita {visit_id}: {err_msg}")
-            return
+    agora = datetime.now(timezone.utc).isoformat()
+    ficha = ficha_do_imovel(scraped_result, url=url, agora=agora)
 
-        scraped_data = {
-            "title": scraped_result.title,
-            "price": scraped_result.price,
-            "location": scraped_result.location,
-            "typology": scraped_result.typology,
-            "area": scraped_result.area,
-            "photo_url": scraped_result.photo_url,
-            "source": scraped_result.source,
-            "url": url,
-            "consultant": {
-                "name": scraped_result.consultant.name if scraped_result.consultant else None,
-                "phone": scraped_result.consultant.phone if scraped_result.consultant else None,
-                "email": scraped_result.consultant.email if scraped_result.consultant else None,
-                "agency_name": scraped_result.consultant.agency_name if scraped_result.consultant else None,
-            } if scraped_result.consultant else None,
-        }
+    try:
+        await db.visits.update_one({"id": visit_id}, {"$set": ficha.campos})
+    except Exception as exc:
+        logger.warning("[VISITS] Erro ao gravar a extracção da visita %s: %s",
+                       visit_id, exc)
+        return
 
-        # Atualizar visita com dados do scraper
-        update_fields = {
-            "scraped_data": scraped_data,
-            "scraped_url": url,
-            "scraper_status": "completed",
-            "scraper_error": None,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-        # Auto-popular campos da visita com dados extraídos
-        if scraped_data.get("title"):
-            update_fields["property_title"] = scraped_data["title"]
-
-        if scraped_data.get("price"):
-            update_fields["scraped_price"] = scraped_data["price"]
-
-        if scraped_data.get("photo_url"):
-            update_fields["property_photo"] = scraped_data["photo_url"]
-
-        if scraped_data.get("location"):
-            update_fields["property_address"] = {
-                "municipality": scraped_data["location"],
-                "district": "",
-            }
-
-        if scraped_data.get("typology"):
-            update_fields["scraped_typology"] = scraped_data["typology"]
-
-        await db.visits.update_one(
-            {"id": visit_id},
-            {"$set": update_fields}
-        )
-
-        logger.info(f"[VISITS] Scraper completado para visita {visit_id}: {scraped_data.get('title', 'sem título')}")
-
-    except Exception as e:
-        logger.warning(f"[VISITS] Erro no scraper para visita {visit_id}: {e}")
-        # Marcar erro no scraper
-        try:
-            await db.visits.update_one(
-                {"id": visit_id},
-                {"$set": {
-                    "scraper_status": "error",
-                    "scraper_error": str(e),
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }}
-            )
-        except Exception:
-            pass
+    if ficha.veredicto == VEREDICTO_ERRO:
+        logger.warning("[VISITS] Extracção falhou para a visita %s: %s",
+                       visit_id, ficha.motivo)
+    elif ficha.veredicto == VEREDICTO_SEM_DADOS:
+        # O terceiro veredicto, que não existia: um anúncio que responde
+        # 200 com tudo vazio contava como sucesso, e a visita ficava sem
+        # um único dado — indistinguível de um imóvel sem informação.
+        logger.warning("[VISITS] Visita %s: %s (%s)",
+                       visit_id, ficha.motivo, url)
+    else:
+        logger.info("[VISITS] Extracção concluída para a visita %s", visit_id)

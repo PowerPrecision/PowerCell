@@ -2042,6 +2042,11 @@ export default function ClientPortal() {
   const [visitUrl, setVisitUrl] = useState('');
   const [requestingVisit, setRequestingVisit] = useState(false);
   const [visitRequestResult, setVisitRequestResult] = useState(null);
+  // O contador do separador DERIVA da lista (e não de uma segunda
+  // contagem escrita no JSX, que divergia na primeira mudança).
+  const pedidosDeVisitaPendentes = Array.isArray(visits)
+    ? visits.filter((v) => v?.status === 'solicitada').length
+    : 0;
 
   // PACOTE DH — Próximos Eventos (Agenda do processo visível no Portal).
   // Só eventos/prazos marcados com visible_to_client=true aparecem aqui.
@@ -2224,7 +2229,10 @@ export default function ClientPortal() {
       });
       if (res.ok) {
         const data = await res.json();
-        setVisits(data.visits || []);
+        // `|| []` não protege: um objecto é truthy, logo a lista
+        // ficava a ser um objecto e o `.filter` rebentava noutro sítio
+        // (§ 27.38 — `Array.isArray`, nunca `|| []`).
+        setVisits(Array.isArray(data?.visits) ? data.visits : []);
       }
     } catch {
       // silently fail
@@ -2495,26 +2503,29 @@ export default function ClientPortal() {
                 <span className="hidden sm:inline">Agenda</span>
                 <span className="sm:hidden">Cal</span>
               </button>
-              {/* PACOTE CB — Botão "As Minhas Visitas" temporariamente oculto.
-                  O código da Tab 'visitas' em baixo está mantido (apenas comentado
-                  o botão de acesso) para reativação futura. */}
-              {/* <button
+              {/* LOTE 9 (Fase B) — reactivado. O PACOTE CB comentou o BOTÃO e
+                  deixou a tab escrita: o endpoint, o scraper e o ecrã existiam
+                  todos, e a funcionalidade estava inalcançável por três linhas
+                  de comentário. As cores passaram a tokens semânticos (a regra
+                  do ESLint) para igualar os separadores vizinhos. */}
+              <button
+                type="button"
                 onClick={() => setActiveTab('visitas')}
                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                   activeTab === 'visitas'
-                    ? 'bg-violet-600 text-white shadow-md'
-                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                    ? 'bg-primary text-primary-foreground shadow-md'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
               >
                 <Home className="w-4 h-4" />
                 <span className="hidden sm:inline">As Minhas Visitas</span>
                 <span className="sm:hidden">Visitas</span>
-                {visits.filter(v => v.status === 'solicitada').length > 0 && (
-                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-violet-200 text-violet-800 text-[10px] font-bold">
-                    {visits.filter(v => v.status === 'solicitada').length}
+                {pedidosDeVisitaPendentes > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-secondary text-secondary-foreground text-[10px] font-bold">
+                    {pedidosDeVisitaPendentes}
                   </span>
                 )}
-              </button> */}
+              </button>
             </div>
 
             {/* ── Tab Content ── */}
@@ -2675,7 +2686,7 @@ export default function ClientPortal() {
                         // Refresh visits list immediately (force reload even if already loaded)
                         try {
                           const vRes = await fetch(`${BACKEND_URL}/portal/visits`, { headers: { Authorization: `Bearer ${token}` } });
-                          if (vRes.ok) { const vData = await vRes.json(); setVisits(vData.visits || []); }
+                          if (vRes.ok) { const vData = await vRes.json(); setVisits(Array.isArray(vData?.visits) ? vData.visits : []); }
                         } catch (vErr) {
                           console.warn('[PORTAL] Erro ao atualizar lista de visitas:', vErr);
                         }

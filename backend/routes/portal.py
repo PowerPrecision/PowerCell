@@ -224,8 +224,22 @@ async def get_recommendations_for_client(
     return await run_get_recommendations_for_client(client_data)
 
 
+# LOTE 9 (Fase B) — este endpoint faz o servidor ir BUSCAR um URL que o
+# cliente escolhe, com anti-bot e seguimento de links, e ainda escreve um
+# registo e notifica a equipa. O SSRF está validado no `scraper.py` (IPs
+# privados recusados), logo não é pivô para a rede interna — mas sem
+# limite era amplificação e custo de IA sem tecto, na única superfície
+# externa. No Portal o `sub` do JWT é o `process_id`, logo o limite é POR
+# PROCESSO.
+#
+# O `response: Response` na assinatura NÃO é decorativo: o limiter corre
+# com `headers_enabled=True` e, sem ele, o caminho de SUCESSO devolve 500
+# (incidente de Set 2026, onze dos catorze endpoints limitados).
 @router.post("/visits/request")
+@limiter.limit("10/minute")
 async def request_portal_visit(
+    request: Request,
+    response: Response,
     data: dict,
     background_tasks: BackgroundTasks,
     client_data: dict = Depends(get_current_client),

@@ -1865,7 +1865,16 @@ class PropertyScraper:
         Returns:
             Dict com dados extraídos ou erro
         """
-        # Obter modelo configurado
+        # LOTE 9 (D-22) — ATÉ AQUI, ISTO ERA DECORATIVO.
+        # O modelo configurado era lido, REGISTADO no log («Usando modelo
+        # configurado: X») e depois ignorado: a chamada era
+        # `genai.GenerativeModel("gemini-2.0-flash")`, literal, e o
+        # `ai_usage_tracker` recebia o mesmo literal — logo o relatório de
+        # custos atribuía a despesa ao modelo errado. **O log a dizer o
+        # contrário é o que tornava isto difícil de ver.** É o defeito que
+        # o `test_nenhuma_chamada_usa_a_constante_fixa` existe para
+        # impedir («Modelo de IA: nunca fixo no código»), num módulo que
+        # essa guarda não cobria.
         configured_model = await self._get_ai_model_for_scraping()
         logger.info(f"Usando modelo configurado: {configured_model}")
         
@@ -1951,7 +1960,7 @@ Conteúdo:
             
             # Usar Gemini 2.0 Flash com modo JSON nativo
             model = genai.GenerativeModel(
-                "gemini-2.0-flash",
+                configured_model,
                 generation_config={"response_mime_type": "application/json"}
             )
             response = model.generate_content(prompt)
@@ -1974,10 +1983,10 @@ Conteúdo:
             response_time = int((time.time() - start_time) * 1000)
             try:
                 from services.ai_usage_tracker import ai_usage_tracker, estimate_cost
-                cost = estimate_cost("gemini-2.0-flash", input_tokens, output_tokens)
+                cost = estimate_cost(configured_model, input_tokens, output_tokens)
                 await ai_usage_tracker.log_usage(
                     task="scraper_extraction",
-                    model="gemini-2.0-flash",
+                    model=configured_model,
                     provider="gemini",
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -2030,7 +2039,7 @@ Conteúdo:
                 "foto_principal": data.get("foto_principal"),
                 "url_planta": data.get("url_planta"),
                 "url_video": data.get("url_video"),
-                "_extracted_by": "gemini-2.0-flash"
+                "_extracted_by": configured_model
             }
             
         except json.JSONDecodeError as e:
@@ -2039,10 +2048,10 @@ Conteúdo:
             try:
                 from services.ai_usage_tracker import ai_usage_tracker, estimate_cost
                 response_time = int((time.time() - start_time) * 1000)
-                cost = estimate_cost("gemini-2.0-flash", input_tokens, 0)
+                cost = estimate_cost(configured_model, input_tokens, 0)
                 await ai_usage_tracker.log_usage(
                     task="scraper_extraction",
-                    model="gemini-2.0-flash",
+                    model=configured_model,
                     provider="gemini",
                     input_tokens=input_tokens,
                     cost=cost,
@@ -2063,7 +2072,7 @@ Conteúdo:
                     from services.ai_usage_tracker import ai_usage_tracker
                     await ai_usage_tracker.log_usage(
                         task="scraper_extraction",
-                        model="gemini-2.0-flash",
+                        model=configured_model,
                         provider="gemini",
                         success=False,
                         error_message="quota_exceeded"

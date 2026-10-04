@@ -7,19 +7,55 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
+from typing import Optional
+
+from fastapi import HTTPException, Request
 
 from database import db
+from services.tenant_access_context import carregar_contexto_de_acesso
 from services.visit_helpers import (
     _create_calendar_event_for_visit,
     _remove_calendar_event_for_visit,
     _update_portal_visit_status,
 )
+from services.visit_kanban_get import exigir_visita_acessivel
+from services.visit_scope import (
+    ERRO_VISITA_NAO_ENCONTRADA,
+    e_papel_de_equipa_nas_visitas,
+    pode_atribuir_a_consultor,
+    pode_mexer_na_visita,
+)
 
 logger = logging.getLogger(__name__)
 
 
-async def run_update_visit(visit_id: str, data: dict, user: dict):
+async def _redes_do_consultor(consultor_id: str) -> tuple[str, ...]:
+    """As redes do utilizador de DESTINO de uma reatribuição.
+
+    Resolve-se com o MESMO `resolve_tenant_scope` que decide o âmbito de
+    quem lê: uma segunda forma de responder «em que rede está esta
+    pessoa?» divergiria, e a que divergir autoriza a entrega do nome, do
+    email e do telefone de um cliente a quem não é dele.
+    """
+    from services.tenant_network import resolve_tenant_scope
+
+    alvo = await db.users.find_one(
+        {"id": consultor_id}, {"_id": 0, "id": 1, "company": 1}
+    )
+    if not alvo:
+        return ()
+    try:
+        return tuple((await resolve_tenant_scope(alvo)).network_ids)
+    except Exception as exc:
+        logger.warning("[VISITS] Falha a resolver as redes de %s: %s",
+                       consultor_id, exc)
+        return ()
+
+
+async def run_update_visit(
+    visit_id: str, data: dict, user: dict,
+    request: Optional[Request] = None,
+):
     """
     Actualizar visita (status, data, notas, etc.)
 
@@ -28,9 +64,19 @@ async def run_update_visit(visit_id: str, data: dict, user: dict):
     - Status → 'cancelada'/'recusada': Remove evento do calendário + atualiza portal
     - scheduled_date alterado: Atualiza evento do calendário
     """
-    visit = await db.visits.find_one({"id": visit_id})
-    if not visit:
-        raise HTTPException(status_code=404, detail="Visita não encontrada")
+    # LOTE 9 (D-21) — era `find_one({"id": visit_id})` e mais nada.
+    visit = await exigir_visita_acessivel(visit_id, user, request)
+    contexto = await carregar_contexto_de_acesso(
+        user, request, e_equipa=e_papel_de_equipa_nas_visitas,
+    )
+    if not pode_mexer_na_visita(
+        visit,
+        user_id=user.get("id"),
+        papel=contexto.papel,
+        redes=contexto.redes,
+        processos_visiveis=contexto.processos,
+    ):
+        raise HTTPException(status_code=404, detail=ERRO_VISITA_NAO_ENCONTRADA)
 
     now = datetime.now(timezone.utc).isoformat()
     update_fields = {"updated_at": now}
@@ -51,8 +97,24 @@ async def run_update_visit(visit_id: str, data: dict, user: dict):
         update_fields["notes"] = data["notes"]
 
     if "consultor_id" in data:
-        consultor = await db.users.find_one({"id": data["consultor_id"]}, {"name": 1})
-        update_fields["consultor_id"] = data["consultor_id"]
+        # A pergunta do DESTINO, separada da posse de propósito. Sem ela,
+        # um editor legítimo reatribuía a visita a um consultor de OUTRA
+        # rede e a lista dele ganhava uma linha com o nome, o email e o
+        # telefone de um cliente que não é dele — o buraco que o
+        # `pode_apontar_para_o_processo` fechou no calendário.
+        alvo_id = data["consultor_id"]
+        if alvo_id:
+            if not pode_atribuir_a_consultor(
+                await _redes_do_consultor(alvo_id),
+                papel=contexto.papel,
+                redes=contexto.redes,
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Esse consultor não pertence à sua rede.",
+                )
+        consultor = await db.users.find_one({"id": alvo_id}, {"name": 1})
+        update_fields["consultor_id"] = alvo_id
         update_fields["consultor_name"] = consultor.get("name", "") if consultor else ""
 
     await db.visits.update_one(
@@ -164,11 +226,26 @@ async def run_update_visit(visit_id: str, data: dict, user: dict):
     return updated
 
 
-async def run_cancel_visit(visit_id: str, user: dict):
-    """Cancelar visita (soft delete — muda status para 'cancelada')."""
-    visit = await db.visits.find_one({"id": visit_id})
-    if not visit:
-        raise HTTPException(status_code=404, detail="Visita não encontrada")
+async def run_cancel_visit(
+    visit_id: str, user: dict, request: Optional[Request] = None
+):
+    """Cancelar visita (soft delete — muda status para 'cancelada').
+
+    LOTE 9 (D-21) — a MESMA guarda da edição. Um consultor da Domus
+    cancelava uma visita da Power sabendo o id, sem rede e sem rasto.
+    """
+    visit = await exigir_visita_acessivel(visit_id, user, request)
+    contexto = await carregar_contexto_de_acesso(
+        user, request, e_equipa=e_papel_de_equipa_nas_visitas,
+    )
+    if not pode_mexer_na_visita(
+        visit,
+        user_id=user.get("id"),
+        papel=contexto.papel,
+        redes=contexto.redes,
+        processos_visiveis=contexto.processos,
+    ):
+        raise HTTPException(status_code=404, detail=ERRO_VISITA_NAO_ENCONTRADA)
 
     now = datetime.now(timezone.utc).isoformat()
     await db.visits.update_one(

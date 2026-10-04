@@ -2235,3 +2235,83 @@ quando a condição se resolver.
 E a mensagem **técnica** do servidor não vai para o ecrã — pode trazer o host
 interno e o código do erro. Vai a que diz o que fazer, com o caminho para o
 fazer.
+
+## 27.44 — O estado da EXTRAÇÃO não é o estado do registo
+
+O quadro de Visitas tem duas perguntas na mesma linha, e confundi-las dá
+duas respostas erradas:
+
+* **o estado da VISITA** — pedida, agendada, concluída, cancelada: o que o
+  consultor e o cliente combinaram;
+* **o estado da EXTRACÇÃO** — se o sistema conseguiu ler o anúncio.
+
+Cinco valores no segundo, e não dois:
+
+| Valor | O que diz no ecrã | Porque é próprio |
+|---|---|---|
+| `sem_url` | nada | não há nada a extrair; um relógio aqui dizia que o sistema estava a trabalhar quando não estava |
+| `pendente` | «A ler o anúncio» | é o único que mantém o polling vivo |
+| `ok` | nada | o resultado está nas outras células |
+| `sem_dados` | «Anúncio sem dados» | o anúncio respondeu 200 com tudo vazio — isto contava como sucesso e a linha ficava vazia sem explicação |
+| `erro` | «Não consegui ler» | falha de leitura, com o motivo no servidor |
+
+**O `sem_dados` não é pendente.** Tratá-lo como tal fazia a página
+recarregar de 3 em 3 segundos durante um minuto, para sempre, sobre um
+trabalho que já terminou.
+
+E a decisão de manter o polling vivo deriva de **um** predicado
+(`extraccaoEmCurso`), não de uma comparação crua `status === "pending"`
+escrita no efeito: era aí que vivia a quinta cópia da leitura das quatro
+colunas com `|| []`.
+
+## 27.45 — Uma lista para COMPARAR é uma tabela; uma lista para MOVER é um quadro
+
+O quadro de Visitas era só kanban. O kanban é a forma certa para gerir um
+fluxo — arrastar entre estados —, e é a forma errada para **comparar**:
+quando o cliente pediu quatro imóveis e a pergunta é «qual deles pelo
+preço, pela tipologia, pela área e pelo estado», uma grelha de cartões
+obriga a ler em zigue-zague e a guardar números de cabeça.
+
+A tabela passou a ser a vista por omissão e o quadro ficou atrás de um
+alternador. **Não se apaga o que funciona:** uma funcionalidade que
+estorva uma regra nova muda-se de sítio (é a regra do botão de nota de
+voz, § 27.19).
+
+Duas regras de ordenação que não se podem perder:
+
+1. **quem precisa de ACÇÃO vem primeiro.** Os pedidos do Portal não têm
+   data de agendamento, logo ordenar a tabela por data punha-os no fim —
+   onde ninguém os vê. Um pedido que ninguém vê é a forma de defeito desta
+   casa;
+2. **dentro do mesmo grupo, ordena-se por data**, e a data de referência
+   cai para `created_at` quando não há agendamento, senão as linhas sem
+   data trocam de posição a cada render.
+
+## 27.46 — A forma da resposta normaliza-se à ENTRADA, e o estado inicial tem essa forma
+
+Terceira ocorrência da mesma armadilha (`KanbanBoard` na D-20, o
+`UsersAccessAdminTab` na colisão de cache, agora a `VisitsPage`):
+
+```js
+// ERRADO — o endpoint devolve um OBJECTO de quatro colunas
+const [visits, setVisits] = useState([]);
+...
+visits.solicitadas.filter(...)   // undefined no primeiro render
+```
+
+O `|| []` por coluna tapa o sintoma e espalha a guarda: foi assim que
+quatro colunas do Kanban ficaram sem ela. A saída é a mesma três vezes:
+
+* **o estado inicial tem a forma final** (`QUADRO_VAZIO`, não `[]`);
+* **a resposta normaliza-se UMA vez, à entrada** (`normalizarQuadro`), num
+  módulo puro e testado;
+* **`Array.isArray`, nunca `|| []`** — um objecto é *truthy*, logo
+  `coluna || []` devolve o objecto e o erro muda de sítio em vez de
+  desaparecer;
+* **as contagens DERIVAM das listas** — o `total` do servidor contradiz o
+  ecrã logo que haja um filtro em memória.
+
+Corolário: o normalizador aceita as DUAS formas que o backend serve (a
+lista de `/visits` e o objecto de `/visits/kanban`), para a página não ter
+de saber de que endpoint vieram os dados — e para trocar de endpoint não
+ser uma alteração de render.

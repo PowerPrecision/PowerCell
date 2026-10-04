@@ -8296,6 +8296,225 @@ seis módulos por um motivo que nada tem a ver com o que mede.
 Cobertura: `tests/unit/test_guarda_de_escrita_do_s3_folder.py`.
 
 
+### `db.visits` não tinha fronteira nenhuma (Lote 9, Fase A — D-21)
+
+A colecção das visitas tinha as **três** formas do defeito de isolamento
+ao mesmo tempo, e cada uma com um precedente já registado neste ficheiro:
+
+| Forma | O que estava lá | Precedente |
+|---|---|---|
+| Listagens abertas | `query = {}` + `if user_role in ["consultor","intermediario"]` | `db.tasks` (Lote 4) |
+| Escritas sem posse | `find_one({"id": visit_id})` e mais nada | `run_delete_deadline` (Lote 7) |
+| Carimbo errado | `"company_id": user.get("company_id")` | a confusão id/nome de 2026-09-21 |
+
+**A consequência exacta:** um **diretor, administrativo, admin ou CEO via
+as visitas de TODAS as redes**, e o documento de uma visita leva
+`client_name`, `client_email` e `client_phone`. A Domus é uma ilha. Os
+dois papéis que escapavam — consultor e intermediário — escapavam **por
+acidente** (filtram por atribuição, que coincide quase sempre com o
+âmbito), e foi essa metade a funcionar que escondeu a outra: é a forma do
+`run_get_my_tasks`, pela quinta vez.
+
+**O carimbo nascia sempre vazio.** `visit_list_create` gravava
+`user.get("company_id")`, e o documento de utilizador tem `company` (o
+NOME) — o `company_id` vive no UCR. Logo *toda* a visita criada pela
+equipa nascia com `company_id: None`; o Portal carimbava o `company_id`
+do processo, e `network_id` não existia em sítio nenhum da colecção. Dois
+escritores, duas origens para o mesmo campo, uma delas sempre vazia.
+
+**O PROCESSO é a autoridade do carimbo.** `visit_helpers.carimbo_da_visita`
+é o ponto único dos dois escritores e deriva do processo, não de quem
+grava: uma visita é sempre sobre um processo, o processo já leva o carimbo
+certo desde o Lote 4, e no Portal não há utilizador de equipa nenhum de
+quem derivar. Sem processo carimbado cai no `resolve_tenant_stamp` do
+utilizador; sem nenhum dos dois devolve `{}` — **meio carimbo é pior do
+que nenhum**.
+
+**O contexto de acesso mudou de casa.** A resolução do papel efectivo, das
+redes e dos processos visíveis nasceu no Lote 7 dentro de
+`deadlines_api_scope` e a pergunta não é do calendário: vive hoje em
+`services/tenant_access_context.py`, com o **predicado de equipa como
+parâmetro**. Nas visitas o conjunto é outro — entra o **ADMINISTRATIVO**,
+porque é o back-office que marca e remarca visitas e estreitá-lo a «só as
+minhas» fazia-o perder de vista o que ele próprio agendou (e uma visita
+que desaparece não produz erro nenhum). Usar o conjunto do calendário
+devolvia-lhe só os processos atribuídos a ele e estreitava a vista de
+equipa **sem dar erro**.
+
+*Consequência operacional, dita de propósito:* para o `administrativo` o
+âmbito ESTREITA de «todas as redes» para «a sua rede». É a mesma mudança
+que o calendário sofreu no Lote 7, e vai no sentido seguro.
+
+**Duas perguntas, duas funções.** `pode_mexer_na_visita` é sobre a visita
+que já existe; `pode_atribuir_a_consultor` é sobre o **destino**. Sem a
+segunda, um editor legítimo reatribuía uma visita a um consultor de outra
+rede e a lista dele ganhava uma linha com o nome, o email e o telefone de
+um cliente que não é dele — o mesmo buraco que o
+`pode_apontar_para_o_processo` fechou no calendário. Falha fechada: um
+consultor sem rede determinável é recusado.
+
+**O Kanban tem construtor SEPARADO**, e foi por isso que escapou a todos
+os varrimentos anteriores — a lição do `build_kanban_query` do Lote 5:
+*um ponto único para a CONDIÇÃO não chega; é preciso inventariar as
+superfícies que LISTAM.* Hoje as duas derivam do mesmo contexto e do
+mesmo `com_isolamento`, e há um teste a afirmar que a fronteira é a mesma.
+
+**Duas mutações sobreviventes, e as duas eram testes fracos:**
+
+1. apagar o recorte por PESSOA da listagem não matava nada, porque todos
+   os testes de listagem usavam um **diretor** — e para um papel de equipa
+   esse recorte é `{}` por desenho. Faltava o caso em que a rede está
+   certa e a pessoa não (um consultor a olhar para a visita do colega);
+2. tirar o `request` das rotas também não matava nada, porque os testes
+   chamam os serviços DIRECTAMENTE. Sem o `Request` o papel efectivo não
+   se resolve e decide-se pelo cargo do JWT — a 5.ª ocorrência da forma do
+   `history._is_stealth_user`. A guarda é um **inventário por AST** sobre
+   `routes/visits.py`, que falha por omissão para um endpoint novo.
+
+### O modelo de IA do scraper era decorativo (Lote 9, Fase A — D-22)
+
+`_extract_with_gemini` lia o modelo configurado pelo administrador,
+**escrevia-o no log** («Usando modelo configurado: X») e depois chamava
+`genai.GenerativeModel("gemini-2.0-flash")`, literal. Só os modelos
+`gpt*` eram honrados, porque esses desviam para o `_extract_with_openai`
+— e foi essa metade a funcionar que escondeu a outra. O
+`ai_usage_tracker` recebia o mesmo literal, pelo que **o relatório de
+custos atribuía a despesa ao modelo errado**.
+
+É o defeito que a regra «Modelo de IA: nunca fixo no código» descreve e
+que `test_nenhuma_chamada_usa_a_constante_fixa` impede no `ai_document`,
+num módulo que essa guarda não cobria. **O log a dizer o contrário é o
+que o tornava difícil de ver:** quem fosse verificar encontrava a prova
+de que estava certo.
+
+A omissão continua no `_get_ai_model_for_scraping` — é lá que ela
+pertence, e um teste afirma-o, senão a correcção deixava o scraper sem
+modelo quando nada está configurado. O teste é **ao nível da chamada**:
+asserção sobre o parâmetro que sai para o SDK (com um
+`google.generativeai` falso injectado em `sys.modules`), nunca sobre o
+resultado — é a regra do «duplo demasiado esperto», porque um falso que
+reimplemente a escolha do modelo esconde a única coisa que esta correcção
+faz.
+
+
+### O motor de extração de imóveis: um ponto único e três veredictos (Lote 9, Fase B — D-23)
+
+**Metade da casa já lá estava, e era a metade difícil.** O
+`services/scraper.py` faz anti-bot com `curl_cffi`, **valida SSRF**
+(recusa IPs privados e reservados), tem cache, segue links para sites de
+agência e cai numa extracção por IA cujo modelo vem do painel de
+administração — sobre 11 portais portugueses. O
+`POST /api/portal/visits/request` já recebia o URL do cliente e respondia
+200 antes de o scraper correr. O que faltava não era motor; era
+integridade na tradução.
+
+**Havia DOIS mapeadores escritos à mão, e já divergiam.** O do CRM
+(`visit_helpers._run_scraper_for_visit`) e o do Portal
+(`portal_client_visits._background_visit_scraper_and_notify`) traduziam o
+MESMO resultado para os MESMOS campos — e o do Portal guardava
+`raw_data`, o do CRM não. Consequência exacta: uma visita criada no CRM
+perdia `quartos`, `casas_banho`, `certificado_energetico`,
+`ano_construcao`, `descricao` e `referencia`. Duas cópias de uma tradução
+divergem na primeira mudança, e a que divergir não dá erro: devolve
+menos.
+
+**E o `raw_data` era uma lista de ONZE chaves sobre ~30 devolvidas.** O
+`estado` do imóvel — que o prompt da IA pede pelo nome, e um dos campos
+que o quadro novo precisa — nunca chegou a sítio nenhum. É a forma do
+`naturalidade` do `AI_SUGGESTION_FIELD_MAP`: o lado que traduz descarta
+em silêncio o que não conhece, e a extracção parece ter corrido bem. Hoje
+`raw_data_do_scraper` **DERIVA**: fora da lista das chaves que já têm
+nome próprio, tudo passa — e um campo novo no prompt chega ao mesmo
+destino sem ninguém se lembrar de o acrescentar.
+
+**Três veredictos, não dois.** O estado era `completed`/`error` e faltava
+o caso do meio: um portal que mude o HTML responde 200 com **tudo vazio**,
+e isso contava como sucesso — a visita ficava com
+`scraper_status: completed` e sem um único dado, indistinguível de um
+imóvel sem informação. `sem_dados` é um veredicto próprio, dito no ecrã
+(«Anúncio sem dados») e contável.
+
+**Nada se sobrescreve com vazio.** Só se emitem os campos que têm valor:
+um segundo scraping que falhe parcialmente não pode apagar o título que o
+primeiro leu. E um **preço ou área ZERO é um valor**, não uma ausência —
+`is not None`, nunca `if valor`, que é a armadilha do `|| 30` do Kanban.
+
+**Um defeito de números que o teste apanhou:** `"185.000 €"` dava `185`.
+A regra do milhar é ESTREITA de propósito (`^\d{1,3}(\.\d{3})+$`): só
+grupos de exactamente três dígitos contam como separador, e `1234.56`,
+`95.5` ou `120.75` continuam decimais. Adivinhar ali trocava um preço por
+outro, e um `float()` cru rebentava o pipeline de FUNDO — onde a excepção
+fica num log que ninguém lê.
+
+**O limite de pedidos.** O endpoint do Portal faz o servidor abrir uma
+ligação de saída para um URL que o cliente escolhe, com anti-bot, e pode
+chamar um modelo pago. O SSRF está validado, logo não é pivô para a rede
+interna; o que sobrava era **amplificação e custo sem tecto na única
+superfície externa**. Ganhou `@limiter.limit("10/minute")` — no Portal o
+`sub` do JWT é o `process_id`, logo o limite é POR PROCESSO — e o
+`response: Response` na assinatura, sem o qual o caminho de SUCESSO
+devolve 500 (incidente de Set 2026). A mutação que removeu o decorador
+sobreviveu à primeira medição: a guarda existente verifica que um
+endpoint LIMITADO declara `request`/`response`, e nada afirmava que este
+tinha de estar limitado.
+
+**E a tarefa de fundo era crua.** `asyncio.create_task` sem referência
+forte — exactamente o que `services/background_tasks.py` existe para
+evitar. Recolhida pelo GC, a visita fica para sempre em
+`scraper_status: pending` e o ecrã diz «a ler o anúncio» de um trabalho
+que já ninguém está a fazer: um erro que aponta para o portal imobiliário
+quando a causa é o garbage collector. É o defeito do `email_webmail`
+outra vez, e o próprio corredor de testes o denunciava em cada execução
+com «Task was destroyed but it is pending».
+
+Cobertura: `tests/unit/test_ficha_do_imovel.py`,
+`tests/unit/test_scraper_modelo_configurado.py`.
+
+### O quadro de Visitas: a forma do servidor normaliza-se uma vez (Lote 9, Fase B)
+
+A `VisitsPage` tinha `useState([])` — um ARRAY — e `/visits/kanban`
+devolve um OBJECTO com quatro colunas. No primeiro render
+`visits.solicitadas` é `undefined`, e só um `|| []` por coluna impedia o
+`.filter` de rebentar; o `total` vinha do servidor e contradizia o ecrã
+depois de uma pesquisa em memória. **É a forma do `KanbanBoard` da D-20**,
+numa página que — como o Kanban antes da D-20 — nunca tinha sido montada
+num teste.
+
+`utils/visitasDashboard.js` é o ponto único, com as três regras já
+estabelecidas: `Array.isArray` nunca `|| []`; a forma normaliza-se UMA
+vez; as contagens DERIVAM das listas. Aceita também um ARRAY, para a
+página não ter de saber de que endpoint vieram os dados.
+
+Quatro decisões do ecrã:
+
+1. **a TABELA é a vista por omissão** — o consultor precisa de comparar
+   preço, tipologia, área e estado, e uma grelha de cartões obriga a ler
+   em zigue-zague. O quadro por estado fica atrás de um alternador: uma
+   funcionalidade que estorva uma regra nova muda-se de sítio, não se
+   apaga;
+2. **os pedidos do Portal vêm PRIMEIRO** — ordenar por data punha-os no
+   fim (não têm data), onde ninguém os vê, e um pedido que ninguém vê é a
+   forma de defeito desta casa;
+3. **o estado da EXTRACÇÃO é diferente do estado da visita**, e tem cinco
+   valores: `sem_url` separa «não há nada a extrair» de «ainda não
+   extraí» — um relógio numa visita criada à mão dizia que o sistema
+   estava a trabalhar quando não estava;
+4. **sem destino não se desenha a ligação** do cliente (a regra do
+   `calendarioIdentidade`), e há um teste de concordância entre as duas
+   funções de rota, com a do calendário como oráculo — duas cópias de uma
+   regra de navegação divergem, e a que divergir leva a um 404.
+
+**O separador do Portal estava inalcançável por três linhas de
+comentário.** O PACOTE CB comentou o BOTÃO e deixou a tab escrita: o
+endpoint, o scraper e o ecrã existiam todos. Um separador que não existe
+não produz erro nenhum, e a regra do `SystemConfigPage.seccoes.test.jsx`
+aplica-se — quem reactiva um separador monta a PÁGINA num teste.
+
+Cobertura: `utils/__tests__/visitasDashboard.test.js` (33),
+`pages/__tests__/VisitsPage.test.jsx` (20, com a `VisitasTable` REAL),
+`pages/__tests__/ClientPortal.visitas.test.jsx` (6).
+
+
 ### A superfície que tomava o caminho legado SEMPRE
 
 `GET /api/onedrive/files/{client_name}` resolvia o processo por `$regex` parcial

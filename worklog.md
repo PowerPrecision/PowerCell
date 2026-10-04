@@ -1,4 +1,46 @@
 ---
+Task ID: isolamento-e-motor-de-visitas
+Agent: Cloud Agent
+Task: LOTE 9 parte 2 — isolamento do `db.visits` (D-21), o modelo de IA do scraper (D-22), o motor de extração (D-23) e o dashboard de Visitas
+
+Date: 2026-10-04
+
+Work Log:
+
+FASE A — BLINDAGEM
+- D-21: a colecção `visits` tinha as TRÊS formas do defeito de isolamento AO MESMO TEMPO. (1) Listagens com `query = {}` e recorte só `if user_role in ["consultor","intermediario"]` — um diretor, administrativo, admin ou CEO via as visitas de TODAS as redes, e o documento leva `client_name`, `client_email` e `client_phone`. (2) `run_get_visit`/`run_update_visit`/`run_cancel_visit` eram `find_one({"id": visit_id})` e mais nada. (3) A criação gravava `user.get("company_id")` — campo que o documento de utilizador NÃO tem.
+- Os dois papéis que escapavam (consultor, intermediário) escapavam POR ACIDENTE: filtram por atribuição, que coincide quase sempre com o âmbito. Foi essa metade a funcionar que escondeu a outra — forma do `run_get_my_tasks`, quinta vez.
+- `visit_scope.py` (puro) é a regra; `exigir_visita_acessivel` liga-a à leitura, ao PATCH e ao cancelamento. 404 e NUNCA 403.
+- DUAS perguntas, duas funções: `pode_mexer_na_visita` (a visita que existe) e `pode_atribuir_a_consultor` (o DESTINO). Sem a segunda, um editor legítimo reatribuía a visita a um consultor de outra rede e a lista dele ganhava o nome, o email e o telefone de um cliente que não é dele. É o buraco que o `pode_apontar_para_o_processo` fechou no calendário, no mesmo sítio da árvore.
+- O CARIMBO deriva do PROCESSO, não de quem grava (`carimbo_da_visita`, ponto único dos dois escritores): uma visita é sempre sobre um processo, o processo já leva o carimbo certo desde o Lote 4, e no Portal não há utilizador de equipa de quem derivar. Sem nenhum dos dois devolve `{}` — meio carimbo é pior do que nenhum.
+- O CONTEXTO DE ACESSO saiu do `deadlines_api_scope` para `tenant_access_context.py`, com o predicado de equipa como PARÂMETRO. O `administrativo` ENTROU na equipa das visitas (é o back-office que marca e remarca; estreitá-lo fazia-o perder de vista o que ele próprio agendou) e usar o conjunto do calendário devolvia-lhe só os processos atribuídos a ele, estreitando a vista SEM DAR ERRO. Consequência operacional dita: para o `administrativo` o âmbito estreita de «todas as redes» para «a sua rede».
+- Ao mover a resolução, os testes do calendário falharam ALTO com `AttributeError` no `patch.object(deadlines_api_scope, "db", ...)` — exactamente a regra da ordem de importação do AGENTS.md. Corrigidos para patchar o módulo novo; 38 verdes.
+- D-22: o modelo de IA do scraper era DECORATIVO. O configurado era lido, ESCRITO NO LOG («Usando modelo configurado: X») e depois ignorado — a chamada era `genai.GenerativeModel("gemini-2.0-flash")`, literal, e o `ai_usage_tracker` recebia o mesmo literal, pelo que o relatório de custos atribuía a despesa ao modelo errado. O LOG A DIZER O CONTRÁRIO é o que o tornava difícil de ver: quem fosse verificar encontrava a prova de que estava certo.
+- O teste da D-22 é ao nível da CHAMADA, com um `google.generativeai` falso em `sys.modules` e asserção sobre o parâmetro que SAI — regra do «duplo demasiado esperto». E há contraprova de que a omissão continua no resolvedor, senão a correcção deixava o scraper sem modelo quando nada está configurado.
+
+FASE B — MOTOR E UI
+- D-23: havia DOIS mapeadores escritos à mão para os MESMOS campos — o do CRM e o do Portal — e JÁ DIVERGIAM: o do Portal guardava `raw_data`, o do CRM não, pelo que uma visita criada no CRM perdia quartos, casas de banho, certificado energético, ano de construção, descrição e referência.
+- E o `raw_data` do `property_scraper` era uma lista de ONZE chaves sobre ~30 devolvidas pelo scraper: o `estado` do imóvel, que o prompt da IA pede PELO NOME desde sempre, nunca chegou a sítio nenhum. É a forma do `naturalidade` do `AI_SUGGESTION_FIELD_MAP`.
+- `ficha_do_imovel` é o ponto único e o `raw_data` DERIVA: fora das chaves que já têm nome próprio, tudo passa — um campo novo no prompt chega ao mesmo destino sem ninguém se lembrar.
+- TRÊS veredictos, não dois: `sem_dados` é o caso do meio. Um portal que mude o HTML responde 200 com tudo vazio, e isso contava como `completed` — a visita ficava sem um único dado, indistinguível de um imóvel sem informação.
+- O MEU PRÓPRIO TESTE APANHOU UM DEFEITO MEU: `"185.000 €"` dava `185`. A regra do milhar é agora ESTREITA (só grupos de três dígitos), porque adivinhar ali trocava um preço por outro — e `1234.56`, `95.5` e `120.75` continuam decimais.
+- O `asyncio.create_task` do scraper era CRU, sem referência forte. Recolhido pelo GC, a visita fica para sempre em `pending` e o ecrã diz «a ler o anúncio» de um trabalho que ninguém está a fazer: o defeito do `email_webmail`, e o próprio corredor de testes o denunciava em CADA execução com «Task was destroyed but it is pending».
+- `POST /portal/visits/request` ganhou `@limiter.limit("10/minute")` + `response: Response`: fazia o servidor abrir uma ligação de saída para um URL escolhido pelo cliente, com anti-bot, e chamar um modelo pago — sem tecto, na única superfície externa. O SSRF já estava validado no `scraper.py`, logo não era pivô para a rede interna; o que sobrava era amplificação e custo.
+- FRONTEND: a `VisitsPage` tinha `useState([])` para um endpoint que devolve um OBJECTO de quatro colunas — a forma do `KanbanBoard` da D-20, numa página que (como o Kanban antes da D-20) nunca tinha sido montada num teste. `utils/visitasDashboard.js` é o ponto único; o estado inicial passou a ter a forma final.
+- A TABELA é a vista por omissão (o consultor compara preço/tipologia/área/estado, e cartões obrigam a ler em zigue-zague); o quadro ficou atrás de um alternador, porque uma funcionalidade que estorva uma regra nova muda-se de sítio. Os PEDIDOS DO PORTAL vêm primeiro: ordenar por data punha-os no fim, onde ninguém os vê.
+- O separador «As Minhas Visitas» do Portal estava INALCANÇÁVEL POR TRÊS LINHAS DE COMENTÁRIO (o PACOTE CB comentou o botão e deixou a tab escrita). O endpoint, o scraper e o ecrã existiam todos. Um separador que não existe não produz erro nenhum.
+- Encontrei e corrigi DOIS `|| []` sobre a lista de visitas no `ClientPortal` (um no fetch, outro no handler de submissão) e um terceiro no efeito do polling da `VisitsPage`.
+
+O QUE AS MUTAÇÕES ENSINARAM (46 em quatro voltas)
+- Primeira volta: 13 mortas, 4 vivas, 1 sem âncora. As QUATRO vivas eram TESTES FRACOS meus, não mutações perdidas — e cada uma apontava uma lacuna concreta.
+- Apagar o recorte por PESSOA da listagem não matava nada: todos os testes de listagem usavam um DIRETOR, e para um papel de equipa esse recorte é `{}` por desenho. Faltava o caso em que a rede está certa e a pessoa não.
+- Tirar o `request` das rotas também não: os testes chamam os serviços DIRECTAMENTE. A guarda é um inventário por AST sobre `routes/visits.py` que DERIVA da assinatura de produção — quem aceita `request` tem de o receber — e falha por omissão para um endpoint novo.
+- O predicado de equipa do contexto é observável UM NÍVEL ABAIXO: para um papel de equipa o recorte pessoal é `{}`, logo o conjunto de processos não é consultado e a listagem sai igual. Fica DITO no teste em vez de inventar uma asserção de listagem que passasse sem provar nada.
+- E uma mutação minha estava ERRADA, não o teste: devolver `frozenset(["*"])` no ramo de falha não é fail-open, porque num `$in` não casa com nada. A fail-open real — o ramo não-equipa a ignorar a condição pessoal — morreu à primeira.
+- Fim: 46 mutações, 36 mortas à primeira passagem, e as 10 restantes mortas depois de corrigir o teste ou a mutação. Nenhuma sobrevive hoje.
+- Provas: backend 5725 passed / 5 skipped (eram 5623, +102). Frontend 1729 passed em 142 ficheiros (+59 deste lote: 33 do `visitasDashboard`, 20 da página, 6 do Portal). flake8 do CI limpo, eslint `--quiet` limpo.
+
+---
 Task ID: guarda-de-escrita-do-s3-folder
 Agent: Cloud Agent
 Task: LOTE 9 parte 1 — a guarda de retorno do `s3_folder`, e o levantamento do terreno das Visitas

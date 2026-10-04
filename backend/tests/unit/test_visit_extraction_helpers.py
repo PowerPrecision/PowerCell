@@ -54,10 +54,21 @@ def test_visit_no_collision_with_portal_client_visits():
 
     services_dir = Path(__file__).resolve().parents[2] / "services"
     visit_files = sorted(p.name for p in services_dir.glob("visit_*.py"))
+    # `visit_scope.py` entrou no Lote 9 (D-21): é a regra PURA de quem vê e
+    # quem mexe numa visita, sem base de dados, ao lado do `deadline_scope`
+    # do calendário. Esta lista é um inventário e falha por ADIÇÃO de
+    # propósito — um módulo `visit_*` novo tem de aparecer aqui, para a
+    # fronteira com o `portal_client_visits` continuar afirmada.
     assert visit_files == [
         "visit_helpers.py",
         "visit_kanban_get.py",
         "visit_list_create.py",
+        # `visit_property_extract.py` entrou na Fase B (D-23): é a
+        # tradução PURA do que o scraper devolve para os campos da visita
+        # (`ficha_do_imovel`), e é o ponto único dos DOIS caminhos — o do
+        # CRM e o do Portal, que traduziam à mão e já divergiam.
+        "visit_property_extract.py",
+        "visit_scope.py",
         "visit_update_cancel.py",
     ]
     assert (services_dir / "portal_client_visits.py").exists()
