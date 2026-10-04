@@ -36,6 +36,7 @@ from services.encryption import (
 )
 from services.client_uniqueness import assert_cliente_unico
 from services.process_service import get_next_process_number
+from services.s3_document_root import pasta_para_gravar
 from services.s3_storage import s3_service
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
@@ -273,12 +274,16 @@ async def run_create_client(
             None,
             None,
         )
-        if s3_mapping.get("success") and s3_mapping.get("s3_folder"):
+        pasta = pasta_para_gravar(
+            s3_mapping.get("s3_folder"),
+            contexto=f"criação do cliente {client.id}",
+        ) if s3_mapping.get("success") else None
+        if pasta:
             await db.clients.update_one(
                 {"id": client.id},
-                {"$set": {"s3_folder": s3_mapping["s3_folder"]}}
+                {"$set": {"s3_folder": pasta}}
             )
-            client_dict["s3_folder"] = s3_mapping["s3_folder"]
+            client_dict["s3_folder"] = pasta
             logger.info(
                 f"[CLIENT-CREATE][S3-MAPPING] Mapeamento S3 "
                 f"{'criado' if s3_mapping.get('created') else 'recuperado'} "

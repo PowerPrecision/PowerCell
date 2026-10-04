@@ -252,6 +252,92 @@ regra do `rede_consensual` (recusa adivinhar quando há mais de uma candidata).
 
 ---
 
+### D-21 · `db.visits` não tem isolamento de rede nem posse nas escritas
+**Onde:** `backend/services/visit_list_create.py`, `visit_kanban_get.py`,
+`visit_update_cancel.py`, `portal_client_visits.py`
+
+Encontrada ao levantar o terreno para o motor de Visitas (Lote 9, parte 2).
+É a mesma família de `db.tasks` (Lote 4, ponto 12) e dos prazos do
+calendário (Lote 7, ponto 3), com as três formas ao mesmo tempo:
+
+1. **Sem filtro de rede nenhum.** `run_get_visits` e `run_get_visits_kanban`
+   abrem com `query = {}`. O único recorte é
+   `if user_role in ["consultor", "intermediario"]` por atribuição — logo um
+   **diretor, administrativo, admin ou CEO vê as visitas de TODAS as redes**,
+   e o documento leva `client_name`, `client_email` e `client_phone`. A Domus
+   é uma ilha. Os dois papéis que escapam escapam **por acidente**, como o
+   `run_get_my_tasks`, e foi essa metade a funcionar que escondeu a outra.
+2. **Sem posse nas escritas.** `run_get_visit`, `run_update_visit` e
+   `run_cancel_visit` fazem `find_one({"id": visit_id})` e mais nada. O
+   `require_roles` da rota autoriza o VERBO, não o OBJECTO — é literalmente
+   o `run_delete_deadline` do Lote 7.
+3. **O carimbo está errado na criação.** `visit_list_create` grava
+   `"company_id": user.get("company_id")`, e o documento de utilizador tem
+   `company` (o NOME); o `company_id` vive no UCR. Ou seja: **toda a visita
+   criada pela equipa nasce com `company_id: None`**. O Portal carimba o
+   `company_id` do processo — duas origens diferentes para o mesmo campo, uma
+   delas sempre vazia. E `network_id` não existe em sítio nenhum da colecção.
+
+O papel é lido de `user["role"]` (o do JWT) e não do EFECTIVO: 5.ª ocorrência
+da forma do `history._is_stealth_user`.
+
+**Porque é que vem antes do ecrã novo:** o Lote 9 pede um dashboard de
+Visitas mais rico. Um ecrã melhor sobre uma colecção sem fronteira mostra
+mais do que hoje mostra — a correcção do isolamento é pré-requisito da UI,
+não um acabamento.
+
+**Para fechar:** `com_isolamento`/`build_tenant_condition` nas DUAS listagens
+e no Kanban; uma função de posse por visita (404, nunca 403 — precedente das
+notificações) ligada ao GET, ao PUT e ao cancelamento; `resolve_tenant_stamp`
+na criação, nos dois escritores, com `network_id`; papel EFECTIVO; e backfill
+com a regra do `rede_consensual` (recusa adivinhar). O teste de exploração
+escreve-se primeiro.
+
+---
+
+### D-22 · O modelo de IA do scraper está fixo no código
+**Onde:** `backend/services/scraper.py` (`_extract_with_gemini`)
+
+`_get_ai_model_for_scraping()` lê `scraping_model` da configuração do
+administrador, o resultado é **registado no log** («Usando modelo
+configurado: X») — e depois ignorado: a chamada é
+`genai.GenerativeModel("gemini-2.0-flash")`, literal. Só os modelos `gpt*`
+são honrados, porque esses desviam para `_extract_with_openai`. O
+`ai_usage_tracker` também recebe o literal, pelo que o relatório de custos
+atribui a despesa ao modelo errado.
+
+É o defeito que `test_nenhuma_chamada_usa_a_constante_fixa` existe para
+impedir (regra «Modelo de IA: nunca fixo no código»), num módulo que essa
+guarda não cobre. **O log a dizer o contrário é o que o torna difícil de
+ver.**
+
+**Para fechar:** passar `configured_model` ao construtor e ao tracker, e
+estender a guarda de fonte do `ai_document` a `scraper.py`.
+
+---
+
+### D-23 · O mapeador do scraper descarta campos que a IA extrai
+**Onde:** `backend/services/property_scraper.py` (`extract_with_deep_scraper`)
+
+O `scraper.py` devolve ~30 campos (o prompt pede explicitamente `estado`,
+`orientacao_solar`, `condominio`, `piso`, `elevador`, `varanda`, `vista`,
+`url_planta`, `url_video`, `agencia_telefone`) e o mapeador para
+`ScrapedData` tem uma lista escrita à mão de 11 — **tudo o que não está nela
+é silenciosamente perdido**. O `estado` do imóvel (novo/usado/remodelado/para
+renovar) é um dos campos pedidos para o quadro de Visitas e é extraído pela
+IA desde sempre.
+
+Mesma forma de «os dois mapas de campos da IA têm de concordar» (o
+`naturalidade` do `AI_SUGGESTION_FIELD_MAP`): o lado que traduz descarta em
+silêncio o que não conhece, e a extracção parece ter corrido bem.
+
+**Para fechar:** `raw_data` deriva do dicionário devolvido em vez de uma
+lista à mão, ou um teste de concordância entre o esquema do prompt e os
+campos transportados (com a função de produção como oráculo, nunca uma
+terceira lista).
+
+---
+
 ### D-14 · O formulário público pode criar um cliente com NIF repetido
 **Onde:** `backend/services/public_registration.py` (`db.clients.insert_one`)
 

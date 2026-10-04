@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
-from services.s3_document_root import pasta_do_processo
+from services.s3_document_root import pasta_do_processo, pasta_para_gravar
 from services.tenant_network import resolve_tenant_stamp
 from services.process_staff_assignment import (
     PAPEIS_COMO_CONSULTOR,
@@ -217,7 +217,10 @@ async def run_assign_client_to_user(
         # seguir honra o que já está gravado (passo 1), pelo que a colisão
         # sobrevivia a qualquer correcção feita só no `ensure`. Hoje o caminho
         # deriva do id, do mesmo ponto único que todos os outros.
-        s3_folder = pasta_do_processo(process_id, client_id=client_id)
+        s3_folder = pasta_para_gravar(
+            pasta_do_processo(process_id, client_id=client_id),
+            contexto=f"atribuição do cliente {client_id}",
+        )
         
         process_doc = {
             "id": process_id,

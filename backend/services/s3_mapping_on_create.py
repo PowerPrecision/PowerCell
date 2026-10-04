@@ -51,7 +51,11 @@ from typing import Any, Optional
 from database import db
 from services.s3_document_root import pasta_do_cliente
 from services.s3_storage import s3_service
-from services.s3_document_root import pasta_gravada
+from services.s3_document_root import (
+    PastaGravadaInvalida,
+    pasta_gravada,
+    pasta_para_gravar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +130,16 @@ async def ensure_s3_mapping_for_entity(
         )
         return result
 
-    folder = s3_mapping["s3_folder"]
+    try:
+        folder = pasta_para_gravar(
+            s3_mapping["s3_folder"], contexto=f"{label} {entity_id}"
+        )
+    except PastaGravadaInvalida as erro:
+        logger.error("[S3-ON-CREATE] %s", erro)
+        return result
+    if folder is None:
+        return result
+
     result.update(
         success=True,
         s3_folder=folder,
@@ -246,7 +259,12 @@ async def ensure_s3_mapping_on_process_create(
     # segundo processo ficaria invisível na ficha. A raiz do cliente contém as
     # dos processos, logo não se perde nada; e não se criam marcadores aqui
     # porque a subárvore do processo já faz a raiz existir.
-    raiz_do_cliente = pasta_do_cliente(client_id) or outcome["s3_folder"]
+    raiz_do_cliente = pasta_para_gravar(
+        pasta_do_cliente(client_id) or outcome["s3_folder"],
+        contexto=f"backfill do cliente {client_id}",
+    )
+    if not raiz_do_cliente:
+        return outcome
     try:
         await clients.update_one(
             {"id": client_id},

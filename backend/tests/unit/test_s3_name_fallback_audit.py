@@ -597,3 +597,83 @@ class TestOS3FolderQueNaoEUmaString:
             [Pasta(nome="ana_costa", ficheiros=3)],
         )
         assert resultados[0].veredicto == VEREDICTO_MAPEADO
+
+
+class TestOContratoDosCodigosDeSaida:
+    """Uma leitura que não aconteceu sai com 2, dos DOIS lados (Lote 9).
+
+    O ficheiro documenta `2` para «a leitura não aconteceu (sem base de
+    dados)» e só o cumpria para o inventário do bucket
+    (`InventarioIndisponivel`). Uma base de dados que não responde saía
+    com um traceback e código 1 — que se lê como «o script está
+    partido», não como «não mediste nada». É o mesmo erro que o código 2
+    existe para evitar, na outra metade da leitura: um laço de CI que
+    distinga 0 de 2 tratava a falha de ligação como avaria em vez de
+    não-medição, e um operador lê o stack e procura no sítio errado.
+    """
+
+    def _modulo(self):
+        import importlib.util
+        from pathlib import Path
+
+        caminho = (
+            Path(__file__).resolve().parents[2]
+            / "scripts" / "diagnose_s3_name_fallback.py"
+        )
+        spec = importlib.util.spec_from_file_location("diag_d19_saida", caminho)
+        modulo = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(modulo)
+        return modulo
+
+    @pytest.mark.asyncio
+    async def test_base_de_dados_em_baixo_sai_com_2_e_nao_com_um_stack(
+        self, monkeypatch, capsys
+    ):
+        from pymongo.errors import ServerSelectionTimeoutError
+
+        modulo = self._modulo()
+
+        async def _rebenta(_incluir):
+            raise ServerSelectionTimeoutError("localhost:27017: refused")
+
+        monkeypatch.setattr(modulo, "_carregar_fichas", _rebenta)
+        monkeypatch.setattr(modulo, "_argumentos", lambda: _ArgsFalsos())
+
+        assert await modulo.principal() == 2
+        saida = capsys.readouterr().out
+        assert "MEDIÇÃO NÃO REALIZADA" in saida
+        assert "não respondeu" in saida
+
+    @pytest.mark.asyncio
+    async def test_a_medicao_que_ACONTECE_continua_a_sair_com_0(
+        self, monkeypatch
+    ):
+        """Contraprova: um `return 2` incondicional passaria o teste de
+        cima e tornava o script inútil."""
+        from services.s3_name_fallback_audit import Ficha, Pasta
+
+        modulo = self._modulo()
+
+        async def _uma_ficha(_incluir):
+            return [Ficha(
+                tipo="processo", id="p1", nome="Ana Costa",
+                s3_folder="Documentação Clientes/p1",
+            )]
+
+        # O inventário tem de ter conteúdo: um bucket vazio levanta
+        # `InventarioIndisponivel` de propósito (uma medição que não
+        # aconteceu não é um custo zero), e aí o código também é 2.
+        monkeypatch.setattr(modulo, "_carregar_fichas", _uma_ficha)
+        monkeypatch.setattr(
+            modulo, "_carregar_pastas",
+            lambda: [Pasta(nome="p1", ficheiros=3)],
+        )
+        monkeypatch.setattr(modulo, "_argumentos", lambda: _ArgsFalsos())
+
+        assert await modulo.principal() == 0
+
+
+class _ArgsFalsos:
+    limite_exemplos = 20
+    csv = None
+    incluir_eliminados = False

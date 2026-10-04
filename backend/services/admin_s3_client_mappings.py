@@ -11,7 +11,11 @@ import re
 from fastapi import HTTPException
 
 from database import db
-from services.s3_document_root import e_id_gerado
+from services.s3_document_root import (
+    PastaGravadaInvalida,
+    e_id_gerado,
+    pasta_para_gravar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +128,22 @@ async def run_auto_map_client_s3_folders(user: dict):
                 results["skipped"] += 1
                 continue
 
-            update_fields = {"s3_folder": folder["path"]}
+            # Um caminho que o primitivo recuse salta ESTA pasta e fica no
+            # relatório — levantar aqui abortava a varredura e perdia-se o
+            # trabalho das pastas que vinham depois.
+            try:
+                caminho = pasta_para_gravar(
+                    folder["path"],
+                    contexto=f"auto-mapeamento do processo {process.get('id')}",
+                )
+            except PastaGravadaInvalida as erro:
+                results["errors"].append(str(erro))
+                results["skipped"] += 1
+                continue
+            if not caminho:
+                results["skipped"] += 1
+                continue
+            update_fields = {"s3_folder": caminho}
             # Um uuid não é um nome: ver a guarda gémea em
             # `admin_s3_process_mappings.run_fix_missing_client_names`.
             if (

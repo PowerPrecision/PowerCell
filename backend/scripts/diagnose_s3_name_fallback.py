@@ -66,6 +66,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from pymongo.errors import PyMongoError  # noqa: E402
 from services.s3_document_root import RAIZ  # noqa: E402
 from services.s3_name_fallback_audit import (  # noqa: E402
     InventarioIndisponivel,
@@ -288,7 +289,26 @@ def _imprimir(resultados, pastas, args) -> None:
 
 async def principal() -> int:
     args = _argumentos()
-    fichas = await _carregar_fichas(args.incluir_eliminados)
+    # LOTE 9 — o contrato de códigos de saída deste ficheiro prometia 2 para
+    # «a leitura não aconteceu (sem base de dados)» e só o cumpria para o
+    # inventário do bucket. Uma base de dados que não responde saía com um
+    # traceback e código 1, que se lê como «o script está partido» e não como
+    # «não mediste nada»: é o mesmo erro que o `InventarioIndisponivel`
+    # existe para evitar, na outra metade da leitura.
+    try:
+        fichas = await _carregar_fichas(args.incluir_eliminados)
+    except PyMongoError as exc:
+        print("=" * 70)
+        print("D-19 — MEDIÇÃO NÃO REALIZADA")
+        print("=" * 70)
+        print(f"  A base de dados não respondeu: {exc}")
+        print(
+            "\n  Nenhuma ficha foi lida, logo não há contagem nenhuma — e um\n"
+            "  relatório de zero fichas leria-se como «não há risco».\n"
+            "  Confirmar MONGO_URL/DB_NAME e repetir."
+        )
+        print("=" * 70)
+        return 2
     pastas = _carregar_pastas()
     try:
         resultados = auditar(fichas, pastas)

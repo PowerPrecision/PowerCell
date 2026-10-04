@@ -11,6 +11,10 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from database import db
+from services.s3_document_root import (
+    PastaGravadaInvalida,
+    pasta_para_gravar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,13 +56,28 @@ async def run_get_user_s3_mappings(user: dict):
 
 
 async def run_update_user_s3_mapping(user_id: str, s3_folder: str | None, user: dict):
-    """Actualiza o mapeamento de um utilizador para uma pasta S3."""
+    """Actualiza o mapeamento de um utilizador para uma pasta S3.
+
+    LOTE 9 — este escritor não tinha validação NENHUMA. O irmão do lado
+    (`admin_s3_process_mappings`) ganhou o `_clean_s3_folder` no Lote 8 e
+    este ficou de fora: a anotação `str | None` é documentação, não uma
+    parede, e o valor entrava tal e qual na base de dados. É a forma do
+    defeito do Lote 5 (o `set` e o `clear` a divergirem) aplicada a dois
+    endpoints irmãos que gravam o MESMO campo.
+    """
     target_user = await db.users.find_one({"id": user_id})
     if not target_user:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
 
+    try:
+        caminho = pasta_para_gravar(
+            s3_folder, contexto=f"mapeamento do utilizador {user_id}"
+        )
+    except PastaGravadaInvalida as erro:
+        raise HTTPException(status_code=400, detail=str(erro))
+
     update_data = {
-        "s3_folder": s3_folder,
+        "s3_folder": caminho,
         "s3_mapping_updated_at": datetime.now(timezone.utc).isoformat(),
         "s3_mapping_updated_by": user["id"]
     }
@@ -72,11 +91,11 @@ async def run_update_user_s3_mapping(user_id: str, s3_folder: str | None, user: 
         "type": "user_s3_mapping_updated",
         "user_id": user_id,
         "updated_by": user["id"],
-        "s3_folder": s3_folder,
+        "s3_folder": caminho,
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
-    return {"success": True, "user_id": user_id, "s3_folder": s3_folder}
+    return {"success": True, "user_id": user_id, "s3_folder": caminho}
 
 
 async def run_get_user_s3_mapping(user_id: str, user: dict):
