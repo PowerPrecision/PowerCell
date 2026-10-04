@@ -11,7 +11,14 @@
  * continua a existir para quem gere o fluxo (uma funcionalidade que
  * estorva uma regra nova muda-se de sítio, não se apaga).
  */
-import { AlertTriangle, ExternalLink, EyeOff, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ExternalLink,
+  EyeOff,
+  Loader2,
+  Mail,
+  Phone,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 
 import EmptyState from "@/components/ui/EmptyState";
@@ -26,10 +33,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  contactoDoAnunciante,
   dadosDaIA,
   estadoDaExtraccao,
+  ligacaoTelefonica,
   linhasDaTabela,
   rotaDaFicha,
+  telefoneLegivel,
+  temContactoDoAnunciante,
   textoDaFicha,
   tituloDoImovel,
 } from "@/utils/visitasDashboard";
@@ -152,6 +163,74 @@ function CelulaDoImovel({ visita }) {
   );
 }
 
+/**
+ * A quem ligar: a agência e o comercial (LOTE 10).
+ *
+ * É a coluna que o consultor lê para marcar a partilha, e os dados já
+ * existiam no sistema sem nunca chegarem ao ecrã. Três decisões:
+ *
+ * 1. a **agência** vem primeiro e em destaque: é o que identifica quem
+ *    tem a chave do imóvel, mesmo quando não há nome de pessoa;
+ * 2. o telefone é uma **ligação `tel:`** — num portátil abre o softphone,
+ *    no telemóvel marca. Sem número, texto nenhum (`ligacaoTelefonica`
+ *    devolve `null` e aqui não se desenha nada);
+ * 3. a central da agência aparece **rotulada** e nunca no lugar do
+ *    directo: sem o rótulo, o consultor liga à recepção convencido de
+ *    que fala com quem vende.
+ */
+function CelulaDoAnunciante({ visita }) {
+  const contacto = contactoDoAnunciante(visita);
+  if (!temContactoDoAnunciante(visita)) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+
+  const directo = ligacaoTelefonica(contacto.telefone);
+  const central = ligacaoTelefonica(contacto.telefoneDaAgencia);
+
+  return (
+    <div className="min-w-0 space-y-0.5 text-sm">
+      {contacto.agencia ? (
+        <p className="font-medium truncate max-w-[14rem]" title={contacto.agencia}>
+          {contacto.agencia}
+        </p>
+      ) : null}
+      {contacto.nome ? (
+        <p className="text-muted-foreground truncate max-w-[14rem]">
+          {contacto.nome}
+        </p>
+      ) : null}
+      {directo ? (
+        <a
+          href={directo}
+          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+        >
+          <Phone className="h-3 w-3" aria-hidden="true" />
+          {telefoneLegivel(contacto.telefone)}
+        </a>
+      ) : null}
+      {!directo && central ? (
+        <a
+          href={central}
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          title="Telefone geral da agência — não é o directo do comercial"
+        >
+          <Phone className="h-3 w-3" aria-hidden="true" />
+          {telefoneLegivel(contacto.telefoneDaAgencia)} (central)
+        </a>
+      ) : null}
+      {contacto.email ? (
+        <a
+          href={`mailto:${contacto.email}`}
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground truncate max-w-[14rem]"
+        >
+          <Mail className="h-3 w-3" aria-hidden="true" />
+          {contacto.email}
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 function CelulaDosDados({ visita }) {
   const dados = dadosDaIA(visita);
   const partes = [
@@ -198,6 +277,7 @@ export default function VisitasTable({
             <TableHead>Cliente</TableHead>
             <TableHead className="text-right">Preço</TableHead>
             <TableHead>Dados do anúncio</TableHead>
+            <TableHead>Agência / Comercial</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead>Agendamento</TableHead>
             <TableHead className="text-right">Acções</TableHead>
@@ -223,6 +303,9 @@ export default function VisitasTable({
                 </TableCell>
                 <TableCell>
                   <CelulaDosDados visita={visita} />
+                </TableCell>
+                <TableCell>
+                  <CelulaDoAnunciante visita={visita} />
                 </TableCell>
                 <TableCell>
                   <Badge variant={selo.variante}>{selo.texto}</Badge>

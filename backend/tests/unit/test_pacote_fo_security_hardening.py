@@ -124,12 +124,31 @@ class TestFetchMethodsRejectBlockedUrls:
         )
         assert result is None
 
-    async def test_fetch_page_content_returns_none_for_blocked_url(self):
+    async def test_seguir_para_o_anunciante_returns_none_for_blocked_url(self):
+        """O SEGUNDO pedido da navegação multi-nível passa pela mesma
+        validação SSRF do primeiro.
+
+        Este teste apontava para o `_fetch_page_content`, que o LOTE 10
+        apagou por ser código morto. Vale a pena dizer porquê: a guarda
+        SSRF é a PRIMEIRA instrução dessa função, pelo que o teste
+        passava ao exercitar a primeira linha e nunca chegava ao resto —
+        e o resto chamava `self._get_next_proxy()` e `self._proxies`, que
+        não existem na classe. Um teste verde sobre uma função que
+        levantava `AttributeError` em todos os outros caminhos.
+
+        Agora aponta para o caminho REAL do segundo pedido, que delega no
+        `_fetch_url` e por isso herda a mesma guarda — é a ligação que
+        importa afirmar, porque é por aqui que um URL escolhido pelo
+        cliente do Portal entra.
+        """
+        from types import SimpleNamespace
+
         from services.scraper import PropertyScraper
 
         scraper = PropertyScraper()
-        result = await scraper._fetch_page_content(
-            "http://192.168.1.1/internal-dashboard", use_proxy=False
+        alvo = SimpleNamespace(url="http://192.168.1.1/internal-dashboard")
+        result = await scraper._seguir_para_o_anunciante(
+            alvo, "https://www.idealista.pt/imovel/1/"
         )
         assert result is None
 

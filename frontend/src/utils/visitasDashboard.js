@@ -81,6 +81,14 @@ const CAMPOS_DE_PESQUISA = [
   (v) => v?.scraped_data?.title,
   (v) => v?.scraped_data?.location,
   (v) => v?.scraped_data?.typology,
+  // LOTE 10 — procurar pela agência e pelo comercial. Sem isto, a
+  // coluna nova era visível e não pesquisável: o consultor lê «Predial
+  // Atlântico» no ecrã, escreve-o na caixa e não encontra nada.
+  (v) => v?.agency_name,
+  (v) => v?.agent_name,
+  (v) => v?.agent_phone,
+  (v) => v?.scraped_data?.consultant?.agency_name,
+  (v) => v?.scraped_data?.consultant?.name,
 ];
 
 export function visitaCasaComPesquisa(visita, termo) {
@@ -163,6 +171,76 @@ export function dadosDaIA(visita) {
     ),
     fonte: texto(bruto.source),
   };
+}
+
+/**
+ * Quem anuncia o imóvel: a agência e o comercial (LOTE 10).
+ *
+ * É a pergunta que o consultor faz primeiro — «a quem ligo para marcar a
+ * partilha?» — e a resposta já existia no sistema e não chegava ao ecrã:
+ * o prompt da IA pede estes campos pelo nome desde sempre, o
+ * `property_scraper` já construía o `ConsultantInfo`, e um `grep` por
+ * `consultant|agency|agente` neste ficheiro e na `VisitasTable` dava
+ * **zero**. Terceira ocorrência da forma «a UI lê (ou não lê) um
+ * contrato que o servidor já cumpre», depois do `under_35` e das notas
+ * do consultor.
+ *
+ * Lê primeiro os campos de TOPO (criados neste lote) e cai no
+ * `scraped_data.consultant` para os registos ANTERIORES: nada se migra, e
+ * uma visita já extraída não pode deixar de mostrar o que tinha.
+ *
+ * **O directo e a central são campos SEPARADOS.** Juntá-los num só fazia
+ * o consultor ligar à recepção da agência convencido de que falava com
+ * quem vende o imóvel — e no ecrã os dois seriam indistinguíveis.
+ */
+export function contactoDoAnunciante(visita) {
+  const consultor = visita?.scraped_data?.consultant || {};
+  return {
+    agencia: texto(visita?.agency_name || consultor.agency_name),
+    nome: texto(visita?.agent_name || consultor.name),
+    telefone: texto(visita?.agent_phone || consultor.phone),
+    email: texto(visita?.agent_email || consultor.email),
+    telefoneDaAgencia: texto(visita?.agency_phone),
+    origem: texto(consultor.source_url),
+  };
+}
+
+export function temContactoDoAnunciante(visita) {
+  const contacto = contactoDoAnunciante(visita);
+  return Boolean(
+    contacto.agencia ||
+      contacto.nome ||
+      contacto.telefone ||
+      contacto.email ||
+      contacto.telefoneDaAgencia
+  );
+}
+
+/**
+ * O `href` para ligar, ou `null`.
+ *
+ * **Sem número não se desenha a ligação** — a regra do `rotaDaFicha` e do
+ * `calendarioIdentidade`: um `tel:` vazio abre a aplicação do telefone
+ * sem nada marcado, que é pior do que texto.
+ *
+ * O `+351` é acrescentado aqui e não guardado na base de dados: o campo
+ * guarda o número nacional (é o que o backend normaliza) e o indicativo é
+ * uma decisão de APRESENTAÇÃO — para o telemóvel do consultor marcar
+ * mesmo quando está em roaming.
+ */
+export function ligacaoTelefonica(numero) {
+  const limpo = texto(numero).replace(/[^\d+]/g, "");
+  if (!limpo) return null;
+  if (limpo.startsWith("+")) return `tel:${limpo}`;
+  if (limpo.length !== 9) return null;
+  return `tel:+351${limpo}`;
+}
+
+/** `912345678` → `912 345 678`. Só para LER; o valor guardado não muda. */
+export function telefoneLegivel(numero) {
+  const limpo = texto(numero).replace(/\D/g, "");
+  if (limpo.length !== 9) return texto(numero);
+  return `${limpo.slice(0, 3)} ${limpo.slice(3, 6)} ${limpo.slice(6)}`;
 }
 
 export function temDadosDaIA(visita) {

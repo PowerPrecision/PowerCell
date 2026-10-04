@@ -16,10 +16,14 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import VisitasTable from "@/components/visitas/VisitasTable";
 import {
   QUADRO_VAZIO,
+  contactoDoAnunciante,
   extraccaoEmCurso,
   filtrarQuadro,
+  ligacaoTelefonica,
   normalizarQuadro,
   resumoDoQuadro,
+  telefoneLegivel,
+  temContactoDoAnunciante,
 } from "@/utils/visitasDashboard";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
@@ -139,6 +143,52 @@ const formatPrice = (price) => {
 // ════════════════════════════════════════════════════════════════
 // VISIT CARD — Cartão individual de visita (v2 com dados do scraper)
 // ════════════════════════════════════════════════════════════════
+/**
+ * A quem ligar para marcar a partilha (LOTE 10).
+ *
+ * Fica ACIMA do cliente e do nosso consultor de propósito: é a acção que
+ * falta fazer, e quem precisa de acção vem primeiro — a mesma regra que
+ * põe os pedidos do Portal no topo do `linhasDaTabela`.
+ *
+ * O contacto resolve-se UMA vez. A primeira versão deste bloco chamava o
+ * `contactoDoAnunciante(visit)` seis vezes dentro do JSX: o mesmo
+ * cálculo repetido é como cinco cópias de uma guarda — funciona hoje e
+ * divergem na primeira mudança.
+ */
+function BlocoDoAnunciante({ visit }) {
+  if (!temContactoDoAnunciante(visit)) return null;
+  const contacto = contactoDoAnunciante(visit);
+  // Sem número não se desenha a ligação: um `tel:` vazio abre a
+  // aplicação do telefone sem nada marcado.
+  const directo = ligacaoTelefonica(contacto.telefone);
+
+  return (
+    <div className="flex items-start gap-2 rounded bg-muted/50 px-1.5 py-1">
+      <Building2
+        className="h-4 w-4 text-teal-600 shrink-0 mt-0.5"
+        aria-hidden="true"
+      />
+      <div className="min-w-0 text-xs">
+        {contacto.agencia && (
+          <p className="font-medium truncate">{contacto.agencia}</p>
+        )}
+        {contacto.nome && (
+          <p className="text-muted-foreground truncate">{contacto.nome}</p>
+        )}
+        {directo && (
+          <a
+            href={directo}
+            className="text-primary hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {telefoneLegivel(contacto.telefone)}
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function VisitCard({ visit, onStatusChange, onSchedule }) {
   const status = visit.status || "agendada";
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.agendada;
@@ -237,6 +287,9 @@ function VisitCard({ visit, onStatusChange, onSchedule }) {
             )}
           </div>
         </div>
+
+        {/* Agência / Comercial — LOTE 10. Ver `BlocoDoAnunciante`. */}
+        <BlocoDoAnunciante visit={visit} />
 
         {/* Client */}
         <div className="flex items-center gap-2">

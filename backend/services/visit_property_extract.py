@@ -47,6 +47,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from services.scraper_anunciante import telefone_pt
+
 #: `185.000` / `1.250.000`: só pontos a separar grupos de TRÊS dígitos.
 _SO_MILHARES = re.compile(r"^\d{1,3}(\.\d{3})+$")
 
@@ -77,6 +79,33 @@ CAMPOS_DA_VISITA = (
     "scraped_area",
     "scraped_estado",
 )
+
+#: LOTE 10 — quem anuncia, em campo PRÓPRIO da visita.
+#:
+#: Estes dados já eram extraídos (o prompt da IA pede-os pelo nome desde
+#: sempre, o `property_scraper` já construía o `ConsultantInfo`) e
+#: ficavam dentro de `scraped_data.consultant`, que o ecrã das Visitas
+#: não lia: `grep` por `consultant|agency|agente` no frontend das visitas
+#: dava ZERO. O consultor via o imóvel e não via a quem ligar — que é a
+#: única coisa que lhe permite marcar a partilha.
+#:
+#: `agency_phone` entra ao lado de `agent_phone` e NUNCA no lugar dele: a
+#: central da agência não é o directo de quem vende o imóvel, e usar uma
+#: como recurso da outra era precisamente a confusão que o prompt avisa o
+#: modelo para não fazer. São duas perguntas, logo são dois campos.
+CAMPOS_DO_ANUNCIANTE = (
+    "agency_name",
+    "agent_name",
+    "agent_phone",
+    "agent_email",
+    "agency_phone",
+)
+
+#: O veredicto deriva dos DOIS conjuntos. Sem isto, um anúncio de que só
+#: se conseguiu ler o comercial saía `sem_dados` — ou seja, o ecrã dizia
+#: «não consegui ler este anúncio» precisamente quando tinha lido o que
+#: mais importa.
+CAMPOS_QUE_CONTAM_PARA_O_VEREDICTO = CAMPOS_DA_VISITA + CAMPOS_DO_ANUNCIANTE
 
 
 @dataclass(frozen=True)
@@ -209,7 +238,53 @@ def _consultor(scraped: Any) -> Optional[dict]:
         "phone": getattr(consultor, "phone", None),
         "email": getattr(consultor, "email", None),
         "agency_name": getattr(consultor, "agency_name", None),
+        # De onde veio o contacto. Sem isto, um telefone lido na página do
+        # anunciante é indistinguível de um lido no anúncio, e é a
+        # primeira coisa que alguém pergunta quando o número está errado.
+        "source_url": getattr(consultor, "source_url", None),
     }
+
+
+def contacto_do_anunciante(scraped: Any, extra: dict) -> dict:
+    """Os campos de quem anuncia, prontos para a visita.
+
+    O nome, o telefone e o email do comercial vêm do `ConsultantInfo`
+    (é lá que o `property_scraper` os põe); o telefone da AGÊNCIA viaja em
+    `raw_data` porque não cabe nesse modelo — e era um dos campos que a
+    lista à mão da D-23 perdia.
+
+    Os telefones voltam a passar pelo `telefone_pt` aqui, e não é
+    repetição: o `scrape_url` normaliza o que ACABA de extrair, mas uma
+    visita pode ser servida a partir da CACHE do scraper (sete dias),
+    escrita antes desta regra existir. Quem grava o campo é que responde
+    pelo que lá está.
+    """
+    consultor = getattr(scraped, "consultant", None)
+    campos: dict = {}
+
+    nome = _texto(getattr(consultor, "name", "") if consultor else "")
+    if nome:
+        campos["agent_name"] = nome
+
+    email = _texto(getattr(consultor, "email", "") if consultor else "")
+    if email:
+        campos["agent_email"] = email.lower()
+
+    agencia = _texto(getattr(consultor, "agency_name", "") if consultor else "")
+    if not agencia:
+        agencia = _texto((extra or {}).get("agencia_nome"))
+    if agencia:
+        campos["agency_name"] = agencia
+
+    directo = telefone_pt(getattr(consultor, "phone", None) if consultor else None)
+    if directo:
+        campos["agent_phone"] = directo
+
+    central = telefone_pt((extra or {}).get("agencia_telefone"))
+    if central and central != directo:
+        campos["agency_phone"] = central
+
+    return campos
 
 
 def ficha_do_imovel(scraped: Any, *, url: str, agora: str) -> FichaDoImovel:
@@ -302,7 +377,11 @@ def ficha_do_imovel(scraped: Any, *, url: str, agora: str) -> FichaDoImovel:
     if estado:
         campos["scraped_estado"] = estado
 
-    tem_algum = any(campo in campos for campo in CAMPOS_DA_VISITA)
+    # Quem anuncia. Nada se sobrescreve com vazio aqui também: só entram
+    # os campos que o `contacto_do_anunciante` conseguiu afirmar.
+    campos.update(contacto_do_anunciante(scraped, extra))
+
+    tem_algum = any(campo in campos for campo in CAMPOS_QUE_CONTAM_PARA_O_VEREDICTO)
     veredicto = VEREDICTO_COMPLETA if tem_algum else VEREDICTO_SEM_DADOS
     campos["scraper_status"] = veredicto
 
@@ -315,12 +394,15 @@ def ficha_do_imovel(scraped: Any, *, url: str, agora: str) -> FichaDoImovel:
 
 __all__ = [
     "CAMPOS_DA_VISITA",
+    "CAMPOS_DO_ANUNCIANTE",
+    "CAMPOS_QUE_CONTAM_PARA_O_VEREDICTO",
     "CAMPOS_PROPRIOS",
     "CHAVES_JA_COM_NOME_PROPRIO",
     "FichaDoImovel",
     "VEREDICTO_COMPLETA",
     "VEREDICTO_ERRO",
     "VEREDICTO_SEM_DADOS",
+    "contacto_do_anunciante",
     "ficha_do_imovel",
     "raw_data_derivado",
     "raw_data_do_scraper",

@@ -2315,3 +2315,90 @@ Corolário: o normalizador aceita as DUAS formas que o backend serve (a
 lista de `/visits` e o objecto de `/visits/kanban`), para a página não ter
 de saber de que endpoint vieram os dados — e para trocar de endpoint não
 ser uma alteração de render.
+
+---
+
+## 27.47 — Um dado que o servidor já envia e o ecrã não lê é um dado que não existe
+
+A agência e o comercial de um imóvel eram extraídos pelo scraper desde
+sempre: o prompt da IA pede `agente_nome`, `agente_telefone`,
+`agente_email` e `agencia_nome` pelo nome, e o `property_scraper` já
+construía o `ConsultantInfo`. Ficavam dentro de `scraped_data.consultant`,
+e um `grep` por `consultant|agency|agente` no `visitasDashboard.js` e na
+`VisitasTable.jsx` dava **zero**.
+
+O consultor via o imóvel e **não via a quem ligar** — que é a única coisa
+que lhe permite marcar a partilha. Não houve erro em sítio nenhum: a
+coluna não existia.
+
+Terceira ocorrência da forma «a UI e o servidor não concordam sobre o
+contrato», depois do `under_35` (lido por três componentes, escrito por
+nenhum ficheiro do backend) e das notas do consultor (três nomes de campo
+com zero ocorrências em `backend/`). As duas primeiras eram o ecrã a ler
+o que não existe; esta é o ecrã a **não ler o que existe**, e é a mais
+difícil de notar, porque um ecrã que mostra menos do que podia continua a
+parecer completo.
+
+**Regra:** quando se acrescenta um campo ao servidor, inventariar quem o
+LÊ; e quando se desenha um ecrã sobre dados extraídos, inventariar o que o
+extractor devolve em vez de desenhar o que se lembra. Um campo com um
+produtor e zero consumidores é tão inútil como um consumidor sem produtor,
+e nenhum dos dois produz erro.
+
+## 27.48 — Sem número não se desenha a ligação (e a central leva rótulo)
+
+Extensão da regra do `calendarioIdentidade` / `rotaDaFicha` («sem destino
+não se desenha a ligação») aos contactos:
+
+* `ligacaoTelefonica(numero)` devolve `null` para o que não for marcável, e
+  **quem recebe `null` não desenha o `<a>`**. Um `tel:` vazio abre a
+  aplicação do telefone sem nada marcado, que é pior do que texto;
+* o `+351` é acrescentado na **apresentação**, não gravado: o campo guarda
+  o número nacional (é o que o backend normaliza) e o indicativo é o que
+  faz o telemóvel do consultor marcar em roaming;
+* `telefoneLegivel` agrupa em três **só para ler**, e devolve o original
+  quando não reconhece o formato — nunca inventa um;
+* **o telefone da AGÊNCIA aparece rotulado («central») e nunca no lugar do
+  directo.** São dois campos no servidor por este motivo: sem o rótulo, o
+  consultor liga à recepção convencido de que fala com quem vende o imóvel,
+  e no ecrã os dois números são indistinguíveis.
+
+## 27.49 — Uma coluna nova é também um campo de pesquisa
+
+A coluna «Agência / Comercial» entrou no `CAMPOS_DE_PESQUISA` do
+`visitasDashboard`. Sem isso ficava **visível e não pesquisável**: o
+consultor lê «Predial Atlântico» no ecrã, escreve-o na caixa de pesquisa e
+não encontra nada — o que se lê como «a pesquisa está partida», e não
+como «aquela coluna não conta».
+
+O mesmo vale para os caminhos LEGADOS: a pesquisa lê o campo de topo **e**
+o `scraped_data.consultant`, pelas mesmas razões que a célula o faz (nada
+se migra, e um registo antigo tem de continuar a ser encontrado).
+
+## 27.50 — Um cálculo repetido no JSX é uma cópia de uma guarda
+
+A primeira versão do bloco do anunciante no `VisitCard` chamava
+`contactoDoAnunciante(visit)` **seis vezes** dentro do JSX. Funciona, e é a
+mesma forma das cinco cópias de uma guarda que divergem na primeira
+mudança (§ 27.38): quando alguém mudar a condição de uma das chamadas,
+as outras cinco ficam como estão e o cartão passa a dizer coisas
+incoerentes sobre o mesmo contacto.
+
+Resolve-se UMA vez, no topo de um componente próprio
+(`BlocoDoAnunciante`), que também é o que lhe dá um sítio onde a decisão
+«não há contacto → não há bloco» vive sozinha.
+
+## 27.51 — A vista por omissão é a única que um teste monta
+
+A `VisitsPage` tem alternador Tabela/Quadro e a **Tabela** é a omissão,
+pelo que todos os testes da página que não trocam de vista nunca montam o
+`VisitCard`. Acrescentar algo ao cartão exige um teste que **clique no
+alternador** — é a regra do `SystemConfigPage.seccoes.test.jsx` («um
+separador só está coberto quando a PÁGINA é montada») aplicada a uma vista
+alternativa dentro da mesma página.
+
+Foi por páginas nunca montadas que esta casa encontrou o `useCallback` na
+zona morta temporal do `WebmailPage`, o `useState([])` da própria
+`VisitsPage` e o cartão genérico a renderizar-se a par do dedicado no
+`SystemConfigPage`. Uma vista que nenhum teste monta é uma página nunca
+montada, com outro nome.

@@ -10775,3 +10775,155 @@ afirma-se a correr o código.
 **Nota operacional:** correr `scripts/fix_s3_folder_anomalies.py`
 (primeiro sem bandeira, depois com `--aplicar`) **antes** do próximo
 deploy. A ordem não é opcional — ver a secção do `ARCHITECTURE.md`.
+
+---
+
+# Iteração `deep-scraping-do-anunciante` — 2026-10-04
+
+**LOTE 10.** Extracção profunda multi-nível (agência + comercial) e fecho
+da metade do Portal da D-4.
+
+## O terreno, antes de tocar em nada
+
+Três leituras que mudaram o plano:
+
+**(a) O Idealista estava excluído por construção.** `_find_agency_links`
+abria com `if current_domain in link_domain or link_domain in
+current_domain: continue`. No Idealista o perfil do anunciante **É** uma
+página do Idealista (`/pro/<agência>`) — o único ramo que havia era
+deitado fora na primeira linha, antes de qualquer reconhecimento. O
+portal que o cliente mais usa era precisamente o que nunca podia ser
+seguido. Não era um link que faltasse na lista; era o único link que
+havia a ser descartado.
+
+**(b) Havia um SEGUNDO motor de deep link, completo e sem chamador.**
+`_deep_link_contacts` — 73 linhas que fazem exactamente o que o enunciado
+pedia — tinha **uma ocorrência no ficheiro: o seu próprio `def`**. E
+estava partido de três maneiras: chamava `self._get_next_proxy()` e
+`self._proxies`, que **não existem na classe**, e usava `httpx`, que só é
+importado quando o `curl_cffi` FALTA (ou seja, nunca em produção). Tudo
+dentro de um `except Exception: continue`, logo religá-lo devolvia `{}`
+sem um erro no log. Terceiro mecanismo deste projecto a viver na
+documentação e não no código. **Apagado, não desligado** — 197 linhas com
+o `_extract_contacts_from_soup`, também sem chamador.
+
+O único teste que tocava esse motor exercitava a sua **primeira linha** —
+a guarda SSRF — e nada mais. Verde sobre uma função que levantava
+`AttributeError` em todos os outros caminhos.
+
+**(c) Os contactos chegavam ao `ScrapedData` e morriam lá.** O prompt da
+IA pede `agente_nome/telefone/email` e `agencia_nome` pelo nome desde
+sempre; o `property_scraper` já construía o `ConsultantInfo`. Mas
+`grep -r "consultant|agency|agente"` no frontend das Visitas dava
+**zero**, e o veredicto derivava só de `CAMPOS_DA_VISITA` — logo um
+anúncio de que só se lia o comercial saía `sem_dados`.
+
+## O que foi feito
+
+`services/scraper_anunciante.py` (puro) decide **que página seguir** por
+três sinais somados — a ROTA (o que alcança o Idealista), o domínio
+conhecido, o texto da ligação — mais o `agency_link` que o parser já
+**declarou** e que o navegador nunca lia (o `_parse_idealista` gasta seis
+estratégias a encontrá-lo). Um salto e só um; pausa com jitter ENTRE os
+dois pedidos; mesma sessão e mesmo profile; `Referer` como único
+cabeçalho acrescentado.
+
+A IA passou a receber **as duas páginas numa chamada**, em blocos
+rotulados com orçamento próprio, e o prompt deixou de existir em duas
+cópias (o do Gemini e o do OpenAI divergiam na lista de campos).
+
+`CAMPOS_DO_ANUNCIANTE` sobe para o topo da visita, o veredicto deriva dos
+dois conjuntos, e `telefone_pt` recusa o que não for um número português
+válido em vez de adivinhar.
+
+No ecrã: coluna «Agência / Comercial» na tabela e bloco no cartão do
+quadro, com `tel:`/`mailto:`, a central **rotulada**, e os campos novos
+dentro da pesquisa.
+
+**D-4:** os nove POST do Portal ganharam limite e `response: Response`.
+Mas o achado foi outro — o `run_verify_portal_login` prometia na
+docstring «Protecção contra brute-force: 5 tentativas, lockout de 15
+min» e **não tinha uma linha de código a contar tentativas**.
+`services/portal_brute_force.py` é hoje o ponto único, partilhado com o
+login por email (que tinha ~55 linhas à mão e uma segunda cópia da
+política no `_record_login_attempt`).
+
+## Três enganos meus, e um que não era engano
+
+**Duas falhas de teste no primeiro arranque foram testes MEUS errados, não
+o código.** O do orçamento contava `"A"` no contexto inteiro — e os
+rótulos contêm «A» («PÁGINA DO ANÚNCIO»), pelo que media o cabeçalho a
+par do corpo. O do subdomínio estava escrito com um `or` (`== [] or
+interno is True`): **podia passar sem provar nada**, que é o que as
+regras deste projecto proíbem. Ao corrigi-lo encontrei uma decisão
+errada no módulo: comparar o `netloc` cru fazia `pro.idealista.pt` contar
+como «sai do portal» e ganhar o bónus que existe para a página da
+AGÊNCIA. Hoje compara o domínio BASE.
+
+**O terceiro só apareceu na revisão do meu próprio diff, e nenhum teste
+o podia ter apanhado.** Ao inventariar constantes ÓRFÃS no `scraper.py`
+depois da limpeza, o `AGENCY_LINK_TEXTS` apareceu com **uma única
+ocorrência: a definição** — era a lista do `_find_agency_links`, que
+apaguei. E ao comparar o conteúdo com o `TEXTOS_DO_ANUNCIANTE` que
+escrevi, faltavam **nove dos treze** textos. Quatro eram perdas reais
+(«link externo», «visitar site», «ir para o site», «ver original» — é
+assim que os agregadores rotulam a saída para o site PRÓPRIO da agência,
+que é o alvo de maior valor, porque é lá que está o directo do
+consultor); cinco são navegação genérica que qualquer página tem («Ver
+detalhes» aparece em cada cartão de uma lista de resultados) e com UM
+salto por anúncio um alvo errado custa o mesmo que o certo.
+
+Os quatro foram repostos; os cinco ficaram em
+`TEXTOS_RECUSADOS_DE_PROPOSITO`, **escritos em vez de simplesmente
+ausentes**, com dois testes parametrizados e uma contraprova de que as
+listas não se cruzam. Uma ausência não se distingue de um esquecimento; e
+apagar uma constante é apagar conhecimento se não se disser para onde foi.
+
+**O que não era engano:** um teste legado da bateria dos veredictos caiu
+(«um anúncio que responde vazio não é sucesso») porque anulava só os
+campos do imóvel e deixava o consultor do duplo preenchido. Com os campos
+de quem anuncia a contar, isso é — e deve ser — `completed`. Não foi o
+teste a ficar errado nem a regra a abrir-se: foi a **premissa** dele que
+mudou, e a regra nova ficou fixada em dois testes novos em vez de se
+ajustar o antigo e seguir.
+
+## Medição
+
+| | Volta 1 | Volta 2 | Frontend |
+|---|---|---|---|
+| Mutações | 15 | 20 | 9 |
+| Mortas | 13 | — | 9 |
+| Vivas | 2 | — | 0 |
+
+**As duas sobreviventes da volta 1, honestamente:**
+
+**M6** (apagar a tabela `CHAVES_DE_AGENCIA_POR_MARCA`) sobreviveu porque
+o recurso por prefixo já resolve as formas de DOMÍNIO
+(`"era.pt".startswith("era")`), e o meu teste só tinha essas. A tabela é
+indispensável apenas para as formas de **nome visível** — `re/max`,
+`century 21`, `keller`, `mais consultores` —, que vêm do
+`AGENCY_NAME_MAPPING`. Não era uma mutação perdida: era um teste a cobrir
+metade de um mecanismo, e a metade que cobria era a redundante.
+
+**M13** (desligar a passagem dos `declarados`) sobreviveu por um motivo
+mais simples e menos desculpável: acrescentei o parâmetro, dei-lhe o peso
+mais alto de todos, e **nunca o exercitei**. Uma funcionalidade sem teste.
+Ficaram cinco testes, incluindo o que afirma que o declarado passa pelas
+**mesmas recusas** — ganha peso, não dispensa, porque o `agency_link` sai
+de texto de descrição de um anúncio, que é conteúdo de terceiros.
+
+## O que fica aberto, e é importante
+
+A D-4 **não fecha** com este lote, e a razão está escrita lá. O
+`@limiter.limit` é uma parede com uma porta: `_get_client_ip` lê o
+**primeiro** elemento do `X-Forwarded-For`, que é o que o cliente envia
+(os proxies acrescentam ao FIM). Quem ataca varia-o a cada pedido e **o
+limite por IP não morde em lado nenhum do sistema** — é o placebo do
+`build_company_scope_condition` outra vez. É por isso que a força bruta
+do Portal foi fechada pelo eixo da IDENTIDADE e não pelo do IP.
+
+Corrigir exige saber a topologia de proxies do deploy (contar da direita
+com `TRUSTED_PROXY_HOPS`): com o número errado, todos os clientes
+colapsam numa só chave e o limite tranca o sistema inteiro a 10
+pedidos/minuto. Trocar uma porta aberta por uma avaria não é uma
+correcção.

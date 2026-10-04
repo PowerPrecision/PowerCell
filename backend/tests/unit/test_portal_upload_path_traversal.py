@@ -705,15 +705,39 @@ class TestOsEndpointsDoPortalTemLimiteDePedidos:
     def test_a_contraprova_o_guarda_ve_mesmo_a_ausencia(self):
         """Sem isto, um erro no extractor faria o guarda passar sempre.
 
-        `portal_login` não tem (nem precisa de) `@limiter.limit` — se o
-        extractor lhe atribuísse um, estaria a inventar decoradores e os dois
-        testes acima seriam decorativos.
+        A primeira versão deste teste nomeava o `portal_login` como «o
+        endpoint que não tem (nem precisa de) limite». O LOTE 10 deu-lhe
+        um — e bem, é o login do Portal — e a contraprova ficou vermelha.
+        **A contraprova estava a cristalizar o estado de então**, como a
+        guarda de fonte que exigia literalmente `companies("")` enquanto
+        esse era o defeito. Hoje a afirmação é ESTRUTURAL: o extractor
+        tem de distinguir quem tem de quem não tem, sem depender de qual
+        endpoint é qual. Vale para qualquer estado futuro das rotas, e
+        continua a falhar se o extractor passar a inventar decoradores
+        (ficaria tudo com limite) ou a não os ver (ficaria tudo sem).
         """
         decoradores = self._decoradores_por_funcao()
-        assert "portal_login" in decoradores
-        assert not any(
-            d.startswith("limiter.limit(") for d in decoradores["portal_login"]
+        assert decoradores, "o extractor não leu nenhuma função"
+
+        com_limite = {
+            nome for nome, ds in decoradores.items()
+            if any(d.startswith("limiter.limit(") for d in ds)
+        }
+        sem_limite = set(decoradores) - com_limite
+
+        assert com_limite, "o extractor não vê um único @limiter.limit"
+        assert sem_limite, (
+            "o extractor atribui limite a TODAS as funções de routes/portal.py "
+            "— está a inventar decoradores, e os dois testes acima são "
+            "decorativos"
         )
+        # E os que vê com limite são mesmo os que o têm na fonte: a
+        # contagem dos decoradores no ficheiro tem de bater com a dos
+        # endpoints que o extractor marcou.
+        from pathlib import Path
+
+        fonte = Path("routes/portal.py").read_text(encoding="utf-8")
+        assert fonte.count("@limiter.limit(") == len(com_limite)
 
 
 # ====================================================================

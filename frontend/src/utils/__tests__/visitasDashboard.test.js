@@ -19,14 +19,18 @@ import {
   COLUNAS,
   QUADRO_VAZIO,
   colunaDoEstado,
+  contactoDoAnunciante,
   dadosDaIA,
   estadoDaExtraccao,
   extraccaoEmCurso,
   filtrarQuadro,
+  ligacaoTelefonica,
   linhasDaTabela,
   normalizarQuadro,
   resumoDoQuadro,
   rotaDaFicha,
+  telefoneLegivel,
+  temContactoDoAnunciante,
   temDadosDaIA,
   textoDaFicha,
   tituloDoImovel,
@@ -313,5 +317,143 @@ describe("linhasDaTabela", () => {
     const ids = linhasDaTabela(quadro).map((l) => l.id);
     expect(ids).toHaveLength(4);
     expect(new Set(ids).size).toBe(4);
+  });
+});
+
+
+describe("contactoDoAnunciante — a quem ligar (LOTE 10)", () => {
+  // Estes dados já eram extraídos (o prompt da IA pede-os pelo nome, o
+  // `property_scraper` já construía o `ConsultantInfo`) e ficavam dentro
+  // de `scraped_data.consultant`, que nenhum ficheiro do ecrã das Visitas
+  // lia — `grep` por `consultant|agency|agente` dava zero. O consultor
+  // via o imóvel e não via a quem ligar.
+
+  it("lê os campos de TOPO que o backend passou a gravar", () => {
+    const contacto = contactoDoAnunciante({
+      agency_name: "Predial Atlântico",
+      agent_name: "Marta Nunes",
+      agent_phone: "912345678",
+      agent_email: "marta@predial.pt",
+    });
+    expect(contacto.agencia).toBe("Predial Atlântico");
+    expect(contacto.nome).toBe("Marta Nunes");
+    expect(contacto.telefone).toBe("912345678");
+    expect(contacto.email).toBe("marta@predial.pt");
+  });
+
+  it("cai no `scraped_data.consultant` para as visitas ANTERIORES", () => {
+    // Nada se migra: uma visita já extraída não pode deixar de mostrar o
+    // que tinha só porque o campo de topo é novo.
+    const contacto = contactoDoAnunciante({
+      scraped_data: {
+        consultant: {
+          agency_name: "Agência X",
+          name: "Rui Agente",
+          phone: "911111111",
+          email: "rui@x.pt",
+        },
+      },
+    });
+    expect(contacto.agencia).toBe("Agência X");
+    expect(contacto.nome).toBe("Rui Agente");
+    expect(contacto.telefone).toBe("911111111");
+  });
+
+  it("o campo de topo VENCE o legado", () => {
+    const contacto = contactoDoAnunciante({
+      agent_phone: "922222222",
+      scraped_data: { consultant: { phone: "911111111" } },
+    });
+    expect(contacto.telefone).toBe("922222222");
+  });
+
+  it("a central da agência é um campo SEPARADO do directo", () => {
+    // Juntá-los fazia o consultor ligar à recepção convencido de que
+    // falava com quem vende o imóvel.
+    const contacto = contactoDoAnunciante({
+      agent_phone: "912345678",
+      agency_phone: "213456789",
+    });
+    expect(contacto.telefone).toBe("912345678");
+    expect(contacto.telefoneDaAgencia).toBe("213456789");
+  });
+
+  it("sem contacto nenhum devolve tudo vazio e sem rebentar", () => {
+    for (const visita of [undefined, null, {}, { scraped_data: null }]) {
+      const contacto = contactoDoAnunciante(visita);
+      expect(contacto.agencia).toBe("");
+      expect(temContactoDoAnunciante(visita)).toBe(false);
+    }
+  });
+
+  it("basta a agência para haver contacto a mostrar", () => {
+    // O mínimo útil: sem telefone, saber a agência já permite ao
+    // consultor chegar ao imóvel.
+    expect(temContactoDoAnunciante({ agency_name: "Predial Atlântico" })).toBe(true);
+  });
+
+  it("a central SOZINHA também conta como contacto", () => {
+    expect(temContactoDoAnunciante({ agency_phone: "213456789" })).toBe(true);
+  });
+});
+
+describe("ligacaoTelefonica — sem número não se desenha a ligação", () => {
+  it("acrescenta o indicativo a um número nacional", () => {
+    // O `+351` é decisão de APRESENTAÇÃO: o campo guarda o número
+    // nacional (é o que o backend normaliza) e o indicativo é o que faz
+    // o telemóvel do consultor marcar em roaming.
+    expect(ligacaoTelefonica("912345678")).toBe("tel:+351912345678");
+  });
+
+  it("respeita um indicativo já presente", () => {
+    expect(ligacaoTelefonica("+351912345678")).toBe("tel:+351912345678");
+  });
+
+  it("ignora espaços e pontuação", () => {
+    expect(ligacaoTelefonica("912 345 678")).toBe("tel:+351912345678");
+  });
+
+  it.each([undefined, null, "", "   ", "Contacte-nos", "91234567", "9123456789"])(
+    "devolve null para %p — um `tel:` vazio abre o telefone sem nada marcado",
+    (valor) => {
+      expect(ligacaoTelefonica(valor)).toBeNull();
+    }
+  );
+});
+
+describe("telefoneLegivel", () => {
+  it("agrupa em três, só para LER", () => {
+    expect(telefoneLegivel("912345678")).toBe("912 345 678");
+  });
+
+  it("devolve o original quando não tem nove dígitos", () => {
+    // Nunca inventa um formato: o que não reconhece mostra-se como está.
+    expect(telefoneLegivel("+44 20 7946 0000")).toBe("+44 20 7946 0000");
+  });
+});
+
+describe("a pesquisa alcança a agência e o comercial", () => {
+  it("encontra pelo nome da agência", () => {
+    // Sem isto a coluna era visível e não pesquisável: o consultor lê
+    // «Predial Atlântico» no ecrã, escreve-o na caixa e não encontra nada.
+    const visita = { agency_name: "Predial Atlântico" };
+    expect(visitaCasaComPesquisa(visita, "atlântico")).toBe(true);
+  });
+
+  it("encontra pelo nome do comercial", () => {
+    expect(visitaCasaComPesquisa({ agent_name: "Marta Nunes" }, "marta")).toBe(true);
+  });
+
+  it("encontra pelo telefone", () => {
+    expect(visitaCasaComPesquisa({ agent_phone: "912345678" }, "91234")).toBe(true);
+  });
+
+  it("encontra pelo legado em `scraped_data.consultant`", () => {
+    const visita = { scraped_data: { consultant: { name: "Rui Agente" } } };
+    expect(visitaCasaComPesquisa(visita, "rui")).toBe(true);
+  });
+
+  it("e continua a não encontrar o que não existe", () => {
+    expect(visitaCasaComPesquisa({ agency_name: "Predial" }, "remax")).toBe(false);
   });
 });

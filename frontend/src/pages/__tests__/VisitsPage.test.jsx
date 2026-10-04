@@ -60,6 +60,11 @@ const PEDIDO_DO_PORTAL = {
   scraped_area: 140,
   scraped_estado: "remodelado",
   property_address: { municipality: "Cascais", district: "" },
+  // LOTE 10 — quem anuncia, nos campos de TOPO.
+  agency_name: "Predial Atlântico",
+  agent_name: "Marta Nunes",
+  agent_phone: "912345678",
+  agent_email: "marta.nunes@predial-atlantico.pt",
   scraped_data: { source: "idealista", location: "Cascais" },
 };
 
@@ -76,6 +81,15 @@ const AGENDADA = {
   scraper_status: "completed",
   scraped_price: 185000,
   scraped_typology: "T2",
+  // O caminho LEGADO: uma visita extraída antes dos campos de topo
+  // existirem. Nada se migra, logo tem de continuar a ver-se.
+  scraped_data: {
+    consultant: {
+      agency_name: "Remax Leiria",
+      name: "Rui Agente",
+      phone: "931111111",
+    },
+  },
 };
 
 function quadro(extra = {}) {
@@ -336,6 +350,25 @@ describe("o alternador de vista", () => {
     );
     expect(screen.getByText("T2 em Leiria")).toBeInTheDocument();
   });
+
+  it("o cartão do quadro também mostra a quem ligar", async () => {
+    // A tabela é a vista por omissão, logo um teste que não troque de
+    // vista NUNCA monta o `VisitCard` — e foi por páginas nunca montadas
+    // que esta casa descobriu os defeitos do `WebmailPage` e da própria
+    // `VisitsPage`.
+    montar();
+    await screen.findByRole("table");
+    await userEvent.click(screen.getByRole("button", { name: "Quadro" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("table")).not.toBeInTheDocument()
+    );
+
+    expect(screen.getByText("Predial Atlântico")).toBeInTheDocument();
+    expect(screen.getByText("Marta Nunes")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /912 345 678/ })
+    ).toHaveAttribute("href", "tel:+351912345678");
+  });
 });
 
 describe("agendar um pedido do Portal", () => {
@@ -362,5 +395,129 @@ describe("agendar um pedido do Portal", () => {
     // também — ambíguo, e a provar outra coisa.
     const dialogo = await screen.findByRole("dialog");
     expect(dialogo).toHaveTextContent(/T3 em Cascais/i);
+  });
+});
+
+
+describe("a coluna da agência e do comercial (LOTE 10)", () => {
+  it("mostra a agência e o comercial de quem anuncia", async () => {
+    // A pergunta que o consultor faz primeiro: «a quem ligo para marcar
+    // a partilha?». A resposta já existia no sistema e não chegava ao
+    // ecrã — é por isso que este teste monta a PÁGINA e não a célula.
+    montar();
+    const tabela = await screen.findByRole("table");
+
+    expect(within(tabela).getByText("Predial Atlântico")).toBeInTheDocument();
+    expect(within(tabela).getByText("Marta Nunes")).toBeInTheDocument();
+  });
+
+  it("a coluna existe no cabeçalho", async () => {
+    montar();
+    const tabela = await screen.findByRole("table");
+    expect(
+      within(tabela).getByRole("columnheader", { name: /agência \/ comercial/i })
+    ).toBeInTheDocument();
+  });
+
+  it("o telefone é uma ligação `tel:` que marca", async () => {
+    montar();
+    const tabela = await screen.findByRole("table");
+
+    const ligacao = within(tabela).getByRole("link", { name: /912 345 678/ });
+    expect(ligacao).toHaveAttribute("href", "tel:+351912345678");
+  });
+
+  it("o email é uma ligação `mailto:`", async () => {
+    montar();
+    const tabela = await screen.findByRole("table");
+
+    const ligacao = within(tabela).getByRole("link", {
+      name: /marta\.nunes@predial-atlantico\.pt/i,
+    });
+    expect(ligacao).toHaveAttribute(
+      "href",
+      "mailto:marta.nunes@predial-atlantico.pt"
+    );
+  });
+
+  it("uma visita ANTERIOR mostra o contacto que tem no `scraped_data`", async () => {
+    montar();
+    const tabela = await screen.findByRole("table");
+
+    expect(within(tabela).getByText("Remax Leiria")).toBeInTheDocument();
+    expect(within(tabela).getByText("Rui Agente")).toBeInTheDocument();
+    expect(
+      within(tabela).getByRole("link", { name: /931 111 111/ })
+    ).toHaveAttribute("href", "tel:+351931111111");
+  });
+
+  it("sem contacto nenhum a célula diz «—» e não desenha ligações", async () => {
+    prepararFetch(
+      quadro({
+        solicitadas: [
+          {
+            id: "v-sem-contacto",
+            status: "solicitada",
+            property_title: "Imóvel sem anunciante",
+            client_name: "Carla Sousa",
+            scraped_url: "https://www.exemplo.pt/x",
+            scraper_status: "completed",
+          },
+        ],
+        agendadas: [],
+      })
+    );
+    montar();
+    const tabela = await screen.findByRole("table");
+    await within(tabela).findByText("Imóvel sem anunciante");
+
+    // Nenhum `tel:` na tabela: sem número não se desenha a ligação.
+    const telefones = within(tabela)
+      .queryAllByRole("link")
+      .filter((a) => String(a.getAttribute("href")).startsWith("tel:"));
+    expect(telefones).toEqual([]);
+  });
+
+  it("a central da agência aparece ROTULADA quando não há directo", async () => {
+    // Sem o rótulo, o consultor liga à recepção convencido de que fala
+    // com quem vende o imóvel.
+    prepararFetch(
+      quadro({
+        solicitadas: [
+          {
+            id: "v-so-central",
+            status: "solicitada",
+            property_title: "T1 em Aveiro",
+            client_name: "Dora Pinto",
+            scraped_url: "https://www.exemplo.pt/y",
+            scraper_status: "completed",
+            agency_name: "Imobiliária Central",
+            agency_phone: "234567890",
+          },
+        ],
+        agendadas: [],
+      })
+    );
+    montar();
+    const tabela = await screen.findByRole("table");
+
+    const ligacao = within(tabela).getByRole("link", { name: /central/i });
+    expect(ligacao).toHaveAttribute("href", "tel:+351234567890");
+    expect(ligacao).toHaveTextContent("(central)");
+  });
+
+  it("a pesquisa encontra a visita pela agência", async () => {
+    // A coluna não pode ser visível e não pesquisável.
+    montar();
+    await screen.findByRole("table");
+
+    const caixa = screen.getByPlaceholderText(/pesquisar/i);
+    await userEvent.type(caixa, "Predial");
+
+    await waitFor(() => {
+      const tabela = screen.getByRole("table");
+      expect(within(tabela).getByText("Predial Atlântico")).toBeInTheDocument();
+      expect(within(tabela).queryByText("Remax Leiria")).not.toBeInTheDocument();
+    });
   });
 });

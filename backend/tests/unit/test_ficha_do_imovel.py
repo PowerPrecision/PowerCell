@@ -38,6 +38,7 @@ class _Consultor:
         self.phone = "911111111"
         self.email = "rui@agencia.pt"
         self.agency_name = "Agência X"
+        self.source_url = "https://www.idealista.pt/pro/agencia-x/"
 
 
 class _Scraped:
@@ -184,16 +185,62 @@ class TestOsTresVeredictos:
         """O caso do meio, que não existia: um portal que mude o HTML
         devolve 200 com tudo vazio, e isso contava como `completed` — a
         visita ficava sem um único dado, indistinguível de um imóvel sem
-        informação."""
+        informação.
+
+        LOTE 10 — «tudo vazio» passou a incluir o ANUNCIANTE. Este teste
+        anulava só os campos do imóvel e deixava o consultor do duplo
+        preenchido: com os campos de quem anuncia a contar para o
+        veredicto, isso é — e deve ser — `completed`. Não foi o teste que
+        ficou errado nem a regra que se abriu: foi a PREMISSA dele que
+        mudou, e a regra nova está fixada nos dois testes seguintes.
+        """
         vazio = _Scraped(
             title=None, price=None, location=None, typology=None,
-            area=None, photo_url=None, raw_data={},
+            area=None, photo_url=None, raw_data={}, consultant=None,
         )
         ficha = ficha_do_imovel(vazio, url=URL, agora=AGORA)
         assert ficha.veredicto == VEREDICTO_SEM_DADOS
         assert ficha.campos["scraper_status"] == VEREDICTO_SEM_DADOS
         assert ficha.motivo
         assert ficha.tem_dados is False
+
+    def test_so_o_COMERCIAL_encontrado_e_sucesso(self):
+        """O veredicto deriva dos DOIS conjuntos de campos.
+
+        Antes, um anúncio de que só se conseguia ler o comercial saía
+        `sem_dados`: o ecrã dizia «não consegui ler este anúncio»
+        precisamente quando tinha lido o que mais importa — a quem ligar
+        para marcar a partilha.
+        """
+        so_contacto = _Scraped(
+            title=None, price=None, location=None, typology=None,
+            area=None, photo_url=None, raw_data={},
+        )
+        ficha = ficha_do_imovel(so_contacto, url=URL, agora=AGORA)
+
+        assert ficha.veredicto == VEREDICTO_COMPLETA
+        assert ficha.campos["agent_name"]
+        assert "property_title" not in ficha.campos
+
+    def test_so_o_NOME_DA_AGENCIA_tambem_conta(self):
+        """O mínimo útil: sem telefone nenhum, saber a agência já permite
+        ao consultor chegar ao imóvel."""
+        class _SoAgencia:
+            agency_name = "Predial Atlântico"
+            name = None
+            phone = None
+            email = None
+            source_url = None
+
+        quase_nada = _Scraped(
+            title=None, price=None, location=None, typology=None,
+            area=None, photo_url=None, raw_data={},
+            consultant=_SoAgencia(),
+        )
+        ficha = ficha_do_imovel(quase_nada, url=URL, agora=AGORA)
+
+        assert ficha.veredicto == VEREDICTO_COMPLETA
+        assert ficha.campos["agency_name"] == "Predial Atlântico"
 
     def test_o_source_error_do_scraper_e_ERRO_e_leva_o_motivo(self):
         falha = _Scraped(source="error", raw_data={"error": "403 do Idealista"})
@@ -312,3 +359,179 @@ class TestOPontoUnico:
             assert "scraped_typology" not in codigo, (
                 f"o caminho do {nome} voltou a traduzir campos à mão"
             )
+
+
+class TestOsCamposDeQuemAnuncia:
+    """LOTE 10 — o contacto chega à VISITA, não só ao `scraped_data`.
+
+    Estes dados já eram extraídos (o prompt da IA pede-os pelo nome) e
+    ficavam dentro de `scraped_data.consultant`, que o ecrã das Visitas
+    não lia — `grep` por `consultant|agency|agente` no frontend das
+    visitas dava ZERO. O consultor via o imóvel e não via a quem ligar.
+    """
+
+    def test_os_quatro_campos_sobem_para_o_topo_da_visita(self):
+        ficha = ficha_do_imovel(_Scraped(), url=URL, agora=AGORA)
+
+        assert ficha.campos["agency_name"] == "Agência X"
+        assert ficha.campos["agent_name"] == "Rui Agente"
+        assert ficha.campos["agent_phone"] == "911111111"
+        assert ficha.campos["agent_email"] == "rui@agencia.pt"
+
+    def test_o_scraped_data_continua_a_levar_o_consultor(self):
+        """O campo novo ACRESCENTA, não substitui: o `scraped_data` é o
+        registo do que o scraper devolveu e há quem já o leia."""
+        ficha = ficha_do_imovel(_Scraped(), url=URL, agora=AGORA)
+        consultor = ficha.campos["scraped_data"]["consultant"]
+        assert consultor["name"] == "Rui Agente"
+        assert consultor["source_url"].endswith("/pro/agencia-x/")
+
+    def test_o_telefone_da_AGENCIA_e_um_campo_PROPRIO(self):
+        """A central não é o directo, e uma nunca é recurso da outra.
+
+        Usar o telefone da agência no lugar do directo do comercial era
+        precisamente a confusão que o prompt avisa o modelo para não
+        fazer — e no ecrã ficaria indistinguível.
+        """
+        scraped = _Scraped(raw_data={"agencia_telefone": "213456789"})
+        ficha = ficha_do_imovel(scraped, url=URL, agora=AGORA)
+
+        assert ficha.campos["agent_phone"] == "911111111"
+        assert ficha.campos["agency_phone"] == "213456789"
+
+    def test_sem_directo_a_central_NAO_sobe_para_o_campo_do_comercial(self):
+        class _SemDirecto:
+            name = "Rui Agente"
+            phone = None
+            email = None
+            agency_name = "Agência X"
+            source_url = None
+
+        scraped = _Scraped(
+            consultant=_SemDirecto(),
+            raw_data={"agencia_telefone": "213456789"},
+        )
+        ficha = ficha_do_imovel(scraped, url=URL, agora=AGORA)
+
+        assert "agent_phone" not in ficha.campos
+        assert ficha.campos["agency_phone"] == "213456789"
+
+    def test_o_mesmo_numero_nao_aparece_duas_vezes(self):
+        """Quando o directo É o número da agência, duas colunas iguais no
+        ecrã fazem parecer que há dois contactos."""
+        class _MesmoNumero:
+            name = "Rui Agente"
+            phone = "213456789"
+            email = None
+            agency_name = "Agência X"
+            source_url = None
+
+        scraped = _Scraped(
+            consultant=_MesmoNumero(),
+            raw_data={"agencia_telefone": "+351 213 456 789"},
+        )
+        ficha = ficha_do_imovel(scraped, url=URL, agora=AGORA)
+
+        assert ficha.campos["agent_phone"] == "213456789"
+        assert "agency_phone" not in ficha.campos
+
+    def test_um_telefone_que_nao_e_telefone_nao_entra(self):
+        """A visita pode ser servida da CACHE do scraper (sete dias),
+        escrita antes da normalização existir — quem grava o campo é que
+        responde pelo que lá está."""
+        class _Lixo:
+            name = "Rui Agente"
+            phone = "Contacte-nos!"
+            email = None
+            agency_name = None
+            source_url = None
+
+        scraped = _Scraped(consultant=_Lixo(), raw_data={})
+        ficha = ficha_do_imovel(scraped, url=URL, agora=AGORA)
+
+        assert "agent_phone" not in ficha.campos
+        assert ficha.campos["agent_name"] == "Rui Agente"
+
+    def test_o_telefone_vem_normalizado_de_qualquer_formato(self):
+        class _ComIndicativo:
+            name = None
+            phone = "+351 912 345 678"
+            email = None
+            agency_name = None
+            source_url = None
+
+        ficha = ficha_do_imovel(
+            _Scraped(consultant=_ComIndicativo(), raw_data={}),
+            url=URL, agora=AGORA,
+        )
+        assert ficha.campos["agent_phone"] == "912345678"
+
+    def test_o_email_e_gravado_em_minusculas(self):
+        class _EmailAosCaps:
+            name = None
+            phone = None
+            email = "Rui.Agente@Agencia.PT"
+            agency_name = None
+            source_url = None
+
+        ficha = ficha_do_imovel(
+            _Scraped(consultant=_EmailAosCaps(), raw_data={}),
+            url=URL, agora=AGORA,
+        )
+        assert ficha.campos["agent_email"] == "rui.agente@agencia.pt"
+
+    def test_a_agencia_do_raw_data_serve_quando_o_consultor_nao_a_tem(self):
+        """O `agencia_nome` tem dois caminhos até à ficha e os dois valem:
+        o `ConsultantInfo` só nasce quando há um AGENTE
+        (`property_scraper` exige nome, telefone ou email), logo um
+        anúncio com agência e sem pessoa perdia-a por completo."""
+        class _SemAgencia:
+            name = "Rui Agente"
+            phone = None
+            email = None
+            agency_name = None
+            source_url = None
+
+        ficha = ficha_do_imovel(
+            _Scraped(
+                consultant=_SemAgencia(),
+                raw_data={"agencia_nome": "Predial Atlântico"},
+            ),
+            url=URL, agora=AGORA,
+        )
+        assert ficha.campos["agency_name"] == "Predial Atlântico"
+
+    def test_nada_se_sobrescreve_com_vazio(self):
+        """Um segundo scraping que falhe parcialmente não pode apagar o
+        comercial que o primeiro leu."""
+        ficha = ficha_do_imovel(
+            _Scraped(consultant=None, raw_data={"estado": "novo"}),
+            url=URL, agora=AGORA,
+        )
+        for campo in ("agency_name", "agent_name", "agent_phone", "agent_email"):
+            assert campo not in ficha.campos
+
+    def test_todos_os_campos_declarados_sao_producao(self):
+        """Guarda de inventário nos dois sentidos: o que a constante
+        declara é o que a função pode emitir, e nada mais.
+
+        Sem o sentido inverso, acrescentar um nome à constante e esquecer
+        de o emitir passava — e o ecrã, que deriva dela, desenharia uma
+        coluna que nunca tem valor.
+        """
+        from services.visit_property_extract import (
+            CAMPOS_DO_ANUNCIANTE,
+            contacto_do_anunciante,
+        )
+
+        class _Tudo:
+            name = "Rui"
+            phone = "911111111"
+            email = "rui@x.pt"
+            agency_name = "X"
+            source_url = None
+
+        emitidos = contacto_do_anunciante(
+            _Scraped(consultant=_Tudo()), {"agencia_telefone": "213456789"}
+        )
+        assert set(emitidos) == set(CAMPOS_DO_ANUNCIANTE)

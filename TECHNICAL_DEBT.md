@@ -66,7 +66,7 @@ teste-inventário como o de
 
 **Medido no Lote 9 (Fase B):** o `/portal/visits/request` ganhou limite
 (fazia o servidor ir buscar um URL escolhido pelo cliente, sem tecto de
-custo de IA). Ficam **nove POST do Portal sem limite nenhum**, e o Portal
+custo de IA). Ficavam **nove POST do Portal sem limite nenhum**, e o Portal
 é a única superfície externa:
 `portal_login`, `verify_portal_login`, `authenticate_portal`,
 `update_client_profile`, `send_portal_message`, `fetch_financas_documents`,
@@ -74,6 +74,56 @@ custo de IA). Ficam **nove POST do Portal sem limite nenhum**, e o Portal
 `create_recommendations`. Os três primeiros são de autenticação (força
 bruta de magic link) e os dois dos scrapers governamentais abrem ligações
 de saída — são os de maior consequência.
+
+**Fechado no Lote 10 (o Portal):** os nove ganharam `@limiter.limit` e
+`response: Response`, e a guarda de inventário passou a afirmar a
+PROPRIEDADE (nenhum endpoint de escrita de `routes/portal.py` sem limite),
+derivada das rotas e não de uma lista
+(`tests/unit/test_portal_forca_bruta_e_limites.py`). O achado maior do
+caminho não era o limite: o `run_verify_portal_login` prometia na docstring
+«Protecção contra brute-force: 5 tentativas, lockout de 15 min» e **não
+tinha uma linha de código a contar tentativas** — hoje o travão existe,
+num ponto único (`services/portal_brute_force.py`) partilhado com o login
+por email, que tinha a sua própria cópia escrita à mão.
+
+**O que FICA ABERTO nesta dívida, e é o que importa agora**
+
+O `@limiter.limit` é uma parede com uma porta: a chave vem de
+`_get_rate_limit_key`, que nos endpoints **autenticados** resolve o `sub`
+do JWT (assinado, não falsificável — no Portal é o `process_id`), mas nos
+de **pré-autenticação** cai no IP. E o IP sai de `_get_client_ip`, que lê
+o **primeiro** elemento do `X-Forwarded-For`:
+
+```python
+forwarded_for = request.headers.get("X-Forwarded-For")
+if forwarded_for:
+    return forwarded_for.split(",")[0].strip()
+```
+
+O primeiro elemento é o que o CLIENTE envia — qualquer proxy acrescenta ao
+fim, não ao princípio. **Quem ataca muda-o a cada pedido e o limite por IP
+não morde em lado nenhum do sistema**, não só no Portal. É a forma do
+placebo do `build_company_scope_condition`: a verificação corre, parece
+fechada, e o valor que compara é escolhido por quem se quer verificar.
+
+É por isso que a força bruta do Portal foi fechada pelo eixo da
+IDENTIDADE e não pelo do IP, e por isso é que esta dívida não fecha com
+o Lote 10.
+
+**Porque não se corrigiu agora:** o valor de confiança é contado a partir
+da DIREITA, saltando o número de proxies conhecidos — e esse número
+depende do deploy (Render sozinho é 1; Render atrás de Cloudflare é 2). Com
+o número errado, todos os clientes colapsam numa só chave e o limite
+tranca o sistema inteiro a 10 pedidos/minuto. Mudar isto sem saber a
+topologia é trocar uma porta aberta por uma avaria.
+
+**Para fechar:** `TRUSTED_PROXY_HOPS` (inteiro, explícito, por ambiente) +
+`_get_client_ip` a contar da direita; sem a variável definida, usar o
+`request.client.host` (o peer do socket, não falsificável) e **dizer no
+log** que o limite por IP está a agrupar por proxy. Confirmar a topologia
+do Render antes, e medir numa pré-publicação: a asserção é que dois
+pedidos com `X-Forwarded-For` diferentes e o mesmo peer contam para a
+MESMA chave.
 
 ---
 

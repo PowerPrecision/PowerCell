@@ -8715,3 +8715,302 @@ o servidor de email quando a causa é o garbage collector. Os três passaram a
 Cobertura: `tests/unit/test_email_client_match.py` (21),
 `tests/unit/test_mailbox_health.py` (32), `utils/saudeDaCaixa.test.js` (17),
 `components/webmail/__tests__/AvisoDeCaixaAFalhar.test.jsx` (7).
+
+---
+
+## Extracção profunda: a página de quem anuncia (LOTE 10)
+
+### O que correu mal
+
+O motor tinha deep scraping desde sempre — três cenários, selectores por
+agência, pesquisa por referência — e **não conseguia alcançar o Idealista**,
+que é o portal que o cliente mais usa. `_find_agency_links` abria com:
+
+```python
+if current_domain in link_domain or link_domain in current_domain:
+    continue
+```
+
+No Idealista o perfil do anunciante **É** uma página do Idealista
+(`idealista.pt/pro/<agência>`): o único ramo que havia era deitado fora na
+primeira linha, antes de qualquer reconhecimento. E a admissão a que o resto
+recorria (`AGENCY_DOMAINS`) é uma lista escrita à mão — uma agência que não
+esteja lá nunca é seguida, e isso não produz erro: devolve uma visita sem
+contacto, indistinguível de um anúncio que não o traz.
+
+Havia **um segundo motor completo e sem chamador**: `_deep_link_contacts`
+(73 linhas, a seguir links e a extrair nome, telefone e email) tinha UMA
+ocorrência no ficheiro — o seu próprio `def`. E estava partido de três
+maneiras: chamava `self._get_next_proxy()` e `self._proxies`, que não
+existem na classe, e usava `httpx`, que só é importado quando o `curl_cffi`
+FALTA (ou seja, nunca, em produção). Tudo dentro de um
+`except Exception: continue`, logo religá-lo devolveria `{}` sem um erro no
+log. Terceira vez que um mecanismo vive na documentação e não no código
+(`_get_client_base_path` na D-19, o `_2` do `s3_folder_relink`). **Foi
+apagado, não desligado** — 197 linhas, com o `_extract_contacts_from_soup`
+que também não tinha chamador.
+
+O único teste que tocava esse motor morto exercitava a sua **primeira
+linha** — a guarda SSRF — e nada mais. Um teste verde sobre uma função que
+levantava `AttributeError` em todos os outros caminhos.
+
+### A rota é o sinal, o domínio é o recurso
+
+`services/scraper_anunciante.py` é PURO e decide. A pergunta «esta ligação
+leva ao anunciante?» responde-se por três sinais somados, nunca exclusivos:
+
+| Sinal | Peso | O que alcança |
+|---|---|---|
+| Declarado pelo parser (`agency_link`) | 200 | O que o portal já disse |
+| Rota (`/pro/`, `/agencia/`, `/consultor/`) | 100 | O **Idealista** |
+| Domínio conhecido (`AGENCY_DOMAINS`) | 50 | O que já funcionava |
+| Texto da ligação | 25 | `/p/12345` com rótulo claro |
+| Sai do portal | +10 | Na agência o telefone é o directo |
+
+O `agency_link` entrar como **declarado** fecha outro achado: o
+`_parse_idealista` gasta seis estratégias (selectores, JSON-LD, atributos
+`data-*`, o texto da descrição) a encontrá-lo e gravava-o — e **o navegador
+nunca o lia**, varrendo os `<a>` outra vez com menos informação do que já
+tinha em mãos. É a forma do `under_35`, lido por três componentes e escrito
+por nenhum, ao contrário.
+
+Os declarados passam pelas **mesmas recusas** (esquema não navegável,
+página legal, ser a própria origem): o que ganham é peso, não dispensa —
+dar-lhes um caminho paralelo era abrir uma segunda porta para dentro.
+
+**O que se reconhece pelo TEXTO está escrito nas duas direcções.** O
+`AGENCY_LINK_TEXTS` do `_find_agency_links` tinha treze entradas e o
+`TEXTOS_DO_ANUNCIANTE` nasceu com quatro delas — a diferença só apareceu
+num inventário de constantes órfãs feito na revisão do diff, não num
+teste. Quatro foram repostas (as que rotulam a saída para o site PRÓPRIO
+da agência: «link externo», «visitar site», «ir para o site», «ver
+original» — é o alvo de maior valor, porque lá o telefone é o directo do
+consultor e não o formulário do portal) e cinco ficam em
+`TEXTOS_RECUSADOS_DE_PROPOSITO`: são rótulos de navegação genérica que
+qualquer página tem («Ver detalhes» aparece em cada cartão de uma lista
+de resultados), e com um salto por anúncio um alvo errado custa o mesmo
+que o certo. Estão **escritas** em vez de simplesmente ausentes para a
+diferença ser uma decisão e não um esquecimento.
+
+### Um salto, e só um
+
+`MAXIMO_DE_SALTOS = 1`. O contacto está no perfil do anunciante, não a dois
+cliques dele; cada salto a mais dobra o risco de bloqueio e o tempo de um
+trabalho de fundo que o cliente está a ver em «a ler o anúncio».
+
+**A pausa entre os dois pedidos** (`PAUSA_ENTRE_PAGINAS_MIN/MAX`, 1,5–3,5 s
+com jitter) não é zelo: o único atraso que o motor tinha corria **depois**
+de um 403, ou seja, quando já era tarde. Dois GET consecutivos ao mesmo
+portal em milissegundos é o padrão que o Cloudflare procura, e o custo de
+ser apanhado não é este anúncio — é o IP ficar marcado para os seguintes.
+Um valor fixo seria ele próprio uma assinatura, daí o jitter.
+
+**A sessão e o profile MANTÊM-SE.** O `_fetch_url` roda o perfil de
+impersonate após um 403, que é o certo para uma TENTATIVA repetida; para
+uma NAVEGAÇÃO é o contrário — um browser que muda de identidade entre duas
+páginas da mesma visita é mais suspeito do que um que não muda, e perderia
+os cookies que o primeiro pedido acabou de receber. Acrescenta-se **um só
+cabeçalho, o `Referer`**: é o que um browser envia ao seguir uma ligação,
+logo é consistente com o fingerprint, enquanto o `_get_headers()` inteiro o
+contradiz (é essa a razão de o `_fetch_url` não passar headers nenhuns).
+
+### Duas páginas, UMA chamada à IA
+
+A ordem mudou: o deep scraping corria **depois** da chamada à IA, pelo que
+a IA nunca via a página do anunciante — que é precisamente onde está o que
+o consultor precisa. Hoje navega-se primeiro.
+
+As alternativas foram pesadas e estão escritas no cabeçalho do módulo:
+
+* **duas chamadas independentes** pagam-se duas vezes e, pior, a segunda
+  página sozinha não tem o imóvel: o modelo não pode decidir se o fixo que
+  lá está é o directo de quem vende ESTE imóvel ou a central da agência. A
+  pergunta é um CRUZAMENTO, logo não se parte em duas;
+* **concatenar os dois HTML** gasta o orçamento na página do anunciante
+  (que é quase toda navegação e listas de outros imóveis) e trunca o
+  anúncio, que é a autoridade do preço e da área. Um upgrade de contactos
+  que piorasse o preço era um mau negócio.
+
+Fica uma chamada, com os dois blocos **rotulados** e cada um com **orçamento
+próprio** (11 000 / 5 000 caracteres). O rótulo não é cosmética — é o que
+permite ao prompt dizer «os contactos vencem no bloco do anunciante; nenhum
+preço pode vir dele» — e o orçamento por bloco é o que garante que a segunda
+página nunca rouba espaço à primeira. Uma página sem texto **não produz
+bloco**: um rótulo com nada debaixo convida o modelo a inventar.
+
+A IA passou a correr numa condição nova e ESTREITA: quando houve mesmo uma
+segunda página. No máximo uma chamada a mais por anúncio, e só onde ela faz
+o que nenhum parser faz. Chamar a IA sempre que faltasse um contacto punha
+o modelo a correr em todos os scrapes de todos os portais, e o custo da IA é
+a despesa que a D-22 acabou de pôr no relatório certo.
+
+### O prompt é UM, para os dois motores
+
+Havia **dois** prompts escritos à mão — um no `_extract_with_gemini` e
+outro no `_extract_with_openai` — com listas de campos **diferentes** (o do
+OpenAI vinha comprimido e sem instruções de validação). Qual corre depende
+do que o administrador configurou no painel, logo um upgrade feito num deles
+é um upgrade que metade dos clientes não recebe, e nada dá erro. É a forma
+de «os dois mapas de campos da IA têm de concordar» e dos dois mapeadores da
+D-23. Hoje `prompt_da_extraccao` é o ponto único e o contexto constrói-se
+**antes** do desvio para o OpenAI — construí-lo só no ramo do Gemini era o
+que fazia a página do anunciante desaparecer com um `gpt*` configurado.
+
+### A chave dos selectores TRADUZ-SE
+
+`AGENCY_DOMAINS` devolve `era.pt`, `kw.com`, `kwportugal`, `iadportugal`,
+`easygest.com.pt`; `AGENCY_PHONE_SELECTORS` tem `era`, `kw`, `iad`,
+`easygest`. **Não coincidiam**, e a consequência era uma falha silenciosa no
+cenário que mais importa: sem selectores próprios, o motor caía na regex
+sobre o texto da página inteira e trazia a central da agência em vez do
+directo do consultor — um telefone errado com ar de certo. O
+`_chave_da_agencia` traduz, devolve `""` (e nunca `"unknown"`, que ia como
+chave para a tabela e dava sempre miss) e tem guarda de inventário.
+
+### Um telefone que não é um telefone é PIOR do que nenhum
+
+`telefone_pt` normaliza (`+351 912 345 678` → `912345678`) e **recusa** o
+que não for um número português válido, em vez de adivinhar: o consultor
+liga, fala com quem não tem nada a ver com o imóvel, e o ecrã continua a
+dizer que aquele é o contacto. O indicativo só se retira quando o que sobra
+é válido — cortar à cega transformava os primeiros dígitos de um número
+estrangeiro num português plausível, e um número plausível é o que ninguém
+vai verificar antes de ligar. Normaliza-se num **ponto único no fim** do
+`scrape_url` (a IA devolve `+351 ...`, os selectores devolvem nove dígitos,
+a regex devolve o que o HTML tiver) **e outra vez** ao gravar a visita, que
+não é repetição: uma visita pode ser servida da cache do scraper (sete dias),
+escrita antes desta regra existir, e quem grava o campo é que responde pelo
+que lá está.
+
+### Os campos chegam à VISITA
+
+`CAMPOS_DO_ANUNCIANTE` (`agency_name`, `agent_name`, `agent_phone`,
+`agent_email`, `agency_phone`) são campos de **topo** da visita. Estes dados
+já eram extraídos e ficavam dentro de `scraped_data.consultant`, que o ecrã
+não lia — `grep` por `consultant|agency|agente` no frontend das Visitas dava
+**zero**. O consultor via o imóvel e não via a quem ligar, que é a única
+coisa que lhe permite marcar a partilha.
+
+**O veredicto deriva dos DOIS conjuntos**
+(`CAMPOS_QUE_CONTAM_PARA_O_VEREDICTO`). Antes, um anúncio de que só se
+conseguia ler o comercial saía `sem_dados` — o ecrã dizia «não consegui ler
+este anúncio» precisamente quando tinha lido o que mais importa.
+
+**`agency_phone` entra ao lado de `agent_phone` e nunca no lugar dele.** A
+central não é o directo, usar uma como recurso da outra era a confusão que o
+prompt avisa o modelo a não fazer, e no ecrã as duas seriam
+indistinguíveis — por isso são dois campos e, na tabela, a central aparece
+**rotulada**.
+
+Cobertura: `tests/unit/test_extracao_profunda_do_anunciante.py` (49),
+`tests/unit/test_navegacao_multinivel.py` (22),
+`tests/unit/test_ficha_do_imovel.py` (53),
+`utils/__tests__/visitasDashboard.test.js` (57),
+`pages/__tests__/VisitsPage.test.jsx` (29).
+
+---
+
+## D-4 no Portal: o travão de tentativas e os nove limites (LOTE 10)
+
+### A guarda que vivia na docstring
+
+`run_verify_portal_login` — o ecrã de entrada do Portal, que pede **NIF +
+número do processo** — prometia na própria docstring «Protecção contra
+brute-force: 5 tentativas, lockout de 15 min» e **não tinha uma linha de
+código a contar tentativas**. A frase é exactamente o que faz alguém não ir
+verificar.
+
+O ataque é concreto: o `client_id` vem no link do Portal, o `process_number`
+é um inteiro **sequencial** e o NIF tem nove dígitos com dígito de controlo.
+Fixando um e iterando o outro, o espaço de busca é pequeno.
+
+### Dois eixos, e são precisos os dois
+
+| | Conta por | Vale contra | Limite |
+|---|---|---|---|
+| `@limiter.limit` | chave do pedido | volume | **nos pré-auth, o IP sai do `X-Forwarded-For`** |
+| `portal_brute_force` | IDENTIDADE | adivinhar | bloqueia o alvo 10 min |
+
+O `_get_rate_limit_key` decodifica o JWT e devolve `user:<sub>`; no Portal o
+`sub` é o `process_id`, logo nos endpoints **autenticados** o limite é por
+processo, que é o âmbito certo. Nos dois de **pré-autenticação** não há
+token, a chave cai no IP — e o IP sai do `X-Forwarded-For`, um cabeçalho que
+o cliente envia (`_get_client_ip` lê o PRIMEIRO elemento, que é o que o
+cliente controla). Quem ataca varia-o e o limite não morde. **Por isso o
+limite é a primeira linha e não a parede**, e o que fecha a porta é o travão
+por identidade. Fica registado na D-4 em vez de se dar a questão por
+fechada.
+
+O middleware por papel também não serve aqui: dá 400–600 pedidos/minuto a um
+cliente, o que é um travão de DDoS; 400 tentativas por minuto contra um
+número de processo sequencial não é travão nenhum. (E `client_portal` não
+está em `RATE_LIMITS_BY_ROLE`, pelo que cai no `default` de 600 — mais alto
+do que o de `cliente`.)
+
+### `services/portal_brute_force.py` — ponto único
+
+O login por email já tinha um lockout, escrito à mão em ~55 linhas, com uma
+**segunda cópia** da mesma política no `_record_login_attempt`. Hoje os dois
+ecrãs usam o mesmo módulo, com âmbitos separados (`portal_login:<email>`,
+`portal_verify:<client_id>`): tentativas num não gastam as do outro, porque
+são portas diferentes.
+
+Seis regras com teste:
+
+1. **A recusa vem ANTES de olhar para a credencial.** O código de resposta
+   de uma verificação é ele próprio informação sobre a credencial;
+   continuar a responder a quem esgotou as tentativas era continuar a
+   responder ao ataque. É a ordem do Incidente P0 («posse antes de
+   conteúdo, senão a parede vira oráculo»).
+2. **Um 400 não gasta tentativas.** Um corpo mal formado não é uma
+   adivinha, e contá-lo deixava um cliente com o formulário a dar erro a
+   caminho do bloqueio.
+3. **A identidade normaliza-se.** Um travão que se contorna com a tecla de
+   maiúsculas não é um travão.
+4. **O sucesso LIMPA o contador.** Um contador que só sobe mede a vida da
+   conta e não um ataque: oito erros espalhados por semanas bloqueavam
+   alguém que nunca errou duas vezes seguidas.
+5. **Ler o travão falha ABERTO, escrever falha com aviso.** A base de dados
+   com um soluço não pode trancar o Portal à chave a todos os clientes; mas
+   se não se consegue contar, o travão não existe e isso não pode ser
+   invisível. Uma data ilegível também não bloqueia — um registo corrompido
+   não pode trancar um cliente legítimo para sempre.
+6. **O `primeira_em` é preservado.** Reescrevê-lo em cada falha fazia um
+   ataque de três dias parecer começado agora (regra do `desde` do
+   `mailbox_health`).
+
+**Consequência que se assume:** um travão por identidade permite a um
+terceiro bloquear um cliente legítimo com tentativas erradas de propósito. É
+o preço, é o mesmo que o login por email já paga desde sempre, e o prazo é
+curto (10 min) por causa disso.
+
+### Os nove endpoints
+
+| Endpoint | Limite | Porquê |
+|---|---|---|
+| `POST /auth/login` | 10/min | força bruta do código de acesso |
+| `POST /{client_id}/verify` | 10/min | NIF + número de processo |
+| `POST /authenticate` | 30/min | corre no arranque do Portal |
+| `PUT /me` | 20/min | escrita no perfil |
+| `POST /messages` | 20/min | notifica a equipa atribuída |
+| `POST /fetch-financas` | 5/min | ligação de SAÍDA ao Estado |
+| `POST /fetch-seguranca-social` | 5/min | idem |
+| `POST /submit-mfa` | 10/min | código curto |
+| `POST /recommendations` | 30/min | é de staff |
+
+Os dois scrapers governamentais são o par de maior consequência: cada pedido
+abre uma ligação de saída para o portal das Finanças / Segurança Social com
+credenciais do cliente e mantém uma sessão à espera de MFA. Um ciclo ali faz
+o nosso IP bater num serviço do Estado.
+
+**`response: Response` em todos.** Sem ele o caminho de SUCESSO devolve 500
+(incidente de Set 2026, onze dos catorze endpoints limitados) — e uma
+bateria de rejeições não o apanha, porque num caminho de erro a excepção
+sobe antes da injecção dos cabeçalhos.
+
+A guarda de inventário tem dois níveis: a lista dos nove (história) e a
+**propriedade** — nenhum endpoint de ESCRITA de `routes/portal.py` fica sem
+limite, derivada das rotas e não de uma lista. Um POST novo falha ali sem
+ninguém se lembrar de o acrescentar a sítio nenhum.
+
+Cobertura: `tests/unit/test_portal_forca_bruta_e_limites.py` (36).
