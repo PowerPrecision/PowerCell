@@ -289,10 +289,43 @@ describe("o estado da extracção", () => {
 describe("a forma dos dados do servidor", () => {
   it("uma resposta sem colunas nenhumas não rebenta a página", async () => {
     // Era o defeito: `useState([])` + `visits.solicitadas` undefined.
+    //
+    // A ESPERA é sobre o estado vazio e não sobre o `layout`: o `layout`
+    // existe desde o primeiro render (envolve também "A carregar
+    // visitas...") e `findByTestId` resolve-o nesse estado intermédio,
+    // deixando o `getByText` que vinha a seguir a correr contra o ecrã
+    // de carregamento. Passava numa máquina rápida e falhava no CI
+    // carregado — a lição do `WebmailCompanyTabs`, aqui do lado do
+    // teste: o "Sem visitas" só existe quando tem o que dizer, logo a
+    // PRESENÇA dele é a afirmação e é nela que se espera.
     prepararFetch({ total: 0 });
     montar();
-    expect(await screen.findByTestId("layout")).toBeInTheDocument();
-    expect(screen.getByText(/sem visitas/i)).toBeInTheDocument();
+    expect(await screen.findByText(/sem visitas/i)).toBeInTheDocument();
+    expect(screen.queryByText(/a carregar visitas/i)).not.toBeInTheDocument();
+  });
+
+  it("enquanto carrega mostra o carregamento e NÃO o estado vazio", async () => {
+    // A contraprova do teste acima: sem ela, trocar o estado vazio por
+    // um render imediato tornava a espera supérflua sem ninguém notar.
+    // Três estados (a carregar / vazio / com dados) são três condições,
+    // e o do meio tem de ser distinguível dos outros dois.
+    // Só o pedido do QUADRO fica pendurado: os outros (`fetchFormData`)
+    // respondem logo, senão o `resolver` era o do último pedido feito.
+    let resolverOQuadro;
+    globalThis.fetch = vi.fn((url) => {
+      if (String(url).includes("/visits/kanban")) {
+        return new Promise((r) => {
+          resolverOQuadro = () => r({ ok: true, json: async () => ({ total: 0 }) });
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => [] });
+    });
+    montar();
+    expect(await screen.findByText(/a carregar visitas/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sem visitas/i)).not.toBeInTheDocument();
+
+    resolverOQuadro();
+    expect(await screen.findByText(/sem visitas/i)).toBeInTheDocument();
   });
 
   it("uma resposta em ARRAY também é entendida", async () => {

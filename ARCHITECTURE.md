@@ -9038,4 +9038,61 @@ A guarda de inventário tem dois níveis: a lista dos nove (história) e a
 limite, derivada das rotas e não de uma lista. Um POST novo falha ali sem
 ninguém se lembrar de o acrescentar a sítio nenhum.
 
-Cobertura: `tests/unit/test_portal_forca_bruta_e_limites.py` (36).
+Cobertura: `tests/unit/test_portal_forca_bruta_e_limites.py` — o número
+de testes está no fim desta secção, uma vez só.
+
+### O limiter de produção é um singleton que a bateria desliga
+
+As três asserções que provam o caminho de SUCESSO (200 + cabeçalhos
+`X-RateLimit-*`) montam uma app com o **limiter REAL** e os decoradores
+REAIS de `routes/portal.py` — um duplo do slowapi reimplementaria
+exactamente a escolha que falhou em Set 2026. E é por serem os reais que
+dependem de uma coisa que não está no ficheiro de teste: o `server.py`
+faz, **no import**,
+
+```python
+if os.getenv("TESTING") == "true":
+    limiter.enabled = False
+```
+
+sobre o singleton de `middleware/rate_limit.py`. A partir do primeiro
+teste que importe o `server` — toda a bateria de `tests/integration`, que
+corre ANTES de `tests/unit` por ordem alfabética — o travão fica
+desligado para o **resto da sessão**. É a armadilha do `from database
+import db` ao nível do módulo com outro objecto: verde a correr
+`tests/unit` sozinho, vermelho na bateria completa, e o veredicto muda
+com a ORDEM de recolha e não com o código.
+
+O modo de falhar é o pior que há, porque **não dá erro**: os doze pedidos
+passam todos, os cabeçalhos não aparecem, e o teste escrito para provar
+que o travão morde passa a medir o nada. Foi assim que chegou ao CI.
+
+O ponto único é a fixture `limiter_de_producao_ligado`
+(`tests/unit/conftest.py`), ao lado do `_limpar_cache_de_fases`, que é a
+mesma lição com outro cache. Três decisões:
+
+1. **`monkeypatch.setattr`**, não uma atribuição — a reposição é
+   garantida mesmo quando o teste falha. Deixar o travão ligado faria
+   qualquer teste que exercite a app real colidir com os 429, que é a
+   razão pela qual o `server.py` o desliga.
+2. **Não é autouse**, ao contrário da limpeza das fases: pede-o quem
+   afirma sobre o limiter. O raio de acção de uma fixture que liga um
+   travão global tem de ser o menor possível.
+3. **`reset()` à entrada e só à entrada.** O armazenamento `memory://`
+   também é da sessão, logo uma janela gasta por um teste anterior
+   deixava o seguinte a 429 sem razão. A primeira versão limpava também
+   à saída e a **mutação mostrou que as duas eram indistinguíveis** —
+   com a de saída presente, apagar a de entrada não matava teste nenhum.
+   Duas linhas para a mesma propriedade e nenhuma medível: ficou a de
+   entrada, que é verdadeira qualquer que tenha sido o teste anterior, e
+   `test_cada_teste_parte_de_uma_janela_LIMPA` (mesmo IP e mesmo endpoint
+   do teste dos 429, logo a seguir a ele) é o que a torna medida.
+
+Nenhum outro teste do repositório exercita o limiter vivo — os de
+`test_iteration72/73` são guardas sobre a FONTE e os de
+`test_rate_limit_injecta_cabecalhos.py` constroem um `Limiter` próprio,
+que é o certo para medir o mecanismo e insuficiente para medir os
+decoradores de produção. São duas perguntas diferentes e precisam das
+duas ferramentas.
+
+Cobertura: `tests/unit/test_portal_forca_bruta_e_limites.py` (40).

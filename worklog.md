@@ -10977,3 +10977,108 @@ login por email em `portal_brute_force` (8 tentativas / 10 min,
 fazer é que **as constantes têm de ficar POR PORTA**: escolher um dos
 pares mudaria a política de uma delas em silêncio, que é o oposto do que
 uma consolidação deve fazer.
+
+---
+
+# Iteração — Dois testes verdes em local e vermelhos no CI (Lote 10, correcção)
+
+O CI do Lote 10 veio vermelho com **quatro falhas em 7843 testes**, e
+nenhuma delas era um defeito do código entregue: eram **quatro testes meus
+a depender de coisas que não controlavam**. Vale a pena separá-las, porque
+são duas armadilhas de natureza diferente e só uma delas estava escrita.
+
+## 1. Backend — três falhas: o travão que a própria bateria desliga
+
+```
+FAILED TestOCaminhoDoSUCESSODevolve200::test_o_login_do_portal_responde_200_e_com_cabecalhos
+  assert 'x-ratelimit-limit' in {'content-type', 'content-length'}
+FAILED TestOCaminhoDoSUCESSODevolve200::test_o_verify_responde_200_e_com_cabecalhos
+FAILED TestOCaminhoDoSUCESSODevolve200::test_o_429_do_limite_tambem_e_o_do_limiter_real
+  assert 12 == 10   # os doze pedidos passaram todos
+```
+
+Os três sintomas são um só: **o limiter não estava ligado**. O `server.py`
+faz `limiter.enabled = False` quando `TESTING == "true"`, no momento do
+import, sobre o singleton de `middleware/rate_limit.py`. A bateria de
+`tests/integration` importa o `server` e corre **antes** de `tests/unit`
+(ordem alfabética), pelo que na bateria completa o travão chega desligado
+aos meus testes. Eu verifiquei com `pytest tests/unit`, onde nada o
+importa antes, e passou.
+
+É a armadilha do `from database import db` ao nível do módulo — que está
+escrita no AGENTS.md desde a bateria financeira — **com outro objecto**. E
+o que a torna perigosa é não dar erro nenhum: os doze pedidos passam, os
+cabeçalhos não aparecem, e um teste escrito precisamente para provar que o
+travão morde passa a medir o nada.
+
+Reproduzi-a antes de corrigir, com um ficheiro `test_aaa_importa_server.py`
+que faz só `import server`: as três falhas do CI, na minha máquina.
+
+**Correcção:** `limiter_de_producao_ligado` em `tests/unit/conftest.py`,
+ao lado do `_limpar_cache_de_fases` que é a mesma lição noutro cache.
+`monkeypatch.setattr` (reposição garantida mesmo com o teste a falhar),
+**não autouse** (ligar um travão global a toda a bateria faria qualquer
+teste da app real colidir com os 429 — que é a razão de o `server.py` o
+desligar) e `reset()` do armazenamento à entrada.
+
+## 2. Frontend — uma falha: a âncora resolve a carregar
+
+```
+FAIL src/pages/__tests__/VisitsPage.test.jsx
+  > uma resposta sem colunas nenhumas não rebenta a página
+  Unable to find an element with the text: /sem visitas/i
+```
+
+O `dump` do DOM do CI diz tudo: lá estava o **«A carregar visitas...»**. O
+teste fazia
+
+```jsx
+expect(await screen.findByTestId("layout")).toBeInTheDocument();
+expect(screen.getByText(/sem visitas/i)).toBeInTheDocument();
+```
+
+e o `layout` existe desde o primeiro render — envolve também o spinner. O
+`findBy*` resolve no estado intermédio, devolve o controlo e a asserção
+sincrónica corre contra o ecrã de carregamento. Passa quando a resolução
+do `fetch` cai dentro da primeira janela de repetição do RTL e falha
+quando não cai: verde três vezes em local, vermelho num CI carregado.
+
+Provei o diagnóstico com um teste avulso e o mesmo duplo atrasado 400 ms:
+a âncora antiga falha com o spinner no DOM (**o erro exacto do CI**) e a
+nova — `await screen.findByText(/sem visitas/i)` — passa, demorando os
+490 ms que mostram que esperou mesmo.
+
+É a § 27.17 (`WebmailCompanyTabs`) do lado do teste: lá o componente
+deixava um estado de carregamento cair no ramo de um estado de dados; aqui
+o componente está certo (três estados, três condições) e era o teste a
+ancorar na moldura. **Aumentar o timeout não era a correcção** — tratava o
+sintoma e deixava a asserção a poder passar sem provar nada.
+
+## Medição
+
+Quatro mutações, as duas últimas sobre a fixture nova:
+
+| # | Mutação | Resultado |
+|---|---|---|
+| M-F1 | o ramo `loading` da `VisitsPage` deixa de existir | **morta** pela contraprova nova |
+| M-F2 | a âncora antiga, com o `fetch` atrasado 400 ms | **morta** (erro idêntico ao do CI) |
+| M34 | a fixture sem `enabled = True` | **morta** — 3 testes |
+| M35 | a fixture sem o `reset()` da ENTRADA | **SOBREVIVEU** |
+
+**M35 sobreviveu e a mutação estava certa.** A primeira versão da fixture
+limpava o armazenamento à entrada *e* à saída, e com a de saída presente
+apagar a de entrada não matava teste nenhum: duas linhas para a mesma
+propriedade e **nenhuma delas medível** — a forma dos dois travões na
+mesma porta, em miniatura. Ficou só a de entrada, que é a que vale (é
+verdadeira qualquer que tenha sido o teste anterior), e acrescentei
+`test_cada_teste_parte_de_uma_janela_LIMPA` — mesmo IP e mesmo endpoint do
+teste dos 429, logo a seguir a ele — que a torna medida: **M35b**, sem
+`reset()` nenhum, morre.
+
+## O que fica
+
+Nenhuma alteração de código de produção: as quatro falhas eram testes.
+Mas duas regras ficaram escritas, porque ambas já tinham custado um CI
+vermelho antes com outra roupagem: a do singleton mutado por outro módulo
+(ARCHITECTURE.md) e a da espera sobre o elemento que se afirma
+(FRONTEND_GUIDELINES.md § 27.52).

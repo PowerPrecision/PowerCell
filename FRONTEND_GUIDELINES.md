@@ -2402,3 +2402,41 @@ zona morta temporal do `WebmailPage`, o `useState([])` da própria
 `VisitsPage` e o cartão genérico a renderizar-se a par do dedicado no
 `SystemConfigPage`. Uma vista que nenhum teste monta é uma página nunca
 montada, com outro nome.
+
+## 27.52 — A espera é sobre o elemento que se AFIRMA, nunca sobre a moldura
+
+`await screen.findByTestId("layout")` seguido de um `getByText` sincrónico
+é um teste que **passa ou falha conforme a velocidade da máquina**. O
+`layout` existe desde o primeiro render — envolve também o «A carregar
+visitas...» — logo o `findBy*` resolve no estado INTERMÉDIO e devolve o
+controlo antes de os dados chegarem; a asserção que vem a seguir corre
+contra o ecrã de carregamento. Verde em local, vermelho num CI carregado
+(o `VisitsPage.test.jsx` foi verde três execuções locais e vermelho na
+bateria do CI, com o spinner no `dump` do DOM a dizê-lo).
+
+**A regra:** espera-se no elemento sobre o qual se vai afirmar, e aí a
+PRESENÇA dele é a afirmação:
+
+```jsx
+// Errado — a âncora resolve a carregar
+expect(await screen.findByTestId("layout")).toBeInTheDocument();
+expect(screen.getByText(/sem visitas/i)).toBeInTheDocument();
+
+// Certo — o elemento só existe quando tem o que dizer
+expect(await screen.findByText(/sem visitas/i)).toBeInTheDocument();
+expect(screen.queryByText(/a carregar/i)).not.toBeInTheDocument();
+```
+
+É a § 27.17 (`WebmailCompanyTabs`) do lado do TESTE: lá o defeito era o
+componente a deixar um estado de carregamento cair no ramo de um estado
+de dados; aqui o componente está certo — três estados, três condições — e
+era o teste a ancorar no sítio errado. **Aumentar o `timeout` não é a
+correcção**: trata o sintoma e deixa a asserção a poder passar sem provar
+nada.
+
+Corolário, com teste: três estados pedem uma **contraprova** que prove o
+do meio distinguível dos outros dois — um duplo do `fetch` que fica
+pendurado, a afirmação de que se vê o carregamento e **não** o vazio, e só
+depois a resolução. E o duplo tem de pendurar **só o pedido em causa**: a
+`VisitsPage` faz três (`/visits/kanban` mais o `fetchFormData`) e um
+`resolver` global ficava a ser o do último pedido feito, não o do quadro.

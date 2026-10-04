@@ -418,7 +418,17 @@ class TestOCaminhoDoSUCESSODevolve200:
     Este teste monta uma app REAL com o limiter REAL e exige 200 + os
     cabeçalhos. Um duplo do slowapi reimplementaria exactamente a escolha
     que falhou.
+
+    E é por ser o limiter REAL que precisa da fixture: o `server.py`
+    desliga esse singleton quando `TESTING == "true"`, no import, pelo que
+    a bateria de integração — que corre antes — deixava os testes desta
+    classe a medir o nada, sem um único erro. Ver
+    `limiter_de_producao_ligado` em `tests/unit/conftest.py`.
     """
+
+    @pytest.fixture(autouse=True)
+    def _o_travao_tem_de_estar_ligado(self, limiter_de_producao_ligado):
+        """Vale para os testes desta classe, não para o ficheiro."""
 
     @staticmethod
     def _app(monkeypatch, nome_do_handler, resposta):
@@ -486,3 +496,21 @@ class TestOCaminhoDoSUCESSODevolve200:
 
         assert codigos.count(200) == 10, codigos
         assert codigos[-1] == 429, codigos
+
+    def test_cada_teste_parte_de_uma_janela_LIMPA(self, monkeypatch):
+        """O MESMO IP e o MESMO endpoint do teste anterior, outra vez.
+
+        O armazenamento do limiter é `memory://` e é da SESSÃO, não do
+        teste: sem o `reset()` da fixture este teste herdava a janela que
+        o anterior gastou e respondia 429 ao primeiro pedido. É a mesma
+        dependência de ordem, do outro lado — e é esta asserção que faz o
+        `reset()` ser código medido e não zelo.
+        """
+        cliente = self._app(monkeypatch, "run_portal_login", {"token": "t"})
+        resposta = cliente.post(
+            "/api/portal/auth/login",
+            json={"email": "forca.bruta@exemplo.pt", "access_code": "A4B9X2"},
+            headers={"X-Forwarded-For": "203.0.113.77"},
+        )
+
+        assert resposta.status_code == 200, resposta.text
