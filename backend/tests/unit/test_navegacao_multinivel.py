@@ -272,19 +272,37 @@ class TestOAgencyLinkDeclaradoPeloParser:
     parâmetro e nunca o ter exercitado. Uma funcionalidade sem teste.
     """
 
-    async def test_o_alvo_seguido_e_o_que_o_parser_declarou(self, monkeypatch):
-        from services import scraper as modulo
+    #: O `agency_link` DENTRO do texto da descrição e em sítio nenhum
+    #: mais — nenhum `<a href>` aponta para ele. É assim que uma agência
+    #: o deixa num anúncio do Idealista (um encurtador no texto), e é o
+    #: único fixture em que o declarado é OBSERVÁVEL.
+    HTML_COM_O_LINK_SO_NA_DESCRICAO = """
+    <html><body>
+      <h1 class="main-info__title">T3 em Cascais</h1>
+      <span class="info-data-price">450.000 €</span>
+      <a href="/pro/perfil-no-portal/">Perfil no portal</a>
+      <div class="comment">
+        Excelente T3 com vista mar. Visite https://dez.pt/ab12cd para
+        marcar visita.
+      </div>
+    </body></html>
+    """
 
-        html_com_duas_opcoes = """
-        <html><body>
-          <h1 class="main-info__title">T3 em Cascais</h1>
-          <span class="info-data-price">450.000 €</span>
-          <a href="/pro/perfil-no-portal/">Perfil no portal</a>
-          <a class="advertiser-logo" href="https://www.casaboa.pt/agencia/lisboa">
-            Casa Boa
-          </a>
-        </body></html>
+    async def test_o_alvo_seguido_e_o_que_o_parser_declarou(self, monkeypatch):
+        """A primeira versão deste teste deixou a mutação VIVA duas vezes.
+
+        O fixture tinha um `<a class="advertiser-logo">` para a agência:
+        o varrimento do DOM encontrava-o sozinho (rota `/agencia` = 100,
+        mais 10 por sair do portal) e já vencia o `/pro/` interno (100).
+        Com os dois caminhos a dar o MESMO alvo, desligar a passagem dos
+        `declarados` não mudava nada — **não era uma mutação perdida, era
+        um teste a medir uma coincidência**.
+
+        Aqui o `agency_link` existe SÓ no texto da descrição, onde o
+        varrimento dos `<a>` não chega: é o que o parser do portal sabe
+        fazer e o navegador não, e é por isso que ele tem de o ouvir.
         """
+        from services import scraper as modulo
 
         scraper = modulo.PropertyScraper()
         instrumentado = _MotorInstrumentado(scraper)
@@ -292,7 +310,7 @@ class TestOAgencyLinkDeclaradoPeloParser:
         async def fetch(url, retries=3, *, referer=None):
             instrumentado.pedidos.append({"url": url, "referer": referer})
             if url == URL:
-                return html_com_duas_opcoes
+                return self.HTML_COM_O_LINK_SO_NA_DESCRICAO
             return "<html><body><div class='agent-name'>Marta</div></body></html>"
 
         monkeypatch.setattr(scraper, "_fetch_url", fetch)
@@ -304,11 +322,43 @@ class TestOAgencyLinkDeclaradoPeloParser:
         await scraper.scrape_url(URL, use_cache=False)
 
         assert len(instrumentado.pedidos) == 2
+        assert instrumentado.pedidos[1]["url"] == "https://dez.pt/ab12cd", (
+            "o alvo seguido tem de ser o `agency_link` que o parser "
+            "declarou; o varrimento dos `<a>` só encontra o `/pro/` interno"
+        )
+
+    async def test_a_CONTRAPROVA_sem_declarado_segue_o_do_DOM(self, monkeypatch):
+        """Sem o `agency_link` na descrição, o alvo é o do varrimento.
+
+        Sem esta contraprova, o teste acima passaria com um motor que
+        IGNORASSE o DOM e seguisse só declarados — e isso perderia todos
+        os portais em que o perfil do anunciante é uma ligação normal.
+        """
+        from services import scraper as modulo
+
+        sem_link_na_descricao = self.HTML_COM_O_LINK_SO_NA_DESCRICAO.replace(
+            "https://dez.pt/ab12cd", "o nosso escritório"
+        )
+
+        scraper = modulo.PropertyScraper()
+        instrumentado = _MotorInstrumentado(scraper)
+
+        async def fetch(url, retries=3, *, referer=None):
+            instrumentado.pedidos.append({"url": url, "referer": referer})
+            if url == URL:
+                return sem_link_na_descricao
+            return "<html><body><div class='agent-name'>Marta</div></body></html>"
+
+        monkeypatch.setattr(scraper, "_fetch_url", fetch)
+        monkeypatch.setattr(scraper, "_extract_with_gemini", instrumentado.ia)
+        monkeypatch.setattr(modulo.asyncio, "sleep", instrumentado.dormir)
+        monkeypatch.setattr(scraper, "_get_cached_result", lambda url: _nada())
+        monkeypatch.setattr(scraper, "_save_to_cache", lambda url, r: _nada())
+
+        await scraper.scrape_url(URL, use_cache=False)
+
         assert instrumentado.pedidos[1]["url"] == (
-            "https://www.casaboa.pt/agencia/lisboa"
-        ), (
-            "o alvo seguido tem de ser o `agency_link` que o parser declarou, "
-            "não o `/pro/` encontrado a varrer os `<a>`"
+            "https://www.idealista.pt/pro/perfil-no-portal/"
         )
 
 
