@@ -44,6 +44,92 @@ mais longo), ou aceitar a invalidação numa janela de manutenção anunciada.
 
 ---
 
+### D-24 · Quatro superfícies por inventariar atravessam redes (BLOQUEIA a entrada da Domus)
+**Onde:** `services/property_list.py`, `services/property_crud.py`,
+`services/client_match.py`, `services/finance_process_records.py`
+
+O Lote 4 ergueu o isolamento por rede e os lotes seguintes foram-no ligando
+superfície a superfície. Estas quatro ficaram fora do inventário, e as quatro
+carregam dados de cliente. **Provadas** (não deduzidas) em
+`tests/unit/test_cruzamento_domus_na_carteira.py`, com os quatro testes em
+`xfail(strict=True)`: no dia em que a guarda entrar, o xpass passa a FALHA e
+obriga a remover o marcador.
+
+1. **A carteira de angariações não tem fronteira nenhuma.** `run_list_properties`
+   abre com `query = {}` — a sexta ocorrência da forma do `run_get_tasks`. O
+   `PropertyListItem` leva `client_name`, logo a listagem sozinha já entrega o
+   nome do cliente da outra rede. E `run_get_property` é
+   `find_one({"id": property_id})` e mais nada (a forma do
+   `run_delete_deadline`: a rota autoriza o VERBO, não o OBJECTO), devolvendo
+   o `OwnerInfo` completo — nome, telefone, email e **NIF** do proprietário.
+   A escrita também não carimba: zero ocorrências de `network_id` em
+   `property_crud.py` e em `property_excel_import.py`.
+2. **O Smart Match é a ponte, e é a pior das quatro.** É um JOIN entre
+   `properties` e `processes` sem âmbito em nenhuma das pontas:
+   `find_matching_clients_for_property` consulta `db.processes` por ESTADO
+   (`{"status": {"$nin": [...]}}`) e devolve `client_name`, `client_email` e
+   `client_phone`. Alcançável por `GET /match/property/{id}/clients` **e** —
+   pior — pelo `check_and_notify_matches_for_new_property`, que manda a lista
+   por **EMAIL** ao agente: um imóvel angariado na Domus produz um email com
+   os nomes dos clientes da Power. Uma fuga que sai do sistema é de outra
+   natureza; é por isto que esta entrada é a primeira a fechar.
+   (Ao lado dela, um defeito dormente: a notificação inserida em
+   `db.notifications` não tem `user_id`, logo não aparece a ninguém — a
+   regra do Lote 5, ponto 3. Não é fuga, é um aviso que nunca chega.)
+3. **Os registos financeiros.** `GET /finance/processes` sem `company_id`
+   consulta `{}`. E o `company_id` é um parâmetro da QUERY STRING, escolhido
+   por quem pergunta: é o placebo do `build_company_scope_condition` outra
+   vez — um filtro que o cliente controla nunca é uma parede. Os
+   `FINANCE_READ_ROLES` incluem `consultor`, `administrativo` e `indexacao`.
+4. **O registo público não carimba a rede** (já anotado no `worklog.md` da
+   iteração `alertas-por-rede` e sem entrada própria até aqui):
+   `public_registration.py` tem zero ocorrências de `resolve_tenant_stamp`.
+   Hoje funciona por cair na pilha por carimbar; com a Domus a entrar deixa
+   de funcionar, porque a **Sala de Triagem é uma POOL**
+   (`build_tenant_pool_condition`) e por desenho mostra o que não tem carimbo
+   a TODAS as redes. Somado a um formulário público único, que não sabe de
+   que empresa é, todo o lead público fica visível às duas redes.
+
+**Para fechar:** âmbito de rede nas duas listagens e posse (404, nunca 403)
+nos dois `find_one`; o Smart Match a receber o âmbito de quem pergunta em vez
+de consultar a colecção inteira; `company_id` a deixar de ser a fronteira das
+finanças; e o formulário público a saber a que empresa pertence (ou a Pool a
+deixar de ser global). O inventário tem de ser derivado e não escrito à mão —
+a lição do `build_kanban_query`: um ponto único para a CONDIÇÃO não chega, é
+preciso enumerar as superfícies que LISTAM.
+
+---
+
+### D-25 · Um processo em PARTILHA entre duas redes não tem modelo
+**Onde:** `services/tenant_network.py` (`CAMPO_REDE = "network_id"`, singular)
+
+A topologia declarada é «Power + Precision partilham; a Domus é uma ilha». O
+modelo implementa-a com **um** `network_id` por documento: um processo
+pertence a uma rede e só essa o vê. Não há mecanismo de partilha — zero
+ocorrências de qualquer forma de rede convidada, lista de redes ou
+`shared_with` nos documentos de negócio.
+
+Mas a partilha entre agências é uma operação NORMAL do negócio (a
+co-angariação), e o modelo financeiro **já a conhece**: `db.process_finances`
+é chaveado por **(`process_id`, `company_id`)**, um registo por empresa no
+mesmo processo, que é exactamente o rateio de comissão de uma partilha. É só
+a VISIBILIDADE que não tem como o expressar.
+
+O recurso disponível hoje é dar à pessoa um UCR nas duas empresas — e esse é
+o caminho errado: o âmbito é do UTILIZADOR, logo um consultor da Precision
+com acesso à Domus passa a ver **toda** a Domus, e não aquele processo. Para
+um grupo que declara tolerância zero ao cruzamento, trocar um processo
+partilhado por acesso total à outra rede é o pior negócio possível.
+
+**Para fechar:** falta a decisão de produto antes do código — num processo
+partilhado, o que é que o lado convidado vê (a ficha inteira? só o imóvel e a
+visita? os documentos?), quem autoriza a partilha e quem a pode revogar.
+Depois disso, a forma provável é um campo próprio de redes convidadas no
+documento, a entrar no `build_network_scope_condition` como um ramo a mais —
+nunca alargando o `network_id`, que é o carimbo de propriedade e é permanente.
+
+---
+
 ### D-4 · Varrimento de limites de pedidos nos restantes routers
 **Onde:** `backend/routes/*.py`
 
