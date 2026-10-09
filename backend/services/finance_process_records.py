@@ -10,9 +10,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from database import db
+from services.finance_scope import (
+    ERRO_REGISTO_NAO_ENCONTRADO,
+    carregar_ambito_financeiro,
+    exigir_empresa_no_ambito,
+    exigir_registo_no_ambito,
+)
+from services.tenant_network import com_isolamento
 from models.finance import (
     ProcessFinanceCreate,
     ProcessFinanceUpdate,
@@ -49,14 +56,21 @@ def _doc_to_process_finance_response(doc: dict) -> dict:
 async def run_get_process_finance_summary(
     company_id: str,
     user: dict,
+    request: Request | None = None,
 ):
     """
     Resumo financeiro agregado dos registos ProcessFinance.
 
     Agrega totais por status para uma empresa.
 
+    O `company_id` é OBRIGATÓRIO e vem do pedido — valida-se que é de
+    uma das redes do utilizador (D-24). Sem isso bastava escrever o id
+    da outra empresa no URL para ler as comissões dela.
+
     Permissões: todos os roles de leitura financeira.
     """
+    await exigir_empresa_no_ambito(company_id, user=user, request=request)
+
     # Pipeline de agregação por status (inclui comissões duais)
     pipeline = [
         {"$match": {"company_id": company_id}},
@@ -130,6 +144,7 @@ async def run_get_process_finance_summary(
 async def run_create_process_finance(
     body: ProcessFinanceCreate,
     user: dict,
+    request: Request | None = None,
 ):
     """
     Cria um registo financeiro para um processo.
@@ -140,6 +155,11 @@ async def run_create_process_finance(
 
     Permissões: Admin, CEO e Diretor.
     """
+    # A empresa do registo vem do CORPO do pedido: sem validação, uma
+    # ilha criava registos financeiros na empresa de outra rede — e o
+    # `(process_id, company_id)` é a própria repartição de comissões.
+    await exigir_empresa_no_ambito(body.company_id, user=user, request=request)
+
     # Verificar se já existe registo financeiro para este processo
     existing = await db.process_finances.find_one({
         "process_id": body.process_id,
@@ -207,11 +227,16 @@ async def run_list_process_finances(
     client_id: Optional[str],
     status: Optional[str],
     user: dict,
+    request: Request | None = None,
 ):
     """
     Lista registos financeiros de processos, com filtros opcionais.
 
     Filtros disponíveis: company_id, process_id, client_id, status.
+
+    O `company_id` continua a ser um FILTRO de conveniência; a FRONTEIRA
+    é a condição de rede aplicada por fora (D-24). Sem ela, a consulta
+    sem parâmetros era `{}` — todos os registos de todas as redes.
 
     Permissões: todos os roles de leitura financeira.
     """
@@ -230,7 +255,10 @@ async def run_list_process_finances(
             )
         query["status"] = status
 
-    finances = await db.process_finances.find(query, {"_id": 0}).to_list(1000)
+    ambito = await carregar_ambito_financeiro(user, request)
+    consulta = com_isolamento(ambito.condicao, query) if ambito.condicao else query
+
+    finances = await db.process_finances.find(consulta, {"_id": 0}).to_list(1000)
     return {"finances": finances, "total": len(finances)}
 
 
@@ -238,6 +266,7 @@ async def run_list_process_finances(
 async def run_get_process_finance_by_id(
     finance_id: str,
     user: dict,
+    request: Request | None = None,
 ):
     """
     Obtém um registo financeiro de processo específico por ID.
@@ -246,7 +275,9 @@ async def run_get_process_finance_by_id(
     """
     doc = await db.process_finances.find_one({"id": finance_id}, {"_id": 0})
     if not doc:
-        raise HTTPException(status_code=404, detail="Registo financeiro não encontrado")
+        raise HTTPException(status_code=404, detail=ERRO_REGISTO_NAO_ENCONTRADO)
+
+    await exigir_registo_no_ambito(doc, user=user, request=request)
     return doc
 
 
@@ -255,6 +286,7 @@ async def run_update_process_finance(
     finance_id: str,
     body: ProcessFinanceUpdate,
     user: dict,
+    request: Request | None = None,
 ):
     """
     Actualiza um registo financeiro de processo.
@@ -266,7 +298,9 @@ async def run_update_process_finance(
     """
     existing = await db.process_finances.find_one({"id": finance_id})
     if not existing:
-        raise HTTPException(status_code=404, detail="Registo financeiro não encontrado")
+        raise HTTPException(status_code=404, detail=ERRO_REGISTO_NAO_ENCONTRADO)
+
+    await exigir_registo_no_ambito(existing, user=user, request=request)
 
     update_fields = body.model_dump(exclude_none=True)
     if not update_fields:
@@ -377,6 +411,7 @@ async def run_update_process_finance_status(
     finance_id: str,
     status: str,
     user: dict,
+    request: Request | None = None,
 ):
     """
     Actualiza apenas o status de um registo financeiro.
@@ -393,7 +428,9 @@ async def run_update_process_finance_status(
 
     existing = await db.process_finances.find_one({"id": finance_id})
     if not existing:
-        raise HTTPException(status_code=404, detail="Registo financeiro não encontrado")
+        raise HTTPException(status_code=404, detail=ERRO_REGISTO_NAO_ENCONTRADO)
+
+    await exigir_registo_no_ambito(existing, user=user, request=request)
 
     now = datetime.now(timezone.utc).isoformat()
     await db.process_finances.update_one(
@@ -419,6 +456,7 @@ async def run_update_process_finance_status(
 async def run_delete_process_finance(
     finance_id: str,
     user: dict,
+    request: Request | None = None,
 ):
     """
     Elimina um registo financeiro de processo.
@@ -427,7 +465,9 @@ async def run_delete_process_finance(
     """
     existing = await db.process_finances.find_one({"id": finance_id})
     if not existing:
-        raise HTTPException(status_code=404, detail="Registo financeiro não encontrado")
+        raise HTTPException(status_code=404, detail=ERRO_REGISTO_NAO_ENCONTRADO)
+
+    await exigir_registo_no_ambito(existing, user=user, request=request)
 
     await db.process_finances.delete_one({"id": finance_id})
 

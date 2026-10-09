@@ -44,59 +44,44 @@ mais longo), ou aceitar a invalidação numa janela de manutenção anunciada.
 
 ---
 
-### D-24 · Quatro superfícies por inventariar atravessam redes (BLOQUEIA a entrada da Domus)
-**Onde:** `services/property_list.py`, `services/property_crud.py`,
-`services/client_match.py`, `services/finance_process_records.py`
+### D-24 · O registo público não carimba a rede, e a Sala de Triagem é global
+**Onde:** `services/public_registration.py`, `services/client_registered.py`
+(`build_tenant_pool_condition`)
 
-O Lote 4 ergueu o isolamento por rede e os lotes seguintes foram-no ligando
-superfície a superfície. Estas quatro ficaram fora do inventário, e as quatro
-carregam dados de cliente. **Provadas** (não deduzidas) em
-`tests/unit/test_cruzamento_domus_na_carteira.py`, com os quatro testes em
-`xfail(strict=True)`: no dia em que a guarda entrar, o xpass passa a FALHA e
-obriga a remover o marcador.
+**O que já fechou** (iteração `fronteira-da-carteira`, 2026-10-09): as três
+superfícies de dados que esta entrada media — a carteira de angariações
+(`db.properties`, DOZE módulos sem uma única ocorrência de `compan` ou
+`network`), o Smart Match (o JOIN sem âmbito em nenhuma das pontas) e os
+registos financeiros (`company_id` da query string como «fronteira»). Detalhe
+no `worklog.md`.
 
-1. **A carteira de angariações não tem fronteira nenhuma.** `run_list_properties`
-   abre com `query = {}` — a sexta ocorrência da forma do `run_get_tasks`. O
-   `PropertyListItem` leva `client_name`, logo a listagem sozinha já entrega o
-   nome do cliente da outra rede. E `run_get_property` é
-   `find_one({"id": property_id})` e mais nada (a forma do
-   `run_delete_deadline`: a rota autoriza o VERBO, não o OBJECTO), devolvendo
-   o `OwnerInfo` completo — nome, telefone, email e **NIF** do proprietário.
-   A escrita também não carimba: zero ocorrências de `network_id` em
-   `property_crud.py` e em `property_excel_import.py`.
-2. **O Smart Match é a ponte, e é a pior das quatro.** É um JOIN entre
-   `properties` e `processes` sem âmbito em nenhuma das pontas:
-   `find_matching_clients_for_property` consulta `db.processes` por ESTADO
-   (`{"status": {"$nin": [...]}}`) e devolve `client_name`, `client_email` e
-   `client_phone`. Alcançável por `GET /match/property/{id}/clients` **e** —
-   pior — pelo `check_and_notify_matches_for_new_property`, que manda a lista
-   por **EMAIL** ao agente: um imóvel angariado na Domus produz um email com
-   os nomes dos clientes da Power. Uma fuga que sai do sistema é de outra
-   natureza; é por isto que esta entrada é a primeira a fechar.
-   (Ao lado dela, um defeito dormente: a notificação inserida em
-   `db.notifications` não tem `user_id`, logo não aparece a ninguém — a
-   regra do Lote 5, ponto 3. Não é fuga, é um aviso que nunca chega.)
-3. **Os registos financeiros.** `GET /finance/processes` sem `company_id`
-   consulta `{}`. E o `company_id` é um parâmetro da QUERY STRING, escolhido
-   por quem pergunta: é o placebo do `build_company_scope_condition` outra
-   vez — um filtro que o cliente controla nunca é uma parede. Os
-   `FINANCE_READ_ROLES` incluem `consultor`, `administrativo` e `indexacao`.
-4. **O registo público não carimba a rede** (já anotado no `worklog.md` da
-   iteração `alertas-por-rede` e sem entrada própria até aqui):
-   `public_registration.py` tem zero ocorrências de `resolve_tenant_stamp`.
-   Hoje funciona por cair na pilha por carimbar; com a Domus a entrar deixa
-   de funcionar, porque a **Sala de Triagem é uma POOL**
-   (`build_tenant_pool_condition`) e por desenho mostra o que não tem carimbo
-   a TODAS as redes. Somado a um formulário público único, que não sabe de
-   que empresa é, todo o lead público fica visível às duas redes.
+**O que fica**, e fica porque depende de uma decisão de produto e não de
+código: `public_registration.py` tem zero ocorrências de `resolve_tenant_stamp`.
+Hoje funciona por o lead cair na pilha por carimbar — e a **Sala de Triagem é
+uma POOL** (`build_tenant_pool_condition`), que por desenho mostra o que não
+tem carimbo a **TODAS** as redes. É o *claim-based routing*: um registo
+público ainda não é de ninguém, e escondê-lo de quem não é da rede de omissão
+faz com que nunca seja reivindicado.
 
-**Para fechar:** âmbito de rede nas duas listagens e posse (404, nunca 403)
-nos dois `find_one`; o Smart Match a receber o âmbito de quem pergunta em vez
-de consultar a colecção inteira; `company_id` a deixar de ser a fronteira das
-finanças; e o formulário público a saber a que empresa pertence (ou a Pool a
-deixar de ser global). O inventário tem de ser derivado e não escrito à mão —
-a lição do `build_kanban_query`: um ponto único para a CONDIÇÃO não chega, é
-preciso enumerar as superfícies que LISTAM.
+Somado a um **formulário público único**, que não sabe de que empresa é, a
+consequência é directa: **todo o lead público fica visível às duas redes**, a
+Domus incluída. Não é um defeito do isolamento, é o isolamento a aplicar uma
+regra que foi escrita quando havia só um grupo.
+
+**Porque está adiado:** as duas saídas são decisões de negócio opostas e
+nenhuma é obviamente certa. (a) O formulário passa a saber a empresa — um link
+por empresa/rede (`?company=`), e o lead nasce carimbado: a Pool deixa de ser
+partilhada e cada rede trata dos seus. (b) A Pool continua global e passa a
+ser uma SALA DE ENTRADA explícita, com os dados mínimos à vista até alguém
+reivindicar — o que obriga a decidir que campos são «mínimos» (nome sem
+contacto? sem NIF?).
+
+**Quem é atingido:** com uma ilha no sistema, qualquer registo público. Hoje
+não há utilizadores activos da Domus, logo não está a acontecer.
+
+**Para fechar:** a decisão (a) ou (b); depois disso o carimbo na escrita é
+pequeno (`resolve_tenant_stamp` no `public_registration`) e a Pool passa a
+`build_tenant_condition` ou mantém-se com projecção reduzida.
 
 ---
 
@@ -121,12 +106,80 @@ com acesso à Domus passa a ver **toda** a Domus, e não aquele processo. Para
 um grupo que declara tolerância zero ao cruzamento, trocar um processo
 partilhado por acesso total à outra rede é o pior negócio possível.
 
-**Para fechar:** falta a decisão de produto antes do código — num processo
-partilhado, o que é que o lado convidado vê (a ficha inteira? só o imóvel e a
-visita? os documentos?), quem autoriza a partilha e quem a pode revogar.
-Depois disso, a forma provável é um campo próprio de redes convidadas no
-documento, a entrar no `build_network_scope_condition` como um ramo a mais —
+**O que a medição da D-24 acrescentou (2026-10-09):** eu tinha dito que o
+custo não-óbvio desta dívida era a parede do S3. **Não é.**
+`build_s3_valid_prefixes(process)` deriva os prefixos de posse do **PROCESSO**
+(o seu id e o do cliente), não da rede — logo, no momento em que o lado
+convidado consegue abrir o processo, a parede do S3 autoriza-lhe os mesmos
+prefixos sem mudar uma linha. O custo real está noutro sítio, e é a **D-26**: o
+que decide se um processo é visível para efeitos de documentos é o
+`document_visibility`, e esse não conhece redes nenhumas. As duas fecham no
+mesmo lote, porque a resposta a esta é a guarda daquela.
+
+**Decisão de produto já tomada** (dono do produto, 2026-10-09): o lado
+convidado vê **a ficha inteira do processo** — tudo o que o dono vê, naquele
+processo, e a fronteira continua fechada em todos os restantes. A partilha é
+**Via Rápida**: nasce da ATRIBUIÇÃO de um processo a alguém de outra empresa,
+sem aprovação manual.
+
+**Para fechar:** um campo próprio de redes convidadas no documento do
+processo, a entrar no `build_network_scope_condition` como um ramo a mais —
 nunca alargando o `network_id`, que é o carimbo de propriedade e é permanente.
+O que continua em aberto é a REVOGAÇÃO (tirar a atribuição revoga a partilha?
+se sim, o parceiro perde o histórico e os documentos que ele próprio produziu,
+e o registo de comissão em `process_finances` fica órfão) e o facto de uma
+partilha automática ser, por construção, uma abertura de fronteira que
+ninguém aprovou — pelo que tem de ser **auditada e visível** (entrada no
+trilho, entrada no histórico do processo e etiqueta na listagem), senão é
+silenciosa, e uma abertura de fronteira silenciosa é o oposto de tolerância
+zero.
+
+---
+
+### D-26 · A guarda de documentos não conhece redes
+**Onde:** `services/document_visibility.py`
+(`user_can_view_process_documents`, `assert_can_view_process_documents`)
+
+Encontrada a medir a D-24, não estava em enunciado nenhum. A função que
+decide se um utilizador pode ver os documentos de um processo tem **zero**
+ocorrências de `network` ou `compan`, e abre por duas linhas:
+
+1. **bypass ABSOLUTO** para `_ADMIN_BYPASS_ROLES` = {admin, ceo, **diretor**,
+   administrativo, …}, verificado antes de tudo o resto. O diretor de uma ilha
+   é diretor da SUA rede — é a regra 2 do `deadline_scope` e a mesma do
+   `visit_scope`. Aqui atravessa.
+2. `if not is_document_visibility_restricted(process): return True` — um
+   processo **já indexado** é visível a qualquer sessão autenticada. A
+   restrição foi escrita para a PRÉ-indexação (o indexador trata os documentos
+   antes de haver equipa), não como fronteira de tenant. E um processo
+   indexado é o caso NORMAL, não o raro: é a forma do `run_get_my_tasks` ao
+   contrário — foi o ramo comum não ter guarda nenhuma que escondeu isto.
+
+O que está do outro lado não são nomes: é a pasta documental do cliente —
+cartão de cidadão, IRS, recibos de vencimento, extractos bancários. É a fuga
+de maior consequência de RGPD deste eixo, e basta saber um `process_id`.
+
+**Provada** (não deduzida) em `tests/unit/test_documentos_atravessam_redes.py`,
+com os testes em `xfail(strict=True)`.
+
+**Porque foi adiada:** a guarda certa **é** a resposta da D-25. Num processo em
+partilha, o lado convidado tem de ver os documentos (decisão tomada: «a ficha
+inteira»). Escrever aqui uma fronteira de rede pura fecharia a porta que a
+D-25 precisa de abrir, e abri-la outra vez a seguir seria **alargar uma parede
+para caber a correcção** — que é exactamente como o Incidente P0 do Portal
+começou.
+
+**Quem é atingido:** qualquer conta de outra rede que conheça um `process_id`.
+Hoje não há utilizadores activos da Domus, pelo que a janela está fechada por
+operação e não por código — e é isso que torna a ordem (D-25 e D-26 antes do
+primeiro utilizador da Domus) uma condição e não uma preferência.
+
+**Para fechar:** no mesmo lote da D-25. A fronteira entra no
+`user_can_view_process_documents` como mais uma prova — a rede do processo, ou
+a lista de redes convidadas dele — e o bypass do `diretor` passa a valer
+dentro da rede, como já vale no calendário e nas visitas. Os 11 pontos de
+chamada em `routes/documents.py` derivam da mesma função, logo é um ponto
+único; o `onedrive_files` é o segundo chamador.
 
 ---
 

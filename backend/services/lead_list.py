@@ -8,6 +8,7 @@ from typing import Optional
 from datetime import datetime, timezone
 
 from database import db
+from services.tenant_network import build_tenant_condition, com_isolamento
 from models.lead import LeadStatus
 
 
@@ -39,8 +40,12 @@ async def run_list_leads(
     if client_id:
         query["client_id"] = client_id
 
-    # Busca leads e exclui o _id do mongo
-    leads = await db.property_leads.find(query, {"_id": 0}).to_list(length=500)
+    # Busca leads e exclui o _id do mongo. A FRONTEIRA é a rede (D-24):
+    # o recorte por `created_by_id` acima não vale para admin/diretor, e
+    # era por aí que um diretor de uma ilha via as leads do grupo.
+    leads = await db.property_leads.find(
+        com_isolamento(await build_tenant_condition(user), query), {"_id": 0}
+    ).to_list(length=500)
 
     # Enriquecer com nome do cliente (batch com $in — evita N+1)
     client_ids = list({lead["client_id"] for lead in leads if lead.get("client_id")})

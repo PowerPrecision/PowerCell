@@ -71,6 +71,16 @@ VALORES_SEM_EMPRESA: tuple[Any, ...] = (None, "", "default")
 # fuga inteira em silêncio.
 CONDICAO_IMPOSSIVEL: dict = {CAMPO_REDE: {"$in": []}}
 
+#: Todos os campos onde o carimbo pode viver. Uma PROJECÇÃO que os
+#: deixe de fora faz a verificação de posse ver um documento sem marca —
+#: e "sem marca" é a tolerância do legado, logo a guarda abre em vez de
+#: fechar. É a família da lição do `get_file_content`: inspeccionar uma
+#: coisa e decidir sobre outra é a forma discreta de a parede não valer
+#: nada. Qualquer `find_one` que alimente uma verificação de posse tem de
+#: incluir a `PROJECCAO_DO_CARIMBO`.
+CAMPOS_DO_CARIMBO: tuple[str, ...] = (CAMPO_REDE, *CAMPOS_EMPRESA)
+PROJECCAO_DO_CARIMBO: dict = {campo: 1 for campo in CAMPOS_DO_CARIMBO}
+
 _aviso_de_omissao_dado = False
 
 
@@ -366,3 +376,187 @@ async def resolve_tenant_stamp(
         CAMPO_REDE: rede,
     }
     return {chave_: valor for chave_, valor in carimbo.items() if valor}
+
+
+# ====================================================================
+# O PREDICADO GÉMEO DA CONDIÇÃO (D-24, Out 2026)
+# ====================================================================
+# `build_network_scope_condition` responde à pergunta em Mongo, para
+# LISTAGENS. Um `find_one({"id": x})` seguido de uma verificação de posse
+# precisa da MESMA resposta em Python, e escrevê-la à mão em cada
+# serviço era garantir que uma delas divergia — a que divergisse
+# deixaria ver (ou esconderia trabalho real) sem dar erro nenhum.
+#
+# Os dois DERIVAM das mesmas constantes e há um teste de CONCORDÂNCIA
+# que os corre sobre os mesmos documentos: é a lição do `sub35`, onde
+# foi precisamente esse teste a apanhar que o filtro e a etiqueta
+# discordavam numa data no futuro.
+
+
+def _marca_vazia(valor: Any) -> bool:
+    """O campo não identifica empresa nenhuma?"""
+    return _texto(valor) in {_texto(v) for v in VALORES_SEM_EMPRESA}
+
+
+def documento_sem_marca_de_tenant(doc: Optional[dict]) -> bool:
+    """Gémeo em Python do `_sem_marca_de_tenant()`.
+
+    "Por carimbar" exige a ausência de TODAS as marcas — não só do
+    `network_id`. Olhar apenas para a rede deixaria a fuga entrar pela
+    cláusula que existe para a evitar: um imóvel da Domus criado entre o
+    carimbo na escrita e a migração tem empresa e ainda não tem rede, e
+    contá-lo como "legado" entregava-o ao grupo incumbente.
+    """
+    doc = doc or {}
+    return all(
+        _marca_vazia(doc.get(campo)) for campo in (CAMPO_REDE, *CAMPOS_EMPRESA)
+    )
+
+
+def documento_no_ambito(doc: Optional[dict], scope: TenantScope) -> bool:
+    """Este documento cai no âmbito deste utilizador?
+
+    Ramo a ramo, o espelho do `$or` que o construtor devolve:
+
+    1. a rede do documento é uma das do utilizador;
+    2. a empresa do documento (em qualquer dos três campos) é uma das
+       suas — é assim que o histórico, que grava ora o id ora o nome,
+       continua a ser alcançável;
+    3. o documento não tem marca NENHUMA **e** o utilizador pertence à
+       rede de omissão.
+
+    Sem nenhum dos três: **não**. Falha fechada, como o construtor, que
+    devolve uma condição impossível em vez de `None`.
+    """
+    doc = doc or {}
+
+    rede = _texto(doc.get(CAMPO_REDE))
+    if rede and rede in {_texto(r) for r in scope.network_ids if _texto(r)}:
+        return True
+
+    empresas = {
+        _texto(e)
+        for e in (*scope.company_ids, *scope.company_names)
+        if _texto(e)
+    }
+    if empresas and any(
+        _texto(doc.get(campo)) in empresas for campo in CAMPOS_EMPRESA
+    ):
+        return True
+
+    return bool(scope.inclui_rede_de_omissao) and documento_sem_marca_de_tenant(doc)
+
+
+def ambito_de_um_documento(doc: Optional[dict]) -> TenantScope:
+    """O âmbito da PONTA de um cruzamento, lido do próprio documento.
+
+    O Smart Match não tem utilizador: `check_and_notify_matches_for_new_property`
+    corre em background e manda o resultado por email. A fronteira tem
+    por isso de sair dos DOCUMENTOS — um cruzamento liga duas pontas da
+    MESMA rede, e a âncora diz qual é.
+
+    Um documento por carimbar pertence à rede de omissão, que é
+    exactamente o que a variável de ambiente declara. Sem ela (dev, CI)
+    mantém-se o comportamento anterior — todas as redes — com o mesmo
+    aviso de sempre, nunca em silêncio.
+    """
+    rede = _texto((doc or {}).get(CAMPO_REDE))
+    omissao = rede_de_omissao()
+
+    if rede:
+        return TenantScope(
+            network_ids=(rede,),
+            inclui_rede_de_omissao=bool(omissao) and rede == omissao,
+        )
+
+    if omissao:
+        return TenantScope(network_ids=(omissao,), inclui_rede_de_omissao=True)
+
+    _avisar_omissao_por_definir()
+    return TenantScope(inclui_rede_de_omissao=True)
+
+
+async def empresas_das_minhas_redes(scope: TenantScope) -> tuple[str, ...]:
+    """Todas as empresas (ids E nomes) das redes deste utilizador.
+
+    PARA QUE SERVE, E PORQUE É QUE NÃO É O CONSTRUTOR NORMAL
+    --------------------------------------------------------
+    Há colecções que **já** identificam a empresa em cada registo e
+    nunca tiveram `network_id`: `process_finances` é a principal (é
+    chaveada por `(process_id, company_id)`, que é a própria repartição
+    de comissões de uma partilha). Para essas, carimbar a rede exigiria
+    uma migração — e até ela correr, filtrar só pelas empresas do
+    utilizador **esconderia** da Precision os registos da Power, que
+    estão na mesma rede e que ela deve ver. Dados a menos não se notam
+    menos do que dados a mais: notam-se pior, porque parecem um bug de
+    contabilidade.
+
+    Resolver a rede → empresas fecha a fronteira usando um campo que
+    está preenchido em todos os registos, sem migração nenhuma.
+
+    A ilha implícita (`rede:<company_id>`) devolve o seu próprio id: é
+    uma empresa sem grupo configurado, e é dela que a rede deriva.
+    """
+    redes = {_texto(r) for r in scope.network_ids if _texto(r)}
+    if not redes:
+        return ()
+
+    encontradas: list[str] = []
+
+    # A ilha de uma só: a rede É a empresa, e não há linha em `companies`
+    # que a declare — o nome deriva do id (`rede_implicita`).
+    prefixo = rede_implicita("")
+    for rede in redes:
+        if rede.startswith(prefixo) and len(rede) > len(prefixo):
+            encontradas.append(rede[len(prefixo):])
+
+    try:
+        cursor = db.companies.find(
+            {CAMPO_REDE: {"$in": sorted(redes)}},
+            {"_id": 0, "id": 1, "name": 1},
+        )
+        for empresa in await cursor.to_list(500):
+            encontradas.extend(
+                valor for valor in (_texto(empresa.get("id")), _texto(empresa.get("name"))) if valor
+            )
+    except Exception as exc:
+        # Nunca AMPLIAR o âmbito por causa de um erro: sem a colecção de
+        # empresas fica o que já se conseguiu derivar das ilhas.
+        logger.warning(
+            "[tenant_network] Falha a resolver as empresas das redes %s (%s); "
+            "o âmbito por empresa fica reduzido ao que se derivou das ilhas.",
+            sorted(redes), exc,
+        )
+
+    return tuple(dict.fromkeys(e for e in encontradas if e))
+
+
+def condicao_da_mesma_rede(ancora: Optional[dict]) -> dict:
+    """A condição da OUTRA ponta de um cruzamento entre colecções.
+
+    Um cruzamento (imóvel × processo, lead × processo, recomendação do
+    Portal) liga duas pontas da MESMA rede, e a âncora é que diz qual é.
+    Vive aqui porque são QUATRO módulos a fazer a mesma pergunta
+    (`client_match`, `match_api_smart`, `portal_recommendations`,
+    `alerts`) — quatro cópias divergiriam, e a que divergisse não daria
+    erro nenhum: devolveria resultados a mais.
+    """
+    return build_network_scope_condition(ambito_de_um_documento(ancora))
+
+
+def build_company_field_condition(
+    empresas: Sequence[str],
+    *,
+    campo: str = "company_id",
+) -> dict:
+    """«A empresa deste registo é uma das minhas redes», num campo só.
+
+    Uma lista VAZIA devolve a condição impossível e **nunca** `{}`: é a
+    regra do `build_network_scope_condition` e do `ramo_dos_processos`,
+    porque um `{}` casa com tudo e é a forma de uma guarda se desligar a
+    si mesma em silêncio.
+    """
+    valores = sorted({_texto(e) for e in empresas if _texto(e)})
+    if not valores:
+        return CONDICAO_IMPOSSIVEL
+    return {campo: {"$in": valores}}

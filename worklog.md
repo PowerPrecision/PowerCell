@@ -1,4 +1,75 @@
 ---
+Task ID: fronteira-da-carteira
+Agent: Cloud Agent
+Task: BLOCO 1, ponto 1 — D-24: fronteira de rede na carteira de angariações, no Smart Match e nos registos financeiros
+
+Date: 2026-10-09
+
+Work Log:
+
+O INVENTÁRIO À MÃO TINHA QUATRO FUNÇÕES; A MEDIÇÃO DEU DUAS COLECÇÕES
+- A auditoria da entrada da Domus mediu quatro fugas e escreveu-as em `xfail(strict=True)`. Ao ir fechá-las, `grep -c "compan\|network"` em `services/property_*.py` deu **zero** em DOZE módulos que tocam `db.properties`. Não eram quatro funções sem guarda: era a colecção inteira, na leitura, na escrita e na eliminação.
+- É a lição do `build_kanban_query` outra vez — um ponto único para a CONDIÇÃO não chega, é preciso enumerar as superfícies. E é a quinta vez neste projecto que um inventário meu se prova incompleto ao ser medido.
+- Superfícies fechadas: `run_list_properties`, `run_get_property_stats` (que SOMAVA o valor da carteira de todas as redes), `run_get_properties_by_process`, `run_get_property`, `run_update_property`, `run_update_property_status`, `run_delete_property`, os três de `property_documents`, os cinco de `property_engagement`, `property_excel_import`, `lead_list`, as quatro de `client_match`, `match_api_smart`, `portal_recommendations`, `alerts.check_and_notify_matches_for_new_property` e as sete de `finance_process_records`.
+
+A QUARTA FORMA DO DEFEITO NÃO ESTAVA NO ENUNCIADO: O DESTINO
+- O `client_id` de `run_add_interested_client` e `run_register_visit` é um **process_id**. O código lia `db.processes` e GRAVAVA no histórico do imóvel o `client_name` que lá encontrava. Quem soubesse um id de processo da Power copiava o nome do cliente para a sua carteira — e ficava lá escrito.
+- É o `pode_apontar_para_o_processo` do calendário e o `pode_atribuir_a_consultor` das visitas, no mesmo sítio da árvore: são DUAS perguntas (o objecto que existe, e o destino), e juntá-las numa deixa a segunda por fazer. O `run_update_property` tinha a mesma porta (repontar `process_id`/`client_id`).
+
+A CARTEIRA É DA REDE, NÃO DA PESSOA — E ISSO É UMA DECISÃO
+- Ao contrário das visitas e do calendário, `property_scope.py` não tem recorte por pessoa. Uma angariação é um catálogo partilhado; o `agent_id` sempre foi um filtro da query string e nunca uma fronteira. Inventar aqui um limite por pessoa escondia trabalho real a quem o tem de fazer, e um imóvel que desaparece não produz erro nenhum.
+
+O LEGADO POR CARIMBAR NÃO É DE TODOS (mais estrito do que as visitas, de propósito)
+- A tolerância do `visit_scope` — uma visita sem rede entra para todos — estava errada para aqui: a carteira existente está TODA por carimbar, porque nunca houve escritor que a carimbasse. Tolerá-la a todos entregava a carteira inteira do grupo incumbente à primeira ilha que entrasse, que é literalmente a fuga medida.
+- `documento_no_ambito` só admite o documento sem marca quando o utilizador pertence à rede de omissão. É `TENANT_DEFAULT_NETWORK_ID` que declara de quem é a pilha — e é isso que faz a correcção funcionar SEM MIGRAÇÃO nenhuma.
+
+UMA PROJECÇÃO QUE DEIXA O CARIMBO DE FORA CEGA A GUARDA
+- `run_get_interested_clients` lia o imóvel com `{"interested_clients": 1}`: o documento chegava sem rede, contava como legado e a guarda ABRIA em vez de fechar. Família da lição do `get_file_content` — inspeccionar uma coisa e decidir sobre outra.
+- `PROJECCAO_DO_CARIMBO` e `PROJECCAO_DE_POSSE` existem por isso. O que as mede é um teste de COMPORTAMENTO por função: uma guarda de fonte não distingue uma projecção completa de uma incompleta.
+
+O PREDICADO GÉMEO, E O TESTE DE CONCORDÂNCIA
+- `build_network_scope_condition` responde em Mongo (listagens) e `documento_no_ambito` em Python (posse de um objecto). Duas respostas à mesma pergunta divergem na primeira mudança, e a que divergir não dá erro: deixa ver, ou esconde trabalho real.
+- Derivam das mesmas constantes e há um teste que os corre sobre a mesma amostra de dez documentos, em quatro âmbitos × dois valores de omissão. Foi um teste desta forma que apanhou no `sub35` uma data no futuro a entrar na lista filtrada sem etiqueta no ecrã.
+- `documento_sem_marca_de_tenant` exige a ausência de TODAS as marcas: olhar só para o `network_id` deixaria a fuga entrar pela cláusula que existe para a evitar.
+
+O SMART MATCH: A FRONTEIRA SAI DO DOCUMENTO, NÃO DO UTILIZADOR
+- Era a pior das fugas porque é um JOIN e nenhuma das pontas estava filtrada. Alcançável por `GET /match/property/{id}/clients` e pelo `check_and_notify_matches_for_new_property`, que manda o resultado por EMAIL ao agente — uma fuga que SAI do sistema.
+- Não há utilizador em que a ancorar (corre em background). E a regra certa é de qualquer forma esta: um cruzamento liga duas pontas da MESMA rede, logo a âncora diz qual é. `ambito_de_um_documento` + `condicao_da_mesma_rede` são o ponto único dos QUATRO módulos que cruzam colecções — quatro cópias divergiriam, e a que divergisse devolvia resultados a mais.
+- AO LADO: a notificação de match não tinha `user_id`, logo não aparecia a ninguém. Funcionava enquanto o `run_get_notifications` filtrava por visibilidade de processo; o Lote 5 pôs o `user_id` como único critério. Agora é um documento POR destinatário e, sem destinatário, NÃO SE GRAVA — um registo adormecido é pior do que a ausência, porque parece que o aviso foi dado.
+
+AS FINANÇAS: A FRONTEIRA DERIVA DA EMPRESA, NÃO DE UM CARIMBO NOVO
+- `process_finances` é chaveada por `(process_id, company_id)` — a própria repartição de comissões de uma partilha —, logo TODOS os registos já identificam a empresa. `network_id` nunca existiu aqui e o `backfill --documentos` não cobre esta colecção.
+- Filtrar pelas empresas do UTILIZADOR resolvia a fuga e abria outro buraco no sentido oposto: a Precision deixava de ver os registos da Power, que estão na mesma rede e que ela deve ver. Dados a menos não se notam menos do que dados a mais — notam-se PIOR, porque parecem um erro de contabilidade e ninguém suspeita de uma guarda.
+- `empresas_das_minhas_redes(scope)` resolve rede → empresas e fecha a fronteira com um campo preenchido em todos os registos, sem migração. E o `company_id` PEDIDO valida-se (`exigir_empresa_no_ambito`): no `summary` e na criação ele é obrigatório, e sem validação bastava escrever o id da outra empresa no URL.
+
+O PAPEL EFECTIVO TEM UM PONTO DE RESOLUÇÃO (e eu quase escrevi a sexta cópia)
+- Escrevi o `papel_efectivo` dentro do `property_scope` e o `finance_scope` importou-o de lá — camadas trocadas e a caminho da sexta cópia da mesma resolução. Saiu para `tenant_access_context.resolver_papel_efectivo`; o `carregar_contexto_de_acesso` passou a DERIVAR dele.
+- A única diferença entre chamadores é o predicado que traduz `__all_roles__`: quem pergunta pela fronteira de rede passa o `e_papel_sem_fronteira`, senão um administrador em modo global perdia o passe livre.
+- Resolver o papel efectivo exige o `Request` — só a ROTA o tem. 16 endpoints de `routes/properties.py` e 7 de `process_finances` passaram a declará-lo.
+
+MEDIÇÃO POR MUTAÇÃO — SEIS, AS SEIS MORTAS
+- listagem sem condição de rede → morreu na exploração E nas duas contraprovas; `documento_no_ambito` sempre `True` → morreu no teste de concordância; estatísticas sem `$match` → contagem + ordem das etapas; `pode_apontar_para_o_processo` aceita tudo → os dois testes do DESTINO; criação sem carimbo → o teste do carimbo; finanças pelas empresas do UTILIZADOR → `test_a_PRECISION_ve_os_registos_financeiros_da_POWER`.
+- A última é a que mais importa: é a contraprova a apanhar a correcção «certa» que esconde dados em silêncio.
+
+DOIS TESTES MEUS ESTAVAM ERRADOS, NÃO O CÓDIGO
+- `test_o_match_de_um_processo...` afirmava lista VAZIA: mas um processo da Domus a casar com o imóvel da Domus é o comportamento certo. Passou a afirmar a ausência do `imo-power` E a presença do `imo-domus` — a contraprova no mesmo teste.
+- A soma do `$sum` sobre `financials.asking_price` não é afirmada: o duplo de Mongo não agrega caminhos com ponto e devolveria 0 com a correcção presente OU ausente. Uma asserção que passa sem provar nada é pior do que não existir. Afirma-se a CONTAGEM e, num teste próprio, a ORDEM das etapas — que é a propriedade escrita.
+- E a cadeia de `db` cresceu outra vez: `property_helpers.get_next_reference` importa `db` no topo e é chamado na CRIAÇÃO. Sem ele no patch, o teste rebentava com «Event loop is closed» — um vermelho a apontar para o isolamento quando o problema era o `db`.
+
+O QUE ENCONTREI E NÃO FECHEI (e porque não)
+- **D-26, nova:** `document_visibility.user_can_view_process_documents` não conhece redes NENHUMAS. Abre por duas linhas: bypass ABSOLUTO para {admin, ceo, diretor, administrativo} verificado antes de tudo, e `if not is_document_visibility_restricted(process): return True` — um processo JÁ INDEXADO é visível a qualquer sessão autenticada (a restrição foi escrita para a PRÉ-indexação, não como fronteira de tenant; e indexado é o caso NORMAL, não o raro).
+- Do outro lado não são nomes: é a pasta documental do cliente — cartão de cidadão, IRS, recibos, extractos. É a fuga de maior consequência de RGPD deste eixo e basta saber um `process_id`. PROVADA em `test_documentos_atravessam_redes.py`, em `xfail(strict=True)`.
+- **Não a fechei porque a guarda certa É a resposta da D-25.** Num processo em partilha o lado convidado tem de ver os documentos («a ficha inteira», decisão do dono do produto). Escrever aqui uma fronteira de rede pura fecha a porta que a D-25 precisa de abrir, e abri-la outra vez a seguir é alargar uma parede para caber a correcção — como o Incidente P0 do Portal começou.
+- **Corrigi uma afirmação minha da auditoria:** eu disse que o custo não-óbvio da D-25 era a parede do S3. NÃO É. `build_s3_valid_prefixes(process)` deriva os prefixos do PROCESSO (o seu id e o do cliente), não da rede — no momento em que o convidado abre o processo, a parede autoriza-lhe os mesmos prefixos sem mudar uma linha. O custo real é a D-26.
+- **D-24 fica aberta, reduzida ao ponto 4:** `public_registration.py` não carimba a rede e a Sala de Triagem é uma POOL por desenho (`build_tenant_pool_condition` mostra o que não tem carimbo a TODAS as redes — é o claim-based routing). Com um formulário público único, todo o lead público fica visível às duas redes. Não é um defeito do isolamento: é o isolamento a aplicar uma regra escrita quando havia um grupo só. As duas saídas são decisões de negócio opostas e estão escritas na dívida.
+
+CONSEQUÊNCIAS OPERACIONAIS, DITAS DE PROPÓSITO
+- A carteira existente (toda por carimbar) continua visível a quem está em `TENANT_DEFAULT_NETWORK_ID` = `grupo_power_precision`, e deixa de o ser para qualquer rede nova. Não é preciso correr migração nenhuma para os imóveis.
+- Os imóveis e leads criados de HOJE em diante nascem carimbados. Um utilizador sem empresa activa cria imóveis por carimbar, com `warning` no log — meio carimbo é pior do que nenhum.
+- Para o `administrativo`, `consultor`, `intermediario` e `indexacao`, as listagens financeiras estreitam de «todos os registos do sistema» para «as empresas das suas redes». Quem não tiver empresa resolvida vê uma lista VAZIA, com `warning` — falha fechada.
+- O `diretor` NÃO atravessa redes em nenhuma destas superfícies (continua com passe livre dentro da sua). Só ADMIN e CEO atravessam, como no calendário e nas visitas.
+
+---
 Task ID: isolamento-e-motor-de-visitas
 Agent: Cloud Agent
 Task: LOTE 9 parte 2 — isolamento do `db.visits` (D-21), o modelo de IA do scraper (D-22), o motor de extração (D-23) e o dashboard de Visitas

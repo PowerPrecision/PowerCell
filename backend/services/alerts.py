@@ -934,14 +934,34 @@ async def notify_property_match(
     property_id: str,
     property_title: str,
     matching_clients: list,
-    agent_email: str = None
+    agent_email: str = None,
+    destinatarios: Optional[list] = None,
 ):
     """
     Notifica sobre matches perfeitos entre um imóvel e clientes.
     Chamada quando um novo imóvel é adicionado ou quando há matches de alta pontuação.
+
+    UMA NOTIFICAÇÃO SEM `user_id` É INVISÍVEL A TODA A GENTE (D-24)
+    --------------------------------------------------------------
+    Estas notificações nasciam **sem destinatário**. Funcionava enquanto
+    o `run_get_notifications` filtrava por visibilidade de processo; o
+    Lote 5 pôs o `user_id` como ÚNICO critério e desde então não
+    apareciam a ninguém — incluindo a quem as devia ver. É a mesma forma
+    do `notify_new_client_registration`, e **uma notificação que não
+    aparece não produz erro nenhum**.
+
+    A colecção tem um destinatário por documento: um aviso para N
+    pessoas são N documentos. Sem destinatário **não se grava** — um
+    registo adormecido na colecção é pior do que a sua ausência, porque
+    parece que o aviso foi dado.
+
+    Os `destinatarios` são resolvidos por quem chama, que é quem conhece
+    a rede do imóvel: a audiência de um match nunca atravessa redes.
     """
     if not matching_clients:
         return
+
+    ids = [str(d).strip() for d in (destinatarios or []) if str(d or "").strip()]
     
     now = datetime.now(timezone.utc).isoformat()
     
@@ -954,9 +974,16 @@ async def notify_property_match(
         score = match.get("score", 0)
         reasons = match.get("match_reasons", [])
         
-        # Criar notificação no sistema
-        notification = {
-            "id": str(uuid.uuid4()),
+        if not ids:
+            logger.warning(
+                "[MATCH] Match %s%% para o imóvel %s sem destinatário "
+                "(imóvel sem agente atribuído): nada a notificar.",
+                score, property_id,
+            )
+            continue
+
+        # Criar notificação no sistema — UM documento por destinatário
+        base_da_notificacao = {
             "type": ALERT_TYPES["PROPERTY_MATCH"],
             "title": f"Match Encontrado: {client_name}",
             "message": f"O cliente {client_name} tem {score}% de compatibilidade com o imóvel '{property_title}'",
@@ -973,8 +1000,13 @@ async def notify_property_match(
             "read": False,
             "created_at": now
         }
-        
-        await db.notifications.insert_one(notification)
+
+        for destinatario in ids:
+            await db.notifications.insert_one({
+                **base_da_notificacao,
+                "id": str(uuid.uuid4()),
+                "user_id": destinatario,
+            })
     
     # Se há agente responsável, enviar email (com verificação de preferências)
     if agent_email and matching_clients:
@@ -1007,23 +1039,33 @@ async def check_and_notify_matches_for_new_property(property_id: str):
     if not prop:
         return
     
+    # O `find_matching_clients_for_property` já só devolve processos da
+    # rede DESTE imóvel (D-24): o email que sai daqui levava o nome e o
+    # score de clientes de outras redes.
     matches = await find_matching_clients_for_property(property_id)
-    
+
     if matches:
         agent_email = None
+        destinatarios: list = []
         if prop.get("assigned_agent_id"):
             agent = await db.users.find_one(
-                {"id": prop["assigned_agent_id"]}, 
-                {"email": 1}
+                {"id": prop["assigned_agent_id"]},
+                {"email": 1, "id": 1}
             )
             if agent:
                 agent_email = agent.get("email")
-        
+                # O destinatário é o agente da angariação: é quem recebe
+                # o email, e é a única pessoa que sabemos estar na rede
+                # do imóvel sem fazer mais uma pergunta.
+                if agent.get("id"):
+                    destinatarios.append(agent["id"])
+
         await notify_property_match(
             property_id=property_id,
             property_title=prop.get("title", "Imóvel"),
             matching_clients=matches,
-            agent_email=agent_email
+            agent_email=agent_email,
+            destinatarios=destinatarios,
         )
     
     return {"matches_found": len(matches)}
