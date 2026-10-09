@@ -9591,3 +9591,21 @@ O admin liga/desliga se as acções ficam guardadas no histórico **por pessoa e
 * Só retira a empresa pedida; `network_id` (propriedade) nunca muda; as outras partilhas ficam.
 * Rasto: histórico do processo (honra o interruptor do ponto 4) + trilho `process_share_revoked`; o actor silenciado (Indexação) não deixa nenhum dos dois.
 * UI: `PartilhaCard` (coluna direita do detalhe), só com parceiros; o botão aparece aos perfis de gestão e o servidor decide.
+
+
+## Webmail e Indexador (Bloco 2, Lote 12)
+
+**Desvio inteligente — `services/document_intake.py`.** `planear_entrada(processo, categoria)` decide a pasta e se a IA corre, para TODOS os fluxos de entrada (upload multipart, URL pré-assinado + confirmação, verificação de conflito, arquivo de anexo de email): por indexar → `Index` + fila da IA; indexado ou Via Verde → pasta pedida, sem IA. A categorização em background é a ÚNICA chamada ao modelo. `list_files` reconhece `Index` como categoria; `retirar_o_index_da_listagem`/`retirar_documentos_da_index` são a parede no servidor (listagem, metadados antes dos URLs assinados, balcões, pesquisa); quem não vê a pasta recebe `em_indexacao`.
+
+**Libertar a Index — `services/index_release.py`.** Corre em `run_mark_indexed_side_effects`, antes do motor financeiro: move para a pasta da `ai_category` (sem IA, sem sobrescrever, repontando `db.documents`), um registo de histórico, nunca desfaz a indexação.
+
+**Escrever numa pasta — `document_visibility.assert_can_upload_to_process`.** Nos quatro fluxos de upload: quem escreve é quem pode ver (D-26); `parceiro`/`cliente` não carregam pela API do CRM.
+
+**Ler um email — `services/email_access.py`.** `pode_ler_email` (admin/CEO atravessam; é seu; conversa pelos endereços configurados; caixa partilhada do cargo; Caixa Geral da empresa; diretor na rede; email ligado a processo visível à equipa), `carregar_email_legivel` (404 igual para alheio e inexistente), `exigir_processo_legivel` (guarda de documentos da D-26). Todas as rotas `/emails/{email_id}…` e `/emails/…/{process_id}` a chamam (inventário por AST). `CAIXA_GERAL_ROLES` (diretor, CEO, admin, administrativo) é o conjunto único; `pode_abrir_caixa_geral` é positivo.
+
+**Arquivar no Processo — `services/email_archive.py`.** Sugestão por endereço (exacta; ambiguidade não pré-selecciona) e arquivo pelo MESMO `run_upload_file_s3`. Idempotente por processo (`archived_to`). Perfis: admin, CEO, diretor, administrativo, consultor, intermediário.
+
+**Contactos — `services/email_contacts.py`** (`email_contacts`, chave utilizador+empresa+endereço; aprende no envio real; remover é esconder).
+
+**Quadro da Indexação.** `build_kanban_role_base_query` e `realtime_audience` dão à Indexação o quadro geral da rede (só leitura). **Documentos novos — `services/document_novelty.py`**: definição única da bolinha verde (do cliente, não visto, 30 dias); `list_client_files` marca como visto.
+

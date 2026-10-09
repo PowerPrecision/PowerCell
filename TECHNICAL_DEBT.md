@@ -388,6 +388,14 @@ do passo 2.
 Os processos, clientes e leads têm `network_id`; os emails não. Pertence ao
 lote do webmail.
 
+**Bloco 2 (Out 2026):** a LEITURA passou a ter fronteira sem o carimbo —
+`services/email_access.py` deduz a rede pela empresa do email
+(`documento_no_ambito`; sem marca nenhuma pertence à rede de omissão) e todas
+as rotas de leitura/anexos/processo a usam. **O que continua aberto:** o
+carimbo na escrita e o backfill (a dedução falha para um email com
+`company_id` em branco numa instalação sem `TENANT_DEFAULT_NETWORK_ID`), e as
+caixas partilhadas por cargo (`shared_role`) não distinguem redes.
+
 **Para fechar:** carimbo na escrita (`resolve_tenant_stamp`) + backfill com a
 regra do `rede_consensual` (recusa adivinhar quando há mais de uma candidata).
 

@@ -1,4 +1,52 @@
 ---
+Task ID: bloco-2-webmail-e-indexador
+Agent: Cloud Agent
+Task: BLOCO 2 (Lote 12) — Webmail e Indexador: desvio inteligente, Index, arquivar anexos, quadro da Indexação, contactos, caixa geral
+
+Date: 2026-10-10
+
+Work Log:
+
+DESVIO INTELIGENTE E PASTA INDEX (pontos 2 e 3) — `services/document_intake.py`
+- `planear_entrada(processo, categoria)` é o PONTO ÚNICO (upload multipart, URL pré-assinado + confirmação, verificação de conflito, «Arquivar no Processo»): processo por indexar → pasta `Index` + fila da IA (`document_metadata.in_index_queue`); processo indexado **ou Via Verde** (`skip_index`) → pasta pedida, **sem IA**. «Indexado» é só o booleano `True` (um `"true"` ou um `1` falham para o lado de entrar na fila).
+- A triagem à entrada (`_triage_upload_category` / `_triage_category_with_ai`) foi APAGADA: era uma SEGUNDA chamada ao modelo sobre o mesmo ficheiro, só para escolher uma pasta. A IA corre no máximo 1× por ficheiro e 0× se indexado.
+- **Defeito provado:** `s3_storage.list_files` não conhecia a pasta `Index` e despejava-a em «Outros» — os consultores viam ali o que devia ser a «pasta cofre». Agora é uma categoria própria (só aparece na resposta quando tem ficheiros; `DEFAULT_CATEGORIES` não mudou).
+- Parede NO SERVIDOR para a `Index` (o ecrã escondia-a, o servidor devolvia-a): `retirar_o_index_da_listagem` + `retirar_documentos_da_index` na listagem, nos metadados (ANTES de gerar os URLs pré-assinados), no modal de balcões e na pesquisa. Quem não a vê recebe `em_indexacao: N` — um consultor que acabou de enviar e não vê o ficheiro em lado nenhum conclui que o envio falhou.
+- O pedido do Portal tenta casar com a categoria PEDIDA (`categoria_para_o_portal`), não com `Index`.
+- `services/index_release.py`: ao marcar como indexado, os ficheiros da `Index` passam à pasta da `ai_category` — SEM IA, sem sobrescrever (`_2`, `_3`…), com o Portal a acompanhar (`db.documents.s3_path` e `attached_files[]`), um só registo de histórico (mudo para a Indexação) e **antes do motor financeiro** (que lê o `s3_path`). Sem categoria o ficheiro fica e vem no relatório. Nunca desfaz a indexação.
+- **Guarda de ESCRITA (D-26, o lado que faltava):** `assert_can_upload_to_process` nos quatro fluxos. Bastava um `process_id` para plantar um ficheiro na pasta de um cliente de OUTRA rede. Regra: quem escreve é quem pode ver (os perfis certos mantêm a capacidade: gestão da rede, equipa de indexação, atribuído, rede convidada da partilha); `parceiro`/`cliente` não carregam pela API do CRM.
+
+ARQUIVAR NO PROCESSO (ponto 1) — `services/email_archive.py`
+- `GET /emails/{id}/archive-suggestions`: processos ACTIVOS do remetente (ou dos destinatários, num email enviado; os endereços do próprio nunca contam), comparação EXACTA, âmbito de PROCESSOS. Um só candidato vem pré-seleccionado; dois ou mais NÃO (arquivar no processo errado é um cruzamento de dados).
+- `POST /emails/{id}/attachments/{aid}/archive`: passa por `run_upload_file_s3` (magic bytes, conversão, desvio inteligente, guarda de escrita, histórico, Portal) — não há pipeline próprio. Idempotente por processo (`archived_to`). Quem arquiva: admin, CEO, diretor, administrativo, consultor, intermediário (a indexação é SÓ LEITURA nos documentos). `@limiter.limit` + `response: Response`.
+- UI: `ArquivarNoProcessoDialog` + `useArquivarAnexo` + botões «Descarregar» (grava no disco) e «Arquivar» nos anexos.
+
+QUEM LÊ UM EMAIL (ponto 5) — `services/email_access.py`
+- Achado: as CINCO rotas legadas de anexos e as rotas por processo (`/process`, `/stats`, `/timeline`, `/sync`, `/monitored`, `/send-documentation`) não tinham guarda NENHUMA; `PUT/DELETE/mark/labels` tampouco; e o bypass de admin/CEO/DIRETOR do `GET /emails/{id}` era sem rede. Hoje: admin/CEO atravessam; o resto = é seu / está na sua conversa (endereços CONFIGURADOS) / caixa partilhada do seu cargo / **Caixa Geral da empresa** / diretor dentro da rede / email ligado a um processo que a equipa vê. Inventário por AST das rotas (falha por omissão).
+- **Caixa Geral:** um só conjunto `CAIXA_GERAL_ROLES` = diretor, CEO, admin, **administrativo** (eram três cópias e a que ficou para trás escondia a caixa ao Administrativo). No frontend `PAPEIS_COM_CAIXA_GERAL` + teste que LÊ o ficheiro Python e compara. `legacy_general_ok` era uma lista de EXCLUSÃO (deixava passar parceiro/cliente): agora `pode_abrir_caixa_geral` (registo positivo).
+- `associate` e `search` decidiam pelo papel do JWT, sem rede: o diretor de uma ilha ligava qualquer email a qualquer processo e pesquisava (por regex do corpo!) todas as redes. Agora exigem ler o email E ver o processo; a pesquisa escapa o termo.
+- Separador «Emails» do processo: **doze `fetch` crus** (sem `X-Company-Id`/`X-Active-Role`) passaram a Axios; o anexo descarregava o JSON do endpoint legado em vez do ficheiro; uma lista recusada (403/404) parecia «sem emails» — agora diz-se. Primeiro teste montado deste painel.
+- Contactos (`services/email_contacts.py`): sugestão ao escrever Para/CC/BCC + gestão (favorito, remover = esconder). Chave `(user, empresa, endereço)` — a Carla não leva clientes de uma ilha para a outra; aprende no envio REAL (não ao pedir o envio); arranque a frio a partir do enviado, só com empresa activa.
+
+PONTO 18 — QUADRO DA INDEXAÇÃO E BOLINHAS
+- `build_kanban_role_base_query` e a audiência em tempo real (`realtime_audience`, que espelha a query) deixaram de dar à Indexação um âmbito próprio: vê o quadro GERAL da sua rede (a Camada 1 de rede manda). Só leitura: mover cartões e documentos por indexar continuam guardados. Os testes que fixavam o âmbito restrito foram INVERTIDOS, não apagados.
+- **A bolinha verde nunca acendeu:** `fetch_new_documents_map` perguntava por `status == "uploaded"` e o Portal escreve `RECEIVED` + `uploaded_by: "portal_client"`. `services/document_novelty.py` é a definição única (do cliente + não visto + janela de 30 dias, para o primeiro deploy não acender tudo); abrir os documentos marca como visto (guarda QUANDO, nunca QUEM). As bolinhas azul (mensagem) e verde já estavam desenhadas no Kanban, em «Os Meus Processos» e na listagem filtrada.
+
+VERIFICADO SEM ALTERAÇÃO: contas de email por perfil (`EmailAccountsCard` em cada separador de perfil) e Webmail pelo perfil do header (`empresaPedida = ?company_id || activeCompanyId`).
+
+TESTES E MUTAÇÕES
+- Backend: `test_desvio_inteligente` (51), `test_index_release` (20), `test_escrita_na_pasta_do_processo` (18), `test_acesso_a_emails` (41), `test_arquivar_no_processo` (35), `test_documentos_novos_do_cliente` (14), `test_contactos_de_email` (44). Frontend: `emailArchive`, `emailContacts`, `desvioInteligente`, `ArquivarNoProcessoDialog`, `CampoDeDestinatarios`, `EmailHistoryPanel` (montado), `WebmailPage` (+6), `S3FileManager` (+3).
+- Mutações: ~50, todas mortas depois de reforçar 5 testes fracos (o guarda de chave da Index; a equipa no email ligado a processo, que só morria com as DUAS condições unidas numa; o processo no `associate`, mascarado pelo guarda do email; o arranque a frio sem empresa; a pasta).
+- Dois testes de OUTRAS entregas partiram com a ordem de recolha (integração antes de unitários): `test_system_config_multiempresa` não fazia patch de `system_config_scope.db` — corrigido.
+
+A CONFIRMAR PELO DONO DO PRODUTO
+- Uploads de consultor/intermediário passam a ficar INVISÍVEIS (pasta Index) até a indexação; o ecrã di-lo («N aguardam a Indexação»).
+- Via Verde conta como «já indexado» para o desvio.
+- A Indexação NÃO arquiva anexos de email (é só leitura nos documentos). Se a caixa partilhada de Indexação deve poder arquivar, é uma linha em `PAPEIS_QUE_ARQUIVAM`.
+- A listagem de processos da Indexação mantém o âmbito próprio (só o Kanban passou a geral).
+- Fora de âmbito, por escrever: `temp_link_api_public`, `ai_bulk_analyze`, `portal_gov_fetch`, `financial_engine`, `rgpd_service` também gravam em S3 sem passar pelo desvio; `db.emails` continua sem carimbo de rede (D-8 — as regras novas deduzem a rede pela empresa do email).
+
+---
 Task ID: remates-do-bloco-1
 Agent: Cloud Agent
 Task: Remates do Bloco 1 — configuração global só do admin; revogação manual de partilhas (rota + UI)

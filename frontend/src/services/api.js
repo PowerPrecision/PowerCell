@@ -1158,9 +1158,22 @@ export const acknowledgeBackgroundTask = (taskId) => api.post(`/tasks/${taskId}/
 export const cancelBackgroundTask = (taskId) => api.delete(`/tasks/${taskId}/cancel`);
 
 // Emails
-export const getProcessEmails = (processId, direction = null) => 
-  api.get(`/emails/process/${processId}`, { params: { direction } });
-export const getEmailStats = (processId) => api.get(`/emails/stats/${processId}`);
+export const getProcessEmails = (processId, direction = null, options = {}) =>
+  api.get(`/emails/process/${processId}`, { params: { direction }, ...options });
+export const getEmailStats = (processId, options = {}) =>
+  api.get(`/emails/stats/${processId}`, options);
+// Separador «Emails» do processo (Bloco 2): TUDO por Axios. Eram doze `fetch`
+// crus, sem `X-Company-Id` nem `X-Active-Role` — o servidor decidia o acesso
+// pelo cargo do JWT e não pelo perfil activo (incidente 2026-09-21).
+export const getEmailTemplates = () => api.get("/emails/templates");
+export const applyEmailTemplate = (templateId, processId) =>
+  api.post(`/emails/templates/${templateId}/use`, { process_id: processId });
+export const unmarkEmail = (emailId, markType) =>
+  api.delete(`/emails/${emailId}/mark/${markType}`);
+export const searchEmailsToAssociate = (q, limit = 20) =>
+  api.get("/emails/search", { params: { q, limit } });
+export const getProcessEmailSyncStatus = (processId) =>
+  api.get(`/emails/sync-status/${processId}`);
 export const createEmail = (data) => api.post("/emails", data);
 export const updateEmail = (id, data) => api.put(`/emails/${id}`, data);
 export const deleteEmail = (id) => api.delete(`/emails/${id}`);
@@ -1260,6 +1273,16 @@ export const archiveEmailAttachment = (emailId, attachmentId, data) =>
     data,
     { skipErrorToast: true },
   );
+
+// ── Contactos sugeridos ao escrever (Bloco 2) ──
+// `skipErrorToast`: uma sugestão que falha não pode barrar o utilizador com um
+// toast enquanto ele escreve — o campo funciona sem elas.
+export const getEmailContacts = (q = "", limit = 8) =>
+  api.get("/emails/contacts", { params: { q, limit }, skipErrorToast: true });
+export const saveEmailContact = (data) =>
+  api.put("/emails/contacts", data, { skipErrorToast: true });
+export const hideEmailContact = (address) =>
+  api.delete("/emails/contacts", { params: { address }, skipErrorToast: true });
 
 // ── Envio ──
 export const sendWebmailEmail = (payload, account) =>

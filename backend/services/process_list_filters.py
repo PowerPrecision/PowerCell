@@ -649,18 +649,18 @@ def build_kanban_role_base_query(
     """
     Query base do Kanban: is_deleted + visibilidade por role.
 
-    Nota: INDEXACAO tem scope próprio (atribuídos + fila_espera) mesmo com
-    show_all=True — é o âmbito natural de trabalho da Indexação.
+    Nota (Bloco 2, Lote 12, ponto 18): a INDEXAÇÃO vê o quadro GERAL da sua
+    rede, como a gestão. Tinha um âmbito próprio (atribuídos + fila_espera) e
+    por isso não via as bolinhas de mensagem/documento novo dos processos que
+    o cliente acabava de mexer — que é o trabalho dela. É só LEITURA: mover
+    cartões continua guardado em `process_kanban_move`, e os documentos de um
+    processo por indexar continuam sob a guarda da D-26. A rede (Camada 1) é
+    aplicada por quem chama.
     """
     query: dict[str, Any] = {"is_deleted": {"$ne": True}}
     user_id = normalize_id_for_match(user.get("id")) or ""
 
-    if role == UserRole.INDEXACAO:
-        query["$or"] = [
-            {"assigned_indexacao_id": user_id},
-            {"status": "fila_espera"},
-        ]
-    elif not show_all:
+    if not show_all:
         if role == UserRole.CONSULTOR:
             query["$or"] = [
                 {"assigned_consultor_ids": user_id},

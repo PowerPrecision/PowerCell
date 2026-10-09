@@ -2557,3 +2557,13 @@ O aviso «este cliente já tem processos activos» vive num hook (`useConfirmarP
 ## 27.59 — O que o perfil não pode usar não se mostra para dar erro
 
 A configuração global é do administrador. Em vez de deixar o CEO abrir separadores que respondem 403, `seccoesDaNavegacao(isAdmin)` (ponto único das três navegações) devolve vazio ao CEO; um `?tab=` antigo para uma secção global **diz-se** («reservada ao administrador») em vez de abrir um ecrã de erros. É a regra do «menu e rotas têm de concordar» aplicada às secções de uma página: o gate está no ponto único e o teste monta a página com os dois perfis.
+
+
+## 27.60 — O que o servidor decidiu diz-se no ecrã; o ecrã não reimplementa a regra (Bloco 2)
+
+* **Desvio inteligente:** quem não vê a pasta `Index` envia um ficheiro e não o vê em lado nenhum. `utils/desvioInteligente.js` traduz o `intake.fila_ia` da resposta num toast e o `em_indexacao` da listagem numa frase permanente (`AvisoEmIndexacao`). O ecrã NUNCA calcula «este processo está indexado?» — o servidor di-lo.
+* **«Arquivar no Processo»:** `useArquivarAnexo` (um contador de pedidos descarta a resposta de um diálogo anterior) + `ArquivarNoProcessoDialog` (apresentação). Com mais do que um processo possível **não há pré-selecção** (`processoPreSeleccionado` só devolve o que o servidor sugeriu); a pasta só se pergunta quando o ficheiro não vai para a Index.
+* **Um conjunto de papéis duplicado entre camadas tem um teste que lê o outro lado:** `PAPEIS_COM_CAIXA_GERAL` é comparado com o `CAIXA_GERAL_ROLES` do Python. A terceira cópia ficou para trás e escondeu a Caixa Geral ao Administrativo.
+* **Sugestões são um extra:** `CampoDeDestinatarios` nunca impede de escrever (um pedido que falha dá lista vazia, uma resposta velha não substitui a nova) e escolhe com `onMouseDown`+`preventDefault` (com `onClick` o `blur` fechava a lista antes do clique).
+* **Uma lista recusada diz-se:** o `EmailHistoryPanel` mostra «sem permissão» num 403/404 em vez de «Nenhum email encontrado»; um erro de rede NÃO se faz passar por permissão. Doze `fetch` crus passaram a Axios (perdiam `X-Company-Id`/`X-Active-Role`).
+

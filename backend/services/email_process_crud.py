@@ -511,23 +511,16 @@ async def run_associate_email_to_client(data: dict, current_user: dict):
     if not email:
         raise HTTPException(status_code=404, detail="Email não encontrado")
 
-    # === ISOLAMENTO: verificar que o utilizador tem acesso ao email ===
-    user_role = current_user.get("role", "")
-    can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    # === ISOLAMENTO (Bloco 2): ler o email E ver o processo ===
+    # O bypass por `current_user["role"]` (o papel do JWT, sem rede) deixava
+    # um diretor de uma ilha ligar qualquer email a qualquer processo.
+    from services.email_access import exigir_leitura_do_email, exigir_processo_legivel
 
-    if not can_see_all:
-        user_id = current_user["id"]
-        is_owner = (
-            email.get("created_by") == user_id
-            or email.get("synced_for_user") == user_id
-        )
-        is_shared_role = (
-            email.get("shared_role")
-            and email.get("shared_role") == user_role
-        )
-        if not (is_owner or is_shared_role):
-            raise HTTPException(status_code=403, detail="Sem permissão para associar este email")
-    
+    await exigir_leitura_do_email(
+        email, current_user, detail="Sem permissão para associar este email",
+    )
+    await exigir_processo_legivel(process_id, current_user)
+
     if email.get("process_id") == process_id:
         return {"success": True, "message": "Email já está associado a este processo"}
     
@@ -561,20 +554,24 @@ async def run_search_emails(q: str, current_user: dict, limit: int = 20):
     if len(q) < 3:
         raise HTTPException(status_code=400, detail="Termo deve ter pelo menos 3 caracteres")
 
-    # === ISOLAMENTO DE DADOS ===
-    user_role = current_user.get("role", "")
-    can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    # === ISOLAMENTO DE DADOS (Bloco 2) ===
+    # Pelo perfil EFECTIVO. Só admin e CEO atravessam redes: o diretor via
+    # TODOS os emails (corpo incluído, por regex) de todas as redes.
+    from services.email_access import papeis_do_utilizador, PAPEIS_QUE_ATRAVESSAM_REDES
+
+    papeis = papeis_do_utilizador(current_user)
+    user_role = next(iter(papeis), "")
 
     text_filter = {
         "$or": [
-            {"subject": {"$regex": q, "$options": "i"}},
-            {"from_email": {"$regex": q, "$options": "i"}},
-            {"to_emails": {"$regex": q, "$options": "i"}},
-            {"body": {"$regex": q, "$options": "i"}},
+            {"subject": {"$regex": re.escape(q), "$options": "i"}},
+            {"from_email": {"$regex": re.escape(q), "$options": "i"}},
+            {"to_emails": {"$regex": re.escape(q), "$options": "i"}},
+            {"body": {"$regex": re.escape(q), "$options": "i"}},
         ]
     }
 
-    if can_see_all:
+    if papeis & PAPEIS_QUE_ATRAVESSAM_REDES:
         query = text_filter
     else:
         user_id = current_user["id"]
@@ -590,9 +587,16 @@ async def run_search_emails(q: str, current_user: dict, limit: int = 20):
         )
         if shared_config:
             ownership_filter["$or"].append({"shared_role": user_role})
+        # O diretor vê também os emails das empresas onde tem cargo.
+        if "diretor" in papeis:
+            from services.webmail_scope import empresas_do_webmail
+
+            empresas = [e.company_id for e in await empresas_do_webmail(current_user)]
+            if empresas:
+                ownership_filter["$or"].append({"company_id": {"$in": empresas}})
 
         query = {"$and": [ownership_filter, text_filter]}
-    
+
     emails = await db.emails.find(
         query,
         {"_id": 0, "id": 1, "subject": 1, "from_email": 1, "to_emails": 1, "sent_at": 1, "process_id": 1}

@@ -60,6 +60,7 @@ UCRS_EXTRA = [
 def mundo(fake_async_db):
     """Três empresas, duas redes, e uma configuração própria já gravada."""
     import services.system_config as core
+    import services.system_config_scope as ambito
 
     semear(fake_async_db)
     fake_async_db.user_company_roles.docs.extend(dict(u) for u in UCRS_EXTRA)
@@ -75,7 +76,10 @@ def mundo(fake_async_db):
         "storage": {"provider": "aws_s3", "aws_secret_access_key": "SEGREDO-DA-DOMUS"},
     })
     core._config_cache.clear()
-    with tenant_db(fake_async_db, core):
+    # Cada módulo da cadeia que faz `from database import db` no topo tem a
+    # SUA referência: sem `ambito` aqui o teste passava ou falhava conforme a
+    # ordem de recolha (a bateria de integração corre antes).
+    with tenant_db(fake_async_db, core, ambito):
         yield fake_async_db
     core._config_cache.clear()
 

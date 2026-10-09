@@ -9,7 +9,7 @@
  * arrastar-largar) vive AQUI, porque é só DOM: o contentor recebe os
  * ficheiros já prontos em `onUploadFiles(File[])` e trata do resto.
  */
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -41,6 +41,8 @@ import {
 import { Textarea } from "../ui/textarea";
 import { sanitizeEmailHtml, htmlToText } from "../../utils/sanitize";
 import { formatFileSize, getAttachmentIcon } from "./webmailFormatters";
+import CampoDeDestinatarios from "./CampoDeDestinatarios";
+import GerirContactosDialog from "./GerirContactosDialog";
 
 /**
  * @param {object} props
@@ -84,6 +86,7 @@ const EmailComposer = ({
   resolvedSignature = "",
 }) => {
   const fileInputRef = useRef(null);
+  const [contactosAberto, setContactosAberto] = useState(false);
 
   const aoClicarNaZona = () => fileInputRef.current?.click();
 
@@ -126,15 +129,21 @@ const EmailComposer = ({
           {/* To */}
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium w-12 shrink-0">Para:</label>
-            <Input
+            <CampoDeDestinatarios
+              ariaLabel="Para"
               placeholder="email@exemplo.com"
               value={data.to_emails}
-              onChange={(e) =>
-                onFieldChange("to_emails", e.target.value)
-              }
-              className="flex-1"
+              onChange={(valor) => onFieldChange("to_emails", valor)}
             />
           </div>
+          <button
+            type="button"
+            className="ml-14 text-xs text-muted-foreground underline-offset-2 hover:underline"
+            onClick={() => setContactosAberto(true)}
+          >
+            Gerir contactos
+          </button>
+          <GerirContactosDialog open={contactosAberto} onOpenChange={setContactosAberto} />
 
           {/* CC (collapsible) */}
           <Collapsible open={ccExpanded} onOpenChange={onToggleCc}>
@@ -151,13 +160,11 @@ const EmailComposer = ({
             <CollapsibleContent className="mt-2">
               <div className="flex items-center gap-2">
                 <label className="text-sm font-medium w-12 shrink-0">CC:</label>
-                <Input
+                <CampoDeDestinatarios
+                  ariaLabel="CC"
                   placeholder="email@exemplo.com (separar por vírgulas)"
                   value={data.cc_emails}
-                  onChange={(e) =>
-                    onFieldChange("cc_emails", e.target.value)
-                  }
-                  className="flex-1"
+                  onChange={(valor) => onFieldChange("cc_emails", valor)}
                 />
               </div>
             </CollapsibleContent>
@@ -179,13 +186,11 @@ const EmailComposer = ({
             <CollapsibleContent className="mt-2">
               <div className="flex items-center gap-2">
                 <label className="text-sm font-medium w-12 shrink-0">BCC:</label>
-                <Input
+                <CampoDeDestinatarios
+                  ariaLabel="BCC"
                   placeholder="email@exemplo.com (separar por vírgulas)"
                   value={data.bcc_emails}
-                  onChange={(e) =>
-                    onFieldChange("bcc_emails", e.target.value)
-                  }
-                  className="flex-1"
+                  onChange={(valor) => onFieldChange("bcc_emails", valor)}
                 />
               </div>
             </CollapsibleContent>

@@ -61,6 +61,8 @@ PAPEIS_SEM_FILTRO_DE_ATRIBUICAO = frozenset({
     UserRole.CEO,
     UserRole.DIRETOR,
     UserRole.ADMINISTRATIVO,
+    # Bloco 2 (ponto 18): a Indexação vê o quadro geral da rede.
+    UserRole.INDEXACAO,
 })
 
 # O estado que a Indexação vê mesmo sem lhe estar atribuído.
@@ -268,11 +270,6 @@ def _passa_a_necessidade_de_saber(aud: Audiencia, *, user_id: str, role: str) ->
     # Quem saiu da equipa recebe ESTE evento (e só passou a Camada 1).
     if uid and uid in aud.extra_user_ids:
         return True
-
-    if papel == UserRole.INDEXACAO:
-        # A Indexação tem âmbito próprio mesmo com show_all: o que lhe está
-        # atribuído, mais a fila de espera.
-        return uid in aud.indexacao_ids or aud.em_fila_de_espera
 
     if papel == UserRole.CONSULTOR:
         return uid in aud.consultor_ids

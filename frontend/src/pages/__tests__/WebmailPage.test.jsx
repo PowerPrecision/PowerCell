@@ -30,11 +30,14 @@ vi.mock("../../layouts/DashboardLayout", () => ({
   default: ({ children }) => <div data-testid="layout">{children}</div>,
 }));
 
+// O perfil activo muda por teste (quem arquiva anexos depende dele).
+const sessao = vi.hoisted(() => ({ papel: "consultor" }));
+
 vi.mock("../../contexts/AuthContext", () => ({
   useAuth: () => ({
     token: "t-1",
     user: { id: "u-1", email: "consultor@powercell.pt", name: "Consultor" },
-    effectiveRole: "consultor",
+    effectiveRole: sessao.papel,
     activeCompanyId: "c-1",
     effectiveCompanyId: "c-1",
   }),
@@ -104,6 +107,11 @@ vi.mock("../../services/api", () => {
     syncWebmail: registar("syncWebmail"),
     syncWebmailUser: registar("syncWebmailUser"),
     getProcesses: registar("getProcesses"),
+    getEmailArchiveSuggestions: registar("getEmailArchiveSuggestions"),
+    archiveEmailAttachment: registar("archiveEmailAttachment"),
+    getEmailContacts: registar("getEmailContacts"),
+    saveEmailContact: registar("saveEmailContact"),
+    hideEmailContact: registar("hideEmailContact"),
     readBlobErrorBody: vi.fn(async () => ({})),
   };
 });
@@ -157,6 +165,7 @@ const DUAS_EMPRESAS = {
 };
 
 beforeEach(() => {
+  sessao.papel = "consultor";
   estadoDaLista.valor = respostaDaLista([email()]);
   estadoDaLista.ultimosFiltros = null;
   // Qualquer chamada de rede que escape responde vazio em vez de rebentar.
@@ -413,5 +422,90 @@ describe("WebmailPage — separadores por Empresa (Ponto 8, Fase 3)", () => {
     expect(
       within(barraLateral).queryByRole("button", { name: /^sincronizar$/i }),
     ).toBeNull();
+  });
+});
+
+describe("WebmailPage — anexos: descarregar e arquivar no processo (Bloco 2)", () => {
+  const ANEXO = { id: "a1", filename: "cc-joana.pdf", size: 4096 };
+  const SUGESTAO = {
+    process_id: "p-77",
+    process_number: 77,
+    client_name: "Joana Valente",
+    status_label: "Em análise",
+    motivo: "endereço do titular",
+    ja_indexado: false,
+  };
+
+  async function abrirEmailComAnexo(utilizador, anexo = ANEXO) {
+    apiFalsa.getWebmailEmail = () =>
+      Promise.resolve({ data: { ...email({ attachments: [anexo] }), body: "Segue o CC." } });
+    montar();
+    await utilizador.click(await screen.findByText("Proposta do banco"));
+    return within(screen.getByTestId("webmail-reading-pane"));
+  }
+
+  it("«Descarregar» pede o anexo ao servidor e guarda-o sem abrir separador", async () => {
+    const utilizador = userEvent.setup();
+    apiFalsa.downloadWebmailAttachment = () => Promise.resolve({ data: new Blob(["pdf"]) });
+    const abrir = vi.spyOn(window, "open");
+    URL.createObjectURL = vi.fn(() => "blob:fake");
+    URL.revokeObjectURL = vi.fn();
+    const cliques = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    const leitura = await abrirEmailComAnexo(utilizador);
+    await utilizador.click(await leitura.findByRole("button", { name: "Descarregar cc-joana.pdf" }));
+
+    await waitFor(() => expect(cliques).toHaveBeenCalled());
+    expect(apiFalsa.chamadas.find((c) => c.nome === "downloadWebmailAttachment").args).toEqual([
+      "a1",
+      { email_id: "e1" },
+    ]);
+    expect(abrir).not.toHaveBeenCalled();
+  });
+
+  it("«Arquivar»: sugere o processo do remetente, arquiva e marca o anexo", async () => {
+    const utilizador = userEvent.setup();
+    apiFalsa.getEmailArchiveSuggestions = () =>
+      Promise.resolve({
+        data: { enderecos: ["banco@exemplo.pt"], sugestoes: [SUGESTAO], sugerido: "p-77", ambiguo: false },
+      });
+    apiFalsa.archiveEmailAttachment = () =>
+      Promise.resolve({ data: { success: true, path: "Index/cc.pdf", intake: { fila_ia: true } } });
+
+    const leitura = await abrirEmailComAnexo(utilizador);
+    await utilizador.click(await leitura.findByRole("button", { name: "Arquivar cc-joana.pdf no processo" }));
+
+    const radio = await screen.findByRole("radio", { name: /#77 · Joana Valente/ });
+    expect(radio).toBeChecked();
+    await utilizador.click(screen.getByTestId("arquivar-confirmar"));
+
+    await waitFor(() =>
+      expect(apiFalsa.chamadas.find((c) => c.nome === "archiveEmailAttachment").args).toEqual([
+        "e1",
+        "a1",
+        { process_id: "p-77", category: "Outros" },
+      ]),
+    );
+    expect(await leitura.findByText("Arquivado")).toBeInTheDocument();
+    expect(screen.queryByTestId("arquivar-dialogo")).not.toBeInTheDocument();
+  });
+
+  it.each(["indexacao", "parceiro"])(
+    "o perfil %s não vê o botão «Arquivar» (mas pode descarregar)",
+    async (papel) => {
+      sessao.papel = papel;
+      const utilizador = userEvent.setup();
+      const leitura = await abrirEmailComAnexo(utilizador);
+
+      expect(await leitura.findByRole("button", { name: "Descarregar cc-joana.pdf" })).toBeInTheDocument();
+      expect(leitura.queryByRole("button", { name: /Arquivar cc-joana.pdf/ })).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["administrativo", "diretor"])("o perfil %s arquiva", async (papel) => {
+    sessao.papel = papel;
+    const utilizador = userEvent.setup();
+    const leitura = await abrirEmailComAnexo(utilizador);
+    expect(await leitura.findByRole("button", { name: "Arquivar cc-joana.pdf no processo" })).toBeInTheDocument();
   });
 });

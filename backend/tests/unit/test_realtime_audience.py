@@ -227,9 +227,18 @@ class TestCamada2NecessidadeDeSaber:
         aud = audiencia_do_processo(processo(status="fila_espera"))
         assert alcanca(aud, escopo(), user_id="u1", role=UserRole.INDEXACAO)
 
-    def test_indexacao_nao_alcanca_processo_alheio_fora_da_fila(self):
+    def test_indexacao_alcanca_o_quadro_geral_da_rede(self):
+        """Bloco 2, ponto 18 (era `nao_alcanca_processo_alheio_fora_da_fila`)."""
         aud = audiencia_do_processo(processo(indexadores=["outro"]))
-        assert not alcanca(aud, escopo(), user_id="u1", role=UserRole.INDEXACAO)
+        assert alcanca(aud, escopo(), user_id="u1", role=UserRole.INDEXACAO)
+
+    def test_indexacao_nao_atravessa_a_rede(self):
+        """A Camada 1 continua a mandar: quadro geral é da SUA rede."""
+        aud = audiencia_do_processo(processo(rede=REDE_POWER))
+        assert not alcanca(
+            aud, escopo(redes=(REDE_DOMUS,), empresas=(EMPRESA_DOMUS,)),
+            user_id="u1", role=UserRole.INDEXACAO,
+        )
 
     def test_a_rede_vence_a_atribuicao(self):
         """Estar atribuído não fura a rede: as duas camadas são um E."""

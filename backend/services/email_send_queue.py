@@ -385,6 +385,24 @@ async def execute_pending_email_send(send_id: str) -> dict:
     # ── 4) Mover anexos temp → permanente + limpeza ───────────────
     await _finalize_attachments(record, temp_attachment_records, temp_keys_to_cleanup)
 
+    # ── 4b) Aprender os destinatários (livro de endereços do utilizador) ──
+    # Só aqui, no envio REAL: um envio cancelado na janela de «desfazer» não
+    # pode deixar contactos para trás. Nunca faz o envio falhar.
+    try:
+        from services.email_contacts import registar_contactos_usados
+
+        await registar_contactos_usados(
+            record.get("created_by"),
+            record.get("company_id"),
+            [
+                *(record.get("to_emails") or []),
+                *(record.get("cc_emails") or []),
+                *(record.get("bcc_emails") or []),
+            ],
+        )
+    except Exception as contactos_err:
+        logger.warning("[UNDO-SEND] Contactos não registados (não fatal): %s", contactos_err)
+
     # ── 5) Sucesso → apagar registo pending ──────────────────────
     try:
         await collection.delete_one({"id": send_id})

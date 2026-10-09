@@ -59,11 +59,16 @@ import {
 import { toast } from "sonner";
 import { isAfter, isBefore, startOfDay, endOfDay } from "date-fns";
 import { pt } from "date-fns/locale";
-import { getProcessEmails, createEmail, deleteEmail, syncProcessEmails, getMonitoredEmails, addMonitoredEmail, removeMonitoredEmail } from "../services/api";
+import {
+  getProcessEmails, createEmail, deleteEmail, syncProcessEmails, getMonitoredEmails,
+  addMonitoredEmail, removeMonitoredEmail, getEmailStats, getEmailTemplates,
+  applyEmailTemplate, markEmail as markEmailRequest, unmarkEmail as unmarkEmailRequest,
+  searchEmailsToAssociate, associateEmailToProcess, getProcessEmailSyncStatus,
+  downloadWebmailAttachment, readBlobErrorBody,
+} from "../services/api";
 import EmailViewerModal from "./EmailViewerModal";
 import { safeFormat, safeParseISO } from "../lib/utils";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Tamanhos de arquivo
 
@@ -80,6 +85,8 @@ const EmailHistoryPanel = ({
   const [emails, setEmails] = useState([]);
   const [stats, setStats] = useState({ total: 0, sent: 0, received: 0, unread: 0, important: 0, starred: 0 });
   const [loading, setLoading] = useState(true);
+  // O servidor recusou a lista (403/404): di-lo, em vez de parecer «sem emails».
+  const [acessoNegado, setAcessoNegado] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [filter, setFilter] = useState("all"); // all, sent, received
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -173,13 +180,8 @@ const EmailHistoryPanel = ({
 
   const fetchTemplates = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/emails/templates`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setTemplates(data);
-      }
+      const { data } = await getEmailTemplates();
+      setTemplates(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Erro ao carregar templates:", error);
     }
@@ -279,16 +281,7 @@ const EmailHistoryPanel = ({
   // Marcação de emails
   const markEmail = async (emailId, markType) => {
     try {
-      const response = await fetch(`${API_URL}/api/emails/${emailId}/mark`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ mark_type: markType })
-      });
-      
-      if (!response.ok) throw new Error("Erro ao marcar email");
+      await markEmailRequest(emailId, { mark_type: markType });
       
       // Actualizar local
       setEmails(prev => prev.map(e => {
@@ -312,12 +305,7 @@ const EmailHistoryPanel = ({
 
   const unmarkEmail = async (emailId, markType) => {
     try {
-      const response = await fetch(`${API_URL}/api/emails/${emailId}/mark/${markType}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (!response.ok) throw new Error("Erro ao desmarcar email");
+      await unmarkEmailRequest(emailId, markType);
       
       // Actualizar local
       setEmails(prev => prev.map(e => {
@@ -345,22 +333,24 @@ const EmailHistoryPanel = ({
         return;
       }
       
-      const response = await fetch(
-        `${API_URL}/api/emails/${emailId}/attachments/${attachment.id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = attachment.filename;
-        a.click();
-        window.URL.revokeObjectURL(url);
+      // O endpoint de streaming do Webmail (S3 → base de dados → IMAP) e não
+      // o legado `/emails/{id}/attachments/{id}`, que devolvia JSON para os
+      // anexos guardados no S3 — e o ficheiro descarregado era esse JSON.
+      let blob;
+      try {
+        ({ data: blob } = await downloadWebmailAttachment(attachment.id, { email_id: emailId }));
+      } catch (erro) {
+        const corpo = await readBlobErrorBody(erro);
+        throw new Error(corpo.detail || "Anexo não encontrado");
       }
-    } catch {
-      toast.error("Erro ao descarregar anexo");
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = attachment.filename;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (erro) {
+      toast.error(erro?.message || "Erro ao descarregar anexo");
     }
   };
 
@@ -413,18 +403,7 @@ const EmailHistoryPanel = ({
   // Aplicar template ao email
   const applyTemplate = async (templateId) => {
     try {
-      const response = await fetch(`${API_URL}/api/emails/templates/${templateId}/use`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ process_id: processId })
-      });
-      
-      if (!response.ok) throw new Error("Erro ao usar template");
-      
-      const data = await response.json();
+      const { data } = await applyEmailTemplate(templateId, processId);
       setNewEmail(prev => ({
         ...prev,
         subject: data.subject,
@@ -474,13 +453,8 @@ const EmailHistoryPanel = ({
     }
     try {
       setSearching(true);
-      const response = await fetch(
-        `${API_URL}/api/emails/search?q=${encodeURIComponent(searchQuery)}&limit=20`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!response.ok) throw new Error("Erro na pesquisa");
-      const data = await response.json();
-      setSearchResults(data.emails || []);
+      const { data } = await searchEmailsToAssociate(searchQuery, 20);
+      setSearchResults(Array.isArray(data?.emails) ? data.emails : []);
     } catch {
       toast.error("Erro ao pesquisar emails");
     } finally {
@@ -492,29 +466,18 @@ const EmailHistoryPanel = ({
   const handleAssociateEmail = async (emailId) => {
     try {
       setAssociating(emailId);
-      const response = await fetch(`${API_URL}/api/emails/associate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          email_id: emailId,
-          process_id: processId
-        })
+      const { data: result } = await associateEmailToProcess({
+        email_id: emailId,
+        process_id: processId,
       });
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || "Erro ao associar email");
-      }
-      const result = await response.json();
       toast.success(result.message);
       setIsAssociateDialogOpen(false);
       setSearchQuery("");
       setSearchResults([]);
       fetchData();
     } catch (error) {
-      toast.error(error.message);
+      const detalhe = error?.response?.data?.detail;
+      toast.error(typeof detalhe === "string" ? detalhe : "Erro ao associar email");
     } finally {
       setAssociating(null);
     }
@@ -523,15 +486,23 @@ const EmailHistoryPanel = ({
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [emailsRes, statsRes] = await Promise.all([
-        getProcessEmails(processId, filter === "all" ? null : filter),
-        fetch(`${API_URL}/api/emails/stats/${processId}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        }).then(r => r.json())
+      setAcessoNegado(false);
+      // Os emails são o essencial; as estatísticas são um extra (uma falha
+      // delas não pode esvaziar a lista).
+      const [emailsRes, statsRes] = await Promise.allSettled([
+        getProcessEmails(processId, filter === "all" ? null : filter, { skipErrorToast: true }),
+        getEmailStats(processId, { skipErrorToast: true }),
       ]);
-      setEmails(emailsRes.data);
-      setStats(statsRes);
+      if (emailsRes.status === "rejected") throw emailsRes.reason;
+      setEmails(Array.isArray(emailsRes.value.data) ? emailsRes.value.data : []);
+      if (statsRes.status === "fulfilled" && statsRes.value.data && typeof statsRes.value.data === "object") {
+        setStats(statsRes.value.data);
+      }
     } catch (error) {
+      // 403/404 do servidor (processo fora do âmbito ou sem visibilidade):
+      // dizer-se, em vez de mostrar uma lista vazia que parece «sem emails».
+      const estado = error?.response?.status;
+      if (estado === 403 || estado === 404) setAcessoNegado(true);
       console.error("Erro ao carregar emails:", error);
     } finally {
       setLoading(false);
@@ -554,11 +525,7 @@ const EmailHistoryPanel = ({
         toast.success("Sincronização iniciada em background");
         const checkStatus = async () => {
           try {
-            const statusResponse = await fetch(
-              `${API_URL}/api/emails/sync-status/${processId}`,
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-            const status = await statusResponse.json();
+            const { data: status } = await getProcessEmailSyncStatus(processId);
             
             if (status.status === "completed") {
               toast.success(`Sincronização concluída: ${status.result?.new_imported || 0} novos emails`);
@@ -1027,7 +994,14 @@ const EmailHistoryPanel = ({
           ) : (
             /* Lista Normal */
             <ScrollArea style={{ height: maxHeight }}>
-              {filteredEmails.length === 0 ? (
+              {acessoNegado ? (
+                <div role="alert" data-testid="emails-acesso-negado" className="text-center py-8 text-muted-foreground">
+                  <p className="font-medium">Não tem permissão para ver os emails deste processo.</p>
+                  <p className="text-xs mt-1">
+                    Os processos de outra rede, ou ainda por indexar, só são visíveis a quem lhes está atribuído.
+                  </p>
+                </div>
+              ) : filteredEmails.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <Mail className="h-12 w-12 mx-auto mb-2 opacity-20" />
                   <p>Nenhum email encontrado</p>

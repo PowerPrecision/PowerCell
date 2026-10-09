@@ -885,6 +885,7 @@ class TestLimparAIndexacaoEAUltimaOrdem:
         for condicoes in (repr(listagem), repr(kanban)):
             assert "assigned_consultor_id" not in condicoes
             assert "assigned_mediador_id" not in condicoes
-            # Contraprova: o carimbo próprio ESTÁ lá. Sem isto, um
-            # construtor que devolvesse vazio passaria nas duas de cima.
-            assert "assigned_indexacao_id" in condicoes
+        # Contraprova: na LISTAGEM o carimbo próprio ESTÁ lá. Sem isto, um
+        # construtor que devolvesse vazio passaria nas duas de cima. O
+        # Kanban deixou de ter recorte (Bloco 2, ponto 18: quadro geral).
+        assert "assigned_indexacao_id" in repr(listagem)

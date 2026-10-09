@@ -301,6 +301,11 @@ async def list_client_files(
     # Parede do servidor para a pasta `Index` (Bloco 2): o ecrã escondia-a,
     # mas esconder no cliente é cortesia, não fronteira.
     from services.document_intake import retirar_o_index_da_listagem
+    from services.document_novelty import marcar_como_vistos
+
+    # Abrir os documentos é «ver» o que o cliente enviou: apaga a bolinha
+    # verde das listagens. Só depois de a guarda de visibilidade passar.
+    await marcar_como_vistos(effective_id)
 
     return retirar_o_index_da_listagem(files, user)
 

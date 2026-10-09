@@ -17,7 +17,8 @@ from models.email import (
     LabelCreateRequest, LabelUpdateRequest,
     FolderCreateRequest, FolderUpdateRequest
 )
-from services.auth import get_current_user
+from services.auth import get_active_company_id_async, get_current_user
+from services.email_contacts import esconder_contacto, guardar_contacto, listar_contactos
 from middleware.rate_limit import limiter
 from services.email_access import carregar_email_legivel, exigir_processo_legivel
 from services.email_archive import arquivar_anexo, sugerir_processos
@@ -594,6 +595,48 @@ async def associate_email_to_client(
     current_user: dict = Depends(get_current_user)
 ):
     return await run_associate_email_to_client(data, current_user)
+
+
+@router.get("/contacts")
+async def list_email_contacts(
+    request: Request,
+    q: str = Query("", max_length=120),
+    limit: int = Query(8, ge=1, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    """Contactos sugeridos ao escrever (da empresa activa do utilizador)."""
+    company_id = await get_active_company_id_async(request, current_user)
+    return {"contacts": await listar_contactos(current_user, company_id, q=q, limite=limit)}
+
+
+@router.put("/contacts")
+async def save_email_contact(
+    request: Request,
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Cria/actualiza um contacto à mão (nome, favorito)."""
+    company_id = await get_active_company_id_async(request, current_user)
+    try:
+        return await guardar_contacto(
+            current_user, company_id, address=data.get("address"),
+            name=data.get("name"), favorite=data.get("favorite"),
+        )
+    except ValueError as erro:
+        raise HTTPException(status_code=400, detail=str(erro))
+
+
+@router.delete("/contacts")
+async def hide_email_contact(
+    request: Request,
+    address: str = Query(..., min_length=3, max_length=254),
+    current_user: dict = Depends(get_current_user)
+):
+    """Remove um contacto das sugestões (esconde; volta se lhe escrever de novo)."""
+    company_id = await get_active_company_id_async(request, current_user)
+    if not await esconder_contacto(current_user, company_id, address):
+        raise HTTPException(status_code=404, detail="Contacto não encontrado")
+    return {"success": True}
 
 
 @router.get("/search")
