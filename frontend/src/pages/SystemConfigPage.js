@@ -43,6 +43,13 @@ import PortalSettingsSection from "./systemConfig/PortalSettingsSection";
 import MandatoryDocumentsSection from "./systemConfig/MandatoryDocumentsSection";
 import ChangelogSection from "./systemConfig/ChangelogSection";
 import SlaThresholdsSection from "./systemConfig/SlaThresholdsSection";
+import EmpresaConfigSelector from "./systemConfig/EmpresaConfigSelector";
+import { getSystemConfigCompanies } from "../services/api";
+import {
+  deveMostrarSeletorDeEmpresa,
+  empresaEmVigor,
+  normalizarEmpresas,
+} from "../utils/empresaDeConfiguracao";
 import {
   Select,
   SelectContent,
@@ -134,10 +141,41 @@ const SystemConfigPage = ({ embedded = false }) => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(() => searchParams.get("tab") || "storage");
 
-  // MULTI-EMPRESA: a empresa activa vem do selector global (ContextSwitcher
-  // no header principal), não deve existir um segundo selector aqui — só
-  // reagimos à empresa activa escolhida globalmente.
-  const selectedCompanyId = effectiveCompanyId || "default";
+  // MULTI-EMPRESA: por omissão reagimos à empresa activa do selector global
+  // (ContextSwitcher). Mas esse selector só lista os UCR de quem pergunta, e
+  // o ADMIN configura TODAS as empresas do CRM: a lista abaixo vem do
+  // servidor, já filtrada pelo âmbito (admin: todas; CEO: as dele), e só há
+  // selector quando tem mais do que uma. Ver `utils/empresaDeConfiguracao`.
+  const [empresas, setEmpresas] = useState([]);
+  const [listaPronta, setListaPronta] = useState(false);
+  const [empresaEscolhida, setEmpresaEscolhida] = useState(null);
+  const selectedCompanyId = empresaEmVigor({
+    escolhida: empresaEscolhida,
+    activa: effectiveCompanyId,
+    empresas,
+  });
+
+  useEffect(() => {
+    let cancelado = false;
+    getSystemConfigCompanies()
+      .then((res) => {
+        if (!cancelado) setEmpresas(normalizarEmpresas(res?.data));
+      })
+      // Sem lista, o servidor continua a ser a parede: cai no comportamento
+      // de sempre (a empresa activa) em vez de bloquear o ecrã.
+      .catch((error) => console.warn("Lista de empresas indisponível:", error))
+      .finally(() => {
+        if (!cancelado) setListaPronta(true);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, []);
+
+  // Trocar a empresa activa no cabeçalho global anula a escolha local.
+  useEffect(() => {
+    setEmpresaEscolhida(null);
+  }, [effectiveCompanyId]);
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -167,21 +205,28 @@ const SystemConfigPage = ({ embedded = false }) => {
     }
   }, [token, selectedCompanyId]);
 
+  // Só pede depois de saber que empresas se oferecem: um CEO de uma ilha
+  // não tem a global, e abrir o ecrã a pedi-la daria um 403 e um toast.
   useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
+    if (listaPronta) fetchConfig();
+  }, [fetchConfig, listaPronta]);
 
-  // Recarregar config quando a empresa activa (global) mudar — ignora a
-  // primeira execução (montagem) para não sobrepor o tab pedido via ?tab=
-  const previousCompanyIdRef = useRef(selectedCompanyId);
+  // Recarregar config quando a empresa mostrada mudar — ignora a primeira
+  // execução (montagem) para não sobrepor o tab pedido via ?tab=
+  const previousCompanyIdRef = useRef(null);
   useEffect(() => {
+    if (!listaPronta) return;
+    if (previousCompanyIdRef.current === null) {
+      previousCompanyIdRef.current = selectedCompanyId;
+      return;
+    }
     if (previousCompanyIdRef.current === selectedCompanyId) return;
     previousCompanyIdRef.current = selectedCompanyId;
     setLoading(true);
     setActiveTab("settings");
     fetchConfig();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCompanyId]);
+  }, [selectedCompanyId, listaPronta]);
 
   const handleSave = async (section, data) => {
     // Pré-processar campos especiais
@@ -292,8 +337,13 @@ const SystemConfigPage = ({ embedded = false }) => {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {/* O seletor de empresa vive apenas no header global principal
-                (ContextSwitcher) — esta página apenas reage à empresa activa. */}
+            {deveMostrarSeletorDeEmpresa(empresas) && (
+              <EmpresaConfigSelector
+                empresas={empresas}
+                valor={selectedCompanyId}
+                onChange={setEmpresaEscolhida}
+              />
+            )}
             <Button variant="outline" onClick={fetchConfig}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Recarregar
@@ -441,6 +491,7 @@ const SystemConfigPage = ({ embedded = false }) => {
               <ConfigSection
                 section={fields[activeTab]}
                 sectionKey={activeTab}
+                companyId={selectedCompanyId}
                 config={config?.[activeTab]}
                 fields={fields[activeTab]?.fields || []}
                 onSave={handleSave}

@@ -1,4 +1,50 @@
 ---
+Task ID: configuracoes-por-empresa
+Agent: Cloud Agent
+Task: BLOCO 1, ponto 3 — Configurações do Sistema por empresa (Admin vê todas, CEO só as dele)
+
+Date: 2026-10-09
+
+Work Log:
+
+NÃO ERA UMA FUNCIONALIDADE EM FALTA, ERA UMA PAREDE
+- `GET /system-config`, `PATCH /system-config/{secção}` e `GET /system-config/reveal-secrets` estavam em `require_roles([ADMIN, CEO])` — que autoriza o VERBO — e o `company_id` era um **parâmetro livre** da query string. Um CEO da Domus (ilha) lia e ESCREVIA a configuração da Power.
+- O `/reveal-secrets` nem tinha `company_id`: devolvia SEMPRE as chaves da configuração GLOBAL (AWS, SMTP, IA), mesmo quando o formulário em ecrã mostrava os campos de uma empresa. Duas coisas erradas no mesmo endpoint: fuga entre redes e um olho que revelava o segredo de outra configuração.
+- `get_system_config(company_id)` CRIA e grava uma cópia da global para QUALQUER id que não exista — logo um `company_id` inventado escrevia um documento na base de dados. A validação tem de vir ANTES da leitura.
+- `GET /system-config/companies` (qualquer sessão autenticada) listava as empresas com configuração própria, de todas as redes.
+
+A REGRA (decisão do dono do produto): ADMIN acede a todas as empresas do CRM; CEO só às dele (UCR). A mesma rede NÃO chega — o CEO da Power não configura a Precision.
+
+DUAS PERGUNTAS, NÃO UMA (`services/system_config_scope.py`)
+- *Esta EMPRESA é minha para configurar?* → 404 se não (distinguir «não existe» de «não é tua» confirmaria o id).
+- *A configuração GLOBAL (`default`) é minha?* É a infra partilhada (bucket, SMTP do sistema, IA), não uma empresa. ADMIN sim; CEO só se a rede dele for a rede de omissão (`TENANT_DEFAULT_NETWORK_ID`). A Domus não → 403. Sem a variável (dev/CI) mantém-se o comportamento anterior. **Decisão minha, a confirmar**: o pedido falava de empresas e não dizia nada da global; bloquear a global a todos os CEO tirava ao CEO da Power os SLAs, os documentos obrigatórios e o SMTP do sistema, e deixá-la aberta entregava as chaves do bucket (onde vivem os documentos de TODAS as redes) ao CEO de uma ilha.
+- Rotas só-globais (`test-connection`, `complete-setup`, os seis `system-emails`) passam pela pergunta 2. `reveal-secrets` ganhou `company_id`. A permissão de exportação (lida por todos os perfis) só aceita a global ou a empresa do utilizador.
+- Listagem filtrada pelo âmbito: ADMIN todas as de `db.companies`; CEO as dele (+ global se a possui); os outros só as suas.
+
+O ECRÃ
+- A página só reagia à empresa activa do ContextSwitcher, que lista os UCR de quem pergunta: para o ADMIN era um beco (UCR numa empresa, tem de configurar todas). Há agora um selector (`<select>` nativo) alimentado por `GET /system-config/companies` — **o frontend só escolhe de entre o que o servidor devolveu**. Só aparece com mais de uma empresa; o primeiro pedido espera pela lista (um CEO de ilha abria o ecrã a pedir a global e levava um 403 e um toast). O olho de «mostrar valor» leva o `company_id` em ecrã.
+
+Medição por mutação (sete no servidor, três no cliente — todas mortas):
+| Mutação | Resultado |
+|---|---|
+| `empresa_e_minha` devolve sempre True | 6 testes |
+| o CEO ganha a global sem a rede de omissão | 7 |
+| `_empresa_existe` sempre True (admin inventa empresas) | 1 |
+| o reveal deixa de passar o `company_id` | 1 |
+| PATCH sem guarda | 3 |
+| listagem sem filtro | 5 |
+| a página pede antes de ter a lista | 2 |
+| `empresaEmVigor` ignora a lista | 2 |
+| o olho deixa de levar `company_id` | 2 |
+
+Infra de teste: o duplo de Mongo ganhou `replace_one` (o `save_system_config` usa-o; sem ele, escrever configuração num teste era impossível).
+
+Stage Summary:
+- Backend: `services/system_config_scope.py` (novo), `routes/system_config.py`, `services/system_config_api.py`, `services/system_config_admin_ops.py`. Frontend: `utils/empresaDeConfiguracao.js`, `pages/systemConfig/EmpresaConfigSelector.jsx`, `SystemConfigPage.js`, `configFormHelpers.js`, `services/api.js`.
+- Testes: `test_system_config_multiempresa.py` (31), `empresaDeConfiguracao.test.js`, `SystemConfigPage.empresas.test.jsx`, `ConfigFieldInput.revelar.test.jsx`.
+- Resíduo: as secções com ecrã próprio (SLAs, documentos obrigatórios, integrações, emails do sistema) continuam a ler/escrever a global — é desenho (ver D-12), não fuga.
+
+---
 Task ID: partilha-e-documentos
 Agent: Cloud Agent
 Task: BLOCO 1, ponto 2 — D-25 (motor de partilhas, Via Rápida) e D-26 (a guarda de documentos não conhecia redes)

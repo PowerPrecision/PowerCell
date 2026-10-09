@@ -332,6 +332,22 @@ class FakeAsyncCollection:
             return MagicMock(matched_count=0, modified_count=0, upserted_id="fake-upserted-id")
         return MagicMock(matched_count=0, modified_count=0)
 
+    async def replace_one(self, query: dict, replacement: dict, upsert: bool = False):
+        """Substitui o PRIMEIRO documento que casa (o resto dos campos some).
+
+        É a semântica do Mongo e é por isso que não se reaproveita o
+        `update_one`: um `replace_one` não faz `$set`, apaga o que não vem
+        na substituição.
+        """
+        for indice, doc in enumerate(self.docs):
+            if self._matches(doc, query):
+                self.docs[indice] = dict(replacement)
+                return MagicMock(matched_count=1, modified_count=1)
+        if upsert:
+            self.docs.append(dict(replacement))
+            return MagicMock(matched_count=0, modified_count=0, upserted_id="fake-upserted-id")
+        return MagicMock(matched_count=0, modified_count=0)
+
     async def insert_many(self, docs: list, ordered: bool = True):
         for doc in docs:
             self.docs.append(dict(doc))

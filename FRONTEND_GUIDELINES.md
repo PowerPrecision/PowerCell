@@ -2522,3 +2522,13 @@ E o quadro tem **construtor de query separado** no servidor e cabeçalho
 próprio no cliente: um filtro que só exista na listagem dá um quadro a
 ignorá-lo, sem erro nenhum. Ligar os dois é parte da entrega, não um
 extra.
+
+
+## 27.56 — O ecrã escolhe de entre o que o servidor devolveu; não decide o que se pode configurar
+
+O selector de empresa das Configurações do Sistema (`EmpresaConfigSelector`) é alimentado por `GET /system-config/companies`, **já filtrado pelo âmbito de quem pergunta** (ADMIN todas, CEO as dele). O frontend nunca constrói a lista a partir dos UCR do utilizador (era o beco do ADMIN) nem decide o que é permitido — a parede é o servidor.
+
+* `utils/empresaDeConfiguracao.js` é puro: `normalizarEmpresas` (`Array.isArray`, nunca `|| []`), `deveMostrarSeletorDeEmpresa` (só com mais de uma — um selector com uma opção é um ecrã que muda de forma sem razão) e `empresaEmVigor` (escolha explícita → activa → global, **mas só se estiver na lista**).
+* O primeiro pedido de configuração **espera pela lista**: um CEO de ilha não tem a global, e abrir o ecrã a pedi-la dava 403 e um toast. Sem lista (pedido falhado) fica o comportamento de sempre — o servidor continua a ser a parede.
+* Qualquer pedido que revele um segredo leva o `company_id` do que está em ecrã; um olho que revela a configuração de OUTRA empresa é pior do que nenhum.
+* `<select>` nativo, de propósito: acessível, testável por papel e nome, sem a captura de ponteiro do Radix.

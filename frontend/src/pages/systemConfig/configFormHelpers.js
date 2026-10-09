@@ -73,7 +73,7 @@ export const SECTION_LABELS = {
 export const getSectionNavLabel = (key, fields) =>
   SECTION_LABELS[key] || fields[key]?.title?.split(" ")[0] || key;
 
-export const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) => {
+export const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName, companyId = "default" }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [revealedValue, setRevealedValue] = useState(null);
   const [loadingReveal, setLoadingReveal] = useState(false);
@@ -82,7 +82,7 @@ export const ConfigFieldInput = ({ field, value, onChange, allValues, sectionNam
     setLoadingReveal(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`${API_URL}/api/system-config/reveal-secrets?section=${sectionName}`, {
+      const res = await fetch(`${API_URL}/api/system-config/reveal-secrets?section=${sectionName}&company_id=${encodeURIComponent(companyId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -271,7 +271,7 @@ export const ConfigFieldInput = ({ field, value, onChange, allValues, sectionNam
 };
 
 // Componente para secção de configuração
-export const ConfigSection = ({ section, sectionKey, config, fields, onSave, onTest }) => {
+export const ConfigSection = ({ section, sectionKey, companyId = "default", config, fields, onSave, onTest }) => {
   const [localConfig, setLocalConfig] = useState(config || {});
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -360,6 +360,7 @@ export const ConfigSection = ({ section, sectionKey, config, fields, onSave, onT
             onChange={handleChange}
             allValues={localConfig}
             sectionName={sectionKey}
+            companyId={companyId}
           />
         ))}
 

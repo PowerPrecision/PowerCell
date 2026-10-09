@@ -9525,3 +9525,20 @@ no outro.
 | o filtro troca EXCLUSIVOS com PARTILHADOS | os dois testes do filtro |
 | a fronteira dos documentos nunca morde | 4 da D-26 |
 | a fronteira corre DEPOIS do bypass de cargo | 4, e o do diretor é o que a nomeia |
+
+
+## Configurações do Sistema por empresa (Bloco 1, ponto 3)
+
+`services/system_config_scope.py` é o ponto único de «que configuração pode este utilizador ver e escrever». O `company_id` da query string **nunca** é de confiança: `require_roles([ADMIN, CEO])` autoriza o verbo, não o objecto.
+
+| Perfil | Empresas | Global (`default`) |
+|---|---|---|
+| ADMIN | todas as de `db.companies` (ou com configuração própria já gravada) | sim |
+| CEO | só as dele (UCR) — a mesma rede não chega | só se a rede dele for a rede de omissão |
+| outros | só a leitura da permissão de exportação, da própria | leitura do booleano |
+
+* **Duas perguntas** (`exigir_empresa_configuravel` / `exigir_configuracao_global`): empresa alheia → **404**; global sem direito → **403**.
+* **A validação vem ANTES da leitura**: `get_system_config(company_id)` cria e grava uma cópia da global para qualquer id novo.
+* Os handlers de `routes/system_config.py` resolvem o âmbito por `resolver_empresa_pedida` / `resolver_configuracao_global` / `resolver_empresa_para_leitura`; um teste por AST exige-o a todos, com excepções ESCRITAS (`SEM_GUARDA`).
+* `reveal-secrets` tem `company_id` (antes devolvia sempre a global).
+* A listagem (`GET /system-config/companies`) é filtrada pelo âmbito e é o que alimenta o selector do ecrã.

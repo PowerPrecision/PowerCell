@@ -35,6 +35,8 @@ vi.mock("../../contexts/AuthContext", () => ({
 }));
 
 vi.mock("../../services/api", () => ({
+  // Forma REAL de `GET /system-config/companies`: `{companies, total}`.
+  getSystemConfigCompanies: vi.fn(async () => ({ data: { companies: [], total: 0 } })),
   getSystemConfig: vi.fn(async () => ({
     data: { config: { dashboard_slas: { enabled: true, novo: 7, analise: 15, aprovado: 30 } } },
   })),

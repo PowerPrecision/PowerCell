@@ -676,6 +676,10 @@ export const getSystemConfig = (companyId) =>
     params: { ...(companyId ? { company_id: companyId } : {}) },
   });
 
+// As empresas que o servidor deixa ESTE utilizador configurar (admin: todas;
+// CEO: as dele). O frontend só escolhe de entre o que vier — não decide.
+export const getSystemConfigCompanies = () => api.get("/system-config/companies");
+
 export const updateSystemConfigSection = (section, data, companyId) =>
   api.patch(`/system-config/${section}`, data, {
     params: { ...(companyId ? { company_id: companyId } : {}) },

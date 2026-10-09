@@ -84,9 +84,14 @@ async def run_reset_cache() -> dict:
     return {"success": True, "message": "Cache de configurações limpo"}
 
 
-async def run_reveal_secrets(section: Optional[str] = None) -> dict:
-    """Revelar valores sensíveis (passwords, API keys) de uma secção de configuração."""
-    config = await get_system_config()
+async def run_reveal_secrets(section: Optional[str] = None, company_id: str = "default") -> dict:
+    """Revelar valores sensíveis (passwords, API keys) de uma secção de configuração.
+
+    `company_id` já vem validado pela rota. Sem ele o endpoint devolvia
+    sempre as chaves da configuração GLOBAL, mesmo quando o formulário em
+    ecrã mostrava os campos de uma empresa.
+    """
+    config = await get_system_config(company_id)
     config_dict = config.model_dump()
 
     sensitive_fields = SENSITIVE_FIELDS
