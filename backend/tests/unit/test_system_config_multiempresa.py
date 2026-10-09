@@ -11,16 +11,16 @@ Power, com o nome do bucket, o remetente de email e o resto. E o
 da configuração GLOBAL (AWS, SMTP, IA) a qualquer CEO.
 
 A decisão de produto (Out 2026): o Admin acede às definições de todas as
-empresas do CRM; o CEO **só às empresas dele (UCR)**.
+empresas do CRM **e à global**; o CEO **só às empresas dele (UCR)** — nunca
+à global, nem o da rede principal (revisto: a versão inicial admitia o CEO
+da rede de omissão, e os testes que o afirmavam foram INVERTIDOS).
 
 DUAS PERGUNTAS, NÃO UMA
 =======================
 1. *Esta EMPRESA é minha para configurar?* — o `company_id` pedido.
 2. *A configuração GLOBAL (`default`) é minha?* — não é uma empresa, é a
-   infraestrutura partilhada (bucket, SMTP do sistema, chave de IA). Um
-   CEO só lhe toca se a rede dele for a rede de omissão
-   (`TENANT_DEFAULT_NETWORK_ID`) — é o grupo a quem a infra pertence. A
-   Domus (ilha) não.
+   infraestrutura partilhada (bucket, SMTP do sistema, chave de IA). Só o
+   ADMIN.
 
 `TestAExploracao` é o ataque, escrito para morder primeiro.
 """
@@ -133,25 +133,29 @@ class TestAExploracao:
         assert _ids_de_config(mundo) == antes
 
     @pytest.mark.asyncio
-    async def test_o_CEO_da_ilha_nao_toca_na_configuracao_GLOBAL(self, mundo, rede_de_omissao_incumbente):
-        """A global é a infra partilhada: bucket, SMTP do sistema, IA."""
+    @pytest.mark.parametrize("ceo", [CEO_DOMUS, CEO_POWER], ids=["ilha", "rede_principal"])
+    async def test_nenhum_CEO_toca_na_configuracao_GLOBAL(self, mundo, rede_de_omissao_incumbente, ceo):
+        """A global é a infra partilhada (bucket, SMTP do sistema, IA) e tem
+        um único dono: o ADMIN. Nem o CEO da rede principal."""
         from routes.system_config import get_config, reveal_secrets, update_config
 
+        antes = [dict(d) for d in mundo.system_config.docs]
         with pytest.raises(HTTPException) as exc:
-            await get_config(request=None, company_id="default", user=CEO_DOMUS)
+            await get_config(request=None, company_id="default", user=ceo)
         assert exc.value.status_code == 403
         with pytest.raises(HTTPException) as exc:
-            await reveal_secrets(section="storage", request=None, company_id="default", user=CEO_DOMUS)
+            await reveal_secrets(section="storage", request=None, company_id="default", user=ceo)
         assert exc.value.status_code == 403
         with pytest.raises(HTTPException) as exc:
             await update_config(
                 section="storage", data={"provider": "none"},
-                request=None, company_id="default", user=CEO_DOMUS,
+                request=None, company_id="default", user=ceo,
             )
         assert exc.value.status_code == 403
+        assert mundo.system_config.docs == antes
 
     @pytest.mark.asyncio
-    async def test_o_CEO_da_ilha_nao_usa_as_rotas_so_globais(self, mundo, rede_de_omissao_incumbente):
+    async def test_nenhum_CEO_usa_as_rotas_so_globais(self, mundo, rede_de_omissao_incumbente):
         from routes.system_config import (
             complete_setup,
             list_system_email_configs,
@@ -162,6 +166,9 @@ class TestAExploracao:
             lambda: complete_setup(request=None, user=CEO_DOMUS),
             lambda: list_system_email_configs(request=None, user=CEO_DOMUS),
             lambda: test_service_connection(service="email", request=None, user=CEO_DOMUS),
+            lambda: complete_setup(request=None, user=CEO_POWER),
+            lambda: list_system_email_configs(request=None, user=CEO_POWER),
+            lambda: test_service_connection(service="email", request=None, user=CEO_POWER),
         ):
             with pytest.raises(HTTPException) as exc:
                 await chamada()
@@ -285,23 +292,26 @@ class TestAContraprova:
         assert exc.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_o_CEO_do_grupo_incumbente_mantem_a_global(self, mundo, rede_de_omissao_incumbente):
-        """Sem isto o CEO da Power perdia os SLAs, o SMTP do sistema, tudo."""
+    async def test_o_ADMIN_mantem_a_global_e_os_segredos_dela(self, mundo, rede_de_omissao_incumbente):
+        """A contraprova: retirar a global ao CEO não pode tirá-la ao dono."""
         from routes.system_config import get_config, reveal_secrets
 
-        res = await get_config(request=None, company_id="default", user=CEO_POWER)
+        res = await get_config(request=None, company_id="default", user=ADMIN)
         assert "config" in res
-        res = await reveal_secrets(section="storage", request=None, company_id="default", user=CEO_POWER)
+        res = await reveal_secrets(section="storage", request=None, company_id="default", user=ADMIN)
         assert "secrets" in res
 
     @pytest.mark.asyncio
-    async def test_sem_rede_de_omissao_declarada_o_comportamento_antigo_mantem_se(self, mundo, monkeypatch):
-        """Dev/CI: sem `TENANT_DEFAULT_NETWORK_ID` não há dono da global."""
+    async def test_a_regra_nao_depende_da_rede_de_omissao_estar_declarada(self, mundo, monkeypatch):
+        """Antes, sem `TENANT_DEFAULT_NETWORK_ID` (dev/CI) o CEO ganhava a
+        global. Agora a regra é a mesma com ou sem a variável."""
         from routes.system_config import get_config
 
         monkeypatch.delenv("TENANT_DEFAULT_NETWORK_ID", raising=False)
-        res = await get_config(request=None, company_id="default", user=CEO_DOMUS)
-        assert "config" in res
+        for ceo in (CEO_DOMUS, CEO_POWER):
+            with pytest.raises(HTTPException) as exc:
+                await get_config(request=None, company_id="default", user=ceo)
+            assert exc.value.status_code == 403
 
     @pytest.mark.asyncio
     async def test_o_reveal_devolve_os_segredos_DA_EMPRESA_pedida_e_nao_os_da_global(
@@ -329,7 +339,7 @@ class TestAContraprova:
         from routes.system_config import get_available_companies
 
         res = await get_available_companies(request=None, user=CEO_POWER)
-        assert {c["company_id"] for c in res["companies"]} == {"default", "cmp-power"}
+        assert {c["company_id"] for c in res["companies"]} == {"cmp-power"}, "o CEO nunca vê a global"
 
         res = await get_available_companies(request=None, user=CEO_DOMUS)
         assert {c["company_id"] for c in res["companies"]} == {"cmp-domus"}
@@ -430,6 +440,23 @@ class TestAGuardaEstaLigada:
         nu = ast.parse("async def b(request, user):\n    return 1").body[0]
         assert "resolver_empresa_pedida" in ast.unparse(guardado)
         assert "resolver_empresa_pedida" not in ast.unparse(nu)
+
+    def test_as_rotas_so_globais_estao_fechadas_ao_CEO_logo_na_porta(self):
+        """Não basta a guarda dentro: a porta (`require_roles`) também diz ADMIN."""
+        so_admin = {
+            "test_service_connection", "complete_setup", "list_system_email_configs",
+            "get_system_email_config", "create_system_email_config",
+            "update_system_email_config", "delete_system_email_config",
+            "test_system_email_config",
+        }
+        vistos = set()
+        for h in _handlers():
+            if h.name in so_admin:
+                fonte = ast.unparse(h)
+                assert "UserRole.CEO" not in fonte, h.name
+                assert "UserRole.ADMIN" in fonte, h.name
+                vistos.add(h.name)
+        assert vistos == so_admin
 
     def test_o_reveal_aceita_company_id(self):
         from routes.system_config import reveal_secrets

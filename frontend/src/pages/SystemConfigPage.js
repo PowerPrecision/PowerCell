@@ -57,7 +57,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { hasAnyRole } from "../utils/roleUtils";
+import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import { toast } from "sonner";
 import {
   Settings,
@@ -125,13 +125,28 @@ export const SECCOES_DEDICADAS = {
  * `document_recipients`); esta lista diz quais se OFERECEM e com que
  * rótulo. Há um teste a afirmar que toda a chave daqui existe lá.
  */
-export const SECCOES_NA_NAVEGACAO = [
+export const SECCOES_NA_NAVEGACAO_COMPLETAS = [
   { key: "maintenance", label: "Manutenção", Icon: Wrench },
   { key: "portal", label: "Portal", Icon: MessageSquare },
   { key: "mandatory_documents", label: "Docs Obrigatórios", Icon: FileEdit },
   { key: "changelog", label: "Atualizações", Icon: Megaphone },
   { key: "dashboard_slas", label: "Limiares de SLA", Icon: Gauge },
 ];
+
+/**
+ * O que cada perfil vê na navegação — ponto único.
+ *
+ * TODAS as secções com ecrã próprio lêem e escrevem a configuração GLOBAL
+ * (limiares de SLA, documentos obrigatórios, integrações, emails do sistema,
+ * manutenção…), que é infraestrutura partilhada e **exclusiva do
+ * administrador**. O CEO só configura a(s) sua(s) empresa(s), nas secções
+ * genéricas. Mostrar-lhe as dedicadas daria um ecrã de erros 403.
+ */
+export const seccoesDaNavegacao = (isAdmin) =>
+  isAdmin ? SECCOES_NA_NAVEGACAO_COMPLETAS : [];
+
+/** Compatibilidade: a lista completa (o que o administrador vê). */
+export const SECCOES_NA_NAVEGACAO = SECCOES_NA_NAVEGACAO_COMPLETAS;
 
 const SystemConfigPage = ({ embedded = false }) => {
   const { token, user, effectiveCompanyId } = useAuth();
@@ -320,7 +335,13 @@ const SystemConfigPage = ({ embedded = false }) => {
   const sections = Object.keys(fields).filter(key => key !== "email");
   // Qual secção o separador activo pede. Deriva do registo — ver
   // `SECCOES_DEDICADAS`: é o que garante que nunca se renderizam as duas.
-  const SeccaoDedicada = SECCOES_DEDICADAS[activeTab];
+  // A configuração GLOBAL é exclusiva do administrador: o CEO só vê as secções
+  // genéricas da(s) sua(s) empresa(s). Um `?tab=` antigo que aponte para uma
+  // dedicada diz-se, em vez de abrir um ecrã de erros 403.
+  const isAdmin = hasRole(user, "admin");
+  const navegacao = seccoesDaNavegacao(isAdmin);
+  const SeccaoDedicada = isAdmin ? SECCOES_DEDICADAS[activeTab] : undefined;
+  const seccaoReservada = !isAdmin && Boolean(SECCOES_DEDICADAS[activeTab]);
 
 
   const pageContent = (
@@ -384,7 +405,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                     <div className="my-1.5 border-t border-border" />
                     {/* Nota: "RGPD" foi removido daqui — vive apenas no tab Compliance do Painel de Administração (evita duplicação).
                         "Integrações" e "Emails Sistema" foram movidos para o tab Comunicações no Painel de Administração */}
-                    {SECCOES_NA_NAVEGACAO.map(({ key, label, Icon }) => (
+                    {navegacao.map(({ key, label, Icon }) => (
                       <button
                         key={key}
                         type="button"
@@ -426,7 +447,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                     );
                   })}
                   {/* Nota: RGPD removido (vive só em Compliance); Integrações e Emails Sistema movidos para Comunicações */}
-                  {SECCOES_NA_NAVEGACAO.map(({ key, label, Icon }) => (
+                  {navegacao.map(({ key, label, Icon }) => (
                     <SelectItem key={key} value={key}>
                       <span className="flex items-center gap-2">
                         <Icon className="h-4 w-4" />
@@ -464,7 +485,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                     </button>
                   );
                 })}
-                {SECCOES_NA_NAVEGACAO.map(({ key, label, Icon }) => (
+                {navegacao.map(({ key, label, Icon }) => (
                   <button
                     key={key}
                     type="button"
@@ -501,7 +522,18 @@ const SystemConfigPage = ({ embedded = false }) => {
             {/* Um separador desconhecido (um `?tab=` antigo num favorito) não
                 é dedicado nem tem campos: DIZ-SE, em vez de deixar a área de
                 conteúdo vazia sem explicação. */}
-            {!SeccaoDedicada && !fields[activeTab] && !loading && (
+            {seccaoReservada && (
+              <Card data-testid="config-seccao-reservada">
+                <CardContent className="py-12 text-center space-y-2">
+                  <p className="font-medium">Secção reservada ao administrador</p>
+                  <p className="text-sm text-muted-foreground">
+                    Esta definição é global (partilhada por todas as empresas). Como CEO,
+                    configura as definições da sua empresa nas restantes categorias.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+            {!SeccaoDedicada && !seccaoReservada && !fields[activeTab] && !loading && (
               <Card data-testid="config-seccao-desconhecida">
                 <CardContent className="py-12 text-center space-y-2">
                   <p className="font-medium">Secção desconhecida</p>

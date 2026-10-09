@@ -1,4 +1,16 @@
 ---
+Task ID: remates-do-bloco-1
+Agent: Cloud Agent
+Task: Remates do Bloco 1 — configuração global só do admin; revogação manual de partilhas (rota + UI)
+
+Date: 2026-10-10
+
+Work Log:
+- **Global só do admin.** O dono do produto retirou o CEO da configuração global (mesmo o da rede principal). Não existe um perfil `master`: o perfil de topo é `admin`, a quem sempre se chamou «master/admin» — mapeei para ele em vez de inventar um perfil. `pode_a_global` passou a `e_admin`; as 8 rotas só-globais (`test-connection`, `complete-setup`, `system-emails*`) fecham logo na PORTA (`require_roles([ADMIN])`), não só na guarda interna. Os testes que afirmavam a regra antiga foram INVERTIDOS (não apagados): o CEO da rede principal passou a levar 403, e a regra deixou de depender de `TENANT_DEFAULT_NETWORK_ID`. Ecrã: todas as secções dedicadas do `SystemConfigPage` são globais, logo `seccoesDaNavegacao(isAdmin)` esconde-as ao CEO e um `?tab=` antigo diz «reservada ao administrador»; a `EmailAccountsPage` (SMTP do sistema, IMAP de indexação, contas partilhadas — todas globais) passou a admin-only.
+- **Revogar partilha.** `DELETE /processes/{id}/partners/{company_id}` + `PartilhaCard`. Regras e rasto no ARCHITECTURE. Decisão minha a confirmar: o diretor só revoga da casa DONA (o da rede convidada vê o processo mas não decide quem mais o vê, 403); admin e CEO atravessam redes como no resto da fronteira de documentos. `revogar_parceiro` ganhou `registar_historico` (a revogação não deixava entrada no histórico do processo, só no trilho) e `auditar` (o actor silenciado não deixa rasto).
+- Mutações: 8 no serviço da revogação (mortas) + 4 no ecrã (mortas).
+
+---
 Task ID: segundo-titular-nas-listas
 Agent: Cloud Agent
 Task: BLOCO 1, ponto 6 — os clientes que são 2.º titular (ou co-titular) têm de aparecer nas listas

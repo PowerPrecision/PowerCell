@@ -10,9 +10,12 @@ tinha `company_id`: devolvia sempre as chaves da configuração GLOBAL.
 
 A REGRA (decisão do dono do produto, Out 2026)
 ==============================================
-* **ADMIN** — todas as empresas do CRM;
+* **ADMIN** (o «master»: não existe um perfil `master` à parte, é o perfil
+  de topo do sistema) — todas as empresas do CRM **e** a configuração
+  global;
 * **CEO** — só as empresas dele (UCR). A mesma rede NÃO chega: o CEO da
-  Power não configura a Precision;
+  Power não configura a Precision. **Nunca a global**, nem o CEO da rede
+  principal;
 * os restantes perfis não configuram nada (ler a lista devolve-lhes só
   as empresas onde trabalham, para o ecrã não mostrar o que não podem
   usar).
@@ -21,11 +24,9 @@ DUAS PERGUNTAS, NÃO UMA
 =======================
 1. *Esta EMPRESA é minha para configurar?* — o `company_id` pedido.
 2. *A configuração GLOBAL (`default`) é minha?* — não é uma empresa, é a
-   infraestrutura partilhada (bucket, SMTP do sistema, chave de IA). O
-   ADMIN sim; um CEO só se a rede dele for a rede de omissão
-   (`TENANT_DEFAULT_NETWORK_ID`), que é a quem a infra pertence. Sem a
-   variável (dev/CI) mantém-se o comportamento anterior, com o aviso que
-   o `tenant_network` já emite.
+   infraestrutura partilhada (bucket, SMTP do sistema, chave de IA).
+   **Só o ADMIN.** (Uma versão anterior admitia o CEO da rede de omissão;
+   o dono do produto retirou-o: a infra partilhada tem um único dono.)
 
 Responde **404** a uma empresa que não é do utilizador (distinguir «não
 existe» de «não é tua» confirmaria o id a quem adivinha) e **403** à
@@ -57,8 +58,8 @@ EMPRESA_GLOBAL = "default"
 
 ERRO_EMPRESA_NAO_ENCONTRADA = "Empresa não encontrada"
 ERRO_CONFIGURACAO_GLOBAL = (
-    "A configuração global (infraestrutura partilhada) é gerida pela "
-    "administração do grupo a que o sistema pertence."
+    "A configuração global (infraestrutura partilhada) é exclusiva do "
+    "administrador do sistema."
 )
 
 
@@ -96,10 +97,8 @@ class AmbitoDeConfiguracao:
 
     @property
     def pode_a_global(self) -> bool:
-        """A infra partilhada: o admin sempre; o CEO se a rede dele a possui."""
-        if self.e_admin:
-            return True
-        return _e_ceo(self.papel) and bool(self.scope.inclui_rede_de_omissao)
+        """A infra partilhada: só o admin. Nem o CEO da rede principal."""
+        return self.e_admin
 
     def empresa_e_minha(self, company_id: str) -> bool:
         """O `company_id` é uma das empresas (UCR) do utilizador?
@@ -223,7 +222,7 @@ async def listar_empresas_configuraveis(ambito: AmbitoDeConfiguracao) -> list[di
     """As empresas que o ecrã pode oferecer a este utilizador.
 
     * ADMIN — a global e todas as empresas do CRM;
-    * CEO — a global (se a possui) e as dele;
+    * CEO — só as dele (nunca a global);
     * os outros — só as empresas onde trabalham, sem a global.
     """
     resultado: list[dict] = []

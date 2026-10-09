@@ -138,6 +138,8 @@ import ClientPropertyMatch from "../components/ClientPropertyMatch";
 import ProcessAssignDialog from "../components/processDetails/ProcessAssignDialog";
 import ClientContextCard from "../components/processDetails/ClientContextCard";
 import AssignmentContextCard from "../components/processDetails/AssignmentContextCard";
+import PartilhaCard from "../components/processDetails/PartilhaCard";
+import { podeRevogarPartilha } from "../utils/partilhaProcesso";
 import DataConflictResolver from "../components/DataConflictResolver";
 import CPCVModal from "../components/CPCVModal";
 import AutoDSTIBadge from "../components/AutoDSTIBadge";
@@ -3109,6 +3111,17 @@ const ProcessDetails = () => {
                 if (canEditPersonal && !isProcessLocked) handleSaveOrganization({ prioridade: value });
               }}
               canEditPriority={canEditPersonal && !isProcessLocked}
+            />
+
+            {/* D-25 — quem mais vê este processo, e a revogação à mão. */}
+            <PartilhaCard
+              process={process}
+              podeRevogar={podeRevogarPartilha(effectiveRole)}
+              onRevoked={(restantes) => setProcess((prev) => ({
+                ...prev,
+                partner_companies: restantes,
+                partner_network_ids: restantes.map((p) => p.network_id).filter(Boolean),
+              }))}
             />
 
             {/* Tarefas - visível se tem manage_tasks.

@@ -655,6 +655,15 @@ export const setProcessIndexed = (processId, isIndexed) =>
   api.post(`/processes/${processId}/set-indexed`, { is_indexed: !!isIndexed });
 // FIX (Pacote K): adicionar deleteProcess e restoreProcess para suportar o
 // botão "Restaurar" na lista de processos eliminados.
+// Revoga À MÃO a partilha com UMA empresa (a Via Rápida só acrescenta; tirar a
+// atribuição não revoga). O servidor decide quem pode: admin, CEO e o diretor da
+// casa dona. `skipErrorToast`: o cartão mostra a mensagem do servidor, que diz
+// PORQUÊ (403 «só a empresa dona…» vs 404), em vez de um toast genérico por cima.
+export const revokeProcessPartner = (processId, companyId) =>
+  api.delete(`/processes/${processId}/partners/${encodeURIComponent(companyId)}`, {
+    skipErrorToast: true,
+  });
+
 export const deleteProcess = (processId) => api.delete(`/processes/${processId}`);
 export const restoreProcess = (processId) => api.post(`/processes/${processId}/restore`);
 // PACOTE 11 (Eixo 4) — restauro rápido de cliente no ecrã de detalhes

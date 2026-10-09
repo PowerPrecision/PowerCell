@@ -9533,8 +9533,8 @@ no outro.
 
 | Perfil | Empresas | Global (`default`) |
 |---|---|---|
-| ADMIN | todas as de `db.companies` (ou com configuração própria já gravada) | sim |
-| CEO | só as dele (UCR) — a mesma rede não chega | só se a rede dele for a rede de omissão |
+| ADMIN (o «master»; não há perfil `master` à parte) | todas as de `db.companies` (ou com configuração própria já gravada) | sim — **exclusivo** |
+| CEO | só as dele (UCR) — a mesma rede não chega | **nunca** (revisto: nem o CEO da rede principal) |
 | outros | só a leitura da permissão de exportação, da própria | leitura do booleano |
 
 * **Duas perguntas** (`exigir_empresa_configuravel` / `exigir_configuracao_global`): empresa alheia → **404**; global sem direito → **403**.
@@ -9581,3 +9581,13 @@ O admin liga/desliga se as acções ficam guardadas no histórico **por pessoa e
 * **Rede**: o secundário lê-se com a condição de clientes do utilizador; cliente eliminado não volta por esta porta.
 * `process_info.titular` diz a posição: `titular1` / `titular2` / `co_titular`.
 * Os outros «clientes» do sistema (`/my-clients`, Sala de Triagem, autocomplete) não têm o defeito: o primeiro lista processos, os outros lêem `db.clients`.
+
+
+## Revogar uma partilha à mão (remate do Bloco 1)
+
+`DELETE /processes/{id}/partners/{company_id}` (`services/process_sharing_api.py`). A Via Rápida só acrescenta; esta é a única forma de retirar o acesso.
+
+* Quem: **admin, CEO, diretor** (perfil efectivo). O diretor só da casa DONA (`documento_no_ambito`); o da rede convidada vê o processo e recebe **403** com o motivo. Quem não vê o processo recebe **404** igual ao de «não existe». Admin/CEO atravessam redes.
+* Só retira a empresa pedida; `network_id` (propriedade) nunca muda; as outras partilhas ficam.
+* Rasto: histórico do processo (honra o interruptor do ponto 4) + trilho `process_share_revoked`; o actor silenciado (Indexação) não deixa nenhum dos dois.
+* UI: `PartilhaCard` (coluna direita do detalhe), só com parceiros; o botão aparece aos perfis de gestão e o servidor decide.

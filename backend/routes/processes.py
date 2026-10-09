@@ -28,6 +28,7 @@ from services.audit_cdc import inject_cdc_context
 from services.alerts import get_process_alerts
 from services.encryption import decrypt_client_data
 
+from services.process_sharing_api import run_revoke_partner
 from services.process_service import (
     can_view_process,
     can_edit_process_data,
@@ -752,6 +753,17 @@ async def delete_process(
 ):
     """Soft delete a process. Does NOT affect the client document."""
     return await soft_delete_process(process_id, user)
+
+
+@router.delete("/{process_id}/partners/{company_id}")
+async def revoke_process_partner(
+    process_id: str,
+    company_id: str,
+    request: Request,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
+):
+    """Revoga à mão a partilha com UMA empresa (a Via Rápida só acrescenta)."""
+    return await run_revoke_partner(process_id, company_id, user, request)
 
 
 @router.put("/{process_id}", response_model=ProcessResponse)

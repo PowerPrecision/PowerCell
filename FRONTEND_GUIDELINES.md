@@ -2552,3 +2552,8 @@ O aviso «este cliente já tem processos activos» vive num hook (`useConfirmarP
 * Desmontar com a pergunta aberta resolve `false` — nunca deixar a Promise pendurada.
 * **Cada ecrã que adiciona um cliente a um processo tem de o chamar**, e a ligação prova-se montando o ecrã (`SecondTitularCard.processosActivos.test.jsx`, `CreateProcessModal.processosActivos.test.jsx`): apagar a chamada deixa o aviso a existir e a nunca aparecer, sem erro nenhum. Ao acrescentar um terceiro caminho, ligar o hook e copiar o teste.
 * O processo a que o cliente é ligado vai em `excludeProcessId`; sem isso o aviso dizia «já tem este processo».
+
+
+## 27.59 — O que o perfil não pode usar não se mostra para dar erro
+
+A configuração global é do administrador. Em vez de deixar o CEO abrir separadores que respondem 403, `seccoesDaNavegacao(isAdmin)` (ponto único das três navegações) devolve vazio ao CEO; um `?tab=` antigo para uma secção global **diz-se** («reservada ao administrador») em vez de abrir um ecrã de erros. É a regra do «menu e rotas têm de concordar» aplicada às secções de uma página: o gate está no ponto único e o teste monta a página com os dois perfis.

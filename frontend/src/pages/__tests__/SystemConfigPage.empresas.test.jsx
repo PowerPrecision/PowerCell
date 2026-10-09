@@ -125,6 +125,48 @@ describe("SystemConfigPage — a empresa cuja configuração se mostra", () => {
     expect(pedidosDeConfig().some((u) => u.includes("company_id=default"))).toBe(false);
   });
 
+  describe("a configuração GLOBAL é exclusiva do administrador", () => {
+    const SECCOES_GLOBAIS = ["nav-dashboard-slas", "nav-mandatory-documents", "nav-maintenance", "nav-portal", "nav-changelog"];
+
+    it("o ADMIN vê as secções dedicadas (globais) na navegação", async () => {
+      apiMock.getSystemConfigCompanies.mockResolvedValue({ data: LISTA_ADMIN });
+      montar();
+      await screen.findByTestId("config-section-generica");
+      for (const id of SECCOES_GLOBAIS) {
+        expect(screen.getByTestId(id), id).toBeTruthy();
+      }
+    });
+
+    it("o CEO NÃO vê nenhuma — nem nos chips nem na barra lateral", async () => {
+      auth.user = { id: "u2", name: "C", role: "ceo" };
+      auth.effectiveCompanyId = "cmp-power";
+      apiMock.getSystemConfigCompanies.mockResolvedValue({
+        data: { companies: [{ company_id: "cmp-power", company_name: "Power" }], total: 1 },
+      });
+      montar();
+      await screen.findByTestId("config-section-generica");
+      for (const id of SECCOES_GLOBAIS) {
+        expect(screen.queryByTestId(id), id).toBeNull();
+        expect(screen.queryByTestId(id.replace("nav-", "chip-")), id).toBeNull();
+      }
+    });
+
+    it("um ?tab= antigo para uma secção global diz-se ao CEO, em vez de abrir um ecrã de erros", async () => {
+      auth.user = { id: "u2", name: "C", role: "ceo" };
+      auth.effectiveCompanyId = "cmp-power";
+      apiMock.getSystemConfigCompanies.mockResolvedValue({
+        data: { companies: [{ company_id: "cmp-power", company_name: "Power" }], total: 1 },
+      });
+      render(
+        <MemoryRouter initialEntries={["/configuracoes?tab=dashboard_slas"]}>
+          <SystemConfigPage embedded />
+        </MemoryRouter>,
+      );
+      expect(await screen.findByTestId("config-seccao-reservada")).toBeTruthy();
+      expect(screen.queryByTestId("sla-thresholds-section")).toBeNull();
+    });
+  });
+
   it("espera pela lista ANTES do primeiro pedido de configuração", async () => {
     let libertar;
     apiMock.getSystemConfigCompanies.mockReturnValue(

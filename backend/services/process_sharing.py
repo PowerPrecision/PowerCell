@@ -476,6 +476,8 @@ async def revogar_parceiro(
     company_id: Any = None,
     network_id: Any = None,
     por_ordem_de: Any = None,
+    registar_historico=None,
+    auditar: bool = True,
 ) -> list[dict]:
     """Retira UMA empresa convidada. Operação deliberadamente MANUAL.
 
@@ -483,6 +485,10 @@ async def revogar_parceiro(
     mostra a empresa, e é por ela que uma pessoa a reconhece; a rede é o
     que tem efeito. Sem nenhum dos dois não se faz nada — «revogar tudo»
     não é uma operação que se ofereça por omissão.
+
+    `auditar=False` é para o actor que não pode deixar rasto (o perfil
+    `indexacao`, de base ou em exercício): a revogação faz-se, o registo
+    não se escreve.
 
     Devolve as entradas retiradas.
     """
@@ -530,10 +536,15 @@ async def revogar_parceiro(
         processo=processo,
         novas=retiradas,
         por_ordem_de=por_ordem_de,
-        registar_historico=None,
+        registar_historico=registar_historico,
         acao="process_share_revoked",
+        auditar=auditar,
     )
     return retiradas
+
+
+class _SemAuditoria(Exception):
+    """Sinal interno: o actor não pode deixar rasto de auditoria."""
 
 
 async def _deixar_rasto(
@@ -544,6 +555,7 @@ async def _deixar_rasto(
     por_ordem_de: Any,
     registar_historico=None,
     acao: str = "process_shared",
+    auditar: bool = True,
 ) -> None:
     """Trilho de auditoria + histórico do processo. **Nunca** propaga.
 
@@ -561,6 +573,8 @@ async def _deixar_rasto(
         for n in novas
     ]
     try:
+        if not auditar:
+            raise _SemAuditoria()
         from services.audit_trail_service import log_audit_event
 
         await log_audit_event(
@@ -576,6 +590,8 @@ async def _deixar_rasto(
                 "parceiros": detalhe,
             },
         )
+    except _SemAuditoria:
+        pass
     except Exception as exc:
         logger.warning(
             "[PARTILHA] Falha a registar a partilha de %s no trilho (%s).",

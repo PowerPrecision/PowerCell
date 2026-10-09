@@ -340,6 +340,33 @@ describe("ProcessDetails — cartões de contexto (coluna direita)", () => {
   });
 });
 
+describe("ProcessDetails — cartão de partilha (D-25)", () => {
+  it("um processo partilhado mostra com quem — a ligação página ↔ cartão", async () => {
+    pacote.valor = pacoteCompleto({
+      process: {
+        ...PROCESSO,
+        partner_companies: [
+          { company_id: "cmp-domus", company_name: "Domus", network_id: "grupo_domus" },
+        ],
+      },
+    });
+    montar();
+    await screen.findByTestId("layout");
+
+    const cartao = await screen.findByTestId("cartao-partilha");
+    expect(cartao.textContent).toContain("Domus");
+    // O perfil da sessão é consultor: vê com quem, mas não pode revogar.
+    expect(screen.queryByRole("button", { name: /Revogar partilha com/ })).toBeNull();
+  });
+
+  it("um processo exclusivo da casa não mostra o cartão (contraprova)", async () => {
+    montar();
+    await screen.findByTestId("layout");
+    await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("cartao-partilha")).toBeNull();
+  });
+});
+
 describe("ProcessDetails — dados servidos pela cache (regressão)", () => {
   it("uma revisita dentro do staleTime mostra o processo, não o esqueleto", async () => {
     // BUG APANHADO POR ESTE FICHEIRO, no primeiro arranque.
