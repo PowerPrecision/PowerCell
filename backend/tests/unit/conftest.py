@@ -118,6 +118,12 @@ class FakeAsyncCollection:
             return doc.get(path)
         current = doc
         for part in path.split("."):
+            # Como no Mongo, `array.1` é o segundo elemento: é assim que se
+            # pergunta «esta lista tem pelo menos dois» (`{"lista.1": {"$exists": True}}`).
+            if isinstance(current, list) and part.isdigit():
+                indice = int(part)
+                current = current[indice] if indice < len(current) else None
+                continue
             if not isinstance(current, dict):
                 return None
             current = current.get(part)
@@ -226,7 +232,14 @@ class FakeAsyncCollection:
                         return False
                 if "$exists" in expected:
                     matched_operator = True
-                    exists = key in doc
+                    # Com dot-notation (`lista.1`, `a.b`) resolve o caminho: o
+                    # `key in doc` só olhava para o topo e dava sempre «não existe».
+                    # Aproximação: um folha a `None` conta como ausente.
+                    exists = (
+                        FakeAsyncCollection._lookup_path(doc, key) is not None
+                        if "." in key
+                        else key in doc
+                    )
                     if bool(expected["$exists"]) is not exists:
                         return False
                 # PACOTE 10 — comparações ($gte/$gt/$lte/$lt) para datas

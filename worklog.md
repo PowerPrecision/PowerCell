@@ -1,4 +1,35 @@
 ---
+Task ID: segundo-titular-nas-listas
+Agent: Cloud Agent
+Task: BLOCO 1, ponto 6 — os clientes que são 2.º titular (ou co-titular) têm de aparecer nas listas
+
+Date: 2026-10-09
+
+Work Log:
+
+A CAUSA, LOCALIZADA
+- `run_list_clients` constrói a lista A PARTIR DOS PROCESSOS e agrupa por `proc["client_id"]` — só o 1.º titular. `second_client_id` e `client_ids` são escritos (criação, edição, `add-client`) mas a listagem não os lia. As duas queixas são a mesma causa: (1) quem é APENAS 2.º titular não aparece em lista nenhuma; (2) quem é 1.º titular em P1 e 2.º em P2 desaparece da lista de activos quando P1 é anulado — P2, que continua activo, é contado na linha do OUTRO cliente.
+- **Não havia teste NENHUM de `run_list_clients`** (só o de que a função existe): a baseline foi escrita primeiro, e 12 dos 20 testes falhavam pelo defeito.
+
+A CORRECÇÃO (`services/client_list_titulares.py`)
+- Cada processo com titulares secundários contribui com **uma linha por secundário**, construída a partir do DOCUMENTO DO CLIENTE (nome, contacto, NIF — os do processo são os do 1.º titular) e entra no MESMO acumulador do 1.º titular, com `client_id` = o do secundário. Por isso as contagens, o filtro «tem processo activo», a fase principal e a prioridade passam a contar os dois papéis sem código novo, e quem é titular nos dois papéis é UMA linha com os dois processos. Cada `process_info` diz a posição (`titular1`/`titular2`/`co_titular`).
+- Os filtros do PROCESSO (fase, atribuição, indexação, eliminados) valem para o processo do secundário; os do CLIENTE (pesquisa, origem/tipo/estado) valem para o cliente secundário. Os dois caminhos da listagem (`show_all` e «só os meus») usam o mesmo ponto; guarda de fonte a exigir as duas chamadas.
+- **Rede**: o documento do secundário lê-se com a condição de CLIENTES do utilizador — um `second_client_id` que aponte para outra rede não gera linha e o nome dele não sai. Um cliente eliminado não volta pela porta do 2.º titular.
+- Falha → degrada para o comportamento anterior (só os 1.º titulares), com `warning` (nunca rebenta a listagem).
+- A condição `second_client_id ∉ {null, ""} OU client_ids.1 existe` foi verificada num `mongod` real (devolve só os processos com mais alguém além do 1.º titular; `client_ids` inclui sempre o 1.º, logo «tem alguém mais» é «tem pelo menos dois elementos»).
+
+O QUE NÃO MUDA E PORQUÊ: «Os Meus Clientes» (`/my-clients`) lista PROCESSOS atribuídos ao utilizador (uma linha por processo), não clientes agrupados: um processo meu em que o cliente é 2.º titular já lá está. `client_registered` (Sala de Triagem) lê `db.clients` e não depende de processos. O autocomplete (`run_search_clients`) lê `db.clients`. Nenhum dos três tinha o defeito.
+
+Infra de teste (o duplo de Mongo escondia três coisas): `$exists` com dot-notation olhava só para o topo do documento (sempre «não existe»); `array.N` não se resolvia; e — do ponto 5 — o `sort` ignorava a direcção.
+
+Medição por mutação (12; duas sobreviveram à primeira passagem): a pesquisa e o filtro de origem sobre os secundários não eram observáveis porque o fixture só tinha UM secundário — com um só, o filtro removido devolve o mesmo. Passaram a ter um segundo secundário que o filtro tem de EXCLUIR (a contraprova que faltava). Todas as 12 mortas.
+
+Stage Summary:
+- `services/client_list_titulares.py` (novo), `services/client_list_search.py`.
+- Testes: `test_clientes_segundo_titular.py` (20).
+- Sem alteração de frontend: a lista mostra `process_ids.length` e o processo do secundário já lá está. Uma etiqueta «2.º titular» na linha fica como melhoria de UX se for pedida.
+
+---
 Task ID: aviso-de-processos-activos
 Agent: Cloud Agent
 Task: BLOCO 1, ponto 5 — ao adicionar um cliente a um processo, avisar se já tem processos activos

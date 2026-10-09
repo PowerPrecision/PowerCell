@@ -51,8 +51,20 @@ from services.client_list_filters import (
     build_client_entity_query,
     client_doc_to_list_item,
 )
+from services.client_list_titulares import linhas_dos_titulares_secundarios
 
 logger = logging.getLogger(__name__)
+
+
+#: O que a listagem precisa de cada processo. Uma só lista: os titulares
+#: secundários (Bloco 1, ponto 6) leem o MESMO conjunto de campos.
+PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM = {
+    "_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1,
+    "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1,
+    "assigned_consultor_id": 1, "assigned_mediador_id": 1,
+    "consultor_name": 1, "mediador_name": 1, "is_active": 1, "is_deleted": 1, "created_at": 1,
+    "updated_at": 1, "prioridade": 1, "priority": 1,
+}
 
 
 def _merge_entity_client_docs(
@@ -260,6 +272,9 @@ async def run_list_clients(
     if show_all or user_role in ["admin", "ceo", "diretor"]:
         # Mostrar todos os clientes da empresa
         process_query = {}
+        # Os filtros que são do PROCESSO (e não do cliente): valem também para o
+        # processo em que o cliente é 2.º titular (Bloco 1, ponto 6).
+        filtros_de_processo: list[dict] = []
         
         if search:
             simple_regex = {"$regex": re.escape(search), "$options": "i"}
@@ -282,6 +297,7 @@ async def run_list_clients(
         
         # Filtro por fase/status
         if status_filter:
+            filtros_de_processo.append({"status": status_filter})
             if process_query:
                 process_query = {"$and": [process_query, {"status": status_filter}]}
             else:
@@ -330,6 +346,7 @@ async def run_list_clients(
                 }
             
             if assignment_query:
+                filtros_de_processo.append(assignment_query)
                 if process_query:
                     if "$and" in process_query:
                         process_query["$and"].append(assignment_query)
@@ -355,6 +372,7 @@ async def run_list_clients(
                 }
             
             if indexacao_query:
+                filtros_de_processo.append(indexacao_query)
                 if process_query:
                     if "$and" in process_query:
                         process_query["$and"].append(indexacao_query)
@@ -379,6 +397,7 @@ async def run_list_clients(
                 {"is_deleted": True},
                 {"status": {"$in": DELETED_STATUS_VALUES}},
             ]}
+            filtros_de_processo.append(deleted_query)
             if process_query:
                 if "$and" in process_query:
                     process_query["$and"].append(deleted_query)
@@ -391,6 +410,7 @@ async def run_list_clients(
                 "is_deleted": {"$ne": True},
                 "status": {"$nin": DELETED_STATUS_VALUES},
             }
+            filtros_de_processo.append(deleted_query)
             if process_query:
                 if "$and" in process_query:
                     process_query["$and"].append(deleted_query)
@@ -406,12 +426,20 @@ async def run_list_clients(
         # "cliente ativo" poder filtrar processos eliminados.
         processes = await db.processes.find(
             com_isolamento(tenant_condition_processos, process_query),
-            {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
-             "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1,
-             "assigned_consultor_id": 1, "assigned_mediador_id": 1,
-             "consultor_name": 1, "mediador_name": 1, "is_active": 1, "is_deleted": 1, "created_at": 1,
-             "updated_at": 1, "prioridade": 1, "priority": 1}
+            PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM,
         ).sort("client_name", 1).to_list(length=None)
+
+        # Quem é 2.º titular ou co-titular também é cliente: cada processo com
+        # titulares secundários contribui com uma linha por secundário, que
+        # entra no mesmo acumulador do 1.º titular (Bloco 1, ponto 6).
+        processes.extend(await linhas_dos_titulares_secundarios(
+            tenant_condition_processos=tenant_condition_processos,
+            tenant_condition_clientes=tenant_condition,
+            filtros_de_processo=filtros_de_processo,
+            projeccao_do_processo=PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM,
+            search=search,
+            ids_permitidos=matching_client_ids,
+        ))
         
         # Agrupar por cliente
         clients_map = {}
@@ -464,6 +492,7 @@ async def run_list_clients(
                 "consultor_name": proc.get("consultor_name"),
                 "mediador_name": proc.get("mediador_name"),
                 "prioridade": proc_priority,
+                "titular": proc.get("titular", "titular1"),
             }
             clients_map[key]["processes"].append(process_info)
             clients_map[key]["process_ids"].append(proc.get("id"))
@@ -564,6 +593,7 @@ async def run_list_clients(
         role_query = {"created_by": user_email}
     
     process_query = role_query
+    filtros_de_processo = [role_query]
     
     if search:
         simple_regex = {"$regex": re.escape(search), "$options": "i"}
@@ -595,6 +625,7 @@ async def run_list_clients(
             {"is_deleted": True},
             {"status": {"$in": DELETED_STATUS_VALUES}},
         ]}
+        filtros_de_processo.append(deleted_query)
         if "$and" in process_query:
             process_query["$and"].append(deleted_query)
         else:
@@ -604,6 +635,7 @@ async def run_list_clients(
             "is_deleted": {"$ne": True},
             "status": {"$nin": DELETED_STATUS_VALUES},
         }
+        filtros_de_processo.append(deleted_query)
         if "$and" in process_query:
             process_query["$and"].append(deleted_query)
         else:
@@ -619,6 +651,16 @@ async def run_list_clients(
          "is_deleted": 1,
          "prioridade": 1, "priority": 1}
     ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
+
+    # Os titulares secundários dos processos que são meus (Bloco 1, ponto 6).
+    processes.extend(await linhas_dos_titulares_secundarios(
+        tenant_condition_processos=tenant_condition,
+        tenant_condition_clientes=tenant_condition,
+        filtros_de_processo=filtros_de_processo,
+        projeccao_do_processo=PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM,
+        search=search,
+        ids_permitidos=matching_client_ids,
+    ))
     
     # Agrupar por cliente (usando client_id ou client_name como chave)
     clients_map = {}

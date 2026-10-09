@@ -9570,3 +9570,14 @@ O admin liga/desliga se as acções ficam guardadas no histórico **por pessoa e
 * **Rede**: o cliente tem de ser do âmbito (404 igual ao de «não existe»); os processos contam-se pelo âmbito de PROCESSOS (`build_tenant_process_condition`, que inclui a rede convidada de uma partilha).
 * **Só sai o necessário**: número, fase (com rótulo), posição do cliente, responsável. Nunca o documento.
 * `GET /clients/{id}/processes` (a listagem completa) passou a respeitar a mesma fronteira — devolvia os processos desencriptados de qualquer cliente a qualquer sessão.
+
+
+## Titulares secundários na listagem de clientes (Bloco 1, ponto 6)
+
+`run_list_clients` constrói a lista a partir dos processos. Agrupava só por `client_id` (1.º titular), pelo que quem era apenas 2.º titular não aparecia, e quem era 1.º titular num processo anulado e 2.º noutro activo desaparecia da lista de activos.
+
+* `services/client_list_titulares.py::linhas_dos_titulares_secundarios`: cada processo com `second_client_id` ou `client_ids` com mais de um elemento contribui com uma linha por secundário, construída do **documento do cliente** e entregue ao mesmo acumulador (com `client_id` = o do secundário).
+* Os filtros de **processo** (fase, atribuição, indexação, eliminados) valem para o processo do secundário; os de **cliente** (pesquisa, origem/tipo/estado) para o cliente secundário.
+* **Rede**: o secundário lê-se com a condição de clientes do utilizador; cliente eliminado não volta por esta porta.
+* `process_info.titular` diz a posição: `titular1` / `titular2` / `co_titular`.
+* Os outros «clientes» do sistema (`/my-clients`, Sala de Triagem, autocomplete) não têm o defeito: o primeiro lista processos, os outros lêem `db.clients`.
