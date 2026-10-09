@@ -34,14 +34,25 @@ class FakeAsyncCursor:
         self._limit = None
 
     def sort(self, key_or_list, direction=1):
-        def sort_key(doc: dict):
-            if isinstance(key_or_list, (list, tuple)) and key_or_list:
-                if isinstance(key_or_list[0], (list, tuple)):
-                    return tuple(str(doc.get(k) or "") for k, _ in key_or_list)
-                return tuple(str(doc.get(k) or "") for k in key_or_list)
-            return str(doc.get(key_or_list) or "")
+        """Ordena por uma ou mais chaves, RESPEITANDO a direcção (1 / -1).
 
-        self._docs = sorted(self._docs, key=sort_key)
+        Antes ignorava o `-1`: um serviço que pedisse «os mais recentes
+        primeiro» obtinha os mais antigos e o teste que o afirmava só passava
+        se o fixture estivesse por acaso em ordem inversa. Várias passagens
+        estáveis, da última chave para a primeira, dão a ordem composta.
+        """
+        if isinstance(key_or_list, (list, tuple)) and key_or_list:
+            if isinstance(key_or_list[0], (list, tuple)):
+                chaves = [(k, d) for k, d in key_or_list]
+            else:
+                chaves = [(k, direction) for k in key_or_list]
+        else:
+            chaves = [(key_or_list, direction)]
+
+        docs = list(self._docs)
+        for chave, sentido in reversed(chaves):
+            docs.sort(key=lambda doc, c=chave: str(doc.get(c) or ""), reverse=(sentido == -1))
+        self._docs = docs
         return self
 
     def skip(self, n: int):

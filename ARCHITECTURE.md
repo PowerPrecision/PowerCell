@@ -9559,3 +9559,14 @@ O admin liga/desliga se as acções ficam guardadas no histórico **por pessoa e
 * **Fora do interruptor**: `audit_trail_service` (conformidade). A decisão de ligar/desligar fica em `audit_logs`, excepto quando o actor é ele próprio silenciado.
 * Só o ADMIN (rotas `/admin/history-tracking*`); nem o CEO.
 * **Todo escritor de histórico passa pelo `log_history`/`_is_stealth_user`** — um `db.history.insert_one` à mão contorna o interruptor e a regra de ouro (foi o caso de `admin_observability`).
+
+
+## Aviso de processos activos ao adicionar um cliente (Bloco 1, ponto 5)
+
+`GET /clients/{id}/active-processes?exclude_process_id=` responde «este cliente já tem processos activos?» (`services/client_active_processes.py`). Quem pergunta é o ecrã, antes de ligar um cliente a um processo; a resposta é consultiva (um cliente pode ter dois processos legitimamente).
+
+* **Activo** = fora de `nomes_terminais(carregar_fases())` e sem `is_deleted` — o motor de fases manda, não uma lista à mão.
+* **Onde o cliente está**: `client_id`, `second_client_id`, `client_ids` e `clients.process_ids`.
+* **Rede**: o cliente tem de ser do âmbito (404 igual ao de «não existe»); os processos contam-se pelo âmbito de PROCESSOS (`build_tenant_process_condition`, que inclui a rede convidada de uma partilha).
+* **Só sai o necessário**: número, fase (com rótulo), posição do cliente, responsável. Nunca o documento.
+* `GET /clients/{id}/processes` (a listagem completa) passou a respeitar a mesma fronteira — devolvia os processos desencriptados de qualquer cliente a qualquer sessão.

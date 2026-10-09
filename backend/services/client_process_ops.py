@@ -274,8 +274,21 @@ async def run_get_client_processes(
     include_archived: bool = False
 ):
     """Obter todos os processos de um cliente (incluindo como 2º titular)."""
-    client = await db.clients.find_one({"id": client_id})
-    
+    # Fronteira de rede: este endpoint devolvia os processos DESENCRIPTADOS
+    # de qualquer cliente a qualquer sessão (zero `network`, zero posse). O
+    # cliente tem de ser do âmbito de quem pergunta — 404 igual ao de «não
+    # existe» — e só se devolvem os processos do âmbito de PROCESSOS (com a
+    # rede convidada de uma partilha).
+    from services.tenant_network import (
+        build_tenant_condition,
+        build_tenant_process_condition,
+        com_isolamento,
+    )
+
+    client = await db.clients.find_one(
+        com_isolamento(await build_tenant_condition(user), {"id": client_id})
+    )
+
     if not client:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
     
@@ -299,9 +312,12 @@ async def run_get_client_processes(
             "total": 0
         }
     
-    query = {"id": {"$in": all_process_ids}}
+    query = com_isolamento(
+        await build_tenant_process_condition(user),
+        {"id": {"$in": all_process_ids}},
+    )
     if not include_archived:
-        query["status"] = {"$nin": ["arquivado", "cancelado"]}
+        query = {"$and": [query, {"status": {"$nin": ["arquivado", "cancelado"]}}]}
     
     processes = await db.processes.find(
         query,

@@ -2542,3 +2542,13 @@ No controlo de histórico, a **pessoa** tem três estados (segue o perfil / semp
 * Uma alteração de perfil recarrega **as duas** listas: o estado efectivo das pessoas depende dele.
 * O ecrã avisa do atraso de até 30 s entre servidores; um interruptor de gestão que parece não ter feito nada gera um segundo clique.
 * Um separador acrescentado à página de administração exige teste que **monta a página** (`SystemAdminPanel.historico.test.jsx`), com contraprova para o perfil que NÃO o vê.
+
+
+## 27.58 — Um aviso consultivo é uma Promise: `confirmar()` devolve `true` para continuar
+
+O aviso «este cliente já tem processos activos» vive num hook (`useConfirmarProcessosActivos`) que devolve `{confirmar, dialog}`. `confirmar(clientId, opts)` é uma Promise — resolve `true` para continuar (nada a avisar, o utilizador confirmou, **ou a verificação falhou**) e `false` quando o utilizador cancelou. Assim o fluxo escreve-se em linha (`if (!(await confirmar(...))) return;`) em vez de partido em duas metades unidas por estado.
+
+* **Consultivo, não bloqueante**; **falha aberta e DITA** (`toast.warning`): um aviso que falha em silêncio ensina a confiar na ausência de aviso.
+* Desmontar com a pergunta aberta resolve `false` — nunca deixar a Promise pendurada.
+* **Cada ecrã que adiciona um cliente a um processo tem de o chamar**, e a ligação prova-se montando o ecrã (`SecondTitularCard.processosActivos.test.jsx`, `CreateProcessModal.processosActivos.test.jsx`): apagar a chamada deixa o aviso a existir e a nunca aparecer, sem erro nenhum. Ao acrescentar um terceiro caminho, ligar o hook e copiar o teste.
+* O processo a que o cliente é ligado vai em `excludeProcessId`; sem isso o aviso dizia «já tem este processo».

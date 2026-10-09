@@ -17,6 +17,7 @@ import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { parseDuplicateClientError } from "../utils/duplicateClient";
 import DuplicateClientAlert from "./shared/DuplicateClientAlert";
 import { useDebounce } from "../hooks/useDebounce";
+import useConfirmarProcessosActivos from "../hooks/useConfirmarProcessosActivos";
 import { Card, CardContent } from "./ui/card";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
@@ -150,6 +151,9 @@ function CoBuyersSection({ process: processData, financialData }) {
 }
 
 const SecondTitularCard = ({ process: processData, onUpdate, financialData }) => {
+  // Bloco 1, ponto 5 — avisa se o cliente escolhido já tem processos activos.
+  const { confirmar: confirmarProcessosActivos, dialog: dialogProcessosActivos } =
+    useConfirmarProcessosActivos();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isSearching, setIsSearching] = useState(false);
@@ -216,6 +220,12 @@ const SecondTitularCard = ({ process: processData, onUpdate, financialData }) =>
 
   // Ligar cliente como 2º titular
   const handleLinkClient = async (client) => {
+    // O processo a que o cliente é ligado não conta para o aviso.
+    const continuar = await confirmarProcessosActivos(client.id, {
+      nome: client.nome,
+      excludeProcessId: processData.id,
+    });
+    if (!continuar) return;
     setLinking(true);
     try {
       await updateProcess(processData.id, {
@@ -627,6 +637,7 @@ const SecondTitularCard = ({ process: processData, onUpdate, financialData }) =>
         )}
         {/* PACOTE DD — Secção consolidada de co-buyers / co-applicants */}
         <CoBuyersSection process={processData} financialData={financialData} />
+        {dialogProcessosActivos}
       </CardContent>
     </Card>
   );

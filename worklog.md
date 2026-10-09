@@ -1,4 +1,35 @@
 ---
+Task ID: aviso-de-processos-activos
+Agent: Cloud Agent
+Task: BLOCO 1, ponto 5 — ao adicionar um cliente a um processo, avisar se já tem processos activos
+
+Date: 2026-10-09
+
+Work Log:
+
+A PERGUNTA E QUEM A RESPONDE
+- `GET /clients/{id}/active-processes?exclude_process_id=` (`services/client_active_processes.py`). **«Activo» é o do motor**: `nomes_terminais(carregar_fases())` + `is_deleted` — não uma lista escrita à mão (D-6). O processo a que o cliente é adicionado não conta (`exclude_process_id`), senão o aviso dizia «já tem este».
+- **O cliente está em TRÊS sítios do processo**: `client_id` (1.º), `second_client_id` (2.º) e `client_ids` (co-titulares N:M), mais `clients.process_ids` (o `link-process`). É o defeito do ponto 6 do mesmo bloco, evitado desde o início.
+- **Respeita a rede**: o cliente tem de estar no âmbito (senão 404, igual ao de «não existe»); contam-se só os processos do âmbito de PROCESSOS (com a rede convidada de uma partilha). Um «já tem um processo activo» que atravesse redes confirma a existência de um cliente na ilha ao lado.
+- Só sai o que o aviso precisa (número, fase com o rótulo do motor, posição do cliente, responsável): nunca o documento (NIF, telefone, IBAN, palavras-passe de portais). `total` real, lista limitada a 20.
+
+ACHADO NO CAMINHO: `GET /clients/{id}/processes` devolvia os processos DESENCRIPTADOS de qualquer cliente a qualquer sessão — zero `network`, zero posse (um `get_current_user` e mais nada). Passou a exigir o cliente no âmbito (404) e a filtrar pelo âmbito de processos. É a mesma família da D-24; apanhei-a porque a primeira ideia era reaproveitar este endpoint para o aviso.
+
+O ECRÃ
+- `useConfirmarProcessosActivos` devolve `{confirmar, dialog}`: `confirmar(clientId, {nome, excludeProcessId})` é uma Promise (o fluxo escreve-se em linha) que resolve `true` para continuar e `false` para cancelar. Ligado a **dois** sítios: `SecondTitularCard.handleLinkClient` (ligar 2.º titular) e `CreateProcessModal.handleSubmit` (processo para cliente existente; um cliente criado nessa submissão não tem processos e não se pergunta).
+- **Consultivo, não bloqueante**: um cliente pode ter dois processos legitimamente (1.º titular num, 2.º noutro). **Falha aberta e DITA**: se a verificação falhar o fluxo continua, mas há um `toast.warning` a dizer que não foi verificado — um aviso que falha em silêncio ensina a confiar na ausência de aviso.
+- Desmontar com a pergunta aberta resolve `false` em vez de pendurar a Promise.
+- `/clients/{id}/assign` não tem chamador no frontend: não há nada a ligar.
+
+Infra de teste: o `sort` do duplo de Mongo ignorava a direcção (`-1`): um serviço que pedisse «os mais recentes primeiro» obtinha os mais antigos e só passava num fixture em ordem inversa por acaso. Passou a respeitar a direcção e as chaves compostas. O limite de linhas do router de clientes (`test_client_extraction_helpers`) subiu de 250 para 280 — o endpoint novo é um stub legítimo; o que o guarda protege é lógica no router, não linhas.
+
+Medição por mutação (backend 9, frontend 5 — todas mortas): sem `$nin` dos terminais, sem o ramo do 2.º titular, sem o dos co-titulares, sem o âmbito de processos, sem o âmbito do cliente, sem `exclude_process_id`, sem `is_deleted`, os dois endpoints sem fronteira; nos ecrãs: sem o `if (!continuar)` (nos dois), sem `excludeProcessId`, aviso sempre, falha calada.
+
+Stage Summary:
+- Backend: `services/client_active_processes.py` (novo), `routes/clients.py`, `services/client_process_ops.py`. Frontend: `utils/processosActivos.js`, `components/shared/ActiveProcessesConfirmDialog.jsx`, `hooks/useConfirmarProcessosActivos.jsx`, `SecondTitularCard.jsx`, `CreateProcessModal.jsx`, `services/api.js`.
+- Testes: `test_processos_activos_do_cliente.py` (33), `processosActivos.test.js`, `useConfirmarProcessosActivos.test.jsx`, `SecondTitularCard.processosActivos.test.jsx`, `CreateProcessModal.processosActivos.test.jsx`.
+
+---
 Task ID: controlo-de-historico
 Agent: Cloud Agent
 Task: BLOCO 1, ponto 4 — o admin liga/desliga se as acções ficam no histórico, por pessoa e por perfil

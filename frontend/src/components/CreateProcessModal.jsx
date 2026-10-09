@@ -42,8 +42,12 @@ import { createClientProcess, createClient, searchClients } from "../services/ap
 import { toast } from "sonner";
 import { PROCESS_TYPE_LABELS } from "./SmartClientSearch";
 import { Switch } from "./ui/switch";
+import useConfirmarProcessosActivos from "../hooks/useConfirmarProcessosActivos";
 
 const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, isLead = false }) => {
+  // Bloco 1, ponto 5 — avisa se o cliente existente já tem processos activos.
+  const { confirmar: confirmarProcessosActivos, dialog: dialogProcessosActivos } =
+    useConfirmarProcessosActivos();
   const navigate = useNavigate();
 
   const [selectedClient, setSelectedClient] = useState(preSelectedClient || null);
@@ -195,6 +199,15 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
       return;
     }
 
+    // Só para um cliente que JÁ existia: o que acabou de ser criado nesta
+    // submissão não tem processos, e perguntar custava um pedido a mais.
+    if (selectedClient?.id) {
+      const continuar = await confirmarProcessosActivos(clientId, {
+        nome: selectedClient.name || selectedClient.nome,
+      });
+      if (!continuar) return;
+    }
+
     setSubmitting(true);
     try {
       // FASE 3: Enviar APENAS { client_id, process_type } — sem personal_data
@@ -242,6 +255,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
   }, [showDropdown]);
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Lote 3, ponto 3 — estrutura cabeçalho / corpo com scroll / rodapé.
           O `DialogContent` base tem `max-h-[90vh] overflow-y-auto` na GRELHA
@@ -590,6 +604,8 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {dialogProcessosActivos}
+    </>
   );
 };
 

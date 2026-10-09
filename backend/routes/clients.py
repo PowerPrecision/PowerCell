@@ -37,6 +37,7 @@ from services.client_process_ops import (
     run_create_process_for_client,
     run_get_client_processes,
 )
+from services.client_active_processes import run_get_client_active_processes
 from services.client_portal_access import run_resend_portal_access
 from services.client_find_or_create import run_find_or_create_client
 from services.client_delete import PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES, run_delete_client
@@ -235,6 +236,21 @@ async def get_client_processes(
     user: dict = Depends(get_current_user)
 ):
     return await run_get_client_processes(client_id, user, include_archived=include_archived)
+
+
+@router.get("/{client_id}/active-processes")
+async def get_client_active_processes(
+    client_id: str,
+    request: Request,
+    exclude_process_id: Optional[str] = Query(
+        None, description="Processo a que o cliente está a ser adicionado (não conta)"
+    ),
+    user: dict = Depends(get_current_user)
+):
+    """«Este cliente já tem um processo activo?» — alimenta o aviso de duplicação."""
+    return await run_get_client_active_processes(
+        client_id, user, request, exclude_process_id=exclude_process_id,
+    )
 
 
 @router.delete("/{client_id}")

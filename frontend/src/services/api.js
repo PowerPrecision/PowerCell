@@ -685,6 +685,17 @@ export const updateSystemConfigSection = (section, data, companyId) =>
     params: { ...(companyId ? { company_id: companyId } : {}) },
   });
 
+// «Este cliente já tem um processo activo?» — alimenta o aviso de duplicação ao
+// adicionar um cliente a um processo. `excludeProcessId` é o processo a que o
+// cliente está a ser adicionado (esse não conta).
+export const getClientActiveProcesses = (clientId, excludeProcessId) =>
+  api.get(`/clients/${encodeURIComponent(clientId)}/active-processes`, {
+    params: { ...(excludeProcessId ? { exclude_process_id: excludeProcessId } : {}) },
+    // O aviso é consultivo: um erro aqui não pode abrir um toast por cima do
+    // fluxo que o utilizador estava a fazer — quem pergunta decide o que dizer.
+    skipErrorToast: true,
+  });
+
 // Controlo de histórico (admin): por perfil e por pessoa. `enabled: null` no
 // utilizador remove o override pessoal (a pessoa volta a seguir o perfil).
 export const getHistoryTracking = () => api.get("/admin/history-tracking");

@@ -39,4 +39,6 @@ def test_client_router_is_thin_stubs_only():
     routes_path = Path(__file__).resolve().parents[2] / "routes" / "clients.py"
     text = routes_path.read_text()
     assert text.count("return await run_") >= 15
-    assert len(text.splitlines()) < 250
+    # 280: o endpoint `active-processes` (Bloco 1, ponto 5) é um stub legítimo
+    # com docstring; o que o guarda protege é a lógica no router, não as linhas.
+    assert len(text.splitlines()) < 280
