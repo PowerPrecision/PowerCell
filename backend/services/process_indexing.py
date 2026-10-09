@@ -359,6 +359,20 @@ def build_mark_indexed_response(
     }
 
 
+async def libertar_index_sem_falhar(process_id: str, user: dict) -> dict[str, Any]:
+    """Liberta a pasta `Index` sem nunca bloquear nem desfazer a indexação."""
+    try:
+        from services.index_release import libertar_ficheiros_do_index
+
+        return await libertar_ficheiros_do_index(process_id, user=user)
+    except Exception as exc:
+        logger.warning(
+            f"[INDEXACAO] Pasta Index não libertada (não fatal) para o "
+            f"processo {process_id}: {exc}"
+        )
+        return {"executado": False, "movidos": 0, "erro": type(exc).__name__}
+
+
 async def trigger_financial_engine_safe(process: dict, user: dict) -> dict[str, Any]:
     """Dispara o Motor de Simulação Financeira sem nunca bloquear a indexação.
 
@@ -540,9 +554,14 @@ async def run_mark_indexed_side_effects(
         broadcast_fn=broadcast_fn,
     )
 
+    # Bloco 2 (Lote 12): o que entrou na pasta `Index` passa às pastas finais
+    # AGORA que o processo está indexado — e ANTES do motor financeiro, que lê
+    # o `s3_path` dos metadados e tem de o encontrar já actualizado.
+    index_release = await libertar_index_sem_falhar(process_id, user)
+
     financial_engine = await trigger_financial_engine_safe(process, user)
 
-    return build_mark_indexed_response(
+    resposta = build_mark_indexed_response(
         process=process,
         process_id=process_id,
         process_ref=process_ref,
@@ -553,6 +572,8 @@ async def run_mark_indexed_side_effects(
         is_pre_registo_transition=is_pre_registo,
         financial_engine=financial_engine,
     )
+    resposta["index_release"] = index_release
+    return resposta
 
 
 async def run_mark_process_indexed(

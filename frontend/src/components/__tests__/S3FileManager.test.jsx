@@ -326,3 +326,36 @@ describe("S3FileManager — pesquisa e vistas", () => {
     expect(botoes.length).toBeGreaterThan(3);
   });
 });
+
+describe("S3FileManager — ficheiros à espera da Indexação (desvio inteligente)", () => {
+  // Valores DIFERENTES das omissões (0): com 3, ler a chave errada não passa.
+  const COM_FILA = { ...RESPOSTA_FICHEIROS, em_indexacao: 3 };
+
+  it("quem não vê a pasta Index é avisado de quantos ficheiros aguardam", async () => {
+    ligarRede({ carga: COM_FILA });
+    montar();
+
+    const aviso = await screen.findByTestId("aviso-em-indexacao");
+    expect(aviso).toHaveTextContent(/3 ficheiros enviados aguardam a Indexação/);
+  });
+
+  it("quem VÊ a pasta Index não recebe o aviso (tem a lista)", async () => {
+    ligarRede({ carga: COM_FILA });
+    montar(
+      utilizador({
+        user: { id: "u-3", name: "Diana", role: "diretor" },
+        effectiveRole: "diretor",
+      }),
+    );
+    await screen.findByText("cartao_cidadao.pdf");
+
+    expect(screen.queryByTestId("aviso-em-indexacao")).not.toBeInTheDocument();
+  });
+
+  it("sem ficheiros em espera não há aviso", async () => {
+    montar();
+    await screen.findByText("cartao_cidadao.pdf");
+
+    expect(screen.queryByTestId("aviso-em-indexacao")).not.toBeInTheDocument();
+  });
+});

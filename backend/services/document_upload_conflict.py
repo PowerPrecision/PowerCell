@@ -16,6 +16,7 @@ from services.document_constants import (
     ERROR_PROCESS_NOT_FOUND,
 )
 from services.document_filenames import normalize_filename
+from services.document_intake import planear_entrada
 from services.s3_storage import s3_service, sanitize_folder_name
 from services.s3_document_root import pasta_gravada
 
@@ -118,6 +119,11 @@ async def run_check_upload_conflict(data: dict) -> dict:
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
 
+    # Verifica-se onde o ficheiro VAI ficar (Bloco 2): num processo por
+    # indexar é a pasta `Index`, não a que o utilizador escolheu — verificar
+    # a pedida avisava de conflitos que não existem e deixava passar os que
+    # existem.
+    category = planear_entrada(process, category).categoria
     base_path = resolve_upload_base_path(process, process_id)
     conflicts = find_filename_conflicts(
         filenames=filenames, base_path=base_path, category=category

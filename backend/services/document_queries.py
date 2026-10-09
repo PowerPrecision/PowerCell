@@ -18,6 +18,7 @@ from services.document_constants import (
     ERROR_PROCESS_NOT_FOUND,
 )
 from services.document_process_resolve import extract_second_client_name
+from services.document_intake import retirar_documentos_da_index
 from services.s3_storage import s3_service
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ def serialize_metadata_doc(doc: dict) -> dict:
     }
 
 
-async def run_get_process_documents(process_id: str) -> dict[str, Any]:
+async def run_get_process_documents(process_id: str, user: Optional[dict] = None) -> dict[str, Any]:
     """Lista docs (metadata + fallback S3) para modal de envio a balcões."""
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
@@ -94,6 +95,7 @@ async def run_get_process_documents(process_id: str) -> dict[str, Any]:
         except Exception as e:
             logger.warning(f"[DOCS-PROCESS] Fallback S3 falhou: {e}")
 
+    documents = retirar_documentos_da_index(documents, user)
     return {
         "process_id": process_id,
         "client_name": process.get("client_name"),
@@ -102,7 +104,7 @@ async def run_get_process_documents(process_id: str) -> dict[str, Any]:
     }
 
 
-async def run_get_document_metadata(process_id: str) -> dict[str, Any]:
+async def run_get_document_metadata(process_id: str, user: Optional[dict] = None) -> dict[str, Any]:
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
@@ -111,6 +113,9 @@ async def run_get_document_metadata(process_id: str) -> dict[str, Any]:
         {"process_id": process_id},
         {"_id": 0, "extracted_text": 0},
     ).to_list(1000)
+
+    # ANTES de gerar os URLs pré-assinados: o que não se mostra não se assina.
+    metadata_list = retirar_documentos_da_index(metadata_list, user)
 
     for doc in metadata_list:
         s3_path = doc.get("s3_path")
@@ -131,7 +136,7 @@ async def run_get_document_metadata(process_id: str) -> dict[str, Any]:
     }
 
 
-async def run_search_documents(request) -> dict[str, Any]:
+async def run_search_documents(request, user: Optional[dict] = None) -> dict[str, Any]:
     from services.document_categorization import search_documents_by_content
 
     query: dict[str, Any] = {"is_categorized": True}
@@ -141,6 +146,7 @@ async def run_search_documents(request) -> dict[str, Any]:
         query["ai_category"] = {"$in": request.categories}
 
     documents = await db.document_metadata.find(query, {"_id": 0}).to_list(1000)
+    documents = retirar_documentos_da_index(documents, user)
     results = await search_documents_by_content(
         query=request.query,
         process_id=request.process_id,

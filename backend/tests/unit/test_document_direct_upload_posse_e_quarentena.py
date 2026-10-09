@@ -90,10 +90,7 @@ async def _correr(dados, *, veredicto=APROVADO, processo=PROCESSO):
                 modulo, "_auto_fulfill_portal_request",
                 AsyncMock(return_value={"fulfilled": 0}),
             ), \
-            patch.object(
-                modulo, "_triage_category_with_ai",
-                AsyncMock(return_value=("Identificação", None, None)),
-            ):
+            patch("services.document_intake.db", db_falso):
         resposta = await modulo.run_confirm_upload(
             dados, background_tasks=MagicMock(), user={"id": "u-1", "name": "Ana"}
         )
@@ -245,10 +242,7 @@ class TestAQuarentenaDeConteudo:
                 patch.object(modulo.s3_service, "get_file_content", return_value=None), \
                 patch.object(modulo, "log_history", AsyncMock()), \
                 patch.object(modulo, "_auto_fulfill_portal_request", _fulfill), \
-                patch.object(
-                    modulo, "_triage_category_with_ai",
-                    AsyncMock(return_value=("Identificação", None, None)),
-                ):
+                patch("services.document_intake.db", db_falso):
             await modulo.run_confirm_upload(
                 _pedido(
                     "Documentação Clientes/Ana Cliente/cc.pdf",

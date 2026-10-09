@@ -298,7 +298,11 @@ async def list_client_files(
     except Exception as enrich_err:
         logger.warning(f"[FILES] Falha ao enriquecer metadados IA: {enrich_err}")
 
-    return files
+    # Parede do servidor para a pasta `Index` (Bloco 2): o ecrã escondia-a,
+    # mas esconder no cliente é cortesia, não fronteira.
+    from services.document_intake import retirar_o_index_da_listagem
+
+    return retirar_o_index_da_listagem(files, user)
 
 @router.post("/client/{client_id}/upload", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 @limiter.limit("60/minute")
@@ -774,7 +778,7 @@ async def get_process_documents(
     from services.document_visibility import assert_can_view_process_documents_by_id
 
     await assert_can_view_process_documents_by_id(user, process_id)
-    return await run_get_process_documents(process_id)
+    return await run_get_process_documents(process_id, user=user)
 
 
 
@@ -793,7 +797,7 @@ async def get_document_metadata(
     from services.document_visibility import assert_can_view_process_documents_by_id
 
     await assert_can_view_process_documents_by_id(user, process_id)
-    return await run_get_document_metadata(process_id)
+    return await run_get_document_metadata(process_id, user=user)
 
 
 
@@ -811,7 +815,7 @@ async def search_documents(
         from services.document_visibility import assert_can_view_process_documents_by_id
 
         await assert_can_view_process_documents_by_id(user, request.process_id)
-    return await run_search_documents(request)
+    return await run_search_documents(request, user=user)
 
 
 
