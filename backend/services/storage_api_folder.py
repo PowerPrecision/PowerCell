@@ -38,7 +38,9 @@ async def run_get_process_folder_url(process_id: str):
     }
 
 
-async def run_save_process_folder_url(process_id: str, folder_url: str):
+async def run_save_process_folder_url(
+    process_id: str, folder_url: str, user: dict | None = None,
+):
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -51,6 +53,15 @@ async def run_save_process_folder_url(process_id: str, folder_url: str):
         {"$set": {"storage_folder_url": folder_url}}
     )
 
+    # Bloco 3 (ponto 21): acção sobre o processo → histórico.
+    if user:
+        from services.history import log_history
+
+        await log_history(
+            process_id, user, "Definiu a pasta externa do processo",
+            "storage_folder_url", process.get("storage_folder_url"), folder_url,
+        )
+
     return {
         "success": True,
         "message": "Link da pasta guardado com sucesso",
@@ -58,7 +69,7 @@ async def run_save_process_folder_url(process_id: str, folder_url: str):
     }
 
 
-async def run_delete_process_folder_url(process_id: str):
+async def run_delete_process_folder_url(process_id: str, user: dict | None = None):
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -71,6 +82,14 @@ async def run_delete_process_folder_url(process_id: str):
             "drive_folder_url": ""
         }}
     )
+
+    if user:
+        from services.history import log_history
+
+        await log_history(
+            process_id, user, "Removeu a pasta externa do processo",
+            "storage_folder_url", process.get("storage_folder_url"), None,
+        )
 
     return {
         "success": True,

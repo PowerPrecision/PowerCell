@@ -2567,3 +2567,9 @@ A configuração global é do administrador. Em vez de deixar o CEO abrir separa
 * **Sugestões são um extra:** `CampoDeDestinatarios` nunca impede de escrever (um pedido que falha dá lista vazia, uma resposta velha não substitui a nova) e escolhe com `onMouseDown`+`preventDefault` (com `onClick` o `blur` fechava a lista antes do clique).
 * **Uma lista recusada diz-se:** o `EmailHistoryPanel` mostra «sem permissão» num 403/404 em vez de «Nenhum email encontrado»; um erro de rede NÃO se faz passar por permissão. Doze `fetch` crus passaram a Axios (perdiam `X-Company-Id`/`X-Active-Role`).
 
+## 27.61 — Portal bloqueado, automação por fase e ordem do histórico (Bloco 3)
+
+* **O ecrã decide pelo CÓDIGO do servidor, nunca pelo texto.** `eBloqueioDoPortal(status, corpo)` exige 403 **e** `detail.codigo === "portal_inativo"`; um 403 de outra causa (token de staff) não é «acesso suspenso». O bloqueio vem antes do login no render (pedir credenciais não o resolve) e esquece a sessão (`limparSessaoDoPortal`), senão recarregar reabria o Portal com o mesmo token. O `detail` passou a poder ser objecto: `throw new Error(e.detail)` escrevia «[object Object]».
+* **Três estados no editor de fases:** `null` (herdar) ≠ `[]` (nada). Um interruptor «Personalizar» por secção; desligar envia `null`. O prazo vive em TEXTO no estado (0 é um prazo) e o servidor gera os ids das tarefas novas.
+* **Ordenar por instante, não por texto.** `instanteDoEvento` lê `+00:00`, `Z`, fusos e datas sem fuso (UTC); ilegíveis vão para o fim. A data que se mostra e a que ordena vêm da mesma função (`dataDoEvento`). Um teste que dependa do fuso fixa `process.env.TZ`: o sandbox corre em UTC e esconde a leitura local.
+* **Uma nota de instrução nunca se corta** (`NotaDoPedido`: `whitespace-pre-line`, contraste, só texto).

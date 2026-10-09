@@ -922,7 +922,7 @@ async def organize_files_in_folders(
     user: dict = Depends(get_current_user)
 ):
     """Organiza ficheiros em pastas no S3 baseado na análise IA."""
-    return await run_organize_files_in_folders(process_id, organization)
+    return await run_organize_files_in_folders(process_id, organization, user=user)
 
 
 
@@ -946,6 +946,7 @@ async def organize_documents_after_analysis(
         process_id,
         documents=body.get("documents", []),
         create_folders=body.get("create_folders", True),
+        user=user,
     )
 
 
@@ -1001,7 +1002,7 @@ async def rename_all_documents_smart(
     - errors: Número de erros
     - details: Lista de operações
     """
-    return await run_rename_all_documents_smart(process_id)
+    return await run_rename_all_documents_smart(process_id, user=user)
 
 
 

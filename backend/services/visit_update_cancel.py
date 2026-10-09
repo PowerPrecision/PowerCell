@@ -259,4 +259,15 @@ async def run_cancel_visit(
     # Atualizar portal
     await _update_portal_visit_status(visit, "cancelada")
 
+    # Bloco 3 (ponto 21): cancelar uma visita fica no histórico do processo.
+    # (A criação e a edição já registavam; o cancelamento era o buraco.)
+    visit_process = visit.get("process_id") or visit.get("client_id")
+    if visit_process:
+        from services.history import log_history
+
+        await log_history(
+            visit_process, user, "Cancelou uma visita",
+            "visit", visit.get("property_title") or visit_id, "cancelada",
+        )
+
     return {"success": True, "message": "Visita cancelada"}

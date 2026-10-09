@@ -382,8 +382,6 @@ class TestLeastBusyEstrito:
             "services.history.log_history", new=AsyncMock()
         ), patch.object(
             pa, "_notify_newly_assigned_users", new=AsyncMock()
-        ), patch.object(
-            pa, "_create_post_indexing_tasks", new=AsyncMock()
         ):
             result = await pa.dual_auto_assign_on_pre_registo_transition("p-dual")
 

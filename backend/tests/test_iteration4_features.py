@@ -205,7 +205,10 @@ class TestPostIndexingAutoTasks:
         from database import reset_db_connection
         # Reset the global Motor client so it re-binds to this test's event loop
         reset_db_connection()
-        from services.process_assignment import _create_post_indexing_tasks
+        from services.phase_automation import (
+            MODELOS_POR_OMISSAO_DA_SAIDA_DA_INDEX,
+            criar_tarefas_da_fase,
+        )
         from database import db as service_db
 
         fake_process_id = f"qa-proc-{uuid.uuid4()}"
@@ -213,7 +216,16 @@ class TestPostIndexingAutoTasks:
             {"id": f"qa-consultor-{uuid.uuid4()}", "name": "QA Consultor", "role": "consultor"},
             {"id": f"qa-mediador-{uuid.uuid4()}", "name": "QA Mediador", "role": "intermediario"},
         ]
-        await _create_post_indexing_tasks(fake_process_id, fake_users)
+        # Bloco 3: as tarefas de arranque são os modelos da fase (omissão da
+        # saída da Index), criados para quem tem cada papel no processo.
+        processo = {
+            "id": fake_process_id,
+            "assigned_consultor_ids": [fake_users[0]["id"]],
+            "assigned_mediador_ids": [fake_users[1]["id"]],
+        }
+        await criar_tarefas_da_fase(
+            processo, "qa", MODELOS_POR_OMISSAO_DA_SAIDA_DA_INDEX
+        )
         tasks = await service_db.tasks.find({"process_id": fake_process_id}).to_list(length=100)
         # cleanup
         await service_db.tasks.delete_many({"process_id": fake_process_id})

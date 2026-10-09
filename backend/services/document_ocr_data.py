@@ -98,6 +98,15 @@ async def run_resolve_data_conflict(
     result = await resolve_suggestion(suggestion_id, choice, user.get("id"))
     if not result["success"]:
         raise HTTPException(status_code=404, detail=result["message"])
+    # Bloco 3 (ponto 21): decidir um conflito de dados altera a ficha.
+    from services.history import log_history
+
+    await log_history(
+        process_id, user,
+        "Resolveu conflito de dados (valor da IA)" if choice == "ai"
+        else "Resolveu conflito de dados (manteve o valor atual)",
+        field, None, None,
+    )
     return result
 
 
@@ -125,6 +134,14 @@ async def run_confirm_process_data(
                 "updated_at": now,
             }
         },
+    )
+    from services.history import log_history
+
+    await log_history(
+        process_id, user,
+        "Confirmou os dados do processo" if confirmed
+        else "Desbloqueou os dados do processo",
+        "is_data_confirmed", not confirmed, bool(confirmed),
     )
     return {
         "success": True,

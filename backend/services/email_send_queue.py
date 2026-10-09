@@ -155,6 +155,8 @@ def build_pending_send_record(
     attachment_ids: Optional[list],
     in_reply_to: Optional[str] = None,
     references: Optional[list] = None,
+    actor_silenciado: bool = False,
+    created_by_name: Optional[str] = None,
 ) -> dict:
     """Constrói o documento PENDING (função pura — testável isoladamente).
 
@@ -191,7 +193,36 @@ def build_pending_send_record(
         # Auditoria
         "created_by": created_by,
         "created_by_email": created_by_email,
+        "created_by_name": created_by_name,
+        # Bloco 3 (ponto 21): o envio real corre DEPOIS, num job sem sessão.
+        # Quem decide se o envio deixa rasto no histórico (perfil Indexação
+        # ou registo desligado) decide AQUI, onde o utilizador e o perfil
+        # activo ainda são conhecidos — pelo ponto único `_is_stealth_user`.
+        "actor_silenciado": bool(actor_silenciado),
     }
+
+
+async def _registar_envio_no_historico(record: dict) -> None:
+    """Uma entrada «Enviou email» no histórico do processo (se houver processo)."""
+    process_id = record.get("process_id")
+    if not process_id:
+        return
+    try:
+        from services.history import log_history
+
+        ator = {
+            "id": record.get("created_by"),
+            "name": record.get("created_by_name") or record.get("created_by_email"),
+            "role": "email",  # nunca "indexacao": o silêncio vai em track_history
+            "track_history": not record.get("actor_silenciado", False),
+        }
+        n = len(record.get("to_emails") or []) + len(record.get("cc_emails") or [])
+        await log_history(
+            process_id, ator, "Enviou email", "email", None,
+            f"{record.get('subject') or '(sem assunto)'} · {n} destinatário(s)",
+        )
+    except Exception as e:
+        logger.warning("[UNDO-SEND] Histórico do envio não registado (não fatal): %s", e)
 
 
 async def queue_email_send(record: dict) -> dict:
@@ -402,6 +433,13 @@ async def execute_pending_email_send(send_id: str) -> dict:
         )
     except Exception as contactos_err:
         logger.warning("[UNDO-SEND] Contactos não registados (não fatal): %s", contactos_err)
+
+    # ── 4c) Histórico do processo (Bloco 3, ponto 21) ─────────────
+    # O `send_email` NÃO regista histórico (a nota que o dizia estava
+    # errada): um email enviado a partir de um processo não aparecia na
+    # trilha. Nunca faz o envio falhar; o silêncio do perfil Indexação foi
+    # decidido ao enfileirar.
+    await _registar_envio_no_historico(record)
 
     # ── 5) Sucesso → apagar registo pending ──────────────────────
     try:

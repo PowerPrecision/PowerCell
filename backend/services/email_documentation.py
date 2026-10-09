@@ -815,6 +815,16 @@ async def _send_documentation_email_impl(
     total_recipients = len(to_emails) + len(cc_emails) + len(all_bcc)
     
     logger.info(f"Documentação enviada para processo {process_id} por {current_user['email']}: {total_recipients} destinatário(s) (TO:{len(to_emails)} CC:{len(cc_emails)} BCC:{len(all_bcc)}), {len(email_attachments)} anexos")
+
+    # O `send_email` não regista histórico (ver `email_send_queue`): sem isto a
+    # documentação enviada ao banco não aparecia na trilha do processo.
+    from services.history import log_history
+
+    await log_history(
+        process_id, current_user, "Enviou documentação por email",
+        "email", None,
+        f"{total_recipients} destinatário(s) · {len(email_attachments)} anexo(s)",
+    )
     
     return {
         "success": True,

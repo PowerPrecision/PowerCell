@@ -175,6 +175,11 @@ async def generate_magic_link(
         f"Magic link gerado por {user.get('email')} para processo {process_id} "
         f"(cliente: {process.get('client_name', 'N/A')}, short_id: {issued['short_id']})"
     )
+    # Bloco 3 (ponto 21): gerar acesso ao Portal fica no histórico (sem o link).
+    await log_history(
+        process_id, user, "Gerou o link de acesso ao Portal",
+        "portal_access", None, None,
+    )
     return build_generate_magic_link_response(
         process_id=process_id,
         process=process,

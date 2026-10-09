@@ -490,7 +490,7 @@ describe("WebmailPage — anexos: descarregar e arquivar no processo (Bloco 2)",
     expect(screen.queryByTestId("arquivar-dialogo")).not.toBeInTheDocument();
   });
 
-  it.each(["indexacao", "parceiro"])(
+  it.each(["parceiro"])(
     "o perfil %s não vê o botão «Arquivar» (mas pode descarregar)",
     async (papel) => {
       sessao.papel = papel;
@@ -502,7 +502,7 @@ describe("WebmailPage — anexos: descarregar e arquivar no processo (Bloco 2)",
     },
   );
 
-  it.each(["administrativo", "diretor"])("o perfil %s arquiva", async (papel) => {
+  it.each(["administrativo", "diretor", "indexacao"])("o perfil %s arquiva", async (papel) => {
     sessao.papel = papel;
     const utilizador = userEvent.setup();
     const leitura = await abrirEmailComAnexo(utilizador);

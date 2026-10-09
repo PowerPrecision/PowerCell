@@ -11,6 +11,11 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from database import db
+# Importado NO TOPO e não à primeira chamada: um `from database import db`
+# executado dentro de um `patch("database.db", fake)` ficava com o duplo para
+# sempre (a armadilha da ordem de import, ver AGENTS.md). Aqui o módulo carrega
+# com o resto do serviço, antes de qualquer teste patchar o que quer que seja.
+from services import phase_automation
 from services.process_phase_clock import (
     montar_update,
     transicao_de_fase,
@@ -749,6 +754,16 @@ async def run_process_update_side_effects(
         updated_at=updated.get("updated_at"),
         process=updated,
     )
+
+    # Bloco 3 (ponto 12): automação da fase em que o processo ENTROU. Decide-se
+    # pelo que ficou GRAVADO — `data.status` pode ter sido recusado (fase
+    # desconhecida, sem permissão) e não é uma mudança.
+    fase_gravada = (updated or {}).get("status")
+    if fase_gravada and fase_gravada != process.get("status"):
+        await phase_automation.ao_entrar_na_fase_sem_falhar(
+            process_id, fase_gravada,
+            origem=phase_automation.ORIGEM_MOVIMENTO, actor=user,
+        )
 
     if data.status and can_update_status:
         try:

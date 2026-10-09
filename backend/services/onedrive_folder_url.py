@@ -65,6 +65,14 @@ async def run_save_process_folder_url(process_id: str, folder_url: str, user: di
         {"$set": {"onedrive_folder_url": folder_url, "cloud_folder_url": folder_url}},
     )
 
+    # Bloco 3 (ponto 21): ligar a pasta externa de um processo é uma acção.
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Definiu a pasta externa do processo",
+        "cloud_folder_url", process.get("cloud_folder_url"), folder_url,
+    )
+
     return {
         "success": True,
         "message": "Link da pasta guardado com sucesso",
@@ -83,5 +91,12 @@ async def run_remove_process_folder_url(process_id: str, user: dict):
             status_code=404,
             detail="Processo não encontrado ou link já removido",
         )
+
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Removeu a pasta externa do processo",
+        "cloud_folder_url", None, None,
+    )
 
     return {"success": True, "message": "Link removido"}

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from database import db
@@ -21,6 +21,52 @@ from services.s3_document_root import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Quanto tempo uma reivindicação de criação vale antes de outro pedido a poder
+#: retomar (a primeira morreu a meio). Curto: a criação demora milissegundos.
+VALIDADE_DA_REIVINDICACAO = timedelta(minutes=2)
+CAMPO_DA_REIVINDICACAO = "onboarding_process_claim_at"
+
+
+async def reivindicar_criacao_do_processo(client_id: str) -> bool:
+    """Ganha o direito de criar o processo deste cliente. Atómico.
+
+    Bloco 3 (ponto 19). O cliente envia vários ficheiros ao mesmo tempo e
+    CADA confirmação verifica se a checklist está completa; a verificação
+    «já tem processo?» e a criação são dois passos, e entre eles os pedidos
+    concorrentes passavam todos — dois processos, dois números, e os
+    documentos ancorados a um deles. A reivindicação é UMA operação com a
+    condição no próprio filtro: só um pedido a ganha.
+
+    A reivindicação expira (`VALIDADE_DA_REIVINDICACAO`): se quem a ganhou
+    morreu antes de criar, o seguinte retoma em vez de o cliente ficar sem
+    processo para sempre.
+    """
+    agora = datetime.now(timezone.utc)
+    limite = (agora - VALIDADE_DA_REIVINDICACAO).isoformat()
+    ganha = await db.clients.find_one_and_update(
+        {
+            "id": client_id,
+            "$or": [
+                {CAMPO_DA_REIVINDICACAO: {"$exists": False}},
+                {CAMPO_DA_REIVINDICACAO: None},
+                {CAMPO_DA_REIVINDICACAO: {"$lt": limite}},
+            ],
+        },
+        {"$set": {CAMPO_DA_REIVINDICACAO: agora.isoformat()}},
+        projection={"_id": 0, "id": 1},
+    )
+    return ganha is not None
+
+
+async def libertar_reivindicacao(client_id: str) -> None:
+    """Devolve o direito (só quando a criação FALHOU). Nunca levanta."""
+    try:
+        await db.clients.update_one(
+            {"id": client_id}, {"$set": {CAMPO_DA_REIVINDICACAO: None}}
+        )
+    except Exception as e:
+        logger.warning(f"[ONBOARDING-CFG] Falha a libertar a reivindicação: {e}")
 
 
 async def count_pending_mandatory_requests(
@@ -107,6 +153,25 @@ async def create_process_from_client_onboarding(client_id: str) -> dict[str, Any
                 "anchored_docs": 0,
             }
 
+    # Atómico: só UM pedido cria o processo (ver `reivindicar_criacao…`).
+    if not await reivindicar_criacao_do_processo(client_id):
+        logger.info(
+            f"[ONBOARDING-CFG] Cliente {client_id}: a criação do processo já "
+            f"está em curso noutro pedido."
+        )
+        return {"completed": False, "error": "creation_in_progress"}
+
+    try:
+        return await _criar_processo_do_onboarding(client_id, client, decrypt_client_data, get_next_process_number)
+    except Exception:
+        # Falhou a meio: devolve o direito para o pedido seguinte retomar.
+        await libertar_reivindicacao(client_id)
+        raise
+
+
+async def _criar_processo_do_onboarding(
+    client_id: str, client: dict, decrypt_client_data, get_next_process_number,
+) -> dict[str, Any]:
     try:
         decrypted = decrypt_client_data(client)
     except Exception:

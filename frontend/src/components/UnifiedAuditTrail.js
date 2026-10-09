@@ -27,6 +27,7 @@ import { hasRole } from "../utils/roleUtils";
 import {
   AUDIT_EVENT_TYPES,
   classifyAuditEvent,
+  dataDoEvento,
   describeAuditEvent,
   mergeAuditEvents,
 } from "../utils/processAuditHistory";
@@ -165,7 +166,7 @@ const UnifiedAuditTrail = ({
             <TableBody>
               {displayEvents.map((event, idx) => {
                 const type = classifyAuditEvent(event);
-                const timestamp = event.timestamp || event.created_at;
+                const timestamp = dataDoEvento(event);
                 const details = detailsText(event);
                 return (
                   <TableRow

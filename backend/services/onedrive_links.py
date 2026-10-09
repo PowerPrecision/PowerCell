@@ -78,6 +78,12 @@ async def run_add_process_link(process_id: str, link_data: LinkCreate, user: dic
     )
 
     logger.info(f"Link adicionado ao processo {process_id}: {link_data.name}")
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Adicionou ligação ao processo",
+        "onedrive_links", None, link_data.name,
+    )
     return new_link
 
 
@@ -96,6 +102,12 @@ async def run_delete_process_link(process_id: str, link_id: str, user: dict):
         raise HTTPException(status_code=404, detail="Link não encontrado")
 
     logger.info(f"Link {link_id} removido do processo {process_id}")
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Removeu ligação do processo",
+        "onedrive_links", link_id, None,
+    )
     return {"success": True, "message": "Link removido com sucesso"}
 
 
@@ -129,4 +141,12 @@ async def run_update_process_link(
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Link não encontrado")
 
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Atualizou ligação do processo",
+        "onedrive_links", link_id, ", ".join(
+            k.split(".")[-1] for k in sorted(update_fields)
+        ),
+    )
     return {"success": True, "message": "Link actualizado com sucesso"}

@@ -1,4 +1,46 @@
 ---
+Task ID: bloco-3-portal-e-automacoes
+Agent: Cloud Agent
+Task: BLOCO 3 (Lote 13) — Portal do Cliente e Fluxo de Automações
+
+Date: 2026-10-10
+
+Work Log:
+
+DECISÕES DO DONO DO PRODUTO (respostas às perguntas antes de escrever)
+- Tarefas predefinidas: **modelos por fase no editor de fases** (Admin/CEO). Atribuição: **configurável por fase, omissão = o que se fazia** (consultor + intermediário e as duas tarefas de arranque, SÓ à saída da Index). «Inativo» = **qualquer fase terminal** do motor. Portal inativo = **acesso recusado por completo**.
+
+PORTAL BLOQUEADO (ponto 14) — `services/portal_estado.py`
+- `get_current_client` (a dependência de TODAS as rotas autenticadas do Portal) recusa com **403 `{codigo: "portal_inativo", mensagem}`** em cada pedido: uma sessão aberta deixa de funcionar no pedido seguinte; voltar a uma fase activa reabre sozinho (nada se grava). Decide a **fase gravada lida pelo motor** (gralhas, aliases e `cancelado`/`arquivo` legados), nunca a flag derivada `processes.is_active` (desfasa-se). Fase desconhecida NÃO bloqueia.
+- Logins (código, NIF+nº, link curto) recusam **depois** de validar a credencial (antes seria um oráculo do estado do processo). Cliente com vários processos usa o **activo**; só bloqueia quando TODOS estão inativos (`no_process` escolhia o primeiro e trancava o cliente).
+- WebSocket: recusa à ligação (4002), re-lê o processo em cada `ping` (apanha QUALQUER escritor de fase) e o gancho de fase corta já os sockets deste worker.
+- Ecrã: `PortalInativo` + `utils/portalInativo.js` (decide pelo CÓDIGO, nunca pelo texto), nos 4 sítios que falam com o servidor e no login. Inventário por AST: toda a rota do Portal usa a dependência ou está justificada.
+- «Ver como cliente» vê o bloqueio (o JWT de impersonação não se distingue; é a vista certa).
+
+AUTOMAÇÃO POR FASE (ponto 12) — `services/phase_automation.py`
+- `workflow_statuses.auto_assign_roles` e `task_templates` (modelos: título, prioridade, prazo em dias, responsável consultor/intermediário/todos). **`None` ≠ `[]`**: não configurado herda o por-omissão (só na saída da Index); `[]` é «nada». `null` explícito volta a herdar (`model_fields_set`).
+- `ao_entrar_na_fase_sem_falhar` corre nos escritores de fase: Kanban, PUT do processo (pelo estado GRAVADO, não pelo pedido), indexação, motor de regras `change_status` e o avanço do Portal. Atribui primeiro (só se o papel estiver vazio) e cria depois; idempotente por (processo, fase, modelo, responsável); tarefas herdam o carimbo de rede do processo. Fase terminal não atribui nem cria trabalho. Inventário por AST dos escritores de `status` com excepções escritas (apagar fase, soft-delete, restauro, fila do indexador).
+- **Mudança de desenho a confirmar:** as tarefas vão para quem TEM o papel (também o já atribuído antes), não só os recém-atribuídos. `_create_post_indexing_tasks`/`POST_INDEXING_AUTO_TASKS` foram apagados; os testes legados foram reescritos.
+- UI: `FaseAutomacaoFields` no `WorkflowEditor` (interruptor «Personalizar» por secção; prazo em texto; título vazio impede gravar).
+
+FLUXO MESTRE (ponto 19) — blindagem
+- Criação do processo **atómica**: `reivindicar_criacao_do_processo` (um `find_one_and_update` com a guarda no filtro, validade 2 min, libertada se a criação falha). Antes, cada confirmação de upload concorrente podia criar um processo.
+- Avanço do pré-registo **condicional** (`status ∈ {pre_registo, None}` no filtro) e `portal_submitted_at`: o perfil tranca com a ENTREGA, seja qual for a macro-fase da «Index» (`construir_query_do_perfil_trancado`).
+- `tests/unit/test_fluxo_mestre.py` percorre a máquina de estados inteira (pré-registo → upload → Index → perfil trancado → indexação → intermediário + tarefa → fase terminal → Portal bloqueado → reabre).
+
+HISTÓRICO (pontos 20, 21, 17)
+- Ordem: `mergeAuditEvents` ordenava por TEXTO (formatos `+00:00`/`Z`/fusos misturados, ilegíveis no topo); agora por instante, ilegíveis no fim, e a data mostrada é a mesma com que se ordena (`dataDoEvento`).
+- **Todas as acções no histórico** (a Indexação continua silenciada por `_is_stealth_user`): inventário por AST das rotas de escrita com `{process_id}`. Faltavam: eliminar/restaurar processo, ligar/desligar cliente, criar processo para cliente, pasta externa e ligações, emails monitorizados, link/mensagem ao Portal, links temporários, cancelar visita, renomear/mover ficheiros, aplicar sugestões da IA (só NOMES de campos, nunca valores), confirmar dados/resolver conflito, checklist e o perfil editado pelo cliente. **O `send_email` NÃO registava histórico** (a nota do código que o dizia estava errada): o silêncio é decidido ao enfileirar (`actor_silenciado`).
+- Ponto 17: a nota/descrição de um «outro documento» só chegava ao cliente na lista de pendentes. `nota_do_pedido`/`rotulo_do_pedido` servem agora as QUATRO serializações do `/portal/status`; a lista do cliente ainda sem processo não levava `label` (o ecrã escrevia «Documento»). `NotaDoPedido` mostra-a inteira (era `truncate` cinzento-claro).
+
+REMATES DO BLOCO 2: ver a entrada `bloco-2-remates-indexacao`.
+
+Stage Summary:
+- Backend unit sem Mongo 6678 verdes; integração + unit com Mongo local 6827 verdes. Frontend e eslint verdes. ~110 mutações, todas mortas (as sobreviventes foram testes fracos e reforçaram-se: avanço concorrente sem interleaving real, guarda de fonte que lia o `import`, fuso UTC que escondia a leitura local).
+- **Armadilha da ordem de import (outra vez):** `phase_automation` importada à primeira chamada DENTRO de um `patch("database.db")` ficava com o duplo para sempre; passa a importar-se no topo dos cinco chamadores, e o arnês do E2E financeiro patcha-lhe o `db`.
+- **Limites conhecidos:** `get_next_process_number` lê o máximo e soma 1 (dois clientes diferentes em simultâneo podem repetir o número); outros escritores de ficheiros S3 continuam fora do desvio (Bloco 2); `process_activities` (soft-delete/restauro) é uma colecção que nenhum ecrã lê.
+
+---
 Task ID: bloco-2-remates-indexacao
 Agent: Cloud Agent
 Task: Remates do Bloco 2 — decisões do dono do produto sobre a Indexação

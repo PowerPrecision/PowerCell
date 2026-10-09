@@ -22,6 +22,7 @@ from services.portal_security import (
     PORTAL_TOKEN_VALIDITY_DAYS,
 )
 from services.auth import require_staff
+from services.portal_estado import escolher_processo_do_cliente, exigir_processo_activo
 from services.portal_brute_force import (
     AMBITO_DO_LOGIN,
     MAX_TENTATIVAS,
@@ -190,11 +191,15 @@ async def run_portal_login(data: PortalLoginRequest):
     process_id = None
     process_ids = client.get("process_ids", [])
     if process_ids:
-        # Buscar o primeiro processo activo (não eliminado)
-        process = await db.processes.find_one(
+        # Bloco 3 (ponto 14): o processo ACTIVO (não eliminado e fora de uma
+        # fase terminal). As credenciais JÁ foram validadas acima, por isso
+        # dizer «inativo» aqui não é um oráculo; se todos os processos do
+        # cliente estão inativos levanta o 403 do Portal bloqueado.
+        candidatos = await db.processes.find(
             {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
-            {"_id": 0, "id": 1}
-        )
+            {"_id": 0, "id": 1, "status": 1}
+        ).to_list(50)
+        process = await escolher_processo_do_cliente(candidatos)
         if process:
             process_id = process.get("id")
         else:
@@ -317,6 +322,14 @@ async def run_verify_portal_login(client_id: str, data: dict):
         # formato de NIF, porque um corpo mal formado não é uma adivinha.
         raise
 
+    # Bloco 3 (ponto 14): credenciais válidas, mas o processo está numa fase
+    # terminal → Portal bloqueado. DEPOIS da credencial, nunca antes (oráculo).
+    await exigir_processo_activo(
+        await db.processes.find_one(
+            {"id": result["process_id"]}, {"_id": 0, "id": 1, "status": 1}
+        )
+    )
+
     # Gerar token de sessão verificada
     session_token = create_verified_session_token(
         process_id=result["process_id"],
@@ -396,6 +409,15 @@ async def run_resolve_portal_token(short_id: str):
                 {"short_id": short_id},
                 {"$set": {"client_id": client_id or ""}}
             )
+
+    # Bloco 3 (ponto 14): o link curto É a credencial (já foi validado acima),
+    # logo dizer que o processo está inativo não revela nada a quem não a tem.
+    if token_doc.get("process_id"):
+        await exigir_processo_activo(
+            await db.processes.find_one(
+                {"id": token_doc["process_id"]}, {"_id": 0, "id": 1, "status": 1}
+            )
+        )
 
     return {
         "token": token_doc["jwt_token"],

@@ -45,7 +45,7 @@ async def save_process_folder_url(
     user: dict = Depends(get_current_user)
 ):
     """Guardar o link da pasta do cliente no processo."""
-    return await run_save_process_folder_url(process_id, folder_url)
+    return await run_save_process_folder_url(process_id, folder_url, user=user)
 
 
 @router.delete("/process/{process_id}/folder-url")
@@ -54,7 +54,7 @@ async def delete_process_folder_url(
     user: dict = Depends(get_current_user)
 ):
     """Remover o link da pasta do processo."""
-    return await run_delete_process_folder_url(process_id)
+    return await run_delete_process_folder_url(process_id, user=user)
 
 
 @router.post("/process/{process_id}/checklist")
@@ -64,7 +64,7 @@ async def generate_document_checklist(
     user: dict = Depends(get_current_user)
 ):
     """Gerar checklist de documentos baseada nos ficheiros fornecidos."""
-    return await run_generate_document_checklist(process_id, files)
+    return await run_generate_document_checklist(process_id, files, user=user)
 
 
 @router.get("/process/{process_id}/checklist")

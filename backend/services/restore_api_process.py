@@ -103,6 +103,15 @@ async def run_restore_process(process_id: str, user: dict):
 
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
 
+    # Bloco 3 (ponto 21): restaurar um processo eliminado é uma acção (e só
+    # ficava em `process_activities`, que nenhum ecrã lê).
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Restaurou o processo",
+        "status", "eliminado", (updated or {}).get("status"),
+    )
+
     # PACOTE DD — desencriptar campos sensíveis (NIF, documento_id, telefone,
     # senhas, IBAN) antes de devolver ao frontend para evitar hashes "ENC:".
     # Import inline para evitar dependência circular com restore_api_helpers.

@@ -91,6 +91,14 @@ async def run_link_process_to_client(
     )
     
     logger.info(f"Processo {process_id} vinculado ao cliente {client_id} por {user.get('email')}")
+    # Bloco 3 (ponto 21): toda a acção sobre um processo fica no histórico
+    # (o `log_history` já cala o perfil Indexação e quem tem o registo desligado).
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Associou o processo a um cliente",
+        "client_id", process.get("client_id"), client_id,
+    )
     
     return {
         "success": True,
@@ -128,6 +136,12 @@ async def run_unlink_process_from_client(
     )
     
     logger.info(f"Processo {process_id} desvinculado do cliente {client_id} por {user.get('email')}")
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Desassociou o processo do cliente",
+        "client_id", client_id, None,
+    )
     
     return {"success": True, "message": "Processo desvinculado"}
 
@@ -260,6 +274,12 @@ async def run_create_process_for_client(
         )
     
     logger.info(f"Novo processo {process_id} criado para cliente {client_id} por {user.get('email')}")
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, f"Criou processo #{next_number} para o cliente",
+        "process_type", None, process_type,
+    )
 
     return {
         "success": True,

@@ -9609,3 +9609,15 @@ O admin liga/desliga se as acções ficam guardadas no histórico **por pessoa e
 
 **Quadro da Indexação.** `build_kanban_role_base_query` e `realtime_audience` dão à Indexação o quadro geral da rede (só leitura). **Documentos novos — `services/document_novelty.py`**: definição única da bolinha verde (do cliente, não visto, 30 dias); `list_client_files` marca como visto.
 
+
+## Portal e Fluxo de Automações (Bloco 3, Lote 13)
+
+**Portal bloqueado — `services/portal_estado.py`.** «Inativo» = fase terminal do motor. `get_current_client` recusa (403 com `codigo: portal_inativo`) em cada pedido; logins recusam depois da credencial; o WebSocket recusa e re-lê no `ping`; `cortar_sessoes_em_tempo_real` fecha os sockets deste worker. A autoridade é a fase gravada, não `processes.is_active`. Cliente com vários processos usa o activo (`escolher_processo_do_cliente`).
+
+**Automação por fase — `services/phase_automation.py`.** `workflow_statuses.auto_assign_roles` / `task_templates` (`None` herda, `[]` é «nada»). `ao_entrar_na_fase_sem_falhar` é chamado pelos escritores de fase (Kanban, PUT, indexação, motor de regras, avanço do Portal); atribui (só papéis vazios, `dual_auto_assign…(papeis=…)`) e depois cria tarefas idempotentes por (processo, fase, modelo, responsável) com o carimbo de rede do processo. Por-omissão só à saída da Index. Importado no TOPO dos chamadores (armadilha do `patch("database.db")`).
+
+**Fluxo mestre.** Criação atómica do processo (`reivindicar_criacao_do_processo`), avanço condicional do pré-registo, `portal_submitted_at` tranca o perfil (`construir_query_do_perfil_trancado`).
+
+**Histórico.** `_is_stealth_user` continua o ponto único; `send_email` não regista — o envio com processo regista via `_registar_envio_no_historico` (silêncio decidido ao enfileirar). A ordenação é por instante (`instanteDoEvento`).
+
+**`/portal/status`.** `nota_do_pedido`/`rotulo_do_pedido` servem as quatro serializações.

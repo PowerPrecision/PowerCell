@@ -93,6 +93,9 @@ import ClientPortalLogin from './ClientPortalLogin';
 import SimulatorCH from '../components/portal/SimulatorCH';
 import { API_BASE_URL } from "../utils/apiBaseUrl";
 import { usePortalRealtime } from "../hooks/usePortalRealtime";
+import PortalInativo from "../components/portal/PortalInativo";
+import NotaDoPedido from "../components/portal/NotaDoPedido";
+import { eBloqueioDoPortal, limparSessaoDoPortal, mensagemDoBloqueio } from "../utils/portalInativo";
 
 // ====================================================================
 // CLIENT-ONLY WRAPPER — prevents hydration mismatches with Radix portals
@@ -389,7 +392,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
                 O backend já envia o label correto, mas isto é um fallback defensivo. */}
             {doc.label || doc.custom_name || doc.description || 'Documento'}
           </p>
-          {doc.notes && <p className="text-xs text-gray-400 truncate">{typeof doc.notes === 'string' ? doc.notes : JSON.stringify(doc.notes)}</p>}
+          <NotaDoPedido nota={doc.notes} />
         </div>
 
         {/* PACOTE DE — Botão de upload SEMPRE visível (permite uploads faseados).
@@ -1208,6 +1211,7 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
                     {doc.received_at && ` · ${formatDate(doc.received_at)}`}
                     {doc.file_size && ` · ${(doc.file_size / 1024).toFixed(0)} KB`}
                   </p>
+                  <NotaDoPedido nota={doc.notes} />
                 </div>
                 {/* Botão Download — chama /portal/download-url com o token de sessão */}
                 {doc.s3_path ? (
@@ -1777,6 +1781,9 @@ export default function ClientPortal() {
 
   // ── Login obrigatório ──
   const [isVerified, setIsVerified] = useState(false);
+  // Bloco 3 (ponto 14): processo inativo → Portal bloqueado. Guarda a
+  // MENSAGEM do servidor (ou `null`); decide-se pelo código, nunca pelo texto.
+  const [bloqueio, setBloqueio] = useState(null);
   const [autoLoginAttempted, setAutoLoginAttempted] = useState(false);
 
   // AUTO-LOGIN VIA TOKEN NA QUERY STRING (Pacote M, Fix #1)
@@ -1864,6 +1871,15 @@ export default function ClientPortal() {
           setIsVerified(true);
           localStorage.setItem('portalLastActivity', String(Date.now()));
         } else {
+          // Processo inativo: o token é válido mas o Portal está suspenso.
+          // Mostra o aviso em vez do login (que não resolveria nada).
+          const corpo = await res.json().catch(() => undefined);
+          if (cancelled) return;
+          if (eBloqueioDoPortal(res.status, corpo)) {
+            limparSessaoDoPortal();
+            setBloqueio(mensagemDoBloqueio(corpo));
+            return;
+          }
           // Token inválido/expirado — limpar sessão e mostrar login
           localStorage.removeItem('portalToken');
           localStorage.removeItem('portalClientId');
@@ -1928,7 +1944,11 @@ export default function ClientPortal() {
           if (cancelled) return;
           if (!r.ok) {
             const e = await r.json().catch(() => ({}));
-            throw new Error(e.detail || 'Link não encontrado ou expirado');
+            if (eBloqueioDoPortal(r.status, e)) {
+              setBloqueio(mensagemDoBloqueio(e));
+              return;
+            }
+            throw new Error(typeof e.detail === 'string' ? e.detail : 'Link não encontrado ou expirado');
           }
           const resolved = await r.json();
           if (cancelled) return;
@@ -1951,6 +1971,13 @@ export default function ClientPortal() {
               signal: ctrl2.signal,
             });
             clearTimeout(t2);
+            if (!statusRes.ok) {
+              const corpo = await statusRes.json().catch(() => undefined);
+              if (!cancelled && eBloqueioDoPortal(statusRes.status, corpo)) {
+                limparSessaoDoPortal();
+                setBloqueio(mensagemDoBloqueio(corpo));
+              }
+            }
             if (statusRes.ok) {
               const statusData = await statusRes.json();
               const cid = statusData?.process?.client_id;
@@ -2001,7 +2028,14 @@ export default function ClientPortal() {
         if (cancelled) return;
         if (!res.ok) {
           const e = await res.json().catch(() => ({}));
-          throw new Error(e.detail || 'Erro ao carregar dados');
+          if (eBloqueioDoPortal(res.status, e)) {
+            // O processo passou a inativo com a sessão aberta: sai de cena.
+            limparSessaoDoPortal();
+            setData(null);
+            setBloqueio(mensagemDoBloqueio(e));
+            return;
+          }
+          throw new Error(typeof e.detail === 'string' ? e.detail : 'Erro ao carregar dados');
         }
         const result = await res.json();
         if (cancelled) return;
@@ -2262,6 +2296,15 @@ export default function ClientPortal() {
     // Registar actividade para o sliding session
     localStorage.setItem('portalLastActivity', String(Date.now()));
   }, []);
+
+  // Antes do login: um processo inativo não se resolve a pedir credenciais.
+  if (bloqueio) {
+    return (
+      <ClientOnly>
+        <PortalInativo mensagem={bloqueio} />
+      </ClientOnly>
+    );
+  }
 
   if (!isVerified) {
     return (

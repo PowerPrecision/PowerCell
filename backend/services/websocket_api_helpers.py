@@ -262,11 +262,23 @@ async def verify_portal_websocket_token(token: str):
     # `get_current_client`. Um magic link continua válido depois de o processo
     # ser apagado, e sem isto o cliente entrava numa sala de um processo morto.
     processo = await db.processes.find_one(
-        {"id": process_id}, {"_id": 0, "id": 1, "is_deleted": 1}
+        {"id": process_id}, {"_id": 0, "id": 1, "is_deleted": 1, "status": 1}
     )
     if not processo or processo.get("is_deleted"):
         logger.warning(
             "[WS-PORTAL] Processo %s inexistente ou eliminado — ligação recusada",
+            process_id,
+        )
+        return None
+
+    # Bloco 3 (ponto 14): fase terminal = Portal bloqueado — também em tempo
+    # real. Um socket recusado aqui fecha com 4002 («acesso inválido»), que o
+    # cliente trata como veredicto e não reconecta.
+    from services.portal_estado import processo_esta_inativo
+
+    if await processo_esta_inativo(processo):
+        logger.info(
+            "[WS-PORTAL] Processo %s em fase terminal — ligação recusada",
             process_id,
         )
         return None

@@ -31,6 +31,13 @@ async def run_generate_document_checklist(
         {"$set": {"document_checklist": result}},
     )
 
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Gerou a checklist de documentos",
+        "document_checklist", None, f"{len(files)} ficheiro(s)",
+    )
+
     return result
 
 

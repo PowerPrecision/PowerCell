@@ -787,6 +787,8 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
         attachment_ids=payload.attachment_ids or [],
         in_reply_to=payload.in_reply_to,
         references=payload.references,
+        created_by_name=current_user.get("name"),
+        actor_silenciado=_utilizador_silenciado(current_user),
     )
 
     if undo_window <= 0:
@@ -1038,6 +1040,13 @@ async def run_get_monitored_emails(process_id: str, current_user: dict):
     }
 
 
+def _utilizador_silenciado(user: dict) -> bool:
+    """Ponto único: o utilizador deixa de ter rasto no histórico? (Indexação…)"""
+    from services.history import _is_stealth_user
+
+    return _is_stealth_user(user)
+
+
 async def run_add_monitored_email(process_id: str, email: str, current_user: dict):
     """Adicionar email à lista de monitorizados."""
     process = await db.processes.find_one({"id": process_id})
@@ -1060,6 +1069,12 @@ async def run_add_monitored_email(process_id: str, email: str, current_user: dic
     )
     
     logger.info(f"Email {email} adicionado à monitorização do processo {process_id}")
+    from services.history import log_history
+
+    await log_history(
+        process_id, current_user, "Adicionou email monitorizado",
+        "monitored_emails", None, email,
+    )
     
     return {
         "success": True,
@@ -1086,6 +1101,12 @@ async def run_remove_monitored_email(process_id: str, email: str, current_user: 
     )
     
     logger.info(f"Email {email} removido da monitorização do processo {process_id}")
+    from services.history import log_history
+
+    await log_history(
+        process_id, current_user, "Removeu email monitorizado",
+        "monitored_emails", email, None,
+    )
     
     return {
         "success": True,

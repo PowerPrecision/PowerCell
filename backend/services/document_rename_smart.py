@@ -137,6 +137,14 @@ async def run_rename_document_smart(
             )
 
         logger.info("Documento renomeado")
+        # Bloco 3 (ponto 21): renomear um ficheiro é uma acção sobre o processo.
+        if user:
+            from services.history import log_history
+
+            await log_history(
+                process_id, user, "Renomeou documento",
+                "filename", old_filename, new_filename,
+            )
         return {
             "success": True,
             "old_name": old_filename,
@@ -151,7 +159,9 @@ async def run_rename_document_smart(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def run_rename_all_documents_smart(process_id: str) -> dict[str, Any]:
+async def run_rename_all_documents_smart(
+    process_id: str, *, user: dict | None = None,
+) -> dict[str, Any]:
     """Renomeia todos os docs já categorizados do processo."""
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
@@ -240,5 +250,15 @@ async def run_rename_all_documents_smart(process_id: str) -> dict[str, Any]:
             results["details"].append(
                 {"file": old_filename, "status": "error", "reason": str(e)}
             )
+
+    # Uma só entrada para o lote (não uma por ficheiro): o histórico diz o
+    # que aconteceu sem se afogar em N linhas iguais.
+    if user and results["renamed"]:
+        from services.history import log_history
+
+        await log_history(
+            process_id, user, "Renomeou documentos (IA)",
+            "documents", None, f"{results['renamed']} renomeado(s)",
+        )
 
     return results

@@ -13,6 +13,39 @@ from database import db
 logger = logging.getLogger(__name__)
 
 
+def nota_do_pedido(doc: dict) -> str:
+    """A nota/instrução que a equipa escreveu no pedido, SEMPRE como texto.
+
+    Bloco 3 (ponto 17). O campo vive em `db.documents.notes` e já chegava ao
+    cliente na lista de pedidos pendentes — mas só aí. Quando o pedido passava
+    a «submetido» ou «recebido», as outras duas serializações do `/portal/status`
+    não o levavam, e a descrição que o cliente tinha lido desaparecia. Uma só
+    função para as três, para não voltarem a divergir.
+
+    Aceita o objecto que alguns registos antigos guardaram (`{label|value}`).
+    """
+    bruto = (doc or {}).get("notes", "")
+    if isinstance(bruto, dict):
+        bruto = bruto.get("label", bruto.get("value", ""))
+    return str(bruto).strip() if bruto is not None else ""
+
+
+def rotulo_do_pedido(doc: dict, cat_info: dict) -> str:
+    """O nome do pedido que o cliente vê.
+
+    Prefere o nome ESPECÍFICO escrito no pedido («Certidão de Casamento») ao
+    genérico da categoria («Outro Documento»). A lista de pendentes já o fazia;
+    a de recebidos mostrava sempre o genérico, por isso um «Outro documento»
+    perdia a descrição no momento em que era entregue.
+    """
+    doc = doc or {}
+    for campo in ("custom_label", "custom_name", "description", "title"):
+        valor = doc.get(campo)
+        if isinstance(valor, str) and valor.strip():
+            return valor.strip()
+    return (cat_info or {}).get("label") or doc.get("category") or "Documento"
+
+
 async def _get_user_contact_info(user_id: str) -> dict:
     """Obtém informações de contacto de um utilizador."""
     if not user_id:

@@ -18,6 +18,11 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from database import db
+# Importado NO TOPO e não à primeira chamada: um `from database import db`
+# executado dentro de um `patch("database.db", fake)` ficava com o duplo para
+# sempre (a armadilha da ordem de import, ver AGENTS.md). Aqui o módulo carrega
+# com o resto do serviço, antes de qualquer teste patchar o que quer que seja.
+from services import phase_automation
 from services.process_phase_clock import (
     montar_update,
     transicao_de_fase,
@@ -308,6 +313,17 @@ async def run_kanban_move_side_effects(
     await trigger_waitlist_on_inactive_move(
         process, process_id, new_status, flags["is_active"],
     )
+
+    # Bloco 3 (ponto 12): atribuição e tarefas modelo da fase em que o
+    # processo ENTROU (configuráveis pelo Admin/CEO). Só se a fase mudou —
+    # largar o cartão na mesma coluna não é entrar nela. Nunca falha o
+    # movimento; antes do motor de regras, que assim já vê o processo
+    # atribuído.
+    if old_status != new_status:
+        await phase_automation.ao_entrar_na_fase_sem_falhar(
+            process_id, new_status,
+            origem=phase_automation.ORIGEM_MOVIMENTO, actor=user,
+        )
 
     # PACOTE 11 (Eixo 1) — delegar as automações pós-mudança de fase ao
     # MOTOR DE AUTOMAÇÃO (rules engine, /admin/automation/rules) em vez

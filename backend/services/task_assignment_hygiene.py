@@ -16,8 +16,9 @@ DOIS PROBLEMAS DISTINTOS, COM A MESMA CARA
      motor de automação passou a gravar lista — normalizar trata o que já
      existe, deixar de produzir impede que volte.
 
-  2. TAREFAS ÓRFÃS. `_create_post_indexing_tasks` cria tarefas de arranque
-     para quem é atribuído, e nenhum caminho de atribuição voltava a
+  2. TAREFAS ÓRFÃS. As tarefas modelo da fase (`phase_automation`, antes
+     `_create_post_indexing_tasks`) criam tarefas de arranque para quem é
+     atribuído, e nenhum caminho de atribuição voltava a
      tocar-lhes. Tirar o consultor do processo deixava as tarefas dele lá:
      um processo sem ninguém atribuído com tarefas de consultores.
 

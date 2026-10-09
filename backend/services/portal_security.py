@@ -26,6 +26,10 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from database import db
+from services.portal_estado import (
+    escolher_processo_do_cliente,
+    exigir_processo_activo,
+)
 from config import JWT_SECRET, JWT_ALGORITHM
 
 logger = logging.getLogger(__name__)
@@ -469,13 +473,16 @@ async def get_current_client(
         resolved_process = None
         process_ids = (client or {}).get("process_ids") or []
         if process_ids:
-            resolved_process = await db.processes.find_one(
+            candidatos = await db.processes.find(
                 {
                     "id": {"$in": process_ids},
                     "is_deleted": {"$ne": True},
                 },
                 {"_id": 0},
-            )
+            ).to_list(50)
+            # Bloco 3 (ponto 14): prefere o processo ACTIVO; só bloqueia
+            # (403) quando todos os do cliente estão numa fase terminal.
+            resolved_process = await escolher_processo_do_cliente(candidatos)
         if resolved_process:
             return {
                 "process_id": resolved_process["id"],
@@ -521,6 +528,10 @@ async def get_current_client(
             status_code=404,
             detail="Processo não encontrado. O link pode ter sido desactivado."
         )
+
+    # Bloco 3 (ponto 14): processo numa fase terminal = Portal bloqueado, em
+    # CADA pedido (não só no login) — uma sessão já aberta deixa de funcionar.
+    await exigir_processo_activo(process)
 
     logger.info(
         f"[PORTAL-AUTH] Processo encontrado: id={process_id}, "

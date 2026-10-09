@@ -102,6 +102,14 @@ async def run_create_temp_link(
         )
 
         logger.info(f"Link temporário criado com sucesso: {link.id}")
+        # Bloco 3 (ponto 21): dar acesso externo a documentos é das acções que
+        # mais importa ficarem no histórico do processo.
+        from services.history import log_history
+
+        await log_history(
+            process_id, user, "Criou um link temporário",
+            "temp_link", None, link_type,
+        )
         return link
 
     except ValueError as e:
@@ -160,14 +168,31 @@ async def run_cancel_temp_link(link_id: str, user: dict) -> dict:
             detail="Não foi possível cancelar o link. Pode já ter sido usado ou expirado."
         )
 
+    if link.get("process_id"):
+        from services.history import log_history
+
+        await log_history(
+            link["process_id"], user, "Cancelou um link temporário",
+            "temp_link", link_id, "cancelado",
+        )
+
     return {"success": True, "message": "Link cancelado com sucesso"}
 
 
 async def run_delete_temp_link(link_id: str, user: dict) -> dict:
     """Elimina um link temporário (apenas admin)."""
+    link = await db.temp_links.find_one({"id": link_id}, {"_id": 0, "process_id": 1})
     result = await db.temp_links.delete_one({"id": link_id})
 
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Link não encontrado")
+
+    if (link or {}).get("process_id"):
+        from services.history import log_history
+
+        await log_history(
+            link["process_id"], user, "Eliminou um link temporário",
+            "temp_link", link_id, None,
+        )
 
     return {"success": True, "message": "Link eliminado"}
