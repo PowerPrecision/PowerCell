@@ -63,6 +63,7 @@ import UsersAccessAdminTab from "../components/admin/UsersAccessAdminTab";
 import CompaniesAdminTab from "../components/admin/CompaniesAdminTab";
 import AutomationPage from "./AutomationPage";
 import PermissionsTab from "../components/admin/PermissionsTab";
+import HistoryTrackingPanel from "../components/admin/HistoryTrackingPanel";
 
 // PACOTE AZ: Lazy loading para páginas pesadas que causam TDZ
 // (Cannot access 'd' before initialization) devido a dependências
@@ -370,6 +371,14 @@ const SystemAdminPanel = () => {
                   <span className="hidden sm:inline">Auditoria</span>
                   <span className="sm:hidden">Audit</span>
                 </TabsTrigger>
+                {/* Controlo de histórico (Bloco 1, ponto 4) — só o admin */}
+                {isAdmin && (
+                  <TabsTrigger value="history-tracking" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+                    <ClipboardList className="h-4 w-4" />
+                    <span className="hidden sm:inline">Registo de Histórico</span>
+                    <span className="sm:hidden">Histórico</span>
+                  </TabsTrigger>
+                )}
               </TabsList>
               <TabsContent value="rgpd" className="mt-4">
                 <Suspense fallback={<TabLoader />}><RGPDAdminPage embedded={true} /></Suspense>
@@ -377,6 +386,11 @@ const SystemAdminPanel = () => {
               <TabsContent value="audit" className="mt-4">
                 <Suspense fallback={<TabLoader />}><AuditTrailPage embedded={true} /></Suspense>
               </TabsContent>
+              {isAdmin && (
+                <TabsContent value="history-tracking" className="mt-4">
+                  <HistoryTrackingPanel />
+                </TabsContent>
+              )}
             </Tabs>
           </TabsContent>
 

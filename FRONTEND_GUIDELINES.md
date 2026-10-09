@@ -2532,3 +2532,13 @@ O selector de empresa das Configurações do Sistema (`EmpresaConfigSelector`) �
 * O primeiro pedido de configuração **espera pela lista**: um CEO de ilha não tem a global, e abrir o ecrã a pedi-la dava 403 e um toast. Sem lista (pedido falhado) fica o comportamento de sempre — o servidor continua a ser a parede.
 * Qualquer pedido que revele um segredo leva o `company_id` do que está em ecrã; um olho que revela a configuração de OUTRA empresa é pior do que nenhum.
 * `<select>` nativo, de propósito: acessível, testável por papel e nome, sem a captura de ponteiro do Radix.
+
+
+## 27.57 — Um estado «não decidi» não é um interruptor desligado
+
+No controlo de histórico, a **pessoa** tem três estados (segue o perfil / sempre ativo / desligado), não dois. Um `Switch` binário não distingue «ninguém decidiu» de «decidi ligado», e é essa diferença que faz a pessoa voltar a seguir o perfil quando o perfil muda. Por isso é um `<select>` de três opções e o pedido envia `null` (remove o override) — nunca `false`. `valorDaPessoa` e `enabledDoPedido` (`utils/historyTracking.js`) são uma bijecção, com teste.
+
+* **O que está bloqueado diz-se**: o perfil Indexação aparece com o cadeado e o motivo, não escondido — um perfil que desaparece da lista lê-se como esquecimento.
+* Uma alteração de perfil recarrega **as duas** listas: o estado efectivo das pessoas depende dele.
+* O ecrã avisa do atraso de até 30 s entre servidores; um interruptor de gestão que parece não ter feito nada gera um segundo clique.
+* Um separador acrescentado à página de administração exige teste que **monta a página** (`SystemAdminPanel.historico.test.jsx`), com contraprova para o perfil que NÃO o vê.

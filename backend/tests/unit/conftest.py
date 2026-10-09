@@ -310,8 +310,26 @@ class FakeAsyncCollection:
             actual = self._lookup_path(doc, campo)
             self._apply_set(doc, {campo: (actual or 0) + delta})
 
+    @staticmethod
+    def _apply_unset(doc: dict, unset_ops: dict) -> None:
+        """``$unset`` com dot-notation: REMOVE a chave (não a põe a ``None``).
+
+        A diferença conta: um campo a ``null`` ainda é um campo — `{"$in":
+        [None, ...]}` casa-o, `$exists` também.
+        """
+        for path in unset_ops or {}:
+            partes = path.split(".")
+            alvo = doc
+            for parte in partes[:-1]:
+                alvo = alvo.get(parte) if isinstance(alvo, dict) else None
+                if alvo is None:
+                    break
+            if isinstance(alvo, dict):
+                alvo.pop(partes[-1], None)
+
     def _apply_update(self, doc: dict, update: dict):
         self._apply_set(doc, update.get("$set", {}))
+        self._apply_unset(doc, update.get("$unset"))
         push_ops = update.get("$push")
         if push_ops:
             self._apply_push(doc, push_ops)

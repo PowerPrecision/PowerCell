@@ -685,6 +685,18 @@ export const updateSystemConfigSection = (section, data, companyId) =>
     params: { ...(companyId ? { company_id: companyId } : {}) },
   });
 
+// Controlo de histórico (admin): por perfil e por pessoa. `enabled: null` no
+// utilizador remove o override pessoal (a pessoa volta a seguir o perfil).
+export const getHistoryTracking = () => api.get("/admin/history-tracking");
+export const setRoleHistoryTracking = (role, enabled) =>
+  api.put(`/admin/history-tracking/roles/${encodeURIComponent(role)}`, { enabled });
+export const listUsersHistoryTracking = ({ search, page = 1, size = 25 } = {}) =>
+  api.get("/admin/history-tracking/users", {
+    params: { ...(search ? { search } : {}), page, size },
+  });
+export const setUserHistoryTracking = (userId, enabled) =>
+  api.put(`/admin/history-tracking/users/${encodeURIComponent(userId)}`, { enabled });
+
 // Deadlines
 export const getDeadlines = (processId) => 
   api.get("/deadlines", { params: { process_id: processId } });

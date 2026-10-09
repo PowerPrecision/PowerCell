@@ -9542,3 +9542,20 @@ no outro.
 * Os handlers de `routes/system_config.py` resolvem o âmbito por `resolver_empresa_pedida` / `resolver_configuracao_global` / `resolver_empresa_para_leitura`; um teste por AST exige-o a todos, com excepções ESCRITAS (`SEM_GUARDA`).
 * `reveal-secrets` tem `company_id` (antes devolvia sempre a global).
 * A listagem (`GET /system-config/companies`) é filtrada pelo âmbito e é o que alimenta o selector do ecrã.
+
+
+## Controlo de histórico (Bloco 1, ponto 4)
+
+O admin liga/desliga se as acções ficam guardadas no histórico **por pessoa e por perfil**. Por omissão tudo está ativo.
+
+| Eixo | Onde vive | Ausente significa |
+|---|---|---|
+| pessoa | `users.track_history` (`bool`) | segue o perfil |
+| perfil | `history_policy` / documento `roles` — só os DESLIGADOS | ativo |
+
+* **Pessoa vence perfil** (a regra dos overrides pessoais do `capability_gate`). A política segue o perfil **EFECTIVO**.
+* **Aplica-se no `get_current_user`** (`history_tracking.aplicar_politica_de_historico`): o utilizador chega às rotas com `track_history = False` e o `history._is_stealth_user` — puro, síncrono — continua a ser a única regra que os escritores consultam. Cache de 30 s por worker; falha de leitura → tudo ativo, com aviso.
+* **`indexacao` nunca se liga**: a API recusa política e override para ela, e o `_is_stealth_user` ganha mesmo com o estado forjado na base de dados.
+* **Fora do interruptor**: `audit_trail_service` (conformidade). A decisão de ligar/desligar fica em `audit_logs`, excepto quando o actor é ele próprio silenciado.
+* Só o ADMIN (rotas `/admin/history-tracking*`); nem o CEO.
+* **Todo escritor de histórico passa pelo `log_history`/`_is_stealth_user`** — um `db.history.insert_one` à mão contorna o interruptor e a regra de ouro (foi o caso de `admin_observability`).

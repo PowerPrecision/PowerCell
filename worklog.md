@@ -1,4 +1,46 @@
 ---
+Task ID: controlo-de-historico
+Agent: Cloud Agent
+Task: BLOCO 1, ponto 4 — o admin liga/desliga se as acções ficam no histórico, por pessoa e por perfil
+
+Date: 2026-10-09
+
+Work Log:
+
+O QUE JÁ EXISTIA, E O QUE FALTAVA
+- `history._is_stealth_user` já honrava `user["track_history"] is False`, mas ninguém o gravava (campo sem interruptor) e o eixo por perfil não existia.
+- **Não usei o registo de capacidades** (`models/permissions`), que tem UI de gestão pronta: os defaults por cargo editados em `PUT /permissions/role-defaults/{role}` são escritos em memória e numa colecção que **nunca é relida** (`role_capability_defaults` só tem escritor) — perdem-se no reinício e divergem entre workers. Um interruptor de segurança em cima disso era o placebo do `build_company_scope_condition` outra vez. (Dívida real e pré-existente: fica registada em `TECHNICAL_DEBT.md`, D-27.)
+
+A REGRA (decisão do dono do produto): os dois eixos, **pessoa vence perfil**; tudo ativo por omissão; só o ADMIN (master) decide — nem o CEO.
+- Pessoa: `users.track_history` (`true`/`false`; ausente = segue o perfil; `null` no pedido remove o campo).
+- Perfil: colecção `history_policy`, documento `roles` — guardam-se só os desligados (o default é ativo; guardar `True` seria uma segunda forma de dizer o mesmo).
+- A política segue o perfil EFECTIVO, não o do JWT (quinta ocorrência da forma do `_is_stealth_user`).
+
+ONDE SE APLICA
+- No `get_current_user`, depois de resolver o perfil efectivo: se a política desliga o perfil e a pessoa não tem override, o utilizador chega às rotas com `track_history = False`. O `_is_stealth_user` continua puro e síncrono (resolver no `log_history` custava um acesso à base por cada linha de histórico). Cache de 30 s por worker; uma escrita invalida a do worker que a recebe. Falha de leitura → tudo ativo, com aviso (registar de mais é recuperável, perder histórico não é).
+
+RESTRIÇÃO DE SEGURANÇA (Indexação)
+- A API recusa guardar política para `indexacao` (qualquer valor) e recusa override a quem tem Indexação de base; mesmo com o estado forjado na base de dados (política `indexacao: true` + `track_history: true`) o `_is_stealth_user` ganha — teste dedicado. Quem trabalha COMO indexação com override ligado continua silencioso.
+- A decisão fica em `audit_logs` (quem desligou o histórico de quem) EXCEPTO quando o actor é ele próprio silenciado: o perfil Indexação não gera registos de actividade/auditoria. O `audit_trail_service` (conformidade) fica fora do interruptor, afirmado por AST sobre os imports.
+
+O INVENTÁRIO DOS ESCRITORES
+- `grep` por `history.insert_one`/`activities.insert_one`: dos escritores com `process_id`, só dois contornavam o ponto único — `admin_observability.run_update_client_registration` e `run_delete_client_registration` (acções do admin sobre um processo): passaram a `log_history`. Os restantes (`process_id: None`, operações de sistema do admin; `process_activities`, que ninguém lê) ficam como estão. Os de `document_portal_request`, `restore_api_document` e `voice_note_engine` já passavam pelo `_is_stealth_user`.
+
+O ECRÃ
+- Novo separador «Registo de Histórico» em Compliance (só admin): `HistoryTrackingPanel` — um `Switch` por perfil (a Indexação bloqueada, com o motivo, não escondida) e, por pessoa, um selector de TRÊS estados (segue o perfil / sempre ativo / desligado) com pesquisa e paginação. Três e não dois porque um interruptor binário não distingue «não decidi» de «decidi ligado». O ecrã avisa que uma alteração pode demorar até 30 s a chegar a todos os servidores.
+
+Medição por mutação (backend 10, frontend 5 — todas mortas; duas sobreviveram à primeira passagem):
+- SOBREVIVEU: remover o ramo `indexacao` de `run_set_role_history` — equivalente em comportamento (a seguir, `indexacao not in PERFIS_GERIVEIS` também recusa), mas com a mensagem «perfil inválido», que manda procurar um erro de escrita. O teste passou a afirmar a MENSAGEM.
+- SOBREVIVEU: o curto-circuito `isinstance(track_history, bool)` no `aplicar_politica_de_historico` — redundante com `historico_efectivo`, que já dá a prioridade à pessoa. Removido: uma regra num só sítio.
+
+Infra de teste: o duplo de Mongo ganhou `$unset` (com dot-notation; remove a chave, não a põe a `null`).
+
+Stage Summary:
+- Backend: `services/history_tracking.py`, `routes/history_tracking.py`, `services/auth.py` (`get_current_user`), `services/admin_observability.py`, `server.py`. Frontend: `HistoryTrackingPanel.jsx`, `utils/historyTracking.js`, `SystemAdminPanel.jsx`, `services/api.js`.
+- Testes: `test_controlo_de_historico.py` (34), `historyTracking.test.js`, `HistoryTrackingPanel.test.jsx`, `SystemAdminPanel.historico.test.jsx`.
+- Resíduo (D-27): os defaults por cargo do registo de capacidades não persistem.
+
+---
 Task ID: configuracoes-por-empresa
 Agent: Cloud Agent
 Task: BLOCO 1, ponto 3 — Configurações do Sistema por empresa (Admin vê todas, CEO só as dele)

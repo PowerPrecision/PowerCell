@@ -114,6 +114,7 @@ from routes.admin_migration import router as admin_migration_router
 from routes.task_logs import router as task_logs_router
 from routes.portal import router as portal_router
 from routes.portal_admin import router as portal_admin_router
+from routes.history_tracking import router as history_tracking_router
 from routes.google_auth import router as google_auth_router
 from routes.shared_email import router as shared_email_router
 from routes.companies import router as companies_router
@@ -617,6 +618,7 @@ app.include_router(admin_migration_router, prefix="/api")
 app.include_router(task_logs_router, prefix="/api")
 app.include_router(portal_router, prefix="/api")
 app.include_router(portal_admin_router, prefix="/api")
+app.include_router(history_tracking_router, prefix="/api")
 app.include_router(google_auth_router, prefix="/api")
 app.include_router(shared_email_router, prefix="/api")
 app.include_router(companies_router, prefix="/api")

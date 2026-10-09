@@ -20,6 +20,7 @@ from models.email_config import EmailConfigCreate, EmailConfigResponse
 from services.auth import hash_password, require_roles, get_current_user
 from services.process_status import INACTIVE_STATUSES
 from services.admin_helpers import _safe_float, _audit_log
+from services.history import log_history
 from services.permissions import (
     get_default_permissions_for_role,
     get_all_available_permissions,
@@ -428,18 +429,13 @@ async def run_update_client_registration(process_id: str, data: dict, user: dict
         {"$set": update_data}
     )
     
-    # Log da alteração
-    await db.history.insert_one({
-        "id": str(uuid.uuid4()),
-        "process_id": process_id,
-        "user_id": user["id"],
-        "user_name": user.get("name", "Admin"),
-        "action": "Dados do registo editados pelo admin",
-        "field": "registration_edit",
-        "old_value": None,
-        "new_value": list(update_data.keys()),
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
+    # Log da alteração — pelo ponto único do histórico, para que o interruptor
+    # de gestão (Bloco 1, ponto 4) e a regra de ouro da Indexação também
+    # valham para as acções do admin sobre um processo.
+    await log_history(
+        process_id, user, "Dados do registo editados pelo admin",
+        "registration_edit", None, list(update_data.keys()),
+    )
     
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
     
@@ -462,18 +458,12 @@ async def run_delete_client_registration(process_id: str, user: dict):
     if not process:
         raise HTTPException(status_code=404, detail="Registo não encontrado")
     
-    # Guardar log antes de eliminar
-    await db.history.insert_one({
-        "id": str(uuid.uuid4()),
-        "process_id": process_id,
-        "user_id": user["id"],
-        "user_name": user.get("name", "Admin"),
-        "action": f"Registo eliminado (soft delete): {process.get('client_name', 'N/A')} ({process.get('client_email', 'N/A')})",
-        "field": "registration_delete",
-        "old_value": process.get("client_name"),
-        "new_value": None,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
+    # Guardar log antes de eliminar (pelo ponto único do histórico)
+    await log_history(
+        process_id, user,
+        f"Registo eliminado (soft delete): {process.get('client_name', 'N/A')} ({process.get('client_email', 'N/A')})",
+        "registration_delete", process.get("client_name"), None,
+    )
     
     # Soft delete: marcar processo como eliminado em vez de remover permanentemente
     await db.processes.update_one(

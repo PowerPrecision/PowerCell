@@ -449,6 +449,36 @@ o `titular2_data` apontam para "os adicionais"), migrar os documentos escritos
 pelo mapeador do CPCV — identificáveis porque `co_buyers[0]` tem a identidade
 do titular 1 — e só então simplificar a desduplicação.
 
+### D-27 · Os defaults por cargo do registo de capacidades não persistem
+**Onde:** `backend/services/admin_permissions.py::run_update_role_defaults`,
+`backend/models/permissions.py::ROLE_CAPABILITY_DEFAULTS`.
+
+`PUT /admin/permissions/role-defaults/{role}` altera o dicionário
+`ROLE_CAPABILITY_DEFAULTS` **em memória** e escreve uma cópia em
+`system_config` (`key: "role_capability_defaults"`). **Nada a lê de volta**:
+`grep` por `role_capability_defaults` encontra um único escritor. Duas
+consequências: a alteração perde-se no reinício do serviço, e com mais de um
+worker só o que recebeu o pedido a conhece.
+
+Encontrada ao desenhar o controlo de histórico (Bloco 1, ponto 4), que por
+isso NÃO usa este registo — um interruptor de segurança em cima disto seria o
+placebo do `build_company_scope_condition`. Usa uma colecção própria
+(`history_policy`) com leitura real.
+
+**Porque foi adiado:** não pertence ao ponto 4, e corrigi-la muda o
+comportamento de uma matriz de permissões que o dono do produto pode ter
+editado julgando-a permanente — carregar o persistido no arranque revive
+edições antigas que ninguém espera.
+
+**Quem é atingido:** qualquer admin que altere os defaults de um cargo na
+`PermissionsTab` e espere que sobreviva a um deploy. Os overrides por
+**pessoa** (`users.permissions.capabilities`) persistem e não são afectados.
+
+**O que é preciso para fechar:** ler `role_capability_defaults` no arranque (e
+com o mesmo TTL curto do `history_tracking`, para os workers convergirem),
+decidir o que fazer com o documento já gravado (mostrá-lo ao admin antes de o
+aplicar), e um teste que reinicie o módulo e afirme que o valor sobrevive.
+
 ## Fechadas
 
 Ficam aqui só o número e a iteração que as fechou — o detalhe vive no

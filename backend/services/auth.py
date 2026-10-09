@@ -413,6 +413,19 @@ async def get_current_user(
             )
             user["effective_role"] = _jwt_primary_role(user)
 
+        # Controlo de histórico (Bloco 1, ponto 4): a política por PERFIL
+        # EFECTIVO aplica-se aqui, onde o perfil já está resolvido, para que
+        # o `_is_stealth_user` (puro e síncrono) continue a ser a única regra.
+        try:
+            from services.history_tracking import aplicar_politica_de_historico
+
+            await aplicar_politica_de_historico(user)
+        except Exception as exc:
+            logger.warning(
+                "[get_current_user] Falha a aplicar a política de histórico "
+                "user=%s: %s. O histórico fica activo.", user.get("id"), exc,
+            )
+
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expirado")
