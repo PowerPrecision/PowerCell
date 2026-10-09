@@ -103,10 +103,21 @@ class TestRoleVisibility:
             {"client_id": "cli1"}
         ]
 
-    def test_indexacao_scoped(self):
+    def test_indexacao_ve_a_lista_geral(self):
+        """Bloco 3: a lista espelha o âmbito do Kanban (sem recorte por pessoa)."""
         user = {"id": "ix1", "email": "ix@x.com"}
-        conds = build_role_visibility_conditions(user, UserRole.INDEXACAO)
-        assert conds[0]["$or"][2] == {"status": "fila_espera"}
+        assert build_role_visibility_conditions(user, UserRole.INDEXACAO) == []
+
+    def test_indexacao_no_perfil_todos_tambem_nao_recorta(self):
+        user = {"id": "ix1", "email": "ix@x.com"}
+        conds = build_role_visibility_conditions(
+            user, "__all_roles__", all_roles=[UserRole.CONSULTOR, UserRole.INDEXACAO]
+        )
+        assert conds == []
+
+    def test_contraprova_o_consultor_continua_recortado(self):
+        conds = build_role_visibility_conditions({"id": "c1"}, UserRole.CONSULTOR)
+        assert len(conds) == 1
 
 
 class TestViewModeStatus:

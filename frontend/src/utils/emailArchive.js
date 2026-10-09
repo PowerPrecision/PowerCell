@@ -15,8 +15,9 @@
 
 /**
  * Quem pode arquivar. Espelha `PAPEIS_QUE_ARQUIVAM` do backend; a parede é o
- * servidor, isto só decide se o botão aparece. A indexação é SÓ LEITURA nos
- * documentos (regra do `S3FileManager`).
+ * servidor, isto só decide se o botão aparece. A Indexação arquiva (decisão do
+ * dono do produto, Bloco 3): é quem trata a caixa partilhada. O arquivo dela
+ * não deixa rasto — `archived_by` omite-se para o perfil silenciado.
  */
 export const PAPEIS_QUE_ARQUIVAM = [
   "admin",
@@ -25,6 +26,7 @@ export const PAPEIS_QUE_ARQUIVAM = [
   "administrativo",
   "consultor",
   "intermediario",
+  "indexacao",
 ];
 
 export const podeArquivarAnexos = (papelEfectivo) =>

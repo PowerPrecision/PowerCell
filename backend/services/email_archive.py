@@ -55,7 +55,10 @@ from services.workflow_phases import carregar_fases, nomes_terminais
 logger = logging.getLogger(__name__)
 
 PAPEIS_QUE_ARQUIVAM = frozenset(
-    {"admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"}
+    {
+        "admin", "ceo", "diretor", "administrativo", "consultor",
+        "intermediario", "indexacao",
+    }
 )
 
 #: Tecto de um anexo arquivado (o mesmo dos uploads do CRM).

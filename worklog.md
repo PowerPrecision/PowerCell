@@ -1,4 +1,19 @@
 ---
+Task ID: bloco-2-remates-indexacao
+Agent: Cloud Agent
+Task: Remates do Bloco 2 — decisões do dono do produto sobre a Indexação
+
+Date: 2026-10-10
+
+Work Log:
+- **A Indexação arquiva anexos de email** (`PAPEIS_QUE_ARQUIVAM` ganha `indexacao`; espelhado em `utils/emailArchive.js`). Corrige a leitura anterior («só leitura nos documentos»). O arquivo reutiliza o pipeline do upload, por isso continua a não deixar rasto: `archived_by` omite-se para o perfil silenciado e o histórico do upload já é mudo. `parceiro` e `cliente` continuam a ser recusados (403).
+- **A listagem de processos da Indexação espelha o Kanban** (`build_role_visibility_conditions`: o perfil deixa de ser recortado por atribuição/criação/fila e passa ao conjunto sem recorte por pessoa; também no perfil «todos»). A fronteira de REDE não sai daqui — é a condição de tenant, aplicada à parte. «Os Meus Processos» (`mine_only`) continua pessoal.
+- Testes invertidos (não apagados): `test_process_list_filters` (`test_indexacao_ve_a_lista_geral` + contraprova do consultor) e `test_arquivar_no_processo`. O `test_limpar_NAO_tira_acesso_a_indexacao` do drift fixava o âmbito antigo na sua contraprova; a contraprova passou a ser o recorte do consultor, que continua a existir.
+
+Stage Summary:
+- Backend unit sem Mongo: verde. Vitest `emailArchive`: 27 verdes.
+
+---
 Task ID: bloco-2-webmail-e-indexador
 Agent: Cloud Agent
 Task: BLOCO 2 (Lote 12) — Webmail e Indexador: desvio inteligente, Index, arquivar anexos, quadro da Indexação, contactos, caixa geral

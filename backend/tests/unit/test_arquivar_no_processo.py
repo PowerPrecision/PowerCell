@@ -219,7 +219,7 @@ class TestOArquivo:
         await _arquivar(mundo, montar(), dados={"process_id": "p-2"})
         assert upload.await_count == 2
 
-    @pytest.mark.parametrize("perfil", ["indexacao", "parceiro", "cliente"])
+    @pytest.mark.parametrize("perfil", ["parceiro", "cliente"])
     async def test_quem_nao_trata_documentos_nao_arquiva(self, mundo, ambiente_arquivo, perfil):
         upload, montar = ambiente_arquivo
         with pytest.raises(HTTPException) as exc:
@@ -227,7 +227,7 @@ class TestOArquivo:
         assert exc.value.status_code == 403
         upload.assert_not_called()
 
-    @pytest.mark.parametrize("perfil", ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"])
+    @pytest.mark.parametrize("perfil", ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"])
     async def test_quem_trata_documentos_arquiva(self, mundo, ambiente_arquivo, perfil):
         upload, montar = ambiente_arquivo
         await _arquivar(mundo, montar(), user={"id": "u-x", "role": perfil})

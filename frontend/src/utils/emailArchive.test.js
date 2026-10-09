@@ -16,12 +16,12 @@ const S1 = { process_id: "p-1", process_number: 42, client_name: "Joana", ja_ind
 const S2 = { process_id: "p-2", process_number: 43, client_name: "Joana M.", ja_indexado: true };
 
 describe("podeArquivarAnexos", () => {
-  it.each(["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "CONSULTOR"])(
+  it.each(["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao", "CONSULTOR"])(
     "%s arquiva",
     (papel) => expect(podeArquivarAnexos(papel)).toBe(true),
   );
-  it.each(["indexacao", "parceiro", "cliente", "", null, undefined])(
-    "%s não arquiva (a indexação é só leitura nos documentos)",
+  it.each(["parceiro", "cliente", "", null, undefined])(
+    "%s não arquiva",
     (papel) => expect(podeArquivarAnexos(papel)).toBe(false),
   );
 });

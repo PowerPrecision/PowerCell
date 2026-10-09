@@ -153,12 +153,12 @@ def build_role_visibility_conditions(
                     {"assigned_mediador_ids": user_id},
                     {"assigned_mediador_id": user_id},
                 ])
-            elif r == UserRole.INDEXACAO:
-                role_conditions.extend([
-                    {"assigned_indexacao_id": user_id},
-                    {"created_by": user.get("email", "")},
-                ])
-            elif r in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+            elif r in [
+                UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO,
+                UserRole.DIRETOR, UserRole.INDEXACAO,
+            ]:
+                # Indexação: quadro geral da rede (Bloco 2) — a rede é
+                # aplicada à parte, pela condição de tenant.
                 return []
         if role_conditions:
             return [{"$or": role_conditions}]
@@ -167,15 +167,12 @@ def build_role_visibility_conditions(
     if role == UserRole.CLIENTE:
         return [{"client_id": user_id}]
 
-    if role == UserRole.INDEXACAO:
-        # PACOTE BQ — scoped global: atribuídos + criados + fila_espera
-        return [{"$or": [
-            {"assigned_indexacao_id": user_id},
-            {"created_by": user.get("email", "")},
-            {"status": "fila_espera"},
-        ]}]
-
-    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+    # Indexação vê o mesmo âmbito do Kanban (Bloco 2, ponto 18): a lista
+    # geral da sua rede, não só a fila. A fronteira de rede não sai daqui.
+    if role in [
+        UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO,
+        UserRole.DIRETOR, UserRole.INDEXACAO,
+    ]:
         return []
 
     if role == UserRole.CONSULTOR:
