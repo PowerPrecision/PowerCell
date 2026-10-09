@@ -411,3 +411,36 @@ async def assert_can_view_process_documents_by_id(
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
     await assert_can_view_process_documents(user, process)
     return process
+
+
+# ====================================================================
+# ESCREVER NA PASTA DE UM PROCESSO (Bloco 2, Lote 12)
+# ====================================================================
+# O upload (multipart, URL pré-assinado, confirmação, verificação de
+# conflito e o «Arquivar no Processo» do Webmail) carregava o processo com
+# `resolve_process_from_flexible_id` e MAIS NADA: bastava um `process_id`
+# para escrever na pasta documental de um cliente de OUTRA rede. A D-26
+# fechou a LEITURA; esta fecha a escrita, que é pior (planta um ficheiro na
+# ficha de outra casa e, se o processo estiver por indexar, põe-no na fila
+# da IA dela).
+#
+# Quem escreve é quem pode ver. Um perfil que a D-26 deixa LER mantém a
+# capacidade de ESCREVER (administração e gestão dentro da rede, a equipa
+# de indexação, o atribuído) — e a rede convidada de um processo partilhado
+# (D-25) conta, porque `assert_can_view_process_documents` já a conta.
+# `parceiro` e `cliente` não carregam ficheiros pela API do CRM: o Portal
+# tem o seu próprio caminho, com a sua própria parede.
+_PAPEIS_QUE_NAO_CARREGAM = frozenset({"parceiro", "cliente"})
+
+
+async def assert_can_upload_to_process(user: dict, process: dict) -> None:
+    """Levanta 403 se o utilizador não pode carregar ficheiros para o processo."""
+    roles = _user_allows(user)
+    if roles and roles <= _PAPEIS_QUE_NAO_CARREGAM:
+        logger.warning(
+            "[DOCS-UPLOAD] Upload recusado ao perfil %s no processo %s",
+            sorted(roles), (process or {}).get("id"),
+        )
+        raise HTTPException(status_code=403, detail=_ERROR_DETAIL)
+    await assert_can_view_process_documents(user, process)
+

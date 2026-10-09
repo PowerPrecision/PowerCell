@@ -15,6 +15,8 @@
  * envolve tudo num). Sem ele, os `Tooltip` das acções rebentam.
  */
 import {
+  Archive,
+  Download,
   ExternalLink,
   FileText,
   FolderInput,
@@ -37,6 +39,7 @@ import { Separator } from "../ui/separator";
 import { Skeleton } from "../ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { safeString } from "../../utils/safeString";
+import { processosOndeFoiArquivado } from "../../utils/emailArchive";
 import { formatFileSize, formatFullDate, getAttachmentIcon } from "./webmailFormatters";
 
 /**
@@ -56,7 +59,10 @@ import { formatFileSize, formatFullDate, getAttachmentIcon } from "./webmailForm
  * @param {() => void} props.onDelete
  * @param {() => void} props.onOpenProcess
  * @param {() => void} props.onOpenInNewTab
- * @param {(attachment: object, index: number) => void} props.onDownloadAttachment
+ * @param {(attachment: object, index: number) => void} props.onDownloadAttachment Abre num novo separador.
+ * @param {(attachment: object, index: number) => void} [props.onSaveAttachment] Descarrega para a máquina.
+ * @param {(attachment: object, index: number) => void} [props.onArchiveAttachment] «Arquivar no Processo».
+ * @param {boolean} [props.podeArquivar] O perfil activo arquiva anexos (o servidor é a parede).
  */
 const EmailThreadViewer = ({
   email,
@@ -75,6 +81,9 @@ const EmailThreadViewer = ({
   onOpenProcess,
   onOpenInNewTab,
   onDownloadAttachment,
+  onSaveAttachment,
+  onArchiveAttachment,
+  podeArquivar = false,
 }) => {
   return (
     <div
@@ -354,29 +363,77 @@ const EmailThreadViewer = ({
                               </p>
                             )}
                           </div>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8 shrink-0"
-                                disabled={downloadingAttachmentId === (attachment.id || `${email.id}:${idx}`)}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onDownloadAttachment(attachment, idx);
-                                }}
-                                aria-label={`Abrir ${attachment.filename || "anexo"} num novo separador`}
-                              >
-                                {downloadingAttachmentId === (attachment.id || `${email.id}:${idx}`) ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <ExternalLink className="h-3.5 w-3.5" />
-                                )}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Abrir num novo separador</TooltipContent>
-                          </Tooltip>
+                          {processosOndeFoiArquivado(attachment).length > 0 && (
+                            <Badge variant="secondary" className="shrink-0 text-[10px]">
+                              Arquivado
+                            </Badge>
+                          )}
+                          <div className="flex shrink-0 items-center gap-1">
+                            {onSaveAttachment && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    disabled={downloadingAttachmentId === (attachment.id || `${email.id}:${idx}`)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onSaveAttachment(attachment, idx);
+                                    }}
+                                    aria-label={`Descarregar ${attachment.filename || "anexo"}`}
+                                  >
+                                    <Download className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Descarregar para o computador</TooltipContent>
+                              </Tooltip>
+                            )}
+                            {podeArquivar && onArchiveAttachment && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onArchiveAttachment(attachment, idx);
+                                    }}
+                                    aria-label={`Arquivar ${attachment.filename || "anexo"} no processo`}
+                                  >
+                                    <Archive className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Arquivar no Processo</TooltipContent>
+                              </Tooltip>
+                            )}
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  disabled={downloadingAttachmentId === (attachment.id || `${email.id}:${idx}`)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDownloadAttachment(attachment, idx);
+                                  }}
+                                  aria-label={`Abrir ${attachment.filename || "anexo"} num novo separador`}
+                                >
+                                  {downloadingAttachmentId === (attachment.id || `${email.id}:${idx}`) ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                  )}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Abrir num novo separador</TooltipContent>
+                            </Tooltip>
+                          </div>
                         </div>
                       );
                     })}

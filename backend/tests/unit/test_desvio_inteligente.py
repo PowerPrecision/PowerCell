@@ -231,6 +231,7 @@ def upload_env(fake_async_db):
                 AsyncMock(return_value=(b"%PDF-1.4", "f.pdf", "application/pdf", False, False, False, {})),
             ),
             patch.object(document_upload, "log_history", AsyncMock()),
+            patch.object(document_upload, "assert_can_upload_to_process", AsyncMock()),
             patch.object(
                 document_upload, "_auto_fulfill_portal_request",
                 AsyncMock(return_value={"fulfilled": 0}),
@@ -345,7 +346,8 @@ async def _gerar_url(processo, categoria):
     }
     db_falso = MagicMock()
     db_falso.processes.find_one = AsyncMock(return_value=processo)
-    with patch.object(directo, "s3_service", s3), patch.object(directo, "db", db_falso):
+    with patch.object(directo, "s3_service", s3), patch.object(directo, "db", db_falso), \
+            patch.object(directo, "assert_can_upload_to_process", AsyncMock()):
         res = await directo.run_generate_upload_url(
             {"process_id": "p-1", "filename": "f.pdf", "content_type": "application/pdf",
              "category": categoria},
@@ -367,6 +369,7 @@ async def _confirmar(fake_db, processo, categoria="Financeiros"):
             patch.object(intake, "db", fake_db), \
             patch.object(directo, "exigir_conteudo_valido", AsyncMock(return_value=_VEREDICTO)), \
             patch.object(directo, "log_history", AsyncMock()), \
+            patch.object(directo, "assert_can_upload_to_process", AsyncMock()), \
             patch.object(directo, "_auto_fulfill_portal_request", fulfill), \
             patch("services.document_categorization.categorize_document_with_ai", triagem):
         res = await directo.run_confirm_upload(
@@ -478,9 +481,11 @@ class TestOConflitoVerificaOndeOFicheiroVaiFicar:
         s3.file_exists = existe
         db_falso = MagicMock()
         db_falso.processes.find_one = AsyncMock(return_value=processo)
-        with patch.object(conflito, "s3_service", s3), patch.object(conflito, "db", db_falso):
+        with patch.object(conflito, "s3_service", s3), patch.object(conflito, "db", db_falso), \
+                patch.object(conflito, "assert_can_upload_to_process", AsyncMock()):
             res = await conflito.run_check_upload_conflict(
-                {"process_id": "p-1", "filenames": ["a.pdf"], "category": "Financeiros"}
+                {"process_id": "p-1", "filenames": ["a.pdf"], "category": "Financeiros"},
+                user={"id": "u1", "role": "diretor"},
             )
         return res, [c.args[0] for c in existe.call_args_list]
 

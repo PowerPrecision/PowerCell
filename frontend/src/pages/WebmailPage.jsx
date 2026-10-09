@@ -60,7 +60,7 @@ import WebmailCompanyTabs from "../components/webmail/WebmailCompanyTabs";
 // antiga sem dizer nada.
 import AvisoDeCaixaAFalhar from "../components/webmail/AvisoDeCaixaAFalhar";
 import { useWebmailCompaniesQuery } from "../hooks/queries/useWebmailCompaniesQuery";
-import { resolverEmpresaActiva } from "../utils/webmailEmpresas";
+import { resolverEmpresaActiva, temDireitoACaixaGeral } from "../utils/webmailEmpresas";
 // Ponto 8, Fase 2 — TUDO pelo cliente Axios. Só o interceptor injecta os
 // cabeçalhos de empresa/papel, e sem eles a caixa mostrada passa a ser a
 // de outro perfil (AGENTS.md, incidente 2026-09-21).
@@ -95,6 +95,9 @@ import { sanitizeEmailHtml } from "../utils/sanitize";
 import EmailList from "../components/webmail/EmailList";
 import EmailThreadViewer from "../components/webmail/EmailThreadViewer";
 import EmailComposer from "../components/webmail/EmailComposer";
+import ArquivarNoProcessoDialog from "../components/webmail/ArquivarNoProcessoDialog";
+import useArquivarAnexo from "../hooks/useArquivarAnexo";
+import { podeArquivarAnexos } from "../utils/emailArchive";
 import FolderNavigation from "../components/webmail/FolderNavigation";
 import {
   formatFullDate,
@@ -124,6 +127,16 @@ const FOLDERS = [
 // Os formatadores (data, tamanho, ícone de anexo) vivem em
 // components/webmail/webmailFormatters.js — são usados por mais do que
 // um dos componentes extraídos no Épico 6.
+
+/** Grava um blob na máquina local através de um <a download> temporário. */
+function guardarBlobNoDisco(url, attachment, idx) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = attachment.filename || attachment.file_name || `anexo-${idx + 1}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
 
 const WebmailPage = () => {
   const { token, user, effectiveRole, activeCompanyId, effectiveCompanyId } = useAuth();
@@ -286,8 +299,7 @@ const WebmailPage = () => {
   // Derived UI state
   // PACOTE DV — Caixa Geral só no perfil ACTIVO diretor/ceo/admin.
   // hasAnyRole fazia aparecer uma caixa fantasma em todos os perfis.
-  const caixaGeralRoles = ['admin', 'ceo', 'diretor'];
-  const showTabs = caixaGeralRoles.includes(effectiveRole);
+  const showTabs = temDireitoACaixaGeral(effectiveRole);
   // Perfis que podem usar contas globais (power/precision) para enviar email.
   // Os restantes roles (consultor, intermediario, administrativo, indexacao)
   // enviam obrigatoriamente pela conta pessoal (email_config) — o backend
@@ -1628,6 +1640,19 @@ const WebmailPage = () => {
   // do fetch) para não ser bloqueado pelos popup blockers; a navegação para
   // o blob acontece quando o conteúdo chega. Se o browser bloqueou a janela
   // (retornou null), cai no download clássico como fallback.
+  // O blob de um anexo, pelo cliente Axios. `responseType: "blob"` faz o
+  // corpo de ERRO vir também como Blob: sem o `readBlobErrorBody` a mensagem
+  // do servidor desaparecia e ficava só "Erro".
+  const obterBlobDoAnexo = useCallback(async (attId) => {
+    try {
+      const res = await downloadWebmailAttachment(attId, { email_id: emailDetail.id });
+      return res.data;
+    } catch (erro) {
+      const corpo = await readBlobErrorBody(erro);
+      throw new Error(corpo.detail || "Anexo não encontrado");
+    }
+  }, [emailDetail?.id]);
+
   const handleDownloadAttachment = useCallback(async (attachment, idx) => {
     if (!emailDetail?.id || !token) return;
     const attId = attachment.id || `${emailDetail.id}:${idx}`;
@@ -1635,19 +1660,7 @@ const WebmailPage = () => {
     // Abrir o separador ANTES do await — mantém o user-gesture do clique.
     const newTab = window.open("", "_blank");
     try {
-      let blob;
-      try {
-        const res = await downloadWebmailAttachment(attId, {
-          email_id: emailDetail.id,
-        });
-        blob = res.data;
-      } catch (erro) {
-        // `responseType: "blob"` faz o corpo de ERRO vir também como
-        // Blob: sem o `readBlobErrorBody` a mensagem do servidor
-        // desaparecia e ficava só "Erro".
-        const corpo = await readBlobErrorBody(erro);
-        throw new Error(corpo.detail || "Anexo não encontrado");
-      }
+      const blob = await obterBlobDoAnexo(attId);
       const url = URL.createObjectURL(blob);
       if (newTab) {
         newTab.location.href = url;
@@ -1656,12 +1669,7 @@ const WebmailPage = () => {
         setTimeout(() => URL.revokeObjectURL(url), 60000);
       } else {
         // Popup bloqueado — fallback para download directo.
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = attachment.filename || attachment.file_name || `anexo-${idx + 1}`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
+        guardarBlobNoDisco(url, attachment, idx);
         URL.revokeObjectURL(url);
       }
     } catch (error) {
@@ -1670,7 +1678,43 @@ const WebmailPage = () => {
     } finally {
       setDownloadingAttachmentId(null);
     }
-  }, [emailDetail?.id, token]);
+  }, [emailDetail?.id, token, obterBlobDoAnexo]);
+
+  // Bloco 2 — «Descarregar»: grava o anexo na máquina local, sem abrir
+  // separador nenhum (não há popup para o browser bloquear).
+  const handleSaveAttachment = useCallback(async (attachment, idx) => {
+    if (!emailDetail?.id || !token) return;
+    const attId = attachment.id || `${emailDetail.id}:${idx}`;
+    setDownloadingAttachmentId(attId);
+    try {
+      const blob = await obterBlobDoAnexo(attId);
+      const url = URL.createObjectURL(blob);
+      guardarBlobNoDisco(url, attachment, idx);
+      // O clique no <a download> é síncrono, mas o browser lê o blob depois.
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (error) {
+      toast.error(error.message || "Erro ao descarregar anexo");
+    } finally {
+      setDownloadingAttachmentId(null);
+    }
+  }, [emailDetail?.id, token, obterBlobDoAnexo]);
+
+  // Bloco 2 — «Arquivar no Processo». Depois de arquivar, o anexo ganha a
+  // marca «Arquivado» sem reler o email (a resposta já traz o que é preciso).
+  const arquivo = useArquivarAnexo({
+    emailId: emailDetail?.id,
+    onArquivado: (indice, resposta, processId) => {
+      setEmailDetail((prev) => {
+        if (!prev || !Array.isArray(prev.attachments)) return prev;
+        const anexos = prev.attachments.map((a, i) =>
+          i === indice
+            ? { ...a, archived_to: [...(Array.isArray(a.archived_to) ? a.archived_to : []), { process_id: processId, path: resposta?.path }] }
+            : a,
+        );
+        return { ...prev, attachments: anexos };
+      });
+    },
+  });
 
   // Sanitized HTML body
   const sanitizedBodyHtml = useMemo(() => {
@@ -1900,6 +1944,9 @@ const WebmailPage = () => {
               onOpenProcess={() => navigate(`/processo/${emailDetail?.process_id}`)}
               onOpenInNewTab={handleOpenEmailInNewTab}
               onDownloadAttachment={handleDownloadAttachment}
+              onSaveAttachment={handleSaveAttachment}
+              onArchiveAttachment={arquivo.abrir}
+              podeArquivar={podeArquivarAnexos(effectiveRole)}
             />
           </ResizablePanel>
           </ResizablePanelGroup>
@@ -1957,6 +2004,18 @@ const WebmailPage = () => {
         {/* ===== COMPOSITOR ===== */}
         {/* components/webmail/EmailComposer.jsx (Épico 6). Componente
             controlado: o rascunho e o envio vivem aqui. */}
+        <ArquivarNoProcessoDialog
+          open={arquivo.aberto}
+          onOpenChange={(aberto) => { if (!aberto) arquivo.fechar(); }}
+          nomeDoAnexo={arquivo.anexo?.filename || arquivo.anexo?.file_name || ""}
+          estado={arquivo.estado}
+          resposta={arquivo.resposta}
+          erro={arquivo.erro}
+          arquivando={arquivo.arquivando}
+          onConfirmar={arquivo.confirmar}
+          onTentarDeNovo={arquivo.tentarDeNovo}
+        />
+
         <EmailComposer
           open={composerOpen}
           data={composerData}

@@ -1249,6 +1249,18 @@ export const deleteEmailPermanent = (emailId) =>
 export const associateEmailToProcess = (data) =>
   api.post("/emails/associate", data);
 
+// ── «Arquivar no Processo» (Bloco 2) ──
+// `skipErrorToast`: o diálogo mostra o erro no sítio (um 403 da guarda de
+// escrita ou um 413 de um anexo enorme não são "falha de rede").
+export const getEmailArchiveSuggestions = (emailId) =>
+  api.get(`/emails/${emailId}/archive-suggestions`, { skipErrorToast: true });
+export const archiveEmailAttachment = (emailId, attachmentId, data) =>
+  api.post(
+    `/emails/${emailId}/attachments/${encodeURIComponent(attachmentId)}/archive`,
+    data,
+    { skipErrorToast: true },
+  );
+
 // ── Envio ──
 export const sendWebmailEmail = (payload, account) =>
   api.post("/emails/send", payload, { params: account ? { account } : {} });

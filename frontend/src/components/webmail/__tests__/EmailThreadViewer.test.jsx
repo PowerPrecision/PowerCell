@@ -171,3 +171,52 @@ describe("EmailThreadViewer — anexos", () => {
     expect(onDownloadAttachment).toHaveBeenCalledWith(expect.objectContaining({ id: "a1" }), 0);
   });
 });
+
+describe("EmailThreadViewer — descarregar e arquivar anexos (Bloco 2)", () => {
+  const anexo = { id: "a1", filename: "cc.pdf", size: 2048 };
+  const comAnexo = (extra = {}) => props({ email: emailDetalhe({ attachments: [anexo] }), ...extra });
+
+  it("«Descarregar» pede ao contentor para GUARDAR, sem abrir separador", async () => {
+    const onSaveAttachment = vi.fn();
+    const onDownloadAttachment = vi.fn();
+    render(<EmailThreadViewer {...comAnexo({ onSaveAttachment, onDownloadAttachment })} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Descarregar cc.pdf" }));
+    expect(onSaveAttachment).toHaveBeenCalledWith(anexo, 0);
+    expect(onDownloadAttachment).not.toHaveBeenCalled();
+  });
+
+  it("«Arquivar» só aparece a quem pode arquivar", () => {
+    const onArchiveAttachment = vi.fn();
+    const { rerender } = render(<EmailThreadViewer {...comAnexo({ onArchiveAttachment, podeArquivar: false })} />);
+    expect(screen.queryByRole("button", { name: /Arquivar cc.pdf/ })).not.toBeInTheDocument();
+
+    rerender(<EmailThreadViewer {...comAnexo({ onArchiveAttachment, podeArquivar: true })} />);
+    expect(screen.getByRole("button", { name: "Arquivar cc.pdf no processo" })).toBeInTheDocument();
+  });
+
+  it("«Arquivar» chama o contentor com o anexo e o índice", async () => {
+    const onArchiveAttachment = vi.fn();
+    render(<EmailThreadViewer {...comAnexo({ onArchiveAttachment, podeArquivar: true })} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Arquivar cc.pdf no processo" }));
+    expect(onArchiveAttachment).toHaveBeenCalledWith(anexo, 0);
+  });
+
+  it("sem o callback não há botão, mesmo com permissão", () => {
+    render(<EmailThreadViewer {...comAnexo({ podeArquivar: true })} />);
+    expect(screen.queryByRole("button", { name: /Arquivar cc.pdf/ })).not.toBeInTheDocument();
+  });
+
+  it("um anexo já arquivado diz-se", () => {
+    const arquivado = { ...anexo, archived_to: [{ process_id: "p-1" }] };
+    render(<EmailThreadViewer {...props({ email: emailDetalhe({ attachments: [arquivado] }) })} />);
+    expect(screen.getByText("Arquivado")).toBeInTheDocument();
+  });
+
+  it("um `archived_to` que não é lista não rebenta nem marca como arquivado", () => {
+    const estranho = { ...anexo, archived_to: "p-1" };
+    render(<EmailThreadViewer {...props({ email: emailDetalhe({ attachments: [estranho] }) })} />);
+    expect(screen.queryByText("Arquivado")).not.toBeInTheDocument();
+  });
+});

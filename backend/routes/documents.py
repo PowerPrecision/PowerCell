@@ -400,7 +400,7 @@ async def check_upload_conflict(
         - existing_path: Caminho do ficheiro existente
         - suggested_names: Lista de nomes alternativos
     """
-    return await run_check_upload_conflict(data)
+    return await run_check_upload_conflict(data, user=user)
 
 
 # ====================================================================

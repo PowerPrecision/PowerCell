@@ -13,6 +13,7 @@ from typing import Optional, List
 from fastapi import HTTPException, BackgroundTasks, Request
 
 from database import db
+from services.email_config_resolver import pode_abrir_caixa_geral
 from services.email_enrich import enrich_emails
 from services.email_service import (
     test_email_connection,
@@ -392,11 +393,7 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     if box == "general":
         # PACOTE 8 — permitido se o cargo ACTIVO permite (legado) OU se
         # qualquer UCR válido tem cargo de gestão (webmail unificado).
-        legacy_general_ok = effective_role not in (
-            UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO,
-        )
-        ucr_general_ok = bool(ucr_roles & {"admin", "ceo", "diretor"})
-        if not (legacy_general_ok or ucr_general_ok):
+        if not pode_abrir_caixa_geral(effective_role, ucr_roles):
             raise HTTPException(
                 status_code=403,
                 detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."
@@ -795,11 +792,7 @@ async def run_webmail_stats(
         # PACOTE 8 — permissão via cargo ACTIVO (legado) OU qualquer UCR
         # válido com cargo de gestão (webmail unificado).
         ucr_roles_stats = await _user_ucr_roles(request, current_user)
-        legacy_general_ok = effective_role not in (
-            UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO,
-        )
-        ucr_general_ok = bool(ucr_roles_stats & {"admin", "ceo", "diretor"})
-        if not (legacy_general_ok or ucr_general_ok):
+        if not pode_abrir_caixa_geral(effective_role, ucr_roles_stats):
             raise HTTPException(
                 status_code=403,
                 detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."

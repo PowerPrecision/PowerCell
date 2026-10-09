@@ -30,6 +30,7 @@ from services.document_filenames import (
     normalize_filename,
     sanitize_for_log,
 )
+from services.document_visibility import assert_can_upload_to_process
 from services.document_process_resolve import (
     extract_second_client_name,
     resolve_process_from_flexible_id,
@@ -219,9 +220,14 @@ async def run_upload_file_s3(
     user: dict,
     background_tasks: BackgroundTasks,
     client_original_filename: Optional[str] = None,
+    origem: str = "upload",
 ) -> dict[str, Any]:
     """
     Pipeline completo de upload S3.
+
+    `origem` diz de onde vem o ficheiro («upload», «email»): vai para a fila
+    da IA e para o histórico, para se saber como um documento chegou ao
+    processo. A decisão do desvio (Index/IA) é a mesma para todas.
 
     Returns:
         Payload JSON do upload (sem JSONResponse — a rota envolve se necessário).
@@ -242,6 +248,10 @@ async def run_upload_file_s3(
         raise_on_client_without_process=True,
     )
     client_id = effective_id
+
+    # Escrever na pasta de um processo exige poder VÊ-LO (D-26): fronteira
+    # de rede, rede convidada da partilha, pré-indexação.
+    await assert_can_upload_to_process(user, process)
 
     if empresa_nif:
         personal_data = process.get("personal_data", {})
@@ -310,7 +320,7 @@ async def run_upload_file_s3(
             client_name=client_name,
             s3_path=s3_path,
             filename=normalized_filename,
-            origem="upload",
+            origem=origem,
         )
         try:
             file_content_copy = bytes(file_content)
@@ -329,7 +339,7 @@ async def run_upload_file_s3(
         await log_history(
             process_id=client_id,
             user=user,
-            action="Carregou documento",
+            action="Carregou documento" if origem == "upload" else "Arquivou anexo de email",
             field="documento",
             new_value=f"{normalized_filename} ({descreve_destino(plano)})",
         )

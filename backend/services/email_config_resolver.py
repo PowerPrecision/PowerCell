@@ -340,11 +340,34 @@ async def resolve_email_config_for_sync(
     return resolved
 
 
-# Pacote DO.3 / DV — Caixa Geral só para o perfil activo diretor/ceo/admin,
-# e apenas quando existe um email real (ex.: geral@empresa.pt).
+# Pacote DO.3 / DV — Caixa Geral só para quem tem um destes cargos, e apenas
+# quando existe um email real (ex.: geral@empresa.pt).
+#
+# BLOCO 2 (Lote 12): o Administrativo também. O back-office é quem trata o
+# correio geral da empresa, e deixá-lo de fora fazia a Caixa Geral
+# desaparecer-lhe da lista de contas sem erro nenhum.
+#
+# UM conjunto só. Eram três cópias (`INJECT`, `ACCESS` e dois literais
+# `{"admin","ceo","diretor"}` no `email_webmail`) e a que ficava para trás
+# esconderia a caixa a um cargo sem dar erro. Os dois nomes antigos ficam
+# como alias, porque o resto do código importa-os.
 CAIXA_GERAL_ACCOUNT_ID = "caixa-geral"
-CAIXA_GERAL_INJECT_ROLES = {"diretor", "ceo", "admin"}
-CAIXA_GERAL_ACCESS_ROLES = {"diretor", "admin", "ceo"}
+CAIXA_GERAL_ROLES = frozenset({"diretor", "ceo", "admin", "administrativo"})
+CAIXA_GERAL_INJECT_ROLES = CAIXA_GERAL_ROLES
+CAIXA_GERAL_ACCESS_ROLES = CAIXA_GERAL_ROLES
+
+
+def pode_abrir_caixa_geral(effective_role, ucr_roles=()) -> bool:
+    """O perfil activo — ou qualquer cargo UCR válido — tem direito à Caixa Geral?
+
+    Registo POSITIVO: o que estava antes era «qualquer cargo menos três»,
+    que deixava passar um parceiro ou um cliente e dependia de se lembrar
+    de cada cargo novo.
+    """
+    activo = str(effective_role or "").strip().lower()
+    if activo in CAIXA_GERAL_ROLES:
+        return True
+    return bool({str(r or "").strip().lower() for r in (ucr_roles or ())} & CAIXA_GERAL_ROLES)
 
 
 def decrypt_email_secret(value: Optional[str], context: str = "") -> str:

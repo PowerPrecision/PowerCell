@@ -14,7 +14,11 @@ import {
   resolverEmpresaActiva,
   rotuloDaEmpresa,
   estadoDaSincronizacao,
+  PAPEIS_COM_CAIXA_GERAL,
+  temDireitoACaixaGeral,
 } from "./webmailEmpresas";
+import fs from "node:fs";
+import path from "node:path";
 
 const empresa = (id, nome) => ({ company_id: id, company_name: nome });
 
@@ -176,5 +180,31 @@ describe("estadoDaSincronizacao", () => {
 
   it("sem argumentos nenhuns devolve um estado utilizável", () => {
     expect(estadoDaSincronizacao().estado).toBe("por-sincronizar");
+  });
+});
+
+describe("temDireitoACaixaGeral (Bloco 2)", () => {
+  it.each(["admin", "ceo", "diretor", "administrativo", "DIRETOR"])("%s tem a Caixa Geral", (papel) => {
+    expect(temDireitoACaixaGeral(papel)).toBe(true);
+  });
+
+  it.each(["consultor", "intermediario", "indexacao", "parceiro", "", null, undefined])(
+    "%s não tem",
+    (papel) => {
+      expect(temDireitoACaixaGeral(papel)).toBe(false);
+    },
+  );
+
+  it("é o MESMO conjunto do backend (CAIXA_GERAL_ROLES)", () => {
+    const fonte = fs.readFileSync(
+      path.resolve(process.cwd(), "../backend/services/email_config_resolver.py"),
+      "utf-8",
+    );
+    const bloco = fonte.match(/CAIXA_GERAL_ROLES\s*=\s*frozenset\(\{([^}]*)\}\)/);
+    // Contraprova: um leitor que não leu nada também "passaria" a igualdade vazia.
+    expect(bloco).not.toBeNull();
+    const doBackend = [...bloco[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
+    expect(doBackend.length).toBeGreaterThanOrEqual(4);
+    expect([...PAPEIS_COM_CAIXA_GERAL].sort()).toEqual(doBackend);
   });
 });

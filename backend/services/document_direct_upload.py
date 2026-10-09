@@ -33,6 +33,7 @@ from services.document_process_resolve import (
 )
 from services.s3_content_quarantine import exigir_conteudo_valido
 from services.document_upload import _auto_fulfill_portal_request
+from services.document_visibility import assert_can_upload_to_process
 from services.history import log_history
 from services.s3_storage import s3_service
 
@@ -66,6 +67,7 @@ async def run_generate_upload_url(data: dict, *, user: dict) -> dict:
     process = await db.processes.find_one({"id": process_id})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    await assert_can_upload_to_process(user, process)
 
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     second_client_name = extract_second_client_name(process)
@@ -145,6 +147,7 @@ async def run_confirm_upload(
     process = await db.processes.find_one({"id": process_id})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    await assert_can_upload_to_process(user, process)
 
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
 

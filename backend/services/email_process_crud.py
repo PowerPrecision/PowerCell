@@ -880,52 +880,16 @@ async def run_get_email(email_id: str, request: Request, current_user: dict):
         raise HTTPException(status_code=404, detail="Email não encontrado")
 
     # === ISOLAMENTO DE DADOS ===
-    # PACOTE AU: usar effective_role (X-Active-Role) em vez do role primário
-    user_role = get_effective_role(request, current_user)
-    can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    # PACOTE AU: usar effective_role (X-Active-Role) em vez do role primário.
+    # Bloco 2: a regra vive num ponto único (`email_access`), partilhado com
+    # os anexos — eram duas cópias, e a dos anexos era mais permissiva.
+    from services.email_access import exigir_leitura_do_email
 
-    if not can_see_all:
-        user_id = current_user["id"]
-        user_email = (current_user.get("email") or "").lower().strip()
-
-        # PACOTE 8 — desacoplamento login ↔ webmail: a conversa é avaliada
-        # contra as contas CONFIGURADAS no UserEmailConfig (IMAP/SMTP da
-        # área pessoal, todas as empresas) — um utilizador que faz login
-        # com user@x.pt mas gere geral@x.pt vê os emails da sua caixa
-        # configurada. O email de login só é fallback sem configs.
-        conversation_emails: List[str] = []
-        try:
-            from services.user_email_config_service import get_user_mailbox_addresses
-            conversation_emails = await get_user_mailbox_addresses(user_id)
-        except Exception as exc:
-            logger.warning(
-                "[Email Detail] Falha a resolver contas configuradas user=%s: %s",
-                user_id, exc,
-            )
-        if not conversation_emails:
-            conversation_emails = [user_email] if user_email else []
-
-        # Verificar se o utilizador tem acesso a este email
-        is_owner = (
-            email.get("created_by") == user_id
-            or email.get("synced_for_user") == user_id
-        )
-        is_shared_role = (
-            email.get("shared_role")
-            and email.get("shared_role") == user_role
-        )
-        is_in_conversation = False
-        if conversation_emails:
-            from_emails = (email.get("from_email") or "").lower()
-            to_emails = email.get("to_emails") or []
-            is_in_conversation = any(
-                conv in from_emails
-                or any(conv in str(addr).lower() for addr in to_emails)
-                for conv in conversation_emails
-            )
-
-        if not (is_owner or is_shared_role or is_in_conversation):
-            raise HTTPException(status_code=403, detail="Sem permissão para ver este email")
+    await exigir_leitura_do_email(
+        email, current_user,
+        papel=get_effective_role(request, current_user),
+        detail="Sem permissão para ver este email",
+    )
 
     # Pacote DN.1: garantir id em cada anexo (legado IMAP não gravava UUID)
     attachments = email.get("attachments") or []

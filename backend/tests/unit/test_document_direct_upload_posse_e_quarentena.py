@@ -97,6 +97,16 @@ async def _correr(dados, *, veredicto=APROVADO, processo=PROCESSO):
     return resposta, quarentena
 
 
+
+@pytest.fixture(autouse=True)
+def _sem_guarda_de_escrita():
+    """A guarda de ESCRITA na pasta do processo (Bloco 2) tem a sua bateria
+    (`test_escrita_na_pasta_do_processo.py`); aqui testa-se a posse da CHAVE
+    e a quarentena, e a guarda precisaria de um âmbito de rede resolvido."""
+    with patch.object(modulo, "assert_can_upload_to_process", AsyncMock()):
+        yield
+
+
 class TestAExploracao:
     """O ataque. Escrito para morder primeiro."""
 

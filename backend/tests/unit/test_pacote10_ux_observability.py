@@ -653,6 +653,7 @@ class TestConfirmUploadTaskLog:
              patch.object(mod, "s3_service", fake_s3), \
              patch.object(mod, "exigir_conteudo_valido", AsyncMock(return_value=_VEREDICTO_OK)), \
              patch("services.document_intake.db", fake_async_db), \
+             patch.object(mod, "assert_can_upload_to_process", AsyncMock()), \
              patch.object(mod, "log_history", AsyncMock()), \
              patch.object(mod, "_auto_fulfill_portal_request", AsyncMock(return_value={"fulfilled": 0})):
             response = await mod.run_confirm_upload(
