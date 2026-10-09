@@ -19,6 +19,7 @@ from typing import Optional, Tuple
 
 from database import db
 from models.process import ProcessCreate, ProcessUpdate
+from services.process_sharing import PROJECCAO as PROJECCAO_PARTILHA
 from services.sub35 import PROJECCAO as PROJECCAO_SUB35
 from services.encryption import encryption_service, generate_nif_hash, generate_email_hash, generate_telefone_hash
 from services.process_labels import normalizar_etiquetas
@@ -890,6 +891,10 @@ PROCESS_LIST_PROJECTION = {
     # aniversário. Só subcampos de `personal_data` entram, nunca o bloco
     # inteiro: o resto é PII e a listagem não precisa dele.
     **PROJECCAO_SUB35,
+    # Partilha (D-25) — ponto único, pelo mesmo motivo: se o Kanban
+    # projectar e a listagem não, a mesma linha tem etiqueta num ecrã
+    # e não tem no outro.
+    **PROJECCAO_PARTILHA,
 }
 
 # Campos necessários para o Kanban (visualização em colunas)
@@ -939,6 +944,10 @@ PROCESS_KANBAN_PROJECTION = {
     # aniversário. Só subcampos de `personal_data` entram, nunca o bloco
     # inteiro: o resto é PII e a listagem não precisa dele.
     **PROJECCAO_SUB35,
+    # Partilha (D-25) — ponto único, pelo mesmo motivo: se o Kanban
+    # projectar e a listagem não, a mesma linha tem etiqueta num ecrã
+    # e não tem no outro.
+    **PROJECCAO_PARTILHA,
 }
 
 # Campos necessários para "Os Meus Clientes"

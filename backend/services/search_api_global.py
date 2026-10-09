@@ -15,7 +15,10 @@ from services.encryption import (
     generate_telefone_hash,
     decrypt_client_data,  # PACOTE DD — desencriptar clientes na pesquisa global
 )
-from services.tenant_network import build_tenant_condition
+from services.tenant_network import (
+    build_tenant_condition,
+    build_tenant_process_condition,
+)
 from utils.input_sanitization import sanitize_string
 from utils.search_filters import (
     create_accent_insensitive_regex,
@@ -77,9 +80,18 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
     # o NIF já desencriptado (`decrypt_client_data`, mais abaixo). É
     # pesquisa com dados pessoais em claro a atravessar redes.
     tenant_condition = await build_tenant_condition(user)
+    # A pesquisa global percorre TRÊS colecções e só os processos têm
+    # partilha (D-25). Duas funções, para o sítio da chamada dizer qual
+    # das duas perguntas está a fazer — um `com_isolamento` único aqui
+    # ou acrescentava um ramo inútil aos clientes e tarefas, ou escondia
+    # ao parceiro o processo que ele vê.
+    tenant_condition_processos = await build_tenant_process_condition(user)
 
     def com_isolamento(query: dict) -> dict:
         return {"$and": [tenant_condition, query]}
+
+    def com_isolamento_de_processos(query: dict) -> dict:
+        return {"$and": [tenant_condition_processos, query]}
 
     try:
         # Pesquisar processos - usar blind indexes quando apropriado
@@ -111,7 +123,9 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
             process_search_conditions.append({"personal_data.email": simple_regex})
             process_search_conditions.append({"client_email": simple_regex})
 
-        process_query = com_isolamento({"$or": process_search_conditions})
+        process_query = com_isolamento_de_processos(
+            {"$or": process_search_conditions}
+        )
 
         processes = await db.processes.find(
             process_query,

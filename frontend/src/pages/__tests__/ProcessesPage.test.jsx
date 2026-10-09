@@ -145,6 +145,19 @@ const LINHAS = [
       { text: "Aguarda avaliação do banco", created_at: "2026-09-20T09:00:00Z" },
     ],
     under_35: true,
+    // D-25 — os campos que o servidor CALCULA ao servir
+    // (`process_sharing.aplicar_flag_a_processos`). Valores reais, não
+    // inventados: `is_partilhado` + `partilha_com` com o NOME da
+    // empresa, mais o registo cru de onde derivam.
+    is_partilhado: true,
+    partilha_com: ["Precision Crédito"],
+    partner_companies: [
+      {
+        company_id: "cmp-precision",
+        company_name: "Precision Crédito",
+        network_id: "grupo_power_precision",
+      },
+    ],
   },
   {
     id: "p2",
@@ -334,5 +347,66 @@ describe("ProcessesPage — interacção", () => {
     const campos = screen.getAllByPlaceholderText(/pesquisar/i);
     await utilizador.type(campos[0], "Ana");
     expect(campos[0]).toHaveValue("Ana");
+  });
+});
+
+
+describe("ProcessesPage — a partilha (D-25)", () => {
+  it("mostra a etiqueta [Partilha: …] na linha partilhada", async () => {
+    // A partilha é Via Rápida: abre-se uma fronteira sem aprovação, e
+    // esta etiqueta é a única coisa que a torna visível. A `Sub35Badge`
+    // ensinou a forma de defeito — a etiqueta existia em três cópias e
+    // nunca apareceu, porque o campo que liam não era escrito por
+    // ninguém no servidor. Aqui o fixture usa o campo REAL.
+    montar();
+    await screen.findByText("Ana Martins");
+
+    const etiquetas = screen.getAllByTestId("etiqueta-partilha");
+    expect(etiquetas).toHaveLength(1);
+    expect(etiquetas[0]).toHaveTextContent("Partilha: Precision Crédito");
+  });
+
+  it("e NÃO a mostra na linha exclusiva da casa", async () => {
+    // A contraprova: sem ela, uma etiqueta sempre visível passava o
+    // teste de cima e mentia em todas as outras linhas.
+    montar();
+    await screen.findByText("Rui Pereira");
+
+    expect(screen.getAllByTestId("etiqueta-partilha")).toHaveLength(1);
+  });
+
+  it("o filtro rápido está no topo, com os dois valores", async () => {
+    montar();
+    await screen.findByText("Ana Martins");
+
+    const grupo = screen.getByTestId("process-partilha-filter");
+    expect(grupo).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: /exclusivos da casa/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: /^partilhados$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("clicar em «Partilhados» escreve o filtro no URL", async () => {
+    // O filtro vive no URL como os outros: um link já filtrado é metade
+    // da utilidade da segmentação. E é o `setSearchParams` que o teste
+    // observa, porque é ele que dispara o pedido novo.
+    const utilizador = userEvent.setup();
+    montar();
+    await screen.findByText("Ana Martins");
+
+    definirParametros.mockClear();
+    await utilizador.click(screen.getByRole("radio", { name: /^partilhados$/i }));
+
+    await waitFor(() => {
+      expect(definirParametros).toHaveBeenCalled();
+    });
+    // O `setSearchParams` recebe um updater: corre-se com os parâmetros
+    // actuais para ver o que ele escreveria.
+    const [updater] = definirParametros.mock.calls.at(-1);
+    const resultado = updater(new URLSearchParams());
+    expect(resultado.get("partilha")).toBe("partilhados");
   });
 });

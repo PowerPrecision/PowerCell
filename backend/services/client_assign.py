@@ -289,6 +289,14 @@ async def run_assign_client_to_user(
         # Inserir processo
         await db.processes.insert_one(process_doc)
 
+        # PARTILHA — Via Rápida (D-25): a Sala de Triagem atribui a
+        # qualquer pessoa da rede de quem distribui, e o processo nasce
+        # já com o atribuído. Corre DEPOIS do insert, porque é o
+        # documento gravado que decide.
+        from services.process_sharing import sincronizar_parceiros_sem_falhar
+
+        await sincronizar_parceiros_sem_falhar(process_id, por_ordem_de=user.get("id"))
+
         # ============================================================
         # PACOTE 9 — CRIAR ESTRUTURA S3 REAL NO MOMENTO DA CRIAÇÃO
         # ============================================================

@@ -39,7 +39,7 @@ from services.process_list_enrichment import (
     load_workflow_status_order,
     sort_process_list,
 )
-from services.tenant_network import build_tenant_condition
+from services.tenant_network import build_tenant_process_condition
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +121,7 @@ async def run_get_process_neighbours(
     labels: Optional[Any] = None,
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
+    partilha: Optional[str] = None,
 ) -> dict:
     """
     Orquestra GET /processes/{id}/neighbours.
@@ -133,7 +134,10 @@ async def run_get_process_neighbours(
     from fastapi import HTTPException
     from services.process_list_filters import build_process_list_query
 
-    tenant_condition = await build_tenant_condition(user)
+    # Variante de PROCESSOS (D-25): a seta tem de alcançar um
+    # processo partilhado, senão leva a um 404 — é a regra do filtro
+    # Sub35 nos vizinhos.
+    tenant_condition = await build_tenant_process_condition(user)
 
     query = build_process_list_query(
         user,
@@ -159,6 +163,7 @@ async def run_get_process_neighbours(
         # não aqui fazia a seta da fronteira da página saltar para um
         # processo que a lista filtrada não contém.
         sub35=sub35,
+        partilha=partilha,
         terminais=nomes_terminais(await carregar_fases()),
     )
 

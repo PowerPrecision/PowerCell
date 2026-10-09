@@ -37,6 +37,7 @@ from fastapi import Request
 from database import db
 from services.tenant_network import (
     build_network_scope_condition,
+    build_process_scope_condition,
     resolve_tenant_scope,
 )
 
@@ -188,8 +189,19 @@ async def carregar_contexto_de_acesso(
     scope = await resolve_tenant_scope(user)
     condicao = build_network_scope_condition(scope)
     utilizador_com_papel = {**(user or {}), "_papel_efectivo": papel}
+    # O conjunto de PROCESSOS inclui os partilhados (D-25): é por ele que
+    # o calendário e as visitas de um processo partilhado chegam ao
+    # parceiro — a decisão de produto é «a ficha inteira».
+    #
+    # A `condicao_de_rede` DEVOLVIDA fica a genérica, de propósito: quem a
+    # recebe aplica-a às SUAS colecções (`db.deadlines`, `db.visits`), e
+    # essas não têm campo de partilha. Acrescentar-lhe o ramo era um `$or`
+    # que nenhum documento satisfaz, e no dia em que alguém gravasse o
+    # campo noutra colecção passava a ser uma porta.
     processos = await _processos_visiveis(
-        utilizador_com_papel, condicao, e_equipa=equipa
+        utilizador_com_papel,
+        build_process_scope_condition(scope),
+        e_equipa=equipa,
     )
 
     return ContextoDeAcesso(

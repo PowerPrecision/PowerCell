@@ -15,12 +15,24 @@ import { Checkbox } from "../ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import { ScrollArea } from "../ui/scroll-area";
-import { Filter, RotateCcw, Sparkles, UserCheck, ChevronDown } from "lucide-react";
+import {
+  ChevronDown,
+  Filter,
+  Handshake,
+  Home,
+  RotateCcw,
+  Sparkles,
+  UserCheck,
+} from "lucide-react";
 import { PROCESS_TYPE_LABELS } from "../SmartClientSearch";
 import {
   useAssignmentUsersQuery,
   useWorkflowStatusesQuery,
 } from "../../hooks/queries/useUsersQuery";
+import {
+  PARTILHA_EXCLUSIVOS,
+  PARTILHA_PARTILHADOS,
+} from "../../utils/kanbanFiltros";
 
 function userLabel(user) {
   const name = user?.name || user?.email || user?.id || "Utilizador";
@@ -52,6 +64,8 @@ export default function ProcessFilters({
   onAssignedLogicChange,
   sub35 = false,
   onSub35Change,
+  partilha = "",
+  onPartilhaChange,
   onReset,
 }) {
   const { users, isLoading: usersLoading } = useAssignmentUsersQuery();
@@ -93,6 +107,10 @@ export default function ProcessFilters({
     // desactivado deixa o utilizador preso numa lista reduzida sem ver
     // porquê — e sem forma de sair sem mexer no URL.
     Boolean(sub35) ||
+    // D-25 — a partilha ENTRA aqui pelo mesmo motivo que o Sub35: um
+    // filtro activo com o "Limpar Filtros" desactivado deixa o
+    // utilizador preso numa lista reduzida sem ver porquê.
+    Boolean(partilha) ||
     selectedIds.length > 0;
 
   return (
@@ -220,6 +238,39 @@ export default function ProcessFilters({
         <Sparkles className="h-4 w-4" />
         Sub35
       </Button>
+
+      {/* D-25 — partilha. TRÊS estados e por isso um `ToggleGroup` de
+          selecção única em vez de um interruptor: ao contrário do
+          Sub35, aqui "o contrário" é uma pergunta legítima ("quais são
+          exclusivamente da casa?"), e o estado neutro — nenhum dos dois
+          seleccionado — é "todos". Três estados precisam de três
+          condições e não de duas e um `else`: é a § 27.17. */}
+      <ToggleGroup
+        type="single"
+        value={partilha || ""}
+        onValueChange={(valor) => onPartilhaChange?.(valor || "")}
+        className="rounded-md border"
+        data-testid="process-partilha-filter"
+      >
+        <ToggleGroupItem
+          value={PARTILHA_EXCLUSIVOS}
+          aria-label="Exclusivos da Casa"
+          title="Só processos sem partilha com outra rede"
+          className="gap-1.5 px-3 text-xs"
+        >
+          <Home className="h-3.5 w-3.5" />
+          Exclusivos da Casa
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          value={PARTILHA_PARTILHADOS}
+          aria-label="Partilhados"
+          title="Só processos partilhados com outra empresa"
+          className="gap-1.5 px-3 text-xs"
+        >
+          <Handshake className="h-3.5 w-3.5" />
+          Partilhados
+        </ToggleGroupItem>
+      </ToggleGroup>
 
       <Button
         type="button"

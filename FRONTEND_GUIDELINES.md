@@ -2440,3 +2440,85 @@ pendurado, a afirmação de que se vê o carregamento e **não** o vazio, e só
 depois a resolução. E o duplo tem de pendurar **só o pedido em causa**: a
 `VisitsPage` faz três (`/visits/kanban` mais o `fetchFormData`) e um
 `resolver` global ficava a ser o do último pedido feito, não o do quadro.
+
+---
+
+## 27.53 — Uma etiqueta que torna visível uma decisão automática não é decoração
+
+A partilha de um processo é **Via Rápida**: nasce de uma atribuição, sem
+aprovação manual. Abre-se uma fronteira de rede sem ninguém a autorizar,
+e a etiqueta `[Partilha: Precision]` é a ÚNICA coisa que a torna visível
+a quem trabalha o processo. Esconder a partilha num processo partilhado
+não é um defeito cosmético — é a abertura a ficar silenciosa.
+
+Duas consequências práticas:
+
+* **nomeia a EMPRESA, não só o estado.** Saber que «está partilhado» sem
+  saber com quem não responde à pergunta que uma pessoa faz ao ver a
+  linha. (Ao contrário da `Sub35Badge`, onde o estado É a informação.)
+* **sem nome, cai para o id.** Mostrar um uuid é pior do que mostrar o
+  nome; **esconder** a etiqueta é muito pior. Entre uma etiqueta feia e
+  nenhuma etiqueta, escolhe-se a feia.
+
+E nunca se mostra a lista de REDES (`partner_network_ids`): é a fronteira
+de segurança, não tem nome legível, e `rede:8a0b6657…` não responde a
+pergunta nenhuma.
+
+O `title` diz o que a partilha **não** abre («a fronteira continua
+fechada nos restantes processos»), porque é essa a diferença entre isto e
+dar acesso à outra rede inteira.
+
+Cobertura: `components/shared/__tests__/PartilhaBadge.test.jsx`, mais
+`ProcessesPage.test.jsx` e `KanbanPage.test.jsx` — a etiqueta afirma-se
+na PÁGINA montada, com o campo REAL que o servidor calcula. A
+`Sub35Badge` ensinou porquê: existia em três cópias e **nunca apareceu**,
+porque o campo que liam não era escrito por ninguém no servidor.
+
+---
+
+## 27.54 — Um campo novo no cartão entra no comparador do `memo`
+
+O `KanbanCard` é `memo` com um comparador que **enumera** os campos.
+Acrescentar `is_partilhado` ao render sem o acrescentar ao comparador dá
+uma etiqueta que só aparece quando outro campo mudar por acidente: o
+cartão fica a mostrar o estado anterior da fronteira, e isso **não
+produz erro nenhum**.
+
+Regra: ao ler um campo novo num componente memoizado com comparador
+explícito, acrescentá-lo ao comparador no mesmo commit. É a mesma forma
+do «um filtro que vai nos parâmetros tem de ir na chave de cache»
+(§ 27.5–27.6): duas listas escritas à mão divergem, e a que divergir não
+dá erro — mostra o estado antigo.
+
+---
+
+## 27.55 — Dois valores opostos são um `ToggleGroup`; um valor e o seu vazio é um interruptor
+
+O filtro Sub35 é um **interruptor**: «não é Sub35» juntaria quem tem mais
+de 35 anos com quem não tem data de nascimento na ficha, e o servidor
+recusa essa pergunta de propósito.
+
+O filtro de partilha é um **`ToggleGroup` de selecção única** com dois
+itens («Exclusivos da Casa», «Partilhados»): aqui «o contrário» é uma
+pergunta legítima, e o estado neutro — nenhum dos dois seleccionado — é
+«todos». **Três estados precisam de três condições**, nunca de duas e um
+`else` (§ 27.17).
+
+O que os dois têm em comum, e que não se pode perder:
+
+1. o valor vive no **URL** (um link já filtrado é metade da utilidade da
+   segmentação);
+2. só os **valores conhecidos** passam — um valor escrito à mão no URL
+   não pode esvaziar a listagem sem dizer porquê;
+3. entra no `hasActive` do **«Limpar Filtros»**, nos dois ecrãs: um
+   filtro activo com o «Limpar» desactivado deixa o utilizador preso
+   numa lista reduzida sem ver porquê, e sem forma de sair sem mexer no
+   URL;
+4. os **rótulos são os mesmos** na listagem e no quadro. Dois nomes para
+   o mesmo filtro em dois ecrãs é como o `under_35` acabou com quatro
+   significados.
+
+E o quadro tem **construtor de query separado** no servidor e cabeçalho
+próprio no cliente: um filtro que só exista na listagem dá um quadro a
+ignorá-lo, sem erro nenhum. Ligar os dois é parte da entrega, não um
+extra.

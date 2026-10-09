@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from database import db
-from services.document_visibility import assert_can_manage_process_documents
+from services.document_visibility import exigir_gestao_de_documentos
 from services.document_constants import (
     DEFAULT_CLIENT_NAME,
     ERROR_DOC_NOT_CATEGORIZED,
@@ -92,7 +92,7 @@ async def run_rename_document_smart(
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
 
-    assert_can_manage_process_documents(user or {}, process)
+    await exigir_gestao_de_documentos(user or {}, process)
 
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     old_filename = s3_path.rsplit("/", 1)[-1] if "/" in s3_path else s3_path

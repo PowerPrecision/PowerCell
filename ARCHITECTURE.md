@@ -9288,3 +9288,240 @@ que não existir.** Afirma-se a CONTAGEM (que o duplo faz) e, num teste
 próprio, a ORDEM das etapas — que é a propriedade escrita: o `$match`
 entra ANTES do `$group`, senão somava-se o valor das outras redes para o
 descartar a seguir, e o `total` saía errado de qualquer maneira.
+
+---
+
+## A partilha de um processo entre redes: a Via Rápida (D-25 + D-26)
+
+### O modelo tinha UM `network_id`; a co-angariação é normal
+
+`CAMPO_REDE` é singular: um processo pertence a uma rede e só essa o vê.
+Mas a partilha entre agências é uma operação do dia-a-dia, e o modelo
+financeiro **já a conhecia** — `db.process_finances` é chaveada por
+`(process_id, company_id)`, um registo por empresa no mesmo processo, que
+é exactamente o rateio de comissão de uma partilha. Era só a
+VISIBILIDADE que não tinha como o expressar.
+
+O recurso disponível era dar à pessoa um UCR nas duas empresas, e esse é
+o pior negócio possível: o âmbito é do UTILIZADOR, logo um consultor da
+Precision com acesso à Domus passa a ver **toda** a Domus, e não aquele
+processo. O teste `test_a_partilha_de_UM_processo_nao_abre_os_OUTROS` é
+precisamente a diferença entre as duas coisas.
+
+### Decisões de produto (2026-10-09)
+
+| pergunta | decisão |
+|---|---|
+| o que vê o convidado | **a ficha inteira do processo** — e a fronteira continua fechada nos restantes |
+| quem autoriza | ninguém: **Via Rápida**, nasce da ATRIBUIÇÃO |
+| como se revoga | **à mão**, nunca por tirar a atribuição |
+
+A terceira tem uma consequência que não é opcional: **uma abertura de
+fronteira que ninguém aprovou tem de ser visível e auditada**, senão é
+silenciosa — e uma abertura silenciosa é o oposto de tolerância zero.
+Daí a entrada no trilho, a entrada no histórico do processo e a etiqueta
+na listagem. A etiqueta não é decoração: é o único sítio onde a partilha
+se vê.
+
+E a revogação é manual porque o parceiro mantém o histórico e os
+documentos que ele próprio produziu, e o registo de comissão continua
+coerente. Revogar em automático fazia desaparecer trabalho real sem
+ninguém decidir, e **um documento que desaparece não produz erro
+nenhum**.
+
+### Duas listas, uma DERIVA da outra
+
+| campo | para que serve |
+|---|---|
+| `partner_companies` | o REGISTO: quem, quando, por ordem de quem. É o que a etiqueta mostra |
+| `partner_network_ids` | a lista INDEXÁVEL que a condição Mongo lê. **Deriva** do registo em cada escrita |
+
+Duas fontes de verdade para a mesma coisa divergem sem dar erro — e a que
+divergisse ou abria uma rede a mais, ou escondia um processo a quem o
+está a trabalhar. `redes_do_registo()` é a derivação e há um teste a
+afirmar que o documento gravado satisfaz as duas.
+
+O `network_id` **não** se alarga: é o carimbo de propriedade e é
+permanente. Uma partilha acrescenta quem VÊ, nunca muda de quem É — e a
+rede do DONO nunca entra na lista de convidados, porque seria redundante
+hoje e, no dia em que o dono mudasse, deixava lá uma chave da rede
+antiga.
+
+### `build_process_scope_condition` é uma função SEPARADA, não um ramo no genérico
+
+`CAMPO_REDES_PARCEIRAS` existe **só** no documento de processo. Pôr o
+ramo no `build_network_scope_condition` fá-lo-ia viajar para as 33
+superfícies que o usam — clientes, tarefas, imóveis, emails, calendário
+—, onde nenhum documento tem o campo: um `$or` a mais em cada consulta, e
+uma porta aberta no dia em que alguém gravasse o campo noutra colecção
+sem pensar nisto.
+
+DERIVA do genérico em vez de reescrever os ramos: a parte comum é a mesma
+e duas versões dela divergem na primeira mudança. A única diferença é o
+ramo que se acrescenta, e é isso que o código diz.
+
+Quem pergunta «que processos vejo?» usa a variante; todo o resto fica no
+genérico. **Há um inventário por AST** (`test_partilha_de_processo.py`)
+que falha por OMISSÃO para uma superfície nova que consulte `db.processes`
+com a genérica, com as excepções **escritas** e o motivo de cada uma —
+uma lista de exclusão sem motivo é a forma de uma guarda se desligar
+sozinha.
+
+Duas excepções que são decisões e não esquecimentos:
+
+* **as AGREGAÇÕES de estatísticas** ficam na genérica: o KPI é a
+  produção da casa, e contar um processo partilhado nas duas redes
+  fá-lo-ia aparecer duas vezes no consolidado do grupo e tornava a taxa
+  de conversão do parceiro ilegível. **Ver, sim; contar, não** — e a
+  VERIFICAÇÃO de visibilidade (`stats_scope.processos_permitidos`) usa
+  a variante de processos.
+* **a `condicao_de_rede` devolvida pelo `tenant_access_context`** fica a
+  genérica: quem a recebe aplica-a às SUAS colecções (`db.deadlines`,
+  `db.visits`), que não têm campo de partilha. O que ganha a variante é
+  o **conjunto de processos visíveis**, e é por ele que o calendário e
+  as visitas de um processo partilhado chegam ao parceiro.
+
+### A sincronização DERIVA do documento, nunca de um diff
+
+Há **cinco** escritores de atribuições neste projecto, e a lição do Lote
+5 — repetida no Lote 7, no ponto 9 e na contagem por campo que encontrou
+o quinto — é sempre a mesma: a regra aplicada aos construtores e não a
+quem os usa divergiu em todos eles.
+
+`sincronizar_parceiros` lê o documento **já gravado**, resolve as redes
+de todos os atribuídos e acrescenta as que faltam. É idempotente, não
+depende de nenhum diff, e um escritor que se esqueça de a chamar é um bug
+de um sítio e não de cinco. **Só acrescenta**: quem retira é
+`revogar_parceiro`, à mão, e deixa rasto.
+
+### A empresa da ETIQUETA é a da REDE, não a por omissão (defeito medido)
+
+A primeira versão resolvia a empresa pela associação **por omissão** do
+utilizador. Para quem trabalha em duas redes — o caso real deste grupo —
+abria a rede da Domus e escrevia na etiqueta «Precision Crédito»: a
+partilha ficava rotulada com a empresa errada.
+
+**Uma etiqueta que mente sobre quem passou a ver o processo é pior do que
+etiqueta nenhuma**, porque é a única coisa que torna visível uma abertura
+que ninguém aprovou. Hoje percorre-se (utilizador × EMPRESA) e a rede sai
+da empresa. Foi um teste a apanhá-lo, ao tentar usar a utilizadora do
+cenário que trabalha nas duas redes.
+
+### E **não** usa o `resolve_tenant_scope`, de propósito
+
+Aquele atribui a rede de OMISSÃO a um utilizador órfão de empresa (para
+não cegar contas de administração antigas). Aqui isso seria abrir o
+processo ao grupo incumbente por não se saber a empresa de alguém —
+**falha ABERTA, no sítio exactamente errado**. Sem associações, sem
+partilha.
+
+### Uma partilha que falha não pode rebentar uma atribuição
+
+`sincronizar_parceiros_sem_falhar` é o que os escritores chamam. A
+atribuição é a acção do utilizador e **já está gravada** quando a
+sincronização corre: propagar daria um 500 por uma operação que teve
+sucesso, e deixava o estado a meio. Falhar aqui falha FECHADO (o parceiro
+não ganha visibilidade), e a sincronização é idempotente, pelo que a
+acção seguinte repara — mas **nunca em silêncio**, que é a regra do
+`_emit_event_safe`.
+
+O custo desse `except` é que apagar a chamada não parte teste nenhum. Por
+isso a LIGAÇÃO tem guarda própria: um teste parametrizado que exige
+`sincronizar_parceiros_sem_falhar` no corpo de cada um dos quatro
+escritores, mais a contraprova de que a variante estrita **propaga**.
+
+### D-26: a guarda de documentos não conhecia redes
+
+Encontrada a medir a D-24 e fechada aqui, porque **a guarda certa é a
+resposta da D-25**. `user_can_view_process_documents` tinha zero
+ocorrências de `network`, e abria por duas linhas:
+
+1. **bypass ABSOLUTO** para {admin, ceo, **diretor**, administrativo},
+   verificado antes de tudo;
+2. `if not is_document_visibility_restricted(process): return True` — um
+   processo **já indexado** era visível a qualquer sessão autenticada. A
+   restrição foi escrita para a PRÉ-indexação, não como fronteira de
+   tenant, e indexado é o caso NORMAL: é a forma do `run_get_my_tasks`
+   ao contrário, com o ramo COMUM sem guarda nenhuma.
+
+Do outro lado estava a pasta documental do cliente — cartão de cidadão,
+IRS, recibos, extractos. Bastava um `process_id`.
+
+**A fronteira entra ANTES do bypass**: um bypass de cargo que corra
+primeiro é um bypass de rede. A mutação que a move para depois mata
+quatro testes, e o do diretor é o que a nomeia.
+
+Usa o `processo_no_ambito` (e não o `documento_no_ambito`): um processo
+partilhado abre-se ao convidado, que é a decisão de produto. Escrever
+aqui uma fronteira de rede pura fecharia a porta que a partilha precisa
+de abrir, e **alargar uma parede depois para caber a correcção é como o
+Incidente P0 do Portal começou**.
+
+O `scope` é um PARÂMETRO das funções puras e `None` significa «não sei»
+(não aplica a fronteira) — é o que as mantém utilizáveis por quem não o
+tem. A parede real está nas guardas `async`, que o resolvem **sempre**,
+com `_ambito_do_utilizador` a falhar FECHADO (um `TenantScope()` vazio
+não casa com rede nenhuma; devolver `None` desligava a parede por causa
+de um soluço). Há guarda de fonte a exigir que as duas guardas `async`
+resolvam o âmbito **e o passem**, com contraprova a correr o código.
+
+E a recusa de rede vem **antes** do allow-path por relação com o
+cliente: aquele faz I/O e responderia a «este cliente existe?» (a ordem
+das verificações do Incidente P0).
+
+**Nota de correcção:** eu tinha dito que o custo não-óbvio da D-25 era a
+parede do S3. Não é. `build_s3_valid_prefixes(process)` deriva os
+prefixos do PROCESSO (o seu id e o do cliente), não da rede — no momento
+em que o convidado abre o processo, a parede autoriza-lhe os mesmos
+prefixos sem mudar uma linha. O custo era esta guarda.
+
+### O filtro rápido, e a semântica verificada contra um `mongod`
+
+`condicao_de_filtro` é o ponto único, e entra nos **dois** construtores
+de query (a listagem e o Kanban, que tem o seu) **e no endpoint dos
+vizinhos** — senão a seta da fronteira da página leva a um processo que a
+lista filtrada não contém, que é o defeito que o Sub35 já teve ali.
+
+```
+exclusivos  → {partner_network_ids: {"$in":  [None, []]}}
+partilhados → {partner_network_ids: {"$nin": [None, []]}}
+```
+
+`$in: [None, []]` casa com **ausente**, `null` **e** array vazio; o
+`$nin` com a mesma lista é o complemento exacto, incluindo a exclusão dos
+ausentes — e é o `None` na lista que o faz: sem ele o `$nin` casaria com
+os documentos sem o campo e «Partilhados» mostrava a carteira inteira.
+
+**Verificado contra um `mongod` avulso**, porque a semântica de
+`$in`/`$nin` sobre um campo que contém um ARRAY é precisamente onde este
+projecto já se enganou (a consulta do `fix_s3_folder_anomalies`
+encontrou 1 de 7 casos). Os dois são complementos exactos sobre
+{ausente, null, [], ["x"], ["x","y"]}, e o predicado concorda com a
+condição em todos os âmbitos.
+
+Um valor desconhecido **não filtra** em vez de devolver uma condição
+impossível: um parâmetro escrito à mão no URL não pode esvaziar a
+listagem sem dizer porquê — e o `warning` diz.
+
+### A flag é CALCULADA ao servir, nunca persistida
+
+`is_partilhado` e `partilha_com` saem de
+`process_sharing.aplicar_flag_a_processos`, chamada nos mesmos três
+sítios que já aplicam a do `sub35`. Um booleano gravado fica errado no
+dia em que a partilha é revogada — é a regra que o `sub35` já paga, e
+seria o quinto nome do mesmo conceito.
+
+A `PROJECCAO` entra nas DUAS projecções (listagem e Kanban): se o quadro
+projectar e a listagem não, a mesma linha tem etiqueta num ecrã e não tem
+no outro.
+
+### Medição por mutação (seis, as seis mortas)
+
+| mutação | morreu em |
+|---|---|
+| a condição de processos perde o ramo da partilha | o teste de concordância, em 4 âmbitos |
+| a rede do DONO passa a entrar na lista de convidados | 3 testes, entre eles o da etiqueta |
+| a lista indexável deixa de DERIVAR do registo | 4, entre eles o «uma partilha não abre as outras» |
+| o filtro troca EXCLUSIVOS com PARTILHADOS | os dois testes do filtro |
+| a fronteira dos documentos nunca morde | 4 da D-26 |
+| a fronteira corre DEPOIS do bypass de cargo | 4, e o do diretor é o que a nomeia |

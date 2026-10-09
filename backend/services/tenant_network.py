@@ -71,6 +71,13 @@ VALORES_SEM_EMPRESA: tuple[Any, ...] = (None, "", "default")
 # fuga inteira em silêncio.
 CONDICAO_IMPOSSIVEL: dict = {CAMPO_REDE: {"$in": []}}
 
+#: As redes CONVIDADAS num processo partilhado (D-25). Vive **só** no
+#: documento de processo e **nunca** se confunde com o `network_id`, que é
+#: o carimbo de PROPRIEDADE e é permanente: uma partilha acrescenta quem
+#: vê, não muda de quem é. Lista, porque um processo pode ser partilhado
+#: com mais do que uma rede.
+CAMPO_REDES_PARCEIRAS = "partner_network_ids"
+
 #: Todos os campos onde o carimbo pode viver. Uma PROJECÇÃO que os
 #: deixe de fora faz a verificação de posse ver um documento sem marca —
 #: e "sem marca" é a tolerância do legado, logo a guarda abre em vez de
@@ -160,6 +167,77 @@ def build_network_scope_condition(scope: TenantScope) -> dict:
         return CONDICAO_IMPOSSIVEL
 
     return {"$or": ramos}
+
+
+def build_process_scope_condition(scope: TenantScope) -> dict:
+    """Âmbito de PROCESSOS: o do dono **mais** o das redes convidadas (D-25).
+
+    PORQUE É QUE ISTO É UMA FUNÇÃO SEPARADA E NÃO UM RAMO NO GENÉRICO
+    ================================================================
+    `CAMPO_REDES_PARCEIRAS` existe **só** no documento de processo. Pôr o
+    ramo no `build_network_scope_condition` fá-lo-ia viajar para as 33
+    superfícies que o usam — clientes, tarefas, imóveis, emails,
+    calendário —, onde nenhum documento tem o campo: um `$or` a mais em
+    cada consulta, e uma porta aberta no dia em que alguém gravasse o
+    campo noutra colecção sem pensar nisto.
+
+    A partilha é uma propriedade do PROCESSO. Quem pergunta «que
+    processos vejo?» usa esta; todo o resto continua no genérico.
+
+    DERIVA do genérico em vez de escrever os ramos outra vez: a parte
+    comum é a mesma e duas versões dela divergem na primeira mudança (é
+    a nota do `build_pool_scope_condition`). A única diferença é o ramo
+    que se acrescenta, e é isso que o código diz.
+
+    **Um âmbito sem redes não ganha nada aqui.** Sem redes não há com que
+    casar a lista de convidadas, e devolver o ramo com uma lista vazia
+    seria `{"$in": []}` — que não casa com nada, mas transformaria a
+    condição impossível num `$or` de um ramo impossível. Fica a
+    impossível, que é a que se lê.
+    """
+    base = build_network_scope_condition(scope)
+
+    redes = sorted({_texto(r) for r in scope.network_ids if _texto(r)})
+    if not redes:
+        return base
+
+    ramo_da_partilha = {CAMPO_REDES_PARCEIRAS: {"$in": redes}}
+
+    if base == CONDICAO_IMPOSSIVEL:
+        return ramo_da_partilha
+
+    ramos = list(base.get("$or") or [base])
+    return {"$or": [*ramos, ramo_da_partilha]}
+
+
+async def build_tenant_process_condition(user: dict) -> dict:
+    """Atalho: âmbito de PROCESSOS deste utilizador, já em Mongo.
+
+    É esta — e não o `build_tenant_condition` — que todas as superfícies
+    que listam ou resolvem PROCESSOS usam. Há um inventário por AST que
+    falha por OMISSÃO para uma superfície nova que use a genérica.
+    """
+    return build_process_scope_condition(await resolve_tenant_scope(user))
+
+
+def redes_parceiras(doc: Optional[dict]) -> set[str]:
+    """As redes convidadas de um processo, normalizadas."""
+    valor = (doc or {}).get(CAMPO_REDES_PARCEIRAS)
+    if isinstance(valor, (list, tuple, set)):
+        return {_texto(v) for v in valor if _texto(v)}
+    return {_texto(valor)} if _texto(valor) else set()
+
+
+def processo_no_ambito(doc: Optional[dict], scope: TenantScope) -> bool:
+    """Gémeo em Python do `build_process_scope_condition`.
+
+    O dono **ou** uma rede convidada. A ordem é a do construtor, e há um
+    teste de concordância que corre os dois sobre os mesmos documentos.
+    """
+    if documento_no_ambito(doc, scope):
+        return True
+    minhas = {_texto(r) for r in scope.network_ids if _texto(r)}
+    return bool(minhas and (redes_parceiras(doc) & minhas))
 
 
 def build_pool_scope_condition(scope: TenantScope) -> dict:

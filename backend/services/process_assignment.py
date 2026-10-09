@@ -1531,6 +1531,22 @@ async def dual_auto_assign_on_pre_registo_transition(
         # ── Motor de Tarefas Automáticas: criar tarefas de arranque ──
         await _create_post_indexing_tasks(process_id, newly_assigned)
 
+    # PARTILHA — Via Rápida (D-25): a dupla auto-atribuição é o caminho
+    # mais provável de um processo ficar com gente de duas redes (um
+    # consultor da Power e um intermediário da Precision é o caso NORMAL
+    # deste grupo). Lê o documento já gravado, e por isso vale para os
+    # dois papéis de uma vez.
+    from services.process_sharing import sincronizar_parceiros_sem_falhar
+
+    await sincronizar_parceiros_sem_falhar(
+        process_id,
+        por_ordem_de=indexador_user_id or "system",
+        registar_historico=lambda texto: log_history(
+            process_id=process_id, user=system_user, action=texto,
+            field="partilha", old_value="", new_value=texto,
+        ),
+    )
+
     logger.info(
         f"[DUAL-AUTO] ✅ Dupla auto-atribuição concluída "
         f"consultor={result_data.get('consultant_name', 'N/A')} "

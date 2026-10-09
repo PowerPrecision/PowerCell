@@ -27,6 +27,9 @@ from utils.search_filters import (
     build_multiword_search_filter,
 )
 from services.process_labels import build_labels_condition
+from services.process_sharing import (
+    condicao_de_filtro as condicao_de_filtro_de_partilha,
+)
 from services.sub35 import condicao_de_filtro as condicao_de_filtro_sub35
 
 
@@ -509,6 +512,7 @@ def build_process_list_query(
     labels: Optional[Union[str, Sequence[str]]] = None,
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
+    partilha: Optional[str] = None,
     tenant_condition: Optional[dict] = None,
     terminais: Optional[list[str]] = None,
 ) -> dict[str, Any]:
@@ -601,6 +605,14 @@ def build_process_list_query(
     sub35_cond = condicao_de_filtro_sub35(sub35)
     if sub35_cond:
         and_conditions.append(sub35_cond)
+
+    # Partilha (D-25): «Exclusivos da Casa» vs «Partilhados». Do MESMO
+    # ponto que decide a etiqueta — se o filtro tivesse aqui a sua
+    # própria noção de «está partilhado», a lista filtrada e os cartões
+    # etiquetados divergiriam, que é a lição do `sub35`.
+    partilha_cond = condicao_de_filtro_de_partilha(partilha)
+    if partilha_cond:
+        and_conditions.append(partilha_cond)
 
     search_cond = build_process_search_condition(search, mode=search_mode)
     if search_cond:
@@ -800,6 +812,7 @@ def build_kanban_query(
     labels: Optional[Union[str, Sequence[str]]] = None,
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
+    partilha: Optional[str] = None,
     tenant_condition: Optional[dict] = None,
     terminais: Optional[list[str]] = None,
 ) -> dict:
@@ -849,6 +862,13 @@ def build_kanban_query(
     sub35_cond = condicao_de_filtro_sub35(sub35)
     if sub35_cond:
         query = merge_query_and(query, sub35_cond)
+
+    # Partilha (D-25) — e aqui TAMBÉM, pelo mesmo motivo de sempre: um
+    # filtro que só exista na listagem dá um quadro a ignorá-lo, sem
+    # erro nenhum.
+    partilha_cond = condicao_de_filtro_de_partilha(partilha)
+    if partilha_cond:
+        query = merge_query_and(query, partilha_cond)
 
     # Pré-registo sempre excluído do Kanban (todos os roles)
     query = merge_query_and(query, {"status": {"$nin": LEAD_STATUS_VALUES}})

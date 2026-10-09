@@ -29,6 +29,7 @@ const VARIACOES = {
   labels: ["urgente", "sub35"],
   labelsLogic: "AND",
   sub35: true,
+  partilha: "partilhados",
 };
 
 describe("normalizarFiltros", () => {
@@ -141,6 +142,27 @@ describe("a chave de cache e os parâmetros não podem divergir", () => {
       completedDays: 0,
     });
     expect(chaveDeFiltros(filtros)).toEqual(filtros);
+  });
+
+  it("o filtro de PARTILHA só aceita os dois valores conhecidos", () => {
+    // Um terceiro valor não pode esvaziar a listagem: o servidor avisa
+    // no log e ignora, e aqui nem chega a ir.
+    expect(normalizarFiltros({ partilha: "exclusivos" }).partilha).toBe(
+      "exclusivos",
+    );
+    expect(normalizarFiltros({ partilha: "talvez" }).partilha).toBe("");
+    expect(normalizarFiltros({}).partilha).toBe("");
+  });
+
+  it("e só é enviado quando tem valor", () => {
+    expect(
+      parametrosDoKanban(normalizarFiltros({})).toString(),
+    ).not.toContain("partilha");
+    expect(
+      parametrosDoKanban(
+        normalizarFiltros({ partilha: "exclusivos" }),
+      ).toString(),
+    ).toContain("partilha=exclusivos");
   });
 
   it("a lista de campos cobre tudo o que varia", () => {

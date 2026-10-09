@@ -85,104 +85,6 @@ pequeno (`resolve_tenant_stamp` no `public_registration`) e a Pool passa a
 
 ---
 
-### D-25 · Um processo em PARTILHA entre duas redes não tem modelo
-**Onde:** `services/tenant_network.py` (`CAMPO_REDE = "network_id"`, singular)
-
-A topologia declarada é «Power + Precision partilham; a Domus é uma ilha». O
-modelo implementa-a com **um** `network_id` por documento: um processo
-pertence a uma rede e só essa o vê. Não há mecanismo de partilha — zero
-ocorrências de qualquer forma de rede convidada, lista de redes ou
-`shared_with` nos documentos de negócio.
-
-Mas a partilha entre agências é uma operação NORMAL do negócio (a
-co-angariação), e o modelo financeiro **já a conhece**: `db.process_finances`
-é chaveado por **(`process_id`, `company_id`)**, um registo por empresa no
-mesmo processo, que é exactamente o rateio de comissão de uma partilha. É só
-a VISIBILIDADE que não tem como o expressar.
-
-O recurso disponível hoje é dar à pessoa um UCR nas duas empresas — e esse é
-o caminho errado: o âmbito é do UTILIZADOR, logo um consultor da Precision
-com acesso à Domus passa a ver **toda** a Domus, e não aquele processo. Para
-um grupo que declara tolerância zero ao cruzamento, trocar um processo
-partilhado por acesso total à outra rede é o pior negócio possível.
-
-**O que a medição da D-24 acrescentou (2026-10-09):** eu tinha dito que o
-custo não-óbvio desta dívida era a parede do S3. **Não é.**
-`build_s3_valid_prefixes(process)` deriva os prefixos de posse do **PROCESSO**
-(o seu id e o do cliente), não da rede — logo, no momento em que o lado
-convidado consegue abrir o processo, a parede do S3 autoriza-lhe os mesmos
-prefixos sem mudar uma linha. O custo real está noutro sítio, e é a **D-26**: o
-que decide se um processo é visível para efeitos de documentos é o
-`document_visibility`, e esse não conhece redes nenhumas. As duas fecham no
-mesmo lote, porque a resposta a esta é a guarda daquela.
-
-**Decisão de produto já tomada** (dono do produto, 2026-10-09): o lado
-convidado vê **a ficha inteira do processo** — tudo o que o dono vê, naquele
-processo, e a fronteira continua fechada em todos os restantes. A partilha é
-**Via Rápida**: nasce da ATRIBUIÇÃO de um processo a alguém de outra empresa,
-sem aprovação manual.
-
-**Para fechar:** um campo próprio de redes convidadas no documento do
-processo, a entrar no `build_network_scope_condition` como um ramo a mais —
-nunca alargando o `network_id`, que é o carimbo de propriedade e é permanente.
-O que continua em aberto é a REVOGAÇÃO (tirar a atribuição revoga a partilha?
-se sim, o parceiro perde o histórico e os documentos que ele próprio produziu,
-e o registo de comissão em `process_finances` fica órfão) e o facto de uma
-partilha automática ser, por construção, uma abertura de fronteira que
-ninguém aprovou — pelo que tem de ser **auditada e visível** (entrada no
-trilho, entrada no histórico do processo e etiqueta na listagem), senão é
-silenciosa, e uma abertura de fronteira silenciosa é o oposto de tolerância
-zero.
-
----
-
-### D-26 · A guarda de documentos não conhece redes
-**Onde:** `services/document_visibility.py`
-(`user_can_view_process_documents`, `assert_can_view_process_documents`)
-
-Encontrada a medir a D-24, não estava em enunciado nenhum. A função que
-decide se um utilizador pode ver os documentos de um processo tem **zero**
-ocorrências de `network` ou `compan`, e abre por duas linhas:
-
-1. **bypass ABSOLUTO** para `_ADMIN_BYPASS_ROLES` = {admin, ceo, **diretor**,
-   administrativo, …}, verificado antes de tudo o resto. O diretor de uma ilha
-   é diretor da SUA rede — é a regra 2 do `deadline_scope` e a mesma do
-   `visit_scope`. Aqui atravessa.
-2. `if not is_document_visibility_restricted(process): return True` — um
-   processo **já indexado** é visível a qualquer sessão autenticada. A
-   restrição foi escrita para a PRÉ-indexação (o indexador trata os documentos
-   antes de haver equipa), não como fronteira de tenant. E um processo
-   indexado é o caso NORMAL, não o raro: é a forma do `run_get_my_tasks` ao
-   contrário — foi o ramo comum não ter guarda nenhuma que escondeu isto.
-
-O que está do outro lado não são nomes: é a pasta documental do cliente —
-cartão de cidadão, IRS, recibos de vencimento, extractos bancários. É a fuga
-de maior consequência de RGPD deste eixo, e basta saber um `process_id`.
-
-**Provada** (não deduzida) em `tests/unit/test_documentos_atravessam_redes.py`,
-com os testes em `xfail(strict=True)`.
-
-**Porque foi adiada:** a guarda certa **é** a resposta da D-25. Num processo em
-partilha, o lado convidado tem de ver os documentos (decisão tomada: «a ficha
-inteira»). Escrever aqui uma fronteira de rede pura fecharia a porta que a
-D-25 precisa de abrir, e abri-la outra vez a seguir seria **alargar uma parede
-para caber a correcção** — que é exactamente como o Incidente P0 do Portal
-começou.
-
-**Quem é atingido:** qualquer conta de outra rede que conheça um `process_id`.
-Hoje não há utilizadores activos da Domus, pelo que a janela está fechada por
-operação e não por código — e é isso que torna a ordem (D-25 e D-26 antes do
-primeiro utilizador da Domus) uma condição e não uma preferência.
-
-**Para fechar:** no mesmo lote da D-25. A fronteira entra no
-`user_can_view_process_documents` como mais uma prova — a rede do processo, ou
-a lista de redes convidadas dele — e o bypass do `diretor` passa a valer
-dentro da rede, como já vale no calendário e nas visitas. Os 11 pontos de
-chamada em `routes/documents.py` derivam da mesma função, logo é um ponto
-único; o `onedrive_files` é o segundo chamador.
-
----
-
 ### D-4 · Varrimento de limites de pedidos nos restantes routers
 **Onde:** `backend/routes/*.py`
 
@@ -554,6 +456,8 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 
 | # | Dívida | Fechada em |
 |---|---|---|
+| D-26 | A guarda de documentos não conhecia redes | Iteração `partilha-e-documentos` — encontrada a medir a D-24 e **só podia fechar com a D-25**: a guarda certa É a resposta da partilha. `user_can_view_process_documents` tinha ZERO ocorrências de `network` e abria por duas linhas — o bypass ABSOLUTO de {admin, ceo, **diretor**, administrativo} verificado antes de tudo, e `if not is_document_visibility_restricted(process): return True`, que tornava um processo **já indexado** (o caso NORMAL) visível a qualquer sessão autenticada. Do outro lado estava a pasta documental do cliente: cartão de cidadão, IRS, recibos, extractos, alcançável sabendo só um `process_id`. A fronteira entra **antes** do bypass (um bypass de cargo que corra primeiro é um bypass de rede — a mutação que a move para depois mata quatro testes) e usa o `processo_no_ambito`, que conta a rede convidada. O `scope` é PARÂMETRO das puras e as guardas `async` resolvem-no sempre, falhando FECHADO. Corrigiu também uma afirmação minha: o custo não-óbvio da D-25 **não** era a parede do S3 — `build_s3_valid_prefixes` deriva do PROCESSO e não da rede |
+| D-25 | Um processo em PARTILHA entre duas redes não tinha modelo | Iteração `partilha-e-documentos` — `partner_network_ids` acrescenta quem VÊ sem mudar de quem É (`network_id` continua o carimbo de propriedade), e o âmbito é o PROCESSO e não a rede: é essa a diferença face ao atalho do UCR nas duas empresas, que abria a rede INTEIRA. `build_process_scope_condition` é função SEPARADA e DERIVADA da genérica — pôr o ramo no construtor comum fá-lo-ia viajar para 33 superfícies onde nenhum documento tem o campo — com inventário por AST que falha por OMISSÃO e excepções ESCRITAS (as agregações de estatísticas ficam de fora de propósito: **ver, sim; contar, não**). A sincronização DERIVA do documento gravado e não de um diff, porque são cinco os escritores de atribuições. Via Rápida com revogação MANUAL (decisão do dono do produto), e por isso **visível e auditada**: trilho, histórico e etiqueta, que é o único sítio onde uma abertura que ninguém aprovou se vê. Um defeito meu que o teste apanhou: a etiqueta nomeava a empresa POR OMISSÃO do utilizador, pelo que para quem trabalha em duas redes rotulava a partilha com a empresa errada |
 | D-23 | O mapeador do scraper descartava campos que a IA extrai | Iteração `motor-de-visitas` — eram **DOIS** mapeadores escritos à mão (o do CRM em `visit_helpers` e o do Portal em `portal_client_visits`) para os MESMOS campos, e **já divergiam**: o do Portal guardava `raw_data`, o do CRM não, pelo que uma visita criada no CRM perdia também quartos, casas de banho, certificado energético, ano de construção, descrição e referência. E a lista de ONZE chaves do `property_scraper`, sobre ~30 devolvidas, perdia o **`estado`** do imóvel — que o prompt da IA pede pelo nome desde sempre. Hoje `services/visit_property_extract.ficha_do_imovel` é o ponto único e o `raw_data` **DERIVA** do dicionário devolvido: um campo novo no prompt chega ao mesmo destino sem ninguém se lembrar. Ganhou um **terceiro veredicto** (`sem_dados`): um anúncio que responde 200 com tudo vazio contava como sucesso e a visita ficava sem um único dado, indistinguível de um imóvel sem informação |
 | D-21 | `db.visits` sem isolamento de rede nem posse nas escritas | Iteração `isolamento-das-visitas` — as TRÊS formas do defeito ao mesmo tempo. As duas listagens (e o Kanban, que tem construtor SEPARADO — a lição do `build_kanban_query`) passaram a derivar do mesmo contexto de acesso e do mesmo `com_isolamento`; a posse vive em `visit_scope.py` (puro) com `exigir_visita_acessivel` ligada à leitura, ao `PATCH` e ao cancelamento, e responde **404 e nunca 403**. A reatribuição ganhou a pergunta do DESTINO (`pode_atribuir_a_consultor`), sem a qual um editor legítimo entregava a um consultor de outra rede o nome, o email e o telefone de um cliente. O carimbo passou a derivar do **PROCESSO** num ponto único (`carimbo_da_visita`): havia dois escritores com origens diferentes para o mesmo campo e uma delas — `user.get("company_id")` — não existe no documento de utilizador, logo toda a visita da equipa nascia sem carimbo. **O `administrativo` ENTROU na vista de equipa** (o back-office coordena visitas) e por isso o âmbito dele estreita de «todas as redes» para «a sua rede» |
 | D-22 | O modelo de IA do scraper estava fixo no código | Iteração `isolamento-das-visitas` — o modelo configurado era lido, **escrito no log** («Usando modelo configurado: X») e depois ignorado: a chamada era `genai.GenerativeModel("gemini-2.0-flash")`, literal, e o `ai_usage_tracker` recebia o mesmo literal, pelo que o relatório de custos atribuía a despesa ao modelo errado. **O log a dizer o contrário é o que tornava isto difícil de ver.** A omissão continua no `_get_ai_model_for_scraping`, que é onde ela pertence; o teste é ao nível da CHAMADA (asserção sobre o parâmetro que sai para o SDK, não sobre o resultado — regra do «duplo demasiado esperto») |

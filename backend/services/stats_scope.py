@@ -55,6 +55,7 @@ from typing import Optional
 
 from database import db
 from services.tenant_network import (
+    build_process_scope_condition,
     TenantScope,
     build_network_scope_condition,
     resolve_tenant_scope,
@@ -160,8 +161,21 @@ async def processos_no_ambito(
     if not ids:
         return set()
 
+    # Condição de PROCESSOS (D-25) e não a de rede: isto é uma
+    # verificação de VISIBILIDADE — decide se um prazo ou uma mensagem
+    # de um processo aparece —, e um processo PARTILHADO é visível ao
+    # parceiro.
+    #
+    # A `ambito.condicao` (genérica) continua a servir as AGREGAÇÕES, de
+    # propósito: o KPI é a produção da casa, e contar um processo
+    # partilhado nas duas redes fá-lo-ia aparecer duas vezes no
+    # consolidado do grupo e tornava a taxa de conversão do parceiro
+    # ilegível. Ver, sim; contar, não.
     permitidos = await db.processes.find(
-        {"$and": [ambito.condicao, {"id": {"$in": sorted(ids)}}]},
+        {"$and": [
+            build_process_scope_condition(ambito.scope),
+            {"id": {"$in": sorted(ids)}},
+        ]},
         {"_id": 0, "id": 1},
     ).to_list(len(ids))
     return {str(p["id"]) for p in permitidos if p.get("id")}

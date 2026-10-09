@@ -128,6 +128,10 @@ const KanbanBoard = ({
   // PEDIDO (o quadro pede ao servidor só os processos elegíveis) e não
   // um filtro em memória, logo vive no contentor.
   const [sub35, setSub35] = useState(false);
+  // D-25 — '' (todos) | 'exclusivos' | 'partilhados'. A normalização
+  // vive no `kanbanFiltros`, que é o ponto único dos parâmetros E da
+  // chave de cache.
+  const [partilha, setPartilha] = useState('');
   const [etiquetasDisponiveis, setEtiquetasDisponiveis] = useState([]);
 
   useEffect(() => {
@@ -188,7 +192,7 @@ const KanbanBoard = ({
 
   // === REACT QUERY - DATA FETCHING (QUERIES SEPARADAS) ===
   // Memoize filters to prevent infinite re-renders in dependent hooks
-  const filters = useMemo(() => ({ consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labels: labelsFilter, labelsLogic, sub35 }), [consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labelsFilter, labelsLogic, sub35]);
+  const filters = useMemo(() => ({ consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labels: labelsFilter, labelsLogic, sub35, partilha }), [consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labelsFilter, labelsLogic, sub35, partilha]);
 
   // QUERY 1: Colunas ACTIVAS (sem completedDays — não re-fetch quando o filtro muda)
   const {
@@ -524,6 +528,8 @@ const KanbanBoard = ({
         onLabelsLogicChange={setLabelsLogic}
         sub35={sub35}
         onSub35Change={setSub35}
+        partilha={partilha}
+        onPartilhaChange={setPartilha}
         completedDays={completedDays}
         onCompletedDaysChange={setCompletedDays}
         onScrollLeft={() => scrollContainer('left')}

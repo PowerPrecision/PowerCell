@@ -42,7 +42,11 @@ from utils.input_sanitization import (
     sanitize_string, sanitize_url, log_sanitization_rejection,
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
-from services.tenant_network import build_tenant_condition, com_isolamento
+from services.tenant_network import (
+    build_tenant_condition,
+    build_tenant_process_condition,
+    com_isolamento,
+)
 from services.client_list_filters import (
     build_client_entity_query,
     client_doc_to_list_item,
@@ -212,7 +216,14 @@ async def run_list_clients(
 
     # PACOTE FK — filtros da entidade Cliente (independentes do processo).
     client_entity_query = build_client_entity_query(fonte=fonte, tipo=tipo, status=status)
+    # DUAS condições, porque são DUAS colecções (D-25): `db.clients` não
+    # tem partilha — a partilha é uma propriedade do PROCESSO —, logo a
+    # consulta aos clientes continua na condição genérica e só a dos
+    # processos inclui os partilhados. Usar a de processos nos clientes
+    # era acrescentar um `$or` que nenhum documento satisfaz; usar a
+    # genérica nos processos escondia ao parceiro a ficha que ele vê.
     tenant_condition = await build_tenant_condition(user)
+    tenant_condition_processos = await build_tenant_process_condition(user)
     matching_client_ids = None
     extra_client_docs: list[dict] = []
     if client_entity_query:
@@ -394,7 +405,7 @@ async def run_list_clients(
         # FIX (Pacote K): adicionado is_deleted à projection para o cálculo de
         # "cliente ativo" poder filtrar processos eliminados.
         processes = await db.processes.find(
-            com_isolamento(tenant_condition, process_query),
+            com_isolamento(tenant_condition_processos, process_query),
             {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
              "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1,
              "assigned_consultor_id": 1, "assigned_mediador_id": 1,
