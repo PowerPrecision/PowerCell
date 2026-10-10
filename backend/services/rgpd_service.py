@@ -11,6 +11,7 @@ Este módulo implementa:
 import re
 import uuid
 import io
+import html as html_lib
 import base64
 import logging
 import smtplib
@@ -1263,6 +1264,18 @@ async def _get_rendered_minuta_text(
         template_text = "MINUTA DE EXCLUSIVIDADE\n"
     
     rendered = template_text
+    # O texto do administrador pode ser HTML (editor rico). Um valor com `&` ou
+    # `<` ("Silva & Filhos", "Rua <sem nome>") partia o HTML e o conversor
+    # deitava fora o pedaço — escapa-se quando o modelo é HTML. Em texto simples
+    # o escape faz-se mais à frente, na conversão (`_wrap_plain_text_as_html`).
+    template_e_html = "<" in template_text and ">" in template_text
+
+    def _preenche(texto: str, variavel: str, valor) -> str:
+        valor = "" if valor is None else str(valor)
+        if template_e_html:
+            valor = html_lib.escape(valor, quote=False)
+        return texto.replace(variavel, valor)
+
     # `documento_id` do titular alvo — nunca era usado no template, pelo que
     # o número e o tipo do documento saíam em branco no PDF do 2.º titular.
     doc_tipo, doc_numero = partes_do_documento(personal_data.get("documento_id"))
@@ -1296,32 +1309,32 @@ async def _get_rendered_minuta_text(
     empresa_email = empresa["email"]
     empresa_contacto = empresa["contacto"]
 
-    rendered = rendered.replace("{{NOME_CLIENTE}}", client_name)
-    rendered = rendered.replace("{{NOME}}", client_name)
-    rendered = rendered.replace("{{NOME_EMPRESA}}", empresa_nome)
-    rendered = rendered.replace("{{NIF_EMPRESA}}", empresa_nif)
-    rendered = rendered.replace("{{CONTRIBUINTE}}", primeiro_preenchido(
+    rendered = _preenche(rendered, "{{NOME_CLIENTE}}", client_name)
+    rendered = _preenche(rendered, "{{NOME}}", client_name)
+    rendered = _preenche(rendered, "{{NOME_EMPRESA}}", empresa_nome)
+    rendered = _preenche(rendered, "{{NIF_EMPRESA}}", empresa_nif)
+    rendered = _preenche(rendered, "{{CONTRIBUINTE}}", primeiro_preenchido(
         consent_data.get("contribuinte"), personal_data.get("nif")))
-    rendered = rendered.replace("{{MORADA}}", primeiro_preenchido(
+    rendered = _preenche(rendered, "{{MORADA}}", primeiro_preenchido(
         consent_data.get("morada"),
         personal_data.get("morada_fiscal"),
         personal_data.get("morada")))
-    rendered = rendered.replace("{{LOCALIDADE}}", localidade)
-    rendered = rendered.replace("{{CODIGO_POSTAL}}", primeiro_preenchido(
+    rendered = _preenche(rendered, "{{LOCALIDADE}}", localidade)
+    rendered = _preenche(rendered, "{{CODIGO_POSTAL}}", primeiro_preenchido(
         consent_data.get("codigo_postal"), personal_data.get("codigo_postal")))
-    rendered = rendered.replace("{{TIPO_DOCUMENTO}}", get_tipo_documento_label(
+    rendered = _preenche(rendered, "{{TIPO_DOCUMENTO}}", get_tipo_documento_label(
         primeiro_preenchido(consent_data.get("tipo_documento"), doc_tipo)))
-    rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", primeiro_preenchido(
+    rendered = _preenche(rendered, "{{NUMERO_DOCUMENTO}}", primeiro_preenchido(
         consent_data.get("numero_documento"), doc_numero))
-    rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", primeiro_preenchido(
+    rendered = _preenche(rendered, "{{VALIDADE_DOCUMENTO}}", primeiro_preenchido(
         consent_data.get("validade_documento"),
         personal_data.get("data_validade_cc")))
-    rendered = rendered.replace("{{DATA_ASSINATURA}}", consent_data.get("data_assinatura", ""))
-    rendered = rendered.replace("{{MORADA_EMPRESA}}", empresa_morada)
-    rendered = rendered.replace("{{CONTACTO_EMPRESA}}", empresa_contacto)
+    rendered = _preenche(rendered, "{{DATA_ASSINATURA}}", consent_data.get("data_assinatura", ""))
+    rendered = _preenche(rendered, "{{MORADA_EMPRESA}}", empresa_morada)
+    rendered = _preenche(rendered, "{{CONTACTO_EMPRESA}}", empresa_contacto)
     # PACOTE DG-2 — email oficial da empresa (disponível para templates
     # customizados do admin; o template por defeito não o usa).
-    rendered = rendered.replace("{{EMAIL_EMPRESA}}", empresa_email)
+    rendered = _preenche(rendered, "{{EMAIL_EMPRESA}}", empresa_email)
     
     return rendered
 
@@ -1602,137 +1615,16 @@ def _build_rgpd_pdf(rgpd_text: str, consent_data: dict) -> bytes:
 
 
 def _build_minuta_pdf(minuta_text: str, consent_data: dict) -> bytes:
-    """Build professional Minuta de Exclusividade PDF."""
-    try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.units import cm
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.utils import ImageReader
-        from reportlab.lib.colors import HexColor, black, grey
-    except ImportError:
-        logger.error("reportlab não disponível")
-        return b""
-    
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    page_width, page_height = A4
-    
-    margin_left = 2 * cm
-    margin_right = 2 * cm
-    margin_top = 2 * cm
-    margin_bottom = 2 * cm
-    
-    font_name = "Helvetica"
-    font_size = 11
-    title_size = 14
-    line_height = font_size + 5
-    
-    y = page_height - margin_top
-    
-    # === TITLE ===
-    c.setFont("Helvetica-Bold", title_size)
-    c.drawCentredString(page_width / 2, y, "MINUTA DE EXCLUSIVIDADE")
-    y -= line_height + 4
-    
-    # Separator
-    c.setStrokeColor(HexColor("#333333"))
-    c.setLineWidth(0.5)
-    c.line(margin_left, y, page_width - margin_right, y)
-    y -= line_height + 8
-    
-    # === BODY TEXT ===
-    c.setFont(font_name, font_size)
-    max_width = page_width - margin_left - margin_right
-    max_chars = int(max_width / (font_size * 0.48))
-    
-    for line in minuta_text.split('\n'):
-        if "{{" in line:
-            continue
-        
-        words = line.split(' ')
-        current_line = ""
-        for word in words:
-            test_line = f"{current_line} {word}".strip()
-            if len(test_line) > max_chars and current_line:
-                try:
-                    c.drawString(margin_left, y, current_line)
-                except Exception:
-                    current_line = current_line.encode('latin-1', errors='replace').decode('latin-1')
-                    c.drawString(margin_left, y, current_line)
-                y -= line_height
-                current_line = word
-            else:
-                current_line = test_line
-        if current_line.strip():
-            try:
-                c.drawString(margin_left, y, current_line)
-            except Exception:
-                current_line = current_line.encode('latin-1', errors='replace').decode('latin-1')
-                c.drawString(margin_left, y, current_line)
-            y -= line_height
-        
-        if y < margin_bottom + 6 * cm:
-            c.showPage()
-            c.setFont(font_name, font_size)
-            y = page_height - margin_top
-    
-    y -= line_height
-    
-    # === SIGNATURE SECTION ===
-    c.setStrokeColor(grey)
-    c.setLineWidth(0.5)
-    c.line(margin_left, y, page_width - margin_right, y)
-    y -= line_height + 4
-    
-    # Date and location
-    data_assinatura = consent_data.get("data_assinatura", "")
-    loc = consent_data.get("localidade", "")
-    if loc and data_assinatura:
-        date_only = data_assinatura.split(" ")[0] if " " in data_assinatura else data_assinatura
-        c.setFont(font_name, font_size)
-        try:
-            c.drawString(margin_left, y, f"{loc}, {date_only}")
-        except Exception:
-            pass
-        y -= line_height + 10
-    
-    # Signature label
-    c.setFont("Helvetica-Bold", font_size)
-    c.drawString(margin_left, y, "Assinatura do Cliente")
-    y -= line_height
-    c.setFont(font_name, font_size - 1)
-    c.drawString(margin_left, y, "Titular dos Dados")
-    y -= line_height
-    c.setFont("Helvetica-Oblique", font_size - 2)
-    c.drawString(margin_left, y, "Por favor assine conforme o seu cartao de identificacao.")
-    y -= line_height + 4
-    
-    # Signature image
-    assinatura_b64 = consent_data.get("assinatura", "")
-    if assinatura_b64 and "," in assinatura_b64:
-        try:
-            img_data = base64.b64decode(assinatura_b64.split(",")[1])
-            img_buffer = io.BytesIO(img_data)
-            img_reader = ImageReader(img_buffer)
-            
-            img_w, img_h = img_reader.getSize()
-            max_sig_width = 8 * cm
-            max_sig_height = 4 * cm
-            if img_w > max_sig_width:
-                scale = max_sig_width / img_w
-                img_w = max_sig_width
-                img_h = img_h * scale
-            if img_h > max_sig_height:
-                scale = max_sig_height / img_h
-                img_h = max_sig_height
-                img_w = img_w * scale
-            
-            c.drawImage(img_reader, margin_left, y - max_sig_height, width=img_w, height=img_h, mask='auto')
-        except Exception as e:
-            logger.warning(f"Não foi possível incluir assinatura no PDF Minuta: {e}")
-    
-    c.save()
-    return buffer.getvalue()
+    """Minuta de Exclusividade assinada, em PDF.
+
+    Delega em `services.minuta_pdf`: esta função desenhava o texto linha a linha
+    no canvas e perdia o HTML do template, o negrito, o alinhamento e, em
+    silêncio, qualquer parágrafo com uma variável por resolver (Bloco 5, ponto
+    36). Import tardio porque `rgpd_pdf` importa deste módulo.
+    """
+    from services.minuta_pdf import build_signed_minuta_pdf
+
+    return build_signed_minuta_pdf(minuta_text, consent_data)
 
 
 async def _send_client_confirmation_email(

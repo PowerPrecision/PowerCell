@@ -92,6 +92,78 @@ _PACOTE_DI_ALLOWED_TAGS = [
     "div", "span",
 ]
 
+# Bloco 5, ponto 36 — ALINHAMENTO. O `bleach.clean(attributes={})` apagava TODOS
+# os atributos, e o editor rico (Quill) alinha com `class="ql-align-center"`: o
+# texto centrado/justificado/à direita na pré-visualização saía sempre à
+# esquerda no PDF. Deixa-se passar só o que é inofensivo e só o que o conversor
+# sabe usar: `class` com tokens de alinhamento. Nada de CSS livre.
+#
+# O `style="text-align: …"` (HTML colado de outro sítio) NÃO passa pelo bleach:
+# sem o `tinycss2` (que não é dependência do projecto) o bleach esvazia o
+# atributo `style` mesmo quando o filtro o aceita. Converte-se ANTES, numa classe
+# nossa, com um regex que só reconhece `text-align` e nada mais.
+_ALINHAMENTOS = {"left": "TA_LEFT", "center": "TA_CENTER", "right": "TA_RIGHT", "justify": "TA_JUSTIFY"}
+_CLASSES_DE_ALINHAMENTO = frozenset(f"ql-align-{nome}" for nome in _ALINHAMENTOS)
+_RE_TEXT_ALIGN = re.compile(r"text-align\s*:\s*(left|right|center|justify)\s*;?", re.IGNORECASE)
+_RE_ABERTURA_DE_BLOCO = re.compile(r"<(p|h[1-6]|li|div)\b([^>]*)>", re.IGNORECASE)
+_RE_ATRIBUTO_STYLE = re.compile(r"""\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE)
+_RE_ATRIBUTO_CLASS = re.compile(r'\sclass\s*=\s*"([^"]*)"', re.IGNORECASE)
+
+
+def _atributo_permitido(tag, nome, valor) -> bool:
+    """Filtro de atributos do `bleach`: só as classes de alinhamento passam."""
+    if nome != "class":
+        return False
+    tokens = str(valor or "").split()
+    return bool(tokens) and all(t in _CLASSES_DE_ALINHAMENTO for t in tokens)
+
+
+def _estilo_de_alinhamento_para_classe(html_text: str) -> str:
+    """`style="text-align: X"` num bloco → `class="ql-align-X"` (ver acima)."""
+    def converter(m):
+        etiqueta, atributos = m.group(1), m.group(2)
+        estilo = _RE_ATRIBUTO_STYLE.search(atributos)
+        if not estilo:
+            return m.group(0)
+        valor = estilo.group(1) if estilo.group(1) is not None else estilo.group(2)
+        atributos = atributos.replace(estilo.group(0), "", 1)
+        achado = _RE_TEXT_ALIGN.fullmatch((valor or "").strip())
+        if achado:
+            token = f"ql-align-{achado.group(1).lower()}"
+            existente = _RE_ATRIBUTO_CLASS.search(atributos)
+            if existente:
+                atributos = atributos.replace(existente.group(0), f' class="{existente.group(1)} {token}"', 1)
+            else:
+                atributos += f' class="{token}"'
+        return f"<{etiqueta}{atributos}>"
+
+    return _RE_ABERTURA_DE_BLOCO.sub(converter, html_text)
+
+
+def _alinhamento_do_elemento(el):
+    """`TA_*` pedido pelo elemento (classe de alinhamento), ou `None`."""
+    from reportlab.lib import enums
+
+    chave = None
+    for token in (el.get("class") or "").split():
+        if token in _CLASSES_DE_ALINHAMENTO:
+            chave = token[len("ql-align-"):]
+    return getattr(enums, _ALINHAMENTOS[chave]) if chave else None
+
+
+def _estilo_alinhado(estilo, el):
+    """O estilo do parágrafo, com o alinhamento do elemento quando o houver.
+
+    O alinhamento por omissão (o do estilo do documento) mantém-se quando o
+    HTML não pede nenhum — o corpo justificado do RGPD continua justificado.
+    """
+    from reportlab.lib.styles import ParagraphStyle
+
+    alinhamento = _alinhamento_do_elemento(el)
+    if alinhamento is None or alinhamento == getattr(estilo, "alignment", None):
+        return estilo
+    return ParagraphStyle(f"{estilo.name}_al{alinhamento}", parent=estilo, alignment=alinhamento)
+
 
 # ---------------------------------------------------------------------------
 # PACOTE DG — Registo de fonte TTF (DejaVuSans) para suporte Unicode
@@ -546,7 +618,7 @@ def _pacote_di_process_node(
             # explícito.
             if "<b>" not in text:
                 text = f"<b>{text}</b>"
-            flowables.append(Paragraph(text, style))
+            flowables.append(Paragraph(text, _estilo_alinhado(style, el)))
     elif tag == "p":
         text = _pacote_di_serialize_inline(el)
         if text.strip():
@@ -573,7 +645,7 @@ def _pacote_di_process_node(
                 and _is_section_heading(plain_first)
             ):
                 text = f"<b>{text}</b>"
-            flowables.append(Paragraph(text, body_style))
+            flowables.append(Paragraph(text, _estilo_alinhado(body_style, el)))
         else:
             flowables.append(Spacer(1, 0.15 * cm))
     elif tag == "br":
@@ -584,7 +656,7 @@ def _pacote_di_process_node(
             li_text = _pacote_di_serialize_inline(li)
             if li_text.strip():
                 items.append(
-                    ListItem(Paragraph(li_text, body_style))
+                    ListItem(Paragraph(li_text, _estilo_alinhado(body_style, li)))
                 )
         if items:
             if tag == "ol":
@@ -723,9 +795,9 @@ def _html_to_flowables(html_text, styles, font_name, line_height_ratio=1.5):
     # PACOTE DI — Sanitizar com bleach (defesa em profundidade)
     try:
         cleaned = bleach.clean(
-            text_str,
+            _estilo_de_alinhamento_para_classe(text_str),
             tags=_PACOTE_DI_ALLOWED_TAGS,
-            attributes={},
+            attributes={"*": _atributo_permitido},
             strip=True,
         )
     except Exception as clean_err:
@@ -1170,6 +1242,11 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
     # estruturado (`_build_signature_block`) — helper partilhado.
     # ------------------------------------------------------------------
     if minuta_text:
+        # O título já é desenhado a seguir; o template por omissão repete-o no
+        # corpo. Variáveis por resolver ficam em branco, não literais.
+        from services.minuta_pdf import preparar_texto
+
+        minuta_text = preparar_texto(minuta_text)
         story.append(PageBreak())
         story.append(Paragraph("MINUTA DE EXCLUSIVIDADE", title_style))
         story.append(

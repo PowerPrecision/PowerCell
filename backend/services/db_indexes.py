@@ -869,6 +869,21 @@ async def create_ttl_indexes(db) -> dict:
             db.process_financial_origins, idx, "process_financial_origins", results,
         )
 
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'portal_scraper_jobs' (Bloco 5, pontos 8 e 9)
+    # ====================================================================
+    # Tudo o que se pergunta a esta colecção é «os jobs deste processo,
+    # activos, o mais recente»: o MFA, o job activo antes de criar outro e a
+    # limpeza dos mortos. Sem o índice, cada polling do ecrã (3 s) varria-a.
+    scraper_job_indexes = [
+        {"keys": [("process_id", 1), ("created_at", -1)], "name": "idx_scraper_job_process_recente"},
+        {"keys": [("id", 1)], "name": "idx_scraper_job_id", "unique": True},
+    ]
+    for idx in scraper_job_indexes:
+        await _create_index_safe(
+            db.portal_scraper_jobs, idx, "portal_scraper_jobs", results,
+        )
+
     return results
 
 

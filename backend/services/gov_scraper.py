@@ -53,6 +53,9 @@ import shutil
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
+from services.gov_fetch_policy import MFA_ESPERA_SEGUNDOS, executar_com_tentativas
+from services.pdf_validation import parece_pdf
+
 logger = logging.getLogger(__name__)
 
 # ================================================================
@@ -223,8 +226,9 @@ SEG_SOCIAL_SEL = {
 DEFAULT_TIMEOUT = 90000  # 90 segundos
 NAVIGATION_TIMEOUT = 90000  # 90 segundos
 
-# Tempo máximo total do scraper (segundos) — prevenir execuções infinitas
-MAX_SCRAPER_DURATION = 300  # 5 minutos (login + 2 docs com fallbacks)
+# O orçamento de uma tentativa (extracção + espera do SMS) vive em
+# `gov_fetch_policy.orcamento_da_tentativa()` — a espera do código deixou de
+# comer o tempo dos documentos.
 
 # Tempo máximo para lançar o browser (segundos) — prevenir hangs no Render
 BROWSER_LAUNCH_TIMEOUT = 120  # 2 minutos para cold start
@@ -238,9 +242,7 @@ _scraper_semaphore = asyncio.Semaphore(1)
 # os restantes — em vez de o retry global perder tudo.
 PER_DOC_TIMEOUT = 90  # 1m30 por documento
 
-# Retry config
-MAX_RETRIES = 2
-RETRY_DELAYS = [5, 15]  # segundos entre tentativas
+# Tentativas, atrasos e orçamento total: `services/gov_fetch_policy.py`.
 
 # User-Agent atualizado (Chrome 131 — Maio 2025)
 MODERN_USER_AGENT = (
@@ -556,63 +558,16 @@ async def fetch_financas_documents(
         )
 
     masked_nif = _mask_identifier(nif)
-    last_result = None
 
-    # Semaphore: garantir que SÓ UM scraper corre de cada vez (poupar RAM)
-    if _scraper_semaphore.locked():
-        logger.warning("[GOV_SCRAPER] Finanças: Semaphore ocupado — outro scraper está a correr. A aguardar...")
-
-    async with _scraper_semaphore:
-        logger.info("[GOV_SCRAPER] Finanças: Semaphore adquirido")
-
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                result = await asyncio.wait_for(
-                    _financas_scraper_inner(nif, password, process_id=process_id),
-                    timeout=MAX_SCRAPER_DURATION,
-                )
-                if result.success:
-                    return result
-
-                last_result = result
-
-                # Se erro de credenciais, não faz sentido retry
-                if result.error in ("credenciais_invalidas", "mfa_requerido"):
-                    return result
-
-                # Retry com backoff
-                if attempt < MAX_RETRIES:
-                    delay = RETRY_DELAYS[attempt]
-                    logger.info(
-                        f"[GOV_SCRAPER] Retry {attempt + 1}/{MAX_RETRIES} "
-                        f"para NIF {masked_nif} em {delay}s (erro: {result.error})"
-                    )
-                    await asyncio.sleep(delay)
-
-            except asyncio.TimeoutError:
-                logger.error(f"[GOV_SCRAPER] Timeout ({MAX_SCRAPER_DURATION}s) para NIF {masked_nif}")
-                last_result = ScraperResult(success=False, error="timeout", step_failed="global_timeout")
-
-            except MemoryError as e:
-                logger.error(f"[GOV_SCRAPER] Memória insuficiente para NIF {masked_nif}: {e}")
-                return ScraperResult(success=False, error="scraper_unavailable", step_failed="memory_error")
-
-            except Exception as e:
-                logger.error(f"[GOV_SCRAPER] Erro para NIF {masked_nif}: {type(e).__name__}")
-                last_result = ScraperResult(success=False, error=type(e).__name__, step_failed="unexpected_error")
-
-            # Retry com backoff para timeouts/erros
-            if attempt < MAX_RETRIES:
-                delay = RETRY_DELAYS[attempt]
-                logger.info(f"[GOV_SCRAPER] Retry {attempt + 1}/{MAX_RETRIES} em {delay}s")
-                await asyncio.sleep(delay)
-
-    # Limpeza final
-    del password
-    del nif
-    _force_gc()
-
-    return last_result or ScraperResult(success=False, error="unknown", step_failed="all_retries_exhausted")
+    # Semáforo, orçamento, repetição e limpeza do código MFA: política única
+    # em `gov_fetch_policy` (ver o porquê da extracção no docstring de lá).
+    return await executar_com_tentativas(
+        lambda: _financas_scraper_inner(nif, password, process_id=process_id),
+        etiqueta=f"Finanças NIF {masked_nif}",
+        semaforo=_scraper_semaphore,
+        fabrica_de_resultado=lambda erro, passo: ScraperResult(success=False, error=erro, step_failed=passo),
+        process_id=process_id,
+    )
 
 
 async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[str] = None) -> ScraperResult:
@@ -868,25 +823,15 @@ async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[
 
                 if mfa_detected and process_id:
                     # ── MFA DETETADO: Entrar em modo de espera ──
-                    from services.mfa_cache import set_mfa_status, get_mfa_code, delete_mfa_code
+                    from services.mfa_cache import aguardar_codigo_mfa, delete_mfa_code
 
                     logger.info(
                         f"[GOV_SCRAPER] MFA Finanças: a sinalizar "
                         f"awaiting_mfa para processo {process_id}"
                     )
-                    await set_mfa_status(process_id, "awaiting_mfa")
-
-                    # Loop de espera: pollar Redis a cada 2s, máximo 120s
-                    mfa_code = None
-                    for poll_attempt in range(60):
-                        await asyncio.sleep(2)
-                        mfa_code = await get_mfa_code(process_id)
-                        if mfa_code:
-                            logger.info(
-                                f"[GOV_SCRAPER] Código MFA recebido para "
-                                f"processo {process_id} após {poll_attempt * 2}s"
-                            )
-                            break
+                    # Limpa o código antigo, sinaliza `awaiting_mfa` e espera pelo SMS
+                    # (ver `mfa_cache.aguardar_codigo_mfa`).
+                    mfa_code = await aguardar_codigo_mfa(process_id, timeout_s=MFA_ESPERA_SEGUNDOS)
 
                     if not mfa_code:
                         logger.warning(
@@ -1324,7 +1269,7 @@ async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[
                             # Se o download nativo não disparou (PDF aberto inline),
                             # usar _intercept_pdf_from_element que tenta href directo
                             # e depois expect_response.
-                            if not pdf_bytes or not pdf_bytes.startswith(b"%PDF-"):
+                            if not pdf_bytes or not parece_pdf(pdf_bytes):
                                 logger.info(
                                     "[GOV_SCRAPER] Download nativo IRS falhou ou "
                                     "não é PDF — a tentar _intercept_pdf_from_element"
@@ -1340,7 +1285,7 @@ async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[
                                     )
 
                             # ── Validação final ──
-                            if pdf_bytes and pdf_bytes.startswith(b"%PDF-"):
+                            if parece_pdf(pdf_bytes):
                                 now = datetime.now(timezone.utc)
                                 doc_irs = ScraperDocument(
                                     filename=f"Comprovativo_IRS_{now.strftime('%Y%m%d')}.pdf",
@@ -1356,37 +1301,17 @@ async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[
                                     f"{doc_irs.filename} ({len(pdf_bytes)} bytes)"
                                 )
                                 break  # Sucesso — parar de tentar locators
-                            elif pdf_bytes and len(pdf_bytes) > 5000:
-                                # Não começa com %PDF- mas tem tamanho razoável —
-                                # verificar se é HTML disfarçado
-                                is_html = (
-                                    b"<html" in pdf_bytes[:500].lower()
-                                    or b"<!doctype" in pdf_bytes[:500].lower()
+                            elif pdf_bytes:
+                                # Não é um PDF (`parece_pdf` recusou): HTML de erro ou lixo.
+                                # Guardá-lo como PDF — o que a versão anterior fazia com
+                                # tudo o que tivesse mais de 5 KB e não parecesse HTML —
+                                # dava ao cliente um «documento» ilegível e desligava o
+                                # recurso seguinte, que podia ter trazido o verdadeiro.
+                                logger.warning(
+                                    f"[GOV_SCRAPER] Resposta IRS não é um PDF "
+                                    f"({len(pdf_bytes)} bytes) — a tentar próximo locator"
                                 )
-                                if is_html:
-                                    logger.warning(
-                                        f"[GOV_SCRAPER] Resposta IRS é HTML, "
-                                        f"não PDF ({len(pdf_bytes)} bytes) — "
-                                        f"a tentar próximo locator"
-                                    )
-                                    continue
-                                else:
-                                    # Pode ser um PDF com header não-padrão — guardar
-                                    now = datetime.now(timezone.utc)
-                                    doc_irs = ScraperDocument(
-                                        filename=f"Comprovativo_IRS_{now.strftime('%Y%m%d')}.pdf",
-                                        content_bytes=pdf_bytes,
-                                        content_type="application/pdf",
-                                        category="Financeiros",
-                                        label="Declaração de IRS",
-                                    )
-                                    documents.append(doc_irs)
-                                    irs_downloaded = True
-                                    logger.info(
-                                        f"[GOV_SCRAPER] IRS descarregado (sem header %PDF-): "
-                                        f"{doc_irs.filename} ({len(pdf_bytes)} bytes)"
-                                    )
-                                    break
+                                continue
                             else:
                                 logger.warning(
                                     f"[GOV_SCRAPER] Resposta IRS demasiado pequena "
@@ -1689,7 +1614,7 @@ async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[
                         )
 
                     # ── Tentativa 2: Fallback href + expect_response ──
-                    if not pdf_bytes or not pdf_bytes.startswith(b"%PDF-"):
+                    if not pdf_bytes or not parece_pdf(pdf_bytes):
                         logger.info(
                             "[GOV_SCRAPER] Download nativo Nota Liquidação "
                             "falhou ou não é PDF — a tentar "
@@ -1707,7 +1632,7 @@ async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[
                             )
 
                     # ── Validação final ──
-                    if pdf_bytes and pdf_bytes.startswith(b"%PDF-"):
+                    if parece_pdf(pdf_bytes):
                         now = datetime.now(timezone.utc)
                         doc_nota = ScraperDocument(
                             filename=f"Nota_Liquidacao_IRS_{now.strftime('%Y%m%d')}.pdf",
@@ -1722,32 +1647,12 @@ async def _financas_scraper_inner(nif: str, password: str, process_id: Optional[
                             f"[GOV_SCRAPER] Nota de Liquidação descarregada: "
                             f"{doc_nota.filename} ({len(pdf_bytes)} bytes)"
                         )
-                    elif pdf_bytes and len(pdf_bytes) > 5000:
-                        is_html = (
-                            b"<html" in pdf_bytes[:500].lower()
-                            or b"<!doctype" in pdf_bytes[:500].lower()
+                    elif pdf_bytes:
+                        # Não é um PDF: ver o comentário do bloco do IRS.
+                        logger.warning(
+                            f"[GOV_SCRAPER] Resposta Nota Liquidação não é um PDF "
+                            f"({len(pdf_bytes)} bytes) — a ignorar"
                         )
-                        if is_html:
-                            logger.warning(
-                                "[GOV_SCRAPER] Resposta Nota Liquidação "
-                                "é HTML, não PDF — a ignorar"
-                            )
-                        else:
-                            now = datetime.now(timezone.utc)
-                            doc_nota = ScraperDocument(
-                                filename=f"Nota_Liquidacao_IRS_{now.strftime('%Y%m%d')}.pdf",
-                                content_bytes=pdf_bytes,
-                                content_type="application/pdf",
-                                category="Financeiros",
-                                label="Nota de Liquidação IRS",
-                            )
-                            documents.append(doc_nota)
-                            nota_downloaded = True
-                            logger.info(
-                                f"[GOV_SCRAPER] Nota de Liquidação descarregada "
-                                f"(sem header %PDF-): {doc_nota.filename} "
-                                f"({len(pdf_bytes)} bytes)"
-                            )
                     else:
                         logger.warning(
                             f"[GOV_SCRAPER] Resposta Nota Liquidação pequena "
@@ -1922,7 +1827,7 @@ async def _intercept_pdf_from_element(page, btn_locator, safe_filename: str) -> 
             response = await page.goto(full_url, timeout=30000)
             if response:
                 pdf_bytes = await response.body()
-                if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
+                if parece_pdf(pdf_bytes):
                     logger.info(
                         f"[GOV_SCRAPER] PDF obtido via href directo para "
                         f"{safe_filename} ({len(pdf_bytes)} bytes)"
@@ -1970,7 +1875,7 @@ async def _intercept_pdf_from_element(page, btn_locator, safe_filename: str) -> 
                 await btn_locator.click()
             response = await response_info.value
             pdf_bytes = await response.body()
-            if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
+            if parece_pdf(pdf_bytes):
                 logger.info(
                     f"[GOV_SCRAPER] PDF obtido via expect_response para "
                     f"{safe_filename} ({len(pdf_bytes)} bytes)"
@@ -2042,7 +1947,7 @@ async def _download_financas_document(
                         pdf_bytes = await _intercept_pdf_from_element(
                             page, btn_locator, safe_filename
                         )
-                        if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
+                        if parece_pdf(pdf_bytes):
                             return ScraperDocument(
                                 filename=safe_filename,
                                 content_bytes=pdf_bytes,
@@ -2087,7 +1992,7 @@ async def _download_financas_document(
                     pdf_bytes = await _intercept_pdf_from_element(
                         page, btn_locator, safe_filename
                     )
-                    if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
+                    if parece_pdf(pdf_bytes):
                         return ScraperDocument(
                             filename=safe_filename,
                             content_bytes=pdf_bytes,
@@ -2132,7 +2037,7 @@ async def _download_financas_document(
                         pdf_bytes = await _intercept_pdf_from_element(
                             page, dl_el, safe_filename
                         )
-                        if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
+                        if parece_pdf(pdf_bytes):
                             return ScraperDocument(
                                 filename=safe_filename,
                                 content_bytes=pdf_bytes,
@@ -2219,58 +2124,14 @@ async def fetch_seg_social_documents(
         )
 
     masked_niss = _mask_identifier(niss)
-    last_result = None
 
-    # Semaphore: garantir que SÓ UM scraper corre de cada vez (poupar RAM)
-    if _scraper_semaphore.locked():
-        logger.warning("[GOV_SCRAPER] Seg. Social: Semaphore ocupado — outro scraper está a correr. A aguardar...")
-
-    async with _scraper_semaphore:
-        logger.info("[GOV_SCRAPER] Seg. Social: Semaphore adquirido")
-
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                result = await asyncio.wait_for(
-                    _seg_social_scraper_inner(niss, password, process_id=process_id),
-                    timeout=MAX_SCRAPER_DURATION,
-                )
-                if result.success:
-                    return result
-
-                last_result = result
-
-                if result.error in ("credenciais_invalidas", "mfa_requerido"):
-                    return result
-
-                if attempt < MAX_RETRIES:
-                    delay = RETRY_DELAYS[attempt]
-                    logger.info(
-                        f"[GOV_SCRAPER] Retry {attempt + 1}/{MAX_RETRIES} "
-                        f"Seg. Social para NISS {masked_niss} em {delay}s (erro: {result.error})"
-                    )
-                    await asyncio.sleep(delay)
-
-            except asyncio.TimeoutError:
-                logger.error(f"[GOV_SCRAPER] Timeout ({MAX_SCRAPER_DURATION}s) Seg. Social NISS {masked_niss}")
-                last_result = ScraperResult(success=False, error="timeout", step_failed="global_timeout")
-
-            except MemoryError as e:
-                logger.error(f"[GOV_SCRAPER] Memória insuficiente Seg. Social NISS {masked_niss}: {e}")
-                return ScraperResult(success=False, error="scraper_unavailable", step_failed="memory_error")
-
-            except Exception as e:
-                logger.error(f"[GOV_SCRAPER] Erro Seg. Social NISS {masked_niss}: {type(e).__name__}")
-                last_result = ScraperResult(success=False, error=type(e).__name__, step_failed="unexpected_error")
-
-            if attempt < MAX_RETRIES:
-                delay = RETRY_DELAYS[attempt]
-                await asyncio.sleep(delay)
-
-    del password
-    del niss
-    _force_gc()
-
-    return last_result or ScraperResult(success=False, error="unknown", step_failed="all_retries_exhausted")
+    return await executar_com_tentativas(
+        lambda: _seg_social_scraper_inner(niss, password, process_id=process_id),
+        etiqueta=f"Seg. Social NISS {masked_niss}",
+        semaforo=_scraper_semaphore,
+        fabrica_de_resultado=lambda erro, passo: ScraperResult(success=False, error=erro, step_failed=passo),
+        process_id=process_id,
+    )
 
 
 async def _seg_social_scraper_inner(niss: str, password: str, process_id: Optional[str] = None) -> ScraperResult:
@@ -2530,25 +2391,15 @@ async def _seg_social_scraper_inner(niss: str, password: str, process_id: Option
                     if mfa_detected and process_id:
                         # ── MFA DETETADO: Entrar em modo de espera ──
                         # Atualizar job para "awaiting_mfa" (frontend vai mostrar input)
-                        from services.mfa_cache import set_mfa_status, get_mfa_code, delete_mfa_code
+                        from services.mfa_cache import aguardar_codigo_mfa, delete_mfa_code
 
                         logger.info(
                             f"[GOV_SCRAPER] MFA Seg. Social: a sinalizar "
                             f"awaiting_mfa para processo {process_id}"
                         )
-                        await set_mfa_status(process_id, "awaiting_mfa")
-
-                        # Loop de espera: pollar Redis a cada 2s, máximo 120s (60 iterações)
-                        mfa_code = None
-                        for poll_attempt in range(60):
-                            await asyncio.sleep(2)
-                            mfa_code = await get_mfa_code(process_id)
-                            if mfa_code:
-                                logger.info(
-                                    f"[GOV_SCRAPER] Código MFA recebido para "
-                                    f"processo {process_id} após {poll_attempt * 2}s"
-                                )
-                                break
+                        # Limpa o código antigo, sinaliza `awaiting_mfa` e espera pelo SMS
+                        # (ver `mfa_cache.aguardar_codigo_mfa`).
+                        mfa_code = await aguardar_codigo_mfa(process_id, timeout_s=MFA_ESPERA_SEGUNDOS)
 
                         if not mfa_code:
                             # Timeout: cliente não submeteu código a tempo
@@ -2908,7 +2759,7 @@ async def _intercept_pdf_from_element_seg_social(page, btn_locator, safe_filenam
             response = await page.goto(full_url, timeout=30000)
             if response:
                 pdf_bytes = await response.body()
-                if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
+                if parece_pdf(pdf_bytes):
                     logger.info(
                         f"[GOV_SCRAPER] PDF obtido via href directo (SS) para "
                         f"{safe_filename} ({len(pdf_bytes)} bytes)"
@@ -2953,7 +2804,7 @@ async def _intercept_pdf_from_element_seg_social(page, btn_locator, safe_filenam
                 await btn_locator.click()
             response = await response_info.value
             pdf_bytes = await response.body()
-            if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
+            if parece_pdf(pdf_bytes):
                 logger.info(
                     f"[GOV_SCRAPER] PDF obtido via expect_response (SS) para "
                     f"{safe_filename} ({len(pdf_bytes)} bytes)"
@@ -3012,7 +2863,7 @@ async def _download_seg_social_document(
                     pdf_bytes = await _intercept_pdf_from_element_seg_social(
                         page, btn_locator, safe_filename
                     )
-                    if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
+                    if parece_pdf(pdf_bytes):
                         return ScraperDocument(
                             filename=safe_filename,
                             content_bytes=pdf_bytes,
@@ -3048,7 +2899,7 @@ async def _download_seg_social_document(
                         pdf_bytes = await _intercept_pdf_from_element_seg_social(
                             page, dl_el, safe_filename
                         )
-                        if pdf_bytes and pdf_bytes.startswith(b'%PDF-'):
+                        if parece_pdf(pdf_bytes):
                             return ScraperDocument(
                                 filename=safe_filename,
                                 content_bytes=pdf_bytes,

@@ -317,13 +317,26 @@ class FakeAsyncCollection:
         matched = [doc for doc in self.docs if self._matches(doc, query)]
         if sort:
             key_or_list = sort
-            def sort_key(doc: dict):
-                if isinstance(key_or_list, (list, tuple)) and key_or_list:
-                    if isinstance(key_or_list[0], (list, tuple)):
-                        return tuple(str(doc.get(k) or "") for k, _ in key_or_list)
-                    return tuple(str(doc.get(k) or "") for k in key_or_list)
-                return str(doc.get(key_or_list) or "")
-            matched = sorted(matched, key=sort_key)
+            if (
+                isinstance(key_or_list, (list, tuple))
+                and key_or_list
+                and isinstance(key_or_list[0], (list, tuple))
+            ):
+                # [(campo, direcção), ...]: a direcção conta (-1 = descendente).
+                # Ignorá-la devolvia o MAIS ANTIGO onde o código pedia o mais
+                # recente, e o teste passava por acaso com um só documento.
+                for campo, direccao in reversed(list(key_or_list)):
+                    matched = sorted(
+                        matched,
+                        key=lambda d, c=campo: str(d.get(c) or ""),
+                        reverse=direccao < 0,
+                    )
+            else:
+                def sort_key(doc: dict):
+                    if isinstance(key_or_list, (list, tuple)) and key_or_list:
+                        return tuple(str(doc.get(k) or "") for k in key_or_list)
+                    return str(doc.get(key_or_list) or "")
+                matched = sorted(matched, key=sort_key)
         for doc in matched:
             return dict(doc)
         return None
@@ -394,6 +407,7 @@ class FakeAsyncCollection:
             return MagicMock(matched_count=len(matched), modified_count=len(matched))
         if upsert:
             new_doc = dict(query)
+            self._apply_set(new_doc, update.get("$setOnInsert", {}))
             self._apply_update(new_doc, update)
             self.docs.append(new_doc)
             return MagicMock(matched_count=0, modified_count=0, upserted_id="fake-upserted-id")
@@ -460,6 +474,9 @@ class FakeAsyncCollection:
                 push_ops = update.get("$push")
                 if push_ops:
                     self._apply_push(doc, push_ops)
+                unset_ops = update.get("$unset")
+                if unset_ops:
+                    self._apply_unset(doc, unset_ops)
                 resultado = dict(doc)
                 if projection:
                     excluir = {k for k, v in projection.items() if not v}

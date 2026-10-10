@@ -418,7 +418,9 @@ SEM_GUARDA_DO_CLIENTE = {
     "resolve_portal_token": "emite token; recusa dentro de `run_resolve_portal_token`",
     "impersonate_client_portal": "staff (`require_staff`), não é o cliente",
     "create_recommendations": "staff (`get_current_user`)",
-    "get_scraper_job_status": "consulta pública de um job por id opaco; não devolve dados do processo",
+    # `get_scraper_job_status` SAIU desta lista (Bloco 5): estava aqui como «consulta
+    # pública de um job por id opaco», mas devolvia o documento inteiro do job —
+    # `mfa_code` em claro incluído. Passou a exigir `get_current_client`.
 }
 
 

@@ -1161,7 +1161,14 @@ async def send_email(
                 )
                 return {
                     "success": False,
-                    "error": "Falha de autenticação SMTP. Verifique as credenciais da conta de email activa.",
+                    "error": (
+                        f"A password da conta {account.email} não pôde ser lida (a chave de "
+                        "encriptação pode ter mudado). Volte a guardá-la em Perfil → "
+                        "Configuração de Webmail."
+                    ),
+                    "error_code": "smtp_password_unreadable",
+                    "account": account.name,
+                    "account_email": account.email,
                 }
             def _enviar_por_smtp():
                 """Bloco SMTP bloqueante — corre numa thread, fora do event loop."""
@@ -1240,6 +1247,9 @@ async def send_email(
         return {
             "success": False,
             "error": "Falha de autenticação SMTP. Verifique as credenciais da conta de email activa ou da Caixa Geral.",
+            "error_code": "smtp_auth",
+            "account": getattr(account, "name", None),
+            "account_email": getattr(account, "email", None),
         }
     except Exception as e:
         logger.error(
@@ -1255,6 +1265,9 @@ async def send_email(
             return {
                 "success": False,
                 "error": "Falha de autenticação SMTP. Verifique as credenciais da conta de email activa ou da Caixa Geral.",
+                "error_code": "smtp_auth",
+                "account": getattr(account, "name", None),
+                "account_email": getattr(account, "email", None),
             }
         return {"success": False, "error": "Não foi possível enviar o email. Tente novamente."}
 

@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 
 from database import db
 from services.encryption import encryption_service
+from services.mailbox_backoff import deve_esperar
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +212,8 @@ async def get_user_companies_with_config(user_id: str) -> List[str]:
 
 async def get_active_email_configs_for_sync(
     limit: int = 100,
+    *,
+    respeitar_recuo: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Retorna todas as configs de email pessoais ativas para sincronização
@@ -235,6 +238,12 @@ async def get_active_email_configs_for_sync(
           - ``email_address``: endereço de email configurado
           - ``auth_method``: "imap_smtp" | "google_oauth" | "none"
           - ``user_email``: email de login do utilizador (para logging)
+
+    ``respeitar_recuo``: as contas cuja autenticação foi recusada duas ou mais
+    vezes seguidas ficam de fora durante um intervalo crescente (ver
+    ``mailbox_backoff``). Cada ciclo falhado é mais uma tentativa de login que
+    o servidor conta contra a conta — e o bloqueio que daí resulta responde
+    ``535 Incorrect authentication data`` também ao SMTP, com a password certa.
     """
     # 1. Buscar configs ativas com credenciais (IMAP/SMTP OU Google OAuth)
     cursor = db.user_email_configs.find(
@@ -252,6 +261,11 @@ async def get_active_email_configs_for_sync(
             "email_address": 1,
             "auth_method": 1,
             "id": 1,
+            # Estado de saúde e data da última alteração: o que o recuo precisa.
+            "sync_error_class": 1,
+            "sync_failures": 1,
+            "last_sync_attempt_at": 1,
+            "updated_at": 1,
         }
     )
     configs = await cursor.to_list(limit)
@@ -272,6 +286,14 @@ async def get_active_email_configs_for_sync(
     for c in configs:
         uid = c.get("user_id")
         if not uid or uid not in active_users:
+            continue
+        if respeitar_recuo and deve_esperar(c):
+            logger.warning(
+                "[EMAIL-SYNC] A saltar %s (utilizador %s): credenciais recusadas "
+                "%s vezes seguidas — nova tentativa só depois do intervalo de recuo "
+                "ou quando a configuração mudar.",
+                c.get("email_address", "?"), uid, c.get("sync_failures"),
+            )
             continue
         result.append({
             "user_id": uid,

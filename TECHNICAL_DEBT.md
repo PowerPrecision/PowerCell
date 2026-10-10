@@ -497,6 +497,30 @@ filtra pelos processos do âmbito; as contagens não. Fechar exige carimbar
 `history` (escritor único `log_history`) e migrar o legado — adiado por ser um
 escritor central e por o impacto ser só em quem trabalha em duas redes.
 
+### D-29 · Um job activo por processo não é atómico
+**Onde:** `services/portal_gov_fetch._iniciar_recolha`, colecção `portal_scraper_jobs`
+
+A verificação «há um job activo?» e a criação do job são duas operações. Dois
+pedidos simultâneos podem passar ambos e arrancar dois logins (dois SMS ao
+cliente, e o código escrito serve um só). Mitigado: limite de 5/min por processo,
+o botão fica desactivado enquanto o pedido corre e o dano é um SMS a mais, não
+uma fuga. Fechar exige um índice único parcial por `process_id` sobre um campo
+booleano `active` (o `partialFilterExpression` do Mongo não aceita `$in` sobre
+`status`) e a reivindicação por `insert` com tratamento de `DuplicateKeyError`.
+
+### D-30 · Os scrapers do Estado e dos portais só se provam em produção
+**Onde:** `services/gov_scraper.py`, `services/scraper.py`
+
+Sem rede nem credenciais reais, tudo o que se prova é a orquestração (política,
+estado, arquivo, MFA) e a camada estruturada contra HTML de fixture. Os
+selectores do Portal das Finanças e da Segurança Social Direta (`FINANCAS_SEL`,
+`SEG_SOCIAL_SEL`) continuam a ser os do código anterior e **não foram
+validados contra os portais**; o `gov_scraper` tem ~3 000 linhas num módulo só,
+com dois fluxos inner quase gémeos. O que fecha isto: um relatório de
+selectores falhados por execução (passo e selector, sem credenciais) e uma
+rotina de verificação mensal com uma conta de teste; só depois faz sentido
+partir o módulo.
+
 ## Fechadas
 
 Ficam aqui só o número e a iteração que as fechou — o detalhe vive no

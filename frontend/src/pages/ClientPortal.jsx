@@ -558,6 +558,10 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
 // ====================================================================
 // CREDENTIALS DIALOG — Finanças / Segurança Social
 // ====================================================================
+// Teto do polling de uma recolha no Estado: acima do pior caso do servidor (5 min de fila +
+// 12 min de tentativas) e abaixo do encerramento de jobs mortos (24 min).
+const SCRAPER_POLL_MAX_MS = 20 * 60 * 1000;
+
 function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
   const [idField, setIdField] = useState('');
   const [password, setPassword] = useState('');
@@ -602,10 +606,38 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     let cancelled = false;
+    const startedAt = Date.now();
     const pollInterval = setInterval(async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/portal/scraper-job/${scraperJobId}`);
-        if (!res.ok || cancelled) return;
+        // Sem fim à vista não há polling: o servidor encerra os jobs mortos, mas
+        // um ecrã que nunca desiste deixa o cliente preso (o `beforeunload`
+        // acima ainda lhe impede de fechar o separador).
+        if (Date.now() - startedAt > SCRAPER_POLL_MAX_MS) {
+          clearInterval(pollInterval);
+          setAwaitingMfa(false);
+          setLoading(false);
+          setError(
+            'A obtenção está a demorar mais do que o esperado. Tente novamente mais tarde ou envie os documentos através do botão "Carregar documentos".'
+          );
+          return;
+        }
+        // O estado do job é do cliente autenticado: leva o token do Portal.
+        const res = await fetch(`${BACKEND_URL}/portal/scraper-job/${scraperJobId}`, {
+          headers: { Authorization: `Bearer ${getPortalToken()}` },
+        });
+        if (cancelled) return;
+        if (res.status === 401 || res.status === 404) {
+          clearInterval(pollInterval);
+          setAwaitingMfa(false);
+          setLoading(false);
+          setError(
+            res.status === 401
+              ? 'A sua sessão expirou. Volte a entrar no portal.'
+              : 'Esta obtenção já não está disponível. Inicie-a de novo.'
+          );
+          return;
+        }
+        if (!res.ok) return;
         const job = await res.json();
 
         if (job.status === 'awaiting_mfa' && !awaitingMfa) {
@@ -617,12 +649,19 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
           setAwaitingMfa(false);
           setLoading(false);
           const successMsg = job.message || `${job.documents_count || ''} documento(s) obtido(s) com sucesso!`;
+          const faltam = Array.isArray(job.documents_missing) ? job.documents_missing : [];
           setSuccess(successMsg);
-          toast.success('Documentos extraídos com sucesso!');
+          if (faltam.length > 0) {
+            // Obtenção parcial: diz-se qual falta (a nota de liquidação é o que o
+            // banco pede) e dá-se tempo para ler antes de o diálogo fechar.
+            toast.warning(`Obtenção parcial — falta: ${faltam.join(', ')}`);
+          } else {
+            toast.success('Documentos extraídos com sucesso!');
+          }
           clearInterval(pollInterval);
           // Refetch da lista de documentos via onSuccess callback
           if (onSuccess) onSuccess();
-          setTimeout(() => { onOpenChange(false); }, 2500);
+          setTimeout(() => { onOpenChange(false); }, faltam.length > 0 ? 9000 : 2500);
         } else if (job.status === 'error') {
           setAwaitingMfa(false);
           setLoading(false);

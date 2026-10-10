@@ -332,6 +332,29 @@ async def run_preview_documentation_email(process_id: str, current_user: dict):
 # Estes endpoints devem estar ANTES das rotas com /{email_id} para que
 # o FastAPI faça match correcto e não trate "send-documentation" como um email_id.
 
+def descrever_falha_de_envio(resultado: dict, conta, origem: str) -> str:
+    """A mensagem de uma falha de envio, com a conta e a origem quando é de credenciais.
+
+    Um «Falha de autenticação SMTP» sem dizer QUAL conta falhou obriga o
+    consultor a adivinhar entre o perfil e a Caixa Geral — e o suporte a ler os
+    logs do servidor. A password nunca vai na mensagem; o endereço da conta
+    (do próprio utilizador ou da empresa) e a origem sim.
+    """
+    base = resultado.get("error") or "Não foi possível enviar a documentação."
+    if resultado.get("error_code") != "smtp_auth":
+        return base
+    caixa_geral = str(origem or "").startswith(("caixa_geral", "system_config", "global"))
+    onde = "da Caixa Geral da empresa" if caixa_geral else "do seu perfil"
+    return (
+        f"{base} A conta recusada é {getattr(conta, 'email', '?')} ({onde}). "
+        + (
+            "Peça ao administrador para actualizar a password da Caixa Geral."
+            if caixa_geral
+            else "Actualize a password em Perfil → Configuração de Webmail."
+        )
+    )
+
+
 async def run_send_documentation_email(
     process_id: str,
     data: dict,
@@ -786,12 +809,13 @@ async def _send_documentation_email_impl(
 
     if not result["success"]:
         logger.error(
-            "[send-documentation] send_email falhou user=%s source=%s: %s",
-            current_user.get("id"), smtp_source, result.get("error"),
+            "[send-documentation] send_email falhou user=%s source=%s account=%s code=%s: %s",
+            current_user.get("id"), smtp_source, smtp_account.email,
+            result.get("error_code"), result.get("error"),
         )
         raise HTTPException(
             status_code=500,
-            detail=result.get("error") or "Não foi possível enviar a documentação.",
+            detail=descrever_falha_de_envio(result, smtp_account, smtp_source),
         )
     
     # NOTA: O registo no histórico já é feito pelo send_email() internamente.

@@ -34,6 +34,7 @@ import SmartRichEditor from "../components/ui/SmartRichEditor";
 import { toast } from "sonner";
 import { hasAnyRole } from "../utils/roleUtils";
 import { safeString } from "../utils/safeString";
+import { textoSimplesParaHtml } from "../utils/textoRico";
 import { formatDate, formatDateTime } from "../lib/utils";
 import { safeNumber } from "../components/dashboard/DashboardShared";
 import { getRGPDTemplate, updateRGPDTemplate, getMinutaTemplate, updateMinutaTemplate } from "../services/api";
@@ -1003,8 +1004,8 @@ const MinutaTemplateTab = () => {
 
       if (response.status === 200) {
         const data = response.data;
-        setTemplateContent(data.content);
-        setOriginalContent(data.content);
+        setTemplateContent(textoSimplesParaHtml(data.content));
+        setOriginalContent(textoSimplesParaHtml(data.content));
         setTemplateMeta({
           is_default: data.is_default,
           updated_at: data.updated_at,
@@ -1062,8 +1063,8 @@ const MinutaTemplateTab = () => {
         const getResponse = await getMinutaTemplate();
         if (getResponse.status === 200) {
           const data = getResponse.data;
-          setTemplateContent(data.content);
-          setOriginalContent(data.content);
+          setTemplateContent(textoSimplesParaHtml(data.content));
+          setOriginalContent(textoSimplesParaHtml(data.content));
           setTemplateMeta({
             is_default: data.is_default,
             updated_at: data.updated_at,

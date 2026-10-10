@@ -684,6 +684,7 @@ async def resolve_sending_account(
 
     account = None
     source = "none"
+    motivo_do_recurso: Optional[str] = None
 
     try:
         ucr_role = (
@@ -707,6 +708,10 @@ async def resolve_sending_account(
             )
             host = resolved.get("smtp_server") or resolved.get("imap_server")
             user_email = resolved.get("email_address")
+            if not password:
+                motivo_do_recurso = "password do perfil ilegível ou vazia"
+            elif not (user_email and host):
+                motivo_do_recurso = "configuração do perfil incompleta (email ou servidor em falta)"
             if user_email and host and password:
                 account = EmailAccount(
                     name="personal",
@@ -743,6 +748,15 @@ async def resolve_sending_account(
                     password=caixa["password"],
                 )
                 source = caixa.get("source") or "caixa_geral"
+                if motivo_do_recurso:
+                    # O perfil EXISTE mas não é utilizável: o envio sai pela
+                    # Caixa Geral e, se esta recusar as credenciais, o erro
+                    # parece ser da conta do consultor. Fica dito no log.
+                    logger.warning(
+                        "[SendingAccount] user=%s: a usar a Caixa Geral (%s) porque o "
+                        "perfil não é utilizável: %s.",
+                        current_user.get("id"), source, motivo_do_recurso,
+                    )
         except Exception as exc:
             logger.warning(
                 "[SendingAccount] Falha a resolver Caixa Geral company=%s: %s: %s",

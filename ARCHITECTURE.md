@@ -9632,3 +9632,14 @@ O admin liga/desliga se as acções ficam guardadas no histórico **por pessoa e
 **Calendário do Dashboard.** `services/dashboard_calendar.py` junta os eventos do calendário (com janela de datas) e as datas de escritura/CPCV dos processos visíveis ao utilizador. `GET /deadlines/dashboard-calendar?month=AAAA-MM`.
 
 **Perfil visível em impersonate.** `frontend/src/utils/papelEfectivo.js` → `AuthContext.effectiveRole`. `impersonate`/`stopImpersonating` sincronizam os cabeçalhos e limpam a cache do TanStack.
+
+
+## Testes Externos e Minor Fixes (Bloco 5)
+
+**Recolha no Estado (Finanças / Seg. Social).** Um pipeline (`portal_gov_fetch._executar_recolha`) com a diferença em `FonteGovernamental`. `gov_fetch_policy.executar_com_tentativas` é a política única do scraper (semáforo com espera limitada, orçamento por tentativa e total, repetição só para tempo/rede e **nunca depois de MFA**, limpeza do código à saída); `mfa_cache.aguardar_codigo_mfa` é o único ciclo de espera do SMS e `set_mfa_status` actua no job ACTIVO mais recente. `gov_fetch_jobs` guarda o ciclo de vida de `portal_scraper_jobs` (um job activo por processo, jobs mortos encerrados, projecção pública fechada, posse por processo); `gov_fetch_archive` arquiva (S3 em thread, sem registo sem ficheiro, upsert, só PDF real, pedidos fechados por rótulo). `GET /portal/scraper-job/{id}` exige o cliente autenticado.
+
+**Scraper de visitas.** `services/scraper_estruturado.py` corre depois do parser do portal e só preenche o que falta (JSON-LD → `__NEXT_DATA__` → meta → texto rotulado); `e_pagina_de_bloqueio` e `tem_dados_para_guardar` protegem a cache. Os parsers por portal podem rebentar sem matar o scrape.
+
+**Email dos balcões.** `mailbox_backoff.deve_esperar` (puro) tira do ciclo automático as contas com autenticação recusada duas ou mais vezes; `get_active_email_configs_for_sync(respeitar_recuo=True)` aplica-o aos três sincronizadores. `send_email` devolve `error_code`/`account_email` e `descrever_falha_de_envio` compõe a mensagem.
+
+**Minuta assinada.** `services/minuta_pdf.build_signed_minuta_pdf` (platypus, mesma pipeline `_html_to_flowables` do PDF pré-preenchido); `rgpd_service._build_minuta_pdf` delega. Alinhamento por classes `ql-align-*` (`rgpd_pdf._atributo_permitido`, `_estilo_de_alinhamento_para_classe`).
