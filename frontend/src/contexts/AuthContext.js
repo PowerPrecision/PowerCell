@@ -40,6 +40,7 @@ import api, { setAuthToken, clearAuthToken, syncAuthContextHeaders, getRefreshed
 import { useQueryClient } from "@tanstack/react-query";
 import { hasRole } from "../utils/roleUtils";
 import { collectUserRoles, getUserCompanyRecords, resolveCompanyIdFromUser } from "../utils/userProfiles";
+import { papelEfectivoDaSessao } from "../utils/papelEfectivo";
 // PACOTE DI — helper centralizado para rotas públicas (/portal, /rgpd, /upload, /download)
 import { isPublicRoute } from "../utils/publicRoutes";
 
@@ -364,7 +365,27 @@ export function AuthProvider({ children }) {
       sessionStorage.removeItem("activeCompanyId");
     }
     activeCompanyInitialized.current = true;
+    // Quem troca de identidade (impersonate) precisa de saber o que ficou
+    // gravado para sincronizar os cabeçalhos ANTES de limpar a cache.
+    return { role: primaryRole, companyId: companyId || null };
   }, []);
+
+  // Bloco 4, ponto 33 — trocar de identidade é trocar de âmbito.
+  //
+  // A cache do TanStack era do admin: listas de utilizadores, estatísticas,
+  // configurações. Servi-la ao utilizador impersonado mostra o que ele NÃO
+  // vê (o ambiente tem de espelhar exactamente o alvo), pelo menos até
+  // ao próximo pedido. Mesma regra e mesma ordem da troca de perfil:
+  // primeiro os cabeçalhos (o interceptor prefere o snapshot ao storage),
+  // depois o `clear()` — que faz as queries activas voltar a pedir já com
+  // o âmbito novo.
+  const aoTrocarDeIdentidade = useCallback((contexto) => {
+    syncAuthContextHeaders({
+      role: contexto?.role || null,
+      companyId: contexto?.companyId || null,
+    });
+    queryClient.clear();
+  }, [queryClient]);
 
   // Impersonate - ver como outro utilizador
   const impersonate = useCallback(async (userId) => {
@@ -381,14 +402,15 @@ export function AuthProvider({ children }) {
       setOriginalAdminName(userData.impersonated_by_name);
       // PACOTE DM: o nav e os headers devem reflectir o utilizador impersonado,
       // nunca o activeRole de admin que ficou no sessionStorage.
-      applyUserContext(userData);
-      
+      const contexto = applyUserContext(userData);
+      aoTrocarDeIdentidade(contexto);
+
       return userData;
     } catch (error) {
       console.error("Error impersonating:", error);
       throw error;
     }
-  }, [applyUserContext]);
+  }, [applyUserContext, aoTrocarDeIdentidade]);
 
   // Terminar impersonate e voltar à conta original
   const stopImpersonating = useCallback(async () => {
@@ -409,8 +431,8 @@ export function AuthProvider({ children }) {
       setUser(userData);
       setIsImpersonating(false);
       setOriginalAdminName(null);
-      applyUserContext(userData);
-      
+      aoTrocarDeIdentidade(applyUserContext(userData));
+
       // Redirecionar para a página apropriada baseado no role
       const redirectPage = hasRole(userData, "admin") ? "/admin" : "/staff";
       window.location.href = redirectPage;
@@ -445,7 +467,7 @@ export function AuthProvider({ children }) {
       
       throw error;
     }
-  }, [applyUserContext]);
+  }, [applyUserContext, aoTrocarDeIdentidade]);
 
   // Pacote FH / C6: persistir UCR activo em /auth/active-company (user+company+role).
   const persistActiveCompany = useCallback(async (companyId, role) => {
@@ -623,7 +645,9 @@ export function AuthProvider({ children }) {
     activeCompanyId,
     switchActiveCompany,
     refreshUser,
-    effectiveRole: activeRole || user?.role,
+    // Bloco 4, ponto 33 — UMA fonte do perfil visível. Em impersonate nunca
+    // pode ser um perfil que o utilizador-alvo não tem (ver papelEfectivo).
+    effectiveRole: papelEfectivoDaSessao({ isImpersonating, user, activeRole }),
     effectiveCompanyId: activeCompanyId || null,
   }), [user, token, loading, login, register, logout, isImpersonating, originalAdminName, impersonate, stopImpersonating, activeRole, switchActiveRole, activeCompanyId, switchActiveCompany, refreshUser]);
 

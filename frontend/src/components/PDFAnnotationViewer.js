@@ -764,7 +764,7 @@ const PDFAnnotationViewer = ({
     const ann = selectedAnnotation;
     const typeInfo = ANNOTATION_TYPES[ann.type] || ANNOTATION_TYPES.note;
     const isAuthor = ann.author_id === user?.id;
-    const isAdmin = hasAnyRole(user, ["admin", "CEO"]);
+    const isAdmin = hasAnyRole(user, ["master", "admin", "CEO"]);
     const isEditing = editingAnnotation?.id === ann.id;
 
     // Posicionar popup próximo ao pin

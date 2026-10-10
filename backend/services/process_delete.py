@@ -99,4 +99,14 @@ async def soft_delete_process(process_id: str, user: dict) -> dict[str, Any]:
         build_process_deleted_activity(process_id, user, now),
     )
 
+    # Bloco 3 (ponto 21): a eliminação é a acção mais séria sobre um processo e
+    # só deixava rasto em `process_activities`, que nenhum ecrã lê. Vai para o
+    # histórico (que cala o perfil Indexação por si).
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Eliminou o processo",
+        "status", process.get("status"), "eliminado",
+    )
+
     return {"message": "Processo eliminado com sucesso", "id": process_id}

@@ -14,7 +14,7 @@ Permissões:
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Request, Query
 
 from models.auth import UserRole
 from models.finance import (
@@ -77,7 +77,7 @@ async def get_finance_config(
 @router.put("/finance/config")
 async def update_finance_config(
     body: DashboardFinanceConfigUpdate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     return await run_update_finance_config(body, user)
 
@@ -123,7 +123,7 @@ async def get_finance_commissions(
 async def export_commissions_csv(
     year: Optional[int] = Query(None, description="Ano para filtrar"),
     company_id: str = Query(..., description="Empresa para filtrar (obrigatório)"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     return await run_export_commissions_csv(year, company_id, user)
 
@@ -147,7 +147,7 @@ async def get_finance_performance(
 @router.post("/finance/configs")
 async def create_finance_config(
     body: FinanceConfigCreateSchema,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     return await run_create_finance_config(body, user)
 
@@ -172,7 +172,7 @@ async def get_finance_config_by_id(
 async def update_finance_config_by_id(
     config_id: str,
     body: FinanceConfigUpdateSchema,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     return await run_update_finance_config_by_id(config_id, body, user)
 
@@ -180,7 +180,7 @@ async def update_finance_config_by_id(
 @router.delete("/finance/configs/{config_id}")
 async def delete_finance_config(
     config_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     return await run_delete_finance_config(config_id, user)
 
@@ -204,7 +204,7 @@ async def export_pool_distribution_csv(
     month: int = Query(..., ge=1, le=12, description="Mês (1-12)"),
     year: int = Query(..., ge=2020, le=2100, description="Ano (ex: 2025)"),
     company_id: str = Query(..., description="Empresa para filtrar (obrigatório)"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     return await run_export_pool_distribution_csv(month, year, company_id, user)
 
@@ -218,60 +218,69 @@ async def export_pool_distribution_csv(
 
 @router.get("/finance/processes/summary")
 async def get_process_finance_summary(
+    request: Request,
     company_id: str = Query(..., description="Empresa para filtrar (obrigatório)"),
     user: dict = Depends(require_roles(FINANCE_READ_ROLES))
 ):
-    return await run_get_process_finance_summary(company_id, user)
+    return await run_get_process_finance_summary(company_id, user, request)
 
 
 @router.post("/finance/processes")
 async def create_process_finance(
+    request: Request,
     body: ProcessFinanceCreate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
 ):
-    return await run_create_process_finance(body, user)
+    return await run_create_process_finance(body, user, request)
 
 
 @router.get("/finance/processes")
 async def list_process_finances(
+    request: Request,
     company_id: Optional[str] = Query(None, description="Filtrar por company_id"),
     process_id: Optional[str] = Query(None, description="Filtrar por process_id"),
     client_id: Optional[str] = Query(None, description="Filtrar por client_id"),
     status: Optional[str] = Query(None, description="Filtrar por status (pending|invoiced|paid|cancelled)"),
     user: dict = Depends(require_roles(FINANCE_READ_ROLES))
 ):
-    return await run_list_process_finances(company_id, process_id, client_id, status, user)
+    return await run_list_process_finances(
+        company_id, process_id, client_id, status, user, request,
+    )
 
 
 @router.get("/finance/processes/{finance_id}")
 async def get_process_finance_by_id(
+    request: Request,
     finance_id: str,
     user: dict = Depends(require_roles(FINANCE_READ_ROLES))
 ):
-    return await run_get_process_finance_by_id(finance_id, user)
+    return await run_get_process_finance_by_id(finance_id, user, request)
 
 
 @router.put("/finance/processes/{finance_id}")
 async def update_process_finance(
+    request: Request,
     finance_id: str,
     body: ProcessFinanceUpdate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
 ):
-    return await run_update_process_finance(finance_id, body, user)
+    return await run_update_process_finance(finance_id, body, user, request)
 
 
 @router.patch("/finance/processes/{finance_id}/status")
 async def update_process_finance_status(
+    request: Request,
     finance_id: str,
     status: str = Query(..., description="Novo status: pending|invoiced|paid|cancelled"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
 ):
-    return await run_update_process_finance_status(finance_id, status, user)
+    return await run_update_process_finance_status(finance_id, status, user, request)
 
 
 @router.delete("/finance/processes/{finance_id}")
 async def delete_process_finance(
+    request: Request,
     finance_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
-    return await run_delete_process_finance(finance_id, user)
+    return await run_delete_process_finance(finance_id, user, request)

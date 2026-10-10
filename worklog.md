@@ -1,4 +1,557 @@
 ---
+Task ID: portal-do-parceiro-v1
+Agent: Cloud Agent
+Task: Portal do Parceiro (V1) — identidade própria, leitura (casos, funil, métricas), escrita (lead, ficheiros) e controlo interno «Serviço pago pelo parceiro»
+
+Date: 2026-10-10
+
+Work Log:
+
+IDENTIDADE — `services/partner_security.py`, `partner_accounts.py`, `routes/partner_portal.py`, `routes/partners_admin.py`
+- Coleção própria `db.partners` e JWT próprio (`type:"partner"`, `aud:"powercell-partner"`, segredo `JWT_PARTNER_SECRET`; em produção sem segredo ≥32 caracteres o portal responde 503 — nunca deriva do `JWT_SECRET`; em dev deriva um HMAC *diferente*). Claim `tv` = `token_epoch`: suspender, mudar password ou aceitar convite sobe-o e invalida os tokens vivos. 8 h, sem refresh. `get_current_partner` relê o parceiro em CADA pedido (estado, época, redes activas); todas as recusas são o mesmo 401.
+- Só email + password. Onboarding SÓ por convite de Admin/CEO/Master (`/admin/partners*`, âmbito pela REDE da empresa convidada; `exigir_empresas_concediveis`); link de uso único (hash em BD, 7 dias), mostrado uma vez a quem convida. Parceiro é pessoa individual. `redes: [{network_id, company_id, status…}]` — suspensão por ligação; o esquema suporta várias redes.
+- Linha-fantasma em `users` (mesmo id, `role: parceiro`, sem password, `partner_directory`) para o atribuidor existente continuar a funcionar; login-v2 recusa contas sem password. Travão de força bruta POR IDENTIDADE (`portal_brute_force`, âmbito `partner_login`; 429 antes de olhar para a credencial; 400 não conta); chave do limiter por parceiro (o IP via XFF é falsificável — D-4).
+
+LEITURA — `partner_visibility.py` (puro), `partner_portal_read.py`
+- Visibilidade = RELAÇÃO (`assigned_parceiro_id == eu`) ∧ rede nas ligações activas. NÃO usa a variante de processo com o ramo de convidados da D-25. Leads = `clients` com `submitted_by_partner_id`, sem processo. 404 igual para alheio e inexistente.
+- DTO por listas positivas (nada financeiro, nada de notas internas, nada do documento). Funil a partir de `macro_da_fase`; fase desconhecida → «em curso» (nunca «análise» por omissão); conversão `null` sem base (não «0 %»).
+
+ESCRITA — `partner_leads.py`, `partner_upload_ops.py`, `partner_attribution.py`
+- Lead: `extra=forbid`, carimbos (rede, empresa, autor, estado, origem) SEMPRE do servidor, consentimento obrigatório, PII cifrada, sem find-or-create, `possible_duplicate_of` só dentro da rede e só para a equipa, duplo clique devolve a existente, tecto diário, checklist de documentos pedida, alerta à gestão.
+- Ficheiros: chave nunca de confiança (`assert_portal_file_key_e_do_cliente` na escrita E na leitura), quarentena de conteúdo (`exigir_conteudo_valido`, tamanho/tipo REAIS), e as regras do Bloco 2 via `planear_entrada` (processo por indexar → `Index` + fila da IA; indexado → pasta pedida, sem IA). Descarga por `file_id`, nunca por chave. Cumpre pedidos (`apply_portal_request_upload`; origem `partner_portal` entrou em `PORTAL_REQUEST_SOURCES`). O CRM reage: a bolinha verde acende com `uploaded_by: partner:<id>`.
+- `aplicar_parceiro_do_cliente` ligado aos CINCO escritores de processo (inventário por AST).
+
+CONTROLO INTERNO — `servico_do_parceiro.py`, `process_partner_service`
+- O parceiro NÃO recebe comissões: paga-nos. Sem motor financeiro. Caixa «Serviço pago pelo parceiro» + observações em texto livre, em coleção própria (nunca no documento do processo: `extra="allow"` vazá-la-ia), só para processos com parceiro, vista pela equipa (master/admin/ceo/diretor/administrativo/consultor/intermediario), alteração por gestão+administrativo, só na casa DONA. Histórico e trilho (o texto das observações nunca vai para o registo). Nenhum módulo do portal do parceiro o lê (guarda por AST).
+
+FRONTEND — `pages/partner/*`, `contexts/PartnerAuthContext.jsx`, `services/partnerApi.js`, `components/admin/PartnersAdminTab.jsx`, `components/processDetails/ServicoDoParceiroCard.jsx`
+- Cliente Axios SEPARADO (sem `X-Company-Id`/`X-Active-Role`, sem token do staff), sessão em `sessionStorage`, evento de expiração próprio; `/parceiro` entrou em `PUBLIC_ROUTE_PREFIXES` **e na regex do Sentry em `main.jsx`** (o replay regista texto — nomes e NIFs de leads); chunk lazy. Ecrãs: convite/aceitação, login, painel (métricas + funil + lista + pesquisa + paginação), nova lead (consentimento, rede quando há mais de uma), caso (pedidos pendentes primeiro, envio por botão e arrasto com os mesmos tipos), conta/mudar password. Staff: separador Parceiros no painel de administração e cartão no `ProcessDetails`.
+- Os mocks do frontend NÃO são escritos à mão: são fixtures geradas pelos serviços reais (`test_parceiro_contrato_frontend.py`, regenera/compara).
+
+VERIFICAÇÃO
+- ~80 mutações sobre as paredes do backend (token, estado, visibilidade, quarentena, desvio para a Index, carimbos, papéis do controlo interno, histórico): as 3 que sobreviveram à primeira medição eram testes fracos (audiência/tipo do token sem teste de rejeição pela razão certa; «pedido cria envio solto» sem teste de corrida 409) — reforçados e mortas. No frontend, mutações na invalidação de cache, no gate do cartão, na lista pública e no Sentry: todas mortas.
+- Achados: (1) `limpar_observacoes` tirava `3 < 5 e 5 > 3` — a expressão regular passou a visar só etiquetas reais; (2) o `deep link` perdia-se após o login (o ramo `Navigate` antecipava o `navigate`); (3) D-32 (registo público procura em todas as redes) e D-33 (o que ficou fora da V1) em `TECHNICAL_DEBT.md`.
+- **Passo operacional no deploy:** definir `JWT_PARTNER_SECRET` (≥32 caracteres, diferente do `JWT_SECRET`) no serviço web — declarado em `render.yaml` com `sync: false`. Sem ele o portal fica desligado (503) e o resto do sistema não é afectado.
+
+---
+Task ID: adenda-rbac-master-global-admin-local
+Agent: Cloud Agent
+Task: ADENDA DE ARQUITECTURA — hierarquia de perfis (Master global, Admin/CEO locais, 9 perfis) e isolamento do Relatório Semanal
+
+Date: 2026-10-10
+
+Work Log:
+
+HIERARQUIA — `services/role_scope.py` (ponto único), `models/auth.py`, `services/auth.py`, `services/tenant_network.py`
+- Os 9 perfis do sistema são `master`, `admin`, `ceo`, `diretor`, `administrativo`, `consultor`, `intermediario`, `parceiro` e `indexacao` («Index» no ecrã; `normalizar_papel` mapeia o alias). **Só o Master é global** (`PAPEIS_GLOBAIS`). O Admin deixou de atravessar redes: as ~15 constantes `{ADMIN, CEO}` que diziam «sem fronteira» (calendário, emails, origem financeira, partilhas, explorador S3, reconciliação de fases…) passaram a `{MASTER}`. `TenantScope.sem_fronteira` só o liga `resolve_tenant_scope`, pelo perfil ACTIVO, e entra nas chaves de cache (`stats_scope`, `executive_report`) — um âmbito sem listas é «nada» para um utilizador comum e «tudo» para o Master.
+- **Guarda de papel ≠ âmbito de dados.** `require_roles`: Master passa sempre; Admin passa tudo menos o declarado só-Master (`effective_role_is_allowed`). As ~108 rotas «só Admin» de infraestrutura (logs, backups, índices, encriptação, S3, jobs, IA, migrações, diagnósticos, restore, anonimização em lote, empresas, política de histórico, defaults de cargo) são hoje só-Master. Inventário por AST falha por omissão se uma lista com `ADMIN` esquecer o `MASTER`.
+
+ESCALADA DE PRIVILÉGIOS — `services/user_management_scope.py`
+- `require_roles` autorizava o verbo: `PUT/DELETE /admin/users/{id}` e `POST /admin/impersonate/{id}` não verificavam o objecto (o CEO de uma empresa redefinia a password de qualquer utilizador pelo id); o router `/admin/user-company-roles` e `POST /admin/users/{id}/roles` permitiam **dar-se a si próprio o cargo `master`**; `PUT /admin/companies/{id}` deixava mudar o `network_id`. Hoje: alvo no âmbito (404, nunca 403), perfil local nunca é alvo de um global, só o Master concede `master`, só se concede acesso a empresas do próprio âmbito. Serviços de UCR e empresas exigem `actor` kw-only OBRIGATÓRIO.
+- Superfícies que operavam sobre a colecção inteira e foram escopadas: RGPD, registos de clientes, estatísticas e parados do painel, `audit_logs`/trilho (filtra por autores no âmbito), painel financeiro, configs de email por empresa, itens eliminados, mapeamentos S3.
+- **Achado a verificar o Admin:** o pedido de processo POR ID estava aberto a qualquer staff (`can_view_process` responde sim a todos). Fechado com uma dependência do router `/processes` (`process_scope_guard`): 404 igual ao de «não existe», rede convidada conta, Master passa sem ler a BD.
+
+RELATÓRIO SEMANAL — `relatorio_semanal_destinos.py`, `scheduled_tasks.send_weekly_ceo_report`
+- Um relatório por REDE, enviado à gestão dessa rede (CEO/Admin com acesso numa empresa da rede, mais contas antigas só com `users.company`). Quem gere duas redes recebe dois emails. O consolidado vai só aos Master; um endereço de `CEO_EMAIL` que não seja Master activo é ignorado com aviso. A marca de «já enviei» é por destino. A página «Relatório Semanal» já resolvia o âmbito pelo utilizador autenticado; há guarda a impedir que algum handler aceite `company_id`/`scope` do pedido.
+- **Efeito no 1.º deploy:** as marcas por destino são novas, logo o primeiro envio de segunda-feira pode repetir-se por destino.
+
+MIGRAÇÃO — `scripts/promote_to_master.py` (`services/master_promotion.py`)
+- **Passo operacional obrigatório:** nenhuma conta existente é Master. Omissão = só mostra; emails EXPLÍCITOS; um plano com qualquer recusa não escreve nada; deixa rasto em `audit_logs`. `seed.py` e o `conftest` passam `admin@sistema.pt` a Master.
+
+FRONTEND — `utils/roleUtils.js` (9 perfis, `hasRole` com master ⊇ admin, `isMaster`, `grantableRoles`), rotas só-Master em `App.js`, separadores de administração, `CompaniesAdminTab` sem criar empresa nem escolher rede para não-Master, `UsersAccessAdminTab` sem oferecer `master`.
+
+VERIFICAÇÃO
+- 28 mutações sobre as paredes novas: 27 mortas à primeira; **1 sobreviveu** (esconder o Master a um perfil local) porque a consulta de âmbito tem o mesmo `$nin` — duas camadas a dizer o mesmo. Era teste fraco, não mutação perdida: o teste novo neutraliza a segunda camada e a mutação morre.
+- Decisões que mudam comportamento: edição de fases e modelos de tarefas por fase passam a só-Master; o Admin deixa de poder cancelar envios pendentes, apagar anotações e ver jobs de importação de outrem (só o autor e o Master).
+- **Não varrido (D-31):** rotas por id de clientes e tarefas; a fronteira de dados é a REDE (Power e Precision partilham-na), não a empresa.
+- Cobertura: `test_hierarquia_de_perfis.py`, `test_admin_fronteira_de_empresa.py`, `test_relatorio_semanal_por_rede.py`, `test_processo_por_id_na_rede.py`, `src/utils/hierarquiaDePerfis.test.js`, `CompaniesAdminTab.master.test.jsx`.
+
+---
+Task ID: bloco-5-testes-externos-e-minor-fixes
+Agent: Cloud Agent
+Task: BLOCO 5 — Testes Externos e Minor Fixes (integrações do Estado, scraper de visitas, autenticação dos balcões, minuta)
+
+Date: 2026-10-10
+
+Work Log:
+
+RECOLHA NO ESTADO — MFA, TIMEOUTS E ARQUIVO (pontos 8 e 9) — `gov_fetch_policy.py`, `gov_fetch_jobs.py`, `gov_fetch_archive.py`, `mfa_cache.py`, `portal_gov_fetch.py`
+- **O MFA nunca aparecia ao cliente num segundo pedido.** `set_mfa_status` fazia `update_one({"process_id": …})` sem ordenação: actuava no PRIMEIRO job do processo que o Mongo devolvesse — um job antigo, já terminado —, o ecrã (a fazer polling ao job novo) ficava em «a processar» para sempre e o job antigo era ressuscitado como `awaiting_mfa`. Hoje: job ACTIVO mais recente (`find_one_and_update` com `sort`), provado contra um `mongod` real (o duplo aplica `update_one` a TODOS os que casam e escondia isto).
+- **Repetir um login com MFA é fazer o cidadão receber SMS que não pediu.** `mfa_timeout` e `mfa_codigo_incorreto` não estavam na lista de erros sem repetição: um cliente lento levava um 2.º login (e um 2.º SMS, e outros 120 s à espera), e um código errado era seguido de novo login. Política única em `gov_fetch_policy.executar_com_tentativas`: só `timeout`/`timeout_login`/excepção inesperada repetem, **nunca depois de o portal ter pedido MFA** (a marca atravessa a Task filha do `wait_for` por um objecto mutável num `ContextVar`), um atraso por repetição (a cópia anterior dormia o atraso DUAS vezes), orçamento total de 12 min, espera pelo semáforo limitada a 5 min (`scraper_ocupado` em vez de «a processar» sem fim) e o código MFA em cache é sempre limpo à saída. A espera do SMS (120 s) deixou de comer o orçamento da extracção.
+- **Código velho lido como novo:** `aguardar_codigo_mfa` limpa o código ANTES de esperar (uma excepção entre receber e apagar deixava-o para a execução seguinte, que o escrevia no portal ao fim de 2 s), regista que houve MFA e volta a `processing` ao receber (o ecrã voltava a pedir o código logo após o envio). `set_mfa_code` já não diz «guardado» quando ninguém está à espera.
+- **Arquivo (`gov_fetch_archive`)** — substitui DUAS cópias de ~100 linhas: `boto3` por `asyncio.to_thread` (bloqueava o event loop do processo web a cada PDF); **sem ficheiro no S3 não há registo** (criava-se `RECEIVED` com `s3_path` nulo — o cliente via «entregue» um documento sem ficheiro) e se nenhum ficou a recolha FALHA (`arquivo_falhou`) em vez de «0 documentos obtidos» com sucesso; um `update_many` fechava QUALQUER pedido pendente de `Financeiros` (obter a nota de liquidação fechava o pedido de recibos de vencimento) — agora o pedido só fecha se o documento é o que ele pede (`pedido_corresponde`); uma recolha repetida no mesmo dia faz upsert em vez de duplicar; só passa PDF real (`pdf_validation.parece_pdf`, partilhado com o scraper — o scraper guardava como PDF qualquer coisa com >5 KB que não parecesse HTML e desligava o recurso seguinte); sem `s3_folder` resolve-se e grava-se o mapeamento pelo mesmo caminho do Portal (a pasta caía numa derivada do id do PROCESSO como se fosse o do cliente). A «captura de ecrã» (último recurso do scraper) arquiva-se mas não fecha pedidos e conta como EM FALTA.
+- **Parcial diz-se:** `documents_missing` (ex.: «Nota de Liquidação IRS») no job e na mensagem; o ecrã mostra aviso e dá tempo para ler antes de fechar o diálogo.
+- **Nada depois do arquivo transforma sucesso em erro:** a notificação à equipa corria sem guarda no mesmo `try` do scraper — uma excepção ali sobrescrevia um job `success` com `unexpected_error` num processo com os documentos já arquivados. Os dois pipelines (Finanças, Seg. Social) são hoje UM (`_executar_recolha`) com a diferença em `FonteGovernamental`; `classificar_falha` dá a cada erro o seu tipo e mensagem (antes `timeout_scraper`, `sem_documentos` e `selector_desatualizado` caíam todos em «indisponível»).
+- **Jobs presos:** o estado vive na BD e a execução num `BackgroundTask`; um reinício a meio deixava o job em `processing`/`awaiting_mfa` para sempre (e o `beforeunload` do diálogo impedia o cliente de fechar o separador). Jobs activos acima do tempo máximo (24 min, derivado da política) encerram-se na primeira leitura/criação; o ecrã desiste aos 20 min.
+- **Um job activo por processo:** o código MFA vive numa chave por PROCESSO; um 2.º clique disparava um 2.º login. Mesma fonte → devolve o job em curso (`already_running`); outra fonte → 409.
+- **`GET /portal/scraper-job/{id}` não tinha autenticação** e devolvia o documento inteiro do job — `mfa_code` em claro incluído quando o Redis falha. Hoje exige `get_current_client`, posse (404 igual para alheio e inexistente) e projecção fechada. O teste de Bloco 3 tinha-o numa lista de excepções «consulta pública… não devolve dados do processo»: saiu da lista.
+- Índices declarados em `db_indexes.py` (`portal_scraper_jobs`: `process_id+created_at`, `id` único). Duplo de Mongo: `$unset` no `find_one_and_update`, `$setOnInsert` no upsert e direcção do `sort` no `find_one` (ignorava o -1 e devolvia o mais ANTIGO).
+
+SCRAPER DE VISITAS (ponto 1) — `services/scraper_estruturado.py`
+- Os parsers por portal assentam em `data-cy`/classes que o portal muda sem aviso e, quando mudam, devolvem vazio sem erro. Nova camada independente do CSS, lida DEPOIS do parser e que só PREENCHE o que falta (o parser do portal continua a ganhar): JSON-LD (listas, `@graph`, `offers` como lista ou `AggregateOffer`), `__NEXT_DATA__` por NOMES de campo (o dicionário do anúncio é o mais raso com ≥2 dados — os «semelhantes» não contaminam), meta tags e texto rotulado («Área útil: 85 m²»).
+- Defeitos que não eram de DOM: `offers` em lista dava `AttributeError` não apanhado e o scrape inteiro caía; `re.sub(r'[^\d]', '')` fundia «250.000 – 300.000» em 250000300000 (intervalos, valores fora de [1 000; 100 M€] e «sob consulta» dão `None`: um preço errado é pior do que nenhum); um parser que rebentava matava o scrape (agora devolve vazio e a camada estruturada preenche); uma página de desafio anti-bot servida com 200 era lida como anúncio (tenta o ScraperAPI e depois dá erro claro); **um resultado vazio ficava em cache 7 dias** mesmo depois de o portal ser corrigido.
+- **Não validei contra os portais reais** (sem rede nem credenciais): os fixtures simulam o que uma publicação do front-end faz (classes mudam, dados estruturados ficam).
+
+AUTENTICAÇÃO DOS BALCÕES (ponto 34) — `mailbox_backoff.py`, `email_documentation.py`, `email_service.py`
+- **Não consegui reproduzir o `535` sem o servidor de email.** O que se prova no código: o sincronizador (de 10 em 10 minutos, três caminhos) tentava login IMAP para sempre em contas cuja password foi recusada — 144 tentativas falhadas por dia por conta — e servidores cPanel/Dovecot bloqueiam a conta, passando a responder `535 Incorrect authentication data` também ao SMTP do ENVIO, com a password certa. Travão: depois de 2 falhas de autenticação seguidas a conta sai do ciclo automático (1 h → 6 h → 24 h, teto) e **volta de imediato quando a configuração muda**; só a autenticação recua (rede e limite passam sozinhos).
+- Diagnóstico: a recusa devolve `error_code` (`smtp_auth` / `smtp_password_unreadable`), a conta e a origem (perfil vs Caixa Geral) — a mensagem ao consultor nomeia a conta recusada e diz quem a corrige; uma password que não desencripta (`ENCRYPTION_KEY` mudada) deixou de ser descrita como «credenciais recusadas»; o recurso silencioso do perfil para a Caixa Geral deixa o motivo no log. A password gravada perde `\r\n` acidentais (não espaços).
+
+MINUTA DE EXCLUSIVIDADE (ponto 36) — `services/minuta_pdf.py`, `rgpd_pdf.py`, `utils/textoRico.js`
+- A minuta ASSINADA (gerada automaticamente, anexada ao processo e ao email) era desenhada linha a linha no canvas: o HTML do template saía com tags literais, sem negrito nem alinhamento, **qualquer linha com `{{` era descartada em silêncio** (a minuta por omissão é um único parágrafo: a página saía só com título e assinatura), a quebra era uma estimativa por caracteres e os parágrafos compridos passavam a margem inferior, em Helvetica (aspas e travessões viravam `?`). Passou pela MESMA pipeline do PDF pré-preenchido (`_html_to_flowables`, DejaVu, platypus); título desenhado uma vez (também no PDF combinado); variáveis por resolver ficam em branco com aviso; bloco de assinatura em `KeepTogether`; se o HTML não converter cai para texto simples.
+- Alinhamento: o `bleach` apagava todos os atributos, e o Quill alinha com `class="ql-align-*"` — passou a deixar passar SÓ essas classes; `style="text-align:…"` converte-se antes numa classe nossa (sem `tinycss2` o bleach esvazia o `style`). Valores com `&`/`<` escapam-se quando o modelo é HTML.
+- Frontend: o modelo por omissão é texto simples e o `ReactQuill` recebe-o como HTML — as quebras de linha perdiam-se na primeira edição, antes de haver PDF. `textoSimplesParaHtml` converte-o à entrada (só no separador da Minuta; o do RGPD não foi tocado).
+
+Stage Summary:
+- Backend 7401 testes verdes com Mongo local (7190 em `tests/unit` sem Mongo), frontend 2353 verdes, ESLint e `vite build` limpos. Mutações: ~70 aplicadas às quatro áreas; as sobreviventes (limiar de falhas duplicado na tabela de esperas, empate no `__NEXT_DATA__`, `h1` sem teste, `KeepTogether`) eram testes fracos ou código redundante e foram corrigidas.
+- Dívida nova: D-29 (um job activo por processo não é atómico), D-30 (os scrapers do Estado e dos portais só se provam em produção).
+
+---
+Task ID: bloco-4-dashboards-financas-interface
+Agent: Cloud Agent
+Task: BLOCO 4 (Lote 11) — Dashboards, Finanças e Interface
+
+Date: 2026-10-10
+
+Work Log:
+
+ORIGEM FINANCEIRA (ponto 7) — `services/origem_financeira.py`
+- «Veio diretamente à empresa» (orgânica) vs «foi angariado por um utilizador específico». **Vive numa colecção à parte** (`process_financial_origins`, índice único por processo): o `GET /processes/{id}` devolve o documento inteiro (`extra="allow"`) e há dezenas de leitores de `processes`; um campo lá dentro vazava para quem não o pode ver. A restrição é da arquitectura, não de um filtro que alguém esqueça.
+- Só admin/CEO/diretor (papel EFECTIVO; 403 aos outros), processo no âmbito (404 igual ao de «não existe»), diretor só da casa DONA (um convidado vê o processo e não decide a quem se atribui o negócio). O angariador tem de ser utilizador activo do âmbito de quem decide; `orgânica` descarta o angariador. Histórico do processo regista que mudou **sem o valor** (é lido por quem não vê a origem); o valor vai para o trilho de auditoria; actor silenciado não deixa rasto. UI: `OrigemFinanceiraCard` (só pedido à gestão; candidatos só ao abrir «Alterar»).
+- Não está ligada ao cálculo de comissões (pedido: «para o posterior cálculo»): fica pronta e auditada.
+
+RELATÓRIO EXECUTIVO E SEMANAL (pontos 13 e 16) — `services/executive_report.py`
+- **Um motor para quatro superfícies** (Dashboard, Relatório Semanal, PDF e email de segunda); `analytics_service` é agora fachada. **Defeitos do anterior encontrados ao lê-lo:** «tarefas» eram os `task_logs` (trabalhos de fundo da IA), não `db.tasks`; o fim do período era ignorado (`Semana passada` contava esta semana); `$regex` com `i` sobre `action` (sem índice); a Indexação aparecia com linhas de zeros.
+- Regras com teste: concluída conta a quem a CONCLUIU; pendente/em atraso contam a quem está ATRIBUÍDO, **no estado do fim do período** (reconstruído) — uma semana fechada dá os mesmos números hoje e daqui a um mês. Perfil `indexacao` fora de todas as colunas; histórico desligado = «—», nunca 0.
+- **Base de dados:** todas as agregações abrem com `$match` sobre campos indexados (índices novos em `db_indexes.py`: `tasks(completed_by,completed_at)`, `tasks(assigned_to,created_at)`), `$group` encadeados reduzem para pessoas×fases, `maxTimeMS` + `allowDiskUse`, em série, tecto de 366 dias / 500 pessoas / 200 movimentos, cache de 60 s com o ÂMBITO na chave. Corte por tempo → 503 com instrução, nunca um relatório vazio. **Provado contra um mongod real** (`tests/integration/test_relatorio_executivo_mongo.py`): números contados à mão e `explain` sem COLLSCAN nas seis pipelines.
+- Relatório Semanal (`executive_weekly.py`): semana FECHADA = registo guardado uma vez por (âmbito, segunda-feira) em `executive_weekly_reports`; semana a decorrer = vista ao vivo que não se guarda; futura = 422. O registo não guarda nomes de clientes (resolvem-se na leitura: RGPD). Criação lazy na primeira abertura (o relatório é reproduzível); «Recalcular» explícito. O email de segunda passou a ser a semana ISO anterior fechada.
+- PDF (`executive_report_pdf.py`, reportlab em executor, fora do event loop): gerado no servidor a partir do MESMO relatório do ecrã, com gráficos vectoriais, tabela, movimentos e critérios. Limites 6/min (PDF) e 30/min.
+- Filtros do Dashboard Executivo: período predefinido ou intervalo de datas, colaborador e perfil — aplicados NO SERVIDOR. A página usava `fetch` cru (perdia `X-Company-Id`): passou a Axios. **Cores:** o par vermelho/verde dos gráficos falhava a verificação de daltonismo (ΔE 5); passaram a azul/verde-azulado/âmbar (validadas no claro e no escuro).
+
+CALENDÁRIO DO DASHBOARD E RASCUNHOS (pontos 29 e 32)
+- `GET /deadlines/dashboard-calendar?month=`: marcações e ausências vêm do MESMO serviço do Calendário (ganhou uma janela de datas); **escrituras e CPCVs não são eventos, vivem no processo** (`real_estate_data.data_escritura_prevista/data_cpcv`) e são lidas com a visibilidade das listagens de processos (rede e partilhados). Sem duplicar um evento «Escritura» criado à mão; índices esparsos novos nas duas datas. UI `DashboardCalendar` nos dois dashboards (letra + cor por categoria; a identidade nunca depende só da cor).
+- **Rascunhos:** os rascunhos automáticos («documento em falta») pertencem a um PROCESSO e não à caixa pessoal, logo a pasta Rascunhos nunca os traz; o link do Dashboard abria o Webmail e não abria nada. O Webmail pede agora o email pelo id quando o rascunho não está na lista (depois de a lista carregar) e abre o editor.
+
+IMPERSONATE (ponto 33)
+- **Não consegui reproduzir uma fuga no menu lateral**: um teste que monta o `DashboardLayout` REAL sobre o `AuthProvider` REAL passou também contra o código anterior. O que encontrei foram duas fontes para a mesma pergunta (o menu lia `user.role`, as guardas de rota o `activeRole`) e uma defesa por lista de exclusão. `utils/papelEfectivo.js` é agora a fonte única (`effectiveRole` do contexto): em impersonate só vale um perfil que o ALVO tenha. Trocar de identidade sincroniza os cabeçalhos e **esvazia a cache** (a do administrador era servida ao alvo). `MobileBottomNav` usa o mesmo perfil. **Nota:** o frontend não tem nenhum botão que chame `impersonate()` (só o `ImpersonateBanner`).
+
+Stage Summary:
+- Backend (integração + unit com Mongo local) 7083 verdes; frontend 2324 verdes; eslint limpo. Mutações em todos os módulos novos; sobreviventes eram testes fracos ou mutações equivalentes (reforçados/retirados).
+- O duplo de Mongo ganhou projecção com dot-notation (semântica confirmada contra um mongod real e afirmada em `test_duplo_de_mongo_projeccao.py`).
+- Dívida nova: o `history` não leva carimbo de rede — as CONTAGENS de mudanças de fase são por pessoa do âmbito (a lista de movimentos filtra pelos processos do âmbito). Ver D-28.
+
+---
+Task ID: bloco-3-portal-e-automacoes
+Agent: Cloud Agent
+Task: BLOCO 3 (Lote 13) — Portal do Cliente e Fluxo de Automações
+
+Date: 2026-10-10
+
+Work Log:
+
+DECISÕES DO DONO DO PRODUTO (respostas às perguntas antes de escrever)
+- Tarefas predefinidas: **modelos por fase no editor de fases** (Admin/CEO). Atribuição: **configurável por fase, omissão = o que se fazia** (consultor + intermediário e as duas tarefas de arranque, SÓ à saída da Index). «Inativo» = **qualquer fase terminal** do motor. Portal inativo = **acesso recusado por completo**.
+
+PORTAL BLOQUEADO (ponto 14) — `services/portal_estado.py`
+- `get_current_client` (a dependência de TODAS as rotas autenticadas do Portal) recusa com **403 `{codigo: "portal_inativo", mensagem}`** em cada pedido: uma sessão aberta deixa de funcionar no pedido seguinte; voltar a uma fase activa reabre sozinho (nada se grava). Decide a **fase gravada lida pelo motor** (gralhas, aliases e `cancelado`/`arquivo` legados), nunca a flag derivada `processes.is_active` (desfasa-se). Fase desconhecida NÃO bloqueia.
+- Logins (código, NIF+nº, link curto) recusam **depois** de validar a credencial (antes seria um oráculo do estado do processo). Cliente com vários processos usa o **activo**; só bloqueia quando TODOS estão inativos (`no_process` escolhia o primeiro e trancava o cliente).
+- WebSocket: recusa à ligação (4002), re-lê o processo em cada `ping` (apanha QUALQUER escritor de fase) e o gancho de fase corta já os sockets deste worker.
+- Ecrã: `PortalInativo` + `utils/portalInativo.js` (decide pelo CÓDIGO, nunca pelo texto), nos 4 sítios que falam com o servidor e no login. Inventário por AST: toda a rota do Portal usa a dependência ou está justificada.
+- «Ver como cliente» vê o bloqueio (o JWT de impersonação não se distingue; é a vista certa).
+
+AUTOMAÇÃO POR FASE (ponto 12) — `services/phase_automation.py`
+- `workflow_statuses.auto_assign_roles` e `task_templates` (modelos: título, prioridade, prazo em dias, responsável consultor/intermediário/todos). **`None` ≠ `[]`**: não configurado herda o por-omissão (só na saída da Index); `[]` é «nada». `null` explícito volta a herdar (`model_fields_set`).
+- `ao_entrar_na_fase_sem_falhar` corre nos escritores de fase: Kanban, PUT do processo (pelo estado GRAVADO, não pelo pedido), indexação, motor de regras `change_status` e o avanço do Portal. Atribui primeiro (só se o papel estiver vazio) e cria depois; idempotente por (processo, fase, modelo, responsável); tarefas herdam o carimbo de rede do processo. Fase terminal não atribui nem cria trabalho. Inventário por AST dos escritores de `status` com excepções escritas (apagar fase, soft-delete, restauro, fila do indexador).
+- **Mudança de desenho a confirmar:** as tarefas vão para quem TEM o papel (também o já atribuído antes), não só os recém-atribuídos. `_create_post_indexing_tasks`/`POST_INDEXING_AUTO_TASKS` foram apagados; os testes legados foram reescritos.
+- UI: `FaseAutomacaoFields` no `WorkflowEditor` (interruptor «Personalizar» por secção; prazo em texto; título vazio impede gravar).
+
+FLUXO MESTRE (ponto 19) — blindagem
+- Criação do processo **atómica**: `reivindicar_criacao_do_processo` (um `find_one_and_update` com a guarda no filtro, validade 2 min, libertada se a criação falha). Antes, cada confirmação de upload concorrente podia criar um processo.
+- Avanço do pré-registo **condicional** (`status ∈ {pre_registo, None}` no filtro) e `portal_submitted_at`: o perfil tranca com a ENTREGA, seja qual for a macro-fase da «Index» (`construir_query_do_perfil_trancado`).
+- `tests/unit/test_fluxo_mestre.py` percorre a máquina de estados inteira (pré-registo → upload → Index → perfil trancado → indexação → intermediário + tarefa → fase terminal → Portal bloqueado → reabre).
+
+HISTÓRICO (pontos 20, 21, 17)
+- Ordem: `mergeAuditEvents` ordenava por TEXTO (formatos `+00:00`/`Z`/fusos misturados, ilegíveis no topo); agora por instante, ilegíveis no fim, e a data mostrada é a mesma com que se ordena (`dataDoEvento`).
+- **Todas as acções no histórico** (a Indexação continua silenciada por `_is_stealth_user`): inventário por AST das rotas de escrita com `{process_id}`. Faltavam: eliminar/restaurar processo, ligar/desligar cliente, criar processo para cliente, pasta externa e ligações, emails monitorizados, link/mensagem ao Portal, links temporários, cancelar visita, renomear/mover ficheiros, aplicar sugestões da IA (só NOMES de campos, nunca valores), confirmar dados/resolver conflito, checklist e o perfil editado pelo cliente. **O `send_email` NÃO registava histórico** (a nota do código que o dizia estava errada): o silêncio é decidido ao enfileirar (`actor_silenciado`).
+- Ponto 17: a nota/descrição de um «outro documento» só chegava ao cliente na lista de pendentes. `nota_do_pedido`/`rotulo_do_pedido` servem agora as QUATRO serializações do `/portal/status`; a lista do cliente ainda sem processo não levava `label` (o ecrã escrevia «Documento»). `NotaDoPedido` mostra-a inteira (era `truncate` cinzento-claro).
+
+REMATES DO BLOCO 2: ver a entrada `bloco-2-remates-indexacao`.
+
+Stage Summary:
+- Backend unit sem Mongo 6678 verdes; integração + unit com Mongo local 6827 verdes. Frontend e eslint verdes. ~110 mutações, todas mortas (as sobreviventes foram testes fracos e reforçaram-se: avanço concorrente sem interleaving real, guarda de fonte que lia o `import`, fuso UTC que escondia a leitura local).
+- **Armadilha da ordem de import (outra vez):** `phase_automation` importada à primeira chamada DENTRO de um `patch("database.db")` ficava com o duplo para sempre; passa a importar-se no topo dos cinco chamadores, e o arnês do E2E financeiro patcha-lhe o `db`.
+- **Limites conhecidos:** `get_next_process_number` lê o máximo e soma 1 (dois clientes diferentes em simultâneo podem repetir o número); outros escritores de ficheiros S3 continuam fora do desvio (Bloco 2); `process_activities` (soft-delete/restauro) é uma colecção que nenhum ecrã lê.
+
+---
+Task ID: bloco-2-remates-indexacao
+Agent: Cloud Agent
+Task: Remates do Bloco 2 — decisões do dono do produto sobre a Indexação
+
+Date: 2026-10-10
+
+Work Log:
+- **A Indexação arquiva anexos de email** (`PAPEIS_QUE_ARQUIVAM` ganha `indexacao`; espelhado em `utils/emailArchive.js`). Corrige a leitura anterior («só leitura nos documentos»). O arquivo reutiliza o pipeline do upload, por isso continua a não deixar rasto: `archived_by` omite-se para o perfil silenciado e o histórico do upload já é mudo. `parceiro` e `cliente` continuam a ser recusados (403).
+- **A listagem de processos da Indexação espelha o Kanban** (`build_role_visibility_conditions`: o perfil deixa de ser recortado por atribuição/criação/fila e passa ao conjunto sem recorte por pessoa; também no perfil «todos»). A fronteira de REDE não sai daqui — é a condição de tenant, aplicada à parte. «Os Meus Processos» (`mine_only`) continua pessoal.
+- Testes invertidos (não apagados): `test_process_list_filters` (`test_indexacao_ve_a_lista_geral` + contraprova do consultor) e `test_arquivar_no_processo`. O `test_limpar_NAO_tira_acesso_a_indexacao` do drift fixava o âmbito antigo na sua contraprova; a contraprova passou a ser o recorte do consultor, que continua a existir.
+
+Stage Summary:
+- Backend unit sem Mongo: verde. Vitest `emailArchive`: 27 verdes.
+
+---
+Task ID: bloco-2-webmail-e-indexador
+Agent: Cloud Agent
+Task: BLOCO 2 (Lote 12) — Webmail e Indexador: desvio inteligente, Index, arquivar anexos, quadro da Indexação, contactos, caixa geral
+
+Date: 2026-10-10
+
+Work Log:
+
+DESVIO INTELIGENTE E PASTA INDEX (pontos 2 e 3) — `services/document_intake.py`
+- `planear_entrada(processo, categoria)` é o PONTO ÚNICO (upload multipart, URL pré-assinado + confirmação, verificação de conflito, «Arquivar no Processo»): processo por indexar → pasta `Index` + fila da IA (`document_metadata.in_index_queue`); processo indexado **ou Via Verde** (`skip_index`) → pasta pedida, **sem IA**. «Indexado» é só o booleano `True` (um `"true"` ou um `1` falham para o lado de entrar na fila).
+- A triagem à entrada (`_triage_upload_category` / `_triage_category_with_ai`) foi APAGADA: era uma SEGUNDA chamada ao modelo sobre o mesmo ficheiro, só para escolher uma pasta. A IA corre no máximo 1× por ficheiro e 0× se indexado.
+- **Defeito provado:** `s3_storage.list_files` não conhecia a pasta `Index` e despejava-a em «Outros» — os consultores viam ali o que devia ser a «pasta cofre». Agora é uma categoria própria (só aparece na resposta quando tem ficheiros; `DEFAULT_CATEGORIES` não mudou).
+- Parede NO SERVIDOR para a `Index` (o ecrã escondia-a, o servidor devolvia-a): `retirar_o_index_da_listagem` + `retirar_documentos_da_index` na listagem, nos metadados (ANTES de gerar os URLs pré-assinados), no modal de balcões e na pesquisa. Quem não a vê recebe `em_indexacao: N` — um consultor que acabou de enviar e não vê o ficheiro em lado nenhum conclui que o envio falhou.
+- O pedido do Portal tenta casar com a categoria PEDIDA (`categoria_para_o_portal`), não com `Index`.
+- `services/index_release.py`: ao marcar como indexado, os ficheiros da `Index` passam à pasta da `ai_category` — SEM IA, sem sobrescrever (`_2`, `_3`…), com o Portal a acompanhar (`db.documents.s3_path` e `attached_files[]`), um só registo de histórico (mudo para a Indexação) e **antes do motor financeiro** (que lê o `s3_path`). Sem categoria o ficheiro fica e vem no relatório. Nunca desfaz a indexação.
+- **Guarda de ESCRITA (D-26, o lado que faltava):** `assert_can_upload_to_process` nos quatro fluxos. Bastava um `process_id` para plantar um ficheiro na pasta de um cliente de OUTRA rede. Regra: quem escreve é quem pode ver (os perfis certos mantêm a capacidade: gestão da rede, equipa de indexação, atribuído, rede convidada da partilha); `parceiro`/`cliente` não carregam pela API do CRM.
+
+ARQUIVAR NO PROCESSO (ponto 1) — `services/email_archive.py`
+- `GET /emails/{id}/archive-suggestions`: processos ACTIVOS do remetente (ou dos destinatários, num email enviado; os endereços do próprio nunca contam), comparação EXACTA, âmbito de PROCESSOS. Um só candidato vem pré-seleccionado; dois ou mais NÃO (arquivar no processo errado é um cruzamento de dados).
+- `POST /emails/{id}/attachments/{aid}/archive`: passa por `run_upload_file_s3` (magic bytes, conversão, desvio inteligente, guarda de escrita, histórico, Portal) — não há pipeline próprio. Idempotente por processo (`archived_to`). Quem arquiva: admin, CEO, diretor, administrativo, consultor, intermediário (a indexação é SÓ LEITURA nos documentos). `@limiter.limit` + `response: Response`.
+- UI: `ArquivarNoProcessoDialog` + `useArquivarAnexo` + botões «Descarregar» (grava no disco) e «Arquivar» nos anexos.
+
+QUEM LÊ UM EMAIL (ponto 5) — `services/email_access.py`
+- Achado: as CINCO rotas legadas de anexos e as rotas por processo (`/process`, `/stats`, `/timeline`, `/sync`, `/monitored`, `/send-documentation`) não tinham guarda NENHUMA; `PUT/DELETE/mark/labels` tampouco; e o bypass de admin/CEO/DIRETOR do `GET /emails/{id}` era sem rede. Hoje: admin/CEO atravessam; o resto = é seu / está na sua conversa (endereços CONFIGURADOS) / caixa partilhada do seu cargo / **Caixa Geral da empresa** / diretor dentro da rede / email ligado a um processo que a equipa vê. Inventário por AST das rotas (falha por omissão).
+- **Caixa Geral:** um só conjunto `CAIXA_GERAL_ROLES` = diretor, CEO, admin, **administrativo** (eram três cópias e a que ficou para trás escondia a caixa ao Administrativo). No frontend `PAPEIS_COM_CAIXA_GERAL` + teste que LÊ o ficheiro Python e compara. `legacy_general_ok` era uma lista de EXCLUSÃO (deixava passar parceiro/cliente): agora `pode_abrir_caixa_geral` (registo positivo).
+- `associate` e `search` decidiam pelo papel do JWT, sem rede: o diretor de uma ilha ligava qualquer email a qualquer processo e pesquisava (por regex do corpo!) todas as redes. Agora exigem ler o email E ver o processo; a pesquisa escapa o termo.
+- Separador «Emails» do processo: **doze `fetch` crus** (sem `X-Company-Id`/`X-Active-Role`) passaram a Axios; o anexo descarregava o JSON do endpoint legado em vez do ficheiro; uma lista recusada (403/404) parecia «sem emails» — agora diz-se. Primeiro teste montado deste painel.
+- Contactos (`services/email_contacts.py`): sugestão ao escrever Para/CC/BCC + gestão (favorito, remover = esconder). Chave `(user, empresa, endereço)` — a Carla não leva clientes de uma ilha para a outra; aprende no envio REAL (não ao pedir o envio); arranque a frio a partir do enviado, só com empresa activa.
+
+PONTO 18 — QUADRO DA INDEXAÇÃO E BOLINHAS
+- `build_kanban_role_base_query` e a audiência em tempo real (`realtime_audience`, que espelha a query) deixaram de dar à Indexação um âmbito próprio: vê o quadro GERAL da sua rede (a Camada 1 de rede manda). Só leitura: mover cartões e documentos por indexar continuam guardados. Os testes que fixavam o âmbito restrito foram INVERTIDOS, não apagados.
+- **A bolinha verde nunca acendeu:** `fetch_new_documents_map` perguntava por `status == "uploaded"` e o Portal escreve `RECEIVED` + `uploaded_by: "portal_client"`. `services/document_novelty.py` é a definição única (do cliente + não visto + janela de 30 dias, para o primeiro deploy não acender tudo); abrir os documentos marca como visto (guarda QUANDO, nunca QUEM). As bolinhas azul (mensagem) e verde já estavam desenhadas no Kanban, em «Os Meus Processos» e na listagem filtrada.
+
+VERIFICADO SEM ALTERAÇÃO: contas de email por perfil (`EmailAccountsCard` em cada separador de perfil) e Webmail pelo perfil do header (`empresaPedida = ?company_id || activeCompanyId`).
+
+TESTES E MUTAÇÕES
+- Backend: `test_desvio_inteligente` (51), `test_index_release` (20), `test_escrita_na_pasta_do_processo` (18), `test_acesso_a_emails` (41), `test_arquivar_no_processo` (35), `test_documentos_novos_do_cliente` (14), `test_contactos_de_email` (44). Frontend: `emailArchive`, `emailContacts`, `desvioInteligente`, `ArquivarNoProcessoDialog`, `CampoDeDestinatarios`, `EmailHistoryPanel` (montado), `WebmailPage` (+6), `S3FileManager` (+3).
+- Mutações: ~50, todas mortas depois de reforçar 5 testes fracos (o guarda de chave da Index; a equipa no email ligado a processo, que só morria com as DUAS condições unidas numa; o processo no `associate`, mascarado pelo guarda do email; o arranque a frio sem empresa; a pasta).
+- Dois testes de OUTRAS entregas partiram com a ordem de recolha (integração antes de unitários): `test_system_config_multiempresa` não fazia patch de `system_config_scope.db` — corrigido.
+
+A CONFIRMAR PELO DONO DO PRODUTO
+- Uploads de consultor/intermediário passam a ficar INVISÍVEIS (pasta Index) até a indexação; o ecrã di-lo («N aguardam a Indexação»).
+- Via Verde conta como «já indexado» para o desvio.
+- A Indexação NÃO arquiva anexos de email (é só leitura nos documentos). Se a caixa partilhada de Indexação deve poder arquivar, é uma linha em `PAPEIS_QUE_ARQUIVAM`.
+- A listagem de processos da Indexação mantém o âmbito próprio (só o Kanban passou a geral).
+- Fora de âmbito, por escrever: `temp_link_api_public`, `ai_bulk_analyze`, `portal_gov_fetch`, `financial_engine`, `rgpd_service` também gravam em S3 sem passar pelo desvio; `db.emails` continua sem carimbo de rede (D-8 — as regras novas deduzem a rede pela empresa do email).
+
+---
+Task ID: remates-do-bloco-1
+Agent: Cloud Agent
+Task: Remates do Bloco 1 — configuração global só do admin; revogação manual de partilhas (rota + UI)
+
+Date: 2026-10-10
+
+Work Log:
+- **Global só do admin.** O dono do produto retirou o CEO da configuração global (mesmo o da rede principal). Não existe um perfil `master`: o perfil de topo é `admin`, a quem sempre se chamou «master/admin» — mapeei para ele em vez de inventar um perfil. `pode_a_global` passou a `e_admin`; as 8 rotas só-globais (`test-connection`, `complete-setup`, `system-emails*`) fecham logo na PORTA (`require_roles([ADMIN])`), não só na guarda interna. Os testes que afirmavam a regra antiga foram INVERTIDOS (não apagados): o CEO da rede principal passou a levar 403, e a regra deixou de depender de `TENANT_DEFAULT_NETWORK_ID`. Ecrã: todas as secções dedicadas do `SystemConfigPage` são globais, logo `seccoesDaNavegacao(isAdmin)` esconde-as ao CEO e um `?tab=` antigo diz «reservada ao administrador»; a `EmailAccountsPage` (SMTP do sistema, IMAP de indexação, contas partilhadas — todas globais) passou a admin-only.
+- **Revogar partilha.** `DELETE /processes/{id}/partners/{company_id}` + `PartilhaCard`. Regras e rasto no ARCHITECTURE. Decisão minha a confirmar: o diretor só revoga da casa DONA (o da rede convidada vê o processo mas não decide quem mais o vê, 403); admin e CEO atravessam redes como no resto da fronteira de documentos. `revogar_parceiro` ganhou `registar_historico` (a revogação não deixava entrada no histórico do processo, só no trilho) e `auditar` (o actor silenciado não deixa rasto).
+- Mutações: 8 no serviço da revogação (mortas) + 4 no ecrã (mortas).
+
+---
+Task ID: segundo-titular-nas-listas
+Agent: Cloud Agent
+Task: BLOCO 1, ponto 6 — os clientes que são 2.º titular (ou co-titular) têm de aparecer nas listas
+
+Date: 2026-10-09
+
+Work Log:
+
+A CAUSA, LOCALIZADA
+- `run_list_clients` constrói a lista A PARTIR DOS PROCESSOS e agrupa por `proc["client_id"]` — só o 1.º titular. `second_client_id` e `client_ids` são escritos (criação, edição, `add-client`) mas a listagem não os lia. As duas queixas são a mesma causa: (1) quem é APENAS 2.º titular não aparece em lista nenhuma; (2) quem é 1.º titular em P1 e 2.º em P2 desaparece da lista de activos quando P1 é anulado — P2, que continua activo, é contado na linha do OUTRO cliente.
+- **Não havia teste NENHUM de `run_list_clients`** (só o de que a função existe): a baseline foi escrita primeiro, e 12 dos 20 testes falhavam pelo defeito.
+
+A CORRECÇÃO (`services/client_list_titulares.py`)
+- Cada processo com titulares secundários contribui com **uma linha por secundário**, construída a partir do DOCUMENTO DO CLIENTE (nome, contacto, NIF — os do processo são os do 1.º titular) e entra no MESMO acumulador do 1.º titular, com `client_id` = o do secundário. Por isso as contagens, o filtro «tem processo activo», a fase principal e a prioridade passam a contar os dois papéis sem código novo, e quem é titular nos dois papéis é UMA linha com os dois processos. Cada `process_info` diz a posição (`titular1`/`titular2`/`co_titular`).
+- Os filtros do PROCESSO (fase, atribuição, indexação, eliminados) valem para o processo do secundário; os do CLIENTE (pesquisa, origem/tipo/estado) valem para o cliente secundário. Os dois caminhos da listagem (`show_all` e «só os meus») usam o mesmo ponto; guarda de fonte a exigir as duas chamadas.
+- **Rede**: o documento do secundário lê-se com a condição de CLIENTES do utilizador — um `second_client_id` que aponte para outra rede não gera linha e o nome dele não sai. Um cliente eliminado não volta pela porta do 2.º titular.
+- Falha → degrada para o comportamento anterior (só os 1.º titulares), com `warning` (nunca rebenta a listagem).
+- A condição `second_client_id ∉ {null, ""} OU client_ids.1 existe` foi verificada num `mongod` real (devolve só os processos com mais alguém além do 1.º titular; `client_ids` inclui sempre o 1.º, logo «tem alguém mais» é «tem pelo menos dois elementos»).
+
+O QUE NÃO MUDA E PORQUÊ: «Os Meus Clientes» (`/my-clients`) lista PROCESSOS atribuídos ao utilizador (uma linha por processo), não clientes agrupados: um processo meu em que o cliente é 2.º titular já lá está. `client_registered` (Sala de Triagem) lê `db.clients` e não depende de processos. O autocomplete (`run_search_clients`) lê `db.clients`. Nenhum dos três tinha o defeito.
+
+Infra de teste (o duplo de Mongo escondia três coisas): `$exists` com dot-notation olhava só para o topo do documento (sempre «não existe»); `array.N` não se resolvia; e — do ponto 5 — o `sort` ignorava a direcção.
+
+Medição por mutação (12; duas sobreviveram à primeira passagem): a pesquisa e o filtro de origem sobre os secundários não eram observáveis porque o fixture só tinha UM secundário — com um só, o filtro removido devolve o mesmo. Passaram a ter um segundo secundário que o filtro tem de EXCLUIR (a contraprova que faltava). Todas as 12 mortas.
+
+Stage Summary:
+- `services/client_list_titulares.py` (novo), `services/client_list_search.py`.
+- Testes: `test_clientes_segundo_titular.py` (20).
+- Sem alteração de frontend: a lista mostra `process_ids.length` e o processo do secundário já lá está. Uma etiqueta «2.º titular» na linha fica como melhoria de UX se for pedida.
+
+---
+Task ID: aviso-de-processos-activos
+Agent: Cloud Agent
+Task: BLOCO 1, ponto 5 — ao adicionar um cliente a um processo, avisar se já tem processos activos
+
+Date: 2026-10-09
+
+Work Log:
+
+A PERGUNTA E QUEM A RESPONDE
+- `GET /clients/{id}/active-processes?exclude_process_id=` (`services/client_active_processes.py`). **«Activo» é o do motor**: `nomes_terminais(carregar_fases())` + `is_deleted` — não uma lista escrita à mão (D-6). O processo a que o cliente é adicionado não conta (`exclude_process_id`), senão o aviso dizia «já tem este».
+- **O cliente está em TRÊS sítios do processo**: `client_id` (1.º), `second_client_id` (2.º) e `client_ids` (co-titulares N:M), mais `clients.process_ids` (o `link-process`). É o defeito do ponto 6 do mesmo bloco, evitado desde o início.
+- **Respeita a rede**: o cliente tem de estar no âmbito (senão 404, igual ao de «não existe»); contam-se só os processos do âmbito de PROCESSOS (com a rede convidada de uma partilha). Um «já tem um processo activo» que atravesse redes confirma a existência de um cliente na ilha ao lado.
+- Só sai o que o aviso precisa (número, fase com o rótulo do motor, posição do cliente, responsável): nunca o documento (NIF, telefone, IBAN, palavras-passe de portais). `total` real, lista limitada a 20.
+
+ACHADO NO CAMINHO: `GET /clients/{id}/processes` devolvia os processos DESENCRIPTADOS de qualquer cliente a qualquer sessão — zero `network`, zero posse (um `get_current_user` e mais nada). Passou a exigir o cliente no âmbito (404) e a filtrar pelo âmbito de processos. É a mesma família da D-24; apanhei-a porque a primeira ideia era reaproveitar este endpoint para o aviso.
+
+O ECRÃ
+- `useConfirmarProcessosActivos` devolve `{confirmar, dialog}`: `confirmar(clientId, {nome, excludeProcessId})` é uma Promise (o fluxo escreve-se em linha) que resolve `true` para continuar e `false` para cancelar. Ligado a **dois** sítios: `SecondTitularCard.handleLinkClient` (ligar 2.º titular) e `CreateProcessModal.handleSubmit` (processo para cliente existente; um cliente criado nessa submissão não tem processos e não se pergunta).
+- **Consultivo, não bloqueante**: um cliente pode ter dois processos legitimamente (1.º titular num, 2.º noutro). **Falha aberta e DITA**: se a verificação falhar o fluxo continua, mas há um `toast.warning` a dizer que não foi verificado — um aviso que falha em silêncio ensina a confiar na ausência de aviso.
+- Desmontar com a pergunta aberta resolve `false` em vez de pendurar a Promise.
+- `/clients/{id}/assign` não tem chamador no frontend: não há nada a ligar.
+
+Infra de teste: o `sort` do duplo de Mongo ignorava a direcção (`-1`): um serviço que pedisse «os mais recentes primeiro» obtinha os mais antigos e só passava num fixture em ordem inversa por acaso. Passou a respeitar a direcção e as chaves compostas. O limite de linhas do router de clientes (`test_client_extraction_helpers`) subiu de 250 para 280 — o endpoint novo é um stub legítimo; o que o guarda protege é lógica no router, não linhas.
+
+Medição por mutação (backend 9, frontend 5 — todas mortas): sem `$nin` dos terminais, sem o ramo do 2.º titular, sem o dos co-titulares, sem o âmbito de processos, sem o âmbito do cliente, sem `exclude_process_id`, sem `is_deleted`, os dois endpoints sem fronteira; nos ecrãs: sem o `if (!continuar)` (nos dois), sem `excludeProcessId`, aviso sempre, falha calada.
+
+Stage Summary:
+- Backend: `services/client_active_processes.py` (novo), `routes/clients.py`, `services/client_process_ops.py`. Frontend: `utils/processosActivos.js`, `components/shared/ActiveProcessesConfirmDialog.jsx`, `hooks/useConfirmarProcessosActivos.jsx`, `SecondTitularCard.jsx`, `CreateProcessModal.jsx`, `services/api.js`.
+- Testes: `test_processos_activos_do_cliente.py` (33), `processosActivos.test.js`, `useConfirmarProcessosActivos.test.jsx`, `SecondTitularCard.processosActivos.test.jsx`, `CreateProcessModal.processosActivos.test.jsx`.
+
+---
+Task ID: controlo-de-historico
+Agent: Cloud Agent
+Task: BLOCO 1, ponto 4 — o admin liga/desliga se as acções ficam no histórico, por pessoa e por perfil
+
+Date: 2026-10-09
+
+Work Log:
+
+O QUE JÁ EXISTIA, E O QUE FALTAVA
+- `history._is_stealth_user` já honrava `user["track_history"] is False`, mas ninguém o gravava (campo sem interruptor) e o eixo por perfil não existia.
+- **Não usei o registo de capacidades** (`models/permissions`), que tem UI de gestão pronta: os defaults por cargo editados em `PUT /permissions/role-defaults/{role}` são escritos em memória e numa colecção que **nunca é relida** (`role_capability_defaults` só tem escritor) — perdem-se no reinício e divergem entre workers. Um interruptor de segurança em cima disso era o placebo do `build_company_scope_condition` outra vez. (Dívida real e pré-existente: fica registada em `TECHNICAL_DEBT.md`, D-27.)
+
+A REGRA (decisão do dono do produto): os dois eixos, **pessoa vence perfil**; tudo ativo por omissão; só o ADMIN (master) decide — nem o CEO.
+- Pessoa: `users.track_history` (`true`/`false`; ausente = segue o perfil; `null` no pedido remove o campo).
+- Perfil: colecção `history_policy`, documento `roles` — guardam-se só os desligados (o default é ativo; guardar `True` seria uma segunda forma de dizer o mesmo).
+- A política segue o perfil EFECTIVO, não o do JWT (quinta ocorrência da forma do `_is_stealth_user`).
+
+ONDE SE APLICA
+- No `get_current_user`, depois de resolver o perfil efectivo: se a política desliga o perfil e a pessoa não tem override, o utilizador chega às rotas com `track_history = False`. O `_is_stealth_user` continua puro e síncrono (resolver no `log_history` custava um acesso à base por cada linha de histórico). Cache de 30 s por worker; uma escrita invalida a do worker que a recebe. Falha de leitura → tudo ativo, com aviso (registar de mais é recuperável, perder histórico não é).
+
+RESTRIÇÃO DE SEGURANÇA (Indexação)
+- A API recusa guardar política para `indexacao` (qualquer valor) e recusa override a quem tem Indexação de base; mesmo com o estado forjado na base de dados (política `indexacao: true` + `track_history: true`) o `_is_stealth_user` ganha — teste dedicado. Quem trabalha COMO indexação com override ligado continua silencioso.
+- A decisão fica em `audit_logs` (quem desligou o histórico de quem) EXCEPTO quando o actor é ele próprio silenciado: o perfil Indexação não gera registos de actividade/auditoria. O `audit_trail_service` (conformidade) fica fora do interruptor, afirmado por AST sobre os imports.
+
+O INVENTÁRIO DOS ESCRITORES
+- `grep` por `history.insert_one`/`activities.insert_one`: dos escritores com `process_id`, só dois contornavam o ponto único — `admin_observability.run_update_client_registration` e `run_delete_client_registration` (acções do admin sobre um processo): passaram a `log_history`. Os restantes (`process_id: None`, operações de sistema do admin; `process_activities`, que ninguém lê) ficam como estão. Os de `document_portal_request`, `restore_api_document` e `voice_note_engine` já passavam pelo `_is_stealth_user`.
+
+O ECRÃ
+- Novo separador «Registo de Histórico» em Compliance (só admin): `HistoryTrackingPanel` — um `Switch` por perfil (a Indexação bloqueada, com o motivo, não escondida) e, por pessoa, um selector de TRÊS estados (segue o perfil / sempre ativo / desligado) com pesquisa e paginação. Três e não dois porque um interruptor binário não distingue «não decidi» de «decidi ligado». O ecrã avisa que uma alteração pode demorar até 30 s a chegar a todos os servidores.
+
+Medição por mutação (backend 10, frontend 5 — todas mortas; duas sobreviveram à primeira passagem):
+- SOBREVIVEU: remover o ramo `indexacao` de `run_set_role_history` — equivalente em comportamento (a seguir, `indexacao not in PERFIS_GERIVEIS` também recusa), mas com a mensagem «perfil inválido», que manda procurar um erro de escrita. O teste passou a afirmar a MENSAGEM.
+- SOBREVIVEU: o curto-circuito `isinstance(track_history, bool)` no `aplicar_politica_de_historico` — redundante com `historico_efectivo`, que já dá a prioridade à pessoa. Removido: uma regra num só sítio.
+
+Infra de teste: o duplo de Mongo ganhou `$unset` (com dot-notation; remove a chave, não a põe a `null`).
+
+Stage Summary:
+- Backend: `services/history_tracking.py`, `routes/history_tracking.py`, `services/auth.py` (`get_current_user`), `services/admin_observability.py`, `server.py`. Frontend: `HistoryTrackingPanel.jsx`, `utils/historyTracking.js`, `SystemAdminPanel.jsx`, `services/api.js`.
+- Testes: `test_controlo_de_historico.py` (34), `historyTracking.test.js`, `HistoryTrackingPanel.test.jsx`, `SystemAdminPanel.historico.test.jsx`.
+- Resíduo (D-27): os defaults por cargo do registo de capacidades não persistem.
+
+---
+Task ID: configuracoes-por-empresa
+Agent: Cloud Agent
+Task: BLOCO 1, ponto 3 — Configurações do Sistema por empresa (Admin vê todas, CEO só as dele)
+
+Date: 2026-10-09
+
+Work Log:
+
+NÃO ERA UMA FUNCIONALIDADE EM FALTA, ERA UMA PAREDE
+- `GET /system-config`, `PATCH /system-config/{secção}` e `GET /system-config/reveal-secrets` estavam em `require_roles([ADMIN, CEO])` — que autoriza o VERBO — e o `company_id` era um **parâmetro livre** da query string. Um CEO da Domus (ilha) lia e ESCREVIA a configuração da Power.
+- O `/reveal-secrets` nem tinha `company_id`: devolvia SEMPRE as chaves da configuração GLOBAL (AWS, SMTP, IA), mesmo quando o formulário em ecrã mostrava os campos de uma empresa. Duas coisas erradas no mesmo endpoint: fuga entre redes e um olho que revelava o segredo de outra configuração.
+- `get_system_config(company_id)` CRIA e grava uma cópia da global para QUALQUER id que não exista — logo um `company_id` inventado escrevia um documento na base de dados. A validação tem de vir ANTES da leitura.
+- `GET /system-config/companies` (qualquer sessão autenticada) listava as empresas com configuração própria, de todas as redes.
+
+A REGRA (decisão do dono do produto): ADMIN acede a todas as empresas do CRM; CEO só às dele (UCR). A mesma rede NÃO chega — o CEO da Power não configura a Precision.
+
+DUAS PERGUNTAS, NÃO UMA (`services/system_config_scope.py`)
+- *Esta EMPRESA é minha para configurar?* → 404 se não (distinguir «não existe» de «não é tua» confirmaria o id).
+- *A configuração GLOBAL (`default`) é minha?* É a infra partilhada (bucket, SMTP do sistema, IA), não uma empresa. ADMIN sim; CEO só se a rede dele for a rede de omissão (`TENANT_DEFAULT_NETWORK_ID`). A Domus não → 403. Sem a variável (dev/CI) mantém-se o comportamento anterior. **Decisão minha, a confirmar**: o pedido falava de empresas e não dizia nada da global; bloquear a global a todos os CEO tirava ao CEO da Power os SLAs, os documentos obrigatórios e o SMTP do sistema, e deixá-la aberta entregava as chaves do bucket (onde vivem os documentos de TODAS as redes) ao CEO de uma ilha.
+- Rotas só-globais (`test-connection`, `complete-setup`, os seis `system-emails`) passam pela pergunta 2. `reveal-secrets` ganhou `company_id`. A permissão de exportação (lida por todos os perfis) só aceita a global ou a empresa do utilizador.
+- Listagem filtrada pelo âmbito: ADMIN todas as de `db.companies`; CEO as dele (+ global se a possui); os outros só as suas.
+
+O ECRÃ
+- A página só reagia à empresa activa do ContextSwitcher, que lista os UCR de quem pergunta: para o ADMIN era um beco (UCR numa empresa, tem de configurar todas). Há agora um selector (`<select>` nativo) alimentado por `GET /system-config/companies` — **o frontend só escolhe de entre o que o servidor devolveu**. Só aparece com mais de uma empresa; o primeiro pedido espera pela lista (um CEO de ilha abria o ecrã a pedir a global e levava um 403 e um toast). O olho de «mostrar valor» leva o `company_id` em ecrã.
+
+Medição por mutação (sete no servidor, três no cliente — todas mortas):
+| Mutação | Resultado |
+|---|---|
+| `empresa_e_minha` devolve sempre True | 6 testes |
+| o CEO ganha a global sem a rede de omissão | 7 |
+| `_empresa_existe` sempre True (admin inventa empresas) | 1 |
+| o reveal deixa de passar o `company_id` | 1 |
+| PATCH sem guarda | 3 |
+| listagem sem filtro | 5 |
+| a página pede antes de ter a lista | 2 |
+| `empresaEmVigor` ignora a lista | 2 |
+| o olho deixa de levar `company_id` | 2 |
+
+Infra de teste: o duplo de Mongo ganhou `replace_one` (o `save_system_config` usa-o; sem ele, escrever configuração num teste era impossível).
+
+Stage Summary:
+- Backend: `services/system_config_scope.py` (novo), `routes/system_config.py`, `services/system_config_api.py`, `services/system_config_admin_ops.py`. Frontend: `utils/empresaDeConfiguracao.js`, `pages/systemConfig/EmpresaConfigSelector.jsx`, `SystemConfigPage.js`, `configFormHelpers.js`, `services/api.js`.
+- Testes: `test_system_config_multiempresa.py` (31), `empresaDeConfiguracao.test.js`, `SystemConfigPage.empresas.test.jsx`, `ConfigFieldInput.revelar.test.jsx`.
+- Resíduo: as secções com ecrã próprio (SLAs, documentos obrigatórios, integrações, emails do sistema) continuam a ler/escrever a global — é desenho (ver D-12), não fuga.
+
+---
+Task ID: partilha-e-documentos
+Agent: Cloud Agent
+Task: BLOCO 1, ponto 2 — D-25 (motor de partilhas, Via Rápida) e D-26 (a guarda de documentos não conhecia redes)
+
+Date: 2026-10-09
+
+Work Log:
+
+AS DUAS FECHAM JUNTAS, E ISSO NÃO É CONVENIÊNCIA
+- A D-26 foi encontrada a medir a D-24 e **não podia fechar sozinha**: a guarda certa É a resposta da D-25. Num processo em partilha o lado convidado tem de ver os documentos (decisão de produto: «a ficha inteira»), logo escrever ali uma fronteira de rede pura fechava a porta que a partilha precisa de abrir — e alargar uma parede depois para caber a correcção é como o Incidente P0 do Portal começou.
+- Quatro decisões de produto recolhidas antes de escrever código: o convidado vê a ficha inteira; a partilha é Via Rápida (nasce da atribuição, sem aprovação); a revogação é MANUAL; o CEO configura só as empresas dele.
+
+A PARTILHA ACRESCENTA QUEM VÊ, NUNCA MUDA DE QUEM É
+- `partner_network_ids` é a lista de convidados; `network_id` continua a ser o carimbo de propriedade e é permanente. A rede do DONO nunca entra na lista — seria redundante hoje e, no dia em que o dono mudasse, deixava lá uma chave da rede antiga.
+- DUAS listas e uma DERIVA da outra: `partner_companies` é o registo (quem, quando, por ordem de quem — é o que a etiqueta mostra) e `partner_network_ids` é a lista indexável que a condição lê. Duas fontes de verdade divergem sem dar erro, e a que divergisse ou abria uma rede a mais, ou escondia um processo a quem o trabalha.
+- O âmbito é o PROCESSO e não a rede. É esta a diferença face ao atalho que isto substitui (um UCR nas duas empresas abre a rede INTEIRA), e é o `test_a_partilha_de_UM_processo_nao_abre_os_OUTROS` que a mede — sem ele a entrega não se distingue do atalho.
+
+`build_process_scope_condition` É FUNÇÃO SEPARADA, NÃO UM RAMO NO GENÉRICO
+- `CAMPO_REDES_PARCEIRAS` existe só no documento de processo. Pôr o ramo no construtor genérico fá-lo-ia viajar para as 33 superfícies que o usam — clientes, tarefas, imóveis, emails, calendário —, onde nenhum documento tem o campo: um `$or` a mais em cada consulta, e uma porta aberta no dia em que alguém gravasse o campo noutra colecção sem pensar nisto.
+- DERIVA do genérico (a parte comum é a mesma e duas versões dela divergem na primeira mudança). Onze superfícies passaram à variante, e há um INVENTÁRIO POR AST que falha por omissão para uma nova — com as excepções ESCRITAS e o motivo de cada uma. O próprio teste apanhou duas excepções minhas escritas como «idem»: uma lista de exclusão sem motivo é o começo de uma guarda que ninguém revê.
+- DUAS excepções que são decisões: (1) as AGREGAÇÕES de estatísticas ficam na genérica — o KPI é a produção da casa, e contar um processo partilhado nas duas redes punha-o duas vezes no consolidado e tornava a conversão do parceiro ilegível (**ver, sim; contar, não**), mas o `processos_permitidos`, que é VISIBILIDADE, usa a variante; (2) a `condicao_de_rede` devolvida pelo `tenant_access_context` fica a genérica, porque quem a recebe aplica-a às SUAS colecções (`deadlines`, `visits`), que não têm partilha — o que ganha a variante é o CONJUNTO de processos visíveis, e é por ele que o calendário e as visitas de um processo partilhado chegam ao parceiro.
+
+A SINCRONIZAÇÃO DERIVA DO DOCUMENTO, NUNCA DE UM DIFF
+- Há CINCO escritores de atribuições, e a lição do Lote 5 (repetida no Lote 7, no ponto 9 e na contagem por campo que encontrou o quinto) é sempre a mesma: a regra aplicada aos construtores e não a quem os usa divergiu em todos eles.
+- `sincronizar_parceiros` lê o documento JÁ GRAVADO, resolve as redes de todos os atribuídos e acrescenta as que faltam. Idempotente, sem diffs, e um escritor que se esqueça de a chamar é um bug de UM sítio e não de cinco. SÓ ACRESCENTA: a revogação é manual, por decisão de produto.
+
+UM DEFEITO MEU QUE O TESTE APANHOU: A ETIQUETA MENTIA
+- A primeira versão resolvia a empresa pela associação POR OMISSÃO do utilizador. Para a Carla do cenário — que trabalha nas duas redes, e é o caso real deste grupo — abria a rede da Domus e escrevia na etiqueta «Precision Crédito».
+- **Uma etiqueta que mente sobre quem passou a ver o processo é pior do que etiqueta nenhuma**, porque é a única coisa que torna visível uma abertura que ninguém aprovou. Hoje percorre-se (utilizador × EMPRESA) e a rede sai da empresa.
+- E **não** usa o `resolve_tenant_scope`, de propósito: aquele dá a rede de OMISSÃO a um utilizador órfão de empresa (para não cegar contas antigas), o que aqui seria abrir o processo ao grupo incumbente por não se saber a empresa de alguém — falha ABERTA, no sítio exactamente errado.
+
+UMA PARTILHA QUE FALHA NÃO PODE REBENTAR UMA ATRIBUIÇÃO
+- A atribuição é a acção do utilizador e já está GRAVADA quando a sincronização corre: propagar daria um 500 por uma operação que teve sucesso e deixava o estado a meio. `sincronizar_parceiros_sem_falhar` falha FECHADO (o parceiro não ganha visibilidade), com `warning` que nomeia o processo — nunca em silêncio, regra do `_emit_event_safe`.
+- O custo desse `except` é que apagar a chamada não parte teste nenhum. Por isso a LIGAÇÃO tem guarda própria: teste parametrizado sobre o corpo dos quatro escritores + contraprova de que a variante ESTRITA propaga. Embrulhar tudo numa só função escondia um defeito meu atrás do mesmo bloco que protege a produção.
+
+VISÍVEL E AUDITADA — a Via Rápida não tem aprovação
+- Trilho de auditoria (`process_shared` / `process_share_revoked`), entrada no histórico do processo e etiqueta na listagem. O rasto NUNCA faz a operação falhar (observa, não intercepta).
+- A assinatura real do `log_audit_event` é `(process_id, user, action, …)` e eu chamei-a com `entity_type`/`entity_id` inventados. O `warning` do próprio `_deixar_rasto` denunciou-o no primeiro teste — foi o degradado a dizer-me que eu tinha assumido um contrato.
+
+D-26: A GUARDA DE DOCUMENTOS ABRIA POR DUAS LINHAS
+- (1) bypass ABSOLUTO para {admin, ceo, **diretor**, administrativo}, verificado antes de tudo; (2) `if not is_document_visibility_restricted(process): return True` — um processo JÁ INDEXADO era visível a qualquer sessão autenticada. A restrição foi escrita para a PRÉ-indexação, não como fronteira de tenant, e indexado é o caso NORMAL: a forma do `run_get_my_tasks` ao contrário, com o ramo COMUM sem guarda nenhuma.
+- Do outro lado está a pasta documental do cliente: cartão de cidadão, IRS, recibos, extractos. Bastava um `process_id`.
+- **A fronteira entra ANTES do bypass.** Um bypass de cargo que corra primeiro é um bypass de rede — e a mutação que a move para depois mata quatro testes, o do diretor à frente.
+- O `scope` é PARÂMETRO das puras (`None` = «não sei», não aplica) e as guardas `async` resolvem-no SEMPRE, com `_ambito_do_utilizador` a falhar FECHADO. Guarda de fonte a exigir que o resolvam **e o passem**, com contraprova a correr o código — sem ela, apagar a resolução satisfazia o inventário e desligava a parede.
+- A recusa de rede vem ANTES do allow-path por relação com o cliente: aquele faz I/O e responderia a «este cliente existe?» (ordem das verificações do Incidente P0).
+- CORRECÇÃO A MIM MESMO: eu disse que o custo não-óbvio da D-25 era a parede do S3. Não é. `build_s3_valid_prefixes(process)` deriva do PROCESSO e não da rede.
+
+O FILTRO: SEMÂNTICA VERIFICADA CONTRA UM `mongod` AVULSO
+- `exclusivos` → `$in: [None, []]`; `partilhados` → `$nin: [None, []]`. O `$in` casa com ausente, null E array vazio; o `$nin` com a mesma lista é o complemento exacto, e é o `None` na lista que exclui os ausentes — sem ele, «Partilhados» mostrava a carteira inteira.
+- Descarreguei um `mongod` e medi: complementos exactos sobre {ausente, null, [], ["x"], ["x","y"]}, e o predicado concorda com a condição em todos os âmbitos. A semântica de `$in`/`$nin` sobre um campo que contém um ARRAY é precisamente onde este projecto já se enganou (o `fix_s3_folder_anomalies` encontrou 1 de 7).
+- Entra nos DOIS construtores (listagem e Kanban, que tem o seu) **e no endpoint dos vizinhos** — senão a seta da fronteira da página leva a um processo que a lista filtrada não contém.
+- Um valor desconhecido NÃO filtra: um parâmetro escrito à mão no URL não pode esvaziar a listagem sem dizer porquê, e o `warning` di-lo.
+
+FRONTEND
+- `PartilhaBadge` é UM componente e não quatro: a `Sub35Badge` nasceu de três cópias com as cores à mão, duas das quais liam um campo que o servidor nunca escreveu. Ao contrário dela, esta nomeia a EMPRESA — saber que «está partilhado» sem saber com quem não responde à pergunta que uma pessoa faz ao ver a linha.
+- O comparador do `React.memo` do `KanbanCard` ganhou `is_partilhado`: um campo novo que não entre nessa lista é uma etiqueta que só aparece quando outro campo mudar por acidente, e isso não dá erro nenhum.
+- O filtro é um `ToggleGroup` de selecção única e não um interruptor: ao contrário do Sub35, aqui «o contrário» é uma pergunta legítima («quais são exclusivamente da casa?») e o estado neutro é «todos». TRÊS estados, três condições — nunca duas e um `else` (§ 27.17).
+- O filtro vive no URL (um link já filtrado é metade da utilidade), só os dois valores conhecidos passam, e entra no `hasActive` do «Limpar Filtros» nos DOIS ecrãs: um filtro activo com o «Limpar» desactivado deixa o utilizador preso numa lista reduzida sem ver porquê.
+- O `kanbanFiltros` é o ponto único dos parâmetros E da chave de cache: um filtro que vai nos parâmetros TEM de ir na chave, senão mudar o filtro não provoca sequer um pedido (o defeito das etiquetas do Kanban).
+
+MEDIÇÃO POR MUTAÇÃO — seis, as seis mortas
+- a condição perde o ramo da partilha → o teste de concordância, em 4 âmbitos; a rede do DONO entra na lista → 3, com a etiqueta; a lista indexável deixa de derivar → 4, com o «uma partilha não abre as outras»; o filtro troca os dois valores → os dois do filtro; a fronteira dos documentos nunca morde → 4 da D-26; a fronteira corre depois do bypass → 4, com o do diretor.
+
+TESTES
+- Backend: **6007 passados**, 5 saltados, **zero xfailed** (os três da D-26 saíram porque a guarda entrou — foi o `xfail(strict=True)` a forçar a remoção do marcador, que é para isso que existe).
+- Frontend: **1787 passados** em 143 ficheiros (+21 testes, +1 ficheiro).
+- Doze testes legados ficaram vermelhos e foram **invertidos, não apagados**: seis guardas de fonte que exigiam `build_tenant_condition` (cristalizavam um defeito — a seta dos vizinhos saltaria um processo partilhado), duas do catálogo de etiquetas, uma do `rename-smart` (passou a exigir a variante `async`, que resolve a fronteira) e três que rebentavam por o `process_sharing` não estar na cadeia de `db` patchada.
+
+CONSEQUÊNCIAS OPERACIONAIS
+- Atribuir um processo a alguém de outra empresa ABRE esse processo à rede dessa pessoa, sem aprovação, com etiqueta e rasto. Tirar a atribuição NÃO revoga — a revogação é `revogar_parceiro`, à mão.
+- O `diretor` continua sem atravessar redes em sítio nenhum; só ADMIN e CEO atravessam.
+- Os documentos de um processo de outra rede passam a responder **403** a quem não é da rede nem convidado — incluindo a perfis de gestão. É a mudança de comportamento mais larga deste lote e é a que fecha a fuga de maior consequência de RGPD medida neste eixo.
+
+---
+Task ID: fronteira-da-carteira
+Agent: Cloud Agent
+Task: BLOCO 1, ponto 1 — D-24: fronteira de rede na carteira de angariações, no Smart Match e nos registos financeiros
+
+Date: 2026-10-09
+
+Work Log:
+
+O INVENTÁRIO À MÃO TINHA QUATRO FUNÇÕES; A MEDIÇÃO DEU DUAS COLECÇÕES
+- A auditoria da entrada da Domus mediu quatro fugas e escreveu-as em `xfail(strict=True)`. Ao ir fechá-las, `grep -c "compan\|network"` em `services/property_*.py` deu **zero** em DOZE módulos que tocam `db.properties`. Não eram quatro funções sem guarda: era a colecção inteira, na leitura, na escrita e na eliminação.
+- É a lição do `build_kanban_query` outra vez — um ponto único para a CONDIÇÃO não chega, é preciso enumerar as superfícies. E é a quinta vez neste projecto que um inventário meu se prova incompleto ao ser medido.
+- Superfícies fechadas: `run_list_properties`, `run_get_property_stats` (que SOMAVA o valor da carteira de todas as redes), `run_get_properties_by_process`, `run_get_property`, `run_update_property`, `run_update_property_status`, `run_delete_property`, os três de `property_documents`, os cinco de `property_engagement`, `property_excel_import`, `lead_list`, as quatro de `client_match`, `match_api_smart`, `portal_recommendations`, `alerts.check_and_notify_matches_for_new_property` e as sete de `finance_process_records`.
+
+A QUARTA FORMA DO DEFEITO NÃO ESTAVA NO ENUNCIADO: O DESTINO
+- O `client_id` de `run_add_interested_client` e `run_register_visit` é um **process_id**. O código lia `db.processes` e GRAVAVA no histórico do imóvel o `client_name` que lá encontrava. Quem soubesse um id de processo da Power copiava o nome do cliente para a sua carteira — e ficava lá escrito.
+- É o `pode_apontar_para_o_processo` do calendário e o `pode_atribuir_a_consultor` das visitas, no mesmo sítio da árvore: são DUAS perguntas (o objecto que existe, e o destino), e juntá-las numa deixa a segunda por fazer. O `run_update_property` tinha a mesma porta (repontar `process_id`/`client_id`).
+
+A CARTEIRA É DA REDE, NÃO DA PESSOA — E ISSO É UMA DECISÃO
+- Ao contrário das visitas e do calendário, `property_scope.py` não tem recorte por pessoa. Uma angariação é um catálogo partilhado; o `agent_id` sempre foi um filtro da query string e nunca uma fronteira. Inventar aqui um limite por pessoa escondia trabalho real a quem o tem de fazer, e um imóvel que desaparece não produz erro nenhum.
+
+O LEGADO POR CARIMBAR NÃO É DE TODOS (mais estrito do que as visitas, de propósito)
+- A tolerância do `visit_scope` — uma visita sem rede entra para todos — estava errada para aqui: a carteira existente está TODA por carimbar, porque nunca houve escritor que a carimbasse. Tolerá-la a todos entregava a carteira inteira do grupo incumbente à primeira ilha que entrasse, que é literalmente a fuga medida.
+- `documento_no_ambito` só admite o documento sem marca quando o utilizador pertence à rede de omissão. É `TENANT_DEFAULT_NETWORK_ID` que declara de quem é a pilha — e é isso que faz a correcção funcionar SEM MIGRAÇÃO nenhuma.
+
+UMA PROJECÇÃO QUE DEIXA O CARIMBO DE FORA CEGA A GUARDA
+- `run_get_interested_clients` lia o imóvel com `{"interested_clients": 1}`: o documento chegava sem rede, contava como legado e a guarda ABRIA em vez de fechar. Família da lição do `get_file_content` — inspeccionar uma coisa e decidir sobre outra.
+- `PROJECCAO_DO_CARIMBO` e `PROJECCAO_DE_POSSE` existem por isso. O que as mede é um teste de COMPORTAMENTO por função: uma guarda de fonte não distingue uma projecção completa de uma incompleta.
+
+O PREDICADO GÉMEO, E O TESTE DE CONCORDÂNCIA
+- `build_network_scope_condition` responde em Mongo (listagens) e `documento_no_ambito` em Python (posse de um objecto). Duas respostas à mesma pergunta divergem na primeira mudança, e a que divergir não dá erro: deixa ver, ou esconde trabalho real.
+- Derivam das mesmas constantes e há um teste que os corre sobre a mesma amostra de dez documentos, em quatro âmbitos × dois valores de omissão. Foi um teste desta forma que apanhou no `sub35` uma data no futuro a entrar na lista filtrada sem etiqueta no ecrã.
+- `documento_sem_marca_de_tenant` exige a ausência de TODAS as marcas: olhar só para o `network_id` deixaria a fuga entrar pela cláusula que existe para a evitar.
+
+O SMART MATCH: A FRONTEIRA SAI DO DOCUMENTO, NÃO DO UTILIZADOR
+- Era a pior das fugas porque é um JOIN e nenhuma das pontas estava filtrada. Alcançável por `GET /match/property/{id}/clients` e pelo `check_and_notify_matches_for_new_property`, que manda o resultado por EMAIL ao agente — uma fuga que SAI do sistema.
+- Não há utilizador em que a ancorar (corre em background). E a regra certa é de qualquer forma esta: um cruzamento liga duas pontas da MESMA rede, logo a âncora diz qual é. `ambito_de_um_documento` + `condicao_da_mesma_rede` são o ponto único dos QUATRO módulos que cruzam colecções — quatro cópias divergiriam, e a que divergisse devolvia resultados a mais.
+- AO LADO: a notificação de match não tinha `user_id`, logo não aparecia a ninguém. Funcionava enquanto o `run_get_notifications` filtrava por visibilidade de processo; o Lote 5 pôs o `user_id` como único critério. Agora é um documento POR destinatário e, sem destinatário, NÃO SE GRAVA — um registo adormecido é pior do que a ausência, porque parece que o aviso foi dado.
+
+AS FINANÇAS: A FRONTEIRA DERIVA DA EMPRESA, NÃO DE UM CARIMBO NOVO
+- `process_finances` é chaveada por `(process_id, company_id)` — a própria repartição de comissões de uma partilha —, logo TODOS os registos já identificam a empresa. `network_id` nunca existiu aqui e o `backfill --documentos` não cobre esta colecção.
+- Filtrar pelas empresas do UTILIZADOR resolvia a fuga e abria outro buraco no sentido oposto: a Precision deixava de ver os registos da Power, que estão na mesma rede e que ela deve ver. Dados a menos não se notam menos do que dados a mais — notam-se PIOR, porque parecem um erro de contabilidade e ninguém suspeita de uma guarda.
+- `empresas_das_minhas_redes(scope)` resolve rede → empresas e fecha a fronteira com um campo preenchido em todos os registos, sem migração. E o `company_id` PEDIDO valida-se (`exigir_empresa_no_ambito`): no `summary` e na criação ele é obrigatório, e sem validação bastava escrever o id da outra empresa no URL.
+
+O PAPEL EFECTIVO TEM UM PONTO DE RESOLUÇÃO (e eu quase escrevi a sexta cópia)
+- Escrevi o `papel_efectivo` dentro do `property_scope` e o `finance_scope` importou-o de lá — camadas trocadas e a caminho da sexta cópia da mesma resolução. Saiu para `tenant_access_context.resolver_papel_efectivo`; o `carregar_contexto_de_acesso` passou a DERIVAR dele.
+- A única diferença entre chamadores é o predicado que traduz `__all_roles__`: quem pergunta pela fronteira de rede passa o `e_papel_sem_fronteira`, senão um administrador em modo global perdia o passe livre.
+- Resolver o papel efectivo exige o `Request` — só a ROTA o tem. 16 endpoints de `routes/properties.py` e 7 de `process_finances` passaram a declará-lo.
+
+MEDIÇÃO POR MUTAÇÃO — SEIS, AS SEIS MORTAS
+- listagem sem condição de rede → morreu na exploração E nas duas contraprovas; `documento_no_ambito` sempre `True` → morreu no teste de concordância; estatísticas sem `$match` → contagem + ordem das etapas; `pode_apontar_para_o_processo` aceita tudo → os dois testes do DESTINO; criação sem carimbo → o teste do carimbo; finanças pelas empresas do UTILIZADOR → `test_a_PRECISION_ve_os_registos_financeiros_da_POWER`.
+- A última é a que mais importa: é a contraprova a apanhar a correcção «certa» que esconde dados em silêncio.
+
+DOIS TESTES MEUS ESTAVAM ERRADOS, NÃO O CÓDIGO
+- `test_o_match_de_um_processo...` afirmava lista VAZIA: mas um processo da Domus a casar com o imóvel da Domus é o comportamento certo. Passou a afirmar a ausência do `imo-power` E a presença do `imo-domus` — a contraprova no mesmo teste.
+- A soma do `$sum` sobre `financials.asking_price` não é afirmada: o duplo de Mongo não agrega caminhos com ponto e devolveria 0 com a correcção presente OU ausente. Uma asserção que passa sem provar nada é pior do que não existir. Afirma-se a CONTAGEM e, num teste próprio, a ORDEM das etapas — que é a propriedade escrita.
+- E a cadeia de `db` cresceu outra vez: `property_helpers.get_next_reference` importa `db` no topo e é chamado na CRIAÇÃO. Sem ele no patch, o teste rebentava com «Event loop is closed» — um vermelho a apontar para o isolamento quando o problema era o `db`.
+
+O QUE ENCONTREI E NÃO FECHEI (e porque não)
+- **D-26, nova:** `document_visibility.user_can_view_process_documents` não conhece redes NENHUMAS. Abre por duas linhas: bypass ABSOLUTO para {admin, ceo, diretor, administrativo} verificado antes de tudo, e `if not is_document_visibility_restricted(process): return True` — um processo JÁ INDEXADO é visível a qualquer sessão autenticada (a restrição foi escrita para a PRÉ-indexação, não como fronteira de tenant; e indexado é o caso NORMAL, não o raro).
+- Do outro lado não são nomes: é a pasta documental do cliente — cartão de cidadão, IRS, recibos, extractos. É a fuga de maior consequência de RGPD deste eixo e basta saber um `process_id`. PROVADA em `test_documentos_atravessam_redes.py`, em `xfail(strict=True)`.
+- **Não a fechei porque a guarda certa É a resposta da D-25.** Num processo em partilha o lado convidado tem de ver os documentos («a ficha inteira», decisão do dono do produto). Escrever aqui uma fronteira de rede pura fecha a porta que a D-25 precisa de abrir, e abri-la outra vez a seguir é alargar uma parede para caber a correcção — como o Incidente P0 do Portal começou.
+- **Corrigi uma afirmação minha da auditoria:** eu disse que o custo não-óbvio da D-25 era a parede do S3. NÃO É. `build_s3_valid_prefixes(process)` deriva os prefixos do PROCESSO (o seu id e o do cliente), não da rede — no momento em que o convidado abre o processo, a parede autoriza-lhe os mesmos prefixos sem mudar uma linha. O custo real é a D-26.
+- **D-24 fica aberta, reduzida ao ponto 4:** `public_registration.py` não carimba a rede e a Sala de Triagem é uma POOL por desenho (`build_tenant_pool_condition` mostra o que não tem carimbo a TODAS as redes — é o claim-based routing). Com um formulário público único, todo o lead público fica visível às duas redes. Não é um defeito do isolamento: é o isolamento a aplicar uma regra escrita quando havia um grupo só. As duas saídas são decisões de negócio opostas e estão escritas na dívida.
+
+CONSEQUÊNCIAS OPERACIONAIS, DITAS DE PROPÓSITO
+- A carteira existente (toda por carimbar) continua visível a quem está em `TENANT_DEFAULT_NETWORK_ID` = `grupo_power_precision`, e deixa de o ser para qualquer rede nova. Não é preciso correr migração nenhuma para os imóveis.
+- Os imóveis e leads criados de HOJE em diante nascem carimbados. Um utilizador sem empresa activa cria imóveis por carimbar, com `warning` no log — meio carimbo é pior do que nenhum.
+- Para o `administrativo`, `consultor`, `intermediario` e `indexacao`, as listagens financeiras estreitam de «todos os registos do sistema» para «as empresas das suas redes». Quem não tiver empresa resolvida vê uma lista VAZIA, com `warning` — falha fechada.
+- O `diretor` NÃO atravessa redes em nenhuma destas superfícies (continua com passe livre dentro da sua). Só ADMIN e CEO atravessam, como no calendário e nas visitas.
+
+---
 Task ID: isolamento-e-motor-de-visitas
 Agent: Cloud Agent
 Task: LOTE 9 parte 2 — isolamento do `db.visits` (D-21), o modelo de IA do scraper (D-22), o motor de extração (D-23) e o dashboard de Visitas

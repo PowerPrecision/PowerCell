@@ -9,7 +9,7 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from database import db
 from models.property import (
@@ -22,15 +22,34 @@ from utils.input_sanitization import (
     sanitize_url, sanitize_html,
 )
 from services.property_helpers import get_next_reference
+from services.property_scope import (
+    ERRO_IMOVEL_NAO_ENCONTRADO,
+    carregar_contexto_dos_imoveis,
+    exigir_imovel_no_ambito,
+    pode_apontar_para_o_processo,
+)
+from services.tenant_network import com_isolamento, resolve_tenant_stamp
 
 logger = logging.getLogger(__name__)
 
 
 async def run_create_property(
     data: PropertyCreate,
-    user: dict
+    user: dict,
+    request: Request | None = None,
 ):
-    """Criar novo imóvel angariado."""
+    """Criar novo imóvel angariado — CARIMBADO com a rede de quem o cria.
+
+    Corrigir só a leitura tornava a correcção invisível para o trabalho
+    novo: é a lição do `assigned_to` e, antes dela, a do
+    `build_company_scope_condition` (cláusula que admite documentos sem
+    marca + escritores que não marcam = tudo casa).
+
+    **Meio carimbo é pior do que nenhum** (regra das visitas e do
+    calendário): sem contexto de empresa, `resolve_tenant_stamp` devolve
+    `None`, o imóvel cai na pilha por carimbar e a migração resolve-o
+    depois. Carimbar a rede ERRADA é permanente.
+    """
     now = datetime.now(timezone.utc).isoformat()
     
     # Gerar referência se não fornecida
@@ -61,11 +80,18 @@ async def run_create_property(
         if agent:
             agent_name = agent["name"]
     
-    # Verificar URL duplicado (não bloqueia, apenas avisa)
+    contexto = await carregar_contexto_dos_imoveis(user, request)
+
+    # Verificar URL duplicado (não bloqueia, apenas avisa) — DENTRO da
+    # rede: o aviso traz o título e o `client_name` do imóvel que já
+    # existe, logo sem âmbito dizia a quem angariasse o mesmo anúncio
+    # que outra rede já o tinha, e para que cliente.
     warning = None
     if data.source_url:
         existing = await db.properties.find_one(
-            {"source_url": data.source_url},
+            com_isolamento(contexto.condicao, {"source_url": data.source_url})
+            if contexto.condicao
+            else {"source_url": data.source_url},
             {"id": 1, "title": 1, "client_name": 1, "status": 1}
         )
         if existing:
@@ -109,15 +135,32 @@ async def run_create_property(
         created_by=user.get("email")
     )
     
-    await db.properties.insert_one(property_doc.model_dump())
-    
-    logger.info(f"Imóvel criado: {property_doc.id} ({internal_ref}) por {user.get('email')}")
+    documento = property_doc.model_dump()
+
+    carimbo = await resolve_tenant_stamp(user)
+    if carimbo:
+        documento.update(carimbo)
+    else:
+        logger.warning(
+            "[IMOVEIS] Imóvel %s criado SEM carimbo de rede (%s sem empresa "
+            "activa): fica na pilha por carimbar.",
+            property_doc.id, user.get("email"),
+        )
+
+    await db.properties.insert_one(documento)
+
+    logger.info(
+        f"Imóvel criado: {property_doc.id} ({internal_ref}) por {user.get('email')} "
+        f"rede={(carimbo or {}).get('network_id')}"
+    )
     
     # Verificar matches em background (não bloqueia resposta)
     asyncio.create_task(check_and_notify_matches_for_new_property(property_doc.id))
     
-    # Incluir warning na resposta se URL duplicado
-    response = property_doc.model_dump()
+    # Incluir warning na resposta se URL duplicado.
+    # O `insert_one` do Motor MUTA o dicionário com um `_id` de ObjectId
+    # — devolvê-lo rebenta a serialização JSON.
+    response = {k: v for k, v in documento.items() if k != "_id"}
     if warning:
         response["warning"] = warning
     
@@ -126,13 +169,21 @@ async def run_create_property(
 
 async def run_get_property(
     property_id: str,
-    user: dict
+    user: dict,
+    request: Request | None = None,
 ):
-    """Obter detalhes de um imóvel."""
+    """Obter detalhes de um imóvel.
+
+    Entrega o `owner` COMPLETO — nome, telefone, email e **NIF** do
+    proprietário. Era um `find_one` por id e mais nada: a rota autoriza
+    o VERBO, não o OBJECTO.
+    """
     prop = await db.properties.find_one({"id": property_id}, {"_id": 0})
-    
+
     if not prop:
-        raise HTTPException(status_code=404, detail="Imóvel não encontrado")
+        raise HTTPException(status_code=404, detail=ERRO_IMOVEL_NAO_ENCONTRADO)
+
+    await exigir_imovel_no_ambito(prop, user=user, request=request)
     
     # Incrementar contador de visualizações
     await db.properties.update_one(
@@ -146,14 +197,19 @@ async def run_get_property(
 async def run_update_property(
     property_id: str,
     data: PropertyUpdate,
-    user: dict
+    user: dict,
+    request: Request | None = None,
 ):
     """Actualizar um imóvel."""
     prop = await db.properties.find_one({"id": property_id})
-    
+
     if not prop:
-        raise HTTPException(status_code=404, detail="Imóvel não encontrado")
-    
+        raise HTTPException(status_code=404, detail=ERRO_IMOVEL_NAO_ENCONTRADO)
+
+    contexto = await exigir_imovel_no_ambito(
+        prop, user=user, request=request, escrita=True
+    )
+
     now = datetime.now(timezone.utc).isoformat()
     
     # Preparar actualização
@@ -186,7 +242,27 @@ async def run_update_property(
             update_dict["owner"] = owner
     
     update_dict["updated_at"] = now
-    
+
+    # O DESTINO: repontar o imóvel para um processo de outra rede
+    # levava-lhe para dentro a ficha de um cliente que não é desta casa
+    # (é o `pode_apontar_para_o_processo` do calendário).
+    for campo in ("process_id", "client_id"):
+        destino = update_dict.get(campo)
+        if not destino or destino == prop.get(campo):
+            continue
+        processo = await db.processes.find_one(
+            {"id": destino},
+            {"_id": 0, "id": 1, "network_id": 1, "company_id": 1,
+             "company": 1, "company_name": 1},
+        )
+        if not pode_apontar_para_o_processo(
+            processo, papel=contexto.papel, scope=contexto.scope
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="Processo não encontrado",
+            )
+
     # Actualizar nome do agente se mudou
     if "assigned_agent_id" in update_dict:
         agent = await db.users.find_one({"id": update_dict["assigned_agent_id"]}, {"name": 1})
@@ -217,13 +293,16 @@ async def run_update_property(
 async def run_update_property_status(
     property_id: str,
     status: PropertyStatus,
-    user: dict
+    user: dict,
+    request: Request | None = None,
 ):
     """Actualizar apenas o status de um imóvel."""
     prop = await db.properties.find_one({"id": property_id})
-    
+
     if not prop:
-        raise HTTPException(status_code=404, detail="Imóvel não encontrado")
+        raise HTTPException(status_code=404, detail=ERRO_IMOVEL_NAO_ENCONTRADO)
+
+    await exigir_imovel_no_ambito(prop, user=user, request=request, escrita=True)
     
     now = datetime.now(timezone.utc).isoformat()
     
@@ -246,13 +325,33 @@ async def run_update_property_status(
 
 async def run_delete_property(
     property_id: str,
-    user: dict
+    user: dict,
+    request: Request | None = None,
 ):
-    """Eliminar um imóvel (apenas admin/CEO/diretor)."""
+    """Eliminar um imóvel (apenas admin/CEO/diretor).
+
+    Era `delete_one({"id": property_id})` e mais nada — o
+    `run_delete_deadline` do Lote 7 com outro nome: um diretor da Domus
+    apagava uma angariação da Power sabendo o id, sem rasto.
+
+    A LEITURA vem antes da escrita de propósito: apagar e só depois
+    verificar não tem volta.
+    """
+    prop = await db.properties.find_one(
+        {"id": property_id},
+        {"_id": 0, "id": 1, "network_id": 1, "company_id": 1,
+         "company": 1, "company_name": 1},
+    )
+
+    if not prop:
+        raise HTTPException(status_code=404, detail=ERRO_IMOVEL_NAO_ENCONTRADO)
+
+    await exigir_imovel_no_ambito(prop, user=user, request=request, escrita=True)
+
     result = await db.properties.delete_one({"id": property_id})
-    
+
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Imóvel não encontrado")
+        raise HTTPException(status_code=404, detail=ERRO_IMOVEL_NAO_ENCONTRADO)
     
     logger.info(f"Imóvel {property_id} eliminado por {user.get('email')}")
     

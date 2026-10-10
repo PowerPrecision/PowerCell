@@ -106,7 +106,7 @@ async def run_update_minuta(minuta_id: str, data: MinutaUpdate, user: dict):
         raise HTTPException(status_code=404, detail="Minuta nao encontrada")
 
     is_owner = minuta.get("created_by") == user.get("id")
-    is_admin = user.get("role") in ["admin", "ceo"]
+    is_admin = user.get("role") in ["master", "admin", "ceo"]
 
     if not is_owner and not is_admin:
         raise HTTPException(
@@ -155,7 +155,7 @@ async def run_delete_minuta(minuta_id: str, user: dict):
         raise HTTPException(status_code=404, detail="Minuta nao encontrada")
 
     is_owner = minuta.get("created_by") == user.get("id")
-    is_admin = user.get("role") in ["admin", "ceo"]
+    is_admin = user.get("role") in ["master", "admin", "ceo"]
 
     if not is_owner and not is_admin:
         raise HTTPException(

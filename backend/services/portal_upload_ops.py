@@ -313,12 +313,22 @@ async def _notify_assigned_team_upload(process: dict, filename: str, category: s
             logger.warning(f"Erro ao notificar utilizador {uid} sobre upload: {e}")
 
 
-async def run_generate_portal_upload_url(data: dict, client_data: dict):
+async def run_generate_portal_upload_url(
+    data: dict,
+    client_data: dict,
+    *,
+    categoria_forcada: str = "Index",
+):
     """
     Gera uma pre-signed URL para upload direto ao S3.
 
     Suporta cliente sem processo (onboarding): usa pasta S3 do cliente.
     Com processo: usa pasta do processo. Categoria forçada a Index.
+
+    `categoria_forcada` é `Index` para o Portal do Cliente (que nunca
+    escolhe pasta). O Portal do Parceiro passa a que o DESVIO INTELIGENTE
+    decidiu (`document_intake.planear_entrada`): `Index` por indexar, a
+    pedida quando já está indexado — as mesmas regras do upload do CRM.
     """
     if not s3_service.is_configured():
         raise HTTPException(
@@ -335,12 +345,12 @@ async def run_generate_portal_upload_url(data: dict, client_data: dict):
     content_type = data.get("content_type", "application/octet-stream")
     category = data.get("category", "Outros")
 
-    if category != "Index":
+    if category != categoria_forcada:
         logger.info(
             f"[PORTAL-PACOTE-BL] generate_upload_url: categoria original "
-            f"'{category}' forçada para 'Index'. ficheiro={filename}"
+            f"'{category}' forçada para '{categoria_forcada}'. ficheiro={filename}"
         )
-    category = "Index"
+    category = categoria_forcada
 
     if not filename:
         raise HTTPException(status_code=400, detail="Nome do ficheiro é obrigatório")

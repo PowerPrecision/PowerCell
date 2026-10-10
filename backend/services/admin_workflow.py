@@ -48,6 +48,19 @@ logger = logging.getLogger(__name__)
 from services.s3_storage import s3_service
 
 
+def _modelos_para_gravar(modelos):
+    """Modelos de tarefa validados (Pydantic) → dicts com id estável.
+
+    `None` passa como `None` (não configurado). O id é gerado aqui, no
+    servidor, para o que o editor não trouxe — é a chave da idempotência.
+    """
+    if modelos is None:
+        return None
+    from services.phase_automation import garantir_ids_dos_modelos
+
+    return garantir_ids_dos_modelos(m.model_dump() for m in modelos)
+
+
 async def run_get_workflow_statuses(user: dict):
     """Lista todas as fases do workflow ordenadas pelo campo order.
 
@@ -109,6 +122,12 @@ async def run_create_workflow_status(data: WorkflowStatusCreate, user: dict):
         # Pydantic entrega o membro do Enum e o que fica gravado tem de
         # ser a `str`, igual ao que vem da BD em todos os outros sítios.
         "macro_fase": data.macro_fase.value if data.macro_fase else None,
+        # Bloco 3 (ponto 12) — `None` (não configurado) é diferente de `[]`.
+        "auto_assign_roles": (
+            list(dict.fromkeys(data.auto_assign_roles))
+            if data.auto_assign_roles is not None else None
+        ),
+        "task_templates": _modelos_para_gravar(data.task_templates),
     }
 
     await db.workflow_statuses.insert_one(status_doc)
@@ -164,6 +183,18 @@ async def run_update_workflow_status(status_id: str, data: WorkflowStatusUpdate,
         update_data["trigger_deed_reminder"] = data.trigger_deed_reminder
     if data.macro_fase is not None:
         update_data["macro_fase"] = data.macro_fase.value
+    # Bloco 3 (ponto 12) — automação de entrada na fase. `[]` é uma resposta
+    # («não fazer nada») e grava-se.
+    # Um `null` EXPLÍCITO volta a «não configurado» (herda o por-omissão);
+    # a ausência do campo no pedido não toca em nada. A diferença só se vê em
+    # `model_fields_set`: o Pydantic entrega `None` nos dois casos.
+    if "auto_assign_roles" in data.model_fields_set:
+        update_data["auto_assign_roles"] = (
+            None if data.auto_assign_roles is None
+            else list(dict.fromkeys(data.auto_assign_roles))
+        )
+    if "task_templates" in data.model_fields_set:
+        update_data["task_templates"] = _modelos_para_gravar(data.task_templates)
 
     if update_data:
         await db.workflow_statuses.update_one({"id": status_id}, {"$set": update_data})

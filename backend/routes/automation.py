@@ -38,7 +38,7 @@ engine_router = APIRouter(prefix="/automations", tags=["Automation"])
 
 @engine_router.get("")
 async def get_automations_status(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
 ):
     """Sinais vitais dos jobs de background (leitura)."""
     return await run_get_automations_status()
@@ -50,7 +50,7 @@ async def forcar_execucao_de_job(
     chave: str,
     request: Request,
     response: Response,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO])),
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO])),
 ):
     """Corre um job agora (Lote 2, ponto 1).
 
@@ -73,7 +73,7 @@ async def forcar_execucao_de_job(
 @router.get("/rules")
 async def get_rules(
     active_only: bool = False,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """Listar todas as regras de automação."""
     return await run_get_rules(active_only, user)
@@ -82,7 +82,7 @@ async def get_rules(
 @router.get("/rules/{rule_id}")
 async def get_rule_by_id(
     rule_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """Obter uma regra específica."""
     return await run_get_rule_by_id(rule_id, user)
@@ -91,7 +91,7 @@ async def get_rule_by_id(
 @router.post("/rules")
 async def create_rule_endpoint(
     data: RuleCreate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """Criar nova regra de automação."""
     return await run_create_rule(data, user)
@@ -101,7 +101,7 @@ async def create_rule_endpoint(
 async def update_rule_endpoint(
     rule_id: str,
     data: RuleUpdate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """Actualizar uma regra."""
     return await run_update_rule(rule_id, data, user)
@@ -110,7 +110,7 @@ async def update_rule_endpoint(
 @router.delete("/rules/{rule_id}")
 async def delete_rule_endpoint(
     rule_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """Eliminar uma regra."""
     return await run_delete_rule(rule_id, user)
@@ -118,7 +118,7 @@ async def delete_rule_endpoint(
 
 @router.get("/triggers")
 async def list_triggers(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """Listar triggers disponíveis com descrição."""
     return await run_list_triggers()
@@ -126,7 +126,7 @@ async def list_triggers(
 
 @router.get("/actions")
 async def list_actions(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """Listar ações disponíveis com descrição."""
     return await run_list_actions()

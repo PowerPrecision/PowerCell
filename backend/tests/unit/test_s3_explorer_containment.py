@@ -21,7 +21,7 @@ from services.admin_s3_explorer import (
 )
 from services.s3_explorer_paths import RAIZ_DO_EXPLORADOR
 
-UTILIZADOR = {"id": "u1", "role": "admin", "email": "a@x.pt"}
+UTILIZADOR = {"id": "u1", "role": "master", "email": "a@x.pt"}
 
 # A chave que ninguém pode alcançar: é a base de dados inteira num ficheiro.
 BACKUP = "backups/powercell-2026-09-25.gz"

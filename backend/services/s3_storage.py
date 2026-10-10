@@ -19,6 +19,10 @@ AWS_BUCKET_NAME = os.environ.get('AWS_BUCKET_NAME')
 AWS_REGION = os.environ.get('AWS_REGION', 'eu-west-3')
 
 # Categorias de documentos padrão
+#: A pasta onde entra tudo o que se envia a um processo ainda por indexar.
+#: Não faz parte de `DEFAULT_CATEGORIES` de propósito (ver `list_files`).
+CATEGORIA_INDEX = "Index"
+
 DEFAULT_CATEGORIES = [
     "Documentos Pessoais",
     "Financeiros", 
@@ -504,6 +508,12 @@ class S3Service:
                             # Categoria "all" deve ser tratada como "Outros"
                             if category_raw.lower() == "all":
                                 category = "Outros"
+                            elif category_raw.lower() == CATEGORIA_INDEX.lower():
+                                # A «pasta cofre» (Bloco 2, Lote 12) é uma
+                                # categoria PRÓPRIA: sem este ramo caía no
+                                # «Outros» e o consultor via ali o que a
+                                # Indexação ainda não tratou.
+                                category = CATEGORIA_INDEX
                             else:
                                 # Encontrar categoria correspondente
                                 category = "Outros"
@@ -526,7 +536,12 @@ class S3Service:
                             "temporary_url": self.get_presigned_url(key) or ""
                         }
                         
-                        if category in files_by_category:
+                        if category == CATEGORIA_INDEX:
+                            # Só existe na resposta quando tem o que mostrar:
+                            # `DEFAULT_CATEGORIES` (que também cria pastas)
+                            # não muda.
+                            files_by_category.setdefault(CATEGORIA_INDEX, []).append(file_info)
+                        elif category in files_by_category:
                             files_by_category[category].append(file_info)
                         else:
                             files_by_category["Outros"].append(file_info)

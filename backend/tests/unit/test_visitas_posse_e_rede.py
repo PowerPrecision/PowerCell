@@ -181,12 +181,18 @@ class TestQuemPodeVer:
             user_id="u-admin", papel="administrativo", redes=(REDE_POWER,),
         ) is True
 
-    def test_ADMIN_e_CEO_atravessam_redes_de_proposito(self):
-        """São eles que reconciliam a pilha por carimbar."""
+    def test_so_o_MASTER_atravessa_redes_de_proposito(self):
+        """É ele que reconcilia a pilha por carimbar."""
+        assert pode_ver_visita(
+            _visita(), user_id="qualquer", papel="master", redes=(),
+        ) is True
+
+    def test_ADMIN_e_CEO_sao_locais(self):
+        """Adenda de RBAC: sem rede nem ligação, nem o Admin nem o CEO vêem."""
         for papel in ("admin", "ceo"):
             assert pode_ver_visita(
                 _visita(), user_id="qualquer", papel=papel, redes=(),
-            ) is True
+            ) is False
 
     def test_uma_visita_POR_CARIMBAR_entra_na_vista_de_equipa(self):
         """A pilha anterior ao isolamento: cegá-la no dia do deploy

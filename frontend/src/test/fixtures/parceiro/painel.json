@@ -1,0 +1,39 @@
+{
+  "escriturados": 1,
+  "funil": [
+    {
+      "etapa": "lead",
+      "label": "Leads",
+      "total": 2
+    },
+    {
+      "etapa": "novo",
+      "label": "Em preparação",
+      "total": 1
+    },
+    {
+      "etapa": "analise",
+      "label": "Em análise",
+      "total": 0
+    },
+    {
+      "etapa": "aprovado",
+      "label": "Em aprovação",
+      "total": 1
+    },
+    {
+      "etapa": "concluido",
+      "label": "Escriturados",
+      "total": 1
+    },
+    {
+      "etapa": "perdido",
+      "label": "Perdidos",
+      "total": 1
+    }
+  ],
+  "leads": 2,
+  "pedidos_pendentes": 2,
+  "taxa_de_conversao": 16.7,
+  "total_de_casos": 6
+}

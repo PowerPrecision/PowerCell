@@ -50,6 +50,12 @@ except ImportError:
     # `NameError` em vez de fazer o que a docstring prometia.
 
 from config import GEMINI_API_KEY
+from services.scraper_estruturado import (
+    completar as completar_com_estruturados,
+    e_pagina_de_bloqueio,
+    extrair_estruturados,
+    tem_dados_para_guardar,
+)
 from services.scraper_anunciante import (
     alvos_do_anunciante,
     contexto_para_a_ia,
@@ -2152,6 +2158,17 @@ class PropertyScraper:
             logger.info("[SCRAPER] curl_cffi falhou, tentando ScraperAPI...")
             html_content = await self._fetch_with_scraperapi(url)
         
+        # Um desafio anti-bot servido com HTTP 200 não é o anúncio: sem isto o
+        # parser lia a página do desafio, devolvia vazio e (antes da guarda da
+        # cache) o vazio ficava sete dias guardado.
+        if html_content and e_pagina_de_bloqueio(html_content):
+            logger.warning("[SCRAPER] Página de desafio anti-bot recebida em %s", current_domain)
+            html_content = None
+            if SCRAPERAPI_KEY:
+                html_content = await self._fetch_with_scraperapi(url)
+                if html_content and e_pagina_de_bloqueio(html_content):
+                    html_content = None
+
         if not html_content:
             return {"error": "Não foi possível obter o conteúdo da página. O site pode estar bloqueando acessos automáticos."}
         
@@ -2163,34 +2180,68 @@ class PropertyScraper:
         result = {}
         parser_used = None
         
+        # Cada parser por portal depende de nomes de classe que o portal muda
+        # sem aviso. Um parser que RESULTE em excepção (um `find()` a devolver
+        # `None` onde se esperava um nó) não pode matar o scrape: devolve vazio,
+        # diz-se no log, e a camada estruturada abaixo preenche o que puder.
         if "idealista" in url_lower:
-            result = self._parse_idealista(soup, html_content)
             parser_used = "idealista"
+            leitor = lambda: self._parse_idealista(soup, html_content)  # noqa: E731
         elif "imovirtual" in url_lower:
-            result = self._parse_imovirtual(soup)
             parser_used = "imovirtual"
+            leitor = lambda: self._parse_imovirtual(soup)  # noqa: E731
         elif "supercasa" in url_lower:
-            result = self._parse_supercasa(soup, html_content)
             parser_used = "supercasa"
+            leitor = lambda: self._parse_supercasa(soup, html_content)  # noqa: E731
         elif "casasapo" in url_lower or "casa.sapo" in url_lower:
-            result = self._parse_casasapo(soup)
             parser_used = "casasapo"
+            leitor = lambda: self._parse_casasapo(soup)  # noqa: E731
         elif "remax" in url_lower:
-            result = self._parse_remax(soup)
             parser_used = "remax"
+            leitor = lambda: self._parse_remax(soup)  # noqa: E731
         elif "era.pt" in url_lower:
-            result = self._parse_era(soup, html_content)
             parser_used = "era"
+            leitor = lambda: self._parse_era(soup, html_content)  # noqa: E731
         elif "kw.com" in url_lower or "kwportugal" in url_lower:
-            result = self._parse_kw(soup)
             parser_used = "kw"
+            leitor = lambda: self._parse_kw(soup)  # noqa: E731
         elif "easygest" in url_lower:
-            result = self._parse_easygest(soup, html_content, url)
             parser_used = "easygest"
+            leitor = lambda: self._parse_easygest(soup, html_content, url)  # noqa: E731
         else:
-            result = self._parse_generic(soup)
             parser_used = "generic"
-        
+            leitor = lambda: self._parse_generic(soup)  # noqa: E731
+
+        try:
+            result = leitor() or {}
+        except Exception as exc:
+            logger.warning(
+                "[SCRAPER] Parser %s falhou (%s) — a continuar com a camada estruturada",
+                parser_used, type(exc).__name__, exc_info=True,
+            )
+            result = {}
+
+        # Camada independente das classes CSS (JSON-LD, __NEXT_DATA__, meta,
+        # texto rotulado): preenche o que o parser do portal não leu. O que o
+        # parser leu continua a ganhar — conhece o portal.
+        try:
+            completar_com_estruturados(result, extrair_estruturados(soup, html_content))
+            if result.get("_completado_por_estruturados"):
+                logger.info(
+                    "[SCRAPER] %s: camada estruturada acrescentou %s",
+                    parser_used, ", ".join(result["_completado_por_estruturados"]),
+                )
+        except Exception as exc:
+            logger.warning("[SCRAPER] Camada estruturada falhou: %s", type(exc).__name__)
+
+        # Último recurso do título: o `<h1>`. Fica DEPOIS da camada estruturada
+        # de propósito — o nome do JSON-LD é o do anúncio, o `<h1>` é o que o
+        # tema do portal lá pôs (muitas vezes só «Moradia»).
+        if not result.get("titulo"):
+            h1 = soup.find("h1")
+            if h1 and h1.get_text(strip=True):
+                result["titulo"] = h1.get_text(strip=True)
+
         # ============================================================
         # NAVEGAÇÃO MULTI-NÍVEL (LOTE 10) — ANTES DA IA, DE PROPÓSITO
         # ============================================================
@@ -2364,7 +2415,12 @@ class PropertyScraper:
         result["_source"] = current_domain
         
         if use_cache and not result.get("error"):
-            await self._save_to_cache(url, result)
+            if tem_dados_para_guardar(result):
+                await self._save_to_cache(url, result)
+            else:
+                # Um resultado vazio (DOM novo, desafio anti-bot) em cache dava
+                # sete dias de vazio mesmo depois de o portal ser corrigido.
+                logger.warning("[SCRAPER] Resultado sem dados NÃO guardado em cache: %s", url[:80])
         
         return result
     
@@ -2998,49 +3054,26 @@ class PropertyScraper:
         return data
     
     def _parse_generic(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Parser genérico usando meta tags OpenGraph e Schema.org"""
+        """Parser genérico: título e descrição do OpenGraph.
+
+        O JSON-LD, o preço e os restantes campos são da camada
+        `scraper_estruturado`, que corre depois de TODOS os parsers. Aqui havia
+        uma cópia frágil dela (`offers` lido como dicionário quando é muitas
+        vezes uma lista → `AttributeError`) e o «primeiro valor em euros do
+        texto inteiro» como preço.
+        """
         data = {}
-        
-        # OpenGraph
+
         og_title = soup.find('meta', property='og:title')
-        if og_title:
+        if og_title and og_title.get('content'):
             data["titulo"] = og_title.get('content', '')
-        
+
         og_desc = soup.find('meta', property='og:description')
-        if og_desc:
+        if og_desc and og_desc.get('content'):
             data["descricao"] = og_desc.get('content', '')[:500]
-        
-        # Schema.org
-        for script in soup.find_all('script', type='application/ld+json'):
-            try:
-                json_data = json.loads(script.string)
-                if isinstance(json_data, dict):
-                    if json_data.get('name'):
-                        data["titulo"] = json_data['name']
-                    if json_data.get('offers', {}).get('price'):
-                        data["preco"] = int(float(json_data['offers']['price']))
-            except (json.JSONDecodeError, TypeError, ValueError):
-                continue
-        
-        # Fallback: H1
-        if not data.get("titulo"):
-            h1 = soup.find('h1')
-            if h1:
-                data["titulo"] = h1.get_text(strip=True)
-        
-        # Tentar encontrar preço no texto
-        if not data.get("preco"):
-            text = soup.get_text()
-            prices = re.findall(r'(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*€', text)
-            if prices:
-                price_text = prices[0].replace('.', '').replace(',', '.')
-                try:
-                    data["preco"] = int(float(price_text))
-                except ValueError:
-                    pass
-        
+
         return data
-    
+
     # ================================================================
     # CRAWLING RECURSIVO
     # ================================================================

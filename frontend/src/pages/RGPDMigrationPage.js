@@ -80,7 +80,7 @@ const RGPDMigrationPage = () => {
   const [confirmModal, setConfirmModal] = useState(false);
 
   // Verificar acesso - apenas Admin, CEO ou Diretor
-  const allowedRoles = ["admin", "ceo", "diretor"];
+  const allowedRoles = ["master", "admin", "ceo", "diretor"];
   const hasAccess = allowedRoles.includes(user?.role?.toLowerCase());
 
   // Carregar estado da migração

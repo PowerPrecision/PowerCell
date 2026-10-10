@@ -279,5 +279,13 @@ async def run_send_portal_message_staff(
         content=content,
         exclude_user_id=user.get("id"),
     )
+    # Bloco 3 (ponto 21): o conteúdo NÃO vai para o histórico (vive na conversa
+    # do Portal); regista-se que a equipa escreveu ao cliente.
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Enviou mensagem ao cliente (Portal)",
+        "portal_message", None, None,
+    )
     return staff_portal_message_response(message_doc)
 

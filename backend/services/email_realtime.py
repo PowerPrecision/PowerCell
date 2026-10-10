@@ -190,7 +190,7 @@ async def notify_new_email_for_global_mailbox(email_doc: Dict[str, Any]) -> int:
             if not uid:
                 continue
             role = user.get("role")
-            if role in ("admin", "ceo", "diretor", "administrativo"):
+            if role in ("master", "admin", "ceo", "diretor", "administrativo"):
                 user_ids.append(uid)
             elif (user.get("email") or "").lower() in all_recipients:
                 user_ids.append(uid)

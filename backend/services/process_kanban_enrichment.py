@@ -11,6 +11,9 @@ import logging
 from typing import Any, Optional
 
 from database import db
+from services.process_sharing import (
+    aplicar_flag_a_processos as aplicar_flag_partilha,
+)
 from services.sub35 import aplicar_flag_a_processos as aplicar_flag_sub35
 from services.process_status import STATUS_VALUE_ALIASES
 from services.workflow_phases import carregar_fases, nomes_terminais
@@ -415,6 +418,7 @@ async def run_get_kanban_board(
     labels: Optional[Any] = None,
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
+    partilha: Optional[str] = None,
     decrypt_list_fn=None,
     kanban_projection: dict,
 ) -> dict[str, Any]:
@@ -429,9 +433,9 @@ async def run_get_kanban_board(
     # de query SEPARADO do das listagens, e por isso ficou de fora do
     # Lote 4: um utilizador de uma empresa isolada não via processos na
     # lista e via-os todos no quadro. A condição vem do mesmo ponto único.
-    from services.tenant_network import build_tenant_condition
+    from services.tenant_network import build_tenant_process_condition
 
-    tenant_condition = await build_tenant_condition(user)
+    tenant_condition = await build_tenant_process_condition(user)
 
     user_id = user["id"]
 
@@ -458,6 +462,7 @@ async def run_get_kanban_board(
         labels=labels,
         labels_logic=labels_logic,
         sub35=sub35,
+        partilha=partilha,
         terminais=terminais,
     )
     if str(role).lower() == "indexacao":
@@ -473,6 +478,7 @@ async def run_get_kanban_board(
     )
 
     aplicar_flag_sub35(processes)
+    aplicar_flag_partilha(processes)
     await fill_missing_process_client_contacts(processes)
     await enrich_processes_portal_flags(processes)
     await enrich_processes_latest_activity(processes)

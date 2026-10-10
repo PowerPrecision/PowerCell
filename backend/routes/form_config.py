@@ -69,7 +69,7 @@ async def delete_custom_field(
 
 
 @router.post("/reset")
-async def reset_form_config(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+async def reset_form_config(user: dict = Depends(require_roles([UserRole.MASTER]))):
     """Repor configuração padrão do formulário (remove campos personalizados)."""
     return await run_reset_form_config(user)
 
@@ -119,7 +119,7 @@ async def duplicate_template(
 @router.delete("/templates/{template_id}")
 async def delete_template(
     template_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Eliminar template personalizado."""
     return await run_delete_template(template_id, user)

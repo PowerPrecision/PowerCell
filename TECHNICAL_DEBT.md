@@ -44,6 +44,47 @@ mais longo), ou aceitar a invalidação numa janela de manutenção anunciada.
 
 ---
 
+### D-24 · O registo público não carimba a rede, e a Sala de Triagem é global
+**Onde:** `services/public_registration.py`, `services/client_registered.py`
+(`build_tenant_pool_condition`)
+
+**O que já fechou** (iteração `fronteira-da-carteira`, 2026-10-09): as três
+superfícies de dados que esta entrada media — a carteira de angariações
+(`db.properties`, DOZE módulos sem uma única ocorrência de `compan` ou
+`network`), o Smart Match (o JOIN sem âmbito em nenhuma das pontas) e os
+registos financeiros (`company_id` da query string como «fronteira»). Detalhe
+no `worklog.md`.
+
+**O que fica**, e fica porque depende de uma decisão de produto e não de
+código: `public_registration.py` tem zero ocorrências de `resolve_tenant_stamp`.
+Hoje funciona por o lead cair na pilha por carimbar — e a **Sala de Triagem é
+uma POOL** (`build_tenant_pool_condition`), que por desenho mostra o que não
+tem carimbo a **TODAS** as redes. É o *claim-based routing*: um registo
+público ainda não é de ninguém, e escondê-lo de quem não é da rede de omissão
+faz com que nunca seja reivindicado.
+
+Somado a um **formulário público único**, que não sabe de que empresa é, a
+consequência é directa: **todo o lead público fica visível às duas redes**, a
+Domus incluída. Não é um defeito do isolamento, é o isolamento a aplicar uma
+regra que foi escrita quando havia só um grupo.
+
+**Porque está adiado:** as duas saídas são decisões de negócio opostas e
+nenhuma é obviamente certa. (a) O formulário passa a saber a empresa — um link
+por empresa/rede (`?company=`), e o lead nasce carimbado: a Pool deixa de ser
+partilhada e cada rede trata dos seus. (b) A Pool continua global e passa a
+ser uma SALA DE ENTRADA explícita, com os dados mínimos à vista até alguém
+reivindicar — o que obriga a decidir que campos são «mínimos» (nome sem
+contacto? sem NIF?).
+
+**Quem é atingido:** com uma ilha no sistema, qualquer registo público. Hoje
+não há utilizadores activos da Domus, logo não está a acontecer.
+
+**Para fechar:** a decisão (a) ou (b); depois disso o carimbo na escrita é
+pequeno (`resolve_tenant_stamp` no `public_registration`) e a Pool passa a
+`build_tenant_condition` ou mantém-se com projecção reduzida.
+
+---
+
 ### D-4 · Varrimento de limites de pedidos nos restantes routers
 **Onde:** `backend/routes/*.py`
 
@@ -347,6 +388,14 @@ do passo 2.
 Os processos, clientes e leads têm `network_id`; os emails não. Pertence ao
 lote do webmail.
 
+**Bloco 2 (Out 2026):** a LEITURA passou a ter fronteira sem o carimbo —
+`services/email_access.py` deduz a rede pela empresa do email
+(`documento_no_ambito`; sem marca nenhuma pertence à rede de omissão) e todas
+as rotas de leitura/anexos/processo a usam. **O que continua aberto:** o
+carimbo na escrita e o backfill (a dedução falha para um email com
+`company_id` em branco numa instalação sem `TENANT_DEFAULT_NETWORK_ID`), e as
+caixas partilhadas por cargo (`shared_role`) não distinguem redes.
+
 **Para fechar:** carimbo na escrita (`resolve_tenant_stamp`) + backfill com a
 regra do `rede_consensual` (recusa adivinhar quando há mais de uma candidata).
 
@@ -408,6 +457,131 @@ o `titular2_data` apontam para "os adicionais"), migrar os documentos escritos
 pelo mapeador do CPCV — identificáveis porque `co_buyers[0]` tem a identidade
 do titular 1 — e só então simplificar a desduplicação.
 
+### D-27 · Os defaults por cargo do registo de capacidades não persistem
+**Onde:** `backend/services/admin_permissions.py::run_update_role_defaults`,
+`backend/models/permissions.py::ROLE_CAPABILITY_DEFAULTS`.
+
+`PUT /admin/permissions/role-defaults/{role}` altera o dicionário
+`ROLE_CAPABILITY_DEFAULTS` **em memória** e escreve uma cópia em
+`system_config` (`key: "role_capability_defaults"`). **Nada a lê de volta**:
+`grep` por `role_capability_defaults` encontra um único escritor. Duas
+consequências: a alteração perde-se no reinício do serviço, e com mais de um
+worker só o que recebeu o pedido a conhece.
+
+Encontrada ao desenhar o controlo de histórico (Bloco 1, ponto 4), que por
+isso NÃO usa este registo — um interruptor de segurança em cima disto seria o
+placebo do `build_company_scope_condition`. Usa uma colecção própria
+(`history_policy`) com leitura real.
+
+**Porque foi adiado:** não pertence ao ponto 4, e corrigi-la muda o
+comportamento de uma matriz de permissões que o dono do produto pode ter
+editado julgando-a permanente — carregar o persistido no arranque revive
+edições antigas que ninguém espera.
+
+**Quem é atingido:** qualquer admin que altere os defaults de um cargo na
+`PermissionsTab` e espere que sobreviva a um deploy. Os overrides por
+**pessoa** (`users.permissions.capabilities`) persistem e não são afectados.
+
+**O que é preciso para fechar:** ler `role_capability_defaults` no arranque (e
+com o mesmo TTL curto do `history_tracking`, para os workers convergirem),
+decidir o que fazer com o documento já gravado (mostrá-lo ao admin antes de o
+aplicar), e um teste que reinicie o módulo e afirme que o valor sobrevive.
+
+### D-28 · O `history` não leva carimbo de rede
+**Onde:** colecção `history`, `services/executive_report.py`
+
+As CONTAGENS de mudanças de fase do relatório executivo são por pessoa do âmbito
+(o mesmo contrato do relatório que existia antes): uma pessoa que trabalha em
+duas redes tem na rede A as mudanças que fez na rede B. A lista de movimentos já
+filtra pelos processos do âmbito; as contagens não. Fechar exige carimbar
+`history` (escritor único `log_history`) e migrar o legado — adiado por ser um
+escritor central e por o impacto ser só em quem trabalha em duas redes.
+
+### D-29 · Um job activo por processo não é atómico
+**Onde:** `services/portal_gov_fetch._iniciar_recolha`, colecção `portal_scraper_jobs`
+
+A verificação «há um job activo?» e a criação do job são duas operações. Dois
+pedidos simultâneos podem passar ambos e arrancar dois logins (dois SMS ao
+cliente, e o código escrito serve um só). Mitigado: limite de 5/min por processo,
+o botão fica desactivado enquanto o pedido corre e o dano é um SMS a mais, não
+uma fuga. Fechar exige um índice único parcial por `process_id` sobre um campo
+booleano `active` (o `partialFilterExpression` do Mongo não aceita `$in` sobre
+`status`) e a reivindicação por `insert` com tratamento de `DuplicateKeyError`.
+
+### D-30 · Os scrapers do Estado e dos portais só se provam em produção
+**Onde:** `services/gov_scraper.py`, `services/scraper.py`
+
+Sem rede nem credenciais reais, tudo o que se prova é a orquestração (política,
+estado, arquivo, MFA) e a camada estruturada contra HTML de fixture. Os
+selectores do Portal das Finanças e da Segurança Social Direta (`FINANCAS_SEL`,
+`SEG_SOCIAL_SEL`) continuam a ser os do código anterior e **não foram
+validados contra os portais**; o `gov_scraper` tem ~3 000 linhas num módulo só,
+com dois fluxos inner quase gémeos. O que fecha isto: um relatório de
+selectores falhados por execução (passo e selector, sem credenciais) e uma
+rotina de verificação mensal com uma conta de teste; só depois faz sentido
+partir o módulo.
+
+### D-31 · Rotas «por id» fora do router de processos não perguntam a que rede pertence o objecto
+**Onde:** `routes/clients.py` (`/clients/{id}`), `routes/tasks.py` (`/tasks/{id}`), e as restantes rotas com um id no caminho que não passem por um construtor de âmbito
+
+A adenda de RBAC (Out 2026) tornou o Admin e o CEO perfis **locais** e fechou
+o pedido de processos por id com uma dependência de router
+(`process_scope_guard.exigir_processo_no_ambito`). Fica por varrer o resto:
+`require_roles`/`get_current_user` autorizam o VERBO e, onde o serviço não
+volta a perguntar pelo OBJECTO, um staff que adivinhe o id de um cliente ou de
+uma tarefa de outra rede lê-o (clientes), ou muda-o (tarefas). Não foi medido
+rota a rota — o inventário por AST desta adenda cobre as listas de papéis, não
+as posses. Fechar exige o mesmo inventário que o Lote 5 fez para as listagens,
+agora para os handlers com `{..._id}` no caminho, com excepções escritas.
+
+**Relacionado — fronteira de dados é a REDE, não a empresa.** Power e Precision
+partilham rede por decisão do Lote 4, logo um Admin da Power vê os dados da
+Precision. A gestão de utilizadores, os UCR, as configs de email e o relatório
+de segunda-feira seguem a rede; só `system_config` é por empresa. Se o dono do
+produto quiser isolamento por EMPRESA dentro da mesma rede, é um carimbo novo
+em todas as colecções, não uma correcção desta adenda.
+
+### D-32 · O registo público de clientes procura por email/NIF em TODAS as redes e funde
+**Onde:** `backend/services/public_registration.py` (`run_public_client_registration`)
+
+Descoberto ao desenhar o Portal do Parceiro (a lead do parceiro **não** usa este
+caminho de propósito: não há «find-or-create» na lead, porque o encontrar
+atravessaria redes). O registo público é anónimo, e abre com
+`db.clients.find_one` por `contacto.email_hash`/`email` e por
+`dados_pessoais.nif_hash`/`nif` **sem condição de rede**: quem submeter o email
+ou o NIF de um cliente de OUTRA rede cai no ramo «cliente já existe», que
+actualiza campos vazios, junta `custom_fields` e emite o convite do Portal.
+O modo de falhar não dá erro. Não foi alterado neste lote (comportamento de
+produto antigo, e a regra de duplicados é decisão do dono). Fechar exige decidir
+a regra: procurar só na rede por omissão do formulário público (que carimbo tem
+o formulário?) e criar sempre um cliente novo — marcado `possible_duplicate_of`
+— quando o encontrado for de outra rede.
+
+### D-33 · Portal do Parceiro: o que ficou de fora da V1 (decidido)
+**Onde:** `services/partner_*.py`, `routes/partner_portal.py`, `routes/partners_admin.py`, `pages/partner/`
+
+Cada ponto é uma decisão assumida, não um esquecimento:
+- **Sem «esqueci-me da palavra-passe» autónomo.** A recuperação é um novo convite
+  (`POST /admin/partners/{id}/resend-invite`), que reutiliza o token de uso único.
+  Um fluxo público de recuperação precisa do travão por IP (D-4).
+- **Sem link de referência / registo por link** (ideia original do dono). Depende
+  de o `_get_client_ip` ler o XFF certo (D-4): um limite por IP que se contorna
+  mudando um cabeçalho não protege um endpoint anónimo que cria registos.
+- **Um parceiro numa 2.ª rede:** o esquema (`redes: [...]`) e as paredes já o
+  suportam (visibilidade = relação ∧ rede activa); falta o endpoint de
+  «acrescentar ligação» a um parceiro existente — hoje o convite a um email já
+  em uso devolve 409.
+- **O DTO não leva contactos do parceiro nem da equipa** (nem email do consultor).
+  A comunicação é pelos «Pedidos de Documentos»; se o negócio quiser um nome de
+  contacto, é um campo novo e uma decisão de privacidade.
+- **Mesma origem do SPA:** `/parceiro/*` é um chunk do mesmo bundle. Separar num
+  subdomínio/entrada Vite própria tiraria o código do staff da superfície do
+  parceiro; a fronteira real é o servidor (token e segredo próprios), por isso
+  adiou-se.
+- **`uploaded_count` de um pedido inclui ficheiros que a equipa juntou** (é a
+  contagem que decide o estado no servidor); o ecrã do parceiro limita-a a
+  `expected_count` para não mostrar «4/1».
+
 ## Fechadas
 
 Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
@@ -415,6 +589,8 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 
 | # | Dívida | Fechada em |
 |---|---|---|
+| D-26 | A guarda de documentos não conhecia redes | Iteração `partilha-e-documentos` — encontrada a medir a D-24 e **só podia fechar com a D-25**: a guarda certa É a resposta da partilha. `user_can_view_process_documents` tinha ZERO ocorrências de `network` e abria por duas linhas — o bypass ABSOLUTO de {admin, ceo, **diretor**, administrativo} verificado antes de tudo, e `if not is_document_visibility_restricted(process): return True`, que tornava um processo **já indexado** (o caso NORMAL) visível a qualquer sessão autenticada. Do outro lado estava a pasta documental do cliente: cartão de cidadão, IRS, recibos, extractos, alcançável sabendo só um `process_id`. A fronteira entra **antes** do bypass (um bypass de cargo que corra primeiro é um bypass de rede — a mutação que a move para depois mata quatro testes) e usa o `processo_no_ambito`, que conta a rede convidada. O `scope` é PARÂMETRO das puras e as guardas `async` resolvem-no sempre, falhando FECHADO. Corrigiu também uma afirmação minha: o custo não-óbvio da D-25 **não** era a parede do S3 — `build_s3_valid_prefixes` deriva do PROCESSO e não da rede |
+| D-25 | Um processo em PARTILHA entre duas redes não tinha modelo | Iteração `partilha-e-documentos` — `partner_network_ids` acrescenta quem VÊ sem mudar de quem É (`network_id` continua o carimbo de propriedade), e o âmbito é o PROCESSO e não a rede: é essa a diferença face ao atalho do UCR nas duas empresas, que abria a rede INTEIRA. `build_process_scope_condition` é função SEPARADA e DERIVADA da genérica — pôr o ramo no construtor comum fá-lo-ia viajar para 33 superfícies onde nenhum documento tem o campo — com inventário por AST que falha por OMISSÃO e excepções ESCRITAS (as agregações de estatísticas ficam de fora de propósito: **ver, sim; contar, não**). A sincronização DERIVA do documento gravado e não de um diff, porque são cinco os escritores de atribuições. Via Rápida com revogação MANUAL (decisão do dono do produto), e por isso **visível e auditada**: trilho, histórico e etiqueta, que é o único sítio onde uma abertura que ninguém aprovou se vê. Um defeito meu que o teste apanhou: a etiqueta nomeava a empresa POR OMISSÃO do utilizador, pelo que para quem trabalha em duas redes rotulava a partilha com a empresa errada |
 | D-23 | O mapeador do scraper descartava campos que a IA extrai | Iteração `motor-de-visitas` — eram **DOIS** mapeadores escritos à mão (o do CRM em `visit_helpers` e o do Portal em `portal_client_visits`) para os MESMOS campos, e **já divergiam**: o do Portal guardava `raw_data`, o do CRM não, pelo que uma visita criada no CRM perdia também quartos, casas de banho, certificado energético, ano de construção, descrição e referência. E a lista de ONZE chaves do `property_scraper`, sobre ~30 devolvidas, perdia o **`estado`** do imóvel — que o prompt da IA pede pelo nome desde sempre. Hoje `services/visit_property_extract.ficha_do_imovel` é o ponto único e o `raw_data` **DERIVA** do dicionário devolvido: um campo novo no prompt chega ao mesmo destino sem ninguém se lembrar. Ganhou um **terceiro veredicto** (`sem_dados`): um anúncio que responde 200 com tudo vazio contava como sucesso e a visita ficava sem um único dado, indistinguível de um imóvel sem informação |
 | D-21 | `db.visits` sem isolamento de rede nem posse nas escritas | Iteração `isolamento-das-visitas` — as TRÊS formas do defeito ao mesmo tempo. As duas listagens (e o Kanban, que tem construtor SEPARADO — a lição do `build_kanban_query`) passaram a derivar do mesmo contexto de acesso e do mesmo `com_isolamento`; a posse vive em `visit_scope.py` (puro) com `exigir_visita_acessivel` ligada à leitura, ao `PATCH` e ao cancelamento, e responde **404 e nunca 403**. A reatribuição ganhou a pergunta do DESTINO (`pode_atribuir_a_consultor`), sem a qual um editor legítimo entregava a um consultor de outra rede o nome, o email e o telefone de um cliente. O carimbo passou a derivar do **PROCESSO** num ponto único (`carimbo_da_visita`): havia dois escritores com origens diferentes para o mesmo campo e uma delas — `user.get("company_id")` — não existe no documento de utilizador, logo toda a visita da equipa nascia sem carimbo. **O `administrativo` ENTROU na vista de equipa** (o back-office coordena visitas) e por isso o âmbito dele estreita de «todas as redes» para «a sua rede» |
 | D-22 | O modelo de IA do scraper estava fixo no código | Iteração `isolamento-das-visitas` — o modelo configurado era lido, **escrito no log** («Usando modelo configurado: X») e depois ignorado: a chamada era `genai.GenerativeModel("gemini-2.0-flash")`, literal, e o `ai_usage_tracker` recebia o mesmo literal, pelo que o relatório de custos atribuía a despesa ao modelo errado. **O log a dizer o contrário é o que tornava isto difícil de ver.** A omissão continua no `_get_ai_model_for_scraping`, que é onde ela pertence; o teste é ao nível da CHAMADA (asserção sobre o parâmetro que sai para o SDK, não sobre o resultado — regra do «duplo demasiado esperto») |
@@ -427,4 +603,4 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 | D-16 | Eliminar um cliente não deixava entrada no trilho de auditoria | Iteração `sub35-estrito-e-auditoria` — `audit_trail_service.log_audit_event` nos **dois** pontos de saída do `run_delete_client` (o cliente pode viver em `processes` ou em `clients`, e um registo escrito só num ramo era a forma de defeito desta casa); com IP, papel EFECTIVO em `metadata` (o campo partilhado guarda o do JWT) e os ids da cascata. O registo é escrito DEPOIS da eliminação e nunca a faz falhar |
 | D-20 | A Listagem de Processos e o Kanban sem teste que monte a página | Iteração `medicao-d19-e-paginas-montadas` — `ProcessesPage.test.jsx` (14) e `KanbanPage.test.jsx` (14, com o `KanbanBoard` REAL). Apanharam três defeitos que nenhum teste de componente podia ver: uma coluna sem `processes` rebentava o quadro (`filter` de `undefined` — havia `|| []` nos dois sítios do arrasto e em nenhum dos quatro do caminho normal), o botão «Exportar Excel» do cabeçalho do quadro tinha ficado FORA do fecho dos botões fantasma (sem gate, e exporta NIF/telefone/email), e o `BotaoComPermissao` dava nome acessível «Acção — sem permissão» a TODOS os botões bloqueados do sistema (o `typeof children === "string"` nunca é verdadeiro com ícone + rótulo) |
 | D-17 | Os `co_buyers` não tinham data de nascimento | Iteração `identidade-documental-e-d17` — a data entrou no esquema de extracção do CPCV (opcional, e com instrução explícita de NÃO inferir: uma data inventada é pior do que nenhuma) e a regra estrita estendeu-se aos compradores, em Python e na condição Mongo (`$nor` + `$elemMatch`, porque o quantificador é «todos» e no Mongo isso não tem forma positiva). A desduplicação por identidade é o que impede a regra de se desligar a si mesma — ver D-18 |
-| D-7 | Relatório semanal do CEO com âmbito global | Iteração `motor-fila-e-agenda` — decisão de produto tomada (a Direcção quer o CONSOLIDADO, e fica a única excepção deliberada ao isolamento por rede); a dívida fechou com o defeito que ninguém tinha visto ao lado dela — o «às 06:00» vivia só na docstring e o relatório saía **24 vezes** à segunda-feira |
+| D-7 | Relatório semanal do CEO com âmbito global | Iteração `motor-fila-e-agenda` — decisão de produto tomada (a Direcção quer o CONSOLIDADO, e fica a única excepção deliberada ao isolamento por rede) — **revista na adenda de RBAC (Out 2026): o consolidado passou a ser só do Master e cada rede recebe o seu (`relatorio_semanal_destinos`)**; a dívida fechou com o defeito que ninguém tinha visto ao lado dela — o «às 06:00» vivia só na docstring e o relatório saía **24 vezes** à segunda-feira |

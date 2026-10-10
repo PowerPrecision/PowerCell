@@ -11,7 +11,9 @@ from database import db
 from services.document_checklist import generate_checklist
 
 
-async def run_generate_document_checklist(process_id: str, files: list[str]):
+async def run_generate_document_checklist(
+    process_id: str, files: list[str], user: dict | None = None,
+):
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -25,6 +27,14 @@ async def run_generate_document_checklist(process_id: str, files: list[str]):
         {"id": process_id},
         {"$set": {"document_checklist": result}}
     )
+
+    if user:
+        from services.history import log_history
+
+        await log_history(
+            process_id, user, "Gerou a checklist de documentos",
+            "document_checklist", None, f"{len(files)} ficheiro(s)",
+        )
 
     return result
 

@@ -61,6 +61,7 @@ from utils.input_sanitization import (
     sanitize_string, sanitize_url, log_sanitization_rejection,
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
+from services.partner_attribution import aplicar_parceiro_do_cliente
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ async def run_assign_client_to_user(
     
     
     # Determinar utilizador de destino
-    if user_role in ["admin", "ceo", "diretor"]:
+    if user_role in ["master", "admin", "ceo", "diretor"]:
         target_user_id = assign_to_user_id or user_id
     else:
         target_user_id = user_id  # Apenas a si próprio
@@ -140,7 +141,7 @@ async def run_assign_client_to_user(
     if (
         existing_assignee
         and existing_assignee != target_user_id
-        and user_role not in ("admin", "ceo", "diretor")
+        and user_role not in ("master", "admin", "ceo", "diretor")
     ):
         raise HTTPException(
             status_code=409,
@@ -281,6 +282,10 @@ async def run_assign_client_to_user(
                 target_user.get("id"), process_id,
             )
 
+        # Portal do Parceiro: o processo nasce atribuído ao parceiro que
+        # trouxe a lead — senão o caso desaparece do ecrã dele.
+        aplicar_parceiro_do_cliente(process_doc, client)
+
         # Encriptar dados sensíveis do processo antes de inserir
         # (o cliente já foi desencriptado acima, por isso os dados estão em plain text)
         from services.process_service import encrypt_sensitive_data as encrypt_process_data
@@ -288,6 +293,14 @@ async def run_assign_client_to_user(
 
         # Inserir processo
         await db.processes.insert_one(process_doc)
+
+        # PARTILHA — Via Rápida (D-25): a Sala de Triagem atribui a
+        # qualquer pessoa da rede de quem distribui, e o processo nasce
+        # já com o atribuído. Corre DEPOIS do insert, porque é o
+        # documento gravado que decide.
+        from services.process_sharing import sincronizar_parceiros_sem_falhar
+
+        await sincronizar_parceiros_sem_falhar(process_id, por_ordem_de=user.get("id"))
 
         # ============================================================
         # PACOTE 9 — CRIAR ESTRUTURA S3 REAL NO MOMENTO DA CRIAÇÃO

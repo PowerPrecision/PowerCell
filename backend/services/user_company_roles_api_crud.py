@@ -15,6 +15,13 @@ from fastapi import HTTPException
 from pymongo.errors import DuplicateKeyError
 
 from database import db
+from services.admin_users_scope import empresas_do_ambito
+from services.role_scope import PAPEIS_GLOBAIS, e_papel_global, utilizador_e_global
+from services.user_management_scope import (
+    carregar_utilizador_gerivel,
+    exigir_empresas_concediveis,
+    exigir_papeis_concediveis,
+)
 from models.user_company_role import (
     UserCompanyRoleCreate,
     UserCompanyRoleUpdate,
@@ -117,9 +124,52 @@ async def _find_ucr(role_id: str) -> Optional[dict]:
 _find_ucr_by_id = _find_ucr
 
 
+async def _restringir_ao_ambito(query: dict, actor: dict) -> dict:
+    """Junta a fronteira de gestão a uma consulta de UCRs.
+
+    O Master vê todos. Os outros só os acessos às empresas da sua rede, e
+    nunca um acesso `master`. Sem isto, qualquer Admin/CEO listava os
+    acessos de TODAS as empresas.
+    """
+    if utilizador_e_global(actor):
+        return query
+    ambito = await empresas_do_ambito(actor or {})
+    empresas = [*ambito.ids, *ambito.nomes]
+    limite = {
+        "role": {"$nin": sorted(PAPEIS_GLOBAIS)},
+        "$or": (
+            [{"company_id": {"$in": empresas}}, {"company_name": {"$in": empresas}}]
+            if empresas else [{"company_id": {"$in": []}}]
+        ),
+    }
+    return {"$and": [query, limite]}
+
+
+async def _exigir_ucr_no_ambito(ucr: dict, actor: dict) -> None:
+    """404 se o acesso não é gerível por quem actua (dono fora do âmbito, etc.)."""
+    if utilizador_e_global(actor):
+        return
+    if e_papel_global(ucr.get("role")):
+        raise HTTPException(status_code=404, detail="Associação não encontrada")
+    dono = ucr.get("user_id") or ucr.get("userId")
+    if dono:
+        try:
+            await carregar_utilizador_gerivel(dono, actor, projeccao={"_id": 0, "id": 1, "role": 1})
+        except HTTPException:
+            raise HTTPException(status_code=404, detail="Associação não encontrada")
+    try:
+        await exigir_empresas_concediveis(
+            actor, [ucr.get("company_id") or ucr.get("company_name")],
+        )
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="Associação não encontrada")
+
+
 async def run_list_user_company_roles(
     user_id: Optional[str] = None,
     company_id: Optional[str] = None,
+    *,
+    actor: dict,
 ):
     """Lista associações user-company-role.
 
@@ -139,6 +189,8 @@ async def run_list_user_company_roles(
     if company_id:
         query["company_id"] = company_id
 
+    query = await _restringir_ao_ambito(query, actor)
+
     roles = await db.user_company_roles.find(query).sort(
         "company_name", 1
     ).to_list(500)
@@ -148,22 +200,29 @@ async def run_list_user_company_roles(
     return {"roles": serialized, "total": len(serialized)}
 
 
-async def run_get_user_company_role(role_id: str):
+async def run_get_user_company_role(role_id: str, *, actor: dict):
     """Obtém uma associação específica pelo ID."""
     role = await _find_ucr(role_id)
     if not role:
         raise HTTPException(status_code=404, detail="Associação não encontrada")
+    await _exigir_ucr_no_ambito(role, actor)
     company_names = await _company_name_map()
     return serialize_ucr(role, company_names)
 
 
-async def run_create_user_company_role(payload: UserCompanyRoleCreate):
-    """Associa um utilizador a uma empresa com um role específico."""
-    user = await db.users.find_one(
-        {"id": payload.user_id}, {"_id": 0, "id": 1, "name": 1}
+async def run_create_user_company_role(payload: UserCompanyRoleCreate, *, actor: dict):
+    """Associa um utilizador a uma empresa com um role específico.
+
+    Fronteira de gestão: o utilizador tem de estar no âmbito de quem actua,
+    a empresa também, e só o Master concede `master`.
+    """
+    user = await carregar_utilizador_gerivel(
+        payload.user_id, actor, projeccao={"_id": 0, "id": 1, "name": 1, "role": 1},
     )
-    if not user:
-        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    exigir_papeis_concediveis(actor, [payload.role])
+    await exigir_empresas_concediveis(
+        actor, [payload.company_id or payload.company_name],
+    )
 
     # Pacote EA — só bloqueia a combinação exacta empresa + cargo.
     existing = await db.user_company_roles.find_one({
@@ -216,12 +275,14 @@ async def run_create_user_company_role(payload: UserCompanyRoleCreate):
 
 
 async def run_update_user_company_role(
-    role_id: str, payload: UserCompanyRoleUpdate,
+    role_id: str, payload: UserCompanyRoleUpdate, *, actor: dict,
 ):
     """Atualiza o role ou is_default de uma associação existente."""
     existing = await db.user_company_roles.find_one({"id": role_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Associação não encontrada")
+    await _exigir_ucr_no_ambito(existing, actor)
+    exigir_papeis_concediveis(actor, [payload.role])
 
     now = datetime.now(timezone.utc).isoformat()
     update_data = {"updated_at": now}
@@ -275,7 +336,7 @@ async def run_update_user_company_role(
 
 
 async def run_delete_user_company_role(
-    role_id: str, user_id: Optional[str] = None,
+    role_id: str, user_id: Optional[str] = None, *, actor: dict,
 ):
     """Remove uma associação user-company-role.
 
@@ -284,6 +345,7 @@ async def run_delete_user_company_role(
     existing = await _find_ucr(role_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Associação não encontrada")
+    await _exigir_ucr_no_ambito(existing, actor)
 
     owner_id = existing.get("user_id") or existing.get("userId")
     if user_id and owner_id and user_id != owner_id:
@@ -316,7 +378,9 @@ async def run_delete_user_company_role(
     return {"success": True, "message": "Associação removida"}
 
 
-async def run_assign_user_company_role(user_id: str, payload: UserRoleAssignBody):
+async def run_assign_user_company_role(
+    user_id: str, payload: UserRoleAssignBody, *, actor: dict,
+):
     """Associa um acesso (empresa + cargo) a um utilizador.
 
     Conveniência para POST /admin/users/{user_id}/roles — resolve o nome da
@@ -343,4 +407,4 @@ async def run_assign_user_company_role(user_id: str, payload: UserRoleAssignBody
         role=payload.role,
         is_default=is_default,
     )
-    return await run_create_user_company_role(create_payload)
+    return await run_create_user_company_role(create_payload, actor=actor)

@@ -92,6 +92,8 @@ import {
   separarPorTipoAceite,
 } from "@/utils/dropzone";
 import { resumirAnaliseEmLote } from "../utils/analiseEmLoteFeedback";
+import AvisoEmIndexacao from "./documents/AvisoEmIndexacao";
+import { quantosEmIndexacao, resumoDosEnvios } from "../utils/desvioInteligente";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
 // PACOTE DJ — Modal de revisão Human-in-the-Loop de sugestões IA por documento
@@ -209,7 +211,7 @@ const CATEGORIES = [
 // documentos — o filtro abaixo remove-a da UI para esses roles.
 // ====================================================================
 const INDEX_CATEGORY_ID = "Index";
-const INDEX_CATEGORY_ALLOWED_ROLES = ["admin", "ceo", "diretor", "indexacao"];
+const INDEX_CATEGORY_ALLOWED_ROLES = ["master", "admin", "ceo", "diretor", "indexacao"];
 
 /**
  * Os tipos que o upload aceita — UMA lista, usada pelo `accept` do botão E
@@ -240,6 +242,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
   const queryClient = useQueryClient();
   const [files, setFiles] = useState({});
   const [stats, setStats] = useState(null);
+  // Ficheiros à espera da Indexação, para quem não vê a pasta `Index`.
+  const [emIndexacao, setEmIndexacao] = useState(0);
   const [loading, setLoading] = useState(true);
   // PACOTE 11 (Eixo 3 — Privacy Warning localizado): quando o utilizador
   // não tem permissão para ver os documentos do processo (403 do backend,
@@ -352,7 +356,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
   });
   
   // Verificar se o utilizador pode mapear S3 (apenas admin)
-  const canMapS3 = hasRole(user, "admin");
+  const canMapS3 = hasRole(user, "master");
 
   // Verificar se o utilizador é de indexacao (precisa de NIF da empresa)
   const isIndexacao = hasRole(user, "indexacao");
@@ -438,6 +442,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
       const { data } = await getProcessS3Files(processId);
       setFiles(data.files || {});
       setStats(data.stats || null);
+      setEmIndexacao(quantosEmIndexacao(data));
       setPermissionDenied(false);
     } catch (error) {
       const status = error?.response?.status;
@@ -449,6 +454,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
         setPermissionDenied(true);
         setFiles({});
         setStats(null);
+        setEmIndexacao(0);
       } else if (status) {
         const detalhe = error?.response?.data?.detail;
         if (detalhe !== "S3 não configurado") {
@@ -567,6 +573,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
     }
   };
 
+  // Desvio inteligente: se o servidor pôs ficheiros na pasta `Index`, diz-se
+  // — senão quem não vê essa pasta conclui que o envio falhou.
+  const avisarDaIndexacao = (respostas) => {
+    const { mensagem } = resumoDosEnvios(respostas);
+    if (mensagem) toast.info(mensagem);
+  };
+
   // Executar upload dos ficheiros
   const executeUpload = async (files, empresaNif = null) => {
     setUploading(true);
@@ -574,6 +587,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
 
     let successCount = 0;
     let errorCount = 0;
+    const respostasDosEnvios = [];
     const totalFiles = files.length;
 
     for (let i = 0; i < files.length; i++) {
@@ -589,7 +603,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
       }
 
       try {
-        await uploadProcessS3File(processId, formData);
+        const respostaDoEnvio = await uploadProcessS3File(processId, formData);
+        respostasDosEnvios.push(respostaDoEnvio?.data);
         successCount++;
       } catch (error) {
         const status = error?.response?.status;
@@ -630,6 +645,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
           ? `${successCount} ficheiro(s) enviado(s) com sucesso`
           : `${successCount}/${totalFiles} ficheiros enviados`
       );
+      avisarDaIndexacao(respostasDosEnvios);
       fetchFiles();
       // Reatividade: um upload interno pode ter sido auto-associado a um
       // pedido pendente do Portal do Cliente (_auto_fulfill_portal_request
@@ -788,6 +804,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
 
     let successCount = 0;
     let errorCount = 0;
+    const respostasDosEnvios = [];
     const totalFiles = files.length;
 
     // Criar mapa de resoluções por nome original
@@ -820,7 +837,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
       }
 
       try {
-        await uploadProcessS3File(processId, formData);
+        const respostaDoEnvio = await uploadProcessS3File(processId, formData);
+        respostasDosEnvios.push(respostaDoEnvio?.data);
         successCount++;
       } catch (error) {
         const status = error?.response?.status;
@@ -856,6 +874,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
         ? `${successCount} ficheiro(s) enviado(s), ${skipped} ignorado(s)`
         : `${successCount} ficheiro(s) enviado(s) com sucesso`;
       toast.success(message);
+      avisarDaIndexacao(respostasDosEnvios);
       fetchFiles();
       // Reatividade: ver comentário equivalente em executeUpload().
       queryClient.invalidateQueries({ queryKey: queryKeys.portalRequests.byProcess(processId) });
@@ -2049,6 +2068,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
   return (
     <>
       <Card data-testid="s3-file-manager" className="h-full">
+        {!canSeeIndexCategory && <AvisoEmIndexacao total={emIndexacao} />}
         {/* Mapeamento S3 (apenas para admin) */}
         {canMapS3 && (
           <div className="border-b">

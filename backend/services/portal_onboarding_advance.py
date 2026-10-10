@@ -9,6 +9,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from database import db
+# Importado NO TOPO e não à primeira chamada: um `from database import db`
+# executado dentro de um `patch("database.db", fake)` ficava com o duplo para
+# sempre (a armadilha da ordem de import, ver AGENTS.md). Aqui o módulo carrega
+# com o resto do serviço, antes de qualquer teste patchar o que quer que seja.
+from services import phase_automation
 
 logger = logging.getLogger(__name__)
 
@@ -198,13 +203,37 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
         {"id": process_id}, PROJECCAO_DO_RELOGIO,
     )
     transicao = await transicao_de_fase(processo_antes, target_status)
-    await db.processes.update_one(
-        {"id": process_id},
+    # Bloco 3 (ponto 19) — AVANÇO ATÓMICO. O processo só avança se AINDA estiver
+    # em pré-registo/Lead no momento da escrita: o cliente envia vários
+    # ficheiros em simultâneo e cada confirmação dispara esta verificação.
+    # Sem a condição no filtro, dois pedidos passavam ambos a leitura de cima
+    # e o segundo avançava outra vez — relógio de fases a contar duas vezes e
+    # dois indexadores atribuídos.
+    #
+    # `portal_submitted_at` é a marca de que o cliente ENTREGOU a recolha: é
+    # ela que tranca o perfil no Portal, em vez de se depender de a fase de
+    # entrada estar classificada na macro-fase «novo» ou não.
+    resultado_do_avanco = await db.processes.update_one(
+        {"id": process_id, "status": {"$in": ["pre_registo", None]}},
         montar_update(
             {"status": target_status, "workflow_step": target_status,
-             "updated_at": now},
+             "updated_at": now, "portal_submitted_at": now},
             transicao,
         ),
+    )
+    if getattr(resultado_do_avanco, "matched_count", 1) == 0:
+        logger.info(
+            f"[PACOTE-BO] Processo {process_id} já foi avançado por outro "
+            f"pedido em simultâneo. Nada a fazer."
+        )
+        return
+
+    # Bloco 3 (ponto 12): automação da fase de entrada, se o Admin/CEO a
+    # configurou (sem configuração não faz nada: o por-omissão é só da saída
+    # da Index). Nunca falha o avanço.
+    await phase_automation.ao_entrar_na_fase_sem_falhar(
+        process_id, target_status,
+        origem=phase_automation.ORIGEM_ENTRADA_NO_FLUXO,
     )
 
     # Log silencioso: o system user tem track_history=False, pelo que o

@@ -55,6 +55,7 @@ from typing import Optional
 
 from database import db
 from services.tenant_network import (
+    build_process_scope_condition,
     TenantScope,
     build_network_scope_condition,
     resolve_tenant_scope,
@@ -64,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 #: Versão do esquema do sufixo. Muda quando o SIGNIFICADO do âmbito muda,
 #: para as entradas antigas do Redis não serem servidas com semântica nova.
-VERSAO_DO_AMBITO = "a1"
+VERSAO_DO_AMBITO = "a2"
 
 #: 64 bits de resumo. Um prefixo curto era económico e um choque de hash
 #: entre dois âmbitos serviria os números de uma rede a outra — é o único
@@ -85,6 +86,10 @@ def _canonico(scope: TenantScope) -> str:
         "e=" + ",".join(sorted(scope.company_ids)),
         "n=" + ",".join(sorted(scope.company_names)),
         "o=" + ("1" if scope.inclui_rede_de_omissao else "0"),
+        # O Master (sem fronteira) tem as listas vazias, tal como um
+        # utilizador sem redes — SEM esta marca os dois partilhariam a chave
+        # e o utilizador sem redes serviria os números do sistema inteiro.
+        "g=" + ("1" if scope.sem_fronteira else "0"),
     ]
     return "|".join(partes)
 
@@ -160,8 +165,21 @@ async def processos_no_ambito(
     if not ids:
         return set()
 
+    # Condição de PROCESSOS (D-25) e não a de rede: isto é uma
+    # verificação de VISIBILIDADE — decide se um prazo ou uma mensagem
+    # de um processo aparece —, e um processo PARTILHADO é visível ao
+    # parceiro.
+    #
+    # A `ambito.condicao` (genérica) continua a servir as AGREGAÇÕES, de
+    # propósito: o KPI é a produção da casa, e contar um processo
+    # partilhado nas duas redes fá-lo-ia aparecer duas vezes no
+    # consolidado do grupo e tornava a taxa de conversão do parceiro
+    # ilegível. Ver, sim; contar, não.
     permitidos = await db.processes.find(
-        {"$and": [ambito.condicao, {"id": {"$in": sorted(ids)}}]},
+        {"$and": [
+            build_process_scope_condition(ambito.scope),
+            {"id": {"$in": sorted(ids)}},
+        ]},
         {"_id": 0, "id": 1},
     ).to_list(len(ids))
     return {str(p["id"]) for p in permitidos if p.get("id")}

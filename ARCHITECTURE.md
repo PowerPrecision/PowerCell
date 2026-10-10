@@ -9096,3 +9096,583 @@ decoradores de produção. São duas perguntas diferentes e precisam das
 duas ferramentas.
 
 Cobertura: `tests/unit/test_portal_forca_bruta_e_limites.py` (40).
+
+---
+
+## A fronteira da CARTEIRA: imóveis, Smart Match e finanças (D-24)
+
+### O inventário à mão tinha quatro funções; a medição deu duas colecções
+
+A auditoria da entrada da Domus mediu quatro fugas e escreveu-as em
+`xfail(strict=True)`. Ao ir fechá-las, o inventário real era outro:
+`grep -c "compan\|network"` em `services/property_*.py` dava **zero** em
+**doze** módulos que tocam `db.properties`. A colecção inteira não tinha
+fronteira nenhuma — nem na leitura, nem na escrita, nem na eliminação.
+
+E o documento leva `owner.name`, `owner.phone`, `owner.email` e
+`owner.nif` (o proprietário de uma angariação), mais `client_name`, que
+viaja já no item de LISTAGEM.
+
+As **quatro** formas do defeito, as três primeiras já conhecidas:
+
+| forma | onde | o que entregava |
+|---|---|---|
+| listagem aberta (`query = {}`) | `run_list_properties`, `run_get_property_stats`, `run_get_properties_by_process`, `lead_list` | a carteira, e a SOMA do seu valor |
+| objecto sem posse (`find_one` por id) | `run_get_property`, `run_update_property`, `run_update_property_status`, `run_delete_property`, os 3 de documentos, os 5 de *engagement* | o `owner` completo; e o `delete` era `delete_one({"id": ...})` |
+| escrita sem carimbo | `run_create_property`, `property_excel_import` | tudo o que nascia ficava por carimbar |
+| **o DESTINO** | `run_add_interested_client`, `run_register_visit`, `run_update_property` | o `client_name` de outra rede, **gravado** no imóvel |
+
+A quarta não estava no enunciado e é a mais discreta: o `client_id`
+daquelas rotas é um **process_id**; o código lia `db.processes` e
+escrevia no histórico do imóvel o `client_name` que lá encontrava. Quem
+soubesse um id de processo da Power copiava o nome do cliente para a sua
+carteira — e ficava lá escrito. É o `pode_apontar_para_o_processo` do
+calendário e o `pode_atribuir_a_consultor` das visitas: **são duas
+perguntas, e juntá-las numa deixa a segunda por fazer.**
+
+### `services/property_scope.py` — a carteira é da REDE, não da pessoa
+
+Ao contrário das visitas e do calendário, aqui **não** há recorte por
+pessoa, e é uma decisão: uma angariação é um catálogo partilhado — é o
+consultor que precisa de ver o que a casa tem para cruzar com os seus
+clientes, e o `agent_id` sempre foi um FILTRO da query string, nunca uma
+fronteira. Inventar aqui um limite por pessoa esconderia trabalho real, e
+**um imóvel que desaparece não produz erro nenhum**. A fuga medida era
+entre REDES; é essa que fecha.
+
+Três regras:
+
+1. **404 e nunca 403**, com a mesma mensagem que o código já devolvia
+   (`ERRO_IMOVEL_NAO_ENCONTRADO`): distinguir «não existe» de «não é
+   teu» confirma o id a quem adivinha, e quem é legítimo nunca o vê
+   porque o imóvel aparece-lhe na lista.
+2. **O legado por carimbar NÃO é de todos.** `imovel_no_ambito` deriva do
+   `documento_no_ambito`, que só admite o documento sem marca quando o
+   utilizador pertence à rede de omissão. É deliberadamente mais estrito
+   do que a tolerância das visitas (onde uma visita por carimbar entra
+   para todos): a carteira existente está **toda** por carimbar — nunca
+   houve escritor que a carimbasse —, logo tolerá-la a todos era entregar
+   a carteira inteira do grupo incumbente à primeira ilha que entrasse.
+   Era literalmente a fuga medida. É `TENANT_DEFAULT_NETWORK_ID` que diz
+   de quem ela é, e é isso que faz a correcção funcionar **sem migração**.
+3. **A LEITURA vem antes da escrita** no `delete`: apagar e verificar
+   depois não tem volta.
+
+### Uma PROJECÇÃO que deixa o carimbo de fora cega a guarda
+
+`run_get_interested_clients` lia o imóvel com `{"interested_clients": 1}`.
+O documento chegava sem `network_id`, contava como legado e a guarda
+**abria** em vez de fechar. É a família da lição do `get_file_content` —
+inspeccionar uma coisa e decidir sobre outra é a forma discreta de a
+parede não valer nada.
+
+`PROJECCAO_DO_CARIMBO` (em `tenant_network`) e `PROJECCAO_DE_POSSE` (em
+`property_scope`) existem por isso, e o que as mede é um teste de
+COMPORTAMENTO por função — uma guarda de fonte não distingue uma
+projecção completa de uma incompleta.
+
+### O predicado GÉMEO da condição, e o teste de concordância
+
+`build_network_scope_condition` responde em Mongo (listagens);
+`documento_no_ambito` responde em Python (posse de um objecto). São a
+mesma pergunta em duas linguagens e **divergem na primeira mudança** — a
+que divergir não dá erro: deixa ver, ou esconde trabalho real.
+
+Derivam das mesmas constantes e há um teste que os corre sobre a MESMA
+amostra de dez documentos, em quatro âmbitos × dois valores de omissão.
+Foi um teste desta forma que apanhou, no `sub35`, uma data no futuro a
+entrar na lista filtrada sem etiqueta no ecrã.
+
+`documento_sem_marca_de_tenant` é o gémeo do `_sem_marca_de_tenant()`:
+"por carimbar" exige a ausência de **todas** as marcas, não só do
+`network_id`. Olhar apenas para a rede deixaria a fuga entrar pela
+cláusula que existe para a evitar — um imóvel da Domus criado entre o
+carimbo na escrita e a migração tem empresa e ainda não tem rede.
+
+### O Smart Match: a fronteira sai do DOCUMENTO, não do utilizador
+
+O cruzamento é a pior das fugas porque é um JOIN e nenhuma das pontas
+estava filtrada: `find_matching_clients_for_property` consultava
+`db.processes` por ESTADO e devolvia `client_name`, `client_email` e
+`client_phone`. Alcançável por `GET /match/property/{id}/clients` **e**
+pelo `check_and_notify_matches_for_new_property`, que manda o resultado
+por **EMAIL** ao agente: uma fuga que SAI do sistema.
+
+Não há utilizador em que a ancorar — o aviso corre em background depois
+de uma angariação nascer. E a regra certa é de qualquer forma esta: **um
+cruzamento liga duas pontas da MESMA rede**, logo a âncora diz qual é.
+`tenant_network.ambito_de_um_documento` + `condicao_da_mesma_rede` são o
+ponto único, usado pelos **quatro** módulos que cruzam colecções
+(`client_match`, `match_api_smart`, `portal_recommendations`, `alerts`) —
+quatro cópias divergiriam, e a que divergisse devolvia resultados a mais.
+
+Um documento por carimbar pertence à rede que
+`TENANT_DEFAULT_NETWORK_ID` declara, que é precisamente para isso que a
+variável existe; sem ela (dev, CI) mantém-se o comportamento anterior com
+o aviso de sempre — **nunca em silêncio**.
+
+E ao lado: a notificação de match inserida em `db.notifications` **não
+tinha `user_id`**, logo não aparecia a ninguém. Funcionava enquanto o
+`run_get_notifications` filtrava por visibilidade de processo; o Lote 5
+pôs o `user_id` como único critério e o aviso ficou dormente. A colecção
+tem um destinatário por documento — um aviso para N pessoas são N
+documentos — e **sem destinatário não se grava**: um registo adormecido
+é pior do que a ausência, porque parece que o aviso foi dado.
+
+### As finanças: a fronteira deriva da EMPRESA, não de um carimbo novo
+
+`db.process_finances` é a única destas colecções que **não** usa o
+`build_tenant_condition`, e a razão é de dados: é chaveada por
+`(process_id, company_id)` — um registo por empresa no mesmo processo,
+que é exactamente a repartição de comissões de uma partilha —, logo
+**todos os registos já identificam a empresa**. `network_id` nunca
+existiu aqui e o `backfill_network_id --documentos` não cobre esta
+colecção.
+
+Filtrar pelas empresas do UTILIZADOR resolvia a fuga e abria outro buraco
+no sentido contrário: a Precision deixava de ver os registos da Power,
+que estão na mesma rede e que ela deve ver. **Dados a menos não se notam
+menos do que dados a mais: notam-se pior**, porque parecem um erro de
+contabilidade e ninguém suspeita de uma guarda.
+
+`empresas_das_minhas_redes(scope)` resolve rede → empresas e fecha a
+fronteira com um campo preenchido em todos os registos, sem migração
+nenhuma e sem perder o que a rede partilha. A ilha implícita
+(`rede:<company_id>`) devolve o seu próprio id — é uma empresa sem grupo
+configurado, e é dela que a rede deriva.
+
+E o `company_id` **pedido** valida-se em vez de se confiar: há endpoints
+onde é obrigatório (o `summary`, a criação), e sem
+`exigir_empresa_no_ambito` bastava escrever o id da outra empresa no URL.
+Um registo **sem** empresa é recusado a quem não é ADMIN/CEO: o campo é
+obrigatório na criação desde sempre, logo um registo sem ele são dados
+corrompidos e não história — e adivinhar a quem pertence é escolher a
+quem vazar.
+
+### O papel efectivo tem UM ponto de resolução
+
+Decidir por `user["role"]` é a forma do `history._is_stealth_user` e já
+deu as duas respostas erradas em cinco sítios deste projecto. A resolução
+vivia dentro do `carregar_contexto_de_acesso`; saiu para
+`tenant_access_context.resolver_papel_efectivo`, que o `property_scope` e
+o `finance_scope` reutilizam — escrevê-la outra vez seria a sexta cópia.
+
+A única diferença entre chamadores é o predicado que traduz
+`__all_roles__` (o modo «todos os perfis», que **não** é um nome de
+papel): quem pergunta pela FRONTEIRA DE REDE passa o
+`e_papel_sem_fronteira`, senão um administrador em modo global perdia o
+passe livre que o produto lhe dá. Resolver o papel efectivo exige o
+`Request` — só a ROTA o tem —, e é por isso que os 16 endpoints de
+`routes/properties.py` e os 7 de `process_finances` o declaram.
+
+### Medição por mutação (seis, as seis mortas)
+
+| mutação | morreu em |
+|---|---|
+| a listagem perde a condição de rede | a exploração E as duas contraprovas |
+| `documento_no_ambito` devolve sempre `True` | o teste de concordância |
+| o pipeline das estatísticas perde o `$match` | contagem + ordem das etapas |
+| `pode_apontar_para_o_processo` aceita tudo | os dois testes do DESTINO |
+| a criação deixa de carimbar | `test_um_imovel_novo_nasce_com_a_rede_de_quem_o_cria` |
+| as finanças filtram pelas empresas do UTILIZADOR | `test_a_PRECISION_ve_os_registos_financeiros_da_POWER` |
+
+A última é a que importa mais: é a contraprova a apanhar a correcção
+«certa» que esconde dados em silêncio.
+
+### O que NÃO se afirma, e porquê
+
+A soma do `$sum` sobre `financials.asking_price` não é afirmada: o duplo
+de Mongo não agrega caminhos com ponto e devolveria 0 com a correcção
+presente OU ausente. **Uma asserção que passa sem provar nada é pior do
+que não existir.** Afirma-se a CONTAGEM (que o duplo faz) e, num teste
+próprio, a ORDEM das etapas — que é a propriedade escrita: o `$match`
+entra ANTES do `$group`, senão somava-se o valor das outras redes para o
+descartar a seguir, e o `total` saía errado de qualquer maneira.
+
+---
+
+## A partilha de um processo entre redes: a Via Rápida (D-25 + D-26)
+
+### O modelo tinha UM `network_id`; a co-angariação é normal
+
+`CAMPO_REDE` é singular: um processo pertence a uma rede e só essa o vê.
+Mas a partilha entre agências é uma operação do dia-a-dia, e o modelo
+financeiro **já a conhecia** — `db.process_finances` é chaveada por
+`(process_id, company_id)`, um registo por empresa no mesmo processo, que
+é exactamente o rateio de comissão de uma partilha. Era só a
+VISIBILIDADE que não tinha como o expressar.
+
+O recurso disponível era dar à pessoa um UCR nas duas empresas, e esse é
+o pior negócio possível: o âmbito é do UTILIZADOR, logo um consultor da
+Precision com acesso à Domus passa a ver **toda** a Domus, e não aquele
+processo. O teste `test_a_partilha_de_UM_processo_nao_abre_os_OUTROS` é
+precisamente a diferença entre as duas coisas.
+
+### Decisões de produto (2026-10-09)
+
+| pergunta | decisão |
+|---|---|
+| o que vê o convidado | **a ficha inteira do processo** — e a fronteira continua fechada nos restantes |
+| quem autoriza | ninguém: **Via Rápida**, nasce da ATRIBUIÇÃO |
+| como se revoga | **à mão**, nunca por tirar a atribuição |
+
+A terceira tem uma consequência que não é opcional: **uma abertura de
+fronteira que ninguém aprovou tem de ser visível e auditada**, senão é
+silenciosa — e uma abertura silenciosa é o oposto de tolerância zero.
+Daí a entrada no trilho, a entrada no histórico do processo e a etiqueta
+na listagem. A etiqueta não é decoração: é o único sítio onde a partilha
+se vê.
+
+E a revogação é manual porque o parceiro mantém o histórico e os
+documentos que ele próprio produziu, e o registo de comissão continua
+coerente. Revogar em automático fazia desaparecer trabalho real sem
+ninguém decidir, e **um documento que desaparece não produz erro
+nenhum**.
+
+### Duas listas, uma DERIVA da outra
+
+| campo | para que serve |
+|---|---|
+| `partner_companies` | o REGISTO: quem, quando, por ordem de quem. É o que a etiqueta mostra |
+| `partner_network_ids` | a lista INDEXÁVEL que a condição Mongo lê. **Deriva** do registo em cada escrita |
+
+Duas fontes de verdade para a mesma coisa divergem sem dar erro — e a que
+divergisse ou abria uma rede a mais, ou escondia um processo a quem o
+está a trabalhar. `redes_do_registo()` é a derivação e há um teste a
+afirmar que o documento gravado satisfaz as duas.
+
+O `network_id` **não** se alarga: é o carimbo de propriedade e é
+permanente. Uma partilha acrescenta quem VÊ, nunca muda de quem É — e a
+rede do DONO nunca entra na lista de convidados, porque seria redundante
+hoje e, no dia em que o dono mudasse, deixava lá uma chave da rede
+antiga.
+
+### `build_process_scope_condition` é uma função SEPARADA, não um ramo no genérico
+
+`CAMPO_REDES_PARCEIRAS` existe **só** no documento de processo. Pôr o
+ramo no `build_network_scope_condition` fá-lo-ia viajar para as 33
+superfícies que o usam — clientes, tarefas, imóveis, emails, calendário
+—, onde nenhum documento tem o campo: um `$or` a mais em cada consulta, e
+uma porta aberta no dia em que alguém gravasse o campo noutra colecção
+sem pensar nisto.
+
+DERIVA do genérico em vez de reescrever os ramos: a parte comum é a mesma
+e duas versões dela divergem na primeira mudança. A única diferença é o
+ramo que se acrescenta, e é isso que o código diz.
+
+Quem pergunta «que processos vejo?» usa a variante; todo o resto fica no
+genérico. **Há um inventário por AST** (`test_partilha_de_processo.py`)
+que falha por OMISSÃO para uma superfície nova que consulte `db.processes`
+com a genérica, com as excepções **escritas** e o motivo de cada uma —
+uma lista de exclusão sem motivo é a forma de uma guarda se desligar
+sozinha.
+
+Duas excepções que são decisões e não esquecimentos:
+
+* **as AGREGAÇÕES de estatísticas** ficam na genérica: o KPI é a
+  produção da casa, e contar um processo partilhado nas duas redes
+  fá-lo-ia aparecer duas vezes no consolidado do grupo e tornava a taxa
+  de conversão do parceiro ilegível. **Ver, sim; contar, não** — e a
+  VERIFICAÇÃO de visibilidade (`stats_scope.processos_permitidos`) usa
+  a variante de processos.
+* **a `condicao_de_rede` devolvida pelo `tenant_access_context`** fica a
+  genérica: quem a recebe aplica-a às SUAS colecções (`db.deadlines`,
+  `db.visits`), que não têm campo de partilha. O que ganha a variante é
+  o **conjunto de processos visíveis**, e é por ele que o calendário e
+  as visitas de um processo partilhado chegam ao parceiro.
+
+### A sincronização DERIVA do documento, nunca de um diff
+
+Há **cinco** escritores de atribuições neste projecto, e a lição do Lote
+5 — repetida no Lote 7, no ponto 9 e na contagem por campo que encontrou
+o quinto — é sempre a mesma: a regra aplicada aos construtores e não a
+quem os usa divergiu em todos eles.
+
+`sincronizar_parceiros` lê o documento **já gravado**, resolve as redes
+de todos os atribuídos e acrescenta as que faltam. É idempotente, não
+depende de nenhum diff, e um escritor que se esqueça de a chamar é um bug
+de um sítio e não de cinco. **Só acrescenta**: quem retira é
+`revogar_parceiro`, à mão, e deixa rasto.
+
+### A empresa da ETIQUETA é a da REDE, não a por omissão (defeito medido)
+
+A primeira versão resolvia a empresa pela associação **por omissão** do
+utilizador. Para quem trabalha em duas redes — o caso real deste grupo —
+abria a rede da Domus e escrevia na etiqueta «Precision Crédito»: a
+partilha ficava rotulada com a empresa errada.
+
+**Uma etiqueta que mente sobre quem passou a ver o processo é pior do que
+etiqueta nenhuma**, porque é a única coisa que torna visível uma abertura
+que ninguém aprovou. Hoje percorre-se (utilizador × EMPRESA) e a rede sai
+da empresa. Foi um teste a apanhá-lo, ao tentar usar a utilizadora do
+cenário que trabalha nas duas redes.
+
+### E **não** usa o `resolve_tenant_scope`, de propósito
+
+Aquele atribui a rede de OMISSÃO a um utilizador órfão de empresa (para
+não cegar contas de administração antigas). Aqui isso seria abrir o
+processo ao grupo incumbente por não se saber a empresa de alguém —
+**falha ABERTA, no sítio exactamente errado**. Sem associações, sem
+partilha.
+
+### Uma partilha que falha não pode rebentar uma atribuição
+
+`sincronizar_parceiros_sem_falhar` é o que os escritores chamam. A
+atribuição é a acção do utilizador e **já está gravada** quando a
+sincronização corre: propagar daria um 500 por uma operação que teve
+sucesso, e deixava o estado a meio. Falhar aqui falha FECHADO (o parceiro
+não ganha visibilidade), e a sincronização é idempotente, pelo que a
+acção seguinte repara — mas **nunca em silêncio**, que é a regra do
+`_emit_event_safe`.
+
+O custo desse `except` é que apagar a chamada não parte teste nenhum. Por
+isso a LIGAÇÃO tem guarda própria: um teste parametrizado que exige
+`sincronizar_parceiros_sem_falhar` no corpo de cada um dos quatro
+escritores, mais a contraprova de que a variante estrita **propaga**.
+
+### D-26: a guarda de documentos não conhecia redes
+
+Encontrada a medir a D-24 e fechada aqui, porque **a guarda certa é a
+resposta da D-25**. `user_can_view_process_documents` tinha zero
+ocorrências de `network`, e abria por duas linhas:
+
+1. **bypass ABSOLUTO** para {admin, ceo, **diretor**, administrativo},
+   verificado antes de tudo;
+2. `if not is_document_visibility_restricted(process): return True` — um
+   processo **já indexado** era visível a qualquer sessão autenticada. A
+   restrição foi escrita para a PRÉ-indexação, não como fronteira de
+   tenant, e indexado é o caso NORMAL: é a forma do `run_get_my_tasks`
+   ao contrário, com o ramo COMUM sem guarda nenhuma.
+
+Do outro lado estava a pasta documental do cliente — cartão de cidadão,
+IRS, recibos, extractos. Bastava um `process_id`.
+
+**A fronteira entra ANTES do bypass**: um bypass de cargo que corra
+primeiro é um bypass de rede. A mutação que a move para depois mata
+quatro testes, e o do diretor é o que a nomeia.
+
+Usa o `processo_no_ambito` (e não o `documento_no_ambito`): um processo
+partilhado abre-se ao convidado, que é a decisão de produto. Escrever
+aqui uma fronteira de rede pura fecharia a porta que a partilha precisa
+de abrir, e **alargar uma parede depois para caber a correcção é como o
+Incidente P0 do Portal começou**.
+
+O `scope` é um PARÂMETRO das funções puras e `None` significa «não sei»
+(não aplica a fronteira) — é o que as mantém utilizáveis por quem não o
+tem. A parede real está nas guardas `async`, que o resolvem **sempre**,
+com `_ambito_do_utilizador` a falhar FECHADO (um `TenantScope()` vazio
+não casa com rede nenhuma; devolver `None` desligava a parede por causa
+de um soluço). Há guarda de fonte a exigir que as duas guardas `async`
+resolvam o âmbito **e o passem**, com contraprova a correr o código.
+
+E a recusa de rede vem **antes** do allow-path por relação com o
+cliente: aquele faz I/O e responderia a «este cliente existe?» (a ordem
+das verificações do Incidente P0).
+
+**Nota de correcção:** eu tinha dito que o custo não-óbvio da D-25 era a
+parede do S3. Não é. `build_s3_valid_prefixes(process)` deriva os
+prefixos do PROCESSO (o seu id e o do cliente), não da rede — no momento
+em que o convidado abre o processo, a parede autoriza-lhe os mesmos
+prefixos sem mudar uma linha. O custo era esta guarda.
+
+### O filtro rápido, e a semântica verificada contra um `mongod`
+
+`condicao_de_filtro` é o ponto único, e entra nos **dois** construtores
+de query (a listagem e o Kanban, que tem o seu) **e no endpoint dos
+vizinhos** — senão a seta da fronteira da página leva a um processo que a
+lista filtrada não contém, que é o defeito que o Sub35 já teve ali.
+
+```
+exclusivos  → {partner_network_ids: {"$in":  [None, []]}}
+partilhados → {partner_network_ids: {"$nin": [None, []]}}
+```
+
+`$in: [None, []]` casa com **ausente**, `null` **e** array vazio; o
+`$nin` com a mesma lista é o complemento exacto, incluindo a exclusão dos
+ausentes — e é o `None` na lista que o faz: sem ele o `$nin` casaria com
+os documentos sem o campo e «Partilhados» mostrava a carteira inteira.
+
+**Verificado contra um `mongod` avulso**, porque a semântica de
+`$in`/`$nin` sobre um campo que contém um ARRAY é precisamente onde este
+projecto já se enganou (a consulta do `fix_s3_folder_anomalies`
+encontrou 1 de 7 casos). Os dois são complementos exactos sobre
+{ausente, null, [], ["x"], ["x","y"]}, e o predicado concorda com a
+condição em todos os âmbitos.
+
+Um valor desconhecido **não filtra** em vez de devolver uma condição
+impossível: um parâmetro escrito à mão no URL não pode esvaziar a
+listagem sem dizer porquê — e o `warning` diz.
+
+### A flag é CALCULADA ao servir, nunca persistida
+
+`is_partilhado` e `partilha_com` saem de
+`process_sharing.aplicar_flag_a_processos`, chamada nos mesmos três
+sítios que já aplicam a do `sub35`. Um booleano gravado fica errado no
+dia em que a partilha é revogada — é a regra que o `sub35` já paga, e
+seria o quinto nome do mesmo conceito.
+
+A `PROJECCAO` entra nas DUAS projecções (listagem e Kanban): se o quadro
+projectar e a listagem não, a mesma linha tem etiqueta num ecrã e não tem
+no outro.
+
+### Medição por mutação (seis, as seis mortas)
+
+| mutação | morreu em |
+|---|---|
+| a condição de processos perde o ramo da partilha | o teste de concordância, em 4 âmbitos |
+| a rede do DONO passa a entrar na lista de convidados | 3 testes, entre eles o da etiqueta |
+| a lista indexável deixa de DERIVAR do registo | 4, entre eles o «uma partilha não abre as outras» |
+| o filtro troca EXCLUSIVOS com PARTILHADOS | os dois testes do filtro |
+| a fronteira dos documentos nunca morde | 4 da D-26 |
+| a fronteira corre DEPOIS do bypass de cargo | 4, e o do diretor é o que a nomeia |
+
+
+## Configurações do Sistema por empresa (Bloco 1, ponto 3)
+
+`services/system_config_scope.py` é o ponto único de «que configuração pode este utilizador ver e escrever». O `company_id` da query string **nunca** é de confiança: `require_roles([ADMIN, CEO])` autoriza o verbo, não o objecto.
+
+| Perfil | Empresas | Global (`default`) |
+|---|---|---|
+| ADMIN (o «master»; não há perfil `master` à parte) | todas as de `db.companies` (ou com configuração própria já gravada) | sim — **exclusivo** |
+| CEO | só as dele (UCR) — a mesma rede não chega | **nunca** (revisto: nem o CEO da rede principal) |
+| outros | só a leitura da permissão de exportação, da própria | leitura do booleano |
+
+* **Duas perguntas** (`exigir_empresa_configuravel` / `exigir_configuracao_global`): empresa alheia → **404**; global sem direito → **403**.
+* **A validação vem ANTES da leitura**: `get_system_config(company_id)` cria e grava uma cópia da global para qualquer id novo.
+* Os handlers de `routes/system_config.py` resolvem o âmbito por `resolver_empresa_pedida` / `resolver_configuracao_global` / `resolver_empresa_para_leitura`; um teste por AST exige-o a todos, com excepções ESCRITAS (`SEM_GUARDA`).
+* `reveal-secrets` tem `company_id` (antes devolvia sempre a global).
+* A listagem (`GET /system-config/companies`) é filtrada pelo âmbito e é o que alimenta o selector do ecrã.
+
+
+## Controlo de histórico (Bloco 1, ponto 4)
+
+O admin liga/desliga se as acções ficam guardadas no histórico **por pessoa e por perfil**. Por omissão tudo está ativo.
+
+| Eixo | Onde vive | Ausente significa |
+|---|---|---|
+| pessoa | `users.track_history` (`bool`) | segue o perfil |
+| perfil | `history_policy` / documento `roles` — só os DESLIGADOS | ativo |
+
+* **Pessoa vence perfil** (a regra dos overrides pessoais do `capability_gate`). A política segue o perfil **EFECTIVO**.
+* **Aplica-se no `get_current_user`** (`history_tracking.aplicar_politica_de_historico`): o utilizador chega às rotas com `track_history = False` e o `history._is_stealth_user` — puro, síncrono — continua a ser a única regra que os escritores consultam. Cache de 30 s por worker; falha de leitura → tudo ativo, com aviso.
+* **`indexacao` nunca se liga**: a API recusa política e override para ela, e o `_is_stealth_user` ganha mesmo com o estado forjado na base de dados.
+* **Fora do interruptor**: `audit_trail_service` (conformidade). A decisão de ligar/desligar fica em `audit_logs`, excepto quando o actor é ele próprio silenciado.
+* Só o ADMIN (rotas `/admin/history-tracking*`); nem o CEO.
+* **Todo escritor de histórico passa pelo `log_history`/`_is_stealth_user`** — um `db.history.insert_one` à mão contorna o interruptor e a regra de ouro (foi o caso de `admin_observability`).
+
+
+## Aviso de processos activos ao adicionar um cliente (Bloco 1, ponto 5)
+
+`GET /clients/{id}/active-processes?exclude_process_id=` responde «este cliente já tem processos activos?» (`services/client_active_processes.py`). Quem pergunta é o ecrã, antes de ligar um cliente a um processo; a resposta é consultiva (um cliente pode ter dois processos legitimamente).
+
+* **Activo** = fora de `nomes_terminais(carregar_fases())` e sem `is_deleted` — o motor de fases manda, não uma lista à mão.
+* **Onde o cliente está**: `client_id`, `second_client_id`, `client_ids` e `clients.process_ids`.
+* **Rede**: o cliente tem de ser do âmbito (404 igual ao de «não existe»); os processos contam-se pelo âmbito de PROCESSOS (`build_tenant_process_condition`, que inclui a rede convidada de uma partilha).
+* **Só sai o necessário**: número, fase (com rótulo), posição do cliente, responsável. Nunca o documento.
+* `GET /clients/{id}/processes` (a listagem completa) passou a respeitar a mesma fronteira — devolvia os processos desencriptados de qualquer cliente a qualquer sessão.
+
+
+## Titulares secundários na listagem de clientes (Bloco 1, ponto 6)
+
+`run_list_clients` constrói a lista a partir dos processos. Agrupava só por `client_id` (1.º titular), pelo que quem era apenas 2.º titular não aparecia, e quem era 1.º titular num processo anulado e 2.º noutro activo desaparecia da lista de activos.
+
+* `services/client_list_titulares.py::linhas_dos_titulares_secundarios`: cada processo com `second_client_id` ou `client_ids` com mais de um elemento contribui com uma linha por secundário, construída do **documento do cliente** e entregue ao mesmo acumulador (com `client_id` = o do secundário).
+* Os filtros de **processo** (fase, atribuição, indexação, eliminados) valem para o processo do secundário; os de **cliente** (pesquisa, origem/tipo/estado) para o cliente secundário.
+* **Rede**: o secundário lê-se com a condição de clientes do utilizador; cliente eliminado não volta por esta porta.
+* `process_info.titular` diz a posição: `titular1` / `titular2` / `co_titular`.
+* Os outros «clientes» do sistema (`/my-clients`, Sala de Triagem, autocomplete) não têm o defeito: o primeiro lista processos, os outros lêem `db.clients`.
+
+
+## Revogar uma partilha à mão (remate do Bloco 1)
+
+`DELETE /processes/{id}/partners/{company_id}` (`services/process_sharing_api.py`). A Via Rápida só acrescenta; esta é a única forma de retirar o acesso.
+
+* Quem: **admin, CEO, diretor** (perfil efectivo). O diretor só da casa DONA (`documento_no_ambito`); o da rede convidada vê o processo e recebe **403** com o motivo. Quem não vê o processo recebe **404** igual ao de «não existe». Admin/CEO atravessam redes.
+* Só retira a empresa pedida; `network_id` (propriedade) nunca muda; as outras partilhas ficam.
+* Rasto: histórico do processo (honra o interruptor do ponto 4) + trilho `process_share_revoked`; o actor silenciado (Indexação) não deixa nenhum dos dois.
+* UI: `PartilhaCard` (coluna direita do detalhe), só com parceiros; o botão aparece aos perfis de gestão e o servidor decide.
+
+
+## Webmail e Indexador (Bloco 2, Lote 12)
+
+**Desvio inteligente — `services/document_intake.py`.** `planear_entrada(processo, categoria)` decide a pasta e se a IA corre, para TODOS os fluxos de entrada (upload multipart, URL pré-assinado + confirmação, verificação de conflito, arquivo de anexo de email): por indexar → `Index` + fila da IA; indexado ou Via Verde → pasta pedida, sem IA. A categorização em background é a ÚNICA chamada ao modelo. `list_files` reconhece `Index` como categoria; `retirar_o_index_da_listagem`/`retirar_documentos_da_index` são a parede no servidor (listagem, metadados antes dos URLs assinados, balcões, pesquisa); quem não vê a pasta recebe `em_indexacao`.
+
+**Libertar a Index — `services/index_release.py`.** Corre em `run_mark_indexed_side_effects`, antes do motor financeiro: move para a pasta da `ai_category` (sem IA, sem sobrescrever, repontando `db.documents`), um registo de histórico, nunca desfaz a indexação.
+
+**Escrever numa pasta — `document_visibility.assert_can_upload_to_process`.** Nos quatro fluxos de upload: quem escreve é quem pode ver (D-26); `parceiro`/`cliente` não carregam pela API do CRM.
+
+**Ler um email — `services/email_access.py`.** `pode_ler_email` (admin/CEO atravessam; é seu; conversa pelos endereços configurados; caixa partilhada do cargo; Caixa Geral da empresa; diretor na rede; email ligado a processo visível à equipa), `carregar_email_legivel` (404 igual para alheio e inexistente), `exigir_processo_legivel` (guarda de documentos da D-26). Todas as rotas `/emails/{email_id}…` e `/emails/…/{process_id}` a chamam (inventário por AST). `CAIXA_GERAL_ROLES` (diretor, CEO, admin, administrativo) é o conjunto único; `pode_abrir_caixa_geral` é positivo.
+
+**Arquivar no Processo — `services/email_archive.py`.** Sugestão por endereço (exacta; ambiguidade não pré-selecciona) e arquivo pelo MESMO `run_upload_file_s3`. Idempotente por processo (`archived_to`). Perfis: admin, CEO, diretor, administrativo, consultor, intermediário.
+
+**Contactos — `services/email_contacts.py`** (`email_contacts`, chave utilizador+empresa+endereço; aprende no envio real; remover é esconder).
+
+**Quadro da Indexação.** `build_kanban_role_base_query` e `realtime_audience` dão à Indexação o quadro geral da rede (só leitura). **Documentos novos — `services/document_novelty.py`**: definição única da bolinha verde (do cliente, não visto, 30 dias); `list_client_files` marca como visto.
+
+
+## Portal e Fluxo de Automações (Bloco 3, Lote 13)
+
+**Portal bloqueado — `services/portal_estado.py`.** «Inativo» = fase terminal do motor. `get_current_client` recusa (403 com `codigo: portal_inativo`) em cada pedido; logins recusam depois da credencial; o WebSocket recusa e re-lê no `ping`; `cortar_sessoes_em_tempo_real` fecha os sockets deste worker. A autoridade é a fase gravada, não `processes.is_active`. Cliente com vários processos usa o activo (`escolher_processo_do_cliente`).
+
+**Automação por fase — `services/phase_automation.py`.** `workflow_statuses.auto_assign_roles` / `task_templates` (`None` herda, `[]` é «nada»). `ao_entrar_na_fase_sem_falhar` é chamado pelos escritores de fase (Kanban, PUT, indexação, motor de regras, avanço do Portal); atribui (só papéis vazios, `dual_auto_assign…(papeis=…)`) e depois cria tarefas idempotentes por (processo, fase, modelo, responsável) com o carimbo de rede do processo. Por-omissão só à saída da Index. Importado no TOPO dos chamadores (armadilha do `patch("database.db")`).
+
+**Fluxo mestre.** Criação atómica do processo (`reivindicar_criacao_do_processo`), avanço condicional do pré-registo, `portal_submitted_at` tranca o perfil (`construir_query_do_perfil_trancado`).
+
+**Histórico.** `_is_stealth_user` continua o ponto único; `send_email` não regista — o envio com processo regista via `_registar_envio_no_historico` (silêncio decidido ao enfileirar). A ordenação é por instante (`instanteDoEvento`).
+
+**`/portal/status`.** `nota_do_pedido`/`rotulo_do_pedido` servem as quatro serializações.
+
+
+## Dashboards, Finanças e Interface (Bloco 4, Lote 11)
+
+**Origem financeira.** `services/origem_financeira.py` + colecção `process_financial_origins` (índice único `process_id`). Fora do documento de processo de propósito: `ProcessResponse` é `extra="allow"` e o detalhe devolve o documento inteiro. Rotas `GET/PUT /processes/{id}/origem-financeira` e `GET .../candidatos` (só admin/CEO/diretor pelo papel efectivo; processo fora do âmbito = 404; convidado de rede partilhada = 403). O histórico regista a alteração sem valores; o trilho de auditoria leva o antes/depois.
+
+**Relatório executivo.** `services/executive_report.py` é o motor (período semiaberto, âmbito = rede de quem pede, pipelines com `$match` indexado, `maxTimeMS`, cache de 60 s por âmbito). `executive_weekly.py` guarda a semana fechada em `executive_weekly_reports` (`scope_key`+`week_start`, único). `executive_report_pdf.py` gera o PDF no servidor. Rotas em `/admin`: `team-performance` (+`/pdf`), `executive-weekly` (+`/regenerate`, `/pdf`), só admin/CEO. Índices em `db_indexes.py`. `analytics_service.generate_weekly_team_report` é fachada (email de segunda = semana ISO anterior, consolidado D-7).
+
+**Calendário do Dashboard.** `services/dashboard_calendar.py` junta os eventos do calendário (com janela de datas) e as datas de escritura/CPCV dos processos visíveis ao utilizador. `GET /deadlines/dashboard-calendar?month=AAAA-MM`.
+
+**Perfil visível em impersonate.** `frontend/src/utils/papelEfectivo.js` → `AuthContext.effectiveRole`. `impersonate`/`stopImpersonating` sincronizam os cabeçalhos e limpam a cache do TanStack.
+
+
+## Testes Externos e Minor Fixes (Bloco 5)
+
+**Recolha no Estado (Finanças / Seg. Social).** Um pipeline (`portal_gov_fetch._executar_recolha`) com a diferença em `FonteGovernamental`. `gov_fetch_policy.executar_com_tentativas` é a política única do scraper (semáforo com espera limitada, orçamento por tentativa e total, repetição só para tempo/rede e **nunca depois de MFA**, limpeza do código à saída); `mfa_cache.aguardar_codigo_mfa` é o único ciclo de espera do SMS e `set_mfa_status` actua no job ACTIVO mais recente. `gov_fetch_jobs` guarda o ciclo de vida de `portal_scraper_jobs` (um job activo por processo, jobs mortos encerrados, projecção pública fechada, posse por processo); `gov_fetch_archive` arquiva (S3 em thread, sem registo sem ficheiro, upsert, só PDF real, pedidos fechados por rótulo). `GET /portal/scraper-job/{id}` exige o cliente autenticado.
+
+**Scraper de visitas.** `services/scraper_estruturado.py` corre depois do parser do portal e só preenche o que falta (JSON-LD → `__NEXT_DATA__` → meta → texto rotulado); `e_pagina_de_bloqueio` e `tem_dados_para_guardar` protegem a cache. Os parsers por portal podem rebentar sem matar o scrape.
+
+**Email dos balcões.** `mailbox_backoff.deve_esperar` (puro) tira do ciclo automático as contas com autenticação recusada duas ou mais vezes; `get_active_email_configs_for_sync(respeitar_recuo=True)` aplica-o aos três sincronizadores. `send_email` devolve `error_code`/`account_email` e `descrever_falha_de_envio` compõe a mensagem.
+
+**Minuta assinada.** `services/minuta_pdf.build_signed_minuta_pdf` (platypus, mesma pipeline `_html_to_flowables` do PDF pré-preenchido); `rgpd_service._build_minuta_pdf` delega. Alinhamento por classes `ql-align-*` (`rgpd_pdf._atributo_permitido`, `_estilo_de_alinhamento_para_classe`).
+
+## Hierarquia de Perfis: Master global, o resto local (adenda de RBAC ao Bloco 5)
+
+**Os 9 perfis.** `master`, `admin`, `ceo`, `diretor`, `administrativo`, `consultor`, `intermediario`, `parceiro` e `indexacao` («Index» no ecrã; o valor guardado não muda — `models.auth.normalizar_papel`). `UserRoleEnum`/`CompanyRoleEnum`/`VALID_ROLES` (frontend) dizem o mesmo e há um teste que cruza as duas linguagens.
+
+**Duas perguntas que não se misturam.** (1) *Guarda de papel* (`require_roles`/`effective_role_is_allowed`): o Master passa sempre; o Admin passa tudo menos o declarado só-Master (`require_roles([UserRole.MASTER])` / `require_master()`). (2) *Âmbito de dados* (`tenant_network`): `TenantScope.sem_fronteira` só o liga `resolve_tenant_scope` para o Master a trabalhar COMO Master (perfil activo, não o da conta); então `build_network_scope_condition == {}` e `documento_no_ambito == True`. Admin e CEO resolvem a rede pelos UCR, como o Diretor. `services/role_scope.py` é o ponto único (`PAPEIS_GLOBAIS`, `e_papel_global`, `utilizador_e_global`, `pode_conceder_papel`); as constantes `*SEM_FRONTEIRA*` (calendário, imóveis, visitas, finanças, emails, partilhas, origem financeira, Explorador S3, fases desconhecidas) derivam dele.
+
+**Só-Master (infraestrutura e configuração global).** Logs, backups e `/restore`, índices, encriptação, mapeamentos e religamento S3, jobs de fundo, IA (treino/modelos/cache), migrações, diagnósticos, limpezas, anonimização em lote, edição de fases (workflow) e dos modelos de tarefas por fase, defaults por cargo, política de histórico, `PUT /finance/config` (global), criar/apagar empresas e mudar a REDE de uma, configuração `default`, preferências de notificação.
+
+**Gestão de utilizadores (`user_management_scope`).** `carregar_utilizador_gerivel` (404 se o alvo está fora do âmbito ou é um perfil global), `exigir_papeis_concediveis` (só o Master concede `master`), `exigir_empresas_concediveis`, `ids_dos_autores_no_ambito` (para registos que levam o autor e não a rede). Ligada a: editar/eliminar/personificar utilizador, email-config do alvo, permissões por utilizador, o router `/admin/user-company-roles` e `POST /admin/users/{id}/roles` (o `actor` é argumento OBRIGATÓRIO), actualizar/ler empresas e as configs de email por empresa.
+
+**Por id, não só por listagem.** `process_scope_guard.exigir_processo_no_ambito` é dependência do router de processos: o `{process_id}` do caminho tem de ser da rede de quem pede (404 igual ao de «não existe»), cobrindo as ~40 rotas e as que vierem. Antes, `can_view_process` respondia «sim» a qualquer staff.
+
+**Relatório de segunda-feira.** `relatorio_semanal_destinos`: UM relatório por rede, para a gestão (CEO/Admin) dessa rede; o consolidado só para os Master (`CEO_EMAIL` filtrado). Marca de «já enviei» por destino. A página «Relatório Semanal» resolve o âmbito pelo utilizador autenticado (`executive_report.resolver_ambito`), nunca por parâmetro.
+
+**Migração.** `scripts/promote_to_master.py --emails … [--aplicar]` (omissão: só mostra). Sem este passo no deploy ninguém é Master.
+
+## Portal do Parceiro (V1)
+
+Terceiro plano de identidade, ao lado do staff (`users`) e do cliente (`portal_tokens`): o parceiro é uma pessoa de uma entidade contratada que trata do processo do cliente.
+
+| Aspecto | Decisão |
+|---|---|
+| Identidade | `db.partners` (email + password bcrypt); convite único de Admin/CEO/Master; sem registo aberto, sem Google |
+| Token | `type:"partner"`, `aud:"powercell-partner"`, `JWT_PARTNER_SECRET` próprio, `tv` = `token_epoch` (revogação imediata), 8 h, sem refresh; relido em cada pedido |
+| Redes | `redes: [{network_id, company_id, status}]` — N redes no esquema; suspensão por ligação |
+| Visibilidade | relação (`assigned_parceiro_id`) ∧ rede activa; sem ramo de convidados (D-25); 404 igual para alheio e inexistente |
+| Comunicação | sem chat; «Pedidos de Documentos» (o mesmo que o cliente vê) |
+| Ficheiros | `planear_entrada` (Bloco 2): por indexar → `Index` + IA; quarentena de conteúdo; descarga por `file_id` |
+| Financeiro | nenhum dado financeiro no DTO; o parceiro paga-nos — controlo interno em `process_partner_service` (caixa + observações), visível só à equipa |
+| Rate limit | chave do limiter por parceiro; travão de força bruta por identidade (D-4 para o IP) |
+
+Ver `worklog.md` (portal-do-parceiro-v1), `TECHNICAL_DEBT.md` D-32/D-33 e `FRONTEND_GUIDELINES.md` § 27.65.

@@ -17,7 +17,7 @@ from services.ai_analysis_api_generate import run_generate_analysis
 router = APIRouter(tags=["AI Executive Summary"])
 
 _ANALYSIS_ROLES = [
-    UserRole.ADMIN,
+    UserRole.MASTER, UserRole.ADMIN,
     UserRole.CEO,
     UserRole.CONSULTOR,
     UserRole.DIRETOR,

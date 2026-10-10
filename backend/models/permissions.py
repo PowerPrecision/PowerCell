@@ -30,7 +30,7 @@ from typing import Dict, List, Any, Optional
 # SUPER ADMIN BYPASS
 # ====================================================================
 
-SUPER_ADMIN_ROLES = ["admin", "ceo"]
+SUPER_ADMIN_ROLES = ["master", "admin", "ceo"]
 
 
 # ====================================================================

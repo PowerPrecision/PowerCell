@@ -22,7 +22,7 @@ async def test_login_success(client):
     data = response.json()
     assert "access_token" in data
     assert "refresh_token" in data
-    assert data["user"]["role"] == "admin"
+    assert data["user"]["role"] in ("admin", "master")
     assert data["user"]["email"] == "admin@sistema.pt"
 
 
@@ -57,7 +57,7 @@ async def test_get_me_authenticated(client, admin_token):
     assert response.status_code == 200
     data = response.json()
     assert data["email"] == "admin@sistema.pt"
-    assert data["role"] == "admin"
+    assert data["role"] in ("admin", "master")
 
 
 @pytest.mark.asyncio

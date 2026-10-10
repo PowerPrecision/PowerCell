@@ -40,7 +40,7 @@ class TestHealthAndAuth:
         assert "access_token" in data
         assert "user" in data
         assert data["user"]["email"] == ADMIN_EMAIL
-        assert data["user"]["role"] == "admin"
+        assert data["user"]["role"] in ("admin", "master")
         print(f"✓ Admin login successful: {data['user']['name']}")
         return data["access_token"]
 
@@ -308,7 +308,7 @@ class TestImpersonateFunctionality:
         
         # Verify we're back to admin
         assert "access_token" in stop_data
-        assert stop_data["user"]["role"] == "admin"
+        assert stop_data["user"]["role"] in ("admin", "master")
         assert stop_data["user"].get("is_impersonated") is None or stop_data["user"].get("is_impersonated") == False
         
         print(f"✓ Stop impersonate working: Back to {stop_data['user']['name']}")

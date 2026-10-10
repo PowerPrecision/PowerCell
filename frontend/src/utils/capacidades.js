@@ -28,7 +28,7 @@
  */
 
 /** Cargos com bypass total (iguais aos `SUPER_ADMIN_ROLES` do backend). */
-export const PAPEIS_COM_BYPASS = ["admin", "ceo"];
+export const PAPEIS_COM_BYPASS = ["master", "admin", "ceo"];
 
 /** As capacidades que os ecrãs deste lote consultam. */
 export const CRIAR_PROCESSO = "PROCESS_CREATE";

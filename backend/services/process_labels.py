@@ -35,7 +35,7 @@ import logging
 from typing import Any, Iterable, Optional
 
 from database import db
-from services.tenant_network import build_tenant_condition
+from services.tenant_network import build_tenant_process_condition
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +144,8 @@ async def run_get_process_labels(user: dict) -> dict[str, Any]:
     empresa activa é uma vista, a rede é a fronteira de segurança. É a
     mesma condição que as listagens usam, vinda do mesmo ponto único.
     """
-    tenant_condition = await build_tenant_condition(user)
+    # Condição de PROCESSOS (D-25): as etiquetas de um processo
+    # partilhado contam para o parceiro — ele vê o processo.
+    tenant_condition = await build_tenant_process_condition(user)
     etiquetas = await listar_etiquetas_em_uso(tenant_condition=tenant_condition)
     return {"labels": etiquetas, "count": len(etiquetas)}

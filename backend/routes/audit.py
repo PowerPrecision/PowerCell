@@ -32,7 +32,7 @@ async def list_audit_trail(
     ai_suggested: bool = Query(None, description="Filtrar apenas sugestões de IA"),
     page: int = Query(1, ge=1, description="Número da página"),
     page_size: int = Query(50, ge=1, le=200, description="Itens por página"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO])),
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO])),
 ):
     """Listar registos de auditoria com paginação e filtros."""
     return await run_list_audit_trail(
@@ -45,15 +45,16 @@ async def list_audit_trail(
         ai_suggested=ai_suggested,
         page=page,
         page_size=page_size,
+        actor=user,
     )
 
 
 @router.get("/stats")
 async def audit_statistics(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO])),
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO])),
 ):
     """Obter estatísticas de auditoria para o dashboard."""
-    return await run_audit_statistics()
+    return await run_audit_statistics(actor=user)
 
 
 @router.get("/export")
@@ -63,7 +64,7 @@ async def export_audit(
     source: str = Query(None, description="Filtrar por origem"),
     date_from: str = Query(None, description="Data inicial (ISO 8601)"),
     date_to: str = Query(None, description="Data final (ISO 8601)"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO])),
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO])),
 ):
     """Exportar registos de auditoria como ficheiro CSV."""
     return await run_export_audit(
@@ -72,13 +73,14 @@ async def export_audit(
         source=source,
         date_from=date_from,
         date_to=date_to,
+        actor=user,
     )
 
 
 @router.post("/cleanup")
 async def trigger_cleanup(
     days: int = Query(None, description="Dias de retenção (usa config se omitido)"),
-    user: dict = Depends(require_roles([UserRole.ADMIN])),
+    user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     """Limpar registos de auditoria antigos (apenas admin)."""
     return await run_trigger_cleanup(days, user)

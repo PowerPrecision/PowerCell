@@ -2440,3 +2440,173 @@ pendurado, a afirmação de que se vê o carregamento e **não** o vazio, e só
 depois a resolução. E o duplo tem de pendurar **só o pedido em causa**: a
 `VisitsPage` faz três (`/visits/kanban` mais o `fetchFormData`) e um
 `resolver` global ficava a ser o do último pedido feito, não o do quadro.
+
+---
+
+## 27.53 — Uma etiqueta que torna visível uma decisão automática não é decoração
+
+A partilha de um processo é **Via Rápida**: nasce de uma atribuição, sem
+aprovação manual. Abre-se uma fronteira de rede sem ninguém a autorizar,
+e a etiqueta `[Partilha: Precision]` é a ÚNICA coisa que a torna visível
+a quem trabalha o processo. Esconder a partilha num processo partilhado
+não é um defeito cosmético — é a abertura a ficar silenciosa.
+
+Duas consequências práticas:
+
+* **nomeia a EMPRESA, não só o estado.** Saber que «está partilhado» sem
+  saber com quem não responde à pergunta que uma pessoa faz ao ver a
+  linha. (Ao contrário da `Sub35Badge`, onde o estado É a informação.)
+* **sem nome, cai para o id.** Mostrar um uuid é pior do que mostrar o
+  nome; **esconder** a etiqueta é muito pior. Entre uma etiqueta feia e
+  nenhuma etiqueta, escolhe-se a feia.
+
+E nunca se mostra a lista de REDES (`partner_network_ids`): é a fronteira
+de segurança, não tem nome legível, e `rede:8a0b6657…` não responde a
+pergunta nenhuma.
+
+O `title` diz o que a partilha **não** abre («a fronteira continua
+fechada nos restantes processos»), porque é essa a diferença entre isto e
+dar acesso à outra rede inteira.
+
+Cobertura: `components/shared/__tests__/PartilhaBadge.test.jsx`, mais
+`ProcessesPage.test.jsx` e `KanbanPage.test.jsx` — a etiqueta afirma-se
+na PÁGINA montada, com o campo REAL que o servidor calcula. A
+`Sub35Badge` ensinou porquê: existia em três cópias e **nunca apareceu**,
+porque o campo que liam não era escrito por ninguém no servidor.
+
+---
+
+## 27.54 — Um campo novo no cartão entra no comparador do `memo`
+
+O `KanbanCard` é `memo` com um comparador que **enumera** os campos.
+Acrescentar `is_partilhado` ao render sem o acrescentar ao comparador dá
+uma etiqueta que só aparece quando outro campo mudar por acidente: o
+cartão fica a mostrar o estado anterior da fronteira, e isso **não
+produz erro nenhum**.
+
+Regra: ao ler um campo novo num componente memoizado com comparador
+explícito, acrescentá-lo ao comparador no mesmo commit. É a mesma forma
+do «um filtro que vai nos parâmetros tem de ir na chave de cache»
+(§ 27.5–27.6): duas listas escritas à mão divergem, e a que divergir não
+dá erro — mostra o estado antigo.
+
+---
+
+## 27.55 — Dois valores opostos são um `ToggleGroup`; um valor e o seu vazio é um interruptor
+
+O filtro Sub35 é um **interruptor**: «não é Sub35» juntaria quem tem mais
+de 35 anos com quem não tem data de nascimento na ficha, e o servidor
+recusa essa pergunta de propósito.
+
+O filtro de partilha é um **`ToggleGroup` de selecção única** com dois
+itens («Exclusivos da Casa», «Partilhados»): aqui «o contrário» é uma
+pergunta legítima, e o estado neutro — nenhum dos dois seleccionado — é
+«todos». **Três estados precisam de três condições**, nunca de duas e um
+`else` (§ 27.17).
+
+O que os dois têm em comum, e que não se pode perder:
+
+1. o valor vive no **URL** (um link já filtrado é metade da utilidade da
+   segmentação);
+2. só os **valores conhecidos** passam — um valor escrito à mão no URL
+   não pode esvaziar a listagem sem dizer porquê;
+3. entra no `hasActive` do **«Limpar Filtros»**, nos dois ecrãs: um
+   filtro activo com o «Limpar» desactivado deixa o utilizador preso
+   numa lista reduzida sem ver porquê, e sem forma de sair sem mexer no
+   URL;
+4. os **rótulos são os mesmos** na listagem e no quadro. Dois nomes para
+   o mesmo filtro em dois ecrãs é como o `under_35` acabou com quatro
+   significados.
+
+E o quadro tem **construtor de query separado** no servidor e cabeçalho
+próprio no cliente: um filtro que só exista na listagem dá um quadro a
+ignorá-lo, sem erro nenhum. Ligar os dois é parte da entrega, não um
+extra.
+
+
+## 27.56 — O ecrã escolhe de entre o que o servidor devolveu; não decide o que se pode configurar
+
+O selector de empresa das Configurações do Sistema (`EmpresaConfigSelector`) é alimentado por `GET /system-config/companies`, **já filtrado pelo âmbito de quem pergunta** (ADMIN todas, CEO as dele). O frontend nunca constrói a lista a partir dos UCR do utilizador (era o beco do ADMIN) nem decide o que é permitido — a parede é o servidor.
+
+* `utils/empresaDeConfiguracao.js` é puro: `normalizarEmpresas` (`Array.isArray`, nunca `|| []`), `deveMostrarSeletorDeEmpresa` (só com mais de uma — um selector com uma opção é um ecrã que muda de forma sem razão) e `empresaEmVigor` (escolha explícita → activa → global, **mas só se estiver na lista**).
+* O primeiro pedido de configuração **espera pela lista**: um CEO de ilha não tem a global, e abrir o ecrã a pedi-la dava 403 e um toast. Sem lista (pedido falhado) fica o comportamento de sempre — o servidor continua a ser a parede.
+* Qualquer pedido que revele um segredo leva o `company_id` do que está em ecrã; um olho que revela a configuração de OUTRA empresa é pior do que nenhum.
+* `<select>` nativo, de propósito: acessível, testável por papel e nome, sem a captura de ponteiro do Radix.
+
+
+## 27.57 — Um estado «não decidi» não é um interruptor desligado
+
+No controlo de histórico, a **pessoa** tem três estados (segue o perfil / sempre ativo / desligado), não dois. Um `Switch` binário não distingue «ninguém decidiu» de «decidi ligado», e é essa diferença que faz a pessoa voltar a seguir o perfil quando o perfil muda. Por isso é um `<select>` de três opções e o pedido envia `null` (remove o override) — nunca `false`. `valorDaPessoa` e `enabledDoPedido` (`utils/historyTracking.js`) são uma bijecção, com teste.
+
+* **O que está bloqueado diz-se**: o perfil Indexação aparece com o cadeado e o motivo, não escondido — um perfil que desaparece da lista lê-se como esquecimento.
+* Uma alteração de perfil recarrega **as duas** listas: o estado efectivo das pessoas depende dele.
+* O ecrã avisa do atraso de até 30 s entre servidores; um interruptor de gestão que parece não ter feito nada gera um segundo clique.
+* Um separador acrescentado à página de administração exige teste que **monta a página** (`SystemAdminPanel.historico.test.jsx`), com contraprova para o perfil que NÃO o vê.
+
+
+## 27.58 — Um aviso consultivo é uma Promise: `confirmar()` devolve `true` para continuar
+
+O aviso «este cliente já tem processos activos» vive num hook (`useConfirmarProcessosActivos`) que devolve `{confirmar, dialog}`. `confirmar(clientId, opts)` é uma Promise — resolve `true` para continuar (nada a avisar, o utilizador confirmou, **ou a verificação falhou**) e `false` quando o utilizador cancelou. Assim o fluxo escreve-se em linha (`if (!(await confirmar(...))) return;`) em vez de partido em duas metades unidas por estado.
+
+* **Consultivo, não bloqueante**; **falha aberta e DITA** (`toast.warning`): um aviso que falha em silêncio ensina a confiar na ausência de aviso.
+* Desmontar com a pergunta aberta resolve `false` — nunca deixar a Promise pendurada.
+* **Cada ecrã que adiciona um cliente a um processo tem de o chamar**, e a ligação prova-se montando o ecrã (`SecondTitularCard.processosActivos.test.jsx`, `CreateProcessModal.processosActivos.test.jsx`): apagar a chamada deixa o aviso a existir e a nunca aparecer, sem erro nenhum. Ao acrescentar um terceiro caminho, ligar o hook e copiar o teste.
+* O processo a que o cliente é ligado vai em `excludeProcessId`; sem isso o aviso dizia «já tem este processo».
+
+
+## 27.59 — O que o perfil não pode usar não se mostra para dar erro
+
+A configuração global é do administrador. Em vez de deixar o CEO abrir separadores que respondem 403, `seccoesDaNavegacao(isAdmin)` (ponto único das três navegações) devolve vazio ao CEO; um `?tab=` antigo para uma secção global **diz-se** («reservada ao administrador») em vez de abrir um ecrã de erros. É a regra do «menu e rotas têm de concordar» aplicada às secções de uma página: o gate está no ponto único e o teste monta a página com os dois perfis.
+
+
+## 27.60 — O que o servidor decidiu diz-se no ecrã; o ecrã não reimplementa a regra (Bloco 2)
+
+* **Desvio inteligente:** quem não vê a pasta `Index` envia um ficheiro e não o vê em lado nenhum. `utils/desvioInteligente.js` traduz o `intake.fila_ia` da resposta num toast e o `em_indexacao` da listagem numa frase permanente (`AvisoEmIndexacao`). O ecrã NUNCA calcula «este processo está indexado?» — o servidor di-lo.
+* **«Arquivar no Processo»:** `useArquivarAnexo` (um contador de pedidos descarta a resposta de um diálogo anterior) + `ArquivarNoProcessoDialog` (apresentação). Com mais do que um processo possível **não há pré-selecção** (`processoPreSeleccionado` só devolve o que o servidor sugeriu); a pasta só se pergunta quando o ficheiro não vai para a Index.
+* **Um conjunto de papéis duplicado entre camadas tem um teste que lê o outro lado:** `PAPEIS_COM_CAIXA_GERAL` é comparado com o `CAIXA_GERAL_ROLES` do Python. A terceira cópia ficou para trás e escondeu a Caixa Geral ao Administrativo.
+* **Sugestões são um extra:** `CampoDeDestinatarios` nunca impede de escrever (um pedido que falha dá lista vazia, uma resposta velha não substitui a nova) e escolhe com `onMouseDown`+`preventDefault` (com `onClick` o `blur` fechava a lista antes do clique).
+* **Uma lista recusada diz-se:** o `EmailHistoryPanel` mostra «sem permissão» num 403/404 em vez de «Nenhum email encontrado»; um erro de rede NÃO se faz passar por permissão. Doze `fetch` crus passaram a Axios (perdiam `X-Company-Id`/`X-Active-Role`).
+
+## 27.61 — Portal bloqueado, automação por fase e ordem do histórico (Bloco 3)
+
+* **O ecrã decide pelo CÓDIGO do servidor, nunca pelo texto.** `eBloqueioDoPortal(status, corpo)` exige 403 **e** `detail.codigo === "portal_inativo"`; um 403 de outra causa (token de staff) não é «acesso suspenso». O bloqueio vem antes do login no render (pedir credenciais não o resolve) e esquece a sessão (`limparSessaoDoPortal`), senão recarregar reabria o Portal com o mesmo token. O `detail` passou a poder ser objecto: `throw new Error(e.detail)` escrevia «[object Object]».
+* **Três estados no editor de fases:** `null` (herdar) ≠ `[]` (nada). Um interruptor «Personalizar» por secção; desligar envia `null`. O prazo vive em TEXTO no estado (0 é um prazo) e o servidor gera os ids das tarefas novas.
+* **Ordenar por instante, não por texto.** `instanteDoEvento` lê `+00:00`, `Z`, fusos e datas sem fuso (UTC); ilegíveis vão para o fim. A data que se mostra e a que ordena vêm da mesma função (`dataDoEvento`). Um teste que dependa do fuso fixa `process.env.TZ`: o sandbox corre em UTC e esconde a leitura local.
+* **Uma nota de instrução nunca se corta** (`NotaDoPedido`: `whitespace-pre-line`, contraste, só texto).
+
+
+## 27.62 — Dashboards executivos, calendário e perfil em impersonate (Bloco 4)
+
+* **Filtros no servidor, não no browser.** O Dashboard Executivo envia período, `user_ids` e `roles`; o servidor só agrega o que foi pedido. A lista do seletor de colaboradores guarda-se do relatório SEM colaborador escolhido (com um escolhido o servidor devolve só esse e a lista encolhia). Validar o intervalo antes de pedir (`validarIntervalo`); datas sempre `AAAA-MM-DD` em UTC.
+* **O PDF é o relatório do ecrã.** «Gerar PDF» pede ao servidor os MESMOS parâmetros; `responseType: "blob"` faz o erro chegar como Blob — ler com `readBlobErrorBody` (`descarregarPdf`), senão o motivo desaparece. Desactivar o botão enquanto gera.
+* **Cores de séries validadas para daltonismo** (`components/executive/cores.js`, `utils/calendarioDashboard.js`): correr o validador do `dataviz` antes de escolher; vermelho/verde falha. Legenda sempre; categoria com cor **e** letra; tabela como alternativa em texto.
+* **«—» não é 0.** Quem tem o histórico desligado mostra-se com traço (`valorOuTraco`); taxa de conclusão sem tarefas é «—».
+* **Grelha de calendário:** semanas de segunda a domingo em UTC (`construirGrelha`); sem destino não se desenha a ligação (`rotaDoItem`); uma ausência nunca leva a um cliente.
+* **Perfil em impersonate:** ler SEMPRE `effectiveRole` do contexto (já só devolve perfis do alvo). Um atalho `isImpersonating ? user.role : …` num componente é a segunda fonte da mesma pergunta. O teste afirma a ESPELHAÇÃO (menu do admin a ver como X = menu de X em sessão própria), não uma lista de proibidos.
+* **Deep-link para um rascunho** (`/webmail?folder=drafts&id=`): o rascunho pode não estar na lista (pertence a um processo); o Webmail pede-o pelo id depois de a lista carregar.
+
+## 27.63 — Recolha no Estado, Minuta e polling autenticado (Bloco 5)
+
+* **Todo o polling de um recurso do cliente leva o token.** O estado do job de recolha (`/portal/scraper-job/{id}`) era lido com `fetch` sem `Authorization` porque o endpoint estava aberto; passou a exigir o cliente. Um polling que recebe 401/404 **pára e diz porquê** (sessão expirada / obtenção já não disponível) em vez de tentar para sempre.
+* **Todo o polling tem teto.** `SCRAPER_POLL_MAX_MS` (20 min) fica acima do pior caso do servidor e abaixo do encerramento de jobs mortos; passado o teto o diálogo desiste com a indicação do upload manual. Um `beforeunload` sem teto prende o cliente num ecrã a girar.
+* **Obtenção parcial é um estado do ecrã.** `documents_missing` não vazio → aviso (`toast.warning`) com o que falta e o diálogo demora mais a fechar; nunca «extraídos com sucesso!» para metade do que o banco pede.
+* **Texto simples → HTML à entrada do editor rico.** O `ReactQuill` interpreta o `value` como HTML, onde `\n` é espaço: um modelo em texto simples entrava como um bloco só e assim se guardava. `utils/textoRico.textoSimplesParaHtml` converte-o UMA vez (linha vazia → `<p>`, quebra simples → `<br>`, escape de `&<>`); HTML existente não se toca (idempotente). O valor original e o editado derivam do MESMO valor normalizado, senão «Guardar» fica activo sem ninguém ter tocado em nada. Só o separador da Minuta o usa; o do RGPD mantém o comportamento anterior. Limite assumido: texto com forma de etiqueta (`<Lda>`) conta como HTML.
+* Teste de página: `RGPDAdminPage.minuta.test.jsx` monta a página a sério e falseia só o editor (para ler o que a página lhe entrega).
+
+## 27.64 — Perfis: Master global, Admin e CEO locais (adenda de RBAC)
+
+* **`hasRole` é um super-conjunto para o Master, nunca ao contrário.** `hasRole(master, "admin")` é verdadeiro (o Master passa onde o Admin passa); `hasRole(admin, "master")` é falso — é por aí que se fecham as funcionalidades só-Master. Devolve sempre um booleano (devolvia `undefined` sem `additional_roles`).
+* **Uma lista de papéis com `"admin"` tem `"master"`.** As ~70 listas (`allowedRoles`, `.includes(userRole)`, constantes de `utils/`) foram completadas; `hierarquiaDePerfis.test.js` percorre a fonte e falha por omissão. Código novo que escreva `["admin", "ceo"]` à mão, sem `"master"`, fica vermelho.
+* **Só-Master no ecrã:** `/configuracoes/ia`, `/configuracoes/treino-ia`, `/admin/processos-background`, `/configuracoes/notificacoes`, `/admin/logs`, `/admin/backups`, `/diagnosticos`, `/contas-email`, `/workflow-estados`; no painel de administração, os separadores Técnico, Comunicações, Registo de Histórico e Estados de Workflow, as secções dedicadas do `SystemConfigPage` e o painel de religamento S3. O servidor é a parede (403/404); o ecrã só não promete o que será recusado.
+* **O `isMaster` desce por PROP** (`CompaniesAdminTab`, `UsersAccessAdminTab`, `UserCreateDialog`), nunca de um `useAuth` no componente de apresentação, e por omissão é `false`: esquecer a prop esconde um botão (visível) em vez de o mostrar a quem não pode (enganador). Só o Master vê «Nova Empresa» e o campo da REDE, e só ele é oferecido o perfil `master` (`grantableRoles`).
+* **O pedido de actualização de uma empresa feito por um Admin não leva `network_id`** — o campo que, mudado, dava a um CEO a leitura de outra rede. Teste: `CompaniesAdminTab.master.test.jsx`.
+
+## 27.65 — Portal do Parceiro (outro plano de identidade)
+
+* **Outro plano, outro cliente HTTP.** `services/partnerApi.js` cria o seu próprio Axios (`/partner`, token em `sessionStorage` via `utils/partnerSession.js`), sem `X-Company-Id`/`X-Active-Role` e sem o token do staff. Nenhum ficheiro do portal importa `AuthContext`, `services/api` ou `localStorage`: `pages/partner/__tests__/PartnerPortal.isolamento.test.js` percorre a fonte, com contraprova de que leu ficheiros.
+* **Uma rota pública nova toca em TRÊS sítios, não em dois:** `PUBLIC_ROUTE_PREFIXES`, a regex do Sentry em `main.jsx` (o replay grava texto — nomes e NIFs de leads) e a rota fora de `ProtectedRoute`. O teste cruza as três; a regex do `main.jsx` era uma terceira cópia da lista e não tinha `/parceiro`.
+* **Armadilha do teste de fonte:** `semComentarios` por expressão regular engole o ficheiro quando há um literal `"/parceiro/*"` (o `/*` abre um «comentário»). Para `App.js` lê-se a fonte crua.
+* **Mocks = fixtures geradas pelo servidor** (`src/test/fixtures/parceiro/*.json`, regeneradas por `test_parceiro_contrato_frontend.py`). Os valores do cenário são diferentes das omissões.
+* **Esperar pelo elemento que se afirma:** o grupo «Filtrar por etapa» existe desde o primeiro render; os botões do funil só quando o painel chega — `findAllByRole("button")` resolvia só com «Todos». E um mock de lista paginada tem de devolver a página PEDIDA, porque o ecrã lê a do servidor.
+* **Só o que está montado refaz o pedido:** na página do caso o painel não está montado, logo `invalidateQueries` não produz GET; afirma-se a invalidação (chaves), não a contagem de pedidos.
+* **Staff:** o cartão «Serviço do parceiro» desenha-se só com `assigned_parceiro_id` E perfil efectivo que vê; as listas de papéis do JS são lidas contra as do Python em teste.

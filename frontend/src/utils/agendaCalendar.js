@@ -5,7 +5,7 @@
  */
 import { addDays, startOfWeek } from "date-fns";
 
-export const TEAM_CALENDAR_ROLES = ["admin", "ceo", "diretor"];
+export const TEAM_CALENDAR_ROLES = ["master", "admin", "ceo", "diretor"];
 
 export function parseAgendaDate(value) {
   if (!value) return null;

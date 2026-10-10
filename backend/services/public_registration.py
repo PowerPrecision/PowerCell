@@ -528,7 +528,7 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         from services.push_notifications import send_push_notification
         from services.role_query import deep_role_in_filter
         staff_for_push = await db.users.find(
-            {"$and": [deep_role_in_filter([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]), {"is_active": True}]},
+            {"$and": [deep_role_in_filter([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]), {"is_active": True}]},
             {"_id": 0, "id": 1}
         ).to_list(20)
         
@@ -553,7 +553,7 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
     # Email para o primeiro admin/CEO/diretor
     from services.role_query import deep_role_in_filter
     staff = await db.users.find(
-        deep_role_in_filter([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]),
+        deep_role_in_filter([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]),
         {"_id": 0}
     ).to_list(100)
     

@@ -174,17 +174,15 @@ async def fetch_unread_messages_map(db: Any, process_ids: list[str]) -> dict[str
 
 
 async def fetch_new_documents_map(db: Any, process_ids: list[str]) -> dict[str, bool]:
-    """process_id → tem documentos em estado uploaded."""
-    if not process_ids:
-        return {}
-    rows = await db.documents.aggregate([
-        {"$match": {
-            "process_id": {"$in": process_ids},
-            "status": "uploaded",
-        }},
-        {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}},
-    ]).to_list(1000)
-    return {r["_id"]: r["new_count"] > 0 for r in rows}
+    """process_id → tem documentos novos enviados pelo cliente.
+
+    A definição de «novo» vive em `document_novelty` (a bolinha verde nunca
+    acendeu porque aqui se perguntava por um estado que o Portal não escreve).
+    O parâmetro `db` mantém-se por compatibilidade com os chamadores.
+    """
+    from services.document_novelty import mapa_de_documentos_novos
+
+    return await mapa_de_documentos_novos(process_ids)
 
 
 async def fetch_latest_activity_notes_map(

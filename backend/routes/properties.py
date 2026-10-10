@@ -6,7 +6,7 @@ Do not confuse with services/property_scraper.py (portal URL scraping).
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, UploadFile, File
+from fastapi import APIRouter, Depends, Query, Request, UploadFile, File
 
 from models.property import (
     Property, PropertyCreate, PropertyUpdate, PropertyListItem,
@@ -52,6 +52,7 @@ router = APIRouter(prefix="/properties", tags=["Properties"])
 # Static paths before /{property_id}
 @router.get("", response_model=List[PropertyListItem])
 async def list_properties(
+    request: Request,
     status: Optional[PropertyStatus] = None,
     property_type: Optional[PropertyType] = None,
     district: Optional[str] = None,
@@ -74,115 +75,130 @@ async def list_properties(
         min_bedrooms=min_bedrooms,
         agent_id=agent_id,
         search=search,
+        request=request,
     )
 
 
 @router.get("/stats")
-async def get_property_stats(user: dict = Depends(get_current_user)):
-    return await run_get_property_stats(user)
+async def get_property_stats(
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    return await run_get_property_stats(user, request)
 
 
 @router.get("/by-process/{process_id}", response_model=List[PropertyListItem])
 async def get_properties_by_process(
+    request: Request,
     process_id: str,
     user: dict = Depends(get_current_user)
 ):
-    return await run_get_properties_by_process(process_id, user)
+    return await run_get_properties_by_process(process_id, user, request)
 
 
 @router.post("", response_model=Property)
 async def create_property(
+    request: Request,
     data: PropertyCreate,
     user: dict = Depends(get_current_user)
 ):
-    return await run_create_property(data, user)
+    return await run_create_property(data, user, request)
 
 
 @router.get("/{property_id}", response_model=Property)
 async def get_property(
+    request: Request,
     property_id: str,
     user: dict = Depends(get_current_user)
 ):
-    return await run_get_property(property_id, user)
+    return await run_get_property(property_id, user, request)
 
 
 @router.patch("/{property_id}", response_model=Property)
 async def update_property(
+    request: Request,
     property_id: str,
     data: PropertyUpdate,
     user: dict = Depends(get_current_user)
 ):
-    return await run_update_property(property_id, data, user)
+    return await run_update_property(property_id, data, user, request)
 
 
 @router.patch("/{property_id}/status")
 async def update_property_status(
+    request: Request,
     property_id: str,
     status: PropertyStatus,
     user: dict = Depends(get_current_user)
 ):
-    return await run_update_property_status(property_id, status, user)
+    return await run_update_property_status(property_id, status, user, request)
 
 
 @router.delete("/{property_id}")
 async def delete_property(
+    request: Request,
     property_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
 ):
-    return await run_delete_property(property_id, user)
+    return await run_delete_property(property_id, user, request)
 
 
 @router.post("/{property_id}/interested-client")
 async def add_interested_client(
+    request: Request,
     property_id: str,
     client_id: str,
     user: dict = Depends(get_current_user)
 ):
-    return await run_add_interested_client(property_id, client_id, user)
+    return await run_add_interested_client(property_id, client_id, user, request)
 
 
 @router.get("/{property_id}/interested-clients")
 async def get_interested_clients(
+    request: Request,
     property_id: str,
     user: dict = Depends(get_current_user)
 ):
-    return await run_get_interested_clients(property_id, user)
+    return await run_get_interested_clients(property_id, user, request)
 
 
 @router.post("/{property_id}/register-visit")
 async def register_visit(
+    request: Request,
     property_id: str,
     client_id: Optional[str] = None,
     notes: Optional[str] = None,
     user: dict = Depends(get_current_user)
 ):
     return await run_register_visit(
-        property_id, user, client_id=client_id, notes=notes,
+        property_id, user, client_id=client_id, notes=notes, request=request,
     )
 
 
 @router.post("/{property_id}/upload-photo")
 async def upload_property_photo(
+    request: Request,
     property_id: str,
     photo_url: str,
     user: dict = Depends(get_current_user)
 ):
-    return await run_upload_property_photo(property_id, photo_url, user)
+    return await run_upload_property_photo(property_id, photo_url, user, request)
 
 
 @router.delete("/{property_id}/photo")
 async def remove_property_photo(
+    request: Request,
     property_id: str,
     photo_url: str,
     user: dict = Depends(get_current_user)
 ):
-    return await run_remove_property_photo(property_id, photo_url, user)
+    return await run_remove_property_photo(property_id, photo_url, user, request)
 
 
 @router.post("/bulk/import-excel")
 async def import_properties_from_excel(
     file: UploadFile,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
 ):
     return await run_import_properties_from_excel(file, user)
 
@@ -212,6 +228,7 @@ async def get_import_template(user: dict = Depends(get_current_user)):
 
 @router.post("/{property_id}/documents")
 async def upload_property_document(
+    request: Request,
     property_id: str,
     file: UploadFile = File(...),
     document_type: str = "outro",
@@ -222,24 +239,27 @@ async def upload_property_document(
         property_id, file, user,
         document_type=document_type,
         description=description,
+        request=request,
     )
 
 
 @router.get("/{property_id}/documents")
 async def get_property_documents(
+    request: Request,
     property_id: str,
     document_type: str = None,
     user: dict = Depends(get_current_user)
 ):
     return await run_get_property_documents(
-        property_id, user, document_type=document_type,
+        property_id, user, document_type=document_type, request=request,
     )
 
 
 @router.delete("/{property_id}/documents/{document_id}")
 async def delete_property_document(
+    request: Request,
     property_id: str,
     document_id: str,
     user: dict = Depends(get_current_user)
 ):
-    return await run_delete_property_document(property_id, document_id, user)
+    return await run_delete_property_document(property_id, document_id, user, request)

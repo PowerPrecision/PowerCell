@@ -13,6 +13,7 @@ from typing import Optional, List
 from fastapi import HTTPException, BackgroundTasks, Request
 
 from database import db
+from services.email_config_resolver import pode_abrir_caixa_geral
 from services.email_enrich import enrich_emails
 from services.email_service import (
     test_email_connection,
@@ -281,7 +282,7 @@ async def rewrite_box_for_caixa_geral(
 async def run_test_email_connections(current_user: dict, account: Optional[str] = None):
     """Testar ligação com as contas de email."""
     role = (current_user.get("effective_role") or current_user.get("role") or "")
-    if role not in ["admin", "ceo"]:
+    if role not in ["master", "admin", "ceo"]:
         raise HTTPException(status_code=403, detail="Sem permissão")
     
     results = await test_email_connection(account)
@@ -371,7 +372,7 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     user_email = (current_user.get("email") or "").lower().strip()
     user_id = current_user.get("id", "")
     effective_role = await get_effective_role_async(request, current_user)
-    can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    can_see_all = effective_role in (UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     box, mailbox = await rewrite_box_for_caixa_geral(request, current_user, box, mailbox)
 
     # PACOTE 8 — desacoplamento login ↔ webmail: os filtros de conversa
@@ -392,11 +393,7 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     if box == "general":
         # PACOTE 8 — permitido se o cargo ACTIVO permite (legado) OU se
         # qualquer UCR válido tem cargo de gestão (webmail unificado).
-        legacy_general_ok = effective_role not in (
-            UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO,
-        )
-        ucr_general_ok = bool(ucr_roles & {"admin", "ceo", "diretor"})
-        if not (legacy_general_ok or ucr_general_ok):
+        if not pode_abrir_caixa_geral(effective_role, ucr_roles):
             raise HTTPException(
                 status_code=403,
                 detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."
@@ -405,8 +402,8 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     elif box == "shared_indexacao":
         # PACOTE 8 — permitido se o cargo ACTIVO é admin/indexacao (legado)
         # OU se qualquer UCR válido tem o cargo indexacao.
-        legacy_index_ok = effective_role in (UserRole.ADMIN, UserRole.INDEXACAO)
-        ucr_index_ok = bool(ucr_roles & {"indexacao", "admin"})
+        legacy_index_ok = effective_role in (UserRole.MASTER, UserRole.ADMIN, UserRole.INDEXACAO)
+        ucr_index_ok = bool(ucr_roles & {"indexacao", "master", "admin"})
         if not (legacy_index_ok or ucr_index_ok):
             raise HTTPException(
                 status_code=403,
@@ -774,7 +771,7 @@ async def run_webmail_stats(
         effective_role = await get_effective_role_async(request, current_user)
     else:
         effective_role = (current_user.get("effective_role") or current_user.get("role") or "")
-    can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    can_see_all = effective_role in (UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     if request is not None:
         box, mailbox = await rewrite_box_for_caixa_geral(request, current_user, box, mailbox)
     # O âmbito por EMPRESA não depende do `request` — é o separador que
@@ -795,11 +792,7 @@ async def run_webmail_stats(
         # PACOTE 8 — permissão via cargo ACTIVO (legado) OU qualquer UCR
         # válido com cargo de gestão (webmail unificado).
         ucr_roles_stats = await _user_ucr_roles(request, current_user)
-        legacy_general_ok = effective_role not in (
-            UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO,
-        )
-        ucr_general_ok = bool(ucr_roles_stats & {"admin", "ceo", "diretor"})
-        if not (legacy_general_ok or ucr_general_ok):
+        if not pode_abrir_caixa_geral(effective_role, ucr_roles_stats):
             raise HTTPException(
                 status_code=403,
                 detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."
@@ -809,8 +802,8 @@ async def run_webmail_stats(
         # PACOTE 8 — permissão via cargo ACTIVO (legado) OU qualquer UCR
         # válido com o cargo indexacao.
         ucr_roles_stats = await _user_ucr_roles(request, current_user)
-        legacy_index_ok = effective_role in (UserRole.ADMIN, UserRole.INDEXACAO)
-        ucr_index_ok = bool(ucr_roles_stats & {"indexacao", "admin"})
+        legacy_index_ok = effective_role in (UserRole.MASTER, UserRole.ADMIN, UserRole.INDEXACAO)
+        ucr_index_ok = bool(ucr_roles_stats & {"indexacao", "master", "admin"})
         if not (legacy_index_ok or ucr_index_ok):
             raise HTTPException(
                 status_code=403,
@@ -979,7 +972,7 @@ async def run_webmail_sync(
         effective_role = await get_effective_role_async(request, current_user)
     else:
         effective_role = (current_user.get("effective_role") or current_user.get("role") or "")
-    can_sync_global = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    can_sync_global = effective_role in (UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     if not can_sync_global:
         raise HTTPException(
             status_code=403,
@@ -1248,7 +1241,7 @@ async def run_get_email_job_status(job_id: str, current_user: dict):
     
     # Verificar permissão: apenas o dono do job ou gestão (cargo efetivo UCR)
     viewer_role = (current_user.get("effective_role") or current_user.get("role") or "")
-    if job.get("user_id") != current_user.get("id") and viewer_role not in ["admin", "ceo", "diretor"]:
+    if job.get("user_id") != current_user.get("id") and viewer_role not in ["master", "admin", "ceo", "diretor"]:
         raise HTTPException(status_code=403, detail="Sem permissão")
     
     return job

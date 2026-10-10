@@ -8,9 +8,13 @@ class UserRoleEnum(str, Enum):
     Enum para roles de utilizador — garante type-safety e evita magic strings.
     Herda de str para ser serializável em JSON automaticamente.
     
-    Lista DEFINITIVA e ÚNICA de 8 perfis: admin, ceo, diretor, administrativo,
-    consultor, intermediario, indexacao, parceiro.
-    "mediador" e "consultor_intermediario" foram removidos (obsoletos).
+    Lista DEFINITIVA e ÚNICA de 9 perfis: master, admin, ceo, diretor,
+    administrativo, consultor, intermediario, parceiro e indexacao ("Index"
+    no ecrã). "mediador" e "consultor_intermediario" foram removidos.
+
+    MASTER é o ÚNICO perfil global (todas as empresas, configuração global do
+    sistema, infraestrutura). ADMIN e CEO são perfis LOCAIS: só vêem a sua
+    própria empresa/rede. Ver `services/role_scope.py`.
     """
     CLIENTE = "cliente"                # Pseudo-role — processos, não utilizadores do sistema
     CONSULTOR = "consultor"          # Consultor(a)
@@ -19,16 +23,36 @@ class UserRoleEnum(str, Enum):
     INDEXACAO = "indexacao"          # Indexação de Dados
     DIRETOR = "diretor"              # Diretor(a)
     CEO = "ceo"                      # CEO
-    ADMIN = "admin"                  # Administrador do Sistema
+    ADMIN = "admin"                  # Administrador da empresa (perfil LOCAL)
+    MASTER = "master"                # Único perfil GLOBAL (todas as empresas + infraestrutura)
     PARCEIRO = "parceiro"            # Parceiro — utilizador fantasma, sem acesso à plataforma
-    
+
     @classmethod
     def from_string(cls, role: str) -> "UserRoleEnum":
         """Converte string para enum, com fallback para CLIENTE."""
         try:
-            return cls(role.lower()) if role else cls.CLIENTE
+            return cls(normalizar_papel(role)) if role else cls.CLIENTE
         except ValueError:
             return cls.CLIENTE
+
+
+#: Nomes alternativos que o ecrã ou os utilizadores usam para um perfil.
+#: «Index» é o nome do perfil `indexacao` no produto; o valor GUARDADO
+#: continua a ser `indexacao` (renomeá-lo partia dados e UCRs existentes).
+ALIASES_DE_PAPEL = {"index": "indexacao", "indexação": "indexacao"}
+
+
+def normalizar_papel(role) -> str:
+    """Papel em minúsculas e sem alias (`Index` → `indexacao`)."""
+    texto = str(role or "").strip().lower()
+    return ALIASES_DE_PAPEL.get(texto, texto)
+
+
+#: Os 9 perfis do sistema (o `cliente` é um pseudo-papel, não um perfil).
+PERFIS_DO_SISTEMA = (
+    "master", "admin", "ceo", "diretor", "administrativo",
+    "consultor", "intermediario", "parceiro", "indexacao",
+)
 
 
 class UserRole:
@@ -37,8 +61,8 @@ class UserRole:
     Mantida para compatibilidade com código existente.
     Usa UserRoleEnum internamente para type-safety.
     
-    Lista DEFINITIVA de 8 perfis: admin, ceo, diretor, administrativo,
-    consultor, intermediario, indexacao, parceiro.
+    Lista DEFINITIVA de 9 perfis: master, admin, ceo, diretor,
+    administrativo, consultor, intermediario, indexacao, parceiro.
     """
     # Constantes de role (strings) - para compatibilidade
     CLIENTE = UserRoleEnum.CLIENTE.value
@@ -49,6 +73,7 @@ class UserRole:
     DIRETOR = UserRoleEnum.DIRETOR.value
     CEO = UserRoleEnum.CEO.value
     ADMIN = UserRoleEnum.ADMIN.value
+    MASTER = UserRoleEnum.MASTER.value
     PARCEIRO = UserRoleEnum.PARCEIRO.value
     
     # Backward compatibility — mapear valores antigos para novos
@@ -67,6 +92,7 @@ class UserRole:
         UserRoleEnum.INDEXACAO.value,
         UserRoleEnum.DIRETOR.value,
         UserRoleEnum.CEO.value,
+        UserRoleEnum.MASTER.value,
         UserRoleEnum.ADMIN.value,
     ]
     
@@ -78,24 +104,28 @@ class UserRole:
         UserRoleEnum.INTERMEDIARIO.value,
         UserRoleEnum.DIRETOR.value,
         UserRoleEnum.CEO.value,
+        UserRoleEnum.MASTER.value,
         UserRoleEnum.ADMIN.value,
     ]
     
     MANAGEMENT_ROLES = [
         UserRoleEnum.DIRETOR.value,
         UserRoleEnum.CEO.value,
+        UserRoleEnum.MASTER.value,
         UserRoleEnum.ADMIN.value,
     ]
     
     # Roles com acesso total ao Painel de Administração
     ADMIN_PANEL_ROLES = [
         UserRoleEnum.CEO.value,
+        UserRoleEnum.MASTER.value,
         UserRoleEnum.ADMIN.value,
     ]
     
     # Roles que podem gerir utilizadores
     USER_MANAGEMENT_ROLES = [
         UserRoleEnum.CEO.value,
+        UserRoleEnum.MASTER.value,
         UserRoleEnum.ADMIN.value,
     ]
     
@@ -107,12 +137,12 @@ class UserRole:
     @classmethod
     def can_act_as_consultor(cls, role: str) -> bool:
         """Check if role can perform consultor tasks"""
-        return role in [cls.CONSULTOR, cls.DIRETOR, cls.CEO, cls.ADMIN, cls.ADMINISTRATIVO]
+        return role in [cls.CONSULTOR, cls.DIRETOR, cls.CEO, cls.ADMIN, cls.MASTER, cls.ADMINISTRATIVO]
     
     @classmethod
     def can_act_as_intermediario(cls, role: str) -> bool:
         """Check if role can perform intermediário de crédito tasks"""
-        return role in [cls.INTERMEDIARIO, cls.DIRETOR, cls.CEO, cls.ADMIN, cls.ADMINISTRATIVO, cls.CONSULTOR]
+        return role in [cls.INTERMEDIARIO, cls.DIRETOR, cls.CEO, cls.ADMIN, cls.MASTER, cls.ADMINISTRATIVO, cls.CONSULTOR]
     
     @classmethod
     def can_act_as_mediador(cls, role: str) -> bool:
@@ -132,12 +162,12 @@ class UserRole:
     @classmethod
     def can_manage_users(cls, role: str) -> bool:
         """Check if role can manage other users"""
-        return role in [cls.ADMIN, cls.CEO]
+        return role in [cls.MASTER, cls.ADMIN, cls.CEO]
     
     @classmethod
     def can_access_admin_panel(cls, role: str) -> bool:
         """Check if role can access admin panel (apenas admin e CEO)"""
-        return role in [cls.ADMIN, cls.CEO]
+        return role in [cls.MASTER, cls.ADMIN, cls.CEO]
     
     @classmethod
     def can_manage_documents(cls, role: str) -> bool:

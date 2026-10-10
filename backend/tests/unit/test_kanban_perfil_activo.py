@@ -101,15 +101,18 @@ class TestAllRolesRecuaNoQuadro:
 
         assert resolver_papel_do_quadro("__all_roles__", {"role": "indexacao"}) == "indexacao"
 
-    def test_quem_tem_indexacao_como_base_mantem_o_seu_ambito(self):
-        """O alargamento que isto impede: a Indexação vê a sua fila, não
-        o quadro inteiro, mesmo com o perfil "all" escolhido."""
+    def test_quem_tem_indexacao_como_base_continua_a_ser_indexacao(self):
+        """O recuo do perfil «all» devolve `indexacao` (e não um papel de
+        gestão). Desde o Bloco 2 a Indexação vê o quadro geral da rede, mas
+        isso é uma decisão da QUERY — o papel resolvido não pode mudar."""
         from services.process_kanban_enrichment import resolver_papel_do_quadro
         from services.process_list_filters import build_kanban_role_base_query
 
         papel = resolver_papel_do_quadro("__all_roles__", {"role": "indexacao", "id": "u1"})
         query = build_kanban_role_base_query({"id": "u1", "role": "indexacao"}, papel, show_all=True)
-        assert "$or" in query, "a Indexação perdeu o seu âmbito próprio"
+        assert papel == "indexacao"
+        # Quadro geral (ponto 18): sem recorte por atribuição.
+        assert query == {"is_deleted": {"$ne": True}}
 
     def test_um_papel_normal_passa_intacto(self):
         """Contraprova: o recuo é só para `__all_roles__`. Se recuasse

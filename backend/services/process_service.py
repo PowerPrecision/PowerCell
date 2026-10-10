@@ -19,6 +19,7 @@ from typing import Optional, Tuple
 
 from database import db
 from models.process import ProcessCreate, ProcessUpdate
+from services.process_sharing import PROJECCAO as PROJECCAO_PARTILHA
 from services.sub35 import PROJECCAO as PROJECCAO_SUB35
 from services.encryption import encryption_service, generate_nif_hash, generate_email_hash, generate_telefone_hash
 from services.process_labels import normalizar_etiquetas
@@ -103,7 +104,7 @@ def can_view_process(user: dict, process: dict) -> bool:
     
     # Todos os staff podem ver todos os processos
     # Indexação incluído pois precisa de ver todos para atribuir processos
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]
+    staff_roles = ["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]
     if user_role in staff_roles:
         return True
     
@@ -162,11 +163,11 @@ def can_edit_process_data(user: dict, process: dict) -> tuple:
             return False, "Indexação não tem permissão para editar dados do processo"
     
     # Staff roles que podem editar (verificar se tem action edit_process)
-    staff_edit_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]
+    staff_edit_roles = ["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]
     
     if user_role in staff_edit_roles:
         # Admin e CEO podem editar qualquer processo
-        if user_role in ["admin", "ceo"]:
+        if user_role in ["master", "admin", "ceo"]:
             return True, "OK"
         
         # Diretor e Administrativo podem editar todos os processos
@@ -213,7 +214,7 @@ def build_query_filter(user: dict) -> dict:
     
     # Staff (incluindo indexacao) veem todos os processos
     # Indexação precisa de ver todos para poder atribuir a consultores/intermediários
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]
+    staff_roles = ["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]
     if user_role in staff_roles:
         return {}
     
@@ -890,6 +891,10 @@ PROCESS_LIST_PROJECTION = {
     # aniversário. Só subcampos de `personal_data` entram, nunca o bloco
     # inteiro: o resto é PII e a listagem não precisa dele.
     **PROJECCAO_SUB35,
+    # Partilha (D-25) — ponto único, pelo mesmo motivo: se o Kanban
+    # projectar e a listagem não, a mesma linha tem etiqueta num ecrã
+    # e não tem no outro.
+    **PROJECCAO_PARTILHA,
 }
 
 # Campos necessários para o Kanban (visualização em colunas)
@@ -939,6 +944,10 @@ PROCESS_KANBAN_PROJECTION = {
     # aniversário. Só subcampos de `personal_data` entram, nunca o bloco
     # inteiro: o resto é PII e a listagem não precisa dele.
     **PROJECCAO_SUB35,
+    # Partilha (D-25) — ponto único, pelo mesmo motivo: se o Kanban
+    # projectar e a listagem não, a mesma linha tem etiqueta num ecrã
+    # e não tem no outro.
+    **PROJECCAO_PARTILHA,
 }
 
 # Campos necessários para "Os Meus Clientes"

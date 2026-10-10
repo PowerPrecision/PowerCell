@@ -9,6 +9,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from database import db
+from services.user_management_scope import ids_dos_autores_no_ambito
+from services.tenant_network import build_process_scope_condition, resolve_tenant_scope
 from services.gdpr import (
     get_gdpr_statistics,
     find_processes_for_anonymization,
@@ -16,16 +18,23 @@ from services.gdpr import (
 )
 
 
-async def run_get_statistics():
-    stats = await get_gdpr_statistics()
+async def _condicao_de_rede(user: dict) -> dict:
+    """Âmbito de PROCESSOS de quem pede. `{}` só para o Master."""
+    return build_process_scope_condition(await resolve_tenant_scope(user))
+
+
+async def run_get_statistics(user: dict):
+    stats = await get_gdpr_statistics(condicao_extra=await _condicao_de_rede(user) or None)
     return {
         "success": True,
         "data": stats
     }
 
 
-async def run_get_eligible_processes(retention_days: Optional[int], limit: int):
-    processes = await find_processes_for_anonymization(retention_days, limit)
+async def run_get_eligible_processes(retention_days: Optional[int], limit: int, user: dict):
+    processes = await find_processes_for_anonymization(
+        retention_days, limit, condicao_extra=await _condicao_de_rede(user) or None,
+    )
 
     return {
         "success": True,
@@ -35,12 +44,18 @@ async def run_get_eligible_processes(retention_days: Optional[int], limit: int):
     }
 
 
-async def run_get_audit_log(days: int, action: Optional[str], limit: int):
+async def run_get_audit_log(days: int, action: Optional[str], limit: int, user: dict):
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     query = {"timestamp": {"$gte": cutoff}}
     if action:
         query["action"] = action
+
+    # O registo não leva carimbo de rede: um perfil local vê as acções dos
+    # utilizadores do seu âmbito (e as suas), nunca as de outras empresas.
+    autores = await ids_dos_autores_no_ambito(user)
+    if autores is not None:
+        query["performed_by"] = {"$in": autores}
 
     audit_entries = await db.gdpr_audit.find(
         query,

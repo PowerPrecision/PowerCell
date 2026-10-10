@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException
 
@@ -15,11 +15,17 @@ from database import db
 from services.document_auto_categorize import auto_categorize_document_background
 from services.document_constants import (
     DEFAULT_CLIENT_NAME,
-    DEFAULT_FILE_PREFIX,
     ERROR_FILE_ACCESS_DENIED,
     ERROR_PROCESS_NOT_FOUND,
 )
-from services.document_filenames import normalize_filename, sanitize_for_log
+from services.document_filenames import normalize_filename
+from services.document_intake import (
+    categoria_para_o_portal,
+    descreve_destino,
+    descricao_para_o_utilizador,
+    planear_entrada,
+    registar_na_fila_da_ia,
+)
 from services.document_process_resolve import (
     assert_path_within_document_root,
     assert_s3_file_belongs_to_process,
@@ -27,6 +33,7 @@ from services.document_process_resolve import (
 )
 from services.s3_content_quarantine import exigir_conteudo_valido
 from services.document_upload import _auto_fulfill_portal_request
+from services.document_visibility import assert_can_upload_to_process
 from services.history import log_history
 from services.s3_storage import s3_service
 
@@ -60,10 +67,16 @@ async def run_generate_upload_url(data: dict, *, user: dict) -> dict:
     process = await db.processes.find_one({"id": process_id})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    await assert_can_upload_to_process(user, process)
 
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     second_client_name = extract_second_client_name(process)
     s3_folder = process.get("s3_folder")
+
+    # DESVIO INTELIGENTE (Bloco 2): a pasta do objecto decide-se AQUI, porque
+    # o PUT pré-assinado fica preso à chave. Processo por indexar → `Index`.
+    plano = planear_entrada(process, category)
+    category = plano.categoria
 
     if custom_filename:
         normalized_filename = normalize_filename(custom_filename, category)
@@ -102,67 +115,9 @@ async def run_generate_upload_url(data: dict, *, user: dict) -> dict:
         "expires_in_seconds": result["expires_in_seconds"],
         "method": "PUT",
         "headers": {"Content-Type": content_type},
+        "category": category,
+        "intake": descricao_para_o_utilizador(plano),
     }
-
-
-async def _triage_category_with_ai(
-    *,
-    category: str,
-    original_filename: str,
-    file_key: str,
-) -> tuple[str, Optional[dict], Optional[bytes]]:
-    """
-    Se categoria for Outros/Auto, tenta triagem IA.
-
-    Returns:
-        (category, ai_categorization_detail|None, file_content|None)
-    """
-    ai_categorization_detail = None
-    file_content = None
-
-    if category.lower().strip() not in ("outros", "auto", "", "other"):
-        return category, None, None
-
-    try:
-        from services.document_categorization import (
-            extract_text_from_pdf,
-            categorize_document_with_ai,
-        )
-
-        file_content = await asyncio.to_thread(s3_service.get_file_content, file_key)
-
-        text_for_analysis = f"{DEFAULT_FILE_PREFIX}{original_filename}"
-        if file_content and original_filename.lower().endswith(".pdf"):
-            extracted = await asyncio.to_thread(
-                extract_text_from_pdf, file_content, max_chars=3000
-            )
-            if extracted:
-                text_for_analysis = extracted
-
-        existing_categories = await db.document_metadata.distinct("ai_category")
-        ai_result = await categorize_document_with_ai(
-            text_content=text_for_analysis,
-            filename=original_filename,
-            existing_categories=existing_categories,
-        )
-
-        if ai_result.get("success") and ai_result.get("category"):
-            ai_suggested = ai_result["category"]
-            ai_categorization_detail = {
-                "original_category": category or "Outros",
-                "ai_category": ai_suggested,
-                "ai_subcategory": ai_result.get("subcategory"),
-                "ai_confidence": ai_result.get("confidence"),
-            }
-            category = ai_suggested
-            logger.info(
-                f"[CONFIRM-UPLOAD-IA] Categoria IA: {ai_suggested} "
-                f"para {sanitize_for_log(original_filename)}"
-            )
-    except Exception as ai_err:
-        logger.warning(f"[CONFIRM-UPLOAD-IA] Erro na triagem IA: {ai_err}")
-
-    return category, ai_categorization_detail, file_content
 
 
 async def run_confirm_upload(
@@ -192,6 +147,7 @@ async def run_confirm_upload(
     process = await db.processes.find_one({"id": process_id})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    await assert_can_upload_to_process(user, process)
 
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
 
@@ -244,30 +200,38 @@ async def run_confirm_upload(
 
     normalized_filename = file_key.split("/")[-1] if "/" in file_key else file_key
 
-    category, ai_categorization_detail, file_content = await _triage_category_with_ai(
-        category=category,
-        original_filename=original_filename,
-        file_key=file_key,
-    )
+    # DESVIO INTELIGENTE (Bloco 2): por indexar → fila da IA; indexado → só
+    # guardado. A triagem à entrada (SEGUNDA chamada ao modelo sobre o mesmo
+    # ficheiro, só para escolher a pasta) saiu: o objecto já está na pasta
+    # que o `run_generate_upload_url` decidiu.
+    plano = planear_entrada(process, category)
+    category = plano.categoria
 
-    if not file_content:
+    file_content = None
+    if plano.passa_pela_ia:
+        await registar_na_fila_da_ia(
+            process_id=process_id,
+            client_name=client_name,
+            s3_path=file_key,
+            filename=normalized_filename,
+            origem="upload_directo",
+        )
         try:
-            file_content = s3_service.get_file_content(file_key)
-        except Exception:
-            pass
-
-    try:
-        if file_content:
-            background_tasks.add_task(
-                auto_categorize_document_background,
-                process_id=process_id,
-                client_name=client_name,
-                s3_path=file_key,
-                filename=normalized_filename,
-                file_content=file_content,
-            )
-    except Exception as e:
-        logger.warning(f"[CONFIRM-UPLOAD] Erro ao agendar categorização: {e}")
+            file_content = await asyncio.to_thread(s3_service.get_file_content, file_key)
+        except Exception as e:
+            logger.warning(f"[CONFIRM-UPLOAD] Não foi possível ler o ficheiro para a IA: {e}")
+        try:
+            if file_content:
+                background_tasks.add_task(
+                    auto_categorize_document_background,
+                    process_id=process_id,
+                    client_name=client_name,
+                    s3_path=file_key,
+                    filename=normalized_filename,
+                    file_content=file_content,
+                )
+        except Exception as e:
+            logger.warning(f"[CONFIRM-UPLOAD] Erro ao agendar categorização: {e}")
 
     try:
         await log_history(
@@ -275,7 +239,7 @@ async def run_confirm_upload(
             user=user,
             action="Carregou documento (upload direto)",
             field="documento",
-            new_value=f"{normalized_filename} ({category})",
+            new_value=f"{normalized_filename} ({descreve_destino(plano)})",
         )
     except Exception as e:
         logger.warning(f"[CONFIRM-UPLOAD] Erro ao registar histórico: {e}")
@@ -285,7 +249,7 @@ async def run_confirm_upload(
     portal_fulfill = await _auto_fulfill_portal_request(
         process_id,
         {
-            "category": category,
+            "category": categoria_para_o_portal(plano),
             "filename": normalized_filename or original_filename,
             "s3_path": file_key,
             "content_type": content_type,
@@ -370,10 +334,12 @@ async def run_confirm_upload(
         # Ninguém o lia — o `directS3Upload` do `api.js` devolvia-o e não
         # tem chamadores. Mesma decisão do `portal/confirm-upload`.
         "message": "Upload registado com sucesso",
-        "auto_categorization": "iniciada" if file_content else " indisponível",
+        "auto_categorization": (
+            "dispensada" if not plano.passa_pela_ia
+            else ("iniciada" if file_content else "indisponível")
+        ),
         "portal_fulfilled": portal_fulfill.get("fulfilled", 0),
+        "intake": descricao_para_o_utilizador(plano),
     }
-    if ai_categorization_detail:
-        response_data["ai_categorization"] = ai_categorization_detail
 
     return response_data

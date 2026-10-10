@@ -23,6 +23,7 @@
  * servidor vai recusar com 403 é prometer uma acção que não existe.
  */
 export const PAPEIS_QUE_MUDAM_FASE = [
+  "master",
   "admin",
   "ceo",
   "consultor",
@@ -49,7 +50,7 @@ export const FASES_TERMINAIS = [
 ];
 
 /** Só estes dois passam por cima do bloqueio de estado terminal. */
-export const PAPEIS_ACIMA_DO_BLOQUEIO = ["admin", "ceo"];
+export const PAPEIS_ACIMA_DO_BLOQUEIO = ["master", "admin", "ceo"];
 
 function normalizar(valor) {
   return typeof valor === "string" ? valor.trim().toLowerCase() : "";

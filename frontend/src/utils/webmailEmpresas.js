@@ -134,3 +134,24 @@ export function estadoDaSincronizacao({ syncing, ultimaSinc, agora } = {}) {
     emCurso: false,
   };
 }
+
+/**
+ * Quem tem direito à Caixa Geral da empresa (Bloco 2, Lote 12).
+ *
+ * Espelha `CAIXA_GERAL_ROLES` do backend (`email_config_resolver`): a
+ * Administrativa entrou, porque é o back-office que trata o correio geral.
+ * A lista vivia escrita à mão no `WebmailPage` (`['admin','ceo','diretor']`)
+ * e foi a cópia que ficou para trás — a Caixa Geral desaparecia ao
+ * Administrativo sem erro nenhum. Há um teste que lê o ficheiro do backend e
+ * compara os dois conjuntos: uma terceira cópia diverge na primeira mudança.
+ *
+ * Decide pelo perfil ACTIVO (Pacote DV): `hasAnyRole` fazia aparecer uma
+ * caixa fantasma em todos os perfis de quem tem um cargo de gestão noutra
+ * empresa. A parede é o servidor, isto só decide se o separador aparece.
+ */
+export const PAPEIS_COM_CAIXA_GERAL = ["master", "admin", "ceo", "diretor", "administrativo"];
+
+export function temDireitoACaixaGeral(papelEfectivo) {
+  return PAPEIS_COM_CAIXA_GERAL.includes(String(papelEfectivo || "").toLowerCase());
+}
+

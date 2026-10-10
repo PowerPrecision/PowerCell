@@ -316,9 +316,9 @@ async def carregar_fases(*, usar_cache: bool = True) -> list[dict]:
 # uma porque são dois domínios: juntá-las faria uma decisão sobre pastas
 # mudar quem vê cartões.
 def papeis_de_reconciliacao() -> frozenset:
-    from models.auth import UserRole
+    from services.role_scope import PAPEIS_GLOBAIS
 
-    return frozenset({UserRole.ADMIN, UserRole.CEO})
+    return frozenset(PAPEIS_GLOBAIS)
 
 
 def pode_ver_desconhecidas(papel) -> bool:

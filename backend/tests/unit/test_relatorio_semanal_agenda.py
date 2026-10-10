@@ -232,7 +232,13 @@ class TestOsDoisRelatoriosEstaoLigadosAAgenda:
         fonte = codigo_da_funcao_sem_comentarios(
             ScheduledTasksService.send_weekly_ceo_report
         )
-        assert fonte.index("result.get") < fonte.index("marcar_enviado(")
+        # O envio (que devolve True SÓ com `success`) vem antes da marca...
+        assert fonte.index("_enviar_relatorio_semanal_de") < fonte.index("marcar_enviado(")
+        envio = codigo_da_funcao_sem_comentarios(
+            ScheduledTasksService._enviar_relatorio_semanal_de
+        )
+        # ...e esse envio só devolve True depois de confirmado.
+        assert envio.index("result.get('success')") < envio.index("return True")
 
     @pytest.mark.asyncio
     async def test_CONTRAPROVA_a_agenda_recusa_mesmo(self, marcas):

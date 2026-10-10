@@ -97,7 +97,7 @@ PRE_REGISTO_STATUS = "pre_registo"
 LEAD_STATUS_VALUES = ["pre_registo", None]
 # Roles com privilégios de gestão — podem contornar a exclusão do pré-registo
 PRE_REGISTO_BYPASS_ROLES = {
-    UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO
+    UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO
 }
 
 

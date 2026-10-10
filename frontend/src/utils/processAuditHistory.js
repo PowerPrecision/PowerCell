@@ -102,6 +102,43 @@ export function findProcessBySelectValue(processes, value) {
   }) || null;
 }
 
+const ISO_SEM_FUSO = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
+
+/**
+ * O instante de um evento, em milissegundos (`-Infinity` se não se lê).
+ *
+ * Ordenar por TEXTO (o que se fazia: `localeCompare` sobre a data) só acerta
+ * enquanto todas as datas tiverem a mesma forma. Aqui misturam-se `…+00:00`
+ * (Python), `…Z` com milissegundos (JavaScript), fusos diferentes e datas sem
+ * fuso: dois eventos do mesmo segundo ficavam trocados e um `+01:00` caía
+ * fora de ordem. Uma data sem fuso lê-se como UTC (é como o servidor as grava).
+ * Datas ilegíveis valem `-Infinity`: vão para o fim, nunca para o topo.
+ */
+export function instanteDoEvento(valor) {
+  if (valor instanceof Date) {
+    const t = valor.getTime();
+    return Number.isNaN(t) ? -Infinity : t;
+  }
+  if (typeof valor === "number") {
+    if (!Number.isFinite(valor)) return -Infinity;
+    return valor < 1e11 ? valor * 1000 : valor; // segundos vs milissegundos
+  }
+  if (typeof valor !== "string" || !valor.trim()) return -Infinity;
+  const texto = valor.trim();
+  const t = Date.parse(ISO_SEM_FUSO.test(texto) ? `${texto.replace(" ", "T")}Z` : texto);
+  return Number.isNaN(t) ? -Infinity : t;
+}
+
+/**
+ * A data com que um evento se ORDENA e se MOSTRA. Um só critério: a lista
+ * ordenava por `created_at || timestamp` e o ecrã mostrava `timestamp ||
+ * created_at` — um evento com as duas aparecia com uma data e estava
+ * posicionado pela outra.
+ */
+export function dataDoEvento(evento) {
+  return evento?.created_at || evento?.timestamp || "";
+}
+
 /**
  * Junta history + activities, mais recentes primeiro, sem duplicar ids.
  */
@@ -112,25 +149,35 @@ export function mergeAuditEvents(history = [], activities = []) {
   const historyIds = new Set(historyList.map((h) => h?.id).filter(Boolean));
 
   historyList.forEach((h) => {
+    if (!h || typeof h !== "object") return;
     events.push({
       ...h,
       event_type: classifyAuditEvent(h),
       description: describeAuditEvent(h),
-      _sortDate: h.created_at || h.timestamp || "",
+      _sortDate: dataDoEvento(h),
     });
   });
 
   activityList.forEach((a) => {
-    if (a?.id && historyIds.has(a.id)) return;
+    if (!a || typeof a !== "object") return;
+    if (a.id && historyIds.has(a.id)) return;
     events.push({
       ...a,
       type: a.type || "comment",
       event_type: classifyAuditEvent({ ...a, type: a.type || "comment" }),
       description: describeAuditEvent({ ...a, type: a.type || "comment" }),
-      _sortDate: a.created_at || a.timestamp || "",
+      _sortDate: dataDoEvento(a),
     });
   });
 
-  events.sort((a, b) => String(b._sortDate).localeCompare(String(a._sortDate)));
+  // Mais recentes primeiro. Empates e datas ilegíveis mantêm a ordem de
+  // chegada (a ordenação é estável) — e as ilegíveis ficam no fim.
+  const instantes = new Map(events.map((e) => [e, instanteDoEvento(e._sortDate)]));
+  events.sort((a, b) => {
+    const ia = instantes.get(a);
+    const ib = instantes.get(b);
+    if (ia === ib) return 0;
+    return ib > ia ? 1 : -1;
+  });
   return events;
 }

@@ -10,9 +10,12 @@ import logging
 from typing import Any, Optional
 
 from database import db
+from services.process_sharing import (
+    aplicar_flag_a_processos as aplicar_flag_partilha,
+)
 from services.sub35 import aplicar_flag_a_processos as aplicar_flag_sub35
 from services.workflow_phases import carregar_fases, nomes_terminais
-from services.tenant_network import build_tenant_condition
+from services.tenant_network import build_tenant_process_condition
 from services.process_my_clients import (
     fetch_unread_messages_map,
     fetch_new_documents_map,
@@ -337,14 +340,16 @@ async def run_get_processes(
     labels: Optional[Any] = None,
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
+    partilha: Optional[str] = None,
 ) -> dict:
     """Orquestra GET /processes (offset pagination)."""
     from services.process_list_filters import build_process_list_query
 
     # Ponto único do isolamento por Rede: as duas listagens de processos
     # passam por aqui, logo o filtro entra uma vez só e não há caminho
-    # que o contorne (`show_all=true` incluído).
-    tenant_condition = await build_tenant_condition(user)
+    # que o contorne (`show_all=true` incluído). A variante de
+    # PROCESSOS (D-25) inclui os partilhados com a rede do utilizador.
+    tenant_condition = await build_tenant_process_condition(user)
 
     query = build_process_list_query(
         user,
@@ -366,6 +371,7 @@ async def run_get_processes(
         labels=labels,
         labels_logic=labels_logic,
         sub35=sub35,
+        partilha=partilha,
         terminais=nomes_terminais(await carregar_fases()),
     )
 
@@ -379,6 +385,7 @@ async def run_get_processes(
     )
 
     aplicar_flag_sub35(processes)
+    aplicar_flag_partilha(processes)
     await enrich_processes_assignee_names(processes)
     sort_process_list(
         processes,
@@ -421,12 +428,13 @@ async def run_get_processes_paginated(
     labels: Optional[Any] = None,
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
+    partilha: Optional[str] = None,
 ) -> dict:
     """Orquestra GET /processes/paginated (cursor-based)."""
     from services.cursor_pagination import CursorPaginator
     from services.process_list_filters import build_process_list_query
 
-    tenant_condition = await build_tenant_condition(user)
+    tenant_condition = await build_tenant_process_condition(user)
 
     query = build_process_list_query(
         user,
@@ -443,6 +451,7 @@ async def run_get_processes_paginated(
         labels=labels,
         labels_logic=labels_logic,
         sub35=sub35,
+        partilha=partilha,
         terminais=nomes_terminais(await carregar_fases()),
     )
 
@@ -468,6 +477,7 @@ async def run_get_processes_paginated(
         fields_to_decrypt=["client_phone", "client_nif"],
     )
     aplicar_flag_sub35(result["items"])
+    aplicar_flag_partilha(result["items"])
     await enrich_processes_portal_flags(result["items"])
     await enrich_processes_latest_notes(result["items"])
 

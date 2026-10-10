@@ -10,6 +10,11 @@ import logging
 from typing import Any, Optional  # Any used by side-effect helpers
 
 from database import db
+# Importado NO TOPO e não à primeira chamada: um `from database import db`
+# executado dentro de um `patch("database.db", fake)` ficava com o duplo para
+# sempre (a armadilha da ordem de import, ver AGENTS.md). Aqui o módulo carrega
+# com o resto do serviço, antes de qualquer teste patchar o que quer que seja.
+from services import phase_automation
 from services.process_phase_clock import (
     montar_update,
     transicao_de_fase,
@@ -106,7 +111,7 @@ def assert_mark_indexed_permission(user_role: str, all_roles: list) -> None:
     from fastapi import HTTPException
 
     role = (user_role or "").lower()
-    allowed = {"indexacao", "admin", "ceo"}
+    allowed = {"indexacao", "master", "admin", "ceo"}
     if role not in allowed and not any(r in all_roles for r in allowed):
         raise HTTPException(
             status_code=403,
@@ -287,36 +292,35 @@ async def auto_assign_after_indexacao(
     user: dict,
     current_status: Optional[str],
     process_ref: str,
+    fase_nova: Optional[str] = None,
 ) -> tuple[Any, bool]:
     """
-    Após indexação: atribui SEMPRE consultor + intermediário (least-busy).
+    Após indexação: corre a AUTOMAÇÃO DA FASE em que o processo acabou de entrar.
 
-    Antes só fazia dual-assign se ainda estivesse em Lead/pre_registo;
-    caso contrário só tentava consultor. O produto exige ambos.
+    Bloco 3 (ponto 12): o que se atribui e que tarefas se criam passou a ser
+    configuração da fase (`phase_automation`), editada pelo Admin/CEO. Uma
+    fase SEM configuração mantém o que sempre se fez à saída da Index —
+    consultor + intermediário (de menor carga, só se o papel estiver vazio)
+    e as duas tarefas de arranque —, para a mudança não alterar nenhum
+    processo em curso.
     """
-    consultant_result = None
     # Manter flag para resposta/API (Lead na altura do mark-indexed)
     is_pre_registo_transition = current_status in ("pre_registo", None)
 
-    try:
-        from services.process_assignment import dual_auto_assign_on_pre_registo_transition
-        dual_result = await dual_auto_assign_on_pre_registo_transition(
-            process_id=process_id,
-            company_id=process.get("company_id") or process.get("company"),
-            indexador_user_id=user.get("id"),
-            actor_role=user.get("role"),
-        )
-        consultant_result = dual_result
-        logger.info(
-            f"[INDEXACAO-DUAL] Dupla auto-atribuição após indexação "
-            f"(status_antes={current_status}): "
-            f"consultor={dual_result.get('consultant_name', 'N/A')}, "
-            f"intermediario={dual_result.get('mediador_name', 'N/A')}"
-        )
-    except Exception as dual_err:
-        logger.warning(f"[INDEXACAO-DUAL] Erro na dupla auto-atribuição: {dual_err}")
-
-    return consultant_result, is_pre_registo_transition
+    resultado = await phase_automation.ao_entrar_na_fase_sem_falhar(
+        process_id,
+        fase_nova or current_status,
+        origem=phase_automation.ORIGEM_INDEXACAO,
+        actor=user,
+    )
+    logger.info(
+        f"[INDEXACAO-DUAL] Automação da fase '{fase_nova or current_status}' "
+        f"(status_antes={current_status}): "
+        f"consultor={resultado.atribuicao.get('consultant_name', 'N/A')}, "
+        f"intermediario={resultado.atribuicao.get('mediador_name', 'N/A')}, "
+        f"tarefas={resultado.tarefas_criadas}"
+    )
+    return (resultado.atribuicao or None), is_pre_registo_transition
 
 
 def build_mark_indexed_response(
@@ -357,6 +361,20 @@ def build_mark_indexed_response(
         "financial_engine": financial_engine
         or {"triggered": False, "reason": None, "task_id": None, "documents": 0},
     }
+
+
+async def libertar_index_sem_falhar(process_id: str, user: dict) -> dict[str, Any]:
+    """Liberta a pasta `Index` sem nunca bloquear nem desfazer a indexação."""
+    try:
+        from services.index_release import libertar_ficheiros_do_index
+
+        return await libertar_ficheiros_do_index(process_id, user=user)
+    except Exception as exc:
+        logger.warning(
+            f"[INDEXACAO] Pasta Index não libertada (não fatal) para o "
+            f"processo {process_id}: {exc}"
+        )
+        return {"executado": False, "movidos": 0, "erro": type(exc).__name__}
 
 
 async def trigger_financial_engine_safe(process: dict, user: dict) -> dict[str, Any]:
@@ -525,6 +543,7 @@ async def run_mark_indexed_side_effects(
 
     consultant_result, is_pre_registo = await auto_assign_after_indexacao(
         process, process_id, user, current_status, process_ref,
+        fase_nova=next_status or current_status,
     )
 
     # BUGFIX (reatividade do cartão de Atribuição) — SEGUNDO broadcast.
@@ -540,9 +559,14 @@ async def run_mark_indexed_side_effects(
         broadcast_fn=broadcast_fn,
     )
 
+    # Bloco 2 (Lote 12): o que entrou na pasta `Index` passa às pastas finais
+    # AGORA que o processo está indexado — e ANTES do motor financeiro, que lê
+    # o `s3_path` dos metadados e tem de o encontrar já actualizado.
+    index_release = await libertar_index_sem_falhar(process_id, user)
+
     financial_engine = await trigger_financial_engine_safe(process, user)
 
-    return build_mark_indexed_response(
+    resposta = build_mark_indexed_response(
         process=process,
         process_id=process_id,
         process_ref=process_ref,
@@ -553,6 +577,8 @@ async def run_mark_indexed_side_effects(
         is_pre_registo_transition=is_pre_registo,
         financial_engine=financial_engine,
     )
+    resposta["index_release"] = index_release
+    return resposta
 
 
 async def run_mark_process_indexed(

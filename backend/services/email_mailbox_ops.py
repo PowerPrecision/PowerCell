@@ -384,45 +384,15 @@ def _match_attachment(attachments: list, attachment_id: str):
 
 
 async def _assert_email_readable(email: dict, request: Request, current_user: dict) -> None:
-    from models.auth import UserRole
+    """Quem pode descarregar um anexo é quem pode ler o email (`email_access`)."""
     from services.auth import get_effective_role
+    from services.email_access import exigir_leitura_do_email
 
-    user_role = get_effective_role(request, current_user)
-    if user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR):
-        return
-
-    user_id = current_user.get("id")
-    user_email = (current_user.get("email") or "").lower().strip()
-    is_owner = (
-        email.get("created_by") == user_id
-        or email.get("synced_for_user") == user_id
-        or email.get("synced_for_user") == user_email
+    await exigir_leitura_do_email(
+        email, current_user,
+        papel=get_effective_role(request, current_user),
+        detail="Sem permissão para descarregar este anexo",
     )
-    is_shared = bool(email.get("shared_role") and email.get("shared_role") == user_role)
-    is_in_conversation = False
-    # PACOTE 8 — desacoplamento login ↔ webmail: a conversa é avaliada
-    # contra as contas CONFIGURADAS no UserEmailConfig (IMAP/SMTP da área
-    # pessoal, todas as empresas); o email de login é apenas fallback.
-    conversation_emails: list = []
-    try:
-        from services.user_email_config_service import get_user_mailbox_addresses
-        conversation_emails = await get_user_mailbox_addresses(user_id or "")
-    except Exception as exc:
-        logger.warning(
-            "[Webmail Attachment] Falha a resolver contas configuradas user=%s: %s",
-            user_id, exc,
-        )
-    if not conversation_emails and user_email:
-        conversation_emails = [user_email]
-    if conversation_emails:
-        from_email = (email.get("from_email") or "").lower()
-        to_emails = email.get("to_emails") or []
-        is_in_conversation = any(
-            conv in from_email or any(conv in str(addr).lower() for addr in to_emails)
-            for conv in conversation_emails
-        )
-    if not (is_owner or is_shared or is_in_conversation):
-        raise HTTPException(status_code=403, detail="Sem permissão para descarregar este anexo")
 
 
 async def _load_attachment_bytes(email: dict, attachment: dict, current_user: dict) -> Optional[bytes]:

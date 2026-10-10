@@ -90,14 +90,21 @@ async def _correr(dados, *, veredicto=APROVADO, processo=PROCESSO):
                 modulo, "_auto_fulfill_portal_request",
                 AsyncMock(return_value={"fulfilled": 0}),
             ), \
-            patch.object(
-                modulo, "_triage_category_with_ai",
-                AsyncMock(return_value=("Identificação", None, None)),
-            ):
+            patch("services.document_intake.db", db_falso):
         resposta = await modulo.run_confirm_upload(
             dados, background_tasks=MagicMock(), user={"id": "u-1", "name": "Ana"}
         )
     return resposta, quarentena
+
+
+
+@pytest.fixture(autouse=True)
+def _sem_guarda_de_escrita():
+    """A guarda de ESCRITA na pasta do processo (Bloco 2) tem a sua bateria
+    (`test_escrita_na_pasta_do_processo.py`); aqui testa-se a posse da CHAVE
+    e a quarentena, e a guarda precisaria de um âmbito de rede resolvido."""
+    with patch.object(modulo, "assert_can_upload_to_process", AsyncMock()):
+        yield
 
 
 class TestAExploracao:
@@ -245,10 +252,7 @@ class TestAQuarentenaDeConteudo:
                 patch.object(modulo.s3_service, "get_file_content", return_value=None), \
                 patch.object(modulo, "log_history", AsyncMock()), \
                 patch.object(modulo, "_auto_fulfill_portal_request", _fulfill), \
-                patch.object(
-                    modulo, "_triage_category_with_ai",
-                    AsyncMock(return_value=("Identificação", None, None)),
-                ):
+                patch("services.document_intake.db", db_falso):
             await modulo.run_confirm_upload(
                 _pedido(
                     "Documentação Clientes/Ana Cliente/cc.pdf",

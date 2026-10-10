@@ -9,7 +9,7 @@ Thin FastAPI stubs — logic lives in services/email_*.py
 import logging
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks, UploadFile, File, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks, UploadFile, File, Request, Response
 
 from models.email import (
     EmailCreate, EmailUpdate, EmailResponse, EmailDirection,
@@ -17,7 +17,11 @@ from models.email import (
     LabelCreateRequest, LabelUpdateRequest,
     FolderCreateRequest, FolderUpdateRequest
 )
-from services.auth import get_current_user
+from services.auth import get_active_company_id_async, get_current_user
+from services.email_contacts import esconder_contacto, guardar_contacto, listar_contactos
+from middleware.rate_limit import limiter
+from services.email_access import carregar_email_legivel, exigir_processo_legivel
+from services.email_archive import arquivar_anexo, sugerir_processos
 
 from services.email_labels_folders import (
     run_list_labels,
@@ -123,6 +127,7 @@ async def preview_documentation_email(
     current_user: dict = Depends(get_current_user)
 ):
     """Gera e devolve o HTML final do email de documentação sem o enviar."""
+    await exigir_processo_legivel(process_id, current_user)
     return await run_preview_documentation_email(process_id, current_user)
 
 
@@ -134,6 +139,7 @@ async def send_documentation_email(
     current_user: dict = Depends(get_current_user)
 ):
     """Envia documentação do processo para balcões/bancos com anexos do S3."""
+    await exigir_processo_legivel(process_id, current_user)
     return await run_send_documentation_email(process_id, data, current_user, request)
 
 
@@ -240,6 +246,7 @@ async def download_email_attachment(
     current_user: dict = Depends(get_current_user)
 ):
     """Obter URL pré-assinada para download de anexo de email."""
+    await carregar_email_legivel(email_id, current_user)
     return await run_download_email_attachment(email_id, file_id, current_user)
 
 
@@ -250,6 +257,7 @@ async def mark_email(
     current_user: dict = Depends(get_current_user)
 ):
     """Marcar um email como importante, lido, etc."""
+    await carregar_email_legivel(email_id, current_user)
     return await run_mark_email(email_id, data, current_user)
 
 
@@ -260,6 +268,7 @@ async def unmark_email(
     current_user: dict = Depends(get_current_user)
 ):
     """Remover marcação de email."""
+    await carregar_email_legivel(email_id, current_user)
     return await run_unmark_email(email_id, mark_type, current_user)
 
 
@@ -270,6 +279,7 @@ async def add_email_label(
     current_user: dict = Depends(get_current_user)
 ):
     """Adicionar etiqueta ao email."""
+    await carregar_email_legivel(email_id, current_user)
     return await run_add_email_label(email_id, label, current_user)
 
 
@@ -280,6 +290,7 @@ async def remove_email_label(
     current_user: dict = Depends(get_current_user)
 ):
     """Remover etiqueta do email."""
+    await carregar_email_legivel(email_id, current_user)
     return await run_remove_email_label(email_id, label, current_user)
 
 
@@ -289,6 +300,7 @@ async def get_email_attachments(
     current_user: dict = Depends(get_current_user)
 ):
     """Listar anexos de um email."""
+    await carregar_email_legivel(email_id, current_user)
     return await run_get_email_attachments(email_id, current_user)
 
 
@@ -299,6 +311,7 @@ async def download_attachment(
     current_user: dict = Depends(get_current_user)
 ):
     """Download de anexo."""
+    await carregar_email_legivel(email_id, current_user)
     return await run_download_attachment(email_id, attachment_id, current_user)
 
 
@@ -309,7 +322,34 @@ async def preview_attachment(
     current_user: dict = Depends(get_current_user)
 ):
     """Preview de anexo (para imagens e PDFs)."""
+    await carregar_email_legivel(email_id, current_user)
     return await run_preview_attachment(email_id, attachment_id, current_user)
+
+
+@router.get("/{email_id}/archive-suggestions")
+async def archive_suggestions(
+    email_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """«Arquivar no Processo»: os processos activos do remetente (ou destinatários)."""
+    email = await carregar_email_legivel(email_id, current_user)
+    return await sugerir_processos(email, current_user)
+
+
+@router.post("/{email_id}/attachments/{attachment_id}/archive")
+@limiter.limit("30/minute")
+async def archive_attachment(
+    email_id: str,
+    attachment_id: str,
+    request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Arquiva um anexo na pasta de um processo (desvio inteligente: Index ou directo)."""
+    email = await carregar_email_legivel(email_id, current_user)
+    return await arquivar_anexo(email, attachment_id, data, current_user, background_tasks)
 
 
 
@@ -330,6 +370,7 @@ async def get_email_timeline(
     process_id: str,
     current_user: dict = Depends(get_current_user)
 ):
+    await exigir_processo_legivel(process_id, current_user)
     return await run_get_email_timeline(process_id, current_user)
 
 
@@ -376,6 +417,7 @@ async def use_template(
     process_id: str = Body(..., embed=True),
     current_user: dict = Depends(get_current_user)
 ):
+    await exigir_processo_legivel(process_id, current_user)
     return await run_use_template(template_id, process_id, current_user)
 
 
@@ -507,6 +549,7 @@ async def get_process_emails(
     force_refresh: bool = False,
     current_user: dict = Depends(get_current_user)
 ):
+    await exigir_processo_legivel(process_id, current_user)
     return await run_get_process_emails(
         process_id, current_user,
         direction=direction, filter_by_user=filter_by_user,
@@ -519,6 +562,7 @@ async def get_email_stats(
     process_id: str,
     current_user: dict = Depends(get_current_user)
 ):
+    await exigir_processo_legivel(process_id, current_user)
     return await run_get_email_stats(process_id, current_user)
 
 
@@ -530,6 +574,7 @@ async def sync_process_emails(
     blocking: bool = False,
     current_user: dict = Depends(get_current_user)
 ):
+    await exigir_processo_legivel(process_id, current_user)
     return await run_sync_process_emails(
         process_id, background_tasks, current_user, days=days, blocking=blocking,
     )
@@ -540,6 +585,7 @@ async def get_sync_status(
     process_id: str,
     current_user: dict = Depends(get_current_user)
 ):
+    await exigir_processo_legivel(process_id, current_user)
     return await run_get_sync_status(process_id, current_user)
 
 
@@ -549,6 +595,48 @@ async def associate_email_to_client(
     current_user: dict = Depends(get_current_user)
 ):
     return await run_associate_email_to_client(data, current_user)
+
+
+@router.get("/contacts")
+async def list_email_contacts(
+    request: Request,
+    q: str = Query("", max_length=120),
+    limit: int = Query(8, ge=1, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    """Contactos sugeridos ao escrever (da empresa activa do utilizador)."""
+    company_id = await get_active_company_id_async(request, current_user)
+    return {"contacts": await listar_contactos(current_user, company_id, q=q, limite=limit)}
+
+
+@router.put("/contacts")
+async def save_email_contact(
+    request: Request,
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Cria/actualiza um contacto à mão (nome, favorito)."""
+    company_id = await get_active_company_id_async(request, current_user)
+    try:
+        return await guardar_contacto(
+            current_user, company_id, address=data.get("address"),
+            name=data.get("name"), favorite=data.get("favorite"),
+        )
+    except ValueError as erro:
+        raise HTTPException(status_code=400, detail=str(erro))
+
+
+@router.delete("/contacts")
+async def hide_email_contact(
+    request: Request,
+    address: str = Query(..., min_length=3, max_length=254),
+    current_user: dict = Depends(get_current_user)
+):
+    """Remove um contacto das sugestões (esconde; volta se lhe escrever de novo)."""
+    company_id = await get_active_company_id_async(request, current_user)
+    if not await esconder_contacto(current_user, company_id, address):
+        raise HTTPException(status_code=404, detail="Contacto não encontrado")
+    return {"success": True}
 
 
 @router.get("/search")
@@ -663,6 +751,7 @@ async def update_email(
     email_data: EmailUpdate,
     current_user: dict = Depends(get_current_user)
 ):
+    await carregar_email_legivel(email_id, current_user)
     return await run_update_email(email_id, email_data, current_user)
 
 
@@ -671,6 +760,7 @@ async def delete_email(
     email_id: str,
     current_user: dict = Depends(get_current_user)
 ):
+    await carregar_email_legivel(email_id, current_user)
     return await run_delete_email(email_id, current_user)
 
 
@@ -679,6 +769,7 @@ async def permanently_delete_email(
     email_id: str,
     current_user: dict = Depends(get_current_user)
 ):
+    await carregar_email_legivel(email_id, current_user)
     return await run_permanently_delete_email(email_id, current_user)
 
 
@@ -689,6 +780,7 @@ async def get_monitored_emails(
     process_id: str,
     current_user: dict = Depends(get_current_user)
 ):
+    await exigir_processo_legivel(process_id, current_user)
     return await run_get_monitored_emails(process_id, current_user)
 
 
@@ -698,6 +790,7 @@ async def add_monitored_email(
     email: str = Body(..., embed=True),
     current_user: dict = Depends(get_current_user)
 ):
+    await exigir_processo_legivel(process_id, current_user)
     return await run_add_monitored_email(process_id, email, current_user)
 
 
@@ -707,5 +800,6 @@ async def remove_monitored_email(
     email: str,
     current_user: dict = Depends(get_current_user)
 ):
+    await exigir_processo_legivel(process_id, current_user)
     return await run_remove_monitored_email(process_id, email, current_user)
 

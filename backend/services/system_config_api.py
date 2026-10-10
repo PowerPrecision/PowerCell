@@ -695,9 +695,15 @@ async def run_get_config_fields() -> dict:
     return CONFIG_FIELDS
 
 
-async def run_get_available_companies() -> dict:
-    """Listar empresas com configuração própria no sistema."""
-    companies = await list_available_companies()
+async def run_get_available_companies(companies: Optional[list] = None) -> dict:
+    """Listar as empresas configuráveis.
+
+    A lista vem JÁ filtrada pelo âmbito do utilizador (ver
+    `system_config_scope.listar_empresas_configuraveis`). Sem ela devolve
+    todas as que têm configuração própria — chamadores internos apenas.
+    """
+    if companies is None:
+        companies = await list_available_companies()
     return {"companies": companies, "total": len(companies)}
 
 

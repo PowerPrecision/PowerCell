@@ -29,12 +29,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../contexts/AuthContext", () => ({
   useAuth: () => ({
     token: "t",
-    user: { id: "u1", name: "Admin", role: "admin" },
+    user: { id: "u1", name: "Master", role: "master" },
     effectiveCompanyId: "default",
   }),
 }));
 
 vi.mock("../../services/api", () => ({
+  // Forma REAL de `GET /system-config/companies`: `{companies, total}`.
+  getSystemConfigCompanies: vi.fn(async () => ({ data: { companies: [], total: 0 } })),
   getSystemConfig: vi.fn(async () => ({
     data: { config: { dashboard_slas: { enabled: true, novo: 7, analise: 15, aprovado: 30 } } },
   })),

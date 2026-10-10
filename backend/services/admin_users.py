@@ -24,6 +24,12 @@ from services.user_company_bootstrap import (
 from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from models.email_config import EmailConfigCreate, EmailConfigResponse
+from services.user_management_scope import (
+    carregar_utilizador_gerivel,
+    exigir_empresas_concediveis,
+    exigir_papeis_concediveis,
+)
+from models.auth import normalizar_papel
 from services.auth import hash_password, require_roles, get_current_user
 from services.admin_helpers import _safe_float, _audit_log
 from services.permissions import (
@@ -255,12 +261,15 @@ async def run_create_user(data: UserCreate, user: dict):
     clean_name = (data.name or "").strip()
     clean_phone = (data.phone or "").strip() if data.phone else None
     
+    # «Index» é o nome do perfil `indexacao` no ecrã; guarda-se sempre o canónico.
+    data.role = normalizar_papel(data.role)
+
     # Cliente não é um utilizador do sistema - é um processo
     if data.role == UserRole.CLIENTE:
         raise HTTPException(status_code=400, detail="Cliente não pode ser criado como utilizador. O cliente é representado pelo processo.")
     
     # Validar role - inclui PARCEIRO
-    valid_roles = [UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.CEO, UserRole.ADMIN, UserRole.PARCEIRO]
+    valid_roles = [UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.CEO, UserRole.MASTER, UserRole.ADMIN, UserRole.PARCEIRO]
     if data.role not in valid_roles:
         raise HTTPException(status_code=400, detail="Role inválido")
     
@@ -273,6 +282,18 @@ async def run_create_user(data: UserCreate, user: dict):
     # deixaria exactamente a conta órfã que isto existe para evitar.
     acessos = normalizar_acessos(data.companies, papel_principal=data.role)
     assert_acessos_obrigatorios(data.role, acessos)
+
+    # Fronteira de gestão (adenda de RBAC): só o Master concede `master`, e
+    # ninguém concede acesso a empresas fora do seu âmbito. TEM de vir antes
+    # do insert — criar e só depois recusar deixava a conta (e o perfil) lá.
+    exigir_papeis_concediveis(
+        user,
+        [data.role, *(data.additional_roles or []), *(a.get("role") for a in acessos)],
+    )
+    await exigir_empresas_concediveis(
+        user,
+        [*(a.get("company_id") or a.get("company_name") for a in acessos), data.company],
+    )
     await completar_nomes_das_empresas(acessos)
     empresa_omissao = empresa_por_omissao(acessos) or (data.company or None)
     
@@ -520,9 +541,18 @@ async def run_update_user(user_id: str, data: UserUpdate, user: dict):
     """
     from services.permissions import should_sync_permissions
     
-    target_user = await db.users.find_one({"id": user_id}, {"_id": 0})
-    if not target_user:
-        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    # O alvo tem de estar no âmbito de quem actua (404 caso contrário) e um
+    # perfil local nunca edita um global. Sem isto, o CEO de uma empresa
+    # redefinia a password de qualquer utilizador do sistema pelo id.
+    target_user = await carregar_utilizador_gerivel(user_id, user, projeccao={"_id": 0})
+
+    if data.role is not None:
+        data.role = normalizar_papel(data.role)
+    exigir_papeis_concediveis(
+        user, [data.role, *(data.additional_roles or [])] if data.role or data.additional_roles else [],
+    )
+    if data.company:
+        await exigir_empresas_concediveis(user, [data.company])
     
     update_data = {}
     role_changed = False
@@ -541,14 +571,14 @@ async def run_update_user(user_id: str, data: UserUpdate, user: dict):
                 raise HTTPException(status_code=400, detail="Email já registado noutro utilizador")
             update_data["email"] = clean_email
     if data.role is not None:
-        if data.role not in [UserRole.CLIENTE, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.CEO, UserRole.ADMIN]:
+        if data.role not in [UserRole.CLIENTE, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO, UserRole.CEO, UserRole.MASTER, UserRole.ADMIN]:
             raise HTTPException(status_code=400, detail="Role inválido")
         if data.role != old_role:
             role_changed = True
         update_data["role"] = data.role
     if data.is_active is not None:
         # Proteger admin de ser desactivado
-        if target_user.get("role") == "admin" and data.is_active == False:
+        if target_user.get("role") in ("master", "admin") and data.is_active == False:
             raise HTTPException(status_code=400, detail="Não é possível desactivar o utilizador administrador")
         update_data["is_active"] = data.is_active
     if data.onedrive_folder is not None:
@@ -616,7 +646,9 @@ async def run_delete_user(user_id: str, user: dict):
     if user_id == user["id"]:
         raise HTTPException(status_code=400, detail="Não pode eliminar a própria conta")
     
-    target = await db.users.find_one({"id": user_id}, {"_id": 0, "email": 1, "name": 1, "role": 1})
+    target = await carregar_utilizador_gerivel(
+        user_id, user, projeccao={"_id": 0, "email": 1, "name": 1, "role": 1},
+    )
     result = await db.users.delete_one({"id": user_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
@@ -655,12 +687,10 @@ async def run_impersonate_user(user_id: str, user: dict):
     from services.auth import create_access_token
     
     # Verificar que o utilizador alvo existe
-    target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-    if not target_user:
-        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    target_user = await carregar_utilizador_gerivel(user_id, user)
     
     # Não permitir impersonate de outro admin
-    if target_user["role"] == UserRole.ADMIN and user_id != user["id"]:
+    if target_user["role"] in (UserRole.MASTER, UserRole.ADMIN) and user_id != user["id"]:
         raise HTTPException(status_code=403, detail="Não pode personificar outro administrador")
     
     # Criar token com dados do utilizador alvo, mas marcar como impersonated
@@ -967,6 +997,8 @@ async def run_admin_get_user_email_config(user_id: str, admin: dict):
     Raises:
         HTTPException(404): Se utilizador não encontrado.
     """
+    # Fronteira de gestão: o alvo tem de estar no âmbito de quem actua.
+    await carregar_utilizador_gerivel(user_id, admin, projeccao={"_id": 0, "id": 1, "role": 1})
     target = await db.users.find_one(
         {"id": user_id},
         {"_id": 0, "email_config": 1, "name": 1, "email": 1}
@@ -1039,6 +1071,8 @@ async def run_admin_set_user_email_config(user_id: str, config: 'EmailConfigCrea
     from models.email_config import EmailConfigCreate
     from services.encryption import encryption_service
 
+    # Fronteira de gestão: o alvo tem de estar no âmbito de quem actua.
+    await carregar_utilizador_gerivel(user_id, admin, projeccao={"_id": 0, "id": 1, "role": 1})
     target = await db.users.find_one(
         {"id": user_id},
         {"_id": 0, "name": 1, "email_config": 1}
@@ -1124,6 +1158,8 @@ async def run_admin_test_user_email_config(user_id: str, admin: dict):
     """
     from services.gmail_oauth import test_connection_smart
 
+    # Fronteira de gestão: o alvo tem de estar no âmbito de quem actua.
+    await carregar_utilizador_gerivel(user_id, admin, projeccao={"_id": 0, "id": 1, "role": 1})
     target = await db.users.find_one(
         {"id": user_id},
         {"_id": 0, "email_config": 1, "name": 1}

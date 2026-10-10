@@ -6,15 +6,33 @@ Use companies_api_* (not companies_crud_api_*).
 from __future__ import annotations
 
 from database import db
+from services.admin_users_scope import empresas_do_ambito
+from services.role_scope import utilizador_e_global
+from services.user_management_scope import exigir_empresas_concediveis
 from models.company_email_config import (
     CompanyEmailConfigResponse,
     CompanyEmailConfigListResponse,
 )
 
 
-async def run_list_company_configs():
-    """Lista todas as configurações de email por empresa."""
-    configs = await db.company_email_configs.find({}, {"_id": 0}).to_list(100)
+async def _filtro_de_empresas(actor: dict) -> dict:
+    """Só as configurações das empresas da rede de quem pede (Master: todas).
+
+    Estas configurações guardam credenciais de correio de cada empresa e
+    são chaveadas pelo NOME: sem esta condição, o Admin de uma empresa
+    lia e reescrevia as da outra.
+    """
+    if utilizador_e_global(actor):
+        return {}
+    ambito = await empresas_do_ambito(actor or {})
+    return {"company_name": {"$in": list(ambito.nomes) or []}}
+
+
+async def run_list_company_configs(*, actor: dict):
+    """Lista as configurações de email por empresa (do âmbito de quem pede)."""
+    configs = await db.company_email_configs.find(
+        await _filtro_de_empresas(actor), {"_id": 0}
+    ).to_list(100)
 
     result = []
     for config in configs:
@@ -40,17 +58,25 @@ async def run_list_company_configs():
     return CompanyEmailConfigListResponse(configs=result, total=len(result))
 
 
-async def run_get_available_companies():
+async def run_get_available_companies(*, actor: dict):
     """Lista empresas registadas com indicação de config de email."""
+    nomes_permitidos = None
+    if not utilizador_e_global(actor):
+        nomes_permitidos = list((await empresas_do_ambito(actor or {})).nomes)
     pipeline = [
-        {"$match": {"company": {"$exists": True, "$nin": ["", None]}}},
+        {"$match": {
+            "company": (
+                {"$exists": True, "$nin": ["", None]} if nomes_permitidos is None
+                else {"$in": nomes_permitidos}
+            ),
+        }},
         {"$group": {"_id": "$company", "total": {"$sum": 1}}},
         {"$sort": {"total": -1}},
     ]
     company_users = await db.users.aggregate(pipeline).to_list(100)
 
     existing_configs = await db.company_email_configs.find(
-        {}, {"_id": 0, "company_name": 1}
+        await _filtro_de_empresas(actor), {"_id": 0, "company_name": 1}
     ).to_list(100)
     configured_companies = {c["company_name"] for c in existing_configs}
 
@@ -66,9 +92,11 @@ async def run_get_available_companies():
     return {"companies": result, "total": len(result)}
 
 
-async def run_get_company_config(company_name: str):
+async def run_get_company_config(company_name: str, *, actor: dict):
     """Obtém a config de email de uma empresa específica."""
     from fastapi import HTTPException
+
+    await exigir_empresas_concediveis(actor, [company_name])
 
     config = await db.company_email_configs.find_one(
         {"company_name": company_name},

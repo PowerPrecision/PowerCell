@@ -6,16 +6,18 @@ import { Link, useLocation } from "react-router-dom";
 import { LayoutGrid, Users, Calendar, User } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { useAuth } from "../../contexts/AuthContext";
-import { hasRole, hasAnyRole } from "../../utils/roleUtils";
+import { hasAnyRole, canAccessOrgAdmin } from "../../utils/roleUtils";
 
 const MobileBottomNav = () => {
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, effectiveRole } = useAuth();
   
   // Determinar o dashboard correcto baseado no role
   const getDashboardPath = () => {
     if (!user) return "/staff";
-    if (hasRole(user, "admin")) {
+    // Perfil EFECTIVO (em impersonate, o do alvo) e a mesma regra do menu
+    // lateral: antes lia o cargo base e o CEO ia para /staff no telemóvel.
+    if (canAccessOrgAdmin(effectiveRole)) {
       return "/admin";
     }
     return "/staff";

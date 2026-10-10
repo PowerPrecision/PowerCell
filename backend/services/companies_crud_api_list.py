@@ -13,6 +13,7 @@ from database import db
 from models.company import CompanyListResponse, CompanyResponse
 from services.companies_crud_api_helpers import resolve_logo_url
 from services.tenant_network import build_tenant_condition
+from services.user_management_scope import exigir_empresas_concediveis
 from utils.input_sanitization import escape_regex
 
 logger = logging.getLogger(__name__)
@@ -150,21 +151,29 @@ async def run_list_companies(
     return CompanyListResponse(companies=result, total=total)
 
 
-async def run_list_available_companies():
-    """Lista nomes das empresas disponíveis (para selects/dropdowns)."""
+async def run_list_available_companies(*, actor: dict):
+    """Lista nomes das empresas disponíveis (para selects/dropdowns).
+
+    Só as da rede de quem pede (o Master vê todas): um dropdown com o nome
+    de todas as empresas do sistema é um directório dos outros inquilinos.
+    """
     cursor = db.companies.find(
-        {}, {"_id": 0, "id": 1, "name": 1}
+        await build_tenant_condition(actor or {}), {"_id": 0, "id": 1, "name": 1}
     ).sort("name", 1)
     return await cursor.to_list(200)
 
 
-async def run_get_company(company_id: str):
+async def run_get_company(company_id: str, *, actor: dict):
     """Obtém uma empresa pelo ID (ou por nome como fallback)."""
     company = await db.companies.find_one({"id": company_id}, {"_id": 0})
     if not company:
         company = await db.companies.find_one({"name": company_id}, {"_id": 0})
     if not company:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    # 404 e não 403: não confirmar que a empresa existe a quem não é dela.
+    await exigir_empresas_concediveis(
+        actor, [company.get("id") or company.get("name") or company_id],
+    )
 
     if not company.get("id"):
         company["id"] = company.get("name", company_id)

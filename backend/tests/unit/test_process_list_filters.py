@@ -103,10 +103,21 @@ class TestRoleVisibility:
             {"client_id": "cli1"}
         ]
 
-    def test_indexacao_scoped(self):
+    def test_indexacao_ve_a_lista_geral(self):
+        """Bloco 3: a lista espelha o âmbito do Kanban (sem recorte por pessoa)."""
         user = {"id": "ix1", "email": "ix@x.com"}
-        conds = build_role_visibility_conditions(user, UserRole.INDEXACAO)
-        assert conds[0]["$or"][2] == {"status": "fila_espera"}
+        assert build_role_visibility_conditions(user, UserRole.INDEXACAO) == []
+
+    def test_indexacao_no_perfil_todos_tambem_nao_recorta(self):
+        user = {"id": "ix1", "email": "ix@x.com"}
+        conds = build_role_visibility_conditions(
+            user, "__all_roles__", all_roles=[UserRole.CONSULTOR, UserRole.INDEXACAO]
+        )
+        assert conds == []
+
+    def test_contraprova_o_consultor_continua_recortado(self):
+        conds = build_role_visibility_conditions({"id": "c1"}, UserRole.CONSULTOR)
+        assert len(conds) == 1
 
 
 class TestViewModeStatus:
@@ -465,11 +476,19 @@ class TestKanbanQuery:
         assert len(conds) == 1
         assert "$or" in conds[0]
 
-    def test_indexacao_scope_ignores_show_all(self):
+    def test_indexacao_ve_o_quadro_geral(self):
+        """Bloco 2, ponto 18: a Indexação já não tem âmbito próprio."""
         from services.process_list_filters import build_kanban_role_base_query
         user = {"id": "ix1"}
-        q = build_kanban_role_base_query(user, UserRole.INDEXACAO, show_all=True)
-        assert q["$or"][1] == {"status": "fila_espera"}
+        for show_all in (True, False):
+            q = build_kanban_role_base_query(user, UserRole.INDEXACAO, show_all=show_all)
+            assert q == {"is_deleted": {"$ne": True}}
+
+    def test_o_consultor_continua_com_o_seu_recorte(self):
+        """Contraprova: alargar a Indexação não alargou os outros."""
+        from services.process_list_filters import build_kanban_role_base_query
+        q = build_kanban_role_base_query({"id": "c1"}, UserRole.CONSULTOR)
+        assert "$or" in q
 
     def test_completed_days_filter(self):
         from datetime import datetime, timezone

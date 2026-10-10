@@ -59,12 +59,14 @@ from typing import Any, Iterable, Optional
 
 from models.auth import UserRole
 from services.deadlines_api_helpers import TEAM_CALENDAR_ROLES
+from services.role_scope import PAPEIS_GLOBAIS, e_papel_global
 from services.tenant_network import CAMPO_REDE, VALORES_SEM_EMPRESA
 
-#: Reconciliam o sistema inteiro: a fronteira de rede não se lhes aplica
-#: (é o mesmo conjunto do Explorador global de ficheiros, e pela mesma
-#: razão — são os perfis que arrumam a pilha por carimbar).
-PAPEIS_SEM_FRONTEIRA_DE_REDE = frozenset({UserRole.ADMIN, UserRole.CEO})
+#: A fronteira de rede não se aplica a quem atravessa empresas — hoje só o
+#: MASTER (adenda de RBAC, Out 2026). Até aí eram o Admin e o CEO, o que
+#: fazia de cada um «dono do sistema inteiro»; a lista vive em
+#: `services/role_scope.py` e não se escreve outra vez à mão.
+PAPEIS_SEM_FRONTEIRA_DE_REDE = frozenset(PAPEIS_GLOBAIS)
 
 #: Os campos pelos quais um evento fica ligado a uma pessoa.
 CAMPOS_DE_PESSOA = (
@@ -83,10 +85,8 @@ def _papel_normalizado(papel: Any) -> str:
 
 
 def e_papel_sem_fronteira(papel: Any) -> bool:
-    """ADMIN/CEO: reconciliam a pilha inteira, incluindo a por carimbar."""
-    return _papel_normalizado(papel) in {
-        _papel_normalizado(p) for p in PAPEIS_SEM_FRONTEIRA_DE_REDE
-    }
+    """Só o MASTER: atravessa empresas e reconcilia a pilha por carimbar."""
+    return e_papel_global(papel)
 
 
 def e_papel_de_equipa(papel: Any) -> bool:
@@ -147,7 +147,7 @@ def pode_mexer_no_evento(
     A ordem das provas é da mais barata e mais segura para a mais larga:
 
     1. não há evento → não;
-    2. ADMIN/CEO → sim (reconciliam a pilha inteira);
+    2. MASTER → sim (único perfil que atravessa redes);
     3. está ligado a si (atribuído, responsável ou **autor**) → sim;
     4. o evento é de um processo que o utilizador vê → sim;
     5. é papel de equipa E o evento está na sua rede → sim;

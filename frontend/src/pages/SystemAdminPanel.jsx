@@ -10,15 +10,16 @@
  * - Tabs organizadas em categorias visuais:
  *   1. GESTÃO (amber/gold): Utilizadores, Permissões, Configurações, Automações, Empresas —
  *      visíveis para admin e CEO.
- *   2. CUSTOMIZAÇÃO (emerald/green): Estados de Workflow, Formulários, Templates, Perfis —
- *      visíveis para admin e CEO.
- *   3. COMUNICAÇÕES (sky/blue): Contas de Email, Notificações —
- *      visíveis para admin e CEO.
+ *   2. CUSTOMIZAÇÃO (emerald/green): Formulários, Templates (visíveis para master,
+ *      admin e CEO); Estados de Workflow só para o MASTER (são globais).
+ *   3. COMUNICAÇÕES (sky/blue): Contas de Email do sistema, Notificações —
+ *      visíveis APENAS para o MASTER (configuração global).
  *   4. COMPLIANCE (violet/purple): RGPD, Auditoria —
- *      visíveis para admin e CEO.
+ *      visíveis para master, admin e CEO (cada um só vê a sua rede);
+ *      o Registo de Histórico só para o MASTER.
  *   5. TÉCNICO (red): Backups, Logs & Diagnósticos, Inteligência Artificial, Processos BG —
- *      visíveis APENAS para o role "admin" (não CEO). Estas tabs envolvem operações
- *      de baixo nível que não são relevantes para o CEO.
+ *      visíveis APENAS para o role "master" (o único perfil global). Admin e
+ *      CEO são perfis LOCAIS e nunca vêem infraestrutura.
  * - Sub-tabs nas tabs "Customização", "Comunicações", "Compliance" e "Técnico"
  *   para organizar as páginas órfãs que ficaram inacessíveis após a refatoração
  *   da Sidebar do DashboardLayout.
@@ -63,6 +64,7 @@ import UsersAccessAdminTab from "../components/admin/UsersAccessAdminTab";
 import CompaniesAdminTab from "../components/admin/CompaniesAdminTab";
 import AutomationPage from "./AutomationPage";
 import PermissionsTab from "../components/admin/PermissionsTab";
+import HistoryTrackingPanel from "../components/admin/HistoryTrackingPanel";
 
 // PACOTE AZ: Lazy loading para páginas pesadas que causam TDZ
 // (Cannot access 'd' before initialization) devido a dependências
@@ -98,8 +100,10 @@ const SystemAdminPanel = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // Verificar se o utilizador é admin (para tabs técnicas exclusivas — não CEO)
-  const isAdmin = hasRole(user, "admin");
+  // Perfil MASTER: o único global. As tabs técnicas e a configuração global do
+  // sistema (workflow, contas de email do sistema, notificações, histórico)
+  // são exclusivas dele — Admin e CEO são perfis LOCAIS (adenda de RBAC).
+  const isMaster = hasRole(user, "master");
 
   const [activeTab, setActiveTab] = useState("users-mgmt");
 
@@ -208,15 +212,17 @@ const SystemAdminPanel = () => {
               </TabsTrigger>
 
               {/* === TAB COMUNICAÇÕES (sky/blue) === */}
-              <TabsTrigger
-                value="comunicacoes"
-                className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-sky-600 dark:text-sky-400"
-                data-testid="tab-comunicacoes"
-              >
-                <MessageSquare className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Comunicações</span>
-                <span className="sm:hidden">Comms</span>
-              </TabsTrigger>
+              {isMaster && (
+                <TabsTrigger
+                  value="comunicacoes"
+                  className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-sky-600 dark:text-sky-400"
+                  data-testid="tab-comunicacoes"
+                >
+                  <MessageSquare className="h-4 w-4 shrink-0" />
+                  <span className="hidden sm:inline">Comunicações</span>
+                  <span className="sm:hidden">Comms</span>
+                </TabsTrigger>
+              )}
 
               {/* === TAB COMPLIANCE (violet/purple) === */}
               <TabsTrigger
@@ -229,8 +235,8 @@ const SystemAdminPanel = () => {
                 <span className="sm:hidden">Compl</span>
               </TabsTrigger>
 
-              {/* === TAB TÉCNICO (red, exclusiva do admin) === */}
-              {isAdmin && (
+              {/* === TAB TÉCNICO (red, exclusiva do Master) === */}
+              {isMaster && (
                 <>
                   <div className="w-px h-6 bg-border mx-1 self-center" />
                   <TabsTrigger
@@ -253,7 +259,7 @@ const SystemAdminPanel = () => {
 
           {/* Utilizadores — contas + UCR (tab consolidada, Pacote DY) */}
           <TabsContent value="users-mgmt" className="mt-6">
-            <UsersAccessAdminTab />
+            <UsersAccessAdminTab isMaster={isMaster} />
           </TabsContent>
 
           {/* Permissões Granulares — PermissionsTab */}
@@ -273,7 +279,7 @@ const SystemAdminPanel = () => {
 
           {/* Empresas — CompaniesAdminTab */}
           <TabsContent value="empresas" className="mt-6">
-            <CompaniesAdminTab />
+            <CompaniesAdminTab isMaster={isMaster} />
           </TabsContent>
 
           {/* ================================================================ */}
@@ -287,14 +293,16 @@ const SystemAdminPanel = () => {
           {/* === TAB CUSTOMIZAÇÃO — Sub-tabs (emerald/green) === */}
           {/* ================================================================ */}
           <TabsContent value="customizacao" className="mt-6">
-            <Tabs defaultValue="workflow-statuses" className="w-full">
+            <Tabs defaultValue={isMaster ? "workflow-statuses" : "form-management"} className="w-full">
               <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">
                 <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
-                  <TabsTrigger value="workflow-statuses" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <GitBranch className="h-4 w-4" />
-                    <span className="hidden sm:inline">Estados de Workflow</span>
-                    <span className="sm:hidden">Workflow</span>
-                  </TabsTrigger>
+                  {isMaster && (
+                    <TabsTrigger value="workflow-statuses" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+                      <GitBranch className="h-4 w-4" />
+                      <span className="hidden sm:inline">Estados de Workflow</span>
+                      <span className="sm:hidden">Workflow</span>
+                    </TabsTrigger>
+                  )}
                   <TabsTrigger value="form-management" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
                     <FileText className="h-4 w-4" />
                     <span className="hidden sm:inline">Formulários</span>
@@ -308,9 +316,11 @@ const SystemAdminPanel = () => {
 
                 </TabsList>
               </div>
-              <TabsContent value="workflow-statuses" className="mt-4">
-                <Suspense fallback={<TabLoader />}><WorkflowStatusesPage embedded={true} /></Suspense>
-              </TabsContent>
+              {isMaster && (
+                <TabsContent value="workflow-statuses" className="mt-4">
+                  <Suspense fallback={<TabLoader />}><WorkflowStatusesPage embedded={true} /></Suspense>
+                </TabsContent>
+              )}
               <TabsContent value="form-management" className="mt-4">
                 <Suspense fallback={<TabLoader />}><FormManagementPage embedded={true} /></Suspense>
               </TabsContent>
@@ -324,35 +334,37 @@ const SystemAdminPanel = () => {
           {/* ================================================================ */}
           {/* === TAB COMUNICAÇÕES — Sub-tabs (sky/blue) === */}
           {/* ================================================================ */}
-          <TabsContent value="comunicacoes" className="mt-6">
-            <Tabs defaultValue="email-accounts" className="w-full">
-              <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">
-                <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
-                  <TabsTrigger value="email-accounts" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <Mail className="h-4 w-4" />
-                    <span className="hidden sm:inline">Contas de Email</span>
-                    <span className="sm:hidden">Email</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="notifications" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <Bell className="h-4 w-4" />
-                    <span className="hidden sm:inline">Notificações</span>
-                    <span className="sm:hidden">Notif</span>
-                  </TabsTrigger>
+          {isMaster && (
+            <TabsContent value="comunicacoes" className="mt-6">
+              <Tabs defaultValue="email-accounts" className="w-full">
+                <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">
+                  <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
+                    <TabsTrigger value="email-accounts" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+                      <Mail className="h-4 w-4" />
+                      <span className="hidden sm:inline">Contas de Email</span>
+                      <span className="sm:hidden">Email</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="notifications" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+                      <Bell className="h-4 w-4" />
+                      <span className="hidden sm:inline">Notificações</span>
+                      <span className="sm:hidden">Notif</span>
+                    </TabsTrigger>
 
-                  {/* PACOTE BG: Sub-separadores 'Emails de Sistema' e 'Integrações'
-                      removidos — estas configurações estão cobertas no
-                      EmailAccountsPage (SystemSmtpCard, IndexationImapCard) e
-                      no detalhe de cada Empresa (Pacote BF). */}
-                </TabsList>
-              </div>
-              <TabsContent value="email-accounts" className="mt-4">
-                <Suspense fallback={<TabLoader />}><EmailAccountsPage embedded={true} /></Suspense>
-              </TabsContent>
-              <TabsContent value="notifications" className="mt-4">
-                <Suspense fallback={<TabLoader />}><NotificationSettingsPage embedded={true} /></Suspense>
-              </TabsContent>
-            </Tabs>
-          </TabsContent>
+                    {/* PACOTE BG: Sub-separadores 'Emails de Sistema' e 'Integrações'
+                        removidos — estas configurações estão cobertas no
+                        EmailAccountsPage (SystemSmtpCard, IndexationImapCard) e
+                        no detalhe de cada Empresa (Pacote BF). */}
+                  </TabsList>
+                </div>
+                <TabsContent value="email-accounts" className="mt-4">
+                  <Suspense fallback={<TabLoader />}><EmailAccountsPage embedded={true} /></Suspense>
+                </TabsContent>
+                <TabsContent value="notifications" className="mt-4">
+                  <Suspense fallback={<TabLoader />}><NotificationSettingsPage embedded={true} /></Suspense>
+                </TabsContent>
+              </Tabs>
+            </TabsContent>
+          )}
 
           {/* ================================================================ */}
           {/* === TAB COMPLIANCE — Sub-tabs (violet/purple) === */}
@@ -370,6 +382,14 @@ const SystemAdminPanel = () => {
                   <span className="hidden sm:inline">Auditoria</span>
                   <span className="sm:hidden">Audit</span>
                 </TabsTrigger>
+                {/* Controlo de histórico (Bloco 1, ponto 4) — só o Master */}
+                {isMaster && (
+                  <TabsTrigger value="history-tracking" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
+                    <ClipboardList className="h-4 w-4" />
+                    <span className="hidden sm:inline">Registo de Histórico</span>
+                    <span className="sm:hidden">Histórico</span>
+                  </TabsTrigger>
+                )}
               </TabsList>
               <TabsContent value="rgpd" className="mt-4">
                 <Suspense fallback={<TabLoader />}><RGPDAdminPage embedded={true} /></Suspense>
@@ -377,13 +397,18 @@ const SystemAdminPanel = () => {
               <TabsContent value="audit" className="mt-4">
                 <Suspense fallback={<TabLoader />}><AuditTrailPage embedded={true} /></Suspense>
               </TabsContent>
+              {isMaster && (
+                <TabsContent value="history-tracking" className="mt-4">
+                  <HistoryTrackingPanel />
+                </TabsContent>
+              )}
             </Tabs>
           </TabsContent>
 
           {/* ================================================================ */}
-          {/* === TAB TÉCNICO — Sub-tabs (red, exclusivas do admin) === */}
+          {/* === TAB TÉCNICO — Sub-tabs (red, exclusivas do Master) === */}
           {/* ================================================================ */}
-          {isAdmin && (
+          {isMaster && (
             <TabsContent value="tecnico" className="mt-6">
               <Tabs defaultValue="backups" className="w-full">
                 <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">

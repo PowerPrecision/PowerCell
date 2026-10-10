@@ -175,12 +175,12 @@ async def run_sync_database(request: SyncDatabaseRequest, background_tasks: Back
             detail="Este endpoint NÃO pode ser executado em produção. Ação bloqueada por segurança."
         )
 
-    # ─── SEGURANÇA 2: Apenas admin ───
-    if user.get("role") != UserRole.ADMIN:
-        logger.warning(f"Tentativa de restore por não-admin bloqueada: {user.get('email')}")
+    # ─── SEGURANÇA 2: Apenas o Master (único perfil global) ───
+    if user.get("role") != UserRole.MASTER:
+        logger.warning(f"Tentativa de restore por não-master bloqueada: {user.get('email')}")
         raise HTTPException(
             status_code=403,
-            detail="Apenas o administrador pode executar esta operação."
+            detail="Apenas o perfil Master pode executar esta operação."
         )
 
     # ─── PREVENIR CONCORRÊNCIA ───
@@ -387,7 +387,7 @@ async def run_seed_realistic_data(request: Request, current_user: dict, body: Se
     consultores = await db.users.find({"role": "consultor", "is_active": True}).to_list(100)
     indexadores = await db.users.find({"role": "indexacao", "is_active": True}).to_list(100)
     intermediarios = await db.users.find({"role": "intermediario", "is_active": True}).to_list(100)
-    admins = await db.users.find({"role": {"$in": ["administrativo", "diretor", "ceo", "admin"]}, "is_active": True}).to_list(100)
+    admins = await db.users.find({"role": {"$in": ["administrativo", "diretor", "ceo", "master", "admin"]}, "is_active": True}).to_list(100)
 
     # Criar dummies se não existirem
     if not consultores:

@@ -283,7 +283,10 @@ class TestEndpointDoCatalogo:
         async def tenant_falso(_user):
             return {"network_id": "rede_a"}
 
-        monkeypatch.setattr(mod, "build_tenant_condition", tenant_falso)
+        # D-25: o catálogo passou à variante de PROCESSOS — as etiquetas de
+        # um processo partilhado contam para o parceiro, porque ele vê o
+        # processo.
+        monkeypatch.setattr(mod, "build_tenant_process_condition", tenant_falso)
         resposta = await mod.run_get_process_labels({"id": "u1"})
 
         assert resposta["labels"] == ["Campanha A"]
@@ -303,7 +306,10 @@ class TestEndpointDoCatalogo:
         async def tenant_falso(_user):
             return {"network_id": "rede_b"}
 
-        monkeypatch.setattr(mod, "build_tenant_condition", tenant_falso)
+        # D-25: o catálogo passou à variante de PROCESSOS — as etiquetas de
+        # um processo partilhado contam para o parceiro, porque ele vê o
+        # processo.
+        monkeypatch.setattr(mod, "build_tenant_process_condition", tenant_falso)
         resposta = await mod.run_get_process_labels({"id": "u2"})
 
         assert resposta["labels"] == ["Campanha B"]

@@ -34,6 +34,7 @@ import SmartRichEditor from "../components/ui/SmartRichEditor";
 import { toast } from "sonner";
 import { hasAnyRole } from "../utils/roleUtils";
 import { safeString } from "../utils/safeString";
+import { textoSimplesParaHtml } from "../utils/textoRico";
 import { formatDate, formatDateTime } from "../lib/utils";
 import { safeNumber } from "../components/dashboard/DashboardShared";
 import { getRGPDTemplate, updateRGPDTemplate, getMinutaTemplate, updateMinutaTemplate } from "../services/api";
@@ -427,7 +428,7 @@ const RGPDTemplateTab = () => {
     updated_by: null,
   });
 
-  const isAdminOrCEO = hasAnyRole(user, ["admin", "ceo"]);
+  const isAdminOrCEO = hasAnyRole(user, ["master", "admin", "ceo"]);
 
   useEffect(() => {
     fetchTemplate();
@@ -990,7 +991,7 @@ const MinutaTemplateTab = () => {
     updated_by: null,
   });
 
-  const isAdminOrCEO = hasAnyRole(user, ["admin", "ceo"]);
+  const isAdminOrCEO = hasAnyRole(user, ["master", "admin", "ceo"]);
 
   useEffect(() => {
     fetchTemplate();
@@ -1003,8 +1004,8 @@ const MinutaTemplateTab = () => {
 
       if (response.status === 200) {
         const data = response.data;
-        setTemplateContent(data.content);
-        setOriginalContent(data.content);
+        setTemplateContent(textoSimplesParaHtml(data.content));
+        setOriginalContent(textoSimplesParaHtml(data.content));
         setTemplateMeta({
           is_default: data.is_default,
           updated_at: data.updated_at,
@@ -1062,8 +1063,8 @@ const MinutaTemplateTab = () => {
         const getResponse = await getMinutaTemplate();
         if (getResponse.status === 200) {
           const data = getResponse.data;
-          setTemplateContent(data.content);
-          setOriginalContent(data.content);
+          setTemplateContent(textoSimplesParaHtml(data.content));
+          setOriginalContent(textoSimplesParaHtml(data.content));
           setTemplateMeta({
             is_default: data.is_default,
             updated_at: data.updated_at,
@@ -1263,7 +1264,7 @@ const RGPDAdminPage = ({ embedded = false }) => {
   // Para admin/ceo/administrativo, AccessRestricted retorna null → página vazia.
   // AGORA: verifica o role com hasAnyRole (boolean real) e só mostra
   // AccessRestricted se o utilizador NÃO tiver permissão.
-  const RGPD_ALLOWED_ROLES = ["admin", "ceo", "administrativo"];
+  const RGPD_ALLOWED_ROLES = ["master", "admin", "ceo", "administrativo"];
   if (!hasAnyRole(user, RGPD_ALLOWED_ROLES)) {
     return wrapLayout(
       <AccessRestricted userRole={user?.role} allowedRoles={RGPD_ALLOWED_ROLES} />

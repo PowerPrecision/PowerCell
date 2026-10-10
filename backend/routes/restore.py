@@ -23,7 +23,7 @@ router = APIRouter(tags=["Restore"])
 async def restore_process(
     process_id: str,
     user: dict = Depends(require_roles([
-        UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
+        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
         UserRole.INTERMEDIARIO, UserRole.DIRETOR,
     ]))
 ):
@@ -35,7 +35,7 @@ async def restore_process(
 async def restore_client(
     client_id: str,
     user: dict = Depends(require_roles([
-        UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
+        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
         UserRole.ADMINISTRATIVO,
     ]))
 ):
@@ -53,7 +53,7 @@ async def restore_client(
 async def restore_document(
     document_id: str,
     user: dict = Depends(require_roles([
-        UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
+        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
         UserRole.INTERMEDIARIO, UserRole.INDEXACAO,
     ]))
 ):
@@ -65,7 +65,7 @@ async def restore_document(
 async def restore_task(
     task_id: str,
     user: dict = Depends(require_roles([
-        UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
+        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
         UserRole.INTERMEDIARIO,
     ]))
 ):
@@ -77,7 +77,7 @@ async def restore_task(
 async def list_deleted_items(
     item_type: str = "all",  # all, processes, documents, tasks
     limit: int = 50,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """Lista itens eliminados recentemente que podem ser restaurados."""
     return await run_list_deleted_items(item_type, limit, user)

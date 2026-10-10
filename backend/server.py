@@ -75,6 +75,8 @@ from routes.push_notifications import router as push_notifications_router
 from routes.tasks import router as tasks_router
 from routes.voice_notes import router as voice_notes_router
 from routes.document_extraction import router as document_extraction_router
+from routes.partner_portal import router as partner_portal_router
+from routes.partners_admin import router as partners_admin_router
 from routes.emails import router as emails_router  # doc_router removido - rotas agora no router principal
 from routes.webmail import router as webmail_router
 from routes.ai_bulk import router as ai_bulk_router
@@ -114,6 +116,7 @@ from routes.admin_migration import router as admin_migration_router
 from routes.task_logs import router as task_logs_router
 from routes.portal import router as portal_router
 from routes.portal_admin import router as portal_admin_router
+from routes.history_tracking import router as history_tracking_router
 from routes.google_auth import router as google_auth_router
 from routes.shared_email import router as shared_email_router
 from routes.companies import router as companies_router
@@ -577,6 +580,8 @@ app.include_router(push_notifications_router, prefix="/api")
 app.include_router(tasks_router, prefix="/api")
 app.include_router(voice_notes_router, prefix="/api")
 app.include_router(document_extraction_router, prefix="/api")
+app.include_router(partner_portal_router, prefix="/api")
+app.include_router(partners_admin_router, prefix="/api")
 # emails_doc_router removido — send-documentation e document-recipients agora no router principal (antes de /{email_id})
 app.include_router(emails_router, prefix="/api")
 app.include_router(webmail_router, prefix="/api")
@@ -617,6 +622,7 @@ app.include_router(admin_migration_router, prefix="/api")
 app.include_router(task_logs_router, prefix="/api")
 app.include_router(portal_router, prefix="/api")
 app.include_router(portal_admin_router, prefix="/api")
+app.include_router(history_tracking_router, prefix="/api")
 app.include_router(google_auth_router, prefix="/api")
 app.include_router(shared_email_router, prefix="/api")
 app.include_router(companies_router, prefix="/api")

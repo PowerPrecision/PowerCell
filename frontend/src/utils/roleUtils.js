@@ -4,15 +4,19 @@
  * ====================================================================
  * Fonte única de verdade (Single Source of Truth) para RBAC no frontend.
  *
- * LISTA DEFINITIVA DE 8 PERFIS (em ordem hierárquica descendente):
- * 1. admin          — Administrador do Sistema
- * 2. ceo            — CEO
- * 3. diretor        — Diretor(a)
- * 4. administrativo — Apoio Administrativo
- * 5. consultor      — Consultor(a)
- * 6. intermediario  — Intermediário(a) de Crédito
- * 7. indexacao      — Indexação de Dados
- * 8. parceiro       — Parceiro (utilizador fantasma)
+ * LISTA DEFINITIVA DE 9 PERFIS (em ordem hierárquica descendente):
+ * 1. master         — ÚNICO perfil GLOBAL (todas as empresas + infraestrutura)
+ * 2. admin          — Administrador da empresa (perfil LOCAL)
+ * 3. ceo            — CEO (perfil LOCAL)
+ * 4. diretor        — Diretor(a)
+ * 5. administrativo — Apoio Administrativo
+ * 6. consultor      — Consultor(a)
+ * 7. intermediario  — Intermediário(a) de Crédito
+ * 8. indexacao      — Indexação de Dados («Index» no ecrã)
+ * 9. parceiro       — Parceiro (utilizador fantasma)
+ *
+ * O Master passa tudo o que o Admin passa (é um super-conjunto) e é o único
+ * que atravessa empresas; Admin e CEO só vêem a sua empresa/rede.
  *
  * NOTA: Os perfis 'mediador' e 'consultor_intermediario' foram removidos.
  * O perfil 'cliente' é mantido apenas para referência (não é perfil de sistema).
@@ -25,6 +29,7 @@
 
 /** Lista definitiva de perfis do sistema (exclui 'cliente') */
 export const VALID_ROLES = [
+  "master",
   "admin",
   "ceo",
   "diretor",
@@ -42,6 +47,9 @@ export const REMOVED_ROLES = ["mediador", "consultor_intermediario"];
 export const LEGACY_ROLE_MAP = {
   mediador: "intermediario",
   consultor_intermediario: "consultor",
+  // «Index» é o nome do perfil `indexacao` no ecrã; o valor guardado é `indexacao`.
+  index: "indexacao",
+  indexador: "indexacao",
 };
 
 /**
@@ -62,6 +70,7 @@ export function isSelectableRole(role) {
 
 /** Perfis de staff (têm acesso à plataforma, exclui cliente e parceiro) */
 export const STAFF_ROLES = [
+  "master",
   "admin",
   "ceo",
   "diretor",
@@ -87,6 +96,7 @@ export const ASSIGNMENT_STAFF_ROLES = [
 
 /** Cargo principal que nunca entra nas listas de atribuição de responsáveis. */
 export const EXCLUDED_ASSIGNMENT_ROLES = [
+  "master",
   "admin",
   "indexacao",
   "index",
@@ -104,22 +114,22 @@ export const INTERMEDIARIO_ASSIGNMENT_ROLES = ["intermediario", "mediador", "dir
 export const INDEXACAO_ASSIGNMENT_ROLES = ["indexacao"];
 
 /** Perfis que podem aceder ao Painel de Administração */
-export const ADMIN_PANEL_ROLES = ["admin", "ceo"];
+export const ADMIN_PANEL_ROLES = ["master", "admin", "ceo"];
 
 /** Perfis que podem gerir utilizadores (CRUD) */
-export const USER_MANAGEMENT_ROLES = ["admin", "ceo"];
+export const USER_MANAGEMENT_ROLES = ["master", "admin", "ceo"];
 
 /** Perfis de gestão (diretoria + admin) */
-export const MANAGEMENT_ROLES = ["admin", "ceo", "diretor"];
+export const MANAGEMENT_ROLES = ["master", "admin", "ceo", "diretor"];
 
 /**
  * Perfis puramente administrativos — sem carteira em "Os Meus Clientes".
  * Um admin/CEO/indexação de sistema não tem clientes atribuídos a este cargo.
  */
-export const NO_CLIENT_PORTFOLIO_ROLES = ["admin", "ceo", "indexacao"];
+export const NO_CLIENT_PORTFOLIO_ROLES = ["master", "admin", "ceo", "indexacao"];
 
 /** Perfis com Super Admin Bypass — têm todas as capabilities sempre ligadas */
-export const SUPER_ADMIN_ROLES = ["admin", "ceo"];
+export const SUPER_ADMIN_ROLES = ["master", "admin", "ceo"];
 
 /** Perfis disponíveis como "Cargo Adicional" (exclui admin, parceiro, cliente) */
 export const ADDITIONAL_ROLE_OPTIONS = [
@@ -141,10 +151,12 @@ export const PRIMARY_ROLE_OPTIONS = [
   "parceiro",
   "ceo",
   "admin",
+  "master",
 ];
 
 /** Cargos atribuíveis num acesso UCR (alinhado com CompanyRoleEnum) */
 export const UCR_ASSIGNABLE_ROLES = [
+  "master",
   "admin",
   "ceo",
   "diretor",
@@ -161,7 +173,8 @@ export const UCR_ASSIGNABLE_ROLES = [
 
 /** Rótulo amigável completo (para tabelas e formulários) */
 export const ROLE_LABELS = {
-  admin: "Administrador do Sistema",
+  master: "Master (Global)",
+  admin: "Administrador da Empresa",
   ceo: "CEO",
   diretor: "Diretor(a)",
   administrativo: "Apoio Administrativo",
@@ -174,6 +187,7 @@ export const ROLE_LABELS = {
 
 /** Rótulo curto (para badges e espaços reduzidos) */
 export const ROLE_SHORT_LABELS = {
+  master: "Master",
   admin: "Admin",
   ceo: "CEO",
   diretor: "Diretor",
@@ -197,6 +211,7 @@ export const ROLE_SHORT_LABELS = {
  * Consultor = azul (operacional), Indexação = cinza (restrição), etc.
  */
 export const ROLE_COLORS = {
+  master: "bg-rose-100 text-rose-900 border-rose-300",
   admin: "bg-red-100 text-red-800 border-red-200",
   ceo: "bg-yellow-100 text-yellow-950 border-yellow-400",
   diretor: "bg-purple-100 text-purple-800 border-purple-200",
@@ -210,6 +225,7 @@ export const ROLE_COLORS = {
 
 /** Cores para sidebar escura (fundo slate-900) */
 export const ROLE_SIDEBAR_COLORS = {
+  master: "bg-rose-500/25 text-rose-200",
   admin: "bg-red-500/20 text-red-300",
   ceo: "bg-yellow-500/20 text-yellow-200",
   diretor: "bg-purple-500/20 text-purple-300",
@@ -223,6 +239,7 @@ export const ROLE_SIDEBAR_COLORS = {
 
 /** Cores para pills/badges adicionais (mais subtis) */
 export const ROLE_ADDITIONAL_COLORS = {
+  master: "bg-rose-50 text-rose-800 border-rose-200",
   admin: "bg-red-50 text-red-700 border-red-100",
   ceo: "bg-yellow-50 text-yellow-800 border-yellow-200",
   diretor: "bg-purple-50 text-purple-700 border-purple-100",
@@ -240,6 +257,7 @@ export const ROLE_ADDITIONAL_COLORS = {
 
 /** Emojis para o Context Switcher e indicações rápidas */
 export const ROLE_ICONS = {
+  master: "👑",
   admin: "🛡️",
   ceo: "⭐",
   diretor: "👔",
@@ -260,6 +278,7 @@ export const ROLE_ICONS = {
  * Usado para comparações e ordenação.
  */
 export const ROLE_HIERARCHY = {
+  master: 110,
   admin: 100,
   ceo: 90,
   diretor: 70,
@@ -276,6 +295,7 @@ export const ROLE_HIERARCHY = {
  * Usado para ordenação visual em listas e dropdowns.
  */
 export const ROLE_HIERARCHY_ORDER = [
+  "master",
   "admin",
   "ceo",
   "diretor",
@@ -299,8 +319,25 @@ export const ROLE_HIERARCHY_ORDER = [
  */
 export const hasRole = (user, role) => {
   if (!user) return false;
-  return user.role === role || (user.additional_roles && user.additional_roles.includes(role));
+  // O Master é um super-conjunto do Admin: passa tudo o que o Admin passa.
+  // O inverso NÃO vale — `hasRole(admin, "master")` é falso, e é por aí que
+  // se fecham as funcionalidades só-Master (infraestrutura global).
+  if (role === "admin" && user.role === "master") return true;
+  return Boolean(
+    user.role === role || (user.additional_roles && user.additional_roles.includes(role)),
+  );
 };
+
+/** O utilizador é Master (o único perfil global)? */
+export const isMaster = (user) => Boolean(user) && user.role === "master";
+
+/**
+ * Perfis que `viewerRole` pode CONCEDER. Só o Master concede `master`; um
+ * formulário que o oferecesse a um Admin seria uma porta que o servidor
+ * fecha com 403 — e o servidor é a parede, isto só evita prometer a acção.
+ */
+export const grantableRoles = (viewerRole, roles) =>
+  (roles || []).filter((r) => r !== "master" || viewerRole === "master");
 
 /**
  * Verifica se um utilizador possui qualquer um dos roles especificados.
@@ -338,6 +375,8 @@ export const canAccessByEffectiveRole = (effectiveRole, allowedRoles) => {
   if (!allowedRoles || allowedRoles.length === 0) return true;
   if (!effectiveRole || typeof effectiveRole !== "string") return false;
   const role = effectiveRole.toLowerCase();
+  // O Master (único perfil global) passa todas as guardas de rota.
+  if (role === "master") return true;
   return allowedRoles.some((r) => (r || "").toLowerCase() === role);
 };
 

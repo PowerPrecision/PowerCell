@@ -1,6 +1,11 @@
 """Property document upload / list / delete.
 
 Extraído de `routes/properties.py`.
+
+FRONTEIRA DE REDE (D-24): os três handlers eram
+`find_one({"id": property_id})` — a rota autoriza o VERBO, não o
+OBJECTO. Aqui a consequência era de ESCRITA: carregar (e apagar do S3) a
+caderneta predial e o CPCV de uma angariação de outra rede.
 """
 from __future__ import annotations
 
@@ -8,10 +13,15 @@ import uuid
 import logging
 from datetime import datetime, timezone
 
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException, Request, UploadFile
 
 from database import db
 from models.property import PropertyHistory
+from services.property_scope import (
+    ERRO_IMOVEL_NAO_ENCONTRADO,
+    PROJECCAO_DE_POSSE,
+    exigir_imovel_no_ambito,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +31,8 @@ async def run_upload_property_document(
     file: UploadFile,
     user: dict,
     document_type: str = 'outro',
-    description: str = None
+    description: str = None,
+    request: Request | None = None,
 ):
     """
     Upload de documento para um imóvel da empresa.
@@ -39,8 +50,10 @@ async def run_upload_property_document(
     
     prop = await db.properties.find_one({"id": property_id})
     if not prop:
-        raise HTTPException(status_code=404, detail="Imóvel não encontrado")
-    
+        raise HTTPException(status_code=404, detail=ERRO_IMOVEL_NAO_ENCONTRADO)
+
+    await exigir_imovel_no_ambito(prop, user=user, request=request, escrita=True)
+
     # Validar tipo de documento
     valid_types = [
         "caderneta_predial", "certidao_registo", "licenca_utilizacao",
@@ -121,18 +134,21 @@ async def run_upload_property_document(
 async def run_get_property_documents(
     property_id: str,
     user: dict,
-    document_type: str = None
+    document_type: str = None,
+    request: Request | None = None,
 ):
     """
     Listar documentos de um imóvel.
     """
     prop = await db.properties.find_one(
         {"id": property_id},
-        {"_id": 0, "documents": 1}
+        {"documents": 1, **PROJECCAO_DE_POSSE},
     )
-    
+
     if not prop:
-        raise HTTPException(status_code=404, detail="Imóvel não encontrado")
+        raise HTTPException(status_code=404, detail=ERRO_IMOVEL_NAO_ENCONTRADO)
+
+    await exigir_imovel_no_ambito(prop, user=user, request=request)
     
     documents = prop.get("documents", [])
     
@@ -150,16 +166,19 @@ async def run_get_property_documents(
 async def run_delete_property_document(
     property_id: str,
     document_id: str,
-    user: dict
+    user: dict,
+    request: Request | None = None,
 ):
     """
     Remover documento de um imóvel.
     """
     from services.s3_service import delete_file_from_s3
-    
+
     prop = await db.properties.find_one({"id": property_id})
     if not prop:
-        raise HTTPException(status_code=404, detail="Imóvel não encontrado")
+        raise HTTPException(status_code=404, detail=ERRO_IMOVEL_NAO_ENCONTRADO)
+
+    await exigir_imovel_no_ambito(prop, user=user, request=request, escrita=True)
     
     # Encontrar documento
     document = None

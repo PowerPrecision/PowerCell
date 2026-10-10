@@ -23,7 +23,7 @@ if (import.meta.env.DEV) {
 // pelo que não precisam de tracking de erros. O Sentry.ErrorBoundary
 // no App.jsx continua a funcionar sem init — apenas não envia erros.
 // ====================================================================
-const isPublicRoute = /^\/(portal|rgpd|upload|download|registo)/.test(window.location.pathname);
+const isPublicRoute = /^\/(portal|rgpd|upload|download|registo|parceiro)/.test(window.location.pathname);
 
 if (!isPublicRoute) {
   const SENTRY_DSN = import.meta.env.VITE_DSN_SENTRY_FRONTEND || import.meta.env.VITE_SENTRY_DSN || '';

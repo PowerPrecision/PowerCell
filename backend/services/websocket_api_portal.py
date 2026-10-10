@@ -62,6 +62,23 @@ from services.ws_client_identity import identidade_de_socket_do_cliente
 logger = logging.getLogger(__name__)
 
 
+async def _processo_do_socket_ficou_inativo(process_id: str) -> bool:
+    """Releitura barata do processo; um erro de leitura NÃO fecha o socket."""
+    from database import db
+    from services.portal_estado import processo_esta_inativo
+
+    try:
+        processo = await db.processes.find_one(
+            {"id": process_id}, {"_id": 0, "id": 1, "status": 1, "is_deleted": 1},
+        )
+        if processo and processo.get("is_deleted"):
+            return True
+        return await processo_esta_inativo(processo)
+    except Exception as e:
+        logger.warning("[WS-PORTAL] Releitura do processo %s falhou: %s", process_id, e)
+        return False
+
+
 async def run_portal_websocket(websocket: WebSocket, token: str) -> None:
     """Liga um cliente do Portal à sala do SEU processo, e a mais nada."""
     verificado = await verify_portal_websocket_token(token)
@@ -131,6 +148,15 @@ async def run_portal_websocket(websocket: WebSocket, token: str) -> None:
                 tipo = dados.get("type")
 
                 if tipo == "ping":
+                    # Bloco 3 (ponto 14): o batimento é também o ponto onde um
+                    # socket aberto descobre que o processo passou a inativo.
+                    # Cobre QUALQUER escritor de fase (o gancho imediato cobre
+                    # os principais; este não depende de nenhum deles).
+                    if await _processo_do_socket_ficou_inativo(process_id):
+                        await websocket.close(code=4002, reason="Processo inativo")
+                        ligado = False
+                        break
+
                     # O batimento renova a presença. É a ÚNICA mensagem aceite.
                     await marcar_online(identidade)
                     try:

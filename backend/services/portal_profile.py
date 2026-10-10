@@ -63,6 +63,38 @@ def construir_query_de_processo_a_trancar(
         "status": {"$nin": nao_tranca},
     }
 
+def construir_query_do_perfil_trancado(process_ids: list, fases: list) -> dict:
+    """Processo cujo perfil o cliente já NÃO pode editar (Bloco 3, ponto 19).
+
+    Duas razões, e qualquer uma tranca:
+
+    1. a fase já saiu da recolha (`construir_query_de_processo_a_trancar`);
+    2. o cliente ENTREGOU a recolha — `portal_submitted_at`, carimbada no
+       avanço automático do pré-registo. É esta que torna o bloqueio
+       independente de como o administrador classificou a fase de entrada
+       (a «Index»): se ela estiver na macro-fase `novo`, só a regra 1 deixava
+       o cliente editar os dados que a Indexação está a validar.
+
+    Um processo perdido, eliminado ou ainda lead NÃO tranca por esta via —
+    a marca é de um avanço que já não está em curso.
+    """
+    from services.workflow_phases import nomes_por_macro
+
+    por_fase = construir_query_de_processo_a_trancar(process_ids, fases)
+    fora_do_fluxo = (
+        list(LEAD_STATUS_VALUES)
+        + nomes_por_macro(fases, "perdido")
+        + list(DELETED_STATUS_VALUES)
+    )
+    entregue = {
+        "id": {"$in": process_ids},
+        "is_deleted": {"$ne": True},
+        "portal_submitted_at": {"$exists": True, "$nin": [None, ""]},
+        "status": {"$nin": fora_do_fluxo},
+    }
+    return {"$or": [por_fase, entregue]}
+
+
 async def carregar_campos_editaveis() -> dict:
     """Campos que o Portal pode gravar, derivados do formulário interno.
 
@@ -328,7 +360,7 @@ async def run_get_client_profile(client_data: dict):
         # Fix: Normalize process status filters — inclui ambas as
         # variações (singular/plural) de "eliminado" e "desistência".
         active_process = await db.processes.find_one(
-            construir_query_de_processo_a_trancar(
+            construir_query_do_perfil_trancado(
                 process_ids, await carregar_fases(),
             ),
             {"_id": 0, "id": 1, "is_data_confirmed": 1}
@@ -434,7 +466,7 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
         # Fix: Normalize process status filters — inclui ambas as
         # variações (singular/plural) de "eliminado" e "desistência".
         active_process = await db.processes.find_one(
-            construir_query_de_processo_a_trancar(
+            construir_query_do_perfil_trancado(
                 process_ids, await carregar_fases(),
             ),
             {"_id": 0, "id": 1}
@@ -487,6 +519,23 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
     logger.info(
         f"[PORTAL PROFILE] Cliente {client_id} atualizou perfil: {updated_fields}"
     )
+
+    # Bloco 3 (ponto 21): uma acção do CLIENTE também é uma acção. Só os NOMES
+    # dos campos (os valores são dados pessoais). O autor é o cliente — nunca
+    # o perfil Indexação, por isso nada aqui é silenciado.
+    from services.history import log_history
+
+    campos_alterados = sorted({
+        chave.split(".", 1)[1] if "." in chave else chave
+        for chave in mongo_update
+        if chave not in ("updated_at",) and not chave.startswith("field_metadata")
+    })
+    autor = {"id": client_id, "name": "Cliente (Portal)", "role": "cliente"}
+    for pid in (client.get("process_ids") or [])[:5]:
+        await log_history(
+            pid, autor, "Cliente atualizou o perfil no Portal",
+            "perfil", None, ", ".join(campos_alterados),
+        )
 
     return {
         "success": True,

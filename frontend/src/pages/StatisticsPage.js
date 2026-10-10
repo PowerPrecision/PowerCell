@@ -75,7 +75,7 @@ const StatisticsPage = () => {
   // que não existe nos processos —, pelo que a página abria VAZIA para um
   // administrador e só mostrava dados depois de ele escolher "Todos".
   const [selectedUser, setSelectedUser] = useState(
-    hasAnyRole(user, ["admin", "ceo"]) ? "all" : user?.id,
+    hasAnyRole(user, ["master", "admin", "ceo"]) ? "all" : user?.id,
   );
   const [timeRange, setTimeRange] = useState("30");
   
@@ -83,7 +83,7 @@ const StatisticsPage = () => {
   const [leadsStats, setLeadsStats] = useState(null);
   const [conversionStats, setConversionStats] = useState(null);
 
-  const canViewAllStats = hasAnyRole(user, ["admin", "ceo"]);
+  const canViewAllStats = hasAnyRole(user, ["master", "admin", "ceo"]);
 
   useEffect(() => {
     fetchData();

@@ -27,6 +27,9 @@ from utils.search_filters import (
     build_multiword_search_filter,
 )
 from services.process_labels import build_labels_condition
+from services.process_sharing import (
+    condicao_de_filtro as condicao_de_filtro_de_partilha,
+)
 from services.sub35 import condicao_de_filtro as condicao_de_filtro_sub35
 
 
@@ -150,12 +153,12 @@ def build_role_visibility_conditions(
                     {"assigned_mediador_ids": user_id},
                     {"assigned_mediador_id": user_id},
                 ])
-            elif r == UserRole.INDEXACAO:
-                role_conditions.extend([
-                    {"assigned_indexacao_id": user_id},
-                    {"created_by": user.get("email", "")},
-                ])
-            elif r in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+            elif r in [
+                UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO,
+                UserRole.DIRETOR, UserRole.INDEXACAO,
+            ]:
+                # Indexação: quadro geral da rede (Bloco 2) — a rede é
+                # aplicada à parte, pela condição de tenant.
                 return []
         if role_conditions:
             return [{"$or": role_conditions}]
@@ -164,15 +167,12 @@ def build_role_visibility_conditions(
     if role == UserRole.CLIENTE:
         return [{"client_id": user_id}]
 
-    if role == UserRole.INDEXACAO:
-        # PACOTE BQ — scoped global: atribuídos + criados + fila_espera
-        return [{"$or": [
-            {"assigned_indexacao_id": user_id},
-            {"created_by": user.get("email", "")},
-            {"status": "fila_espera"},
-        ]}]
-
-    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+    # Indexação vê o mesmo âmbito do Kanban (Bloco 2, ponto 18): a lista
+    # geral da sua rede, não só a fila. A fronteira de rede não sai daqui.
+    if role in [
+        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO,
+        UserRole.DIRETOR, UserRole.INDEXACAO,
+    ]:
         return []
 
     if role == UserRole.CONSULTOR:
@@ -509,6 +509,7 @@ def build_process_list_query(
     labels: Optional[Union[str, Sequence[str]]] = None,
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
+    partilha: Optional[str] = None,
     tenant_condition: Optional[dict] = None,
     terminais: Optional[list[str]] = None,
 ) -> dict[str, Any]:
@@ -602,6 +603,14 @@ def build_process_list_query(
     if sub35_cond:
         and_conditions.append(sub35_cond)
 
+    # Partilha (D-25): «Exclusivos da Casa» vs «Partilhados». Do MESMO
+    # ponto que decide a etiqueta — se o filtro tivesse aqui a sua
+    # própria noção de «está partilhado», a lista filtrada e os cartões
+    # etiquetados divergiriam, que é a lição do `sub35`.
+    partilha_cond = condicao_de_filtro_de_partilha(partilha)
+    if partilha_cond:
+        and_conditions.append(partilha_cond)
+
     search_cond = build_process_search_condition(search, mode=search_mode)
     if search_cond:
         and_conditions.append(search_cond)
@@ -637,18 +646,18 @@ def build_kanban_role_base_query(
     """
     Query base do Kanban: is_deleted + visibilidade por role.
 
-    Nota: INDEXACAO tem scope próprio (atribuídos + fila_espera) mesmo com
-    show_all=True — é o âmbito natural de trabalho da Indexação.
+    Nota (Bloco 2, Lote 12, ponto 18): a INDEXAÇÃO vê o quadro GERAL da sua
+    rede, como a gestão. Tinha um âmbito próprio (atribuídos + fila_espera) e
+    por isso não via as bolinhas de mensagem/documento novo dos processos que
+    o cliente acabava de mexer — que é o trabalho dela. É só LEITURA: mover
+    cartões continua guardado em `process_kanban_move`, e os documentos de um
+    processo por indexar continuam sob a guarda da D-26. A rede (Camada 1) é
+    aplicada por quem chama.
     """
     query: dict[str, Any] = {"is_deleted": {"$ne": True}}
     user_id = normalize_id_for_match(user.get("id")) or ""
 
-    if role == UserRole.INDEXACAO:
-        query["$or"] = [
-            {"assigned_indexacao_id": user_id},
-            {"status": "fila_espera"},
-        ]
-    elif not show_all:
+    if not show_all:
         if role == UserRole.CONSULTOR:
             query["$or"] = [
                 {"assigned_consultor_ids": user_id},
@@ -800,6 +809,7 @@ def build_kanban_query(
     labels: Optional[Union[str, Sequence[str]]] = None,
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
+    partilha: Optional[str] = None,
     tenant_condition: Optional[dict] = None,
     terminais: Optional[list[str]] = None,
 ) -> dict:
@@ -850,6 +860,13 @@ def build_kanban_query(
     if sub35_cond:
         query = merge_query_and(query, sub35_cond)
 
+    # Partilha (D-25) — e aqui TAMBÉM, pelo mesmo motivo de sempre: um
+    # filtro que só exista na listagem dá um quadro a ignorá-lo, sem
+    # erro nenhum.
+    partilha_cond = condicao_de_filtro_de_partilha(partilha)
+    if partilha_cond:
+        query = merge_query_and(query, partilha_cond)
+
     # Pré-registo sempre excluído do Kanban (todos os roles)
     query = merge_query_and(query, {"status": {"$nin": LEAD_STATUS_VALUES}})
     return query
@@ -864,7 +881,7 @@ def build_kanban_query(
 # todos os clientes da plataforma nesta vista (nem os que eventualmente
 # estejam atribuídos a si enquanto cargo operacional).
 NO_CLIENT_PORTFOLIO_ROLES = frozenset({
-    UserRole.ADMIN,
+    UserRole.MASTER, UserRole.ADMIN,
     UserRole.CEO,
     UserRole.INDEXACAO,
 })

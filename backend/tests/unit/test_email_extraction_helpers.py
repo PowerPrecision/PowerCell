@@ -152,7 +152,9 @@ def test_emails_router_is_thin_stubs_only():
     assert text.count("return await run_") >= 40
     # No fat IMAP/webmail bodies left in the route file
     assert "ISOLAMENTO DE DADOS (Segurança)" not in text
-    assert len(text.splitlines()) < 800
+    # 800 → 900 (Bloco 2): guardas de leitura por rota + contactos + arquivo
+    # de anexos — todos stubs de uma linha para o serviço.
+    assert len(text.splitlines()) < 900
 
 
 def test_webmail_attachment_router_is_thin_stub():

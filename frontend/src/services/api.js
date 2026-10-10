@@ -655,6 +655,41 @@ export const setProcessIndexed = (processId, isIndexed) =>
   api.post(`/processes/${processId}/set-indexed`, { is_indexed: !!isIndexed });
 // FIX (Pacote K): adicionar deleteProcess e restoreProcess para suportar o
 // botão "Restaurar" na lista de processos eliminados.
+// Revoga À MÃO a partilha com UMA empresa (a Via Rápida só acrescenta; tirar a
+// atribuição não revoga). O servidor decide quem pode: admin, CEO e o diretor da
+// casa dona. `skipErrorToast`: o cartão mostra a mensagem do servidor, que diz
+// PORQUÊ (403 «só a empresa dona…» vs 404), em vez de um toast genérico por cima.
+export const revokeProcessPartner = (processId, companyId) =>
+  api.delete(`/processes/${processId}/partners/${encodeURIComponent(companyId)}`, {
+    skipErrorToast: true,
+  });
+
+// Bloco 4, ponto 7 — origem financeira (orgânica vs angariação). Só a gestão:
+// o servidor responde 403 com o motivo a quem não pode, e `skipErrorToast`
+// deixa o cartão mostrá-lo no sítio em vez de um toast genérico por cima.
+export const getOrigemFinanceira = (processId) =>
+  api.get(`/processes/${processId}/origem-financeira`, { skipErrorToast: true });
+
+export const getCandidatosOrigemFinanceira = (processId) =>
+  api.get(`/processes/${processId}/origem-financeira/candidatos`, { skipErrorToast: true });
+
+export const setOrigemFinanceira = (processId, corpo) =>
+  api.put(`/processes/${processId}/origem-financeira`, corpo, { skipErrorToast: true });
+
+// ── Portal do Parceiro (lado do STAFF) ──────────────────────────────
+// O parceiro NÃO usa este cliente (tem o seu: `services/partnerApi.js`).
+// Aqui está o que a equipa faz: convidar/gerir parceiros e o controlo
+// «Serviço pago pelo parceiro» de um processo.
+export const getPartners = () => api.get("/admin/partners");
+export const invitePartner = (corpo) => api.post("/admin/partners/invite", corpo);
+export const updatePartner = (partnerId, corpo) => api.patch(`/admin/partners/${partnerId}`, corpo);
+export const resendPartnerInvite = (partnerId) => api.post(`/admin/partners/${partnerId}/resend-invite`);
+
+export const getServicoDoParceiro = (processId) =>
+  api.get(`/processes/${processId}/partner-service`, { skipErrorToast: true });
+export const setServicoDoParceiro = (processId, corpo) =>
+  api.put(`/processes/${processId}/partner-service`, corpo, { skipErrorToast: true });
+
 export const deleteProcess = (processId) => api.delete(`/processes/${processId}`);
 export const restoreProcess = (processId) => api.post(`/processes/${processId}/restore`);
 // PACOTE 11 (Eixo 4) — restauro rápido de cliente no ecrã de detalhes
@@ -676,10 +711,37 @@ export const getSystemConfig = (companyId) =>
     params: { ...(companyId ? { company_id: companyId } : {}) },
   });
 
+// As empresas que o servidor deixa ESTE utilizador configurar (admin: todas;
+// CEO: as dele). O frontend só escolhe de entre o que vier — não decide.
+export const getSystemConfigCompanies = () => api.get("/system-config/companies");
+
 export const updateSystemConfigSection = (section, data, companyId) =>
   api.patch(`/system-config/${section}`, data, {
     params: { ...(companyId ? { company_id: companyId } : {}) },
   });
+
+// «Este cliente já tem um processo activo?» — alimenta o aviso de duplicação ao
+// adicionar um cliente a um processo. `excludeProcessId` é o processo a que o
+// cliente está a ser adicionado (esse não conta).
+export const getClientActiveProcesses = (clientId, excludeProcessId) =>
+  api.get(`/clients/${encodeURIComponent(clientId)}/active-processes`, {
+    params: { ...(excludeProcessId ? { exclude_process_id: excludeProcessId } : {}) },
+    // O aviso é consultivo: um erro aqui não pode abrir um toast por cima do
+    // fluxo que o utilizador estava a fazer — quem pergunta decide o que dizer.
+    skipErrorToast: true,
+  });
+
+// Controlo de histórico (admin): por perfil e por pessoa. `enabled: null` no
+// utilizador remove o override pessoal (a pessoa volta a seguir o perfil).
+export const getHistoryTracking = () => api.get("/admin/history-tracking");
+export const setRoleHistoryTracking = (role, enabled) =>
+  api.put(`/admin/history-tracking/roles/${encodeURIComponent(role)}`, { enabled });
+export const listUsersHistoryTracking = ({ search, page = 1, size = 25 } = {}) =>
+  api.get("/admin/history-tracking/users", {
+    params: { ...(search ? { search } : {}), page, size },
+  });
+export const setUserHistoryTracking = (userId, enabled) =>
+  api.put(`/admin/history-tracking/users/${encodeURIComponent(userId)}`, { enabled });
 
 // Deadlines
 export const getDeadlines = (processId) => 
@@ -690,6 +752,9 @@ export const getCalendarDeadlines = (consultorId, mediadorId) =>
   api.get("/deadlines/calendar", { 
     params: { consultor_id: consultorId, mediador_id: mediadorId } 
   });
+// Bloco 4, ponto 29 — marcações, escrituras, CPCVs e ausências de um mês.
+export const getDashboardCalendar = (month) =>
+  api.get("/deadlines/dashboard-calendar", { params: month ? { month } : {}, skipErrorToast: true });
 export const createDeadline = (data) => api.post("/deadlines", data);
 /** Pacote FA — edição de eventos do calendário (PUT /deadlines/{id}). */
 export const updateDeadline = (id, data) => api.put(`/deadlines/${id}`, data);
@@ -757,7 +822,24 @@ export const getStatsLeads = () => api.get("/stats/leads");
 export const getStatsConversion = () => api.get("/stats/conversion");
 
 // Team Performance (Admin/CEO) — desempenho da equipa por período
-export const getTeamPerformance = (params = {}) => api.get("/admin/team-performance", { params });
+// Bloco 4, pontos 13 e 16 — Dashboard Executivo e Relatório Semanal. TUDO por
+// Axios (o `fetch` cru da página antiga perdia o `X-Company-Id`/`X-Active-Role`).
+// `skipErrorToast`: a página mostra o motivo (422 período inválido, 503 «demorou
+// demasiado») no sítio, em vez de um toast genérico por cima.
+export const getTeamPerformance = (params = {}) =>
+  api.get("/admin/team-performance", { params, skipErrorToast: true });
+// PDF: `responseType: "blob"` faz o corpo de ERRO vir também como Blob —
+// quem chama lê-o com `readBlobErrorBody`.
+export const downloadTeamPerformancePdf = (params = {}) =>
+  api.get("/admin/team-performance/pdf", { params, responseType: "blob", skipErrorToast: true });
+export const getExecutiveWeekly = (week) =>
+  api.get("/admin/executive-weekly", { params: week ? { week } : {}, skipErrorToast: true });
+export const regenerateExecutiveWeekly = (week) =>
+  api.post("/admin/executive-weekly/regenerate", null, { params: week ? { week } : {}, skipErrorToast: true });
+export const downloadExecutiveWeeklyPdf = (week) =>
+  api.get("/admin/executive-weekly/pdf", {
+    params: week ? { week } : {}, responseType: "blob", skipErrorToast: true,
+  });
 
 // Activities/Comments
 export const getActivities = (processId, limit = 50) => {
@@ -1122,9 +1204,22 @@ export const acknowledgeBackgroundTask = (taskId) => api.post(`/tasks/${taskId}/
 export const cancelBackgroundTask = (taskId) => api.delete(`/tasks/${taskId}/cancel`);
 
 // Emails
-export const getProcessEmails = (processId, direction = null) => 
-  api.get(`/emails/process/${processId}`, { params: { direction } });
-export const getEmailStats = (processId) => api.get(`/emails/stats/${processId}`);
+export const getProcessEmails = (processId, direction = null, options = {}) =>
+  api.get(`/emails/process/${processId}`, { params: { direction }, ...options });
+export const getEmailStats = (processId, options = {}) =>
+  api.get(`/emails/stats/${processId}`, options);
+// Separador «Emails» do processo (Bloco 2): TUDO por Axios. Eram doze `fetch`
+// crus, sem `X-Company-Id` nem `X-Active-Role` — o servidor decidia o acesso
+// pelo cargo do JWT e não pelo perfil activo (incidente 2026-09-21).
+export const getEmailTemplates = () => api.get("/emails/templates");
+export const applyEmailTemplate = (templateId, processId) =>
+  api.post(`/emails/templates/${templateId}/use`, { process_id: processId });
+export const unmarkEmail = (emailId, markType) =>
+  api.delete(`/emails/${emailId}/mark/${markType}`);
+export const searchEmailsToAssociate = (q, limit = 20) =>
+  api.get("/emails/search", { params: { q, limit } });
+export const getProcessEmailSyncStatus = (processId) =>
+  api.get(`/emails/sync-status/${processId}`);
 export const createEmail = (data) => api.post("/emails", data);
 export const updateEmail = (id, data) => api.put(`/emails/${id}`, data);
 export const deleteEmail = (id) => api.delete(`/emails/${id}`);
@@ -1212,6 +1307,28 @@ export const deleteEmailPermanent = (emailId) =>
   api.delete(`/emails/${emailId}/permanent`);
 export const associateEmailToProcess = (data) =>
   api.post("/emails/associate", data);
+
+// ── «Arquivar no Processo» (Bloco 2) ──
+// `skipErrorToast`: o diálogo mostra o erro no sítio (um 403 da guarda de
+// escrita ou um 413 de um anexo enorme não são "falha de rede").
+export const getEmailArchiveSuggestions = (emailId) =>
+  api.get(`/emails/${emailId}/archive-suggestions`, { skipErrorToast: true });
+export const archiveEmailAttachment = (emailId, attachmentId, data) =>
+  api.post(
+    `/emails/${emailId}/attachments/${encodeURIComponent(attachmentId)}/archive`,
+    data,
+    { skipErrorToast: true },
+  );
+
+// ── Contactos sugeridos ao escrever (Bloco 2) ──
+// `skipErrorToast`: uma sugestão que falha não pode barrar o utilizador com um
+// toast enquanto ele escreve — o campo funciona sem elas.
+export const getEmailContacts = (q = "", limit = 8) =>
+  api.get("/emails/contacts", { params: { q, limit }, skipErrorToast: true });
+export const saveEmailContact = (data) =>
+  api.put("/emails/contacts", data, { skipErrorToast: true });
+export const hideEmailContact = (address) =>
+  api.delete("/emails/contacts", { params: { address }, skipErrorToast: true });
 
 // ── Envio ──
 export const sendWebmailEmail = (payload, account) =>

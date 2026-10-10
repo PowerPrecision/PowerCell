@@ -81,7 +81,7 @@ const MyClientsPage = () => {
   const [clientDetailsModal, setClientDetailsModal] = useState({ open: false, clientId: null });
   
   // Admin/CEO sempre podem exportar
-  const canExportExcel = allowExcelExport || hasAnyRole(user, ['admin', 'ceo']);
+  const canExportExcel = allowExcelExport || hasAnyRole(user, ['master', 'admin', 'ceo']);
   const hasNoPortfolio = hasNoClientPortfolio(effectiveRole || user?.role);
   
   // Sync filters with URL

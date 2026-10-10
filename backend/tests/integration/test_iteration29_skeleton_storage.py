@@ -49,7 +49,7 @@ class TestIteration29:
         assert response.status_code == 200, f"Login failed: {response.text}"
         data = response.json()
         assert "access_token" in data, "No access token in response"
-        assert data.get("user", {}).get("role") == "admin", "User role should be admin"
+        assert data.get("user", {}).get("role") in ("admin", "master"), "User role should be admin"
         print(f"SUCCESS: Admin login works, role={data.get('user', {}).get('role')}")
     
     # ===================

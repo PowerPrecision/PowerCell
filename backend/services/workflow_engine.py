@@ -22,6 +22,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from database import db
+# Importado NO TOPO e não à primeira chamada: um `from database import db`
+# executado dentro de um `patch("database.db", fake)` ficava com o duplo para
+# sempre (a armadilha da ordem de import, ver AGENTS.md). Aqui o módulo carrega
+# com o resto do serviço, antes de qualquer teste patchar o que quer que seja.
+from services import phase_automation
 from services.task_assignment_hygiene import normalizar_assigned_to
 
 logger = logging.getLogger(__name__)
@@ -305,6 +310,14 @@ async def execute_action(rule: dict, context: dict) -> bool:
                         "updated_at": datetime.now(timezone.utc).isoformat()
                     }, transicao),
                 )
+                # Bloco 3 (ponto 12): uma regra que muda a fase também faz o
+                # processo ENTRAR nela — atribuição e tarefas modelo incluídas.
+                # Não re-dispara o motor (evita o ciclo regra → fase → regra).
+                if (processo_antes or {}).get("status") != new_status:
+                    await phase_automation.ao_entrar_na_fase_sem_falhar(
+                        context["process_id"], new_status,
+                        origem=phase_automation.ORIGEM_MOVIMENTO,
+                    )
         
         elif action == "assign_user":
             user_id = config.get("user_id")

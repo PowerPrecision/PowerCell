@@ -283,8 +283,8 @@ async def submit_mfa_code(
 
 
 @router.get("/scraper-job/{job_id}")
-async def get_scraper_job_status(job_id: str):
-    return await run_get_scraper_job_status(job_id)
+async def get_scraper_job_status(job_id: str, client_data: dict = Depends(get_current_client)):
+    return await run_get_scraper_job_status(job_id, client_data)
 
 
 # Este é de STAFF (`get_current_user`), não do cliente: a chave do

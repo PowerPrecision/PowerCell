@@ -21,6 +21,11 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '../ui/select';
+import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group';
+import {
+  PARTILHA_EXCLUSIVOS,
+  PARTILHA_PARTILHADOS,
+} from '../../utils/kanbanFiltros';
 import { 
   Search, 
   ChevronLeft, 
@@ -36,7 +41,9 @@ import {
   Loader2,
   Bell,
   BellOff,
-  Sparkles
+  Sparkles,
+  Handshake,
+  Home
 } from 'lucide-react';
 import { formatDate } from '../../lib/utils';
 
@@ -70,6 +77,8 @@ const KanbanHeader = memo(({
   columns = [],
   // ═══ Filtro "A Aguardar Ação" ═══
   sub35 = false,
+  partilha = '',
+  onPartilhaChange,
   onSub35Change,
   showOnlyPendingActions = false,
   onTogglePendingActions,
@@ -149,7 +158,8 @@ const KanbanHeader = memo(({
     // — uma lista que inclui um filtro e um "Limpar" que não o limpa é
     // um botão que mente.
     onSub35Change?.(false);
-  }, [onDateFilterChange, onUrgencyFilterChange, onLabelsChange, onCompletedDaysChange, onSub35Change]);
+    onPartilhaChange?.('');
+  }, [onDateFilterChange, onUrgencyFilterChange, onLabelsChange, onCompletedDaysChange, onSub35Change, onPartilhaChange]);
 
   return (
     <>
@@ -269,6 +279,39 @@ const KanbanHeader = memo(({
           Sub35
         </Button>
 
+        {/* D-25 — partilha. Um `ToggleGroup` de selecção única e não um
+            interruptor: aqui "o contrário" é uma pergunta legítima
+            ("quais são exclusivamente da casa?"), e o estado neutro é
+            "todos". Os rótulos são os mesmos da listagem — dois nomes
+            para o mesmo filtro em dois ecrãs é como o `under_35` acabou
+            com quatro significados. */}
+        <ToggleGroup
+          type="single"
+          value={partilha || ''}
+          onValueChange={(valor) => onPartilhaChange?.(valor || '')}
+          className="h-8 rounded-md border shrink-0"
+          data-testid="kanban-partilha-filter"
+        >
+          <ToggleGroupItem
+            value={PARTILHA_EXCLUSIVOS}
+            aria-label="Exclusivos da Casa"
+            title="Só processos sem partilha com outra rede"
+            className="h-8 gap-1.5 px-2 text-xs"
+          >
+            <Home className="h-3.5 w-3.5" />
+            Exclusivos
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            value={PARTILHA_PARTILHADOS}
+            aria-label="Partilhados"
+            title="Só processos partilhados com outra empresa"
+            className="h-8 gap-1.5 px-2 text-xs"
+          >
+            <Handshake className="h-3.5 w-3.5" />
+            Partilhados
+          </ToggleGroupItem>
+        </ToggleGroup>
+
         <Select value={dateFilter} onValueChange={onDateFilterChange}>
           <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs" data-testid="kanban-date-filter" aria-label="Filtrar por data">
             <Calendar className="h-3 w-3 mr-1" />
@@ -350,7 +393,7 @@ const KanbanHeader = memo(({
 
         {/* O Sub35 entra aqui: um filtro activo com o "Limpar" escondido
             deixa o utilizador numa lista reduzida sem forma de sair. */}
-        {(dateFilter !== 'all' || urgencyFilter !== 'all' || completedDays !== 30 || sub35) && (
+        {(dateFilter !== 'all' || urgencyFilter !== 'all' || completedDays !== 30 || sub35 || partilha) && (
           <Button 
             variant="ghost" 
             size="sm" 

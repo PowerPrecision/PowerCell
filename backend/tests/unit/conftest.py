@@ -34,14 +34,25 @@ class FakeAsyncCursor:
         self._limit = None
 
     def sort(self, key_or_list, direction=1):
-        def sort_key(doc: dict):
-            if isinstance(key_or_list, (list, tuple)) and key_or_list:
-                if isinstance(key_or_list[0], (list, tuple)):
-                    return tuple(str(doc.get(k) or "") for k, _ in key_or_list)
-                return tuple(str(doc.get(k) or "") for k in key_or_list)
-            return str(doc.get(key_or_list) or "")
+        """Ordena por uma ou mais chaves, RESPEITANDO a direcção (1 / -1).
 
-        self._docs = sorted(self._docs, key=sort_key)
+        Antes ignorava o `-1`: um serviço que pedisse «os mais recentes
+        primeiro» obtinha os mais antigos e o teste que o afirmava só passava
+        se o fixture estivesse por acaso em ordem inversa. Várias passagens
+        estáveis, da última chave para a primeira, dão a ordem composta.
+        """
+        if isinstance(key_or_list, (list, tuple)) and key_or_list:
+            if isinstance(key_or_list[0], (list, tuple)):
+                chaves = [(k, d) for k, d in key_or_list]
+            else:
+                chaves = [(k, direction) for k in key_or_list]
+        else:
+            chaves = [(key_or_list, direction)]
+
+        docs = list(self._docs)
+        for chave, sentido in reversed(chaves):
+            docs.sort(key=lambda doc, c=chave: str(doc.get(c) or ""), reverse=(sentido == -1))
+        self._docs = docs
         return self
 
     def skip(self, n: int):
@@ -62,16 +73,41 @@ class FakeAsyncCursor:
             include = {k for k, v in self._projection.items() if v}
             exclude = {k for k, v in self._projection.items() if not v}
             if include:
-                docs = [
-                    {k: d[k] for k in include if k in d and k not in exclude}
-                    for d in docs
-                ]
+                docs = [self._incluir(d, include - exclude) for d in docs]
             else:
                 docs = [
                     {k: v for k, v in d.items() if k not in exclude}
                     for d in docs
                 ]
         return docs
+
+    @staticmethod
+    def _incluir(doc: dict, campos) -> dict:
+        """Projecção de inclusão, com dot-notation (`a.b` copia só `a.b`).
+
+        No Mongo `{"real_estate_data.data_cpcv": 1}` devolve
+        `{"real_estate_data": {"data_cpcv": ...}}`. O duplo ignorava o campo
+        (a chave com ponto não existe no topo do documento) e um teste de
+        código com projecção aninhada via sempre «sem dados» — o defeito
+        estava no duplo, não no código. Semântica afirmada em
+        `test_duplo_de_mongo_projeccao.py`.
+        """
+        saida: dict = {}
+        for campo in campos:
+            partes = campo.split(".")
+            origem, destino = doc, saida
+            for i, parte in enumerate(partes):
+                if not isinstance(origem, dict) or parte not in origem:
+                    break  # contentor inexistente: nada (como o Mongo)
+                if i == len(partes) - 1:
+                    destino[parte] = origem[parte]
+                else:
+                    if not isinstance(origem[parte], dict):
+                        break
+                    # Contentor existente com folha em falta: fica `{}` (como o Mongo).
+                    destino = destino.setdefault(parte, {})
+                    origem = origem[parte]
+        return saida
 
     def __aiter__(self):
         """PACOTE 9 — iteração assíncrona (``async for doc in cursor``),
@@ -107,6 +143,12 @@ class FakeAsyncCollection:
             return doc.get(path)
         current = doc
         for part in path.split("."):
+            # Como no Mongo, `array.1` é o segundo elemento: é assim que se
+            # pergunta «esta lista tem pelo menos dois» (`{"lista.1": {"$exists": True}}`).
+            if isinstance(current, list) and part.isdigit():
+                indice = int(part)
+                current = current[indice] if indice < len(current) else None
+                continue
             if not isinstance(current, dict):
                 return None
             current = current.get(part)
@@ -215,7 +257,14 @@ class FakeAsyncCollection:
                         return False
                 if "$exists" in expected:
                     matched_operator = True
-                    exists = key in doc
+                    # Com dot-notation (`lista.1`, `a.b`) resolve o caminho: o
+                    # `key in doc` só olhava para o topo e dava sempre «não existe».
+                    # Aproximação: um folha a `None` conta como ausente.
+                    exists = (
+                        FakeAsyncCollection._lookup_path(doc, key) is not None
+                        if "." in key
+                        else key in doc
+                    )
                     if bool(expected["$exists"]) is not exists:
                         return False
                 # PACOTE 10 — comparações ($gte/$gt/$lte/$lt) para datas
@@ -268,13 +317,26 @@ class FakeAsyncCollection:
         matched = [doc for doc in self.docs if self._matches(doc, query)]
         if sort:
             key_or_list = sort
-            def sort_key(doc: dict):
-                if isinstance(key_or_list, (list, tuple)) and key_or_list:
-                    if isinstance(key_or_list[0], (list, tuple)):
-                        return tuple(str(doc.get(k) or "") for k, _ in key_or_list)
-                    return tuple(str(doc.get(k) or "") for k in key_or_list)
-                return str(doc.get(key_or_list) or "")
-            matched = sorted(matched, key=sort_key)
+            if (
+                isinstance(key_or_list, (list, tuple))
+                and key_or_list
+                and isinstance(key_or_list[0], (list, tuple))
+            ):
+                # [(campo, direcção), ...]: a direcção conta (-1 = descendente).
+                # Ignorá-la devolvia o MAIS ANTIGO onde o código pedia o mais
+                # recente, e o teste passava por acaso com um só documento.
+                for campo, direccao in reversed(list(key_or_list)):
+                    matched = sorted(
+                        matched,
+                        key=lambda d, c=campo: str(d.get(c) or ""),
+                        reverse=direccao < 0,
+                    )
+            else:
+                def sort_key(doc: dict):
+                    if isinstance(key_or_list, (list, tuple)) and key_or_list:
+                        return tuple(str(doc.get(k) or "") for k in key_or_list)
+                    return str(doc.get(key_or_list) or "")
+                matched = sorted(matched, key=sort_key)
         for doc in matched:
             return dict(doc)
         return None
@@ -310,8 +372,26 @@ class FakeAsyncCollection:
             actual = self._lookup_path(doc, campo)
             self._apply_set(doc, {campo: (actual or 0) + delta})
 
+    @staticmethod
+    def _apply_unset(doc: dict, unset_ops: dict) -> None:
+        """``$unset`` com dot-notation: REMOVE a chave (não a põe a ``None``).
+
+        A diferença conta: um campo a ``null`` ainda é um campo — `{"$in":
+        [None, ...]}` casa-o, `$exists` também.
+        """
+        for path in unset_ops or {}:
+            partes = path.split(".")
+            alvo = doc
+            for parte in partes[:-1]:
+                alvo = alvo.get(parte) if isinstance(alvo, dict) else None
+                if alvo is None:
+                    break
+            if isinstance(alvo, dict):
+                alvo.pop(partes[-1], None)
+
     def _apply_update(self, doc: dict, update: dict):
         self._apply_set(doc, update.get("$set", {}))
+        self._apply_unset(doc, update.get("$unset"))
         push_ops = update.get("$push")
         if push_ops:
             self._apply_push(doc, push_ops)
@@ -327,8 +407,25 @@ class FakeAsyncCollection:
             return MagicMock(matched_count=len(matched), modified_count=len(matched))
         if upsert:
             new_doc = dict(query)
+            self._apply_set(new_doc, update.get("$setOnInsert", {}))
             self._apply_update(new_doc, update)
             self.docs.append(new_doc)
+            return MagicMock(matched_count=0, modified_count=0, upserted_id="fake-upserted-id")
+        return MagicMock(matched_count=0, modified_count=0)
+
+    async def replace_one(self, query: dict, replacement: dict, upsert: bool = False):
+        """Substitui o PRIMEIRO documento que casa (o resto dos campos some).
+
+        É a semântica do Mongo e é por isso que não se reaproveita o
+        `update_one`: um `replace_one` não faz `$set`, apaga o que não vem
+        na substituição.
+        """
+        for indice, doc in enumerate(self.docs):
+            if self._matches(doc, query):
+                self.docs[indice] = dict(replacement)
+                return MagicMock(matched_count=1, modified_count=1)
+        if upsert:
+            self.docs.append(dict(replacement))
             return MagicMock(matched_count=0, modified_count=0, upserted_id="fake-upserted-id")
         return MagicMock(matched_count=0, modified_count=0)
 
@@ -377,6 +474,9 @@ class FakeAsyncCollection:
                 push_ops = update.get("$push")
                 if push_ops:
                     self._apply_push(doc, push_ops)
+                unset_ops = update.get("$unset")
+                if unset_ops:
+                    self._apply_unset(doc, unset_ops)
                 resultado = dict(doc)
                 if projection:
                     excluir = {k for k, v in projection.items() if not v}

@@ -21,6 +21,7 @@ from models.process import (
 )
 from services.capability_gate import exigir_capacidade
 from services.auth import get_current_user, require_roles, require_staff, get_effective_role, get_all_user_roles, get_active_company_id_async
+from services.process_scope_guard import exigir_processo_no_ambito
 from services.notification_service import send_to_admins
 from services.history import log_history
 from services.audit_trail_service import log_audit_event
@@ -28,6 +29,18 @@ from services.audit_cdc import inject_cdc_context
 from services.alerts import get_process_alerts
 from services.encryption import decrypt_client_data
 
+from services.process_sharing_api import run_revoke_partner
+from services.origem_financeira import (
+    OrigemFinanceiraBody,
+    run_get_origem,
+    run_list_candidatos,
+    run_set_origem,
+)
+from services.servico_do_parceiro import (
+    ServicoDoParceiroBody,
+    run_get_servico,
+    run_set_servico,
+)
 from services.process_service import (
     can_view_process,
     can_edit_process_data,
@@ -133,7 +146,14 @@ logger = logging.getLogger(__name__)
 # ====================================================================
 # CONFIGURAÇÃO DO ROUTER
 # ====================================================================
-router = APIRouter(prefix="/processes", tags=["Processes"])
+# A fronteira de rede por ID (adenda de RBAC): `can_view_process` responde
+# «sim» a qualquer staff, por isso o `{process_id}` do caminho é verificado
+# aqui, uma vez, para as ~40 rotas — e para as que vierem.
+router = APIRouter(
+    prefix="/processes",
+    tags=["Processes"],
+    dependencies=[Depends(exigir_processo_no_ambito)],
+)
 
 
 # ====================================================================
@@ -173,6 +193,11 @@ async def generate_magic_link(
     logger.info(
         f"Magic link gerado por {user.get('email')} para processo {process_id} "
         f"(cliente: {process.get('client_name', 'N/A')}, short_id: {issued['short_id']})"
+    )
+    # Bloco 3 (ponto 21): gerar acesso ao Portal fica no histórico (sem o link).
+    await log_history(
+        process_id, user, "Gerou o link de acesso ao Portal",
+        "portal_access", None, None,
     )
     return build_generate_magic_link_response(
         process_id=process_id,
@@ -278,6 +303,11 @@ async def get_processes(
     labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
     labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
     sub35: Optional[bool] = Query(None, description="Ponto 1 (Lote 4) — true: só processos Sub35 (titular com menos de 36 anos). O valor false NÃO filtra: ver services/sub35.py"),
+    partilha: Optional[str] = Query(None, description=(
+        "Partilha (D-25) — 'exclusivos': só os da casa; "
+        "'partilhados': só os partilhados com outra rede. Qualquer "
+        "outro valor NÃO filtra: ver services/process_sharing.py"
+    )),
     company_id: Optional[str] = Query(None, description="PACOTE FN — Empresa activa seleccionada no ContextSwitcher (Header); limita a Lista Global à empresa explicitamente enviada"),
     user: dict = Depends(get_current_user)
 ):
@@ -306,6 +336,7 @@ async def get_processes(
         labels=labels,
         labels_logic=labels_logic,
         sub35=sub35,
+        partilha=partilha,
     )
 
 
@@ -327,6 +358,11 @@ async def get_my_processes(
     labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
     labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
     sub35: Optional[bool] = Query(None, description="Ponto 1 (Lote 4) — true: só processos Sub35 (titular com menos de 36 anos). O valor false NÃO filtra: ver services/sub35.py"),
+    partilha: Optional[str] = Query(None, description=(
+        "Partilha (D-25) — 'exclusivos': só os da casa; "
+        "'partilhados': só os partilhados com outra rede. Qualquer "
+        "outro valor NÃO filtra: ver services/process_sharing.py"
+    )),
     company_id: Optional[str] = Query(None, description="PACOTE FN — Empresa activa seleccionada no ContextSwitcher (Header); tem prioridade sobre o header X-Company-Id quando enviada explicitamente"),
     user: dict = Depends(get_current_user),
 ):
@@ -375,6 +411,7 @@ async def get_my_processes(
         labels=labels,
         labels_logic=labels_logic,
         sub35=sub35,
+        partilha=partilha,
     )
 
 
@@ -394,6 +431,11 @@ async def get_processes_paginated(
     labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
     labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
     sub35: Optional[bool] = Query(None, description="Ponto 1 (Lote 4) — true: só processos Sub35 (titular com menos de 36 anos). O valor false NÃO filtra: ver services/sub35.py"),
+    partilha: Optional[str] = Query(None, description=(
+        "Partilha (D-25) — 'exclusivos': só os da casa; "
+        "'partilhados': só os partilhados com outra rede. Qualquer "
+        "outro valor NÃO filtra: ver services/process_sharing.py"
+    )),
     user: dict = Depends(get_current_user)
 ):
     """Listar processos com paginação cursor-based."""
@@ -416,6 +458,7 @@ async def get_processes_paginated(
         labels=labels,
         labels_logic=labels_logic,
         sub35=sub35,
+        partilha=partilha,
     )
 
 
@@ -461,6 +504,11 @@ async def get_kanban_board(
     labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
     labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
     sub35: Optional[bool] = Query(None, description="Ponto 1 (Lote 4) — true: só processos Sub35 (titular com menos de 36 anos). O valor false NÃO filtra: ver services/sub35.py"),
+    partilha: Optional[str] = Query(None, description=(
+        "Partilha (D-25) — 'exclusivos': só os da casa; "
+        "'partilhados': só os partilhados com outra rede. Qualquer "
+        "outro valor NÃO filtra: ver services/process_sharing.py"
+    )),
     user: dict = Depends(require_staff())
 ):
     """Kanban por status com filtros de assignee / view_mode / completed_days."""
@@ -483,6 +531,7 @@ async def get_kanban_board(
         labels=labels,
         labels_logic=labels_logic,
         sub35=sub35,
+        partilha=partilha,
         decrypt_list_fn=decrypt_processes_list,
         kanban_projection=PROCESS_KANBAN_PROJECTION,
     )
@@ -495,7 +544,7 @@ async def get_my_clients(
     size: int = Query(50, ge=1, le=100, description="Itens por página"),
     user: dict = Depends(require_roles([
     UserRole.CONSULTOR, UserRole.INTERMEDIARIO, 
-    UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
+    UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
     UserRole.INDEXACAO
 ]))):
     """Lista clientes/processos atribuídos ao utilizador (com leads órfãos)."""
@@ -603,6 +652,11 @@ async def get_process_neighbours(
     labels: Optional[List[str]] = Query(None, description="Filtrar por etiquetas"),
     labels_logic: Optional[str] = Query("OR", description="AND (todas) ou OR (qualquer uma)"),
     sub35: Optional[bool] = Query(None, description="Ponto 1 (Lote 4) — true: só processos Sub35 (titular com menos de 36 anos). O valor false NÃO filtra: ver services/sub35.py"),
+    partilha: Optional[str] = Query(None, description=(
+        "Partilha (D-25) — 'exclusivos': só os da casa; "
+        "'partilhados': só os partilhados com outra rede. Qualquer "
+        "outro valor NÃO filtra: ver services/process_sharing.py"
+    )),
     company_id: Optional[str] = Query(None, description="Empresa activa do ContextSwitcher"),
     user: dict = Depends(get_current_user),
 ):
@@ -640,6 +694,7 @@ async def get_process_neighbours(
         labels=labels,
         labels_logic=labels_logic,
         sub35=sub35,
+        partilha=partilha,
     )
 
 
@@ -718,10 +773,73 @@ async def set_process_indexed(
 @router.delete("/{process_id}")
 async def delete_process(
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """Soft delete a process. Does NOT affect the client document."""
     return await soft_delete_process(process_id, user)
+
+
+@router.delete("/{process_id}/partners/{company_id}")
+async def revoke_process_partner(
+    process_id: str,
+    company_id: str,
+    request: Request,
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
+):
+    """Revoga à mão a partilha com UMA empresa (a Via Rápida só acrescenta)."""
+    return await run_revoke_partner(process_id, company_id, user, request)
+
+
+@router.get("/{process_id}/origem-financeira")
+async def get_origem_financeira(
+    process_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Origem financeira (orgânica vs angariação) — só a gestão."""
+    return await run_get_origem(process_id, user, request)
+
+
+@router.get("/{process_id}/origem-financeira/candidatos")
+async def list_candidatos_origem_financeira(
+    process_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Utilizadores que podem ser escolhidos como angariador — só a gestão."""
+    return await run_list_candidatos(process_id, user, request)
+
+
+@router.put("/{process_id}/origem-financeira")
+async def set_origem_financeira(
+    process_id: str,
+    body: OrigemFinanceiraBody,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Define a origem: `{"tipo": "organica"|"angariacao", "angariador_id"?}`."""
+    return await run_set_origem(process_id, body.tipo, body.angariador_id, user, request)
+
+
+@router.get("/{process_id}/partner-service")
+async def get_servico_do_parceiro(
+    process_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Controlo «Serviço pago pelo parceiro» + observações — equipa interna."""
+    return await run_get_servico(process_id, user, request)
+
+
+@router.put("/{process_id}/partner-service")
+async def set_servico_do_parceiro(
+    process_id: str,
+    body: ServicoDoParceiroBody,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Marca/desmarca «pago pelo parceiro» e/ou grava as observações."""
+    return await run_set_servico(process_id, body, user, request)
 
 
 @router.put("/{process_id}", response_model=ProcessResponse)

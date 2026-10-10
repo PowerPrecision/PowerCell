@@ -22,6 +22,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { API_BASE_URL } from "../utils/apiBaseUrl";
+import { eBloqueioDoPortal, mensagemDoBloqueio } from '../utils/portalInativo';
 
 const BACKEND_URL = API_BASE_URL;
 
@@ -194,6 +195,10 @@ export default function ClientPortalLogin({ onLoginSuccess }) {
         if (retryAfter > 0) {
           setLockoutSeconds(retryAfter);
         }
+      } else if (eBloqueioDoPortal(res.status, data)) {
+        // Credenciais certas, mas o processo está inativo: dizê-lo, sem
+        // sessão. (O servidor só chega aqui DEPOIS de validar a credencial.)
+        setError(mensagemDoBloqueio(data));
       } else if (res.status === 401) {
         // Credenciais inválidas
         setError(typeof data.detail === 'string' ? data.detail : 'Credenciais inválidas. Verifique o seu email e código.');

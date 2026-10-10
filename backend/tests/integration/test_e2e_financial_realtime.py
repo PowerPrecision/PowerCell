@@ -183,8 +183,8 @@ class _Arnes:
 
     def __enter__(self):
         from services import (
-            financial_engine, process_assignment, process_indexing,
-            task_log_service,
+            financial_engine, phase_automation, process_assignment,
+            process_indexing, task_log_service,
         )
 
         patches = [
@@ -194,6 +194,9 @@ class _Arnes:
             patch("database.db", self.db),
             patch.object(process_indexing, "db", self.db),
             patch.object(process_assignment, "db", self.db),
+            # Bloco 3: a automação de fase (atribuição + tarefas modelo) faz parte
+            # da cadeia do mark-indexed e tem o seu `db` ao nível do módulo.
+            patch.object(phase_automation, "db", self.db),
             patch.object(financial_engine, "db", self.db),
             # `task_log_service` faz `from database import db` ao nível do
             # módulo, ficando com a SUA referência. Patchar `database.db`
@@ -213,9 +216,6 @@ class _Arnes:
             patch.object(process_indexing, "trigger_indexer_waitlist", AsyncMock()),
             patch.object(
                 process_assignment, "_notify_newly_assigned_users", AsyncMock()
-            ),
-            patch.object(
-                process_assignment, "_create_post_indexing_tasks", AsyncMock()
             ),
             patch.object(
                 process_assignment, "_find_least_busy_user",

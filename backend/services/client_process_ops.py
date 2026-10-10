@@ -41,6 +41,7 @@ from utils.input_sanitization import (
     sanitize_string, sanitize_url, log_sanitization_rejection,
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
+from services.partner_attribution import aplicar_parceiro_do_cliente
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,14 @@ async def run_link_process_to_client(
     )
     
     logger.info(f"Processo {process_id} vinculado ao cliente {client_id} por {user.get('email')}")
+    # Bloco 3 (ponto 21): toda a acção sobre um processo fica no histórico
+    # (o `log_history` já cala o perfil Indexação e quem tem o registo desligado).
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Associou o processo a um cliente",
+        "client_id", process.get("client_id"), client_id,
+    )
     
     return {
         "success": True,
@@ -128,6 +137,12 @@ async def run_unlink_process_from_client(
     )
     
     logger.info(f"Processo {process_id} desvinculado do cliente {client_id} por {user.get('email')}")
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Desassociou o processo do cliente",
+        "client_id", client_id, None,
+    )
     
     return {"success": True, "message": "Processo desvinculado"}
 
@@ -247,6 +262,7 @@ async def run_create_process_for_client(
         new_process["assigned_consultor_id"] = user["id"]
         new_process["consultor_name"] = user["name"]
 
+    aplicar_parceiro_do_cliente(new_process, client)
     await db.processes.insert_one(new_process)
     
     # Se temos um cliente real, actualizar a lista de processos
@@ -260,6 +276,12 @@ async def run_create_process_for_client(
         )
     
     logger.info(f"Novo processo {process_id} criado para cliente {client_id} por {user.get('email')}")
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, f"Criou processo #{next_number} para o cliente",
+        "process_type", None, process_type,
+    )
 
     return {
         "success": True,
@@ -274,8 +296,21 @@ async def run_get_client_processes(
     include_archived: bool = False
 ):
     """Obter todos os processos de um cliente (incluindo como 2º titular)."""
-    client = await db.clients.find_one({"id": client_id})
-    
+    # Fronteira de rede: este endpoint devolvia os processos DESENCRIPTADOS
+    # de qualquer cliente a qualquer sessão (zero `network`, zero posse). O
+    # cliente tem de ser do âmbito de quem pergunta — 404 igual ao de «não
+    # existe» — e só se devolvem os processos do âmbito de PROCESSOS (com a
+    # rede convidada de uma partilha).
+    from services.tenant_network import (
+        build_tenant_condition,
+        build_tenant_process_condition,
+        com_isolamento,
+    )
+
+    client = await db.clients.find_one(
+        com_isolamento(await build_tenant_condition(user), {"id": client_id})
+    )
+
     if not client:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
     
@@ -299,9 +334,12 @@ async def run_get_client_processes(
             "total": 0
         }
     
-    query = {"id": {"$in": all_process_ids}}
+    query = com_isolamento(
+        await build_tenant_process_condition(user),
+        {"id": {"$in": all_process_ids}},
+    )
     if not include_archived:
-        query["status"] = {"$nin": ["arquivado", "cancelado"]}
+        query = {"$and": [query, {"status": {"$nin": ["arquivado", "cancelado"]}}]}
     
     processes = await db.processes.find(
         query,

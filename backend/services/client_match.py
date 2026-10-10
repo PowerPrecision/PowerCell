@@ -5,8 +5,37 @@ Encontra correspondências entre clientes e imóveis (leads e imóveis angariado
 import logging
 from typing import List, Dict, Any, Optional
 from database import db
+from services.tenant_network import com_isolamento, condicao_da_mesma_rede
 
 logger = logging.getLogger(__name__)
+
+
+# ====================================================================
+# A PONTE ENTRE DUAS COLECÇÕES (D-24, Out 2026)
+# ====================================================================
+# Estas funções são a PIOR das fugas medidas, porque são um JOIN e
+# nenhuma das duas pontas estava filtrada: `find_matching_clients_for_property`
+# consultava `db.processes` por ESTADO e devolvia `client_name`,
+# `client_email` e `client_phone`. Alcançável por
+# `GET /match/property/{id}/clients` **e** pelo
+# `check_and_notify_matches_for_new_property`, que manda o resultado por
+# EMAIL ao agente — uma fuga que SAI do sistema.
+#
+# A FRONTEIRA SAI DO DOCUMENTO, NÃO DO UTILIZADOR
+# -----------------------------------------------
+# Não há utilizador em que a ancorar: o aviso de match corre em
+# background depois de uma angariação nascer. E a regra certa é de
+# qualquer forma esta — **um cruzamento liga duas pontas da MESMA
+# rede** —, logo a âncora é que diz qual é. Um documento por carimbar
+# pertence à rede que `TENANT_DEFAULT_NETWORK_ID` declara, que é
+# precisamente para isso que a variável existe.
+#
+# `ambito_de_um_documento` é o ponto único dessa leitura.
+
+
+#: A condição da outra ponta vive no `tenant_network` — são quatro os
+#: módulos que cruzam colecções, e quatro cópias divergiriam.
+_condicao_da_ponta = condicao_da_mesma_rede
 
 
 async def find_matching_properties_for_client(process_id: str) -> List[Dict[str, Any]]:
@@ -52,9 +81,11 @@ async def find_matching_properties_for_client(process_id: str) -> List[Dict[str,
         except Exception:
             pass
     
-    # Buscar imóveis disponíveis
+    # Buscar imóveis disponíveis — só da rede DESTE processo
     query = {"status": {"$in": ["disponivel", "em_analise"]}}
-    properties = await db.properties.find(query, {"_id": 0}).to_list(100)
+    properties = await db.properties.find(
+        com_isolamento(_condicao_da_ponta(process), query), {"_id": 0}
+    ).to_list(100)
     
     matches = []
     for prop in properties:
@@ -169,8 +200,10 @@ async def find_matching_leads_for_client(process_id: str) -> List[Dict[str, Any]
         "status": {"$in": ["novo", "contactado", "visita_agendada"]},  # Leads disponíveis
     }
     
-    # Buscar todos os leads activos
-    leads = await db.property_leads.find(query, {"_id": 0}).to_list(length=100)
+    # Buscar todos os leads activos — só da rede DESTE processo
+    leads = await db.property_leads.find(
+        com_isolamento(_condicao_da_ponta(process), query), {"_id": 0}
+    ).to_list(length=100)
     
     # Calcular score de match para cada lead
     matches = []
@@ -275,9 +308,14 @@ async def find_matching_clients_for_property(property_id: str) -> List[Dict[str,
     prop_municipality = (prop.get("address", {}).get("municipality") or "").lower()
     prop_bedrooms = prop.get("features", {}).get("bedrooms") if prop.get("features") else None
     
-    # Buscar processos activos
+    # Buscar processos activos — só da rede DESTE imóvel. É daqui que
+    # saem `client_name`, `client_email` e `client_phone`, e é este
+    # resultado que o `notify_property_match` manda por email.
     processes = await db.processes.find(
-        {"status": {"$nin": ["escriturado", "recusado", "desistiu"]}},
+        com_isolamento(
+            _condicao_da_ponta(prop),
+            {"status": {"$nin": ["escriturado", "recusado", "desistiu"]}},
+        ),
         {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
          "status": 1, "financial_data": 1, "real_estate_data": 1}
     ).to_list(200)
@@ -372,9 +410,13 @@ async def find_matching_clients_for_lead(lead_id: str) -> List[Dict[str, Any]]:
     lead_typology = (lead.get("typology") or "").upper()
     lead_area = lead.get("area")
     
-    # Buscar processos activos
+    # Buscar processos activos — só da rede DESTE lead (as leads são
+    # carimbadas nos dois caminhos de escrita desde o Dashboard, ponto 1).
     processes = await db.processes.find(
-        {"status": {"$nin": ["escriturado", "recusado", "desistiu"]}},
+        com_isolamento(
+            _condicao_da_ponta(lead),
+            {"status": {"$nin": ["escriturado", "recusado", "desistiu"]}},
+        ),
         {"_id": 0, "id": 1, "client_name": 1, "status": 1, "financial_data": 1, "real_estate_data": 1}
     ).to_list(length=200)
     

@@ -1,0 +1,6 @@
+{
+  "expires_in": 900,
+  "filename": "cc.pdf",
+  "success": true,
+  "url": "https://s3.exemplo/get"
+}

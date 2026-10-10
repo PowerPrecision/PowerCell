@@ -40,6 +40,9 @@ def hash_password(password: str) -> str:
 
 # User roles
 class UserRole:
+    # Cópia local (o seed não importa a app). Tem de conter TODOS os perfis que
+    # o `seed_users` usa — `tests/unit/test_seed_perfis.py` fá-lo cumprir.
+    MASTER = "master"
     CLIENTE = "cliente"
     CONSULTOR = "consultor"
     INTERMEDIARIO = "intermediario"
@@ -98,7 +101,9 @@ async def seed_users():
             "email": "admin@sistema.pt",
             "password": admin_password,
             "name": "Administrador Sistema",
-            "role": UserRole.ADMIN,
+            # Conta de sistema: o ÚNICO perfil global (Master). O Admin é
+            # local à empresa (adenda de RBAC) e não opera a infraestrutura.
+            "role": UserRole.MASTER,
             "phone": None,
             "company": "Sistema"
         },

@@ -4,13 +4,11 @@ Extraído de `routes/portal.py`.
 """
 from __future__ import annotations
 
-import asyncio
 import gc as _gc
 import os
 import logging
-import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
@@ -18,9 +16,16 @@ from fastapi.responses import JSONResponse
 from database import db
 from services.portal_assigned_users import get_all_assigned_user_ids as _get_all_assigned_user_ids
 from services.notification_service import send_notification_with_preference_check
-from services.s3_storage import s3_service
 from services.websocket_manager import WSEventType
 from services.realtime_delivery import entregar_na_sala, sala_do_processo
+from services.gov_fetch_archive import arquivar_documentos, rotulos_em_falta
+from services.gov_fetch_jobs import (
+    criar_job,
+    encerrar_jobs_mortos,
+    job_activo_do_processo,
+    ler_job_do_processo,
+)
+from services.gov_fetch_policy import MFA_ESPERA_SEGUNDOS
 
 logger = logging.getLogger(__name__)
 
@@ -107,562 +112,292 @@ async def _notificar_recolha(
         logger.warning(f"[PORTAL-BG] Erro ao notificar o cliente via WebSocket: {ws_err}")
 
 
-async def _run_financas_background(nif: str, password: str, process_id: str, client_name: str, client_email: str, process: dict, scraper_job_id: str):
-    """
-    Background task para o scraper das Finanças.
+# ====================================================================
+# FONTES — o que distingue Finanças de Segurança Social
+# ====================================================================
+# Os dois pipelines eram duas cópias de ~450 linhas que só diferiam nisto.
+# As cópias divergiam sem dar erro (uma tinha `mfa_no_input` mapeado e a outra
+# não), e uma correcção feita numa ficava por fazer na outra.
+@dataclass(frozen=True)
+class FonteGovernamental:
+    chave: str  # `source` do job e do email
+    nome: str  # como o cliente a conhece
+    origem: str  # `source` dos documentos arquivados
+    enviado_por: str  # `uploaded_by` dos documentos arquivados
+    nome_do_identificador: str  # NIF / NISS
+    funcao_do_scraper: str  # nome em `services.gov_scraper`
+    nome_da_equipa: str  # como aparece na notificação à equipa
+    ids_do_processo: str  # etiqueta do WS (`auto_financas`...)
 
-    Executa o scraper pesado em background, atualiza o job na BD,
-    envia emails e notifica a equipa quando termina.
-    """
-    # ── 1. Enviar email de início de processo ──
-    try:
-        await _send_portal_fetch_email(
-            client_email, client_name, "financas", "started"
+
+FINANCAS = FonteGovernamental(
+    chave="financas",
+    nome="Portal das Finanças",
+    origem="auto_financas",
+    enviado_por="system_financas_scraper",
+    nome_do_identificador="NIF",
+    funcao_do_scraper="fetch_financas_documents",
+    nome_da_equipa="Portal das Finanças",
+    ids_do_processo="auto_financas",
+)
+SEGURANCA_SOCIAL = FonteGovernamental(
+    chave="seguranca_social",
+    nome="Segurança Social",
+    origem="auto_seguranca_social",
+    enviado_por="system_seguranca_social_scraper",
+    nome_do_identificador="NISS",
+    funcao_do_scraper="fetch_seg_social_documents",
+    nome_da_equipa="Segurança Social",
+    ids_do_processo="auto_seguranca_social",
+)
+
+# Erro do scraper -> o que se grava no job (`error_type`). O que não está aqui
+# é `scraper_unavailable`.
+_TIPO_DE_ERRO = {
+    "credenciais_invalidas": "credenciais_invalidas",
+    "mfa_requerido": "mfa_requerido",
+    "mfa_timeout": "mfa_timeout",
+    "mfa_codigo_incorreto": "mfa_codigo_incorreto",
+    "mfa_no_input": "mfa_error",
+    "mfa_error": "mfa_error",
+    "timeout": "timeout_scraper",
+    "timeout_login": "timeout_scraper",
+    "sem_documentos": "sem_documentos",
+    "scraper_ocupado": "scraper_ocupado",
+    "arquivo_falhou": "arquivo_falhou",
+    "memory_error": "scraper_unavailable",
+    "MemoryError": "scraper_unavailable",
+}
+
+
+def classificar_falha(error_detail: str | None, fonte: FonteGovernamental) -> tuple[str, str]:
+    """(`error_type`, mensagem para o cliente) de uma recolha falhada."""
+    tipo = _TIPO_DE_ERRO.get(error_detail or "", "scraper_unavailable")
+    manual = (
+        f"Pode descarregar os documentos directamente do {fonte.nome} e enviá-los "
+        f"através do botão de upload."
+    )
+    mensagens = {
+        "credenciais_invalidas": (
+            f"As credenciais que introduziu estão incorretas. Verifique o seu "
+            f"{fonte.nome_do_identificador} e a password do {fonte.nome}."
+        ),
+        "mfa_requerido": (
+            "O portal requere verificação em 2 passos (Chave Móvel Digital). "
+            "Introduza o código enviado para o seu telemóvel."
+        ),
+        "mfa_timeout": (
+            f"O código de verificação não foi submetido a tempo (limite de "
+            f"{MFA_ESPERA_SEGUNDOS // 60} minutos). Tente novamente."
+        ),
+        "mfa_codigo_incorreto": (
+            "O código de verificação SMS introduzido parece estar incorreto. "
+            "O login não foi concluído."
+        ),
+        "mfa_error": "Erro ao processar o código de verificação. Tente novamente.",
+        "timeout_scraper": f"O {fonte.nome} demorou demasiado a responder. Tente novamente mais tarde. {manual}",
+        "sem_documentos": f"Não foi possível localizar os documentos no {fonte.nome}. {manual}",
+        "scraper_ocupado": (
+            "O serviço está ocupado com outros pedidos neste momento. "
+            "Tente novamente dentro de alguns minutos."
+        ),
+        "arquivo_falhou": (
+            f"Os documentos foram obtidos mas não foi possível guardá-los no seu "
+            f"processo. Tente novamente ou contacte o seu consultor. {manual}"
+        ),
+        "scraper_unavailable": (
+            f"O serviço de obtenção automática de documentos não está disponível "
+            f"de momento. {manual}"
+        ),
+    }
+    return tipo, mensagens[tipo]
+
+
+def mensagem_de_sucesso(fonte: FonteGovernamental, obtidos: int, em_falta: list[str]) -> str:
+    plural = "s" if obtidos != 1 else ""
+    mensagem = f"{obtidos} documento{plural} obtido{plural} do {fonte.nome}."
+    if em_falta:
+        mensagem += (
+            f" Não foi possível obter: {', '.join(em_falta)}. "
+            f"Pode descarregá-lo do {fonte.nome} e enviá-lo através do botão de upload."
         )
-    except Exception as e:
-        logger.warning(f"[PORTAL-BG] Erro ao enviar email de início (Finanças): {e}")
-
-    # ── 2. Invocar scraper ──
-    try:
-        result = await _run_financas_scraper(nif, password, process_id)
-
-        if result.get("success"):
-            docs_count = result.get("documents_count", 0)
-            logger.info(
-                f"[PORTAL-BG] Finanças: {docs_count} documentos obtidos para processo {process_id}"
-            )
-
-            # Atualizar job na BD
-            await db.portal_scraper_jobs.update_one(
-                {"id": scraper_job_id},
-                {"$set": {
-                    "status": "success",
-                    "documents_count": docs_count,
-                    "message": f"{docs_count} documento{'s' if docs_count != 1 else ''} obtido{'s' if docs_count != 1 else ''} do Portal das Finanças.",
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }}
-            )
-
-            # Email de sucesso com documentos anexados
-            try:
-                docs_to_attach = result.get("documents", [])
-                await _send_portal_fetch_email(
-                    client_email, client_name, "financas", "success",
-                    docs_count=docs_count,
-                    attachments=docs_to_attach if docs_to_attach else None,
-                )
-            except Exception as e:
-                logger.warning(f"[PORTAL-BG] Erro ao enviar email de sucesso (Finanças): {e}")
-
-            # Notificar equipa via WebSocket
-            await _notify_assigned_team_fetch(process, "Portal das Finanças", docs_count)
-            await _notificar_recolha(process_id, "auto_financas", docs_count=docs_count)
-
-            # Libertar memória: limpar screenshot e documentos do result
-            result.pop("screenshot_b64", None)
-            result.pop("documents", None)
-            _gc.collect()
-
-        else:
-            error_detail = result.get("error", "erro_desconhecido")
-            logger.error(f"[PORTAL-BG] Erro do scraper Finanças: {error_detail}")
-
-            # Determinar mensagem de erro
-            if error_detail == "credenciais_invalidas":
-                error_message = "As credenciais que introduziu estão incorretas. Verifique o seu NIF e password do Portal das Finanças."
-                error_type = "credenciais_invalidas"
-            elif error_detail == "mfa_requerido":
-                error_message = "O portal requere verificação em 2 passos (Chave Móvel Digital). Introduza o código enviado para o seu telemóvel."
-                error_type = "mfa_requerido"
-            elif error_detail == "mfa_timeout":
-                error_message = "O código de verificação não foi submetido a tempo. O scraper expirou após 2 minutos à espera do código SMS."
-                error_type = "mfa_timeout"
-            elif error_detail == "mfa_codigo_incorreto":
-                error_message = "O código de verificação SMS introduzido parece estar incorreto. O login não foi concluído."
-                error_type = "mfa_codigo_incorreto"
-            elif error_detail == "mfa_error":
-                error_message = "Erro ao processar o código de verificação. Tente novamente."
-                error_type = "mfa_error"
-            elif error_detail == "memory_error" or error_detail == "MemoryError":
-                error_message = "O servidor não tem memória suficiente para executar a obtenção automática neste momento. Por favor, tente novamente mais tarde ou faça download manualmente."
-                error_type = "scraper_unavailable"
-            else:
-                error_message = "O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente do Portal das Finanças e envie os documentos através do botão de upload."
-                error_type = "scraper_unavailable"
-
-            # Atualizar job na BD
-            await db.portal_scraper_jobs.update_one(
-                {"id": scraper_job_id},
-                {"$set": {
-                    "status": "error",
-                    "error_type": error_type,
-                    "message": error_message,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }}
-            )
-
-            # Email de erro
-            try:
-                await _send_portal_fetch_email(
-                    client_email, client_name, "financas", "error"
-                )
-            except Exception:
-                pass
-
-            # Notificar via WebSocket sobre o erro
-            await _notificar_recolha(process_id, "auto_financas_error", error_type=error_type)
-
-    except Exception as e:
-        logger.error(f"[PORTAL-BG] Erro inesperado no scraper Finanças: {type(e).__name__}: {e}", exc_info=True)
-
-        # Atualizar job na BD
-        await db.portal_scraper_jobs.update_one(
-            {"id": scraper_job_id},
-            {"$set": {
-                "status": "error",
-                "error_type": "unexpected_error",
-                "message": "Ocorreu um erro ao obter os documentos. Tente novamente mais tarde ou contacte o seu consultor.",
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }}
-        )
-
-        try:
-            await _send_portal_fetch_email(
-                client_email, client_name, "financas", "error"
-            )
-        except Exception:
-            pass
+    return mensagem
 
 
-async def _run_seguranca_social_background(niss: str, password: str, process_id: str, client_name: str, client_email: str, process: dict, scraper_job_id: str):
+async def _gravar_estado_do_job(scraper_job_id: str, campos: dict, *, remover: tuple[str, ...] = ()) -> None:
+    """Grava o estado final do job. Nunca levanta.
+
+    O estado final é a única coisa que o cliente lê. Uma excepção aqui, dentro
+    do `except` do pipeline, escondia a causa original e deixava o job a
+    «processar» para sempre.
     """
-    Background task para o scraper da Segurança Social.
-
-    Executa o scraper pesado em background, atualiza o job na BD,
-    envia emails e notifica a equipa quando termina.
-    """
-    # ── 1. Enviar email de início de processo ──
+    operacao: dict = {"$set": {**campos, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    operacao["$unset"] = {campo: "" for campo in ("mfa_code", *remover)}
     try:
-        await _send_portal_fetch_email(
-            client_email, client_name, "seguranca_social", "started"
-        )
-    except Exception as e:
-        logger.warning(f"[PORTAL-BG] Erro ao enviar email de início (Seg. Social): {e}")
-
-    # ── 2. Invocar scraper ──
-    try:
-        result = await _run_seguranca_social_scraper(niss, password, process_id)
-
-        if result.get("success"):
-            docs_count = result.get("documents_count", 0)
-            logger.info(
-                f"[PORTAL-BG] Seg. Social: {docs_count} documentos obtidos para processo {process_id}"
-            )
-
-            # Atualizar job na BD
-            await db.portal_scraper_jobs.update_one(
-                {"id": scraper_job_id},
-                {"$set": {
-                    "status": "success",
-                    "documents_count": docs_count,
-                    "message": f"{docs_count} documento{'s' if docs_count != 1 else ''} obtido{'s' if docs_count != 1 else ''} da Segurança Social.",
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }}
-            )
-
-            # Email de sucesso com documentos anexados
-            try:
-                docs_to_attach = result.get("documents", [])
-                await _send_portal_fetch_email(
-                    client_email, client_name, "seguranca_social", "success",
-                    docs_count=docs_count,
-                    attachments=docs_to_attach if docs_to_attach else None,
-                )
-            except Exception as e:
-                logger.warning(f"[PORTAL-BG] Erro ao enviar email de sucesso (Seg. Social): {e}")
-
-            # Notificar equipa
-            await _notify_assigned_team_fetch(process, "Segurança Social", docs_count)
-            await _notificar_recolha(process_id, "auto_seguranca_social", docs_count=docs_count)
-
-            # Libertar memória: limpar screenshot e documentos do result
-            result.pop("screenshot_b64", None)
-            result.pop("documents", None)
-            _gc.collect()
-
-        else:
-            error_detail = result.get("error", "erro_desconhecido")
-            logger.error(f"[PORTAL-BG] Erro do scraper Seg. Social: {error_detail}")
-
-            if error_detail == "credenciais_invalidas":
-                error_message = "As credenciais que introduziu estão incorretas. Verifique o seu NISS e password da Segurança Social."
-                error_type = "credenciais_invalidas"
-            elif error_detail == "mfa_requerido":
-                error_message = "O portal requere verificação em 2 passos (Chave Móvel Digital). Introduza o código enviado para o seu telemóvel."
-                error_type = "mfa_requerido"
-            elif error_detail == "mfa_timeout":
-                error_message = "O código de verificação não foi submetido a tempo. O scraper expirou após 2 minutos à espera do código SMS."
-                error_type = "mfa_timeout"
-            elif error_detail == "mfa_codigo_incorreto":
-                error_message = "O código de verificação SMS introduzido parece estar incorreto. O login não foi concluído."
-                error_type = "mfa_codigo_incorreto"
-            elif error_detail == "mfa_error" or error_detail == "mfa_no_input":
-                error_message = "Erro ao processar o código de verificação. Tente novamente."
-                error_type = "mfa_error"
-            elif error_detail == "memory_error" or error_detail == "MemoryError":
-                error_message = "O servidor não tem memória suficiente para executar a obtenção automática neste momento. Por favor, tente novamente mais tarde ou faça download manualmente."
-                error_type = "scraper_unavailable"
-            else:
-                error_message = "O serviço de obtenção automática de documentos não está disponível de momento. Por favor, faça download manualmente da Segurança Social e envie os documentos através do botão de upload."
-                error_type = "scraper_unavailable"
-
-            await db.portal_scraper_jobs.update_one(
-                {"id": scraper_job_id},
-                {"$set": {
-                    "status": "error",
-                    "error_type": error_type,
-                    "message": error_message,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }}
-            )
-
-            try:
-                await _send_portal_fetch_email(
-                    client_email, client_name, "seguranca_social", "error"
-                )
-            except Exception:
-                pass
-
-            await _notificar_recolha(process_id, "auto_seguranca_social_error", error_type=error_type)
-
-    except Exception as e:
-        logger.error(f"[PORTAL-BG] Erro inesperado no scraper Seg. Social: {type(e).__name__}: {e}", exc_info=True)
-
-        await db.portal_scraper_jobs.update_one(
-            {"id": scraper_job_id},
-            {"$set": {
-                "status": "error",
-                "error_type": "unexpected_error",
-                "message": "Ocorreu um erro ao obter os documentos. Tente novamente mais tarde ou contacte o seu consultor.",
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }}
+        await db.portal_scraper_jobs.update_one({"id": scraper_job_id}, operacao)
+    except Exception as exc:
+        logger.error(
+            "[PORTAL-BG] Não foi possível gravar o estado do job %s: %s",
+            scraper_job_id, type(exc).__name__, exc_info=True,
         )
 
-        try:
-            await _send_portal_fetch_email(
-                client_email, client_name, "seguranca_social", "error"
-            )
-        except Exception:
-            pass
+
+async def _recolher(fonte: FonteGovernamental, identificador: str, password: str, process_id: str) -> dict:
+    """Corre o scraper e arquiva o que ele trouxe. Devolve um dict de resultado.
+
+    SEGURANÇA: as credenciais só existem em memória, durante esta chamada. Nunca
+    são persistidas nem escritas no log.
+    """
+    from services import gov_scraper
+
+    obter = getattr(gov_scraper, fonte.funcao_do_scraper)
+    resultado = await obter(identificador, password, process_id=process_id)
+
+    if not resultado.success:
+        falha = {
+            "success": False,
+            "error": resultado.error or "erro_desconhecido",
+            "step_failed": resultado.step_failed,
+        }
+        if resultado.screenshot_b64:
+            falha["screenshot_available"] = True
+            logger.info("[PORTAL] Screenshot disponível para debug (%d chars)", len(resultado.screenshot_b64))
+        return falha
+
+    arquivo = await arquivar_documentos(
+        process_id, list(resultado.documents), origem=fonte.origem, enviado_por=fonte.enviado_por
+    )
+    resultado.documents = []  # libertar os bytes: já estão no S3 (e em `arquivo.registados`)
+    if arquivo.total == 0:
+        # O scraper obteve, o arquivo falhou: «0 documentos obtidos» com sucesso
+        # seria mentir ao cliente e à equipa.
+        return {
+            "success": False,
+            "error": "arquivo_falhou" if arquivo.falhados else "sem_documentos",
+            "step_failed": "archive",
+        }
+
+    return {
+        "success": True,
+        "documents_count": arquivo.total,
+        "documents": arquivo.registados,
+        "documents_missing": rotulos_em_falta(fonte.chave, arquivo.registados),
+    }
 
 
 async def _run_financas_scraper(nif: str, password: str, process_id: str):
-    """
-    Invoca o scraper do Portal das Finanças (gov_scraper.py).
-
-    O scraper utiliza Playwright em modo headless para:
-    1. Autenticar no Portal das Finanças via acesso.gov.pt
-    2. Navegar até à secção de IRS
-    3. Descarregar a Declaração de IRS e a Nota de Liquidação
-    4. Retornar os PDFs em bytes
-
-    Após obter os documentos, faz upload para o S3 e cria registos na BD.
-
-    SEGURANÇA: As credenciais (NIF + password) são usadas APENAS em memória
-    pelo scraper e eliminadas logo após a execução (del + gc.collect).
-    NUNCA são persistidas na BD ou impressas no log.
-    """
-    from services.gov_scraper import fetch_financas_documents
-
-    # Obter informações do processo para upload S3
-    process = await db.processes.find_one({"id": process_id})
-    client_name = process.get("client_name", "cliente") if process else "cliente"
-    s3_folder = process.get("s3_folder") if process else None
-
-    # ── Invocar o scraper real ──
-    result = await fetch_financas_documents(nif, password, process_id=process_id)
-
-    # Neste ponto, o scraper já limpou as credenciais da memória
-    # (garantido pelo `finally` em fetch_financas_documents)
-
-    if not result.success:
-        error_map = {
-            "credenciais_invalidas": "credenciais_invalidas",
-            "mfa_requerido": "mfa_requerido",
-            "mfa_timeout": "mfa_timeout",
-            "mfa_codigo_incorreto": "mfa_codigo_incorreto",
-            "mfa_no_input": "mfa_error",
-            "mfa_error": "mfa_error",
-            "timeout": "timeout_scraper",
-            "sem_documentos": "sem_documentos",
-            "selector_desatualizado": "selector_desatualizado",
-        }
-        response = {
-            "success": False,
-            "error": error_map.get(result.error, result.error or "erro_desconhecido"),
-            "step_failed": result.step_failed,
-        }
-        # Incluir screenshot para debug (se disponível)
-        if result.screenshot_b64:
-            response["screenshot_available"] = True
-            # Não enviar o base64 no response (pode ser grande) — guardar no log
-            logger.info(f"[PORTAL] Screenshot disponível para debug ({len(result.screenshot_b64)} chars)")
-        return response
-
-    # ── Upload dos documentos para o S3 e registo na BD ──
-    docs_registered = 0
-    docs_for_attachment = []  # Documentos para anexar ao email de sucesso
-
-    for doc in result.documents:
-        try:
-            # Upload para o S3
-            import io
-            file_obj = io.BytesIO(doc.content_bytes)
-            s3_path = s3_service.upload_file(
-                file_obj=file_obj,
-                client_id=process_id,
-                client_name=client_name,
-                category=doc.category,
-                filename=doc.filename,
-                content_type=doc.content_type,
-                s3_folder=s3_folder,
-            )
-
-            if not s3_path:
-                logger.warning(f"[PORTAL] Falha no upload S3 para {doc.filename} — a criar registo sem S3 path")
-
-            # Timestamp único por documento (evita que vários docs do mesmo
-            # batch fiquem com a mesma data/hora exacta no CRM)
-            doc_now = datetime.now(timezone.utc).isoformat()
-
-            # Criar registo na BD
-            doc_id = str(uuid.uuid4())
-            doc_record = {
-                "id": doc_id,
-                "process_id": process_id,
-                "filename": doc.filename,
-                "original_filename": doc.filename,
-                "category": doc.category,
-                # Mantemos sempre o label legível ("Declaração de IRS",
-                # "Nota de Liquidação IRS", etc.) para o utilizador identificar
-                # o tipo específico dentro da categoria "Financeiros".
-                "custom_label": doc.label,
-                "status": "RECEIVED",
-                "source": "auto_financas",
-                "uploaded_at": doc_now,
-                "uploaded_by": "system_financas_scraper",
-                "content_type": doc.content_type,
-                "file_size": len(doc.content_bytes),
-                "s3_path": s3_path,
-                "auto_fetched": True,
-            }
-
-            await db.documents.insert_one(doc_record)
-            docs_registered += 1
-
-            # Guardar dados do documento para anexar ao email de sucesso
-            docs_for_attachment.append({
-                "filename": doc.filename,
-                "content_bytes": doc.content_bytes,
-                "content_type": doc.content_type,
-            })
-
-            logger.info(
-                f"[PORTAL] Documento Finanças registado: {doc.filename} "
-                f"({len(doc.content_bytes)} bytes, S3: {'sim' if s3_path else 'não'}, "
-                f"categoria: {doc.category}, label: {doc.label})"
-            )
-
-        except Exception as e:
-            logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}: {e}")
-
-    # ── Marcar documentos pendentes como UPLOADED ──
-    # Quando o scraper Finanças obtém docs com sucesso, marcar qualquer
-    # documento REQUESTED/PENDING das categorias IRS/Financeiros como UPLOADED
-    # para que o cliente veja o item como "entregue" na checklist do portal.
-    if docs_registered > 0:
-        try:
-            financas_categories = ["IRS", "Financeiros", "irs", "financeiros"]
-            update_result = await db.documents.update_many(
-                {
-                    "process_id": process_id,
-                    "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
-                    "category": {"$in": financas_categories},
-                },
-                {
-                    "$set": {
-                        "status": "UPLOADED",
-                        "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                        "uploaded_by": "system_financas_scraper",
-                        "auto_fetched": True,
-                        "source": "auto_financas",
-                    }
-                }
-            )
-            if update_result.modified_count > 0:
-                logger.info(
-                    f"[PORTAL] {update_result.modified_count} documento(s) pendente(s) "
-                    f"IRS/Financeiros marcado(s) como UPLOADED para processo {process_id}"
-                )
-        except Exception as mark_err:
-            logger.warning(
-                f"[PORTAL] Erro ao marcar docs pendentes como UPLOADED: "
-                f"{type(mark_err).__name__}: {mark_err}"
-            )
-
-    return {"success": True, "documents_count": docs_registered, "documents": docs_for_attachment}
+    return await _recolher(FINANCAS, nif, password, process_id)
 
 
 async def _run_seguranca_social_scraper(niss: str, password: str, process_id: str):
+    return await _recolher(SEGURANCA_SOCIAL, niss, password, process_id)
+
+
+async def _executar_recolha(
+    fonte: FonteGovernamental,
+    scraper,
+    identificador: str,
+    password: str,
+    process_id: str,
+    client_name: str,
+    client_email: str,
+    process: dict,
+    scraper_job_id: str,
+) -> None:
+    """Pipeline completo de uma recolha, com o estado final garantido.
+
+    Regra: depois de os documentos estarem arquivados, NADA do que vem a seguir
+    (email, notificação à equipa, WebSocket) pode transformar o job em erro. A
+    cópia anterior chamava `_notify_assigned_team_fetch` sem guarda dentro do
+    mesmo `try` que apanhava os erros do scraper: uma excepção ao notificar
+    sobrescrevia um job `success` com `unexpected_error` — o cliente via
+    «falhou» num processo onde os documentos já estavam arquivados.
     """
-    Invoca o scraper da Segurança Social (gov_scraper.py).
+    try:
+        await _send_portal_fetch_email(client_email, client_name, fonte.chave, "started")
+    except Exception as exc:
+        logger.warning("[PORTAL-BG] Erro ao enviar email de início (%s): %s", fonte.nome, exc)
 
-    O scraper utiliza Playwright em modo headless para:
-    1. Autenticar na Segurança Social Direta
-    2. Navegar até à secção de documentos
-    3. Descarregar a Situação Contributiva e o Extrato de Remunerações
-    4. Retornar os PDFs em bytes
+    try:
+        resultado = await scraper(identificador, password, process_id)
+    except Exception as exc:
+        logger.error(
+            "[PORTAL-BG] Erro inesperado na recolha %s: %s", fonte.nome, type(exc).__name__, exc_info=True
+        )
+        resultado = {"success": False, "error": "unexpected_error"}
+    finally:
+        del password  # a referência local; o `gov_scraper` já limpou as dele
 
-    SEGURANÇA: As credenciais (NISS + password) são usadas APENAS em memória
-    pelo scraper e eliminadas logo após a execução (del + gc.collect).
-    NUNCA são persistidas na BD ou impressas no log.
-    """
-    from services.gov_scraper import fetch_seg_social_documents
+    if resultado.get("success"):
+        await _concluir_com_sucesso(fonte, resultado, process_id, client_name, client_email, process, scraper_job_id)
+    else:
+        await _concluir_com_erro(fonte, resultado, process_id, client_name, client_email, scraper_job_id)
+    _gc.collect()
 
-    # Obter informações do processo para upload S3
-    process = await db.processes.find_one({"id": process_id})
-    client_name = process.get("client_name", "cliente") if process else "cliente"
-    s3_folder = process.get("s3_folder") if process else None
 
-    # ── Invocar o scraper real ──
-    result = await fetch_seg_social_documents(niss, password, process_id=process_id)
+async def _concluir_com_sucesso(
+    fonte, resultado, process_id, client_name, client_email, process, scraper_job_id
+) -> None:
+    obtidos = resultado.get("documents_count", 0)
+    em_falta = resultado.get("documents_missing", [])
+    logger.info("[PORTAL-BG] %s: %d documento(s) obtido(s) para o processo %s", fonte.nome, obtidos, process_id)
 
-    # Neste ponto, o scraper já limpou as credenciais da memória
-
-    if not result.success:
-        error_map = {
-            "credenciais_invalidas": "credenciais_invalidas",
-            "mfa_requerido": "mfa_requerido",
-            "mfa_timeout": "mfa_timeout",
-            "mfa_codigo_incorreto": "mfa_codigo_incorreto",
-            "mfa_no_input": "mfa_error",
-            "mfa_error": "mfa_error",
-            "timeout": "timeout_scraper",
-            "sem_documentos": "sem_documentos",
-            "selector_desatualizado": "selector_desatualizado",
-        }
-        response = {
-            "success": False,
-            "error": error_map.get(result.error, result.error or "erro_desconhecido"),
-            "step_failed": result.step_failed,
-        }
-        if result.screenshot_b64:
-            response["screenshot_available"] = True
-            logger.info(f"[PORTAL] Screenshot disponível para debug ({len(result.screenshot_b64)} chars)")
-        return response
-
-    # ── Upload dos documentos para o S3 e registo na BD ──
-    docs_registered = 0
-    docs_for_attachment = []  # Documentos para anexar ao email de sucesso
-
-    for doc in result.documents:
+    await _gravar_estado_do_job(
+        scraper_job_id,
+        {
+            "status": "success",
+            "documents_count": obtidos,
+            "documents_missing": em_falta,
+            "message": mensagem_de_sucesso(fonte, obtidos, em_falta),
+        },
+    )
+    anexos = resultado.get("documents") or None
+    for passo, coro in (
+        ("email de sucesso", lambda: _send_portal_fetch_email(
+            client_email, client_name, fonte.chave, "success", docs_count=obtidos, attachments=anexos)),
+        ("notificação da equipa", lambda: _notify_assigned_team_fetch(process, fonte.nome_da_equipa, obtidos)),
+        ("notificação em tempo real", lambda: _notificar_recolha(process_id, fonte.ids_do_processo, docs_count=obtidos)),
+    ):
         try:
-            # Upload para o S3
-            import io
-            file_obj = io.BytesIO(doc.content_bytes)
-            s3_path = s3_service.upload_file(
-                file_obj=file_obj,
-                client_id=process_id,
-                client_name=client_name,
-                category=doc.category,
-                filename=doc.filename,
-                content_type=doc.content_type,
-                s3_folder=s3_folder,
-            )
+            await coro()
+        except Exception as exc:
+            logger.warning("[PORTAL-BG] %s (%s) falhou: %s", passo, fonte.nome, type(exc).__name__)
+    resultado.pop("documents", None)
 
-            if not s3_path:
-                logger.warning(f"[PORTAL] Falha no upload S3 para {doc.filename} — a criar registo sem S3 path")
 
-            # Timestamp único por documento (evita que vários docs do mesmo
-            # batch fiquem com a mesma data/hora exacta no CRM)
-            doc_now = datetime.now(timezone.utc).isoformat()
+async def _concluir_com_erro(fonte, resultado, process_id, client_name, client_email, scraper_job_id) -> None:
+    detalhe = resultado.get("error", "erro_desconhecido")
+    tipo, mensagem = classificar_falha(detalhe, fonte)
+    logger.error("[PORTAL-BG] Recolha %s falhou: %s (passo: %s)", fonte.nome, detalhe, resultado.get("step_failed"))
 
-            # Criar registo na BD
-            doc_id = str(uuid.uuid4())
-            doc_record = {
-                "id": doc_id,
-                "process_id": process_id,
-                "filename": doc.filename,
-                "original_filename": doc.filename,
-                "category": doc.category,
-                # Mantemos sempre o label legível ("Situação Contributiva",
-                # "Extrato de Remunerações") para o utilizador identificar
-                # o tipo específico dentro da categoria genérica.
-                "custom_label": doc.label,
-                "status": "RECEIVED",
-                "source": "auto_seguranca_social",
-                "uploaded_at": doc_now,
-                "uploaded_by": "system_seguranca_social_scraper",
-                "content_type": doc.content_type,
-                "file_size": len(doc.content_bytes),
-                "s3_path": s3_path,
-                "auto_fetched": True,
-            }
-
-            await db.documents.insert_one(doc_record)
-            docs_registered += 1
-
-            # Guardar dados do documento para anexar ao email de sucesso
-            docs_for_attachment.append({
-                "filename": doc.filename,
-                "content_bytes": doc.content_bytes,
-                "content_type": doc.content_type,
-            })
-
-            logger.info(
-                f"[PORTAL] Documento Seg. Social registado: {doc.filename} "
-                f"({len(doc.content_bytes)} bytes, S3: {'sim' if s3_path else 'não'}, "
-                f"categoria: {doc.category}, label: {doc.label})"
-            )
-
-        except Exception as e:
-            logger.error(f"[PORTAL] Erro ao registar documento {doc.filename}: {type(e).__name__}: {e}")
-
-    # ── Marcar documentos pendentes como UPLOADED ──
-    # Quando o scraper Segurança Social obtém docs com sucesso, marcar qualquer
-    # documento REQUESTED/PENDING das categorias Financeiros/Segurança Social
-    # como UPLOADED para que o cliente veja o item como "entregue" na checklist.
-    if docs_registered > 0:
+    await _gravar_estado_do_job(
+        scraper_job_id, {"status": "error", "error_type": tipo, "message": mensagem}
+    )
+    for passo, coro in (
+        ("email de erro", lambda: _send_portal_fetch_email(client_email, client_name, fonte.chave, "error")),
+        ("notificação em tempo real", lambda: _notificar_recolha(
+            process_id, f"{fonte.ids_do_processo}_error", error_type=tipo)),
+    ):
         try:
-            ss_categories = ["Financeiros", "financeiros", "Seguranca_Social", "Segurança_Social"]
-            update_result = await db.documents.update_many(
-                {
-                    "process_id": process_id,
-                    "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
-                    "category": {"$in": ss_categories},
-                },
-                {
-                    "$set": {
-                        "status": "UPLOADED",
-                        "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                        "uploaded_by": "system_seguranca_social_scraper",
-                        "auto_fetched": True,
-                        "source": "auto_seguranca_social",
-                    }
-                }
-            )
-            if update_result.modified_count > 0:
-                logger.info(
-                    f"[PORTAL] {update_result.modified_count} documento(s) pendente(s) "
-                    f"Seg. Social marcado(s) como UPLOADED para processo {process_id}"
-                )
-        except Exception as mark_err:
-            logger.warning(
-                f"[PORTAL] Erro ao marcar docs pendentes como UPLOADED: "
-                f"{type(mark_err).__name__}: {mark_err}"
-            )
+            await coro()
+        except Exception as exc:
+            logger.warning("[PORTAL-BG] %s (%s) falhou: %s", passo, fonte.nome, type(exc).__name__)
 
-    return {"success": True, "documents_count": docs_registered, "documents": docs_for_attachment}
+
+async def _run_financas_background(nif: str, password: str, process_id: str, client_name: str, client_email: str, process: dict, scraper_job_id: str):
+    """Background task do scraper das Finanças (ver `_executar_recolha`)."""
+    await _executar_recolha(
+        FINANCAS, _run_financas_scraper, nif, password, process_id,
+        client_name, client_email, process, scraper_job_id,
+    )
+
+
+async def _run_seguranca_social_background(niss: str, password: str, process_id: str, client_name: str, client_email: str, process: dict, scraper_job_id: str):
+    """Background task do scraper da Segurança Social (ver `_executar_recolha`)."""
+    await _executar_recolha(
+        SEGURANCA_SOCIAL, _run_seguranca_social_scraper, niss, password, process_id,
+        client_name, client_email, process, scraper_job_id,
+    )
 
 
 async def _send_portal_fetch_email(to_email: str, client_name: str, source: str, status: str, docs_count: int = 0, attachments: list = None):
@@ -884,66 +619,9 @@ async def run_check_scraper_status():
         }
 
 
-async def run_fetch_financas_documents(data: dict, background_tasks: BackgroundTasks, client_data: dict):
-    """
-    Obtém documentos do Portal das Finanças (IRS, Nota de Liquidação).
-
-    SEGURANÇA: As credenciais (NIF + Password) NUNCA são guardadas na BD.
-    São usadas apenas em memória para invocar o scraper e descartadas de imediato.
-
-    Body:
-    - nif: NIF do cliente (obrigatório, 9 dígitos)
-    - password: Password do Portal das Finanças (obrigatório)
-
-    Fluxo (ASSÍNCRONO com BackgroundTasks):
-    1. Valida credenciais e responde IMEDIATAMENTE com HTTP 200 {status: "processing"}
-    2. Em background: envia email de início → invoca scraper → anexa docs → notifica
-    3. O cliente consulta o estado via polling ou WebSocket
-
-    Isto resolve CORS/502 Bad Gateway causado pelo timeout do Render (30s)
-    quando o scraper demora mais de 1 minuto a executar.
-
-    DEV MODE: Se ENVIRONMENT != 'production', retorna mock de sucesso sem invocar Playwright.
-    """
-    # DEV MODE: Mock do scraper — SÓ PRODUÇÃO lança o browser
-    # REGRA ABSOLUTA: Se ENVIRONMENT != 'production', o Chromium NÃO lança.
-    if os.environ.get('ENVIRONMENT') != 'production':
-        logger.info("[PORTAL] MOCK DEV: fetch-financas desativado em DEV para poupar RAM.")
-        return {
-            "success": True,
-            "message": "MOCK DEV: Acesso ao Portal das Finanças desativado em DEV para poupar RAM. Funciona apenas em ENVIRONMENT=production.",
-            "documents_count": 0,
-            "dev_mode": True,
-        }
-
-    process = client_data["process"]
-    process_id = process["id"]
-    client_name = process.get("client_name", "Cliente")
-    client_email = process.get("client_email", "")
-
-    nif = data.get("nif", "").strip()
-    password = data.get("password", "")
-
-    # Validação básica
-    if not nif or len(nif) != 9 or not nif.isdigit():
-        raise HTTPException(status_code=400, detail="NIF inválido. Deve conter 9 dígitos.")
-    if not password:
-        raise HTTPException(status_code=400, detail="A password é obrigatória.")
-
-    # ── Registar estado inicial do scraper na BD ──
-    scraper_job_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    await db.portal_scraper_jobs.insert_one({
-        "id": scraper_job_id,
-        "process_id": process_id,
-        "source": "financas",
-        "status": "processing",
-        "created_at": now,
-        "updated_at": now,
-    })
-
-    # ── Passar apenas campos necessários do processo (evitar reter dados grandes em memória) ──
-    process_minimal = {
+def _processo_minimo(process: dict) -> dict:
+    """Só os campos que a notificação da equipa precisa (evita reter o documento)."""
+    return {
         "id": process.get("id"),
         "client_name": process.get("client_name", ""),
         "process_number": process.get("process_number", ""),
@@ -955,203 +633,169 @@ async def run_fetch_financas_documents(data: dict, background_tasks: BackgroundT
         "assigned_parceiro_id": process.get("assigned_parceiro_id"),
     }
 
-    # ── Agendar execução pesada em BackgroundTask ──
-    background_tasks.add_task(
-        _run_financas_background,
-        nif=nif,
-        password=password,
-        process_id=process_id,
-        client_name=client_name,
-        client_email=client_email,
-        process=process_minimal,
-        scraper_job_id=scraper_job_id,
-    )
 
-    # ── Responder IMEDIATAMENTE com HTTP 200 ──
-    logger.info(f"[PORTAL] Fetch Finanças agendado em background para processo {process_id}")
+async def _iniciar_recolha(
+    fonte: FonteGovernamental,
+    corpo_background,
+    data: dict,
+    chave_do_identificador: str,
+    tamanho_do_identificador: int,
+    background_tasks: BackgroundTasks,
+    client_data: dict,
+):
+    """Valida o pedido, regista o job e agenda a recolha. Responde logo.
+
+    SEGURANÇA: as credenciais NUNCA são guardadas na BD. Passam em memória para
+    a tarefa de fundo e são descartadas.
+
+    Há UM job activo por processo: o código MFA vive numa chave por processo e
+    um segundo login em paralelo faria o cliente receber outro SMS e o código
+    que escreveu servir a execução errada. Um pedido repetido para a MESMA fonte
+    devolve o job em curso (o ecrã liga-se a ele); para outra fonte é um 409.
+    """
+    # Só PRODUÇÃO lança o browser. Em dev o scraper é simulado.
+    if os.environ.get('ENVIRONMENT') != 'production':
+        logger.info("[PORTAL] MOCK DEV: fetch-%s desativado em DEV para poupar RAM.", fonte.chave)
+        return {
+            "success": True,
+            "message": (
+                f"MOCK DEV: Acesso ao {fonte.nome} desativado em DEV para poupar RAM. "
+                "Funciona apenas em ENVIRONMENT=production."
+            ),
+            "documents_count": 0,
+            "dev_mode": True,
+        }
+
+    process = client_data["process"]
+    process_id = process["id"]
+    identificador = (data.get(chave_do_identificador) or "").strip()
+    password = data.get("password") or ""
+
+    if (
+        not identificador
+        or len(identificador) != tamanho_do_identificador
+        or not identificador.isdigit()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{fonte.nome_do_identificador} inválido. Deve conter {tamanho_do_identificador} dígitos.",
+        )
+    if not password:
+        raise HTTPException(status_code=400, detail="A password é obrigatória.")
+
+    activo = await job_activo_do_processo(process_id)
+    if activo:
+        if activo.get("source") == fonte.chave:
+            logger.info("[PORTAL] Recolha %s já em curso para o processo %s — a reutilizar o job.", fonte.nome, process_id)
+            return JSONResponse(content={
+                "status": "processing",
+                "message": "Já existe uma obtenção em curso. A acompanhar o seu progresso.",
+                "scraper_job_id": activo["id"],
+                "process_id": process_id,
+                "already_running": True,
+            })
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe uma obtenção de documentos em curso. Aguarde que termine antes de iniciar outra.",
+        )
+
+    scraper_job_id = await criar_job(process_id, fonte.chave)
+    background_tasks.add_task(
+        corpo_background,
+        **{
+            chave_do_identificador: identificador,
+            "password": password,
+            "process_id": process_id,
+            "client_name": process.get("client_name", "Cliente"),
+            "client_email": process.get("client_email", ""),
+            "process": _processo_minimo(process),
+            "scraper_job_id": scraper_job_id,
+        },
+    )
+    logger.info("[PORTAL] Fetch %s agendado em background para o processo %s", fonte.nome, process_id)
     return JSONResponse(content={
         "status": "processing",
         "message": "A obter documentos em background. Será notificado quando estiverem prontos.",
         "scraper_job_id": scraper_job_id,
         "process_id": process_id,
     })
+
+
+async def run_fetch_financas_documents(data: dict, background_tasks: BackgroundTasks, client_data: dict):
+    """Obtém documentos do Portal das Finanças (IRS, Nota de Liquidação).
+
+    Body: `nif` (9 dígitos) e `password`. Responde logo (`processing`); o cliente
+    acompanha por polling/WebSocket. Ver `_iniciar_recolha`.
+    """
+    return await _iniciar_recolha(
+        FINANCAS, _run_financas_background, data, "nif", 9, background_tasks, client_data
+    )
 
 
 async def run_fetch_seguranca_social_documents(data: dict, background_tasks: BackgroundTasks, client_data: dict):
+    """Obtém documentos da Segurança Social.
+
+    Body: `niss` (11 dígitos) e `password`. Responde logo (`processing`); o
+    cliente acompanha por polling/WebSocket. Ver `_iniciar_recolha`.
     """
-    Obtém documentos da Segurança Social.
-
-    SEGURANÇA: As credenciais (NISS + Password) NUNCA são guardadas na BD.
-    São usadas apenas em memória para invocar o scraper e descartadas de imediato.
-
-    Body:
-    - niss: NISS do cliente (obrigatório, 11 dígitos)
-    - password: Password da Segurança Social (obrigatório)
-
-    Fluxo (ASSÍNCRONO com BackgroundTasks):
-    1. Valida credenciais e responde IMEDIATAMENTE com HTTP 200 {status: "processing"}
-    2. Em background: envia email de início → invoca scraper → anexa docs → notifica
-    3. O cliente consulta o estado via polling ou WebSocket
-
-    Isto resolve CORS/502 Bad Gateway causado pelo timeout do Render (30s)
-    quando o scraper demora mais de 1 minuto a executar.
-
-    DEV MODE: Se ENVIRONMENT != 'production', retorna mock de sucesso sem invocar Playwright.
-    """
-    # DEV MODE: Mock do scraper — SÓ PRODUÇÃO lança o browser
-    # REGRA ABSOLUTA: Se ENVIRONMENT != 'production', o Chromium NÃO lança.
-    if os.environ.get('ENVIRONMENT') != 'production':
-        logger.info("[PORTAL] MOCK DEV: fetch-seguranca-social desativado em DEV para poupar RAM.")
-        return {
-            "success": True,
-            "message": "MOCK DEV: Acesso à Segurança Social desativado em DEV para poupar RAM. Funciona apenas em ENVIRONMENT=production.",
-            "documents_count": 0,
-            "dev_mode": True,
-        }
-
-    process = client_data["process"]
-    process_id = process["id"]
-    client_name = process.get("client_name", "Cliente")
-    client_email = process.get("client_email", "")
-
-    niss = data.get("niss", "").strip()
-    password = data.get("password", "")
-
-    # Validação básica
-    if not niss or len(niss) != 11 or not niss.isdigit():
-        raise HTTPException(status_code=400, detail="NISS inválido. Deve conter 11 dígitos.")
-    if not password:
-        raise HTTPException(status_code=400, detail="A password é obrigatória.")
-
-    # ── Registar estado inicial do scraper na BD ──
-    scraper_job_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    await db.portal_scraper_jobs.insert_one({
-        "id": scraper_job_id,
-        "process_id": process_id,
-        "source": "seguranca_social",
-        "status": "processing",
-        "created_at": now,
-        "updated_at": now,
-    })
-
-    # ── Passar apenas campos necessários do processo (evitar reter dados grandes em memória) ──
-    process_minimal = {
-        "id": process.get("id"),
-        "client_name": process.get("client_name", ""),
-        "process_number": process.get("process_number", ""),
-        "assigned_consultor_ids": process.get("assigned_consultor_ids"),
-        "assigned_consultor_id": process.get("assigned_consultor_id"),
-        "assigned_mediador_ids": process.get("assigned_mediador_ids"),
-        "assigned_mediador_id": process.get("assigned_mediador_id"),
-        "assigned_indexacao_id": process.get("assigned_indexacao_id"),
-        "assigned_parceiro_id": process.get("assigned_parceiro_id"),
-    }
-
-    # ── Agendar execução pesada em BackgroundTask ──
-    background_tasks.add_task(
-        _run_seguranca_social_background,
-        niss=niss,
-        password=password,
-        process_id=process_id,
-        client_name=client_name,
-        client_email=client_email,
-        process=process_minimal,
-        scraper_job_id=scraper_job_id,
+    return await _iniciar_recolha(
+        SEGURANCA_SOCIAL, _run_seguranca_social_background, data, "niss", 11, background_tasks, client_data
     )
-
-    # ── Responder IMEDIATAMENTE com HTTP 200 ──
-    logger.info(f"[PORTAL] Fetch Seg. Social agendado em background para processo {process_id}")
-    return JSONResponse(content={
-        "status": "processing",
-        "message": "A obter documentos em background. Será notificado quando estiverem prontos.",
-        "scraper_job_id": scraper_job_id,
-        "process_id": process_id,
-    })
 
 
 async def run_submit_mfa_code(data: dict, client_data: dict):
     """
     Submete o código MFA recebido por SMS para retomar o scraper.
 
-    Quando a Segurança Social pede verificação em 2 passos (código SMS),
-    o scraper pausa e coloca o job em estado "awaiting_mfa". O frontend
-    mostra um input ao cliente, e ao submeter, este endpoint guarda o
-    código no Redis (TTL 300s) para o scraper o consumir.
+    Quando o portal pede verificação em 2 passos, o scraper pausa e coloca o
+    job em `awaiting_mfa`. O ecrã mostra o campo e, ao submeter, este endpoint
+    guarda o código (Redis, TTL 300 s; MongoDB como recurso) para o scraper o
+    consumir.
 
-    Body:
-    - process_id: ID do processo (obrigatório)
-    - mfa_code: Código de verificação SMS (obrigatório, 4-8 dígitos)
-
-    Fluxo:
-    1. Scraper detecta MFA → job status = "awaiting_mfa"
-    2. Frontend faz polling → vê "awaiting_mfa" → mostra input
-    3. Cliente submete código → POST /submit-mfa
-    4. Código guardado no Redis (mfa_code:{process_id}, TTL 300s)
-    5. Scraper lê código do Redis → preenche no browser → continua
+    Body: `process_id` (opcional, tem de ser o do token) e `mfa_code` (4-8 dígitos).
     """
     process = client_data["process"]
     process_id = process["id"]
 
-    # Validar que o process_id no body corresponde ao do token JWT
-    body_process_id = data.get("process_id", "").strip()
+    body_process_id = (data.get("process_id") or "").strip()
     if body_process_id and body_process_id != process_id:
         raise HTTPException(status_code=403, detail="process_id não corresponde ao token.")
 
-    mfa_code = data.get("mfa_code", "").strip()
+    mfa_code = (data.get("mfa_code") or "").strip()
     if not mfa_code:
         raise HTTPException(status_code=400, detail="Código MFA é obrigatório.")
-
-    # Validar formato: 4 a 8 dígitos (códigos SMS tipicamente têm este tamanho)
     if not mfa_code.isdigit() or len(mfa_code) < 4 or len(mfa_code) > 8:
-        raise HTTPException(
-            status_code=400,
-            detail="Código MFA inválido. Deve conter entre 4 e 8 dígitos."
-        )
+        raise HTTPException(status_code=400, detail="Código MFA inválido. Deve conter entre 4 e 8 dígitos.")
 
-    # Verificar que existe um job em estado "awaiting_mfa" para este processo
+    await encerrar_jobs_mortos(process_id)
     job = await db.portal_scraper_jobs.find_one(
-        {"process_id": process_id, "status": "awaiting_mfa"},
-        {"_id": 0}
+        {"process_id": process_id, "status": "awaiting_mfa"}, {"_id": 0, "id": 1}
     )
     if not job:
-        # Pode ter expirado ou o scraper ainda não pediu MFA
-        existing = await db.portal_scraper_jobs.find_one(
-            {"process_id": process_id},
-            {"_id": 0, "status": 1}
+        # O MAIS RECENTE, não «um qualquer»: o `find_one` sem ordenação devolvia
+        # o job mais antigo do processo, e a resposta descrevia uma recolha de
+        # semanas atrás.
+        ultimo = await db.portal_scraper_jobs.find_one(
+            {"process_id": process_id}, {"_id": 0, "status": 1}, sort=[("created_at", -1)]
         )
-        if existing:
-            if existing.get("status") in ("success", "error"):
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"O processo já terminou com estado '{existing['status']}'. Não é necessário código MFA."
-                )
-            elif existing.get("status") == "processing":
-                raise HTTPException(
-                    status_code=409,
-                    detail="O scraper ainda está a processar o login. Aguarde que o pedido de MFA apareça."
-                )
-        else:
+        if not ultimo:
+            raise HTTPException(status_code=404, detail="Nenhum job de scraper encontrado para este processo.")
+        if ultimo.get("status") == "processing":
             raise HTTPException(
-                status_code=404,
-                detail="Nenhum job de scraper encontrado para este processo."
+                status_code=409,
+                detail="O scraper ainda está a processar o login. Aguarde que o pedido de MFA apareça.",
             )
-
-    # Guardar código MFA no Redis (TTL 300s = 5 minutos)
-    from services.mfa_cache import set_mfa_code
-    success = await set_mfa_code(process_id, mfa_code, ttl=300)
-
-    if not success:
         raise HTTPException(
-            status_code=500,
-            detail="Erro ao guardar o código MFA. Tente novamente."
+            status_code=409,
+            detail="Já não há nenhum código à espera (a obtenção terminou ou expirou). Inicie de novo.",
         )
 
-    logger.info(
-        f"[PORTAL] Código MFA submetido para processo {process_id} "
-        f"({len(mfa_code)} dígitos)"
-    )
+    from services.mfa_cache import set_mfa_code
 
+    if not await set_mfa_code(process_id, mfa_code, ttl=300):
+        raise HTTPException(status_code=500, detail="Erro ao guardar o código MFA. Tente novamente.")
+
+    logger.info("[PORTAL] Código MFA submetido para o processo %s (%d dígitos)", process_id, len(mfa_code))
     return JSONResponse(content={
         "success": True,
         "message": "Código submetido com sucesso. O scraper vai utilizá-lo automaticamente.",
@@ -1159,27 +803,16 @@ async def run_submit_mfa_code(data: dict, client_data: dict):
     })
 
 
-async def run_get_scraper_job_status(job_id: str):
-    """
-    Retorna o estado de um job de scraper (para polling pelo frontend).
+async def run_get_scraper_job_status(job_id: str, client_data: dict):
+    """Estado de um job de recolha, para o polling do ecrã do cliente.
 
-    Após submeter fetch-financas ou fetch-seguranca-social, o frontend
-    pode fazer polling a este endpoint para saber quando os documentos
-    estão prontos.
+    Só o dono do job o lê (404 igual para «não existe» e «não é teu») e só
+    devolve os campos de `CAMPOS_PUBLICOS_DO_JOB`: este endpoint não tinha
+    autenticação e devolvia o documento inteiro, `mfa_code` incluído.
 
-    Returns:
-    - status: "processing" | "success" | "error"
-    - documents_count: número de documentos obtidos (se sucesso)
-    - error_type: tipo de erro (se erro)
-    - message: mensagem de estado
+    Estados: `processing` | `awaiting_mfa` | `success` | `error`.
     """
-    job = await db.portal_scraper_jobs.find_one(
-        {"id": job_id},
-        {"_id": 0}
-    )
+    job = await ler_job_do_processo(job_id, client_data["process"]["id"])
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado.")
-
     return job
-
-

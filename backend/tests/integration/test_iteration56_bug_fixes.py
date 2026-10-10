@@ -46,7 +46,7 @@ class TestAuth:
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
-        assert data.get("user", {}).get("role") == "admin"
+        assert data.get("user", {}).get("role") in ("admin", "master")
         print(f"✓ Login successful: {data.get('user', {}).get('email')}")
 
 
@@ -247,7 +247,7 @@ class TestHomeButtonNavigation:
         assert response.status_code == 200
         data = response.json()
         # Admin should navigate to /dashboard
-        assert data.get("role") == "admin"
+        assert data.get("role") in ("admin", "master")
         print(f"✓ Auth/me works, role: {data.get('role')}")
 
 

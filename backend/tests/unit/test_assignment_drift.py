@@ -885,6 +885,12 @@ class TestLimparAIndexacaoEAUltimaOrdem:
         for condicoes in (repr(listagem), repr(kanban)):
             assert "assigned_consultor_id" not in condicoes
             assert "assigned_mediador_id" not in condicoes
-            # Contraprova: o carimbo próprio ESTÁ lá. Sem isto, um
-            # construtor que devolvesse vazio passaria nas duas de cima.
-            assert "assigned_indexacao_id" in condicoes
+        # Desde o Bloco 3 a Indexação vê o âmbito geral nas DUAS superfícies
+        # (sem recorte por pessoa), pelo que a afirmação de cima é verdadeira
+        # por construção. A contraprova passa a ser o outro lado: um papel que
+        # AINDA é recortado por `assigned_consultor_id` — se o construtor
+        # deixasse de recortar o que quer que fosse, isto denunciava-o.
+        assert listagem == []
+        assert "assigned_consultor_id" in repr(
+            build_role_visibility_conditions(utilizador, UserRole.CONSULTOR)
+        )

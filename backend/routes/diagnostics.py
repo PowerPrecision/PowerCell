@@ -34,7 +34,7 @@ router = APIRouter(prefix="/diagnostics", tags=["Diagnósticos"])
 
 @router.get("", response_model=SystemDiagnostics)
 async def get_system_diagnostics(
-    _current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    _current_user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Obtém diagnóstico completo do sistema.
@@ -47,7 +47,7 @@ async def get_system_diagnostics(
 @router.get("/service/{service_name}")
 async def get_service_diagnostics(
     service_name: str,
-    _current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    _current_user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Obtém diagnóstico detalhado de um serviço específico.
@@ -70,7 +70,7 @@ async def quick_system_check(
 
 @router.get("/encryption")
 async def check_encryption_status(
-    _current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    _current_user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Verifica o estado do serviço de encriptação.
@@ -82,7 +82,7 @@ async def check_encryption_status(
 
 @router.get("/pii-compliance")
 async def check_pii_compliance(
-    _current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    _current_user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Verifica a conformidade PII (Personally Identifiable Information) com a OpenAI.
@@ -107,7 +107,7 @@ async def check_pii_compliance(
 
 @router.post("/pii-compliance/test-api")
 async def test_openai_api_privacy(
-    _current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    _current_user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Testa a conectividade com a API OpenAI verificando configurações de privacidade.
@@ -122,7 +122,7 @@ async def test_openai_api_privacy(
 
 @router.post("/migrate-ttl-fields", response_model=TTLMigrationResponse)
 async def migrate_ttl_datetime_fields(
-    _current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    _current_user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Migra documentos existentes para incluir campos datetime nativos (*_dt).
@@ -142,7 +142,7 @@ async def migrate_ttl_datetime_fields(
 
 @router.get("/ttl-status")
 async def get_ttl_index_status(
-    _current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    _current_user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Retorna o estado dos índices TTL e contagem de documentos migrados/pendentes.

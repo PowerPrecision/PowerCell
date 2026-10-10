@@ -255,11 +255,19 @@ class TestQuemReconcilia:
 
         assert pode_ver_desconhecidas(papel) is False
 
-    @pytest.mark.parametrize("papel", ["admin", "ceo", _UR.ADMIN, _UR.CEO])
+    @pytest.mark.parametrize("papel", ["master", _UR.MASTER])
     def test_quem_reconcilia(self, papel):
         from services.workflow_phases import pode_ver_desconhecidas
 
         assert pode_ver_desconhecidas(papel) is True
+
+    @pytest.mark.parametrize("papel", ["admin", "ceo", _UR.ADMIN, _UR.CEO])
+    def test_admin_e_ceo_sao_locais_e_nao_reconciliam(self, papel):
+        """Adenda de RBAC: um cartão sem fase conhecida pode ser de qualquer
+        empresa; só o Master (global) o arruma."""
+        from services.workflow_phases import pode_ver_desconhecidas
+
+        assert pode_ver_desconhecidas(papel) is False
 
     @pytest.mark.parametrize("papel", ["diretor", "consultor", "intermediario",
                                        "indexacao", "administrativo",
@@ -273,7 +281,8 @@ class TestQuemReconcilia:
         """`str(UserRole.ADMIN)` devolve `'UserRole.ADMIN'`, não `'admin'`."""
         from services.workflow_phases import pode_ver_desconhecidas
 
-        assert pode_ver_desconhecidas("UserRoleEnum.ADMIN") is True
+        assert pode_ver_desconhecidas("UserRoleEnum.MASTER") is True
+        assert pode_ver_desconhecidas("UserRoleEnum.ADMIN") is False
         assert pode_ver_desconhecidas("UserRoleEnum.CONSULTOR") is False
 
 

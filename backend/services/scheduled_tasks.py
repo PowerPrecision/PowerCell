@@ -1306,109 +1306,126 @@ class ScheduledTasksService:
     
     async def send_weekly_ceo_report(self, *, forcado: bool = False) -> bool:
         """
-        Envia o relatório semanal de produtividade da equipa ao CEO.
+        Envia o relatório semanal de produtividade — UM POR REDE.
 
-        **Segundas-feiras, a partir das 06:00 UTC, UMA vez por semana.**
-        A agenda vive em `services/relatorio_semanal_agenda.py` — ver lá o
-        detalhe. Até ao Lote 2 essa frase estava só nesta docstring: a
-        guarda real era `if today.weekday() != 0`, o `run_all_tasks` corre
-        de hora a hora e não havia marca de "já enviei" — pelo que o
-        relatório saía **24 vezes** à segunda-feira, à hora a que o
-        Processador tivesse arrancado.
+        **Segundas-feiras, a partir das 06:00 UTC, UMA vez por semana e por
+        destino.** A agenda vive em `services/relatorio_semanal_agenda.py`.
+
+        **Âmbito (adenda de RBAC, Out 2026):** cada rede recebe o SEU
+        relatório, enviado à gestão (CEO e Admin) dessa rede, e nunca mais o
+        consolidado a todos. O consolidado existe e vai só para os
+        utilizadores Master. Quem decide «a quem vai cada relatório» é
+        `services/relatorio_semanal_destinos.py` — ver lá o porquê.
 
         `forcado=True` (botão «Forçar Execução» do painel) salta a janela
-        de dia/hora mas **não** a marca da semana.
-
-        Âmbito CONSOLIDADO por decisão de produto — é a única excepção
-        deliberada ao isolamento por rede (D-7, agora fechada).
+        de dia/hora mas **não** a marca da semana de cada destino.
 
         Returns:
-            True se o email foi enviado, False caso contrário
+            True se pelo menos um email foi enviado, False caso contrário
         """
         from services.relatorio_semanal_agenda import (
             deve_enviar_relatorio_semanal,
-            destinatarios_configurados,
             marcar_enviado,
         )
+        from services.relatorio_semanal_destinos import montar_destinos
+        from services.executive_report import semana_de
 
-        CHAVE_DA_AGENDA = "relatorio_semanal_ceo"
         today = datetime.now(timezone.utc)
 
-        if not await deve_enviar_relatorio_semanal(
-            CHAVE_DA_AGENDA, momento=today, forcado=forcado
-        ):
-            return False
-
-        logger.info("[CEO Report] A gerar relatório semanal de produtividade para o CEO...")
-
         try:
-            # 1. Gerar dados de agregação
-            from services.analytics_service import generate_weekly_team_report, format_report_html
-
-            report = await generate_weekly_team_report(self.db)
-
-            # 2. Formatar HTML
-            html_content = format_report_html(report)
-
-            # 3. Determinar destinatário(s)
-            recipient_emails: List[str] = destinatarios_configurados()
-
-            if not recipient_emails:
-                # Fallback: buscar utilizadores com role ceo na base de dados
-                from services.role_query import deep_role_in_filter
-                ceo_users = await self.db.users.find(
-                    {"$and": [deep_role_in_filter(["ceo"]), {"is_active": {"$ne": False}}]},
-                    {"_id": 0, "email": 1, "name": 1}
-                ).to_list(10)
-                recipient_emails = [u["email"] for u in ceo_users if u.get("email")]
-
-            if not recipient_emails:
-                logger.warning("[CEO Report] Nenhum destinatário encontrado — CEO_EMAIL não configurado e sem utilizadores CEO")
-                return False
-
-            # 4. Resumo em texto simples (fallback)
-            summary = report.get("summary", {})
-            period_start = datetime.fromisoformat(report["period_start"])
-            period_end = datetime.fromisoformat(report["period_end"])
-
-            plain_body = (
-                f"Relatório Semanal de Produtividade\n"
-                f"Período: {period_start.strftime('%d/%m/%Y')} - {period_end.strftime('%d/%m/%Y')}\n\n"
-                f"Processos Movidos: {summary.get('total_processes_moved', 0)}\n"
-                f"Tarefas Concluídas: {summary.get('total_tasks_completed', 0)}\n"
-                f"Tarefas Atrasadas: {summary.get('total_tasks_overdue', 0)}\n"
-                f"Tarefas Pendentes: {summary.get('total_tasks_pending', 0)}\n"
-                f"Utilizadores: {summary.get('total_users', 0)}\n"
-            )
-
-            # 5. Enviar e-mail
-            from services.email_service import send_email
-
-            result = await send_email(
-                account_name="precision",
-                to_emails=recipient_emails,
-                subject=f"Relatório Semanal de Produtividade - {period_start.strftime('%d/%m')} a {period_end.strftime('%d/%m/%Y')}",
-                body=plain_body,
-                body_html=html_content,
-                force_system=True,
-                system_purpose="CEO_REPORT",
-            )
-
-            if result.get("success"):
-                # A marca é gravada DEPOIS do envio confirmado: marcar antes
-                # perdia a semana inteira se o SMTP falhasse.
-                await marcar_enviado(CHAVE_DA_AGENDA, today)
-                logger.info(
-                    f"[CEO Report] Relatório enviado para {len(recipient_emails)} destinatário(s)"
-                )
-                return True
-            else:
-                logger.error(f"[CEO Report] Falha ao enviar: {result.get('error')}")
-                return False
-
+            destinos = await montar_destinos(self.db)
         except Exception as e:
-            logger.error(f"[CEO Report] Erro ao gerar/enviar relatório: {e}")
+            logger.error(f"[CEO Report] Erro a determinar os destinos: {e}")
             return False
+
+        if not destinos:
+            logger.warning(
+                "[CEO Report] Nenhum destino: nenhuma rede tem CEO/Admin com email "
+                "e não há utilizador Master."
+            )
+            return False
+
+        # A semana ISO ANTERIOR, fechada (segunda a domingo): era «os
+        # últimos 7 dias até agora», que à segunda-feira apanhava a manhã
+        # de segunda e fazia o relatório deslizar de dia a dia.
+        segunda, domingo = semana_de(today.date() - timedelta(days=7))
+
+        enviados = 0
+        for destino in destinos:
+            if not await deve_enviar_relatorio_semanal(
+                destino.chave, momento=today, forcado=forcado
+            ):
+                continue
+            try:
+                if await self._enviar_relatorio_semanal_de(destino, segunda, domingo):
+                    # A marca é gravada DEPOIS do envio confirmado: marcar
+                    # antes perdia a semana inteira se o SMTP falhasse. E é
+                    # por destino: a falha de uma rede não repete as outras.
+                    await marcar_enviado(destino.chave, today)
+                    enviados += 1
+            except Exception as e:
+                logger.error(
+                    f"[CEO Report] Erro a gerar/enviar o relatório de {destino.rotulo}: {e}"
+                )
+
+        return enviados > 0
+
+    async def _enviar_relatorio_semanal_de(self, destino, segunda, domingo) -> bool:
+        """Gera e envia o relatório de UM destino (uma rede, ou o global)."""
+        from services.analytics_service import generate_weekly_team_report, format_report_html
+        from services.email_service import send_email
+
+        emails = destino.emails
+        if not emails:
+            return False
+
+        logger.info(
+            f"[CEO Report] A gerar o relatório semanal de {destino.rotulo} "
+            f"para {len(emails)} destinatário(s)..."
+        )
+        report = await generate_weekly_team_report(
+            self.db,
+            period_start=datetime.combine(segunda, datetime.min.time(), tzinfo=timezone.utc),
+            period_end=datetime.combine(domingo, datetime.min.time(), tzinfo=timezone.utc),
+            scope=destino.scope,
+        )
+
+        html_content = format_report_html(report)
+        summary = report.get("summary", {})
+        period_start = datetime.fromisoformat(report["period_start"])
+        period_end = datetime.fromisoformat(report["period_end"])
+
+        plain_body = (
+            f"Relatório Semanal de Produtividade — {destino.rotulo}\n"
+            f"Período: {period_start.strftime('%d/%m/%Y')} - {period_end.strftime('%d/%m/%Y')}\n\n"
+            f"Processos Movidos: {summary.get('total_processes_moved', 0)}\n"
+            f"Tarefas Concluídas: {summary.get('total_tasks_completed', 0)}\n"
+            f"Tarefas Atrasadas: {summary.get('total_tasks_overdue', 0)}\n"
+            f"Tarefas Pendentes: {summary.get('total_tasks_pending', 0)}\n"
+            f"Utilizadores: {summary.get('total_users', 0)}\n"
+        )
+
+        result = await send_email(
+            account_name="precision",
+            to_emails=emails,
+            subject=(
+                f"Relatório Semanal de Produtividade - {destino.rotulo} - "
+                f"{period_start.strftime('%d/%m')} a {period_end.strftime('%d/%m/%Y')}"
+            ),
+            body=plain_body,
+            body_html=html_content,
+            force_system=True,
+            system_purpose="CEO_REPORT",
+        )
+
+        if result.get("success"):
+            logger.info(
+                f"[CEO Report] Relatório de {destino.rotulo} enviado para "
+                f"{len(emails)} destinatário(s)"
+            )
+            return True
+        logger.error(f"[CEO Report] Falha ao enviar {destino.rotulo}: {result.get('error')}")
+        return False
 
     def _get_weekly_insight(self, total: int, success_rate: float, doc_variation: float) -> str:
         """Gera insight para o email."""

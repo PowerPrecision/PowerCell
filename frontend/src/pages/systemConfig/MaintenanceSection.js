@@ -683,10 +683,10 @@ export default function MaintenanceSection({ token, user }) {
             precisamente quem vive sozinho na raiz documental. Exclusivo da
             Administração — a rota entra por `require_roles([ADMIN])` e esta
             escrita move a fronteira de posse de documentos. */}
-        {hasRole(user, "admin") && <S3RelinkPanel />}
+        {hasRole(user, "master") && <S3RelinkPanel />}
 
         {/* ═══ Sincronização Produção → Desenvolvimento (RGPD) ═══ */}
-        {isDevEnvironment && hasRole(user, "admin") && (
+        {isDevEnvironment && hasRole(user, "master") && (
           <div className="border rounded-lg p-4 border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/30">
             <div className="flex items-center justify-between mb-3">
               <div>

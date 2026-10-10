@@ -88,6 +88,17 @@ def _get_rate_limit_key(request: Request) -> str:
                 return f"user:{user_id}"
         except Exception:
             pass
+        # Portal do Parceiro: família de tokens própria (outro segredo), logo
+        # a decodificação acima falha e caía no IP — que o cliente falsifica
+        # (D-4). Quando a assinatura é a do parceiro, conta-se por parceiro.
+        try:
+            from services.partner_security import chave_de_limite_do_parceiro
+
+            chave = chave_de_limite_do_parceiro(auth_header[7:])
+            if chave:
+                return chave
+        except Exception:
+            pass
     
     # Fallback: usar IP para utilizadores não autenticados
     client_ip = _get_client_ip(request)

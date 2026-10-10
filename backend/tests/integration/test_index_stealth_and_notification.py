@@ -155,8 +155,10 @@ class TestPostIndexingAutoTasks:
         await db.tasks.delete_many({"assigned_to": {"$in": [consultor_id, mediador_id]}})
 
     @pytest.mark.asyncio
-    async def test_creates_two_tasks_per_newly_assigned_user(self, qa_process, qa_users):
-        company_id, consultor_id, mediador_id = qa_users
+    async def test_a_dupla_atribui_mas_ja_nao_cria_tarefas(self, qa_process, qa_users):
+        """Bloco 3 (ponto 12): as tarefas de arranque deixaram de nascer na
+        dupla auto-atribuição — são os MODELOS da fase (`phase_automation`)."""
+        company_id, _, _ = qa_users
         with patch(
             "services.notification_service.send_notification_with_preference_check",
             new_callable=AsyncMock,
@@ -170,9 +172,33 @@ class TestPostIndexingAutoTasks:
                 indexador_user_id="idx-qa",
                 actor_role="indexacao",
             )
+        assert result["consultant_id"] and result["mediador_id"]
+        assert await db.tasks.count_documents({"process_id": qa_process}) == 0
 
-        assigned_consultant_id = result["consultant_id"]
-        assigned_mediador_id = result["mediador_id"]
+    @pytest.mark.asyncio
+    async def test_creates_two_tasks_per_assigned_user(self, qa_process, qa_users):
+        """A saída da Index sem configuração faz o que sempre fez: duas
+        tarefas de arranque para o consultor e duas para o intermediário."""
+        from services.phase_automation import ORIGEM_INDEXACAO, ao_entrar_na_fase
+
+        company_id, consultor_id, mediador_id = qa_users
+        await db.processes.update_one(
+            {"id": qa_process}, {"$set": {"company_id": company_id}}
+        )
+        with patch(
+            "services.notification_service.send_notification_with_preference_check",
+            new_callable=AsyncMock,
+        ), patch(
+            "services.realtime_notifications.send_realtime_notification",
+            new_callable=AsyncMock,
+        ):
+            resultado = await ao_entrar_na_fase(
+                qa_process, "fase_documental", origem=ORIGEM_INDEXACAO,
+                actor={"id": "idx-qa", "role": "indexacao"},
+            )
+
+        assigned_consultant_id = resultado.atribuicao["consultant_id"]
+        assigned_mediador_id = resultado.atribuicao["mediador_id"]
 
         consultor_tasks = await db.tasks.find(
             {"process_id": qa_process, "assigned_to": [assigned_consultant_id]}, {"_id": 0}
@@ -195,13 +221,19 @@ class TestPostIndexingAutoTasks:
                 assert t["completed"] is False
 
     @pytest.mark.asyncio
-    async def test_no_tasks_created_when_already_assigned(self, qa_process, qa_users):
-        """Se consultor/mediador já estavam atribuídos, não há newly_assigned
-        e por isso nenhuma tarefa automática deve ser criada de novo."""
+    async def test_quem_ja_estava_atribuido_recebe_as_tarefas_sem_duplicar(self, qa_process, qa_users):
+        """Mudança de desenho (Bloco 3): as tarefas são da FASE e vão para quem
+        tem o papel — também o que já estava atribuído, que antes ficava sem
+        elas. Não há notificação de «novo processo» (ninguém foi atribuído
+        agora) e reentrar na fase não duplica nada."""
+        from services.phase_automation import ORIGEM_INDEXACAO, ao_entrar_na_fase
+
         company_id, consultor_id, mediador_id = qa_users
         await db.processes.update_one(
             {"id": qa_process},
-            {"$set": {"consultant_id": consultor_id, "mediador_id": mediador_id}},
+            {"$set": {"consultant_id": consultor_id, "mediador_id": mediador_id,
+                      "assigned_consultor_ids": [consultor_id],
+                      "assigned_mediador_ids": [mediador_id]}},
         )
         with patch(
             "services.notification_service.send_notification_with_preference_check",
@@ -210,12 +242,10 @@ class TestPostIndexingAutoTasks:
             "services.realtime_notifications.send_realtime_notification",
             new_callable=AsyncMock,
         ):
-            await dual_auto_assign_on_pre_registo_transition(
-                process_id=qa_process,
-                company_id=company_id,
-                indexador_user_id="idx-qa",
-                actor_role="indexacao",
-            )
+            for _ in range(2):
+                await ao_entrar_na_fase(
+                    qa_process, "fase_documental", origem=ORIGEM_INDEXACAO,
+                    actor={"id": "idx-qa", "role": "indexacao"},
+                )
         assert mock_email.await_count == 0
-        total_tasks = await db.tasks.count_documents({"process_id": qa_process})
-        assert total_tasks == 0
+        assert await db.tasks.count_documents({"process_id": qa_process}) == 4

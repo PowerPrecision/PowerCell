@@ -207,7 +207,7 @@ class TestCriacaoDeUtilizador:
              patch.object(bootstrap, "db", fake_async_db), \
              patch.object(email_service, "send_email", _envio_falso), \
              patch.object(admin_users, "_audit_log", _sem_efeito):
-            await admin_users.run_create_user(dados, {"id": "u-admin", "name": "Admin"})
+            await admin_users.run_create_user(dados, {"id": "u-admin", "name": "Admin", "role": "master", "effective_role": "master"})
 
         assert len(fake_async_db.users.docs) == 1
         assert len(fake_async_db.user_company_roles.docs) == 1
@@ -230,7 +230,7 @@ class TestCriacaoDeUtilizador:
 
         with patch.object(admin_users, "db", fake_async_db):
             with pytest.raises(HTTPException) as erro:
-                await admin_users.run_create_user(dados, {"id": "u-admin"})
+                await admin_users.run_create_user(dados, {"id": "u-admin", "role": "master", "effective_role": "master"})
 
         assert erro.value.status_code == 400
         assert fake_async_db.users.docs == []
@@ -244,7 +244,7 @@ class TestCriacaoDeUtilizador:
 
         with patch.object(admin_users, "db", fake_async_db), \
              patch.object(admin_users, "_audit_log", _sem_efeito):
-            await admin_users.run_create_user(dados, {"id": "u-admin"})
+            await admin_users.run_create_user(dados, {"id": "u-admin", "role": "master", "effective_role": "master"})
 
         assert len(fake_async_db.users.docs) == 1
         assert fake_async_db.user_company_roles.docs == []
@@ -271,7 +271,7 @@ class TestCriacaoDeUtilizador:
              patch.object(bootstrap, "db", fake_async_db), \
              patch.object(admin_users, "_audit_log", _sem_efeito):
             with pytest.raises(HTTPException) as erro:
-                await admin_users.run_create_user(dados, {"id": "u-admin"})
+                await admin_users.run_create_user(dados, {"id": "u-admin", "role": "master", "effective_role": "master"})
 
         assert erro.value.status_code == 500
         assert fake_async_db.users.docs == [], "a conta ficou órfã na base de dados"

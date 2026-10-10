@@ -18,7 +18,7 @@ async def run_get_task_details(task_id: str, user: dict):
     if not task:
         raise HTTPException(status_code=404, detail="Tarefa não encontrada")
 
-    if task.user_id != user.get("id") and user.get("role") not in ["admin", "ceo"]:
+    if task.user_id != user.get("id") and user.get("role") not in ["master", "admin", "ceo"]:
         raise HTTPException(status_code=403, detail="Acesso não autorizado a esta tarefa")
 
     return task
@@ -54,7 +54,7 @@ async def run_cancel_task(task_id: str, user: dict):
     if not task:
         raise HTTPException(status_code=404, detail="Tarefa não encontrada")
 
-    if task.user_id != user.get("id") and user.get("role") not in ["admin", "ceo"]:
+    if task.user_id != user.get("id") and user.get("role") not in ["master", "admin", "ceo"]:
         raise HTTPException(status_code=403, detail="Acesso não autorizado a esta tarefa")
 
     if task.status != TaskStatus.PENDING:
@@ -84,7 +84,7 @@ async def run_delete_task(task_id: str, user: dict):
     if not task:
         raise HTTPException(status_code=404, detail="Tarefa não encontrada")
 
-    if task.user_id != user.get("id") and user.get("role") not in ["admin", "ceo"]:
+    if task.user_id != user.get("id") and user.get("role") not in ["master", "admin", "ceo"]:
         raise HTTPException(status_code=403, detail="Acesso não autorizado a esta tarefa")
 
     if task.status in [TaskStatus.PENDING, TaskStatus.PROCESSING]:

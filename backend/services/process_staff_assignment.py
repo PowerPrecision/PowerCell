@@ -782,6 +782,8 @@ async def run_staff_assign_process(
     """Orquestra POST /assign: persist + cache + WS + emails."""
     from fastapi import HTTPException
 
+    from services.history import log_history
+    from services.process_sharing import sincronizar_parceiros_sem_falhar
     from services.websocket_manager import WSEventType
 
     process = await db.processes.find_one({"id": process_id})
@@ -814,6 +816,20 @@ async def run_staff_assign_process(
     # ANTES e o DEPOIS reais do documento — não sobre o que o construtor
     # da query julga ter mudado.
     equipa_depois = ids_atribuidos_do_processo(updated_process)
+
+    # PARTILHA — Via Rápida (D-25): atribuir a alguém de outra rede
+    # ABRE o processo a essa rede. Lê o documento JÁ GRAVADO em vez de
+    # qualquer diff: é o que a torna idempotente e o que impede os cinco
+    # escritores de atribuições de divergirem (a lição do Lote 5).
+    await sincronizar_parceiros_sem_falhar(
+        process_id,
+        por_ordem_de=user.get("id"),
+        registar_historico=lambda texto: log_history(
+            process_id=process_id, user=user, action=texto,
+            field="partilha", old_value="", new_value=texto,
+        ),
+    )
+
     removidos = equipa_antes - equipa_depois
     if removidos:
         await limpar_tarefas_orfas(process_id, removidos=removidos)
@@ -857,6 +873,8 @@ async def run_assign_me_to_process(
     """Orquestra POST /assign-me."""
     from fastapi import HTTPException
 
+    from services.process_sharing import sincronizar_parceiros_sem_falhar
+
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -868,6 +886,17 @@ async def run_assign_me_to_process(
         process_id, user, f"Atribuiu-se como {assignment_type}",
         f"assigned_{assignment_type}_ids", None, user["name"],
     )
+
+    # PARTILHA (D-25): o «atribuir-me» é um dos caminhos pelos quais
+    # alguém de outra rede entra num processo.
+    await sincronizar_parceiros_sem_falhar(
+        process_id,
+        por_ordem_de=user.get("id"),
+        registar_historico=lambda texto: log_history_fn(
+            process_id, user, texto, "partilha", None, texto,
+        ),
+    )
+
     return {
         "success": True,
         "message": f"Atribuído como {assignment_type}",

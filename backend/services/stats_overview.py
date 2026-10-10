@@ -139,7 +139,7 @@ async def run_get_stats(user: dict):
     stats["pending_tasks"] = pending_tasks_count
     
     # ── DEADLINES: depende do role ──
-    if role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+    if role in [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         # ISOLAMENTO (Dashboard, ponto 1) — era `{"completed": False}`, ou
         # seja os prazos abertos de TODAS as redes.
         #
@@ -192,7 +192,7 @@ async def run_get_stats(user: dict):
             })
     
     # ── USER STATS (Admin/CEO): executar em paralelo com deadlines ──
-    if role in [UserRole.ADMIN, UserRole.CEO]:
+    if role in [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]:
         from services.role_query import deep_role_filter, deep_role_in_filter
         from services.admin_users_scope import (
             build_users_scope_query,

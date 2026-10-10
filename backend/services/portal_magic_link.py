@@ -261,6 +261,14 @@ async def send_magic_link_to_client(
     magic_link = issued["magic_link"]
     short_id = issued["short_id"]
 
+    # Bloco 3 (ponto 21): enviar acesso ao Portal fica no histórico (sem o link).
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Enviou o link de acesso ao Portal ao cliente",
+        "portal_access", None, "email",
+    )
+
     # PACOTE 11 (Eixo 2) — logo da empresa no header do magic link.
     try:
         from services.email_branding import (

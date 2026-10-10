@@ -73,7 +73,7 @@ ERRO_VISITA_NAO_ENCONTRADA = "Visita não encontrada"
 #: módulo para o motivo de o `administrativo` estar aqui e não no
 #: conjunto do calendário.
 PAPEIS_QUE_VEEM_AS_VISITAS_DA_EQUIPA = frozenset({
-    UserRole.ADMIN,
+    UserRole.MASTER, UserRole.ADMIN,
     UserRole.CEO,
     UserRole.DIRETOR,
     UserRole.ADMINISTRATIVO,

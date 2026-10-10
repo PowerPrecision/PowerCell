@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from database import db
 from models.finance import DistributionModel, FinanceStatus
 from services.finance_helpers import _safe_float
+from services.finance_scope import exigir_empresa_no_ambito
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,8 @@ async def run_get_pool_distribution(
 
     Permissões: todos os roles de leitura financeira.
     """
+    await exigir_empresa_no_ambito(company_id, user=user)
+
     # --- Verificar se a empresa usa modelo global_pool ---
     config_doc = await db.finance_configs.find_one({"company_id": company_id})
     dist_model = config_doc.get("distribution_model", DistributionModel.INDIVIDUAL_SPLIT.value) if config_doc else DistributionModel.INDIVIDUAL_SPLIT.value
@@ -171,6 +174,8 @@ async def run_export_pool_distribution_csv(
     Permissões: apenas Admin e CEO.
     """
     # --- Reutilizar toda a lógica de cálculo do pool-distribution ---
+
+    await exigir_empresa_no_ambito(company_id, user=user)
 
     # 1. Verificar modelo de distribuição
     config_doc = await db.finance_configs.find_one({"company_id": company_id})

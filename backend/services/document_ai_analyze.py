@@ -686,6 +686,7 @@ async def run_organize_documents_after_analysis(
     *,
     documents: list[dict],
     create_folders: bool = True,
+    user: dict | None = None,
 ) -> dict[str, Any]:
     """Cria pastas standard e move ficheiros S3 conforme tipo IA."""
     process = await db.processes.find_one(
@@ -754,6 +755,14 @@ async def run_organize_documents_after_analysis(
                 results["errors"].append(
                     {"file": doc.get("file_name", "?"), "error": str(e)}
                 )
+
+    if user and results["organized"]:
+        from services.history import log_history
+
+        await log_history(
+            process_id, user, "Organizou documentos por pastas",
+            "documents", None, f"{len(results['organized'])} movido(s)",
+        )
 
     return {
         "success": True,
@@ -947,6 +956,14 @@ async def run_apply_ai_suggestions(
         f"Campos atualizados via IA para processo: {sanitize_for_log(process_id)} "
         f"(titular={target_titular})"
     )
+    # Bloco 3 (ponto 21): só os NOMES dos campos vão para o histórico — os
+    # valores são dados pessoais (NIF, IBAN…) e já foram encriptados acima.
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Aplicou sugestões da IA à ficha",
+        target_titular, None, ", ".join(sorted(update_data.keys())),
+    )
     return {
         "success": True,
         "updated_fields": len(update_data),
@@ -958,6 +975,7 @@ async def run_apply_ai_suggestions(
 async def run_organize_files_in_folders(
     process_id: str,
     organization: list[dict] | None,
+    user: dict | None = None,
 ) -> dict[str, Any]:
     """Move ficheiros S3 conforme lista {source_path, target_folder, file_name}."""
     from services.document_constants import ERROR_NO_ORGANIZATION
@@ -1000,6 +1018,14 @@ async def run_organize_files_in_folders(
             results["errors"].append(
                 {"file": item.get("file_name", "?"), "error": str(e)}
             )
+
+    if user and results["moved"]:
+        from services.history import log_history
+
+        await log_history(
+            process_id, user, "Moveu documentos entre pastas",
+            "documents", None, f"{len(results['moved'])} movido(s)",
+        )
 
     return {
         "success": True,

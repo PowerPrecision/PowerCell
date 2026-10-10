@@ -20,10 +20,26 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import servicoPorPagar from "@/test/fixtures/parceiro/servico_por_pagar.json";
 
 // ── Fronteiras falsas ────────────────────────────────────────────────
 vi.mock("../../layouts/DashboardLayout", () => ({
   default: ({ children }) => <div data-testid="layout">{children}</div>,
+}));
+
+// O perfil da sessão muda por teste (a origem financeira só aparece à gestão).
+const sessao = vi.hoisted(() => ({ papel: "consultor" }));
+
+// Parcial: só a origem financeira é falseada; o resto do `api` é o real.
+vi.mock("../../services/api", async (importOriginal) => ({
+  ...(await importOriginal()),
+  getOrigemFinanceira: vi.fn(() => Promise.resolve({ data: {
+    process_id: "proc-1", definida: false, tipo: null, rotulo: null,
+    angariador: null, definido_por: null, definido_em: null,
+  } })),
+  getCandidatosOrigemFinanceira: vi.fn(() => Promise.resolve({ data: { candidatos: [] } })),
+  // Forma REAL do servidor (fixture gerada pelo serviço), não uma inventada.
+  getServicoDoParceiro: vi.fn(() => Promise.resolve({ data: servicoPorPagar })),
 }));
 
 vi.mock("../../contexts/AuthContext", () => ({
@@ -33,9 +49,9 @@ vi.mock("../../contexts/AuthContext", () => ({
       id: "u-1",
       name: "Carla Consultora",
       email: "carla@precisioncredito.pt",
-      role: "consultor",
+      role: sessao.papel,
     },
-    effectiveRole: "consultor",
+    effectiveRole: sessao.papel,
     activeCompanyId: "c-1",
     effectiveCompanyId: "c-1",
     permissions: {},
@@ -338,6 +354,105 @@ describe("ProcessDetails — cartões de contexto (coluna direita)", () => {
       expect(screen.getAllByText(/Carla Consultora/).length).toBeGreaterThan(0),
     );
   });
+});
+
+describe("ProcessDetails — cartão de partilha (D-25)", () => {
+  it("um processo partilhado mostra com quem — a ligação página ↔ cartão", async () => {
+    pacote.valor = pacoteCompleto({
+      process: {
+        ...PROCESSO,
+        partner_companies: [
+          { company_id: "cmp-domus", company_name: "Domus", network_id: "grupo_domus" },
+        ],
+      },
+    });
+    montar();
+    await screen.findByTestId("layout");
+
+    const cartao = await screen.findByTestId("cartao-partilha");
+    expect(cartao.textContent).toContain("Domus");
+    // O perfil da sessão é consultor: vê com quem, mas não pode revogar.
+    expect(screen.queryByRole("button", { name: /Revogar partilha com/ })).toBeNull();
+  });
+
+  it("um processo exclusivo da casa não mostra o cartão (contraprova)", async () => {
+    montar();
+    await screen.findByTestId("layout");
+    await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("cartao-partilha")).toBeNull();
+  });
+});
+
+describe("ProcessDetails — serviço pago pelo parceiro (Portal do Parceiro)", () => {
+  afterEach(() => { sessao.papel = "consultor"; });
+
+  it("um processo COM parceiro mostra o cartão à equipa e o dado é pedido", async () => {
+    pacote.valor = pacoteCompleto({ process: { ...PROCESSO, assigned_parceiro_id: "pt-1" } });
+    const api = await import("../../services/api");
+    api.getServicoDoParceiro.mockClear();
+    montar();
+    await screen.findByTestId("layout");
+
+    expect(await screen.findByTestId("cartao-servico-do-parceiro")).toBeInTheDocument();
+    await waitFor(() => expect(api.getServicoDoParceiro).toHaveBeenCalledWith("proc-1"));
+  });
+
+  it("um processo SEM parceiro não mostra o cartão e nunca pede o dado (contraprova)", async () => {
+    const api = await import("../../services/api");
+    api.getServicoDoParceiro.mockClear();
+    montar();
+    await screen.findByTestId("layout");
+    await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+
+    expect(screen.queryByTestId("cartao-servico-do-parceiro")).toBeNull();
+    expect(api.getServicoDoParceiro).not.toHaveBeenCalled();
+  });
+
+  it.each(["indexacao", "parceiro"])("o perfil %s não vê o cartão, mesmo com parceiro, e o dado nunca é pedido", async (papel) => {
+    sessao.papel = papel;
+    pacote.valor = pacoteCompleto({ process: { ...PROCESSO, assigned_parceiro_id: "pt-1" } });
+    const api = await import("../../services/api");
+    api.getServicoDoParceiro.mockClear();
+    montar();
+    await screen.findByTestId("layout");
+    await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+
+    expect(screen.queryByTestId("cartao-servico-do-parceiro")).toBeNull();
+    expect(api.getServicoDoParceiro).not.toHaveBeenCalled();
+  });
+});
+
+describe("ProcessDetails — origem financeira (Bloco 4, ponto 7)", () => {
+  afterEach(() => { sessao.papel = "consultor"; });
+
+  it.each(["diretor", "ceo", "admin"])(
+    "a gestão (%s) vê o cartão e o dado é pedido",
+    async (papel) => {
+      sessao.papel = papel;
+      const api = await import("../../services/api");
+      api.getOrigemFinanceira.mockClear();
+      montar();
+      await screen.findByTestId("layout");
+
+      expect(await screen.findByTestId("cartao-origem-financeira")).toBeInTheDocument();
+      await waitFor(() => expect(api.getOrigemFinanceira).toHaveBeenCalledWith("proc-1"));
+    },
+  );
+
+  it.each(["consultor", "intermediario", "administrativo", "indexacao"])(
+    "%s NÃO vê o cartão e o dado nunca é pedido",
+    async (papel) => {
+      sessao.papel = papel;
+      const api = await import("../../services/api");
+      api.getOrigemFinanceira.mockClear();
+      montar();
+      await screen.findByTestId("layout");
+      await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+
+      expect(screen.queryByTestId("cartao-origem-financeira")).toBeNull();
+      expect(api.getOrigemFinanceira).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("ProcessDetails — dados servidos pela cache (regressão)", () => {

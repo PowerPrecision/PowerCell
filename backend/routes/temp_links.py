@@ -42,7 +42,7 @@ async def create_temp_link(
     file_paths: Optional[str] = Form(default=None),
     notify_email: Optional[str] = Form(default="true"),
     base_url: Optional[str] = Form(default=None),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))
 ):
     return await run_create_temp_link(
         process_id=process_id,
@@ -68,7 +68,7 @@ async def list_process_temp_links(
 @router.post("/{link_id}/cancel")
 async def cancel_temp_link(
     link_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO]))
 ):
     return await run_cancel_temp_link(link_id, user)
 
@@ -76,7 +76,7 @@ async def cancel_temp_link(
 @router.delete("/{link_id}")
 async def delete_temp_link(
     link_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     return await run_delete_temp_link(link_id, user)
 

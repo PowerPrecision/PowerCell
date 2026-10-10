@@ -46,7 +46,8 @@ def test_deadlines_router_is_thin_stubs_only():
     routes_path = Path(__file__).resolve().parents[2] / "routes" / "deadlines.py"
     text = routes_path.read_text()
     assert text.count("return await run_") >= 6
-    assert len(text.splitlines()) < 100
+    # 100 antes do `/dashboard-calendar` (Bloco 4): uma rota fina nova vale ~10 linhas.
+    assert len(text.splitlines()) < 115
     assert "sanitize_string" not in text
     assert "send_notification_with_preference_check" not in text
     # Static paths before /{deadline_id}

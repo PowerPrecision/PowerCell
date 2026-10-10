@@ -37,6 +37,8 @@ import ClientPortal from "./pages/ClientPortal";
 // - KanbanPage: usa drag-drop HTML5 nativo (sem biblioteca externa)
 // - ProcessDetails: 164KB (o maior componente da aplicação!)
 const ConsultorDashboard = React.lazy(() => import("./pages/ConsultorDashboard"));
+// Portal do Parceiro — chunk próprio: o código de um utilizador externo não vai no pacote do CRM.
+const PartnerPortalRoutes = React.lazy(() => import("./pages/partner/PartnerPortalRoutes"));
 const KanbanPage = React.lazy(() => import("./pages/KanbanPage"));
 const ProcessDetails = React.lazy(() => import("./pages/ProcessDetails"));
 
@@ -64,6 +66,7 @@ const PropertiesPage = React.lazy(() => import("./pages/PropertiesPage"));
 const ClientsPage = React.lazy(() => import("./pages/ClientsPage"));
 const LeadsPage = React.lazy(() => import("./pages/LeadsPage"));
 const TeamPerformanceDashboard = React.lazy(() => import("./pages/TeamPerformanceDashboard"));
+const WeeklyExecutiveReport = React.lazy(() => import("./pages/WeeklyExecutiveReport"));
 const VisitsPage = React.lazy(() => import("./pages/VisitsPage"));
 const CalendarPage = React.lazy(() => import("./pages/CalendarPage"));
 const MyClientsPage = React.lazy(() => import("./pages/MyClientsPage"));
@@ -222,7 +225,7 @@ class LazyChunkErrorBoundary extends Component {
 import "./App.css";
 
 // Admin roles for automation and system config
-const ADMIN_ROLES = ["admin", "ceo"];
+const ADMIN_ROLES = ["master", "admin", "ceo"];
 
 function ProtectedRoute({ children, allowedRoles, requiredCapability }) {
   const { user, loading, effectiveRole } = useAuth();
@@ -332,6 +335,16 @@ function App() {
           {/* /portal — ecrã de login OTP (novo fluxo NIF + OTP) */}
           <Route path="/portal" element={<ErrorBoundary variant="page" moduleName="Portal do Cliente"><ClientPortal /></ErrorBoundary>} />
           
+          {/* Portal do Parceiro — identidade própria (token, armazenamento e cliente HTTP à parte) */}
+          <Route
+            path="/parceiro/*"
+            element={
+              <RouteBoundary name="Portal do Parceiro">
+                <PartnerPortalRoutes />
+              </RouteBoundary>
+            }
+          />
+
           {/* Staff login */}
           <Route path="/login" element={<LoginPage />} />
           
@@ -369,7 +382,7 @@ function App() {
           <Route
             path="/admin"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Dashboard Operacional">
                   <AdminDashboard />
                 </RouteBoundary>
@@ -381,7 +394,7 @@ function App() {
           <Route
             path="/admin/organizacao"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Administração — Empresas e Acessos">
                   <OrganizationAdminPage />
                 </RouteBoundary>
@@ -393,7 +406,7 @@ function App() {
           <Route
             path="/admin/desempenho"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Desempenho da Equipa">
                   <TeamPerformanceDashboard />
                 </RouteBoundary>
@@ -401,11 +414,23 @@ function App() {
             }
           />
           
+          {/* Relatório Semanal Executivo (admin + CEO) — Bloco 4, ponto 13 */}
+          <Route
+            path="/admin/relatorio-semanal"
+            element={
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
+                <RouteBoundary name="Relatório Semanal">
+                  <WeeklyExecutiveReport />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+
           {/* System Admin Panel - Configurações do Sistema (admin + CEO) */}
           <Route
             path="/system-admin"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Painel de Administração do Sistema">
                   <SystemAdminPanel />
                 </RouteBoundary>
@@ -548,7 +573,7 @@ function App() {
           <Route
             path="/meus-clientes"
             element={
-              <ProtectedRoute allowedRoles={["consultor", "intermediario", "diretor", "admin", "ceo", "indexacao"]}>
+              <ProtectedRoute allowedRoles={["consultor", "intermediario", "diretor", "master", "admin", "ceo", "indexacao"]}>
                 <RouteBoundary name="Meus Clientes">
                   <MyClientsPage />
                 </RouteBoundary>
@@ -617,7 +642,7 @@ function App() {
           <Route
             path="/workflow-estados"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Estados de Workflow">
                   <WorkflowStatusesPage />
                 </RouteBoundary>
@@ -649,7 +674,7 @@ function App() {
           <Route
             path="/templates"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "administrativo"]}>
                 <RouteBoundary name="Templates">
                   <TemplatesPage />
                 </RouteBoundary>
@@ -685,7 +710,7 @@ function App() {
           <Route
             path="/configuracoes"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Configurações do Sistema">
                   <SystemConfigPage />
                 </RouteBoundary>
@@ -697,7 +722,7 @@ function App() {
           <Route
             path="/contas-email"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Contas de Email">
                   <EmailAccountsPage />
                 </RouteBoundary>
@@ -709,7 +734,7 @@ function App() {
           <Route
             path="/configuracoes/ia"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Configuração IA">
                   <AIConfigPage />
                 </RouteBoundary>
@@ -721,7 +746,7 @@ function App() {
           <Route
             path="/configuracoes/treino-ia"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Treino IA">
                   <AITrainingPage />
                 </RouteBoundary>
@@ -733,7 +758,7 @@ function App() {
           <Route
             path="/admin/processos-background"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Processos em Background">
                   <BackgroundJobsPage />
                 </RouteBoundary>
@@ -745,7 +770,7 @@ function App() {
           <Route
             path="/configuracoes/notificacoes"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Configurações de Notificações">
                   <NotificationSettingsPage />
                 </RouteBoundary>
@@ -769,7 +794,7 @@ function App() {
           <Route
             path="/admin/logs"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Logs do Sistema">
                   <UnifiedLogsPage />
                 </RouteBoundary>
@@ -787,7 +812,7 @@ function App() {
           <Route
             path="/admin/backups"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Backups">
                   <BackupsPage />
                 </RouteBoundary>
@@ -799,7 +824,7 @@ function App() {
           <Route
             path="/diagnosticos"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Diagnósticos">
                   <DiagnosticsPage />
                 </RouteBoundary>
@@ -811,7 +836,7 @@ function App() {
           <Route
             path="/minutas"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]}>
                 <RouteBoundary name="Minutas">
                   <MinutasPage />
                 </RouteBoundary>
@@ -854,7 +879,7 @@ function App() {
           <Route
             path="/ai-insights"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="AI Insights">
                   <AIInsightsPage />
                 </RouteBoundary>
@@ -866,7 +891,7 @@ function App() {
           <Route
             path="/revisao-dados-ia"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "administrativo"]}>
                 <RouteBoundary name="Revisão de Dados IA">
                   <AIDataReviewPage />
                 </RouteBoundary>
@@ -878,7 +903,7 @@ function App() {
           <Route
             path="/auditoria"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Auditoria">
                   <AuditTrailPage />
                 </RouteBoundary>
@@ -890,7 +915,7 @@ function App() {
           <Route
             path="/rgpd-admin"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "administrativo"]}>
                 <RouteBoundary name="Administração RGPD">
                   <RGPDAdminPage />
                 </RouteBoundary>
@@ -902,7 +927,7 @@ function App() {
           <Route
             path="/admin/migracao-rgpd"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "diretor"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "diretor"]}>
                 <RouteBoundary name="Migração RGPD">
                   <RGPDMigrationPage />
                 </RouteBoundary>
@@ -960,7 +985,7 @@ function App() {
           <Route
             path="/ficheiros"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]}>
                 <RouteBoundary name="Explorador de Ficheiros">
                   <FilesExplorerPage />
                 </RouteBoundary>

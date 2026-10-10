@@ -302,7 +302,7 @@ async def get_pending_drafts(
     }
 
     # Filtro por acesso - admin/ceo veem todos, outros só os seus processos
-    if user_role not in ["admin", "ceo"]:
+    if user_role not in ["master", "admin", "ceo"]:
         process_ids = await db.processes.distinct(
             "id", {"assigned_to": user_id}
         )
@@ -338,7 +338,7 @@ async def get_draft_stats(user_id: str, user_role: str) -> Dict[str, Any]:
         "status": "draft",
     }
 
-    if user_role not in ["admin", "ceo"]:
+    if user_role not in ["master", "admin", "ceo"]:
         process_ids = await db.processes.distinct(
             "id", {"assigned_to": user_id}
         )

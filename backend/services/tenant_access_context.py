@@ -37,6 +37,7 @@ from fastapi import Request
 from database import db
 from services.tenant_network import (
     build_network_scope_condition,
+    build_process_scope_condition,
     resolve_tenant_scope,
 )
 
@@ -120,6 +121,48 @@ async def _processos_visiveis(
     return frozenset(str(d["id"]) for d in docs if d.get("id"))
 
 
+async def resolver_papel_efectivo(
+    user: dict,
+    request: Optional[Request] = None,
+    *,
+    traduzir_todos_os_perfis: Optional[Callable[[Any], bool]] = None,
+) -> str:
+    """O papel com que o utilizador está a trabalhar AGORA.
+
+    Ponto ÚNICO. Decidir por `user["role"]` é a forma do
+    `history._is_stealth_user` e já deu as duas respostas erradas em
+    cinco sítios deste projecto: quem tem perfil base de consultor e
+    entra COMO diretor caía no ramo restrito, e quem é admin de base
+    mantinha o passe livre com outro perfil activo.
+
+    `__all_roles__` é o modo «todos os perfis» e **não** um nome de
+    papel: deixá-lo passar faz qualquer predicado responder `False` a um
+    administrador em modo global. A tradução escolhe, entre os papéis do
+    utilizador, o primeiro que satisfaz `traduzir_todos_os_perfis` — por
+    omissão o predicado de equipa do calendário, para o chamador antigo
+    não mudar de comportamento. Quem pergunta pela FRONTEIRA DE REDE
+    passa o `e_papel_sem_fronteira`.
+    """
+    from services.auth import get_all_user_roles, get_effective_role_async
+    from services.deadline_scope import e_papel_de_equipa
+
+    escolher = traduzir_todos_os_perfis or e_papel_de_equipa
+
+    papel = (user or {}).get("role") or ""
+    if request is not None:
+        try:
+            papel = await get_effective_role_async(request, user) or papel
+        except Exception as exc:
+            logger.warning("[ACESSO] Falha a resolver o papel efectivo: %s", exc)
+
+    if str(papel).strip().lower() == "__all_roles__":
+        papeis = get_all_user_roles(user or {})
+        escolhido = next((p for p in papeis if escolher(p)), "")
+        papel = escolhido or ((user or {}).get("role") or "")
+
+    return str(papel or "").strip()
+
+
 async def carregar_contexto_de_acesso(
     user: dict,
     request: Optional[Request] = None,
@@ -132,34 +175,33 @@ async def carregar_contexto_de_acesso(
     o que lhes está atribuído. Por omissão é o do calendário, para o
     chamador que já existia não mudar de comportamento.
     """
-    from services.auth import get_all_user_roles, get_effective_role_async
     from services.deadline_scope import e_papel_de_equipa
 
     equipa = e_equipa or e_papel_de_equipa
 
-    papel = (user or {}).get("role") or ""
-    if request is not None:
-        try:
-            papel = await get_effective_role_async(request, user) or papel
-        except Exception as exc:
-            logger.warning("[ACESSO] Falha a resolver o papel efectivo: %s", exc)
-
-    # `__all_roles__` é o modo "todos os perfis" e não um nome de papel:
-    # traduzi-lo é o que impede o `exigir_capacidade` de recusar tudo, e
-    # aqui o que impede um diretor em modo global de cair na vista pessoal.
-    # A tradução usa o MESMO predicado de equipa que o resto da função —
-    # com dois, um perfil podia entrar na vista de equipa e receber o
-    # conjunto de processos da vista pessoal.
-    if str(papel).strip().lower() == "__all_roles__":
-        papeis = get_all_user_roles(user or {})
-        de_equipa = next((p for p in papeis if equipa(p)), "")
-        papel = de_equipa or ((user or {}).get("role") or "")
+    # A tradução de `__all_roles__` usa o MESMO predicado de equipa que o
+    # resto da função — com dois, um perfil podia entrar na vista de
+    # equipa e receber o conjunto de processos da vista pessoal.
+    papel = await resolver_papel_efectivo(
+        user, request, traduzir_todos_os_perfis=equipa
+    )
 
     scope = await resolve_tenant_scope(user)
     condicao = build_network_scope_condition(scope)
     utilizador_com_papel = {**(user or {}), "_papel_efectivo": papel}
+    # O conjunto de PROCESSOS inclui os partilhados (D-25): é por ele que
+    # o calendário e as visitas de um processo partilhado chegam ao
+    # parceiro — a decisão de produto é «a ficha inteira».
+    #
+    # A `condicao_de_rede` DEVOLVIDA fica a genérica, de propósito: quem a
+    # recebe aplica-a às SUAS colecções (`db.deadlines`, `db.visits`), e
+    # essas não têm campo de partilha. Acrescentar-lhe o ramo era um `$or`
+    # que nenhum documento satisfaz, e no dia em que alguém gravasse o
+    # campo noutra colecção passava a ser uma porta.
     processos = await _processos_visiveis(
-        utilizador_com_papel, condicao, e_equipa=equipa
+        utilizador_com_papel,
+        build_process_scope_condition(scope),
+        e_equipa=equipa,
     )
 
     return ContextoDeAcesso(
@@ -175,4 +217,5 @@ __all__ = [
     "ContextoDeAcesso",
     "carregar_contexto_de_acesso",
     "condicao_dos_meus_processos",
+    "resolver_papel_efectivo",
 ]

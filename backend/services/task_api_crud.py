@@ -173,7 +173,7 @@ async def run_get_tasks(
     query = {}
 
     # Verificar se é admin/ceo para acesso global
-    is_admin_or_ceo = current_user.get("role") in ["admin", "ceo", "diretor"]
+    is_admin_or_ceo = current_user.get("role") in ["master", "admin", "ceo", "diretor"]
 
     # Filtro por processo
     if process_id:
@@ -432,7 +432,7 @@ async def run_delete_task(task_id: str, current_user: dict):
         raise HTTPException(status_code=404, detail="Tarefa não encontrada")
 
     # Apenas o criador ou admin pode eliminar
-    if task["created_by"] != current_user["id"] and current_user["role"] not in ["admin", "ceo"]:
+    if task["created_by"] != current_user["id"] and current_user["role"] not in ["master", "admin", "ceo"]:
         raise HTTPException(status_code=403, detail="Sem permissão para eliminar esta tarefa")
 
     await db.tasks.delete_one({"id": task_id})

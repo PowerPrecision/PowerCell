@@ -90,7 +90,7 @@ async def run_get_me(request, user: dict):
                 email_configured = True
 
     # Para admin/ceo/diretor/administrativo, também verificar se existe config global (SystemConfigPage)
-    if not email_configured and user.get("role") in ("admin", "ceo", "diretor", "administrativo"):
+    if not email_configured and user.get("role") in ("master", "admin", "ceo", "diretor", "administrativo"):
         try:
             config = await db.system_config.find_one({"_id": "main"}, {"_id": 0, "email": 1, "system_smtp": 1, "system_webmail": 1})
             if config:

@@ -45,6 +45,7 @@ const roleLabels = {
   administrativo: "Administrativo",
   diretor: "Diretor",
   ceo: "CEO",
+  master: "Master",
   admin: "Administrador",
 };
 

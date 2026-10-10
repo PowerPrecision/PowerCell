@@ -204,7 +204,8 @@ class TestAFronteiraDeRedeNaoSeAlarga:
 
         scope = TenantScope(network_ids=frozenset({"r1"}))
         assert mod.pode_ver(mapa[PASTA_DO_CLIENTE], scope, role="consultor") is False
-        assert mod.pode_ver(mapa[PASTA_DO_CLIENTE], scope, role="admin") is True
+        assert mod.pode_ver(mapa[PASTA_DO_CLIENTE], scope, role="master") is True
+        assert mod.pode_ver(mapa[PASTA_DO_CLIENTE], scope, role="admin") is False
 
 
 class TestOQueOExploradorDevolve:

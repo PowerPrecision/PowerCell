@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, UploadFile
 
 from database import db
+from services.tenant_network import resolve_tenant_stamp
 from services.background_jobs import background_jobs, JobType, JobStatus
 from utils.input_sanitization import (
     sanitize_string, sanitize_name, sanitize_email, sanitize_phone, sanitize_html,
@@ -99,6 +100,16 @@ async def _process_excel_import(
     """
     Processa a importação Excel em background.
     """
+    # O carimbo de quem importa — `None` quando não há empresa activa
+    # (meio carimbo é pior do que nenhum: a pilha por carimbar tem
+    # migração, uma rede errada é permanente).
+    carimbo_da_rede = await resolve_tenant_stamp(user)
+    if not carimbo_da_rede:
+        logger.warning(
+            "[IMOVEIS] Importação de Excel por %s sem empresa activa: os "
+            "imóveis ficam na pilha por carimbar.", user.get("email"),
+        )
+
     import pandas as pd
     
     await background_jobs.set_status(job_id, JobStatus.PROCESSING)
@@ -449,7 +460,13 @@ async def _process_excel_import(
                     "visit_count": 0,
                     "interested_clients": []
                 }
-                
+
+                # CARIMBO DE REDE (D-24): resolvido UMA vez por job, antes
+                # do ciclo — um `find` em `companies` por linha importada
+                # era o N+1 que o `enrich_emails` já tinha substituído.
+                if carimbo_da_rede:
+                    property_doc.update(carimbo_da_rede)
+
                 await db.properties.insert_one(property_doc)
                 results["importados"] += 1
                 results["ids_criados"].append(property_doc["id"])
@@ -517,7 +534,7 @@ async def run_get_import_job_status(
         raise HTTPException(status_code=404, detail="Job não encontrado")
     
     # Verificar se o utilizador tem acesso ao job
-    if job.get("user_id") != user.get("id") and user.get("role") != "admin":
+    if job.get("user_id") != user.get("id") and user.get("role") != "master":
         raise HTTPException(status_code=403, detail="Sem permissão para ver este job")
     
     return job

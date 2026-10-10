@@ -157,7 +157,7 @@ class TestAsDuasPontasDerivamDaMesmaConstante:
         from services.client_delete import PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES
 
         assert set(PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES) == {
-            UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
+            UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
         }
         assert UserRole.ADMINISTRATIVO not in PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES
 
@@ -169,5 +169,5 @@ class TestAsDuasPontasDerivamDaMesmaConstante:
         que o botão."""
         from services.client_delete import PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES
 
-        papeis_da_ui = {"admin", "ceo", "diretor"}  # frontend/src/utils/roleUtils.js
+        papeis_da_ui = {"master", "admin", "ceo", "diretor"}  # frontend/src/utils/roleUtils.js
         assert {str(p) for p in PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES} == papeis_da_ui

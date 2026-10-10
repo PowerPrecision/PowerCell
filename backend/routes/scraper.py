@@ -56,7 +56,7 @@ async def scrape_url(
 async def crawl_website(
     request: CrawlRequest,
     user: dict = Depends(require_roles([
-        UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.CONSULTOR,
+        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.CONSULTOR,
     ])),
 ):
     """Crawler recursivo para extrair múltiplos imóveis de um site."""
@@ -73,7 +73,7 @@ async def get_supported_sites(user: dict = Depends(get_current_user)):
 async def analyze_page_with_ai_endpoint(
     request: ScrapeRequest,
     user: dict = Depends(require_roles([
-        UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
+        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
     ])),
 ):
     """Analisa uma página usando IA configurada (Gemini por defeito)."""
@@ -91,7 +91,7 @@ async def extract_from_html(
 
 @router.get("/cache/stats")
 async def get_cache_stats(
-    user: dict = Depends(require_roles([UserRole.ADMIN])),
+    user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     """Retorna estatísticas do cache de scraping."""
     return await run_get_cache_stats(user)
@@ -100,7 +100,7 @@ async def get_cache_stats(
 @router.delete("/cache/clear")
 async def clear_scraper_cache(
     url: Optional[str] = None,
-    user: dict = Depends(require_roles([UserRole.ADMIN])),
+    user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     """Limpa o cache de scraping."""
     return await run_clear_scraper_cache(url, user)
@@ -110,7 +110,7 @@ async def clear_scraper_cache(
 async def refresh_url_cache(
     request: ScrapeRequest,
     user: dict = Depends(require_roles([
-        UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
+        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
     ])),
 ):
     """Força o refresh do cache para uma URL específica."""

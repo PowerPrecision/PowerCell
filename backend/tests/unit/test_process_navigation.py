@@ -179,7 +179,7 @@ class TestRunGetProcessNeighbours:
     async def _correr(self, fake_db, process_id, **kwargs):
         import services.process_navigation as nav
         with patch.object(nav, "db", fake_db), \
-             patch.object(nav, "build_tenant_condition", return_value={}), \
+             patch.object(nav, "build_tenant_process_condition", return_value={}), \
              patch.object(nav, "load_workflow_status_order", return_value={}):
             return await run_get_process_neighbours(
                 user={"id": "u1", "role": "admin"},
@@ -281,8 +281,17 @@ class TestNaoHaConstrutorParalelo:
         assert "build_process_list_query" in fonte
 
     def test_aplica_o_isolamento_por_rede(self):
+        """D-25: a variante de PROCESSOS, não a genérica.
+
+        A guarda original exigia `build_tenant_condition` e ficou
+        vermelha quando a partilha entrou. Foi **invertida** e não
+        apagada: exigir a genérica aqui cristalizava um defeito — a seta
+        da fronteira da página saltaria um processo partilhado e levaria
+        a um 404, que é o defeito que o filtro Sub35 já teve nos
+        vizinhos.
+        """
         fonte = codigo_da_funcao_sem_comentarios(run_get_process_neighbours)
-        assert "build_tenant_condition" in fonte
+        assert "build_tenant_process_condition" in fonte
         assert "tenant_condition=tenant_condition" in fonte.replace(" ", "")
 
     def test_ordena_com_a_funcao_da_listagem(self):

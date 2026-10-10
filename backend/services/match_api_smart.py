@@ -10,6 +10,7 @@ import logging
 from fastapi import HTTPException
 
 from database import db
+from services.tenant_network import com_isolamento, condicao_da_mesma_rede
 
 logger = logging.getLogger(__name__)
 
@@ -132,8 +133,11 @@ async def run_smart_match_for_process(process_id: str, user: dict):
 
     logger.info(f"[SMART MATCH] Query para processo {process_id}: {query}")
 
-    # 5. Executar query
-    properties = await db.properties.find(query, {"_id": 0}).to_list(50)
+    # 5. Executar query — só imóveis da rede DESTE processo (D-24: um
+    # cruzamento liga duas pontas da mesma rede)
+    properties = await db.properties.find(
+        com_isolamento(condicao_da_mesma_rede(process), query), {"_id": 0}
+    ).to_list(50)
 
     # 6. Calcular score de relevância e enriquecer resultados
     matches = []

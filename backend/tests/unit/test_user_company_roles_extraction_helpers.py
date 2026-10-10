@@ -121,8 +121,8 @@ async def test_assign_user_company_role_resolves_company_and_creates():
     mock_db.user_company_roles.insert_one = AsyncMock()
     mock_db.user_company_roles.update_many = AsyncMock()
 
-    with patch.object(crud, "db", mock_db):
-        result = await crud.run_assign_user_company_role("u1", payload)
+    with patch.object(crud, "db", mock_db), patch("services.user_management_scope.db", mock_db):
+        result = await crud.run_assign_user_company_role("u1", payload, actor={"id": "u-master", "role": "master", "effective_role": "master"})
 
     assert result["success"] is True
     assert result.get("id")
@@ -151,9 +151,9 @@ async def test_assign_user_company_role_404_when_company_missing():
     mock_db = MagicMock()
     mock_db.companies.find_one = AsyncMock(return_value=None)
 
-    with patch.object(crud, "db", mock_db):
+    with patch.object(crud, "db", mock_db), patch("services.user_management_scope.db", mock_db):
         with pytest.raises(HTTPException) as exc:
-            await crud.run_assign_user_company_role("u1", payload)
+            await crud.run_assign_user_company_role("u1", payload, actor={"id": "u-master", "role": "master", "effective_role": "master"})
 
     assert exc.value.status_code == 404
     assert "Empresa" in str(exc.value.detail)
@@ -208,9 +208,9 @@ async def test_delete_last_ucr_returns_400():
     mock_db.user_company_roles.count_documents = AsyncMock(return_value=1)
     mock_db.user_company_roles.delete_one = AsyncMock()
 
-    with patch.object(crud, "db", mock_db):
+    with patch.object(crud, "db", mock_db), patch("services.user_management_scope.db", mock_db):
         with pytest.raises(HTTPException) as exc:
-            await crud.run_delete_user_company_role("r1")
+            await crud.run_delete_user_company_role("r1", actor={"id": "u-master", "role": "master", "effective_role": "master"})
 
     assert exc.value.status_code == 400
     assert "único acesso" in exc.value.detail
@@ -230,8 +230,8 @@ async def test_delete_ucr_when_multiple_succeeds():
     mock_db.user_company_roles.count_documents = AsyncMock(return_value=2)
     mock_db.user_company_roles.delete_one = AsyncMock()
 
-    with patch.object(crud, "db", mock_db):
-        result = await crud.run_delete_user_company_role("r1")
+    with patch.object(crud, "db", mock_db), patch("services.user_management_scope.db", mock_db):
+        result = await crud.run_delete_user_company_role("r1", actor={"id": "u-master", "role": "master", "effective_role": "master"})
 
     assert result["success"] is True
     mock_db.user_company_roles.delete_one.assert_called_once()
@@ -251,8 +251,8 @@ async def test_delete_ucr_when_multiple_remain():
     deleted.deleted_count = 1
     mock_db.user_company_roles.delete_one = AsyncMock(return_value=deleted)
 
-    with patch.object(crud, "db", mock_db):
-        result = await crud.run_delete_user_company_role("r1", user_id="u1")
+    with patch.object(crud, "db", mock_db), patch("services.user_management_scope.db", mock_db):
+        result = await crud.run_delete_user_company_role("r1", user_id="u1", actor={"id": "u-master", "role": "master", "effective_role": "master"})
 
     assert result["success"] is True
     mock_db.user_company_roles.delete_one.assert_called()
@@ -284,8 +284,8 @@ async def test_list_ucr_normalizes_role_name():
     mock_db.user_company_roles.find = MagicMock(return_value=_Cursor())
     mock_db.companies.find = MagicMock(return_value=_EmptyCursor())
 
-    with patch.object(crud, "db", mock_db):
-        result = await crud.run_list_user_company_roles(user_id="u1")
+    with patch.object(crud, "db", mock_db), patch("services.user_management_scope.db", mock_db):
+        result = await crud.run_list_user_company_roles(user_id="u1", actor={"id": "u-master", "role": "master", "effective_role": "master"})
 
     assert result["total"] == 1
     role = result["roles"][0]
@@ -315,8 +315,8 @@ async def test_create_ucr_allows_second_role_same_company():
     mock_db.user_company_roles.insert_one = AsyncMock()
     mock_db.user_company_roles.update_many = AsyncMock()
 
-    with patch.object(crud, "db", mock_db):
-        result = await crud.run_create_user_company_role(payload)
+    with patch.object(crud, "db", mock_db), patch("services.user_management_scope.db", mock_db):
+        result = await crud.run_create_user_company_role(payload, actor={"id": "u-master", "role": "master", "effective_role": "master"})
 
     assert result["success"] is True
     query = mock_db.user_company_roles.find_one.call_args[0][0]
@@ -352,9 +352,9 @@ async def test_create_ucr_409_when_same_company_and_role():
     )
     mock_db.user_company_roles.insert_one = AsyncMock()
 
-    with patch.object(crud, "db", mock_db):
+    with patch.object(crud, "db", mock_db), patch("services.user_management_scope.db", mock_db):
         with pytest.raises(HTTPException) as exc:
-            await crud.run_create_user_company_role(payload)
+            await crud.run_create_user_company_role(payload, actor={"id": "u-master", "role": "master", "effective_role": "master"})
 
     assert exc.value.status_code == 409
     assert "cargo" in str(exc.value.detail).lower()
@@ -379,10 +379,11 @@ async def test_update_ucr_409_when_role_collides_same_company():
     )
     mock_db.user_company_roles.update_one = AsyncMock()
 
-    with patch.object(crud, "db", mock_db):
+    with patch.object(crud, "db", mock_db), patch("services.user_management_scope.db", mock_db):
         with pytest.raises(HTTPException) as exc:
             await crud.run_update_user_company_role(
                 "r1", UserCompanyRoleUpdate(role="diretor"),
+                actor={"id": "u-master", "role": "master", "effective_role": "master"},
             )
 
     assert exc.value.status_code == 409

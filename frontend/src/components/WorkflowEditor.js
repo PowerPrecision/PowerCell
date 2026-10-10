@@ -21,6 +21,15 @@ import { Textarea } from "./ui/textarea";
 import { Switch } from "./ui/switch";
 import { toast } from "sonner";
 import { safeLabel } from "./dashboard/DashboardShared";
+import FaseAutomacaoFields from "./admin/FaseAutomacaoFields";
+import {
+  automacaoDaFase,
+  automacaoVazia,
+  errosDaAutomacao,
+  payloadDaAutomacao,
+  payloadDaAutomacaoNaCriacao,
+  resumoDaAutomacao,
+} from "../utils/faseAutomacao";
 import {
   Plus,
   Edit,
@@ -81,6 +90,9 @@ const WorkflowEditor = () => {
     trigger_countdown: null,
     trigger_property_check: null,
     trigger_deed_reminder: null,
+    // Bloco 3 (ponto 12) — o que acontece quando um processo ENTRA na fase.
+    // `null` em cada parte = herda o por-omissão.
+    automacao: automacaoVazia(),
   });
 
   useEffect(() => {
@@ -105,6 +117,11 @@ const WorkflowEditor = () => {
       toast.error("Nome do estado é obrigatório");
       return;
     }
+    const errosAutomacao = errosDaAutomacao(formData.automacao);
+    if (errosAutomacao.length) {
+      toast.error(errosAutomacao[0]);
+      return;
+    }
 
     setFormLoading(true);
     try {
@@ -123,6 +140,7 @@ const WorkflowEditor = () => {
         trigger_countdown: formData.trigger_countdown,
         trigger_property_check: formData.trigger_property_check,
         trigger_deed_reminder: formData.trigger_deed_reminder,
+        ...payloadDaAutomacaoNaCriacao(formData.automacao),
       });
       toast.success("Estado criado com sucesso");
       setIsCreateDialogOpen(false);
@@ -138,6 +156,11 @@ const WorkflowEditor = () => {
   const handleEditStatus = async (e) => {
     e.preventDefault();
     if (!selectedStatus) return;
+    const errosAutomacao = errosDaAutomacao(formData.automacao);
+    if (errosAutomacao.length) {
+      toast.error(errosAutomacao[0]);
+      return;
+    }
 
     setFormLoading(true);
     try {
@@ -155,6 +178,8 @@ const WorkflowEditor = () => {
         trigger_countdown: formData.trigger_countdown,
         trigger_property_check: formData.trigger_property_check,
         trigger_deed_reminder: formData.trigger_deed_reminder,
+        // Sempre as duas chaves: `null` manda voltar a herdar.
+        ...payloadDaAutomacao(formData.automacao),
       };
       await updateWorkflowStatus(selectedStatus.id, payload);
       toast.success("Estado atualizado com sucesso");
@@ -231,6 +256,7 @@ const WorkflowEditor = () => {
       trigger_countdown: status.trigger_countdown ?? null,
       trigger_property_check: status.trigger_property_check ?? null,
       trigger_deed_reminder: status.trigger_deed_reminder ?? null,
+      automacao: automacaoDaFase(status),
     });
     setIsEditDialogOpen(true);
   };
@@ -255,6 +281,7 @@ const WorkflowEditor = () => {
       trigger_countdown: null,
       trigger_property_check: null,
       trigger_deed_reminder: null,
+      automacao: automacaoVazia(),
     });
     setSelectedStatus(null);
   };
@@ -510,6 +537,14 @@ const WorkflowEditor = () => {
                       </Badge>
                     )}
                   </div>
+                  {resumoDaAutomacao(status) && (
+                    <p
+                      className="text-xs text-muted-foreground truncate"
+                      data-testid={`resumo-automacao-${status.name}`}
+                    >
+                      Ao entrar: {resumoDaAutomacao(status)}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-1 flex-shrink-0">
@@ -650,6 +685,11 @@ const WorkflowEditor = () => {
             </div>
             {/* PACOTE BS — Automações e Gatilhos do Sistema (Criar) */}
             {renderAutomationTriggersSection("create")}
+            <FaseAutomacaoFields
+              prefix="create"
+              value={formData.automacao}
+              onChange={(automacao) => setFormData({ ...formData, automacao })}
+            />
             <DialogFooter>
               <Button
                 type="button"
@@ -769,6 +809,11 @@ const WorkflowEditor = () => {
             </div>
             {/* PACOTE BS — Automações e Gatilhos do Sistema (Editar) */}
             {renderAutomationTriggersSection("edit")}
+            <FaseAutomacaoFields
+              prefix="edit"
+              value={formData.automacao}
+              onChange={(automacao) => setFormData({ ...formData, automacao })}
+            />
             <DialogFooter>
               <Button
                 type="button"

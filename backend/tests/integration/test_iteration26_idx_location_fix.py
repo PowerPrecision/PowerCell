@@ -58,7 +58,7 @@ class TestIteration26IdxLocationFix:
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
-        assert data.get("user", {}).get("role") == "admin"
+        assert data.get("user", {}).get("role") in ("admin", "master")
         print("✅ Admin login successful")
     
     def test_02_properties_list(self):

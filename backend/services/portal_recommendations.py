@@ -12,6 +12,7 @@ from typing import Optional
 from fastapi import HTTPException
 
 from database import db
+from services.tenant_network import com_isolamento, condicao_da_mesma_rede
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +43,14 @@ async def run_create_recommendations(data: dict, user: dict):
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
-    # Buscar detalhes dos imóveis
+    # Buscar detalhes dos imóveis — só os da rede DESTE processo
+    # (D-24): os `property_ids` vêm do CORPO do pedido, logo sem âmbito
+    # recomendava-se ao cliente um imóvel de outra rede, com o preço e a
+    # morada, e ficava gravado na ficha dele.
     properties = await db.properties.find(
-        {"id": {"$in": property_ids}},
+        com_isolamento(
+            condicao_da_mesma_rede(process), {"id": {"$in": property_ids}}
+        ),
         {"_id": 0}
     ).to_list(50)
 

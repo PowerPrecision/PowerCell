@@ -1,0 +1,23 @@
+{
+  "access_token": "TOKEN-DA-SESSAO",
+  "expires_in": 28800,
+  "partner": {
+    "created_at": "2026-10-11T09:30:00+00:00",
+    "email": "rui@parceiros.pt",
+    "id": "parceiro-novo",
+    "invite_pending": false,
+    "last_login_at": null,
+    "name": "Rui Parceiro",
+    "phone": null,
+    "redes": [
+      {
+        "company_id": "cmp-power",
+        "company_name": "Power Real Estate",
+        "network_id": "grupo_power_precision",
+        "status": "active"
+      }
+    ],
+    "status": "active"
+  },
+  "token_type": "bearer"
+}

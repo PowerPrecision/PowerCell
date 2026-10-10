@@ -28,7 +28,7 @@ LEAD_STATUS_VALUES = ["pre_registo", None]
 MY_CLIENTS_ROLES = [
     UserRole.CONSULTOR,
     UserRole.INTERMEDIARIO,
-    UserRole.ADMIN,
+    UserRole.MASTER, UserRole.ADMIN,
     UserRole.CEO,
     UserRole.INDEXACAO,
     UserRole.DIRETOR,

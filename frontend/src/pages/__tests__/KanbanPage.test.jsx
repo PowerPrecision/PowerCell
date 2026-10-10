@@ -101,6 +101,10 @@ const COLUNAS = [
         updated_at: "2026-09-20T10:00:00Z",
         labels: ["urgente"],
         under_35: true,
+        // D-25 — calculados ao servir
+        // (`process_sharing.aplicar_flag_a_processos`).
+        is_partilhado: true,
+        partilha_com: ["Domus"],
       },
     ],
   },
@@ -327,5 +331,50 @@ describe("KanbanPage — os botões fantasma (ligação do Lote 6)", () => {
     await screen.findByText("Ana Martins");
     await utilizador.click(screen.getByRole("button", { name: /novo processo/i }));
     expect(await screen.findByTestId("modal-criar")).toBeInTheDocument();
+  });
+});
+
+
+describe("KanbanPage — a partilha (D-25)", () => {
+  it("o cartão partilhado mostra a etiqueta [Partilha: …]", async () => {
+    // O cartão é o REAL (`KanbanCard`): falsear o quadro tornava este
+    // teste inútil, porque o que falta cobrir é a ligação página ↔
+    // quadro ↔ cartão.
+    montar();
+    await screen.findByText("Ana Martins");
+
+    const etiquetas = screen.getAllByTestId("etiqueta-partilha");
+    expect(etiquetas).toHaveLength(1);
+    expect(etiquetas[0]).toHaveTextContent("Partilha: Domus");
+  });
+
+  it("o filtro rápido está no cabeçalho do quadro", async () => {
+    // O quadro tem construtor de query SEPARADO no servidor e cabeçalho
+    // próprio no cliente: um filtro que só exista na listagem dá um
+    // quadro a ignorá-lo, sem erro nenhum.
+    montar();
+    await screen.findByText("Ana Martins");
+
+    expect(screen.getByTestId("kanban-partilha-filter")).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: /exclusivos da casa/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("clicar em «Partilhados» muda o pedido do quadro", async () => {
+    const utilizador = userEvent.setup();
+    montar();
+    await screen.findByText("Ana Martins");
+
+    api.getKanbanBoard.mockClear();
+    await utilizador.click(
+      screen.getByRole("radio", { name: /^partilhados$/i }),
+    );
+
+    await waitFor(() => expect(api.getKanbanBoard).toHaveBeenCalled());
+    const enviados = api.getKanbanBoard.mock.calls
+      .map(([params]) => String(params ?? ""))
+      .join("|");
+    expect(enviados).toContain("partilha=partilhados");
   });
 });

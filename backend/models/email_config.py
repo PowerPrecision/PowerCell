@@ -64,6 +64,21 @@ class EmailConfigCreate(BaseModel):
     is_primary: Optional[bool] = None
     account_id: Optional[str] = None  # ID existente para actualizar uma conta
 
+    @field_validator("password")
+    @classmethod
+    def password_sem_quebras_de_linha(cls, v):
+        """Tira o `\r\n` que um copiar/colar acrescenta ao fim da password.
+
+        Só as quebras de linha: são SEMPRE acidentais (nenhum campo de password
+        as aceita escritas à mão), ao contrário de um espaço, que pode fazer
+        parte de uma password escolhida. Um `\n` gravado fazia o `AUTH` do SMTP
+        enviar uma password que o servidor recusa — `535 Incorrect
+        authentication data` —, e o campo de password não mostra o erro.
+        """
+        if isinstance(v, str):
+            return v.strip("\r\n")
+        return v
+
     @field_validator("company_id")
     @classmethod
     def validate_company_id(cls, v):

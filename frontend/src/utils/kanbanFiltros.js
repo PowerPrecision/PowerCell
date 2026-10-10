@@ -37,6 +37,18 @@
 const TODOS = "all";
 
 /**
+ * Os dois valores do filtro de partilha (D-25). Iguais aos do servidor
+ * (`services/process_sharing.py`): um terceiro nome para a mesma coisa é
+ * como o `under_35` acabou com quatro significados.
+ */
+export const PARTILHA_EXCLUSIVOS = "exclusivos";
+export const PARTILHA_PARTILHADOS = "partilhados";
+export const VALORES_DE_PARTILHA = [
+  PARTILHA_EXCLUSIVOS,
+  PARTILHA_PARTILHADOS,
+];
+
+/**
  * A forma canónica dos filtros do quadro.
  *
  * Tudo o que o servidor sabe filtrar entra aqui. Um filtro que fique
@@ -62,6 +74,13 @@ export function normalizarFiltros(opcoes = {}) {
     labels: etiquetas,
     labelsLogic: opcoes.labelsLogic === "AND" ? "AND" : "OR",
     sub35: opcoes.sub35 === true,
+    // D-25 — "exclusivos" | "partilhados"; qualquer outra coisa é "não
+    // filtrar". Normaliza-se AQUI e não no componente: é a mesma razão
+    // de o `sub35` viver aqui — o que não está neste objecto não chega
+    // ao servidor nem à chave de cache.
+    partilha: VALORES_DE_PARTILHA.includes(opcoes.partilha)
+      ? opcoes.partilha
+      : "",
     viewMode: "all",
   };
 }
@@ -106,6 +125,13 @@ export function parametrosDoKanban(filtros) {
   // de propósito (ver `services/sub35.py`).
   if (f.sub35 === true) params.append("sub35", "true");
 
+  // D-25 — partilha. Vazio não é enviado: "todos" é a ausência do
+  // parâmetro, e enviar um valor desconhecido faria o servidor avisar no
+  // log por nossa causa.
+  if (VALORES_DE_PARTILHA.includes(f.partilha)) {
+    params.append("partilha", f.partilha);
+  }
+
   return params;
 }
 
@@ -126,6 +152,7 @@ export function chaveDeFiltros(filtros) {
     labels: filtros?.labels,
     labelsLogic: filtros?.labelsLogic,
     sub35: filtros?.sub35,
+    partilha: filtros?.partilha,
   });
   return f;
 }
@@ -140,4 +167,5 @@ export const CAMPOS_DE_FILTRO = [
   "labels",
   "labelsLogic",
   "sub35",
+  "partilha",
 ];

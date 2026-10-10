@@ -352,12 +352,16 @@ class TestAsRotasDeAdministracao:
         assert "get_s3_relink" in rotas
         assert "set_s3_relink" in rotas
 
-    def test_so_o_ADMIN_entra(self):
+    def test_so_o_MASTER_entra(self):
+        """Mover a fronteira de posse de um cliente é uma escrita GLOBAL:
+        depois dela, a guarda autoriza tudo o que estiver na pasta escolhida,
+        de qualquer empresa. Por isso é do Master — um Admin local podia
+        apontar a pasta de um cliente seu para a de um cliente de outra empresa."""
         rotas = self._rotas()
         for nome in ("get_s3_relink", "set_s3_relink"):
             fonte = rotas[nome]
-            assert "require_roles([UserRole.ADMIN])" in fonte, nome
-            for outro in ("CEO", "DIRETOR", "CONSULTOR", "ADMINISTRATIVO"):
+            assert "require_roles([UserRole.MASTER])" in fonte, nome
+            for outro in ("ADMIN", "CEO", "DIRETOR", "CONSULTOR", "ADMINISTRATIVO"):
                 assert f"UserRole.{outro}" not in fonte, f"{nome} abriu a {outro}"
 
     def test_a_escrita_resolve_o_papel_EFECTIVO_e_passa_o_request(self):

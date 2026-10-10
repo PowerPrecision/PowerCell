@@ -5,9 +5,7 @@ Extraído de `routes/documents.py` (`upload_file_s3`).
 """
 from __future__ import annotations
 
-import asyncio
 import logging
-from datetime import datetime
 from io import BytesIO
 from typing import Any, Optional
 
@@ -15,9 +13,15 @@ from fastapi import BackgroundTasks, HTTPException
 
 from database import db
 from services.document_auto_categorize import auto_categorize_document_background
+from services.document_intake import (
+    categoria_para_o_portal,
+    descreve_destino,
+    descricao_para_o_utilizador,
+    planear_entrada,
+    registar_na_fila_da_ia,
+)
 from services.document_constants import (
     DEFAULT_CLIENT_NAME,
-    DEFAULT_FILE_PREFIX,
     ERROR_S3_UPLOAD_FAILED,
     MIME_TYPE_PDF,
 )
@@ -26,6 +30,7 @@ from services.document_filenames import (
     normalize_filename,
     sanitize_for_log,
 )
+from services.document_visibility import assert_can_upload_to_process
 from services.document_process_resolve import (
     extract_second_client_name,
     resolve_process_from_flexible_id,
@@ -203,67 +208,6 @@ async def _validate_and_maybe_convert(
     )
 
 
-async def _triage_upload_category(
-    category: str,
-    original_filename: str,
-    file_content: bytes,
-) -> tuple[str, Optional[dict]]:
-    """Triagem IA quando categoria é Outros/Auto. Returns (category, detail)."""
-    auto_categorization_detail = None
-    needs_ai = category.lower().strip() in ("outros", "auto", "", "other")
-    if not needs_ai:
-        return category, None
-
-    try:
-        from services.document_categorization import (
-            extract_text_from_pdf,
-            categorize_document_with_ai,
-        )
-
-        text_for_analysis = f"{DEFAULT_FILE_PREFIX}{original_filename}"
-        if original_filename.lower().endswith(".pdf") and len(file_content) > 0:
-            extracted = await asyncio.to_thread(
-                extract_text_from_pdf, file_content, max_chars=3000
-            )
-            if extracted:
-                text_for_analysis = extracted
-
-        existing_categories = await db.document_metadata.distinct("ai_category")
-        ai_result = await categorize_document_with_ai(
-            text_content=text_for_analysis,
-            filename=original_filename,
-            existing_categories=existing_categories,
-        )
-
-        if ai_result.get("success") and ai_result.get("category"):
-            ai_suggested = ai_result["category"]
-            auto_categorization_detail = {
-                "original_category": category or "Outros",
-                "ai_category": ai_suggested,
-                "ai_subcategory": ai_result.get("subcategory"),
-                "ai_confidence": ai_result.get("confidence"),
-            }
-            category = ai_suggested
-            logger.info(
-                f"[UPLOAD-IA] Categoria IA: {ai_suggested} "
-                f"(confiança: {ai_result.get('confidence', 0):.0%}) "
-                f"para {sanitize_for_log(original_filename)}"
-            )
-        else:
-            logger.warning(
-                "[UPLOAD-IA] IA não conseguiu categorizar, "
-                "a usar 'Outros' como fallback"
-            )
-            category = category or "Outros"
-    except Exception as ai_err:
-        logger.warning(
-            f"[UPLOAD-IA] Erro na triagem IA (fallback para 'Outros'): {ai_err}"
-        )
-        category = category or "Outros"
-
-    return category, auto_categorization_detail
-
-
 async def run_upload_file_s3(
     client_id: str,
     *,
@@ -276,9 +220,14 @@ async def run_upload_file_s3(
     user: dict,
     background_tasks: BackgroundTasks,
     client_original_filename: Optional[str] = None,
+    origem: str = "upload",
 ) -> dict[str, Any]:
     """
     Pipeline completo de upload S3.
+
+    `origem` diz de onde vem o ficheiro («upload», «email»): vai para a fila
+    da IA e para o histórico, para se saber como um documento chegou ao
+    processo. A decisão do desvio (Index/IA) é a mesma para todas.
 
     Returns:
         Payload JSON do upload (sem JSONResponse — a rota envolve se necessário).
@@ -299,6 +248,10 @@ async def run_upload_file_s3(
         raise_on_client_without_process=True,
     )
     client_id = effective_id
+
+    # Escrever na pasta de um processo exige poder VÊ-LO (D-26): fronteira
+    # de rede, rede convidada da partilha, pré-indexação.
+    await assert_can_upload_to_process(user, process)
 
     if empresa_nif:
         personal_data = process.get("personal_data", {})
@@ -324,9 +277,12 @@ async def run_upload_file_s3(
         file_content, original_filename, content_type
     )
 
-    category, auto_categorization_detail = await _triage_upload_category(
-        category, original_filename, file_content
-    )
+    # DESVIO INTELIGENTE (Bloco 2, Lote 12): processo por indexar → pasta
+    # `Index` + fila da IA; já indexado → pasta pedida, sem IA. A triagem à
+    # entrada (uma SEGUNDA chamada ao modelo sobre o mesmo ficheiro, só para
+    # escolher a pasta) saiu: a pasta deixou de ser escolha da IA.
+    plano = planear_entrada(process, category)
+    category = plano.categoria
 
     if custom_filename:
         normalized_filename = normalize_filename(custom_filename, category)
@@ -358,26 +314,34 @@ async def run_upload_file_s3(
         logger.warning(f"[UPLOAD] Erro ao gerar URL temporário: {e}")
         temporary_url = ""
 
-    try:
-        file_content_copy = bytes(file_content)
-        background_tasks.add_task(
-            auto_categorize_document_background,
+    if plano.passa_pela_ia:
+        await registar_na_fila_da_ia(
             process_id=client_id,
             client_name=client_name,
             s3_path=s3_path,
             filename=normalized_filename,
-            file_content=file_content_copy,
+            origem=origem,
         )
-    except Exception as e:
-        logger.warning(f"[UPLOAD] Erro ao agendar categorização: {e}")
+        try:
+            file_content_copy = bytes(file_content)
+            background_tasks.add_task(
+                auto_categorize_document_background,
+                process_id=client_id,
+                client_name=client_name,
+                s3_path=s3_path,
+                filename=normalized_filename,
+                file_content=file_content_copy,
+            )
+        except Exception as e:
+            logger.warning(f"[UPLOAD] Erro ao agendar categorização: {e}")
 
     try:
         await log_history(
             process_id=client_id,
             user=user,
-            action="Carregou documento",
+            action="Carregou documento" if origem == "upload" else "Arquivou anexo de email",
             field="documento",
-            new_value=f"{normalized_filename} ({category})",
+            new_value=f"{normalized_filename} ({descreve_destino(plano)})",
         )
     except Exception as e:
         logger.warning(f"[UPLOAD] Erro ao registar histórico: {e}")
@@ -387,7 +351,7 @@ async def run_upload_file_s3(
     portal_fulfill = await _auto_fulfill_portal_request(
         client_id,
         {
-            "category": category,
+            "category": categoria_para_o_portal(plano),
             "filename": normalized_filename,
             "s3_path": s3_path,
             "content_type": content_type,
@@ -408,11 +372,10 @@ async def run_upload_file_s3(
         "was_extracted": was_extracted,
         "was_converted": was_converted,
         "conversion_method": conversion_info.get("conversion_method"),
-        "auto_categorization": "iniciada",
+        "auto_categorization": "iniciada" if plano.passa_pela_ia else "dispensada",
         "temporary_url": temporary_url,
         "category": category,
         "portal_fulfilled": portal_fulfill.get("fulfilled", 0),
+        "intake": descricao_para_o_utilizador(plano),
     }
-    if auto_categorization_detail:
-        response_data["ai_categorization"] = auto_categorization_detail
     return response_data

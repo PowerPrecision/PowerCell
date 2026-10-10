@@ -818,6 +818,110 @@ async def create_ttl_indexes(db) -> dict:
     for idx in [{"keys": [("chave", 1)], "name": "idx_job_schedule_chave", "unique": True}]:
         await _create_index_safe(db.job_schedule_marks, idx, "job_schedule_marks", results)
 
+    # ====================================================================
+    # ÍNDICES DO RELATÓRIO EXECUTIVO (Bloco 4, pontos 13 e 16)
+    # ====================================================================
+    # As agregações de `services/executive_report.py` abrem com um `$match`
+    # sobre estes campos: sem eles varriam `tasks` inteira a cada clique em
+    # «Actualizar». O histórico já tem `idx_history_user_time`
+    # (user_id, created_at), que serve a pergunta «o que fez cada pessoa».
+    #   - concluídas no período, por quem concluiu;
+    #   - carga em aberto: atribuídas a X e criadas antes do fim.
+    executive_task_indexes = [
+        {"keys": [("completed_by", 1), ("completed_at", 1)], "name": "idx_tasks_completed_by_time"},
+        {"keys": [("assigned_to", 1), ("created_at", 1)], "name": "idx_tasks_assigned_created"},
+    ]
+    for idx in executive_task_indexes:
+        await _create_index_safe(db.tasks, idx, "tasks", results)
+
+    # Calendário do Dashboard (ponto 29): as datas de escritura e de CPCV
+    # vivem no processo e a consulta do mês filtra por elas. `sparse`: a
+    # maioria dos processos não tem as datas preenchidas.
+    for idx in [
+        {"keys": [("real_estate_data.data_escritura_prevista", 1)], "name": "idx_proc_data_escritura", "sparse": True},
+        {"keys": [("real_estate_data.data_cpcv", 1)], "name": "idx_proc_data_cpcv", "sparse": True},
+    ]:
+        await _create_index_safe(db.processes, idx, "processes", results)
+
+    # O registo semanal: um por (âmbito, semana). O `unique` impede que dois
+    # pedidos concorrentes do mesmo CEO deixem dois registos da mesma semana.
+    for idx in [{
+        "keys": [("scope_key", 1), ("week_start", -1)],
+        "name": "idx_exec_weekly_scope_week",
+        "unique": True,
+    }]:
+        await _create_index_safe(
+            db.executive_weekly_reports, idx, "executive_weekly_reports", results,
+        )
+
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'process_financial_origins' (Bloco 4, ponto 7)
+    # ====================================================================
+    # Uma origem por processo: o `unique` é o que impede duas escritas
+    # concorrentes de deixarem duas origens (e o cálculo de comissões de
+    # escolher uma à sorte).
+    origin_indexes = [
+        {"keys": [("process_id", 1)], "name": "idx_origin_process", "unique": True},
+        {"keys": [("angariador_id", 1)], "name": "idx_origin_angariador", "sparse": True},
+    ]
+    for idx in origin_indexes:
+        await _create_index_safe(
+            db.process_financial_origins, idx, "process_financial_origins", results,
+        )
+
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'portal_scraper_jobs' (Bloco 5, pontos 8 e 9)
+    # ====================================================================
+    # Tudo o que se pergunta a esta colecção é «os jobs deste processo,
+    # activos, o mais recente»: o MFA, o job activo antes de criar outro e a
+    # limpeza dos mortos. Sem o índice, cada polling do ecrã (3 s) varria-a.
+    scraper_job_indexes = [
+        {"keys": [("process_id", 1), ("created_at", -1)], "name": "idx_scraper_job_process_recente"},
+        {"keys": [("id", 1)], "name": "idx_scraper_job_id", "unique": True},
+    ]
+    for idx in scraper_job_indexes:
+        await _create_index_safe(
+            db.portal_scraper_jobs, idx, "portal_scraper_jobs", results,
+        )
+
+    # ====================================================================
+    # PORTAL DO PARCEIRO (Out 2026)
+    # ====================================================================
+    # `partners`: o login procura por email e a sessão por id — ambos
+    # únicos (dois documentos com o mesmo email deixavam o login escolher à
+    # sorte). O convite procura-se pelo hash do token (`sparse`: só os
+    # convites pendentes o têm).
+    for idx in [
+        {"keys": [("id", 1)], "name": "idx_partner_id", "unique": True},
+        {"keys": [("email", 1)], "name": "idx_partner_email", "unique": True},
+        {"keys": [("invite.token_hash", 1)], "name": "idx_partner_invite", "sparse": True},
+    ]:
+        await _create_index_safe(db.partners, idx, "partners", results)
+
+    # Um controlo «serviço pago pelo parceiro» por processo: o `unique` é o que
+    # impede duas escritas concorrentes de deixarem dois registos (e a ficha
+    # de mostrar um ao acaso).
+    for idx in [{"keys": [("process_id", 1)], "name": "idx_partner_service_process", "unique": True}]:
+        await _create_index_safe(db.process_partner_service, idx, "process_partner_service", results)
+
+    # A pergunta de TODAS as listagens e métricas do parceiro: «os meus
+    # processos, da(s) minha(s) rede(s), não eliminados». O prefixo é o
+    # campo mais selectivo (um parceiro tem dezenas, a rede milhares).
+    for idx in [{
+        "keys": [("assigned_parceiro_id", 1), ("network_id", 1), ("is_deleted", 1)],
+        "name": "idx_proc_parceiro_rede",
+        "sparse": True,
+    }]:
+        await _create_index_safe(db.processes, idx, "processes", results)
+
+    # As leads que o parceiro submeteu (clientes sem processo).
+    for idx in [{
+        "keys": [("submitted_by_partner_id", 1), ("network_id", 1)],
+        "name": "idx_client_parceiro_rede",
+        "sparse": True,
+    }]:
+        await _create_index_safe(db.clients, idx, "clients", results)
+
     return results
 
 

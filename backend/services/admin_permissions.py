@@ -19,6 +19,7 @@ from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, Workflow
 from models.email_config import EmailConfigCreate, EmailConfigResponse
 from services.auth import hash_password, require_roles, get_current_user
 from services.admin_helpers import _safe_float, _audit_log
+from services.user_management_scope import carregar_utilizador_gerivel
 from services.permissions import (
     get_default_permissions_for_role,
     get_all_available_permissions,
@@ -112,9 +113,7 @@ async def run_reset_user_permissions(user_id: str, user: dict):
     Raises:
         HTTPException(404): Se utilizador não encontrado.
     """
-    target_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-    if not target_user:
-        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    target_user = await carregar_utilizador_gerivel(user_id, user)
     
     role = target_user.get("role")
     perms_doc = build_permissions_document(role)
@@ -170,10 +169,11 @@ async def run_update_role_defaults(role: str, request: CapabilityUpdateRequest, 
     """
     Atualiza os defaults de capabilities para um cargo.
     Isto afecta TODOS os utilizadores com esse cargo que NÃO têm overrides.
-    Apenas admin pode alterar defaults (CEO pode visualizar mas não alterar).
+    Apenas o Master pode alterar defaults: afectam TODOS os utilizadores com
+    esse cargo, de todas as empresas (Admin e CEO podem visualizar).
     """
-    if user.get("role") != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="Apenas o Admin pode alterar defaults de cargo")
+    if user.get("role") != UserRole.MASTER:
+        raise HTTPException(status_code=403, detail="Apenas o Master pode alterar defaults de cargo")
     
     if role in SUPER_ADMIN_ROLES:
         raise HTTPException(status_code=400, detail="Não é possível alterar permissões de admin/CEO (Super Admin Bypass)")
@@ -215,9 +215,7 @@ async def run_get_user_permissions(user_id: str, user: dict):
     Retorna as capabilities efetivas de um utilizador específico,
     incluindo role defaults + overrides pessoais.
     """
-    target = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-    if not target:
-        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    target = await carregar_utilizador_gerivel(user_id, user)
     
     effective_caps = get_user_capabilities(target)
     role_defaults = get_role_defaults(target.get("role", ""))
@@ -239,9 +237,7 @@ async def run_update_user_permissions(user_id: str, request: CapabilityUpdateReq
     Atualiza as capabilities (overrides) de um utilizador específico.
     Apenas as capabilities enviadas são alteradas; as restantes mantêm-se.
     """
-    target = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-    if not target:
-        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    target = await carregar_utilizador_gerivel(user_id, user)
     
     target_role = target.get("role", "")
     

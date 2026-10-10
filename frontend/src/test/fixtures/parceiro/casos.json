@@ -1,0 +1,86 @@
+{
+  "items": [
+    {
+      "client_name": "Lead lead-2",
+      "consultor_name": null,
+      "created_at": "2026-10-03T10:00:00+00:00",
+      "etapa": "lead",
+      "etapa_label": "Leads",
+      "id": "lead-2",
+      "kind": "lead",
+      "pedidos_pendentes": 0,
+      "process_number": null,
+      "process_type": "credito_habitacao",
+      "updated_at": "2026-10-09T10:00:00+00:00"
+    },
+    {
+      "client_name": "Lead lead-1",
+      "consultor_name": null,
+      "created_at": "2026-10-03T10:00:00+00:00",
+      "etapa": "lead",
+      "etapa_label": "Leads",
+      "id": "lead-1",
+      "kind": "lead",
+      "pedidos_pendentes": 1,
+      "process_number": null,
+      "process_type": "credito_habitacao",
+      "updated_at": "2026-10-03T10:00:00+00:00"
+    },
+    {
+      "client_name": "Cliente a-novo",
+      "consultor_name": "Carla Consultora",
+      "created_at": "2026-10-01T10:00:00+00:00",
+      "etapa": "novo",
+      "etapa_label": "Em preparação",
+      "id": "a-novo",
+      "kind": "process",
+      "pedidos_pendentes": 1,
+      "process_number": "PROC-a-novo",
+      "process_type": "credito_habitacao",
+      "updated_at": "2026-10-02T10:00:00+00:00"
+    },
+    {
+      "client_name": "Cliente b-aprovado",
+      "consultor_name": "Carla Consultora",
+      "created_at": "2026-10-01T10:00:00+00:00",
+      "etapa": "aprovado",
+      "etapa_label": "Em aprovação",
+      "id": "b-aprovado",
+      "kind": "process",
+      "pedidos_pendentes": 0,
+      "process_number": "PROC-b-aprovado",
+      "process_type": "credito_habitacao",
+      "updated_at": "2026-10-02T10:00:00+00:00"
+    },
+    {
+      "client_name": "Cliente c-escriturado",
+      "consultor_name": "Carla Consultora",
+      "created_at": "2026-10-01T10:00:00+00:00",
+      "etapa": "concluido",
+      "etapa_label": "Escriturados",
+      "id": "c-escriturado",
+      "kind": "process",
+      "pedidos_pendentes": 0,
+      "process_number": "PROC-c-escriturado",
+      "process_type": "credito_habitacao",
+      "updated_at": "2026-10-02T10:00:00+00:00"
+    },
+    {
+      "client_name": "Cliente d-perdido",
+      "consultor_name": "Carla Consultora",
+      "created_at": "2026-10-01T10:00:00+00:00",
+      "etapa": "perdido",
+      "etapa_label": "Perdidos",
+      "id": "d-perdido",
+      "kind": "process",
+      "pedidos_pendentes": 0,
+      "process_number": "PROC-d-perdido",
+      "process_type": "credito_habitacao",
+      "updated_at": "2026-10-02T10:00:00+00:00"
+    }
+  ],
+  "page": 1,
+  "pages": 1,
+  "size": 20,
+  "total": 6
+}

@@ -19,7 +19,7 @@ const WorkflowStatusesPage = ({ embedded = false }) => {
   const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
 
   // Verificar permissões
-  if (!hasAnyRole(user, ["admin", "ceo"])) {
+  if (!hasAnyRole(user, ["master", "admin", "ceo"])) {
     return wrapLayout(
       <Card className="border-red-200 bg-red-50">
         <CardContent className="p-8 text-center">

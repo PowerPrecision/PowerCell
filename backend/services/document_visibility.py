@@ -146,6 +146,8 @@ def user_can_view_process_documents(
     user: dict,
     process: dict,
     client: Optional[dict] = None,
+    *,
+    scope=None,
 ) -> bool:
     """
     Verifica a permissão de VER documentos do processo.
@@ -167,6 +169,13 @@ def user_can_view_process_documents(
         utilizador é INDEX, se está atribuído ao processo ou se tem
         relação directa com o cliente (doc pré-carregado).
     """
+    # 0. FRONTEIRA DE REDE — antes do bypass (D-26). O bypass de cargo é
+    #    absoluto DENTRO da rede; um bypass que corra primeiro é um
+    #    bypass de rede. Conta a rede convidada de um processo
+    #    partilhado (D-25), que é a porta que a decisão de produto abre.
+    if processo_fora_da_rede(process, scope):
+        return False
+
     # 1. BYPASS ABSOLUTO — perfis de administração (admin, ceo, diretor,
     #    administrativo): verificado primeiro, incondicionalmente.
     roles = _user_allows(user)
@@ -194,7 +203,61 @@ def user_can_view_process_documents(
     return False
 
 
-def can_manage_process_documents(user: dict, process: dict) -> bool:
+# ====================================================================
+# A FRONTEIRA DE REDE (D-26, fechada com a D-25 — Out 2026)
+# ====================================================================
+# Esta função não conhecia redes NENHUMAS, e abria por duas linhas:
+#
+#   1. bypass ABSOLUTO para {admin, ceo, diretor, administrativo},
+#      verificado antes de tudo. O diretor de uma ilha é diretor da SUA
+#      rede — é a regra 2 do `deadline_scope` e a mesma do `visit_scope`.
+#   2. `if not is_document_visibility_restricted(process): return True`
+#      — um processo JÁ INDEXADO era visível a qualquer sessão
+#      autenticada. A restrição foi escrita para a PRÉ-indexação (o
+#      indexador trata os documentos antes de haver equipa), não como
+#      fronteira de tenant; e indexado é o caso NORMAL, não o raro. É a
+#      forma do `run_get_my_tasks` ao contrário — foi o ramo COMUM não
+#      ter guarda nenhuma que escondeu isto.
+#
+# Do outro lado não eram nomes: era a pasta documental do cliente —
+# cartão de cidadão, IRS, recibos, extractos. Bastava um `process_id`.
+#
+# A fronteira entra ANTES do bypass, e não depois: um bypass de cargo
+# que corre primeiro é um bypass de rede.
+#
+# PORQUE É QUE SÓ FECHA AGORA
+# ---------------------------
+# A guarda certa É a resposta da D-25: num processo em PARTILHA o lado
+# convidado **tem de ver os documentos** (decisão de produto: «a ficha
+# inteira»). Escrever aqui uma fronteira de rede pura fechava a porta
+# que a partilha precisa de abrir — e alargar uma parede depois para
+# caber a correcção é como o Incidente P0 do Portal começou. Por isso
+# usa o `processo_no_ambito`, que já conta a rede convidada.
+#
+# O `scope` é um PARÂMETRO e não uma leitura: estas funções são puras, e
+# é isso que as torna testáveis sem Mongo no `backend-fast`. Quem o
+# resolve são as guardas `async`, que é o que os endpoints chamam — e há
+# uma guarda sobre a fonte a afirmar que o resolvem mesmo.
+
+
+def processo_fora_da_rede(process: dict, scope) -> bool:
+    """O processo está FORA do âmbito de rede deste utilizador?
+
+    `scope=None` significa «não sei» e **não** aplica a fronteira — é o
+    que mantém as puras utilizáveis por quem não a tem (e o que não
+    partiu os chamadores legados). A parede real está nas guardas
+    `async`, que resolvem o âmbito sempre.
+    """
+    if scope is None:
+        return False
+    from services.tenant_network import processo_no_ambito
+
+    return not processo_no_ambito(process, scope)
+
+
+def can_manage_process_documents(
+    user: dict, process: dict, *, scope=None,
+) -> bool:
     """Pode OPERAR sobre os documentos do processo (renomear, organizar)?
 
     Gestão OU atribuído — decisão de produto (Set 2026). O
@@ -216,6 +279,10 @@ def can_manage_process_documents(user: dict, process: dict) -> bool:
     """
     from services.process_staff_assignment import collect_assigned_ids
 
+    # 0. FRONTEIRA DE REDE — antes do bypass de cargo (D-26).
+    if processo_fora_da_rede(process, scope):
+        return False
+
     if _user_allows(user) & _ADMIN_BYPASS_ROLES:
         return True
 
@@ -223,9 +290,23 @@ def can_manage_process_documents(user: dict, process: dict) -> bool:
     return bool(uid and uid in set(collect_assigned_ids(process)))
 
 
-def assert_can_manage_process_documents(user: dict, process: dict) -> None:
+async def exigir_gestao_de_documentos(user: dict, process: dict) -> None:
+    """Variante `async`: resolve a FRONTEIRA DE REDE e delega (D-26).
+
+    É esta que os serviços chamam. A versão sem âmbito fica como
+    primitivo puro (e para os testes), mas uma operação de ESCRITA sobre
+    os documentos de um processo de outra rede não pode passar por ela.
+    """
+    assert_can_manage_process_documents(
+        user, process, scope=await _ambito_do_utilizador(user),
+    )
+
+
+def assert_can_manage_process_documents(
+    user: dict, process: dict, *, scope=None,
+) -> None:
     """Levanta 403 quando `can_manage_process_documents` recusa."""
-    if can_manage_process_documents(user, process):
+    if can_manage_process_documents(user, process, scope=scope):
         return
     logger.warning(
         "[DOCS-MANAGE] Operação negada: user=%s role=%s ao processo %s "
@@ -241,6 +322,27 @@ def assert_can_manage_process_documents(user: dict, process: dict) -> None:
     )
 
 
+async def _ambito_do_utilizador(user: dict):
+    """O âmbito de rede de quem pede. Falha **FECHADA**.
+
+    Sem âmbito resolvido devolve um `TenantScope()` vazio, que não casa
+    com rede nenhuma — logo `processo_no_ambito` recusa. Devolver `None`
+    era a saída cómoda e desligava a fronteira por causa de um soluço da
+    rede, que é o oposto do que esta guarda existe para fazer.
+    """
+    from services.tenant_network import TenantScope, resolve_tenant_scope
+
+    try:
+        return await resolve_tenant_scope(user or {})
+    except Exception as exc:
+        logger.warning(
+            "[DOCS-VISIBILITY] Falha a resolver o âmbito de %s (%s); a "
+            "fronteira de rede passa a recusar.",
+            (user or {}).get("id"), exc,
+        )
+        return TenantScope()
+
+
 async def assert_can_view_process_documents(user: dict, process: dict) -> None:
     """
     Guarda de permissão para endpoints de leitura/listagem de documentos.
@@ -254,8 +356,24 @@ async def assert_can_view_process_documents(user: dict, process: dict) -> None:
         não é INDEX/ADMIN nem está atribuído ao processo nem tem relação
         com o cliente.
     """
-    if user_can_view_process_documents(user, process):
+    scope = await _ambito_do_utilizador(user)
+
+    if user_can_view_process_documents(user, process, scope=scope):
         return
+
+    # A fronteira de REDE não tem allow-path: um processo de outra rede
+    # não se abre por relação com o cliente — o cliente também não é
+    # desta rede. Recusa-se aqui, antes do `_user_related_to_client`,
+    # que faz I/O e responderia a «este cliente existe?».
+    if processo_fora_da_rede(process, scope):
+        logger.warning(
+            "[DOCS-VISIBILITY] Fronteira de rede: user=%s papel=%s ao "
+            "processo %s (rede=%r, parceiras=%r) fora do seu âmbito",
+            (user or {}).get("id"), (user or {}).get("role"),
+            (process or {}).get("id"), (process or {}).get("network_id"),
+            (process or {}).get("partner_network_ids"),
+        )
+        raise HTTPException(status_code=403, detail=_ERROR_DETAIL)
     # PACOTE 12 — consultor responsável pelo cliente (assigned_to) ou
     # criador do registo (created_by): allow-path assíncrono, avaliado
     # apenas no caminho de negação (sem I/O extra quando já é permitido).
@@ -293,3 +411,36 @@ async def assert_can_view_process_documents_by_id(
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
     await assert_can_view_process_documents(user, process)
     return process
+
+
+# ====================================================================
+# ESCREVER NA PASTA DE UM PROCESSO (Bloco 2, Lote 12)
+# ====================================================================
+# O upload (multipart, URL pré-assinado, confirmação, verificação de
+# conflito e o «Arquivar no Processo» do Webmail) carregava o processo com
+# `resolve_process_from_flexible_id` e MAIS NADA: bastava um `process_id`
+# para escrever na pasta documental de um cliente de OUTRA rede. A D-26
+# fechou a LEITURA; esta fecha a escrita, que é pior (planta um ficheiro na
+# ficha de outra casa e, se o processo estiver por indexar, põe-no na fila
+# da IA dela).
+#
+# Quem escreve é quem pode ver. Um perfil que a D-26 deixa LER mantém a
+# capacidade de ESCREVER (administração e gestão dentro da rede, a equipa
+# de indexação, o atribuído) — e a rede convidada de um processo partilhado
+# (D-25) conta, porque `assert_can_view_process_documents` já a conta.
+# `parceiro` e `cliente` não carregam ficheiros pela API do CRM: o Portal
+# tem o seu próprio caminho, com a sua própria parede.
+_PAPEIS_QUE_NAO_CARREGAM = frozenset({"parceiro", "cliente"})
+
+
+async def assert_can_upload_to_process(user: dict, process: dict) -> None:
+    """Levanta 403 se o utilizador não pode carregar ficheiros para o processo."""
+    roles = _user_allows(user)
+    if roles and roles <= _PAPEIS_QUE_NAO_CARREGAM:
+        logger.warning(
+            "[DOCS-UPLOAD] Upload recusado ao perfil %s no processo %s",
+            sorted(roles), (process or {}).get("id"),
+        )
+        raise HTTPException(status_code=403, detail=_ERROR_DETAIL)
+    await assert_can_view_process_documents(user, process)
+

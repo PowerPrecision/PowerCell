@@ -89,7 +89,7 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
             }
         ))
 
-        if user.get("role") in ["admin", "ceo"]:
+        if user.get("role") in ["master", "admin", "ceo"]:
             # Épico 10: era um `broadcast` e levava o NOME de uma pessoa a
             # todos os sockets, incluindo os de outra rede. Hoje fica
             # dentro das redes do próprio.
@@ -277,7 +277,7 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
         registo_do_ambito = manager.get_scope(user_id)
         manager.disconnect(websocket)
 
-        if user.get("role") in ["admin", "ceo"]:
+        if user.get("role") in ["master", "admin", "ceo"]:
             try:
                 await entregar_as_redes(
                     registo_do_ambito[0] if registo_do_ambito else None,

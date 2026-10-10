@@ -19,7 +19,7 @@ from models.company import (
     CompanyListResponse,
     CompanyEmailConnectionTest,
 )
-from services.auth import get_current_user, require_admin
+from services.auth import get_current_user, require_admin, require_master
 from services.companies_crud_api_list import (
     run_list_companies,
     run_list_available_companies,
@@ -56,20 +56,23 @@ async def list_companies(
 
 
 @router.get("/available", response_model=list)
-async def list_available_companies():
+async def list_available_companies(user: dict = Depends(get_current_user)):
     """Lista nomes das empresas disponíveis (para selects/dropdowns)."""
-    return await run_list_available_companies()
+    return await run_list_available_companies(actor=user)
 
 
 @router.get("/{company_id}", response_model=CompanyResponse)
-async def get_company(company_id: str):
+async def get_company(company_id: str, user: dict = Depends(get_current_user)):
     """Obtém uma empresa pelo ID (ou por nome como fallback)."""
-    return await run_get_company(company_id)
+    return await run_get_company(company_id, actor=user)
 
 
-@router.post("", response_model=CompanyResponse, status_code=201)
+@router.post(
+    "", response_model=CompanyResponse, status_code=201,
+    dependencies=[Depends(require_master())],
+)
 async def create_company(data: CompanyCreate):
-    """Cria uma nova empresa."""
+    """Cria uma nova empresa (um novo inquilino: só o Master)."""
     return await run_create_company(data)
 
 
@@ -80,12 +83,14 @@ async def test_email_connection(data: CompanyEmailConnectionTest):
 
 
 @router.put("/{company_id}", response_model=CompanyResponse)
-async def update_company(company_id: str, data: CompanyUpdate):
-    """Atualiza os dados de uma empresa."""
-    return await run_update_company(company_id, data)
+async def update_company(
+    company_id: str, data: CompanyUpdate, user: dict = Depends(get_current_user),
+):
+    """Atualiza os dados de uma empresa (a própria; a rede só o Master)."""
+    return await run_update_company(company_id, data, actor=user)
 
 
-@router.delete("/{company_id}")
+@router.delete("/{company_id}", dependencies=[Depends(require_master())])
 async def delete_company(company_id: str):
     """Remove uma empresa e gere utilizadores associados."""
     return await run_delete_company(company_id)
@@ -95,6 +100,7 @@ async def delete_company(company_id: str):
 async def upload_company_logo(
     company_id: str,
     file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
 ):
     """Faz upload do logótipo da empresa para o S3."""
-    return await run_upload_company_logo(company_id, file)
+    return await run_upload_company_logo(company_id, file, actor=user)

@@ -43,6 +43,13 @@ import PortalSettingsSection from "./systemConfig/PortalSettingsSection";
 import MandatoryDocumentsSection from "./systemConfig/MandatoryDocumentsSection";
 import ChangelogSection from "./systemConfig/ChangelogSection";
 import SlaThresholdsSection from "./systemConfig/SlaThresholdsSection";
+import EmpresaConfigSelector from "./systemConfig/EmpresaConfigSelector";
+import { getSystemConfigCompanies } from "../services/api";
+import {
+  deveMostrarSeletorDeEmpresa,
+  empresaEmVigor,
+  normalizarEmpresas,
+} from "../utils/empresaDeConfiguracao";
 import {
   Select,
   SelectContent,
@@ -50,7 +57,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { hasAnyRole } from "../utils/roleUtils";
+import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import { toast } from "sonner";
 import {
   Settings,
@@ -118,13 +125,28 @@ export const SECCOES_DEDICADAS = {
  * `document_recipients`); esta lista diz quais se OFERECEM e com que
  * rótulo. Há um teste a afirmar que toda a chave daqui existe lá.
  */
-export const SECCOES_NA_NAVEGACAO = [
+export const SECCOES_NA_NAVEGACAO_COMPLETAS = [
   { key: "maintenance", label: "Manutenção", Icon: Wrench },
   { key: "portal", label: "Portal", Icon: MessageSquare },
   { key: "mandatory_documents", label: "Docs Obrigatórios", Icon: FileEdit },
   { key: "changelog", label: "Atualizações", Icon: Megaphone },
   { key: "dashboard_slas", label: "Limiares de SLA", Icon: Gauge },
 ];
+
+/**
+ * O que cada perfil vê na navegação — ponto único.
+ *
+ * TODAS as secções com ecrã próprio lêem e escrevem a configuração GLOBAL
+ * (limiares de SLA, documentos obrigatórios, integrações, emails do sistema,
+ * manutenção…), que é infraestrutura partilhada e **exclusiva do
+ * administrador**. O CEO só configura a(s) sua(s) empresa(s), nas secções
+ * genéricas. Mostrar-lhe as dedicadas daria um ecrã de erros 403.
+ */
+export const seccoesDaNavegacao = (isAdmin) =>
+  isAdmin ? SECCOES_NA_NAVEGACAO_COMPLETAS : [];
+
+/** Compatibilidade: a lista completa (o que o administrador vê). */
+export const SECCOES_NA_NAVEGACAO = SECCOES_NA_NAVEGACAO_COMPLETAS;
 
 const SystemConfigPage = ({ embedded = false }) => {
   const { token, user, effectiveCompanyId } = useAuth();
@@ -134,10 +156,41 @@ const SystemConfigPage = ({ embedded = false }) => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(() => searchParams.get("tab") || "storage");
 
-  // MULTI-EMPRESA: a empresa activa vem do selector global (ContextSwitcher
-  // no header principal), não deve existir um segundo selector aqui — só
-  // reagimos à empresa activa escolhida globalmente.
-  const selectedCompanyId = effectiveCompanyId || "default";
+  // MULTI-EMPRESA: por omissão reagimos à empresa activa do selector global
+  // (ContextSwitcher). Mas esse selector só lista os UCR de quem pergunta, e
+  // o ADMIN configura TODAS as empresas do CRM: a lista abaixo vem do
+  // servidor, já filtrada pelo âmbito (admin: todas; CEO: as dele), e só há
+  // selector quando tem mais do que uma. Ver `utils/empresaDeConfiguracao`.
+  const [empresas, setEmpresas] = useState([]);
+  const [listaPronta, setListaPronta] = useState(false);
+  const [empresaEscolhida, setEmpresaEscolhida] = useState(null);
+  const selectedCompanyId = empresaEmVigor({
+    escolhida: empresaEscolhida,
+    activa: effectiveCompanyId,
+    empresas,
+  });
+
+  useEffect(() => {
+    let cancelado = false;
+    getSystemConfigCompanies()
+      .then((res) => {
+        if (!cancelado) setEmpresas(normalizarEmpresas(res?.data));
+      })
+      // Sem lista, o servidor continua a ser a parede: cai no comportamento
+      // de sempre (a empresa activa) em vez de bloquear o ecrã.
+      .catch((error) => console.warn("Lista de empresas indisponível:", error))
+      .finally(() => {
+        if (!cancelado) setListaPronta(true);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, []);
+
+  // Trocar a empresa activa no cabeçalho global anula a escolha local.
+  useEffect(() => {
+    setEmpresaEscolhida(null);
+  }, [effectiveCompanyId]);
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -167,21 +220,28 @@ const SystemConfigPage = ({ embedded = false }) => {
     }
   }, [token, selectedCompanyId]);
 
+  // Só pede depois de saber que empresas se oferecem: um CEO de uma ilha
+  // não tem a global, e abrir o ecrã a pedi-la daria um 403 e um toast.
   useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
+    if (listaPronta) fetchConfig();
+  }, [fetchConfig, listaPronta]);
 
-  // Recarregar config quando a empresa activa (global) mudar — ignora a
-  // primeira execução (montagem) para não sobrepor o tab pedido via ?tab=
-  const previousCompanyIdRef = useRef(selectedCompanyId);
+  // Recarregar config quando a empresa mostrada mudar — ignora a primeira
+  // execução (montagem) para não sobrepor o tab pedido via ?tab=
+  const previousCompanyIdRef = useRef(null);
   useEffect(() => {
+    if (!listaPronta) return;
+    if (previousCompanyIdRef.current === null) {
+      previousCompanyIdRef.current = selectedCompanyId;
+      return;
+    }
     if (previousCompanyIdRef.current === selectedCompanyId) return;
     previousCompanyIdRef.current = selectedCompanyId;
     setLoading(true);
     setActiveTab("settings");
     fetchConfig();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCompanyId]);
+  }, [selectedCompanyId, listaPronta]);
 
   const handleSave = async (section, data) => {
     // Pré-processar campos especiais
@@ -259,7 +319,7 @@ const SystemConfigPage = ({ embedded = false }) => {
     );
     return embedded ? loadingContent : <DashboardLayout>{loadingContent}</DashboardLayout>;
   }
-  if (!hasAnyRole(user, ["admin", "ceo"])) {
+  if (!hasAnyRole(user, ["master", "admin", "ceo"])) {
     const accessDeniedContent = (
       <div className="text-center py-12">
         <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
@@ -275,7 +335,14 @@ const SystemConfigPage = ({ embedded = false }) => {
   const sections = Object.keys(fields).filter(key => key !== "email");
   // Qual secção o separador activo pede. Deriva do registo — ver
   // `SECCOES_DEDICADAS`: é o que garante que nunca se renderizam as duas.
-  const SeccaoDedicada = SECCOES_DEDICADAS[activeTab];
+  // A configuração GLOBAL é exclusiva do MASTER (o único perfil global): o
+  // Admin e o CEO só vêem as secções genéricas da(s) sua(s) empresa(s). Um
+  // `?tab=` antigo que aponte para uma dedicada diz-se, em vez de abrir um
+  // ecrã de erros 403.
+  const isMaster = hasRole(user, "master");
+  const navegacao = seccoesDaNavegacao(isMaster);
+  const SeccaoDedicada = isMaster ? SECCOES_DEDICADAS[activeTab] : undefined;
+  const seccaoReservada = !isMaster && Boolean(SECCOES_DEDICADAS[activeTab]);
 
 
   const pageContent = (
@@ -292,8 +359,13 @@ const SystemConfigPage = ({ embedded = false }) => {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {/* O seletor de empresa vive apenas no header global principal
-                (ContextSwitcher) — esta página apenas reage à empresa activa. */}
+            {deveMostrarSeletorDeEmpresa(empresas) && (
+              <EmpresaConfigSelector
+                empresas={empresas}
+                valor={selectedCompanyId}
+                onChange={setEmpresaEscolhida}
+              />
+            )}
             <Button variant="outline" onClick={fetchConfig}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Recarregar
@@ -334,7 +406,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                     <div className="my-1.5 border-t border-border" />
                     {/* Nota: "RGPD" foi removido daqui — vive apenas no tab Compliance do Painel de Administração (evita duplicação).
                         "Integrações" e "Emails Sistema" foram movidos para o tab Comunicações no Painel de Administração */}
-                    {SECCOES_NA_NAVEGACAO.map(({ key, label, Icon }) => (
+                    {navegacao.map(({ key, label, Icon }) => (
                       <button
                         key={key}
                         type="button"
@@ -376,7 +448,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                     );
                   })}
                   {/* Nota: RGPD removido (vive só em Compliance); Integrações e Emails Sistema movidos para Comunicações */}
-                  {SECCOES_NA_NAVEGACAO.map(({ key, label, Icon }) => (
+                  {navegacao.map(({ key, label, Icon }) => (
                     <SelectItem key={key} value={key}>
                       <span className="flex items-center gap-2">
                         <Icon className="h-4 w-4" />
@@ -414,7 +486,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                     </button>
                   );
                 })}
-                {SECCOES_NA_NAVEGACAO.map(({ key, label, Icon }) => (
+                {navegacao.map(({ key, label, Icon }) => (
                   <button
                     key={key}
                     type="button"
@@ -441,6 +513,7 @@ const SystemConfigPage = ({ embedded = false }) => {
               <ConfigSection
                 section={fields[activeTab]}
                 sectionKey={activeTab}
+                companyId={selectedCompanyId}
                 config={config?.[activeTab]}
                 fields={fields[activeTab]?.fields || []}
                 onSave={handleSave}
@@ -450,7 +523,18 @@ const SystemConfigPage = ({ embedded = false }) => {
             {/* Um separador desconhecido (um `?tab=` antigo num favorito) não
                 é dedicado nem tem campos: DIZ-SE, em vez de deixar a área de
                 conteúdo vazia sem explicação. */}
-            {!SeccaoDedicada && !fields[activeTab] && !loading && (
+            {seccaoReservada && (
+              <Card data-testid="config-seccao-reservada">
+                <CardContent className="py-12 text-center space-y-2">
+                  <p className="font-medium">Secção reservada ao administrador</p>
+                  <p className="text-sm text-muted-foreground">
+                    Esta definição é global (partilhada por todas as empresas). Como CEO,
+                    configura as definições da sua empresa nas restantes categorias.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+            {!SeccaoDedicada && !seccaoReservada && !fields[activeTab] && !loading && (
               <Card data-testid="config-seccao-desconhecida">
                 <CardContent className="py-12 text-center space-y-2">
                   <p className="font-medium">Secção desconhecida</p>

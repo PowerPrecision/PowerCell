@@ -16,6 +16,8 @@ from services.portal_doc_categories import (
     PORTAL_HIDDEN_CATEGORIES,
 )
 from services.portal_status_helpers import (
+    nota_do_pedido,
+    rotulo_do_pedido,
     _get_user_contact_info,
     _get_rgpd_status,
     _get_team_info,
@@ -65,9 +67,24 @@ async def run_get_portal_status(client_data: dict):
             ).to_list(200)
             for d in docs:
                 status = (d.get("status") or "").upper()
+                cat_bruta = d.get("category") or "Outros"
+                if isinstance(cat_bruta, dict):
+                    cat_bruta = cat_bruta.get("value", cat_bruta.get("label", "Outros"))
+                cat_info = DOCUMENT_CATEGORY_MAP.get(
+                    cat_bruta, {"label": cat_bruta, "icon": "📎"}
+                )
                 entry = {
                     "id": d.get("id"),
                     "category": d.get("category"),
+                    # Bloco 3 (ponto 17): esta é a PRIMEIRA lista que o cliente
+                    # vê (antes de haver processo) e a única serialização que
+                    # não levava `label`, `icon` nem `notes` — o ecrã lê
+                    # `label` e mostrava «Documento» em todas as linhas, sem a
+                    # descrição escrita no pedido.
+                    "label": rotulo_do_pedido(d, cat_info),
+                    "category_label": rotulo_do_pedido(d, cat_info),
+                    "icon": cat_info["icon"],
+                    "notes": nota_do_pedido(d),
                     "custom_label": d.get("custom_label") or d.get("notes"),
                     "filename": d.get("filename") or d.get("original_filename"),
                     "status": d.get("status"),
@@ -209,26 +226,12 @@ async def run_get_portal_status(client_data: dict):
         if isinstance(cat, dict):
             cat = cat.get("value", cat.get("label", "Outros"))
         cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
-        # Ensure notes is a string (may have been stored as an object)
-        raw_notes = doc.get("notes", "")
-        if isinstance(raw_notes, dict):
-            raw_notes = raw_notes.get("label", raw_notes.get("value", str(raw_notes)))
-        notes_str = str(raw_notes) if raw_notes is not None else ""
+        # A nota vem pela função partilhada pelas TRÊS serializações.
+        notes_str = nota_do_pedido(doc)
 
-        # PACOTE AN / BUGFIX (Bug 2, Fev 2026): preferir custom_label (nome
-        # específico definido no pedido — ex: vindo da checklist dinâmica do
-        # SystemConfig, ou de "Outros Documentos" com nomes diferentes) sobre
-        # o label genérico da categoria. Antes só se aplicava a "Outros",
-        # o que fazia os pedidos gerados pela checklist do SystemConfig
-        # (categorias livres como "identificacao") mostrarem o slug da
-        # categoria em vez do nome legível.
-        display_label = (
-            doc.get("custom_label")
-            or doc.get("custom_name")
-            or doc.get("description")
-            or doc.get("title")
-            or cat_info["label"]
-        )
+        # PACOTE AN / BUGFIX (Bug 2, Fev 2026): preferir o nome ESPECÍFICO
+        # do pedido ao genérico da categoria (ver `rotulo_do_pedido`).
+        display_label = rotulo_do_pedido(doc, cat_info)
 
         requested_docs.append({
             "id": doc.get("id"),
@@ -275,13 +278,13 @@ async def run_get_portal_status(client_data: dict):
         if isinstance(cat, dict):
             cat = cat.get("value", cat.get("label", "Outros"))
         cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
-        # Show custom_label for "Outros" category, otherwise use category label
-        display_label = doc.get("custom_label") if cat == "Outros" and doc.get("custom_label") else cat_info["label"]
+        display_label = rotulo_do_pedido(doc, cat_info)
         uploaded_docs.append({
             "id": doc.get("id"),
             "filename": doc.get("original_filename", doc.get("filename", "")),
             "category": cat,
             "category_label": display_label,
+            "notes": nota_do_pedido(doc),
             "icon": cat_info["icon"],
             "uploaded_at": doc.get("uploaded_at", ""),
             "file_size": doc.get("file_size"),
@@ -315,7 +318,8 @@ async def run_get_portal_status(client_data: dict):
             "id": doc.get("id"),
             "filename": doc.get("original_filename") or doc.get("filename") or cat_info["label"],
             "category": cat,
-            "category_label": cat_info["label"],
+            "category_label": rotulo_do_pedido(doc, cat_info),
+            "notes": nota_do_pedido(doc),
             "icon": cat_info["icon"],
             "received_at": doc.get("reviewed_at", doc.get("updated_at", "")),
             "s3_path": doc.get("s3_path") or doc.get("file_key"),

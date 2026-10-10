@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from models.auth import UserRole
 
 TEMPLATES_ALLOWED_ROLES = [
-    UserRole.ADMIN,
+    UserRole.MASTER, UserRole.ADMIN,
     UserRole.CEO,
     UserRole.DIRETOR,
     UserRole.ADMINISTRATIVO,

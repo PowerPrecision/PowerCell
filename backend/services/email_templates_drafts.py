@@ -167,7 +167,7 @@ async def run_get_unread_notifications(current_user: dict):
     user_email = current_user.get("email", "").lower()
     
     # Admin/CEO veem todos, outros só os seus
-    if current_user["role"] in ["admin", "ceo"]:
+    if current_user["role"] in ["master", "admin", "ceo"]:
         processes = await db.processes.find({}, {"_id": 0, "id": 1, "client_name": 1}).to_list(1000)
     else:
         processes = await db.processes.find(

@@ -316,8 +316,15 @@ def effective_role_is_allowed(user_role: str, allowed_roles: List[str]) -> bool:
         (r or "").strip().lower() if isinstance(r, str) else r
         for r in (allowed_roles or [])
     ]
-    if user_role == UserRole.ADMIN:
+    if user_role == UserRole.MASTER:
         return True
+    if user_role == UserRole.ADMIN:
+        # O Admin é LOCAL (adenda de RBAC, Out 2026): passa todas as guardas
+        # de papel EXCEPTO as declaradas só-Master (infraestrutura global).
+        # Uma guarda cuja lista é só `master` é a forma de dizer «isto não é
+        # da empresa de ninguém»; sem esta excepção, o bypass do Admin tornava
+        # `require_roles([UserRole.MASTER])` num adorno.
+        return not allowed or any(r != UserRole.MASTER for r in allowed)
     if user_role == UserRole.CEO:
         if any(r in allowed for r in (
             UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.CEO,
@@ -413,6 +420,19 @@ async def get_current_user(
             )
             user["effective_role"] = _jwt_primary_role(user)
 
+        # Controlo de histórico (Bloco 1, ponto 4): a política por PERFIL
+        # EFECTIVO aplica-se aqui, onde o perfil já está resolvido, para que
+        # o `_is_stealth_user` (puro e síncrono) continue a ser a única regra.
+        try:
+            from services.history_tracking import aplicar_politica_de_historico
+
+            await aplicar_politica_de_historico(user)
+        except Exception as exc:
+            logger.warning(
+                "[get_current_user] Falha a aplicar a política de histórico "
+                "user=%s: %s. O histórico fica activo.", user.get("id"), exc,
+            )
+
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expirado")
@@ -429,7 +449,8 @@ def require_roles(allowed_roles: List[str]):
     restrito. ``additional_roles`` do JWT já não concedem acesso.
 
     Hierarquia (aplicada ao cargo efetivo):
-    - Admin: acesso total a tudo.
+    - Master: acesso total a tudo (único perfil global).
+    - Admin: acesso a tudo o que não seja declarado só-Master (perfil local).
     - CEO: acesso a rotas de consultor, intermediário e CEO.
     - Diretor: acesso a rotas de consultor, intermediário e diretor.
     - Administrativo: acesso a rotas de consultor, intermediário e administrativo.
@@ -630,8 +651,8 @@ def get_all_user_roles(user: dict) -> list:
 def require_admin():
     """Dependency do FastAPI que restringe acesso a administradores e CEO.
 
-    Um utilizador é considerado "admin" se o seu role for ``UserRole.ADMIN``
-    ou ``UserRole.CEO``. Isto é usado para endpoints sensíveis (ex: gestão
+    Um utilizador é considerado "admin" se o seu role for ``UserRole.MASTER``,
+    ``UserRole.ADMIN`` ou ``UserRole.CEO``. Isto é usado para endpoints sensíveis (ex: gestão
     de configs de email por empresa, configurações do sistema) que só devem
     ser acessíveis por administradores ou CEO.
 
@@ -645,7 +666,18 @@ def require_admin():
     Raises:
         HTTPException: 403 se o utilizador autenticado não tiver role de admin ou CEO.
     """
-    return require_roles([UserRole.ADMIN, UserRole.CEO])
+    return require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO])
+
+
+def require_master():
+    """Dependency que restringe o acesso ao ÚNICO perfil global (Master).
+
+    Para a infraestrutura e a configuração global do sistema: backups,
+    índices, encriptação, S3, jobs de fundo, logs, configuração por
+    omissão (`default`). Nada disto «pertence» a uma empresa, logo nenhum
+    perfil local (Admin incluído) lhe deve tocar.
+    """
+    return require_roles([UserRole.MASTER])
 
 
 def require_management():
@@ -666,7 +698,7 @@ def require_management():
     Raises:
         HTTPException: 403 se o utilizador autenticado não tiver role de gestão.
     """
-    return require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO])
+    return require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO])
 
 
 def require_staff():

@@ -39,7 +39,7 @@ const CalendarTab = ({
   const [consultorFilter, setConsultorFilter] = useState("all");
 
   // Verificar se é CEO ou Admin (pode ver todos os calendários)
-  const canViewAllCalendars = hasAnyRole(currentUser, ["ceo", "admin"]);
+  const canViewAllCalendars = hasAnyRole(currentUser, ["ceo", "master", "admin"]);
 
   // Lista de utilizadores para filtro (excluindo clientes, admin e ceo)
   const staffUsers = useMemo(() => {

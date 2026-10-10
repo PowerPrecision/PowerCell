@@ -1,0 +1,14 @@
+{
+  "actualizado_em": "2026-10-11T09:30:00+00:00",
+  "actualizado_por": "Ana",
+  "aplicavel": true,
+  "observacoes": "Transferência de 14/10\nRef. 8841",
+  "pago": true,
+  "pago_em": "2026-10-11T09:30:00+00:00",
+  "parceiro": {
+    "id": "pt-1",
+    "nome": "Rui"
+  },
+  "pode_alterar": true,
+  "process_id": "a-novo"
+}

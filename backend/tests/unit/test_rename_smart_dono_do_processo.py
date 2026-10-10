@@ -92,7 +92,11 @@ class TestAGuardaEstaLigadaAoServico:
         from services.document_rename_smart import run_rename_document_smart
 
         fonte = codigo_da_funcao_sem_comentarios(run_rename_document_smart)
-        assert "assert_can_manage_process_documents" in fonte
+        # D-26: passou à variante `async`, que resolve a FRONTEIRA DE
+        # REDE antes de delegar. A guarda foi invertida e não apagada:
+        # exigir aqui a versão sem âmbito deixava uma operação de ESCRITA
+        # a atravessar redes.
+        assert "exigir_gestao_de_documentos" in fonte
 
     def test_a_rota_deixou_de_filtrar_pelo_cargo_sozinho(self):
         """`require_roles` não vê o processo, logo nunca poderia deixar

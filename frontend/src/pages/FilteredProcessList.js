@@ -24,6 +24,7 @@ import { safeString } from "../utils/safeString";
 import { formatCurrency as formatCurrencyShared } from "../utils/formatCurrency";
 import { notaMaisRecenteDoConsultor } from "../utils/processObservationNotes";
 // PACOTE CH — ClientDetailsModal reutilizável
+import PartilhaBadge from "../components/shared/PartilhaBadge";
 import Sub35Badge from "../components/shared/Sub35Badge";
 import ClientDetailsModal from "../components/ClientDetailsModal";
 
@@ -495,6 +496,7 @@ const FilteredProcessList = () => {
                                 )}
                               </div>
                               <Sub35Badge processo={process} className="mt-1" />
+                              <PartilhaBadge processo={process} className="mt-1" />
                             </div>
                           </TableCell>
                           <TableCell>

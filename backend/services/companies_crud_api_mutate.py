@@ -11,13 +11,17 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from database import db
+from typing import Optional
+
 from models.company import CompanyCreate, CompanyResponse, CompanyUpdate
+from services.role_scope import utilizador_e_global
+from services.user_management_scope import exigir_empresas_concediveis
 
 logger = logging.getLogger(__name__)
 
 
-async def run_create_company(data: CompanyCreate):
-    """Cria uma nova empresa."""
+async def run_create_company(data: CompanyCreate, *, actor: Optional[dict] = None):
+    """Cria uma nova empresa. Só o Master (a rota exige-o)."""
     existing = await db.companies.find_one({"name": data.name})
     if existing:
         raise HTTPException(
@@ -63,14 +67,27 @@ async def run_create_company(data: CompanyCreate):
     return CompanyResponse(**doc)
 
 
-async def run_update_company(company_id: str, data: CompanyUpdate):
-    """Atualiza os dados de uma empresa."""
+async def run_update_company(company_id: str, data: CompanyUpdate, *, actor: dict):
+    """Atualiza os dados de uma empresa.
+
+    Um perfil local só actualiza a SUA empresa e **nunca muda a rede**: o
+    `network_id` define quem vê os dados de quem, e deixar o CEO de uma
+    empresa pô-lo igual ao de outra dava-lhe, de graça, a leitura dos
+    clientes dessa outra. É decisão do Master.
+    """
     existing = await db.companies.find_one({"id": company_id})
     if not existing:
         existing = await db.companies.find_one({"name": company_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     real_id = existing.get("id", company_id)
+
+    await exigir_empresas_concediveis(actor, [real_id])
+    if data.network_id is not None and not utilizador_e_global(actor):
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas o perfil Master pode alterar a rede de uma empresa.",
+        )
 
     if data.name and data.name != existing.get("name"):
         dup = await db.companies.find_one({"name": data.name})

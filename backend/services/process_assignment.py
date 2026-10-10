@@ -848,7 +848,7 @@ async def consultant_inactive_statuses() -> set[str]:
 # absoluto de visibilidade). Espelha os _ADMIN_BYPASS_ROLES do
 # services/document_visibility.py (inclui variantes legadas defensivas).
 LEAST_BUSY_EXCLUDED_ROLES = [
-    "admin", "ceo", "diretor", "administrativo", "system_admin", "super_admin",
+    "master", "admin", "ceo", "diretor", "administrativo", "system_admin", "super_admin",
 ]
 
 
@@ -1378,6 +1378,7 @@ async def dual_auto_assign_on_pre_registo_transition(
     company_id: Optional[str] = None,
     indexador_user_id: Optional[str] = None,
     actor_role: Optional[str] = None,
+    papeis: tuple = ("consultor", "intermediario"),
 ) -> Dict:
     """
     🔥 DUPLA AUTO-ATRIBUIÇÃO — Conversão Mágica
@@ -1405,6 +1406,9 @@ async def dual_auto_assign_on_pre_registo_transition(
             mesmo que marcou a indexação como concluída). Usado apenas para
             decidir se o registo de histórico desta auto-atribuição deve
             ficar silencioso (Auditoria Stealth — role "indexacao").
+        papeis: Que papéis atribuir (Bloco 3, ponto 12: configurável por
+            fase). Por omissão os dois, que é o que sempre se fez. Um papel
+            fora desta lista não é tocado, nem sequer para o ler.
     
     Returns:
         Dict com consultor_id, consultor_name, mediador_id, mediador_name
@@ -1436,7 +1440,9 @@ async def dual_auto_assign_on_pre_registo_transition(
         or process.get("assigned_consultor_id")
         or next(iter(process.get("assigned_consultor_ids") or []), None)
     )
-    if existing_consultant:
+    if "consultor" not in papeis:
+        pass  # papel fora do plano desta fase: não se lê, não se escreve
+    elif existing_consultant:
         user = await db.users.find_one({"id": existing_consultant}, {"name": 1})
         result_data["consultant_id"] = existing_consultant
         result_data["consultant_name"] = user.get("name", "") if user else ""
@@ -1473,7 +1479,9 @@ async def dual_auto_assign_on_pre_registo_transition(
         or process.get("assigned_mediador_id")
         or next(iter(process.get("assigned_mediador_ids") or []), None)
     )
-    if existing_mediador:
+    if "intermediario" not in papeis:
+        pass  # papel fora do plano desta fase: não se lê, não se escreve
+    elif existing_mediador:
         user = await db.users.find_one({"id": existing_mediador}, {"name": 1})
         result_data["mediador_id"] = existing_mediador
         result_data["mediador_name"] = user.get("name", "") if user else ""
@@ -1528,8 +1536,25 @@ async def dual_auto_assign_on_pre_registo_transition(
     # ── Notificar quem foi ATRIBUÍDO agora (email + in-app) ───────
     if newly_assigned:
         await _notify_newly_assigned_users(process, process_id, newly_assigned)
-        # ── Motor de Tarefas Automáticas: criar tarefas de arranque ──
-        await _create_post_indexing_tasks(process_id, newly_assigned)
+        # As tarefas de arranque deixaram de nascer aqui (Bloco 3, ponto 12):
+        # são os MODELOS DA FASE (`phase_automation`), configuráveis pelo
+        # Admin/CEO, e correm depois desta atribuição.
+
+    # PARTILHA — Via Rápida (D-25): a dupla auto-atribuição é o caminho
+    # mais provável de um processo ficar com gente de duas redes (um
+    # consultor da Power e um intermediário da Precision é o caso NORMAL
+    # deste grupo). Lê o documento já gravado, e por isso vale para os
+    # dois papéis de uma vez.
+    from services.process_sharing import sincronizar_parceiros_sem_falhar
+
+    await sincronizar_parceiros_sem_falhar(
+        process_id,
+        por_ordem_de=indexador_user_id or "system",
+        registar_historico=lambda texto: log_history(
+            process_id=process_id, user=system_user, action=texto,
+            field="partilha", old_value="", new_value=texto,
+        ),
+    )
 
     logger.info(
         f"[DUAL-AUTO] ✅ Dupla auto-atribuição concluída "
@@ -1587,69 +1612,3 @@ async def _notify_newly_assigned_users(
             )
         except Exception as e:
             logger.debug(f"[DUAL-AUTO] Erro ao enviar notificação in-app a {uid}: {e}")
-
-
-# ==== MOTOR DE TAREFAS AUTOMÁTICAS (Pós-Indexação) ====
-
-# Tarefas de arranque criadas automaticamente para cada consultor/mediador
-# que é atribuído a um processo assim que este sai de pré-registo.
-POST_INDEXING_AUTO_TASKS = [
-    {"title": "Analisar documentação inicial", "priority": "Alta"},
-    {"title": "Agendar contacto inicial com o cliente", "priority": "Média"},
-]
-
-
-async def _create_post_indexing_tasks(
-    process_id: str,
-    newly_assigned: List[Dict],
-) -> None:
-    """
-    Cria automaticamente as tarefas de arranque para cada consultor/
-    intermediário que ACABOU de ser atribuído a um processo pós-indexação
-    (chamada a partir de `dual_auto_assign_on_pre_registo_transition`).
-
-    Tarefas criadas por cada utilizador recém-atribuído:
-    - "Analisar documentação inicial" (Prioridade: Alta)
-    - "Agendar contacto inicial com o cliente" (Prioridade: Média)
-
-    Não gera entradas no histórico do processo (as tarefas em si já
-    aparecem na lista de tarefas do utilizador — evita duplicar ruído
-    junto do registo de auto-atribuição, que já cobre esta transição).
-    """
-    import uuid
-
-    for assignee in newly_assigned:
-        uid = assignee.get("id")
-        if not uid:
-            continue
-
-        for template in POST_INDEXING_AUTO_TASKS:
-            now = datetime.now(timezone.utc).isoformat()
-            task = {
-                "id": str(uuid.uuid4()),
-                "title": template["title"],
-                "description": None,
-                "assigned_to": [uid],
-                "process_id": process_id,
-                "due_date": None,
-                "priority": template["priority"],
-                "created_by": "system",
-                "completed": False,
-                "completed_at": None,
-                "completed_by": None,
-                "created_at": now,
-                "updated_at": now,
-            }
-            try:
-                await db.tasks.insert_one(task)
-            except Exception as e:
-                logger.warning(
-                    f"[DUAL-AUTO] Erro ao criar tarefa automática "
-                    f"'{template['title']}' para {uid}: {e}"
-                )
-
-    logger.info(
-        f"[DUAL-AUTO] Tarefas automáticas de arranque criadas para "
-        f"{len(newly_assigned)} utilizador(es) recém-atribuídos ao processo {process_id}"
-    )
-

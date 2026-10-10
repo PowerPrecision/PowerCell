@@ -218,6 +218,7 @@ const SettingsPage = () => {
   // Obter label do papel
   const getRoleLabel = (role) => {
     const labels = {
+      master: "Master",
       admin: "Administrador",
       ceo: "CEO",
       consultor: "Consultor",
@@ -250,7 +251,7 @@ const SettingsPage = () => {
               <Bell className="h-4 w-4 mr-2" />
               Notificações
             </TabsTrigger>
-            {hasAnyRole(user, ["admin", "ceo"]) && (
+            {hasAnyRole(user, ["master", "admin", "ceo"]) && (
               <TabsTrigger value="sistema" className="data-[state=active]:bg-teal-600 data-[state=active]:text-white">
                 <Settings className="h-4 w-4 mr-2" />
                 Sistema
@@ -538,7 +539,7 @@ const SettingsPage = () => {
           </TabsContent>
 
           {/* Tab Sistema (Admin e CEO) */}
-          {hasAnyRole(user, ["admin", "ceo"]) && (
+          {hasAnyRole(user, ["master", "admin", "ceo"]) && (
             <TabsContent value="sistema">
               <div className="space-y-6">
                 {/* Análise de Documentos com IA */}

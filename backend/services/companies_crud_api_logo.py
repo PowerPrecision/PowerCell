@@ -11,11 +11,12 @@ from fastapi import HTTPException, UploadFile
 
 from database import db
 from services.companies_crud_api_helpers import resolve_logo_url
+from services.user_management_scope import exigir_empresas_concediveis
 
 logger = logging.getLogger(__name__)
 
 
-async def run_upload_company_logo(company_id: str, file: UploadFile):
+async def run_upload_company_logo(company_id: str, file: UploadFile, *, actor: dict):
     """Faz upload do logótipo da empresa para o S3."""
     company = await db.companies.find_one({"id": company_id})
     if not company:
@@ -23,6 +24,7 @@ async def run_upload_company_logo(company_id: str, file: UploadFile):
     if not company:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     real_id = company.get("id", company_id)
+    await exigir_empresas_concediveis(actor, [real_id])
 
     allowed_types = {
         "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",

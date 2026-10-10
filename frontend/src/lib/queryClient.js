@@ -95,6 +95,14 @@ export const queryKeys = {
     // só esta query é invalidada, não a query das colunas activas
     kanbanCompleted: (filters) => [...queryKeys.processes.all, 'kanban-completed', filters],
     myClients: (filters) => [...queryKeys.processes.all, 'my-clients', filters],
+    // Bloco 4, ponto 7 — a origem financeira desce do detalhe: invalidar o
+    // processo recarrega-a, e ela nunca viaja DENTRO do documento do processo.
+    origemFinanceira: (id) => [...queryKeys.processes.detail(id), 'origem-financeira'],
+    candidatosOrigemFinanceira: (id) => [...queryKeys.processes.detail(id), 'origem-financeira', 'candidatos'],
+    // Portal do Parceiro — o controlo «Serviço pago pelo parceiro». Desce do
+    // detalhe como a origem financeira: nunca viaja dentro do documento do
+    // processo.
+    servicoDoParceiro: (id) => [...queryKeys.processes.detail(id), 'servico-do-parceiro'],
   },
   
   // Histórico/Timeline
@@ -112,6 +120,7 @@ export const queryKeys = {
   // Prazos/Deadlines
   deadlines: {
     all: ['deadlines'],
+    dashboardCalendar: (month) => ['deadlines', 'dashboard-calendar', month],
     lists: () => [...queryKeys.deadlines.all, 'list'],
     byProcess: (processId) => [...queryKeys.deadlines.all, 'process', processId],
     myDeadlines: () => [...queryKeys.deadlines.all, 'my'],
@@ -283,6 +292,21 @@ export const queryKeys = {
       [...queryKeys.orgAdmin.usersPaginatedAll(), search ?? '', page ?? 1, companyId ?? ''],
     ucrs: () => [...queryKeys.orgAdmin.all, 'ucrs'],
     ucrByUser: (userId) => [...queryKeys.orgAdmin.ucrs(), userId],
+    // Parceiros (convites e contas) — gestão pelo Admin/CEO da rede.
+    partners: () => [...queryKeys.orgAdmin.all, 'partners'],
+  },
+
+  // Portal do Parceiro. NAMESPACE PRÓPRIO: o parceiro e o staff partilham o
+  // QueryClient da aplicação, e uma chave `['cases', ...]` ou `['dashboard']`
+  // colidia com formas do CRM. Tudo desce de `partner.all`, que é o que o
+  // logout remove — um parceiro que sai não deixa dados em cache para o
+  // seguinte que se sentar nesse computador.
+  partner: {
+    all: ['partner'],
+    painel: () => [...queryKeys.partner.all, 'painel'],
+    casosAll: () => [...queryKeys.partner.all, 'casos'],
+    casos: (filtros) => [...queryKeys.partner.casosAll(), filtros ?? {}],
+    caso: (id) => [...queryKeys.partner.all, 'caso', id],
   },
 };
 

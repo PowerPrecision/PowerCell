@@ -13,6 +13,7 @@ import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Search, Phone, Eye } from 'lucide-react';
+import PartilhaBadge from "../shared/PartilhaBadge";
 import Sub35Badge from "../shared/Sub35Badge";
 import { statusColors } from './constants';
 import { safeString } from '../../utils/safeString';
@@ -77,6 +78,7 @@ const SearchResultsList = memo(({
                             #{process.process_number || '—'}
                           </p>
                           <Sub35Badge processo={process} className="mt-1" />
+                          <PartilhaBadge processo={process} className="mt-1" />
                         </div>
                       </TableCell>
                       <TableCell>
