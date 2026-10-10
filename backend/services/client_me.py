@@ -98,6 +98,11 @@ async def run_get_my_assigned_clients(
     else:
         query = {"created_by": user_email}
     
+    # Fronteira de rede (Bloco A): os perfis de gestão consultam
+    # «todos os activos»; sem a condição atravessavam redes.
+    from services.tenant_network import build_tenant_process_condition, com_isolamento
+    tenant_condition = await build_tenant_process_condition(user)
+
     # Filter out soft-deleted processes
     if "$or" in query:
         query = {"$and": [query, {"is_deleted": {"$ne": True}}]}
@@ -116,6 +121,8 @@ async def run_get_my_assigned_clients(
         }
         query = {"$and": [query, search_filter]}
     
+    query = com_isolamento(tenant_condition, query)
+
     # Buscar ordem das fases do workflow para ordenação composta
     workflow_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
     status_order = {s["name"]: idx for idx, s in enumerate(workflow_statuses)}

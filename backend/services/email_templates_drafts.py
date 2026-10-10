@@ -166,12 +166,16 @@ async def run_get_unread_notifications(current_user: dict):
     # Obter processos do utilizador
     user_email = current_user.get("email", "").lower()
     
-    # Admin/CEO veem todos, outros só os seus
+    # Admin/CEO veem todos (DA SUA REDE — Bloco A), outros só os seus
+    from services.tenant_network import build_tenant_process_condition, com_isolamento
+    tenant = await build_tenant_process_condition(current_user)
     if current_user["role"] in ["master", "admin", "ceo"]:
-        processes = await db.processes.find({}, {"_id": 0, "id": 1, "client_name": 1}).to_list(1000)
+        processes = await db.processes.find(
+            com_isolamento(tenant, {}), {"_id": 0, "id": 1, "client_name": 1}
+        ).to_list(1000)
     else:
         processes = await db.processes.find(
-            {"assigned_to": current_user["id"]},
+            com_isolamento(tenant, {"assigned_to": current_user["id"]}),
             {"_id": 0, "id": 1, "client_name": 1}
         ).to_list(1000)
     

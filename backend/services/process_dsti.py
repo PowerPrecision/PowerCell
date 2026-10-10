@@ -5,7 +5,7 @@ Extraído de `routes/processes.py`.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import HTTPException
 
@@ -60,7 +60,7 @@ def build_dsti_high_risk_row(proc: dict, dsti_result: dict) -> dict[str, Any]:
     }
 
 
-async def run_get_dsti_high_risk_processes() -> dict[str, Any]:
+async def run_get_dsti_high_risk_processes(user: Optional[dict] = None) -> dict[str, Any]:
     """Lista processos acima do limiar DSTI configurado."""
     from services.dsti_service import calculate_dsti, is_high_risk
     from services.system_config import get_system_config
@@ -70,8 +70,13 @@ async def run_get_dsti_high_risk_processes() -> dict[str, Any]:
         return {"enabled": False, "processes": [], "total": 0}
 
     threshold = config.dsti_analysis.high_risk_threshold
+    # Fronteira de rede (Bloco A).
+    from services.tenant_network import build_tenant_process_condition, com_isolamento
     processes = await db.processes.find(
-        {"financial_data.rendimento_bruto_mensal": {"$gt": 0}},
+        com_isolamento(
+            await build_tenant_process_condition(user or {}),
+            {"financial_data.rendimento_bruto_mensal": {"$gt": 0}},
+        ),
         {
             "_id": 0, "id": 1, "process_number": 1, "client_name": 1,
             "financial_data": 1, "personal_data": 1, "status": 1,

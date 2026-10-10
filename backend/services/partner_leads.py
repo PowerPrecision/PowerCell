@@ -57,6 +57,7 @@ from services.encryption import (
     generate_nif_hash,
 )
 from services.partner_accounts import VERSAO_DOS_TERMOS
+from services.partner_drafts import ESTADO_PENDENTE
 from services.partner_security import redes_activas
 from services.partner_visibility import scope_do_parceiro
 from services.tenant_network import build_network_scope_condition
@@ -192,8 +193,11 @@ def _resposta(client: dict, *, repetida: bool = False) -> dict:
 
 
 async def _contar_leads_recentes(partner_id: str, desde: str) -> int:
-    return await db.clients.count_documents(
-        {"submitted_by_partner_id": partner_id, "created_at": {"$gte": desde}}
+    """Conta as leads dos dois lados: as retidas também gastam o tecto."""
+    consulta = {"submitted_by_partner_id": partner_id, "created_at": {"$gte": desde}}
+    return (
+        await db.clients.count_documents(consulta)
+        + await db.partner_drafts.count_documents(consulta)
     )
 
 
@@ -244,13 +248,15 @@ async def run_submit_lead(partner: dict, data: PartnerLeadIn) -> dict:
     # 1. O duplo clique do próprio parceiro: devolve o que já existe.
     email_hash = generate_email_hash(email)
     if email_hash:
-        recente = await db.clients.find_one(
-            {
-                "submitted_by_partner_id": partner["id"],
-                "contacto.email_hash": email_hash,
-                "created_at": {"$gte": (agora_dt - timedelta(minutes=JANELA_DO_DUPLO_CLIQUE_MINUTOS)).isoformat()},
-            },
-            {"_id": 0, "id": 1, "nome": 1, "created_at": 1},
+        consulta_recente = {
+            "submitted_by_partner_id": partner["id"],
+            "contacto.email_hash": email_hash,
+            "created_at": {"$gte": (agora_dt - timedelta(minutes=JANELA_DO_DUPLO_CLIQUE_MINUTOS)).isoformat()},
+        }
+        projeccao = {"_id": 0, "id": 1, "nome": 1, "created_at": 1}
+        recente = (
+            await db.partner_drafts.find_one(consulta_recente, projeccao)
+            or await db.clients.find_one(consulta_recente, projeccao)
         )
         if recente:
             return _resposta(recente, repetida=True)
@@ -275,31 +281,42 @@ async def run_submit_lead(partner: dict, data: PartnerLeadIn) -> dict:
     if duplicados:
         cliente["possible_duplicate_of"] = duplicados
 
+    # FILTRO DE VIABILIDADE (Out 2026): a lead nasce RETIDA do lado do
+    # parceiro. Só passa à equipa quando ele enviar o Comprovativo de
+    # Pagamento (`partner_drafts.libertar_se_tiver_comprovativo`).
+    cliente["partner_stage"] = ESTADO_PENDENTE
+    cliente["last_activity_at"] = agora
+
     try:
         cifrado = encrypt_client_data(cliente)
     except Exception as exc:  # noqa: BLE001 — sem cifra não se grava PII em claro
         logger.error("[PARCEIRO] Falha a cifrar a lead de %s: %s", partner["id"], exc)
         raise HTTPException(status_code=500, detail="Não foi possível guardar a lead. Tente novamente.")
-    await db.clients.insert_one(dict(cifrado))
+    await db.partner_drafts.insert_one(dict(cifrado))
 
-    _depois_de_gravar(partner, cliente, ligacao)
-    return _resposta(cliente)
+    _depois_de_gravar(partner, cliente)
+    resposta = _resposta(cliente)
+    resposta.update({"estado": ESTADO_PENDENTE, "requer_comprovativo": True})
+    return resposta
 
 
-def _depois_de_gravar(partner: dict, cliente: dict, ligacao: dict) -> None:
-    """Pedidos da checklist e aviso à gestão da rede, em segundo plano.
+def _depois_de_gravar(partner: dict, cliente: dict) -> None:
+    """Os pedidos da checklist, em segundo plano.
 
-    Nunca bloqueiam nem fazem falhar a submissão: o registo já está
-    gravado. `spawn_background_task` guarda a referência forte (uma task
-    solta pode ser recolhida pelo GC e o aviso perde-se sem erro).
+    **O aviso à gestão NÃO sai daqui**: a lead está retida do lado do
+    parceiro e a equipa nem sabe que existe — o aviso sai na libertação
+    (`avisar_gestao_da_lead`), quando o comprovativo chega.
+
+    Nunca bloqueia nem faz falhar a submissão: o registo já está gravado.
+    `spawn_background_task` guarda a referência forte (uma task solta pode
+    ser recolhida pelo GC e o trabalho perde-se sem erro).
     """
     from services.background_tasks import spawn_background_task
 
-    spawn_background_task(_pedir_checklist(partner, cliente), name=f"partner-lead-checklist:{cliente['id']}")
-    spawn_background_task(_avisar_a_gestao(partner, cliente, ligacao), name=f"partner-lead-alert:{cliente['id']}")
+    spawn_background_task(pedir_checklist(partner, cliente), name=f"partner-lead-checklist:{cliente['id']}")
 
 
-async def _pedir_checklist(partner: dict, cliente: dict) -> None:
+async def pedir_checklist(partner: dict, cliente: dict) -> None:
     """Os pedidos obrigatórios, ligados ao CLIENTE (ainda não há processo):
     é por eles que o parceiro e a equipa falam sobre o que falta."""
     try:
@@ -316,7 +333,8 @@ async def _pedir_checklist(partner: dict, cliente: dict) -> None:
         logger.warning("[PARCEIRO] Falha a gerar a checklist da lead %s: %s", cliente.get("id"), exc)
 
 
-async def _avisar_a_gestao(partner: dict, cliente: dict, ligacao: dict) -> None:
+async def avisar_gestao_da_lead(partner: dict, cliente: dict, ligacao: dict) -> None:
+    """Avisa a gestão da rede de que chegou uma lead (já com comprovativo)."""
     try:
         from services.alerts import notify_new_client_registration
 
@@ -346,7 +364,9 @@ __all__ = [
     "LIMITE_DE_LEADS_POR_DIA",
     "PartnerLeadIn",
     "TIPOS_DE_PROCESSO",
+    "avisar_gestao_da_lead",
     "escolher_ligacao",
     "montar_cliente",
+    "pedir_checklist",
     "run_submit_lead",
 ]

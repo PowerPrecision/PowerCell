@@ -22,6 +22,7 @@ from services.my_clients_api_helpers import (
     resolve_list_context,
 )
 from services.process_list_filters import role_has_client_portfolio
+from services.tenant_network import build_tenant_process_condition, com_isolamento
 from services.process_my_clients import (
     fetch_latest_activity_notes_map,
     fetch_new_documents_map,
@@ -54,6 +55,9 @@ async def run_get_my_clients(request: Request, user: dict):
         terminais=nomes_terminais(await carregar_fases()),
     )
     query = apply_pre_registo_exclusion(query)
+    # Fronteira de rede (Bloco A): para diretor/administrativo o construtor
+    # devolve «todos os processos activos» — de TODAS as redes.
+    query = com_isolamento(await build_tenant_process_condition(user), query)
 
     processes = await db.processes.find(
         query,

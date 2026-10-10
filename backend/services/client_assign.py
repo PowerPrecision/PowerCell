@@ -62,6 +62,7 @@ from utils.input_sanitization import (
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 from services.partner_attribution import aplicar_parceiro_do_cliente
+from services.hub_triage import aplicar_regime_de_indexacao
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +287,10 @@ async def run_assign_client_to_user(
         # trouxe a lead — senão o caso desaparece do ecrã dele.
         aplicar_parceiro_do_cliente(process_doc, client)
 
+        # HUB & SPOKE (Bloco A): a rede satélite não passa pelo Index —
+        # corre DEPOIS do carimbo (a rede decide) e antes de gravar.
+        await aplicar_regime_de_indexacao(process_doc)
+
         # Encriptar dados sensíveis do processo antes de inserir
         # (o cliente já foi desencriptado acima, por isso os dados estão em plain text)
         from services.process_service import encrypt_sensitive_data as encrypt_process_data
@@ -336,7 +341,11 @@ async def run_assign_client_to_user(
         # 2. Atribuir o processo ao indexador (assigned_indexacao_id)
         # 3. Se nenhum indexador disponível → status = fila_espera
         # ============================================================
-        if target_role != "indexacao" and process_id:
+        if (
+            target_role != "indexacao"
+            and process_id
+            and not process_doc.get("skip_index")  # Via Verde / rede satélite
+        ):
             try:
                 from services.process_assignment import assign_to_indexer
                 assign_success, assign_data, assign_msg = await assign_to_indexer(process_id)

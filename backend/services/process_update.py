@@ -519,6 +519,12 @@ def apply_cpcv_and_metadata_fields(update_data: dict, data: Any) -> None:
     skip_index = getattr(data, "skip_index", None)
     if skip_index is not None:
         update_data["skip_index"] = bool(skip_index)
+    # HUB & SPOKE (Bloco A) — `via_verde` é lida quando o processo é
+    # partilhado com o Hub; mudá-la depois da entrada na triagem não
+    # reabre nem fecha a triagem (o primeiro registo ganha).
+    via_verde = getattr(data, "via_verde", None)
+    if via_verde is not None:
+        update_data["via_verde"] = bool(via_verde)
 
 
 async def apply_staff_business_updates(

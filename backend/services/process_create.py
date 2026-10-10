@@ -19,6 +19,7 @@ from models.auth import UserRole
 from models.enums import ProcessStatus
 from services.encryption import decrypt_client_data
 from services.partner_attribution import aplicar_parceiro_do_cliente
+from services.hub_triage import aplicar_regime_de_indexacao
 from services.process_staff_assignment import (
     PAPEIS_COMO_CONSULTOR,
     PAPEIS_COMO_MEDIADOR,
@@ -604,6 +605,9 @@ async def assemble_staff_create_bundle(
     # PACOTE 5 (Fast-Track / Via Verde) — persistir o flag no processo
     if skip_index:
         process_doc["skip_index"] = True
+    # HUB & SPOKE (Bloco A) — excepção à triagem do Hub, lida na partilha.
+    if bool(getattr(data, "via_verde", False)):
+        process_doc["via_verde"] = True
 
     return {
         "process_id": process_id,
@@ -657,6 +661,9 @@ async def persist_and_finalize_staff_create(
     # S3 (client_name/second_client_name não são encriptados, mas capturamos
     # aqui para não depender da forma do doc encriptado).
     second_client_name_for_s3 = process_doc.get("second_client_name")
+
+    # HUB & SPOKE (Bloco A): a rede satélite não passa pelo Index.
+    await aplicar_regime_de_indexacao(process_doc)
 
     process_doc = encrypt_fn(process_doc)
     await db.processes.insert_one(process_doc)
@@ -810,6 +817,7 @@ async def persist_and_finalize_client_self_create(
         now=now,
     )
     aplicar_parceiro_do_cliente(process_doc, client_doc)
+    await aplicar_regime_de_indexacao(process_doc)
     process_doc = encrypt_fn(process_doc)
     await db.processes.insert_one(process_doc)
 

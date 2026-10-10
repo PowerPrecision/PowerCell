@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import HTTPException, UploadFile
 
@@ -157,7 +157,7 @@ async def run_get_download_url_by_path(file_path: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail=ERROR_S3_FILE_NOT_FOUND)
 
 
-async def run_check_employer_nif(nif: str) -> dict[str, Any]:
+async def run_check_employer_nif(nif: str, user: Optional[dict] = None) -> dict[str, Any]:
     if not re.match(r"^\d{9}$", nif):
         raise HTTPException(
             status_code=400,
@@ -172,10 +172,14 @@ async def run_check_employer_nif(nif: str) -> dict[str, Any]:
     if re.match(r"^5", nif):
         or_conditions.append({"personal_data.nif": nif})
 
+    # Fronteira de rede (Bloco A): «este NIF já existe?» respondia com o
+    # nome de clientes de qualquer rede.
+    from services.tenant_network import build_tenant_process_condition, com_isolamento
     processes = await db.processes.find(
-        {
-            "$or": or_conditions
-        },
+        com_isolamento(
+            await build_tenant_process_condition(user or {}),
+            {"$or": or_conditions},
+        ),
         {
             "_id": 0,
             "id": 1,

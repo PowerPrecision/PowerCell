@@ -422,6 +422,12 @@ async def run_list_registered_clients(
             "created_at": c.get("created_at"),
             "updated_at": c.get("updated_at"),
             "fonte": c.get("fonte"),
+            # Lead de parceiro: coluna «Parceiro» nas listas da equipa.
+            "parceiro_name": c.get("submitted_by_partner_name"),
+            # Validação financeira (aviso, nunca travão): o estado e se é
+            # preciso decidir.
+            "validacao_financeira": (c.get("validacao_financeira") or {}).get("estado")
+            if isinstance(c.get("validacao_financeira"), dict) else None,
             "has_property": c.get("has_property"),
             # Legado: é escrito `False` à letra pelo registo público e
             # nunca calculado por ninguém. Fica porque alguém pode

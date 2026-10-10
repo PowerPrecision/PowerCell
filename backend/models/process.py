@@ -218,6 +218,16 @@ class ProcessCreate(BaseModel):
             "consultor (em vez do indexador)."
         ),
     )
+    # HUB & SPOKE (Bloco A) — excepção ao encaminhamento para o Hub: se
+    # True, quando este processo for partilhado com o Hub (Precision) salta
+    # o Index do Hub e vai direto para a consultoria.
+    via_verde: Optional[bool] = Field(
+        False,
+        description=(
+            "Se True, ao ser partilhado com o Hub o processo salta a fila de "
+            "triagem (Index) e vai direto para a consultoria."
+        ),
+    )
 
 class ProcessUpdate(BaseModel):
     real_estate_data: Optional[RealEstateData] = None
@@ -250,6 +260,13 @@ class ProcessUpdate(BaseModel):
             "Via Verde: se True, a transição de workflow ignora a fase de "
             "Indexação (o processo salta para a consultoria). Enviar null/"
             "omitir para manter o valor atual."
+        ),
+    )
+    via_verde: Optional[bool] = Field(
+        None,
+        description=(
+            "Hub & Spoke: se True, a partilha com o Hub salta a triagem "
+            "(Index). Omitir para manter o valor atual."
         ),
     )
 
@@ -316,6 +333,14 @@ class ProcessResponse(BaseModel):
         None,
         description="Via Verde: se True, o processo ignora a fase de Indexação na transição de workflow",
     )
+    # HUB & SPOKE (Bloco A) — excepção ao encaminhamento para o Hub, e o
+    # registo da entrada do processo na triagem do Hub.
+    via_verde: Optional[bool] = None
+    hub_triage: Optional[dict] = None
+    # Validação financeira (lead de parceiro): um AVISO, nunca um travão.
+    # `{"estado": "pendente"|"validado"|"rejeitado", ...}` — a ficha acende o
+    # selo «Processo Não Validado» enquanto não for «validado».
+    validacao_financeira: Optional[dict] = None
 
     @field_serializer("created_at", "updated_at")
     def _serialize_datetime(self, value: Optional[datetime]) -> Optional[str]:

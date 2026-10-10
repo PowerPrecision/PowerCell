@@ -1110,7 +1110,7 @@ async def check_employer_nif(
     user: dict = Depends(get_current_user)
 ):
     """Verifica se um NIF de empresa já existe na base de dados."""
-    return await run_check_employer_nif(nif)
+    return await run_check_employer_nif(nif, user)
 
 
 

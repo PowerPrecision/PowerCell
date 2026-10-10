@@ -181,7 +181,14 @@ class TestOContratoComOFrontend:
         )
         mapa_ficheiro = {confirmacao["id"]: "ficheiro-novo"}
         _escrever_ou_comparar("confirmacao_de_envio", _fixar(confirmacao, mapa_ficheiro))
-        descarga = await ops.run_partner_download_url(PT1, "a-novo", confirmacao["id"])
+        # O parceiro descarrega o que o CLIENTE enviou (o que ele próprio
+        # submeteu não se descarrega — Bloco C).
+        com_tudo.documents.docs.append({
+            "id": "do-cliente", "process_id": "a-novo", "status": "RECEIVED", "source": "client_portal",
+            "s3_path": "Documentação Clientes/cli-a-novo/Index/foto.jpg", "filename": "foto.jpg",
+            "uploaded_by": "portal_client",
+        })
+        descarga = await ops.run_partner_download_url(PT1, "a-novo", "do-cliente")
         _escrever_ou_comparar("descarga", _fixar(descarga, {}))
 
     async def test_servico_do_parceiro_lado_da_equipa(self, com_tudo):

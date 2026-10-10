@@ -230,6 +230,12 @@ async def run_get_expiring_documents_dashboard(
         user_id=user_id,
         consultor_id=consultor_id,
     )
+    # Fronteira de rede (Bloco A): os documentos de processos de outra rede
+    # saem do `process_map` e, por isso, do dashboard.
+    from services.tenant_network import build_tenant_process_condition, com_isolamento
+    processes_query = com_isolamento(
+        await build_tenant_process_condition(user), processes_query,
+    )
     processes = await db.processes.find(
         processes_query,
         {

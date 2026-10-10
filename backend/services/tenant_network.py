@@ -402,7 +402,18 @@ def _avisar_omissao_por_definir() -> None:
     if _aviso_de_omissao_dado:
         return
     _aviso_de_omissao_dado = True
-    logger.warning(
+    # Em produção isto é um defeito de configuração, não um aviso: com a
+    # variável por definir a pilha por carimbar (toda a carteira antiga)
+    # fica visível a utilizadores de QUALQUER rede, incluindo uma rede
+    # satélite acabada de criar (Bloco A, Out 2026).
+    nivel = (
+        logging.ERROR
+        if (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or "").strip().lower()
+        in {"production", "prod"}
+        else logging.WARNING
+    )
+    logger.log(
+        nivel,
         "[tenant_network] %s por definir: os documentos sem carimbo de "
         "empresa/rede ficam visíveis a TODAS as redes (comportamento "
         "anterior ao isolamento). Em produção, defina-a com a rede do "

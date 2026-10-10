@@ -919,6 +919,16 @@ async def create_ttl_indexes(db) -> dict:
     ]:
         await _create_index_safe(db.partners, idx, "partners", results)
 
+    # Leads RETIDAS do lado do parceiro (filtro de viabilidade, Out 2026):
+    # o id é único (a libertação move o documento com o MESMO id para
+    # `clients`) e o parceiro lista as suas por (parceiro, estado).
+    for idx in [
+        {"keys": [("id", 1)], "name": "idx_partner_draft_id", "unique": True},
+        {"keys": [("submitted_by_partner_id", 1), ("partner_stage", 1)], "name": "idx_partner_draft_parceiro"},
+        {"keys": [("partner_stage", 1), ("last_activity_at", 1)], "name": "idx_partner_draft_inactividade"},
+    ]:
+        await _create_index_safe(db.partner_drafts, idx, "partner_drafts", results)
+
     # Um controlo «serviço pago pelo parceiro» por processo: o `unique` é o que
     # impede duas escritas concorrentes de deixarem dois registos (e a ficha
     # de mostrar um ao acaso).

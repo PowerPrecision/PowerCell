@@ -37,6 +37,10 @@ class CompanyCreate(BaseModel):
         None, max_length=100,
         description="Rede / Grupo Empresarial. Empresas com a mesma rede partilham visibilidade de dados; redes diferentes estão em isolamento absoluto. Sem rede, a empresa é uma ilha de uma só."
     )
+    is_hub: bool = Field(
+        False,
+        description="Hub & Spoke: esta empresa é o Hub (tem a equipa de Index). Só o Master a marca.",
+    )
     address: Optional[str] = Field(None, max_length=500, description="Morada")
     phone: Optional[str] = Field(None, max_length=30, description="Telefone principal")
     email: Optional[str] = Field(None, max_length=200, description="Email de contacto")
@@ -67,6 +71,9 @@ class CompanyUpdate(BaseModel):
         None, max_length=100,
         description="Rede / Grupo Empresarial. Empresas com a mesma rede partilham visibilidade de dados; redes diferentes estão em isolamento absoluto. Sem rede, a empresa é uma ilha de uma só."
     )
+    is_hub: Optional[bool] = Field(
+        None, description="Hub & Spoke: marca a empresa como Hub. Só o Master."
+    )
     address: Optional[str] = Field(None, max_length=500)
     phone: Optional[str] = Field(None, max_length=30)
     email: Optional[str] = Field(None, max_length=200)
@@ -96,6 +103,7 @@ class CompanyResponse(BaseModel):
     id: str
     name: str
     network_id: Optional[str] = None
+    is_hub: bool = False
     nif: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None

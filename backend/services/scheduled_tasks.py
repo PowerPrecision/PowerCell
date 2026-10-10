@@ -531,6 +531,15 @@ class ScheduledTasksService:
         logger.info(f"Notificações removidas: {result.deleted_count}")
         return result.deleted_count
     
+    async def expire_stale_partner_leads(self, days: int = 60) -> int:
+        """Leads de parceiros pendentes na triagem sem actividade há ``days``
+        dias passam a «Expirado» (edições e envios do parceiro contam como
+        actividade). Idempotente; o trabalho vive em `partner_drafts`."""
+        from services.partner_drafts import expirar_leads_inactivas
+
+        resultado = await expirar_leads_inactivas(days, bd=self.db)
+        return sum(resultado.values())
+
     async def check_clients_waiting_too_long(self, days: int = 15) -> int:
         """
         Verificar clientes no estado "em espera" há mais de X dias.
@@ -1598,6 +1607,7 @@ class ScheduledTasksService:
             tasks_count = await self.check_tasks_due_soon()
             countdown_count = await self.check_pre_approval_countdown()
             waiting_count = await self.check_clients_waiting_too_long()
+            expired_partner_leads = await self.expire_stale_partner_leads()
             watchdog_count = await self.check_document_expirations_watchdog()  # NOVA TAREFA
             monthly_count = await self.send_monthly_document_reminder()
             stale_count = await self.check_stale_processes()  # Processos atrasados
@@ -1614,6 +1624,7 @@ class ScheduledTasksService:
             logger.info(f"- Alertas de tarefas: {tasks_count}")
             logger.info(f"- Alertas de countdown: {countdown_count}")
             logger.info(f"- Alertas clientes em espera: {waiting_count}")
+            logger.info(f"- Leads de parceiros expiradas (60 dias): {expired_partner_leads}")
             logger.info(f"- Watchdog expiração docs: {watchdog_count}")  # NOVA LINHA
             logger.info(f"- Lembretes mensais: {monthly_count}")
             logger.info(f"- Processos atrasados/urgentes: {stale_count}")
