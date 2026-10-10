@@ -40,6 +40,9 @@ def hash_password(password: str) -> str:
 
 # User roles
 class UserRole:
+    # Cópia local (o seed não importa a app). Tem de conter TODOS os perfis que
+    # o `seed_users` usa — `tests/unit/test_seed_perfis.py` fá-lo cumprir.
+    MASTER = "master"
     CLIENTE = "cliente"
     CONSULTOR = "consultor"
     INTERMEDIARIO = "intermediario"
