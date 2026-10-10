@@ -9660,3 +9660,19 @@ O admin liga/desliga se as acções ficam guardadas no histórico **por pessoa e
 
 **Migração.** `scripts/promote_to_master.py --emails … [--aplicar]` (omissão: só mostra). Sem este passo no deploy ninguém é Master.
 
+## Portal do Parceiro (V1)
+
+Terceiro plano de identidade, ao lado do staff (`users`) e do cliente (`portal_tokens`): o parceiro é uma pessoa de uma entidade contratada que trata do processo do cliente.
+
+| Aspecto | Decisão |
+|---|---|
+| Identidade | `db.partners` (email + password bcrypt); convite único de Admin/CEO/Master; sem registo aberto, sem Google |
+| Token | `type:"partner"`, `aud:"powercell-partner"`, `JWT_PARTNER_SECRET` próprio, `tv` = `token_epoch` (revogação imediata), 8 h, sem refresh; relido em cada pedido |
+| Redes | `redes: [{network_id, company_id, status}]` — N redes no esquema; suspensão por ligação |
+| Visibilidade | relação (`assigned_parceiro_id`) ∧ rede activa; sem ramo de convidados (D-25); 404 igual para alheio e inexistente |
+| Comunicação | sem chat; «Pedidos de Documentos» (o mesmo que o cliente vê) |
+| Ficheiros | `planear_entrada` (Bloco 2): por indexar → `Index` + IA; quarentena de conteúdo; descarga por `file_id` |
+| Financeiro | nenhum dado financeiro no DTO; o parceiro paga-nos — controlo interno em `process_partner_service` (caixa + observações), visível só à equipa |
+| Rate limit | chave do limiter por parceiro; travão de força bruta por identidade (D-4 para o IP) |
+
+Ver `worklog.md` (portal-do-parceiro-v1), `TECHNICAL_DEBT.md` D-32/D-33 e `FRONTEND_GUIDELINES.md` § 27.65.

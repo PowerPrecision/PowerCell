@@ -36,6 +36,11 @@ from services.origem_financeira import (
     run_list_candidatos,
     run_set_origem,
 )
+from services.servico_do_parceiro import (
+    ServicoDoParceiroBody,
+    run_get_servico,
+    run_set_servico,
+)
 from services.process_service import (
     can_view_process,
     can_edit_process_data,
@@ -814,6 +819,27 @@ async def set_origem_financeira(
 ):
     """Define a origem: `{"tipo": "organica"|"angariacao", "angariador_id"?}`."""
     return await run_set_origem(process_id, body.tipo, body.angariador_id, user, request)
+
+
+@router.get("/{process_id}/partner-service")
+async def get_servico_do_parceiro(
+    process_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Controlo «Serviço pago pelo parceiro» + observações — equipa interna."""
+    return await run_get_servico(process_id, user, request)
+
+
+@router.put("/{process_id}/partner-service")
+async def set_servico_do_parceiro(
+    process_id: str,
+    body: ServicoDoParceiroBody,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Marca/desmarca «pago pelo parceiro» e/ou grava as observações."""
+    return await run_set_servico(process_id, body, user, request)
 
 
 @router.put("/{process_id}", response_model=ProcessResponse)

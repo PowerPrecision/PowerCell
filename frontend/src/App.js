@@ -37,6 +37,8 @@ import ClientPortal from "./pages/ClientPortal";
 // - KanbanPage: usa drag-drop HTML5 nativo (sem biblioteca externa)
 // - ProcessDetails: 164KB (o maior componente da aplicação!)
 const ConsultorDashboard = React.lazy(() => import("./pages/ConsultorDashboard"));
+// Portal do Parceiro — chunk próprio: o código de um utilizador externo não vai no pacote do CRM.
+const PartnerPortalRoutes = React.lazy(() => import("./pages/partner/PartnerPortalRoutes"));
 const KanbanPage = React.lazy(() => import("./pages/KanbanPage"));
 const ProcessDetails = React.lazy(() => import("./pages/ProcessDetails"));
 
@@ -333,6 +335,16 @@ function App() {
           {/* /portal — ecrã de login OTP (novo fluxo NIF + OTP) */}
           <Route path="/portal" element={<ErrorBoundary variant="page" moduleName="Portal do Cliente"><ClientPortal /></ErrorBoundary>} />
           
+          {/* Portal do Parceiro — identidade própria (token, armazenamento e cliente HTTP à parte) */}
+          <Route
+            path="/parceiro/*"
+            element={
+              <RouteBoundary name="Portal do Parceiro">
+                <PartnerPortalRoutes />
+              </RouteBoundary>
+            }
+          />
+
           {/* Staff login */}
           <Route path="/login" element={<LoginPage />} />
           

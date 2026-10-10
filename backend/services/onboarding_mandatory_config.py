@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from database import db
+from services.partner_attribution import aplicar_parceiro_do_cliente
 from services.s3_document_root import (
     pasta_do_processo_sob_mapeamento_do_cliente,
     pasta_para_gravar,
@@ -252,6 +253,9 @@ async def _criar_processo_do_onboarding(
             if second_id not in process_doc["client_ids"]:
                 process_doc["client_ids"].append(second_id)
 
+    # Portal do Parceiro: a lead completa a checklist e o processo nasce já
+    # atribuído a quem a trouxe.
+    aplicar_parceiro_do_cliente(process_doc, client)
     await db.processes.insert_one(process_doc)
 
     # Ancorar docs órfãos + pedidos REQUESTED do cliente

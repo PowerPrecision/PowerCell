@@ -413,7 +413,11 @@ async def create_deed_reminder(process: dict, deed_date: str, user: dict) -> Opt
 # FUNÇÕES DE NOTIFICAÇÃO DE NOVO REGISTO
 # ====================================================================
 
-async def notify_new_client_registration(process: dict, has_property: bool = False):
+async def notify_new_client_registration(
+    process: dict,
+    has_property: bool = False,
+    origem: Optional[str] = None,
+):
     """
     Notifica administradores sobre novo registo de cliente.
     NOTA: Envia email apenas para o PRIMEIRO admin para evitar spam.
@@ -422,6 +426,8 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
     Args:
         process: Dados do processo (pode ter 'client_name' ou 'nome')
         has_property: Se o cliente já tem imóvel (atribuir só intermediários)
+        origem: Quem trouxe o registo, quando não é o formulário público
+            (ex.: «Parceiro Rui Silva») — aparece no email e na notificação.
     """
     # Lote 6, ponto 8 — a gestão DA REDE do registo, não a de todas.
     #
@@ -465,6 +471,7 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
             f"Email: {client_email}\n"
             f"Telefone: {client_phone}\n"
             f"Tipo: {process.get('process_type', 'Não especificado')}\n"
+            f"{('Origem: ' + origem + chr(10)) if origem else ''}"
             f"{assignment_note}\n\n"
             f"Por favor, aceda ao sistema para atribuir os responsáveis.",
             notification_type="new_process",
@@ -494,7 +501,11 @@ async def notify_new_client_registration(process: dict, has_property: bool = Fal
             "client_id": process.get("client_id") or process.get("id"),
             "client_name": client_name,
             "has_property": has_property,
-            "message": f"Novo registo: {client_name}" + (" (Já tem imóvel)" if has_property else ""),
+            "message": (
+                f"Novo registo: {client_name}"
+                + (f" — {origem}" if origem else "")
+                + (" (Já tem imóvel)" if has_property else "")
+            ),
             "read": False,
             "created_at": agora,
         }

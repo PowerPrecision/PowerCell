@@ -1,0 +1,59 @@
+{
+  "partners": [
+    {
+      "created_at": null,
+      "email": "rui@p.pt",
+      "id": "pt-1",
+      "invite_pending": false,
+      "last_login_at": null,
+      "name": "Rui",
+      "phone": null,
+      "redes": [
+        {
+          "company_id": "cmp-power",
+          "company_name": null,
+          "network_id": "grupo_power_precision",
+          "status": "active"
+        }
+      ],
+      "status": "active"
+    },
+    {
+      "created_at": "2026-10-11T09:30:00+00:00",
+      "email": "rui@parceiros.pt",
+      "id": "parceiro-novo",
+      "invite_pending": false,
+      "last_login_at": null,
+      "name": "Rui Parceiro",
+      "phone": null,
+      "redes": [
+        {
+          "company_id": "cmp-power",
+          "company_name": "Power Real Estate",
+          "network_id": "grupo_power_precision",
+          "status": "active"
+        }
+      ],
+      "status": "active"
+    },
+    {
+      "created_at": null,
+      "email": "sara@p.pt",
+      "id": "pt-2",
+      "invite_pending": false,
+      "last_login_at": null,
+      "name": "Sara",
+      "phone": null,
+      "redes": [
+        {
+          "company_id": "cmp-power",
+          "company_name": null,
+          "network_id": "grupo_power_precision",
+          "status": "active"
+        }
+      ],
+      "status": "active"
+    }
+  ],
+  "total": 3
+}

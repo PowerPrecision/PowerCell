@@ -676,6 +676,20 @@ export const getCandidatosOrigemFinanceira = (processId) =>
 export const setOrigemFinanceira = (processId, corpo) =>
   api.put(`/processes/${processId}/origem-financeira`, corpo, { skipErrorToast: true });
 
+// ── Portal do Parceiro (lado do STAFF) ──────────────────────────────
+// O parceiro NÃO usa este cliente (tem o seu: `services/partnerApi.js`).
+// Aqui está o que a equipa faz: convidar/gerir parceiros e o controlo
+// «Serviço pago pelo parceiro» de um processo.
+export const getPartners = () => api.get("/admin/partners");
+export const invitePartner = (corpo) => api.post("/admin/partners/invite", corpo);
+export const updatePartner = (partnerId, corpo) => api.patch(`/admin/partners/${partnerId}`, corpo);
+export const resendPartnerInvite = (partnerId) => api.post(`/admin/partners/${partnerId}/resend-invite`);
+
+export const getServicoDoParceiro = (processId) =>
+  api.get(`/processes/${processId}/partner-service`, { skipErrorToast: true });
+export const setServicoDoParceiro = (processId, corpo) =>
+  api.put(`/processes/${processId}/partner-service`, corpo, { skipErrorToast: true });
+
 export const deleteProcess = (processId) => api.delete(`/processes/${processId}`);
 export const restoreProcess = (processId) => api.post(`/processes/${processId}/restore`);
 // PACOTE 11 (Eixo 4) — restauro rápido de cliente no ecrã de detalhes

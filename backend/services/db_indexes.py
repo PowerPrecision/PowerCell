@@ -884,6 +884,44 @@ async def create_ttl_indexes(db) -> dict:
             db.portal_scraper_jobs, idx, "portal_scraper_jobs", results,
         )
 
+    # ====================================================================
+    # PORTAL DO PARCEIRO (Out 2026)
+    # ====================================================================
+    # `partners`: o login procura por email e a sessão por id — ambos
+    # únicos (dois documentos com o mesmo email deixavam o login escolher à
+    # sorte). O convite procura-se pelo hash do token (`sparse`: só os
+    # convites pendentes o têm).
+    for idx in [
+        {"keys": [("id", 1)], "name": "idx_partner_id", "unique": True},
+        {"keys": [("email", 1)], "name": "idx_partner_email", "unique": True},
+        {"keys": [("invite.token_hash", 1)], "name": "idx_partner_invite", "sparse": True},
+    ]:
+        await _create_index_safe(db.partners, idx, "partners", results)
+
+    # Um controlo «serviço pago pelo parceiro» por processo: o `unique` é o que
+    # impede duas escritas concorrentes de deixarem dois registos (e a ficha
+    # de mostrar um ao acaso).
+    for idx in [{"keys": [("process_id", 1)], "name": "idx_partner_service_process", "unique": True}]:
+        await _create_index_safe(db.process_partner_service, idx, "process_partner_service", results)
+
+    # A pergunta de TODAS as listagens e métricas do parceiro: «os meus
+    # processos, da(s) minha(s) rede(s), não eliminados». O prefixo é o
+    # campo mais selectivo (um parceiro tem dezenas, a rede milhares).
+    for idx in [{
+        "keys": [("assigned_parceiro_id", 1), ("network_id", 1), ("is_deleted", 1)],
+        "name": "idx_proc_parceiro_rede",
+        "sparse": True,
+    }]:
+        await _create_index_safe(db.processes, idx, "processes", results)
+
+    # As leads que o parceiro submeteu (clientes sem processo).
+    for idx in [{
+        "keys": [("submitted_by_partner_id", 1), ("network_id", 1)],
+        "name": "idx_client_parceiro_rede",
+        "sparse": True,
+    }]:
+        await _create_index_safe(db.clients, idx, "clients", results)
+
     return results
 
 

@@ -1,0 +1,12 @@
+{
+  "destino": {
+    "aviso": "O processo ainda não está indexado: o ficheiro fica na pasta Index e entra na fila da Indexação.",
+    "categoria_final": "Index",
+    "categoria_pedida": null,
+    "fila_ia": true
+  },
+  "filename": "cc.pdf",
+  "id": "ficheiro-novo",
+  "request_id": null,
+  "success": true
+}

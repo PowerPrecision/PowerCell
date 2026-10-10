@@ -141,6 +141,8 @@ import AssignmentContextCard from "../components/processDetails/AssignmentContex
 import PartilhaCard from "../components/processDetails/PartilhaCard";
 import { podeRevogarPartilha } from "../utils/partilhaProcesso";
 import OrigemFinanceiraCard from "../components/processDetails/OrigemFinanceiraCard";
+import ServicoDoParceiroCard from "../components/processDetails/ServicoDoParceiroCard";
+import { podeVerServicoDoParceiro, processoTemParceiro } from "../utils/servicoDoParceiro";
 import { podeGerirOrigemFinanceira } from "../utils/origemFinanceira";
 import DataConflictResolver from "../components/DataConflictResolver";
 import CPCVModal from "../components/CPCVModal";
@@ -3132,6 +3134,16 @@ const ProcessDetails = () => {
               processId={id}
               podeGerir={podeGerirOrigemFinanceira(effectiveRole)}
             />
+
+            {/* Portal do Parceiro — «Serviço pago pelo parceiro» + observações.
+                Só para processos COM parceiro e para a equipa que vê o
+                processo (perfil efectivo); o parceiro nunca o recebe. */}
+            {processoTemParceiro(process) && (
+              <ServicoDoParceiroCard
+                processId={id}
+                podeVer={podeVerServicoDoParceiro(effectiveRole)}
+              />
+            )}
 
             {/* Tarefas - visível se tem manage_tasks.
                 Lote 4, ponto 13: o TasksPanel JÁ É um cartão completo com

@@ -41,6 +41,7 @@ from utils.input_sanitization import (
     sanitize_string, sanitize_url, log_sanitization_rejection,
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
+from services.partner_attribution import aplicar_parceiro_do_cliente
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +262,7 @@ async def run_create_process_for_client(
         new_process["assigned_consultor_id"] = user["id"]
         new_process["consultor_name"] = user["name"]
 
+    aplicar_parceiro_do_cliente(new_process, client)
     await db.processes.insert_one(new_process)
     
     # Se temos um cliente real, actualizar a lista de processos

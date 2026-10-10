@@ -330,6 +330,10 @@ PORTAL_REQUEST_SOURCES = (
     "auto_default",
     "mandatory_checklist",
     "mandatory_checklist_optional",
+    # Envios do Portal do Parceiro (Out 2026): sem esta origem a aba
+    # Documentos do CRM não os mostrava — o consultor não via o que o
+    # parceiro tinha enviado.
+    "partner_portal",
 )
 
 

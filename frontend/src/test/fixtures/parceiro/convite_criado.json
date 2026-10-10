@@ -1,0 +1,23 @@
+{
+  "expires_at": "2026-10-11T09:30:00+00:00",
+  "invite_path": "/parceiro/convite/TOKEN-DO-CONVITE",
+  "invite_token": "TOKEN-DO-CONVITE",
+  "partner": {
+    "created_at": "2026-10-11T09:30:00+00:00",
+    "email": "rui@parceiros.pt",
+    "id": "parceiro-novo",
+    "invite_pending": true,
+    "last_login_at": null,
+    "name": "Rui Parceiro",
+    "phone": null,
+    "redes": [
+      {
+        "company_id": "cmp-power",
+        "company_name": "Power Real Estate",
+        "network_id": "grupo_power_precision",
+        "status": "active"
+      }
+    ],
+    "status": "invited"
+  }
+}

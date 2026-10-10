@@ -18,6 +18,7 @@ from database import db
 from models.auth import UserRole
 from models.enums import ProcessStatus
 from services.encryption import decrypt_client_data
+from services.partner_attribution import aplicar_parceiro_do_cliente
 from services.process_staff_assignment import (
     PAPEIS_COMO_CONSULTOR,
     PAPEIS_COMO_MEDIADOR,
@@ -93,6 +94,10 @@ async def load_existing_client_for_process(client_id: str) -> dict[str, Any]:
         "client_email": client_email,
         "client_phone": client_phone,
         "client_nif": client_nif,
+        # Portal do Parceiro: a lead leva o parceiro que a trouxe e o
+        # processo herda-o (`partner_attribution`).
+        "submitted_by_partner_id": existing_client.get("submitted_by_partner_id"),
+        "submitted_by_partner_name": existing_client.get("submitted_by_partner_name"),
     }
 
 
@@ -594,6 +599,7 @@ async def assemble_staff_create_bundle(
         client_fields["client_id"],
     )
     apply_creator_role_assignment(process_doc, user)
+    aplicar_parceiro_do_cliente(process_doc, client_fields)
 
     # PACOTE 5 (Fast-Track / Via Verde) — persistir o flag no processo
     if skip_index:
@@ -803,6 +809,7 @@ async def persist_and_finalize_client_self_create(
         initial_status=initial_status,
         now=now,
     )
+    aplicar_parceiro_do_cliente(process_doc, client_doc)
     process_doc = encrypt_fn(process_doc)
     await db.processes.insert_one(process_doc)
 

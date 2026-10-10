@@ -20,6 +20,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import servicoPorPagar from "@/test/fixtures/parceiro/servico_por_pagar.json";
 
 // ── Fronteiras falsas ────────────────────────────────────────────────
 vi.mock("../../layouts/DashboardLayout", () => ({
@@ -37,6 +38,8 @@ vi.mock("../../services/api", async (importOriginal) => ({
     angariador: null, definido_por: null, definido_em: null,
   } })),
   getCandidatosOrigemFinanceira: vi.fn(() => Promise.resolve({ data: { candidatos: [] } })),
+  // Forma REAL do servidor (fixture gerada pelo serviço), não uma inventada.
+  getServicoDoParceiro: vi.fn(() => Promise.resolve({ data: servicoPorPagar })),
 }));
 
 vi.mock("../../contexts/AuthContext", () => ({
@@ -377,6 +380,45 @@ describe("ProcessDetails — cartão de partilha (D-25)", () => {
     await screen.findByTestId("layout");
     await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
     expect(screen.queryByTestId("cartao-partilha")).toBeNull();
+  });
+});
+
+describe("ProcessDetails — serviço pago pelo parceiro (Portal do Parceiro)", () => {
+  afterEach(() => { sessao.papel = "consultor"; });
+
+  it("um processo COM parceiro mostra o cartão à equipa e o dado é pedido", async () => {
+    pacote.valor = pacoteCompleto({ process: { ...PROCESSO, assigned_parceiro_id: "pt-1" } });
+    const api = await import("../../services/api");
+    api.getServicoDoParceiro.mockClear();
+    montar();
+    await screen.findByTestId("layout");
+
+    expect(await screen.findByTestId("cartao-servico-do-parceiro")).toBeInTheDocument();
+    await waitFor(() => expect(api.getServicoDoParceiro).toHaveBeenCalledWith("proc-1"));
+  });
+
+  it("um processo SEM parceiro não mostra o cartão e nunca pede o dado (contraprova)", async () => {
+    const api = await import("../../services/api");
+    api.getServicoDoParceiro.mockClear();
+    montar();
+    await screen.findByTestId("layout");
+    await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+
+    expect(screen.queryByTestId("cartao-servico-do-parceiro")).toBeNull();
+    expect(api.getServicoDoParceiro).not.toHaveBeenCalled();
+  });
+
+  it.each(["indexacao", "parceiro"])("o perfil %s não vê o cartão, mesmo com parceiro, e o dado nunca é pedido", async (papel) => {
+    sessao.papel = papel;
+    pacote.valor = pacoteCompleto({ process: { ...PROCESSO, assigned_parceiro_id: "pt-1" } });
+    const api = await import("../../services/api");
+    api.getServicoDoParceiro.mockClear();
+    montar();
+    await screen.findByTestId("layout");
+    await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+
+    expect(screen.queryByTestId("cartao-servico-do-parceiro")).toBeNull();
+    expect(api.getServicoDoParceiro).not.toHaveBeenCalled();
   });
 });
 

@@ -1,0 +1,17 @@
+{
+  "destino": {
+    "aviso": "O processo ainda não está indexado: o ficheiro fica na pasta Index e entra na fila da Indexação.",
+    "categoria_final": "Index",
+    "categoria_pedida": "Identificação",
+    "fila_ia": true
+  },
+  "expires_at": "2026-10-10T16:00:00+00:00",
+  "expires_in_seconds": 300,
+  "file_key": "Documentação Clientes/cli-a-novo/Index/cc.pdf",
+  "headers": {
+    "Content-Type": "application/octet-stream"
+  },
+  "method": "PUT",
+  "success": true,
+  "upload_url": "https://s3.exemplo/put"
+}

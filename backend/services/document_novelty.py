@@ -41,6 +41,10 @@ logger = logging.getLogger(__name__)
 
 JANELA_DE_NOVIDADE_DIAS = 30
 ENVIADO_PELO_CLIENTE = "portal_client"
+#: O Portal do Parceiro grava `uploaded_by = "partner:<id>"`. Um documento
+#: enviado por um parceiro é, para a equipa, tão «novo» como o do cliente —
+#: sem isto a bolinha verde nunca acendia para o que o parceiro envia.
+PREFIXO_DE_AUTORIA_DO_PARCEIRO = "partner:"
 ESTADOS_LEGADOS = ("uploaded", "UPLOADED")
 
 
@@ -51,6 +55,7 @@ def condicao_de_documento_novo(agora: Optional[datetime] = None) -> dict[str, An
     return {"$and": [
         {"$or": [
             {"uploaded_by": ENVIADO_PELO_CLIENTE},
+            {"uploaded_by": {"$regex": f"^{PREFIXO_DE_AUTORIA_DO_PARCEIRO}"}},
             {"status": {"$in": list(ESTADOS_LEGADOS)}},
         ]},
         {"staff_seen_at": {"$in": [None, ""]}},

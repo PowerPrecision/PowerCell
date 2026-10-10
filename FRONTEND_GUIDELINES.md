@@ -2601,3 +2601,12 @@ A configuração global é do administrador. Em vez de deixar o CEO abrir separa
 * **O `isMaster` desce por PROP** (`CompaniesAdminTab`, `UsersAccessAdminTab`, `UserCreateDialog`), nunca de um `useAuth` no componente de apresentação, e por omissão é `false`: esquecer a prop esconde um botão (visível) em vez de o mostrar a quem não pode (enganador). Só o Master vê «Nova Empresa» e o campo da REDE, e só ele é oferecido o perfil `master` (`grantableRoles`).
 * **O pedido de actualização de uma empresa feito por um Admin não leva `network_id`** — o campo que, mudado, dava a um CEO a leitura de outra rede. Teste: `CompaniesAdminTab.master.test.jsx`.
 
+## 27.65 — Portal do Parceiro (outro plano de identidade)
+
+* **Outro plano, outro cliente HTTP.** `services/partnerApi.js` cria o seu próprio Axios (`/partner`, token em `sessionStorage` via `utils/partnerSession.js`), sem `X-Company-Id`/`X-Active-Role` e sem o token do staff. Nenhum ficheiro do portal importa `AuthContext`, `services/api` ou `localStorage`: `pages/partner/__tests__/PartnerPortal.isolamento.test.js` percorre a fonte, com contraprova de que leu ficheiros.
+* **Uma rota pública nova toca em TRÊS sítios, não em dois:** `PUBLIC_ROUTE_PREFIXES`, a regex do Sentry em `main.jsx` (o replay grava texto — nomes e NIFs de leads) e a rota fora de `ProtectedRoute`. O teste cruza as três; a regex do `main.jsx` era uma terceira cópia da lista e não tinha `/parceiro`.
+* **Armadilha do teste de fonte:** `semComentarios` por expressão regular engole o ficheiro quando há um literal `"/parceiro/*"` (o `/*` abre um «comentário»). Para `App.js` lê-se a fonte crua.
+* **Mocks = fixtures geradas pelo servidor** (`src/test/fixtures/parceiro/*.json`, regeneradas por `test_parceiro_contrato_frontend.py`). Os valores do cenário são diferentes das omissões.
+* **Esperar pelo elemento que se afirma:** o grupo «Filtrar por etapa» existe desde o primeiro render; os botões do funil só quando o painel chega — `findAllByRole("button")` resolvia só com «Todos». E um mock de lista paginada tem de devolver a página PEDIDA, porque o ecrã lê a do servidor.
+* **Só o que está montado refaz o pedido:** na página do caso o painel não está montado, logo `invalidateQueries` não produz GET; afirma-se a invalidação (chaves), não a contagem de pedidos.
+* **Staff:** o cartão «Serviço do parceiro» desenha-se só com `assigned_parceiro_id` E perfil efectivo que vê; as listas de papéis do JS são lidas contra as do Python em teste.

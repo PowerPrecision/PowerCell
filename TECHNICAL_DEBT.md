@@ -541,6 +541,47 @@ de segunda-feira seguem a rede; só `system_config` é por empresa. Se o dono do
 produto quiser isolamento por EMPRESA dentro da mesma rede, é um carimbo novo
 em todas as colecções, não uma correcção desta adenda.
 
+### D-32 · O registo público de clientes procura por email/NIF em TODAS as redes e funde
+**Onde:** `backend/services/public_registration.py` (`run_public_client_registration`)
+
+Descoberto ao desenhar o Portal do Parceiro (a lead do parceiro **não** usa este
+caminho de propósito: não há «find-or-create» na lead, porque o encontrar
+atravessaria redes). O registo público é anónimo, e abre com
+`db.clients.find_one` por `contacto.email_hash`/`email` e por
+`dados_pessoais.nif_hash`/`nif` **sem condição de rede**: quem submeter o email
+ou o NIF de um cliente de OUTRA rede cai no ramo «cliente já existe», que
+actualiza campos vazios, junta `custom_fields` e emite o convite do Portal.
+O modo de falhar não dá erro. Não foi alterado neste lote (comportamento de
+produto antigo, e a regra de duplicados é decisão do dono). Fechar exige decidir
+a regra: procurar só na rede por omissão do formulário público (que carimbo tem
+o formulário?) e criar sempre um cliente novo — marcado `possible_duplicate_of`
+— quando o encontrado for de outra rede.
+
+### D-33 · Portal do Parceiro: o que ficou de fora da V1 (decidido)
+**Onde:** `services/partner_*.py`, `routes/partner_portal.py`, `routes/partners_admin.py`, `pages/partner/`
+
+Cada ponto é uma decisão assumida, não um esquecimento:
+- **Sem «esqueci-me da palavra-passe» autónomo.** A recuperação é um novo convite
+  (`POST /admin/partners/{id}/resend-invite`), que reutiliza o token de uso único.
+  Um fluxo público de recuperação precisa do travão por IP (D-4).
+- **Sem link de referência / registo por link** (ideia original do dono). Depende
+  de o `_get_client_ip` ler o XFF certo (D-4): um limite por IP que se contorna
+  mudando um cabeçalho não protege um endpoint anónimo que cria registos.
+- **Um parceiro numa 2.ª rede:** o esquema (`redes: [...]`) e as paredes já o
+  suportam (visibilidade = relação ∧ rede activa); falta o endpoint de
+  «acrescentar ligação» a um parceiro existente — hoje o convite a um email já
+  em uso devolve 409.
+- **O DTO não leva contactos do parceiro nem da equipa** (nem email do consultor).
+  A comunicação é pelos «Pedidos de Documentos»; se o negócio quiser um nome de
+  contacto, é um campo novo e uma decisão de privacidade.
+- **Mesma origem do SPA:** `/parceiro/*` é um chunk do mesmo bundle. Separar num
+  subdomínio/entrada Vite própria tiraria o código do staff da superfície do
+  parceiro; a fronteira real é o servidor (token e segredo próprios), por isso
+  adiou-se.
+- **`uploaded_count` de um pedido inclui ficheiros que a equipa juntou** (é a
+  contagem que decide o estado no servidor); o ecrã do parceiro limita-a a
+  `expected_count` para não mostrar «4/1».
+
 ## Fechadas
 
 Ficam aqui só o número e a iteração que as fechou — o detalhe vive no

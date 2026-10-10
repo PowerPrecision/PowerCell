@@ -1,0 +1,14 @@
+{
+  "actualizado_em": null,
+  "actualizado_por": null,
+  "aplicavel": true,
+  "observacoes": "",
+  "pago": false,
+  "pago_em": null,
+  "parceiro": {
+    "id": "pt-1",
+    "nome": "Rui"
+  },
+  "pode_alterar": true,
+  "process_id": "a-novo"
+}

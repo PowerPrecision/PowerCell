@@ -12,8 +12,12 @@
  *  - /rgpd     → Link público RGPD (/rgpd/:token — raw fetch no RGPDPage)
  *  - /upload   → Magic link de upload (/upload/:token)
  *  - /download → Magic link de download (/download/:token)
+ *  - /parceiro → Portal do Parceiro (token próprio, noutro segredo e noutro
+ *                armazenamento — `utils/partnerSession.js`). Sem isto, um
+ *                consultor com a sessão do CRM expirada abria o login do
+ *                parceiro e o interceptor do staff mandava-o para /login.
  */
-export const PUBLIC_ROUTE_PREFIXES = ['/portal', '/rgpd', '/upload', '/download'];
+export const PUBLIC_ROUTE_PREFIXES = ['/portal', '/rgpd', '/upload', '/download', '/parceiro'];
 
 /**
  * Verifica se o pathname atual corresponde a uma rota pública.

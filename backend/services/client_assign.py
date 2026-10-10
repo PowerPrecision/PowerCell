@@ -61,6 +61,7 @@ from utils.input_sanitization import (
     sanitize_string, sanitize_url, log_sanitization_rejection,
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
+from services.partner_attribution import aplicar_parceiro_do_cliente
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +281,10 @@ async def run_assign_client_to_user(
                 "%s fica por carimbar (permanece na Pool).",
                 target_user.get("id"), process_id,
             )
+
+        # Portal do Parceiro: o processo nasce atribuído ao parceiro que
+        # trouxe a lead — senão o caso desaparece do ecrã dele.
+        aplicar_parceiro_do_cliente(process_doc, client)
 
         # Encriptar dados sensíveis do processo antes de inserir
         # (o cliente já foi desencriptado acima, por isso os dados estão em plain text)

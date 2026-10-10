@@ -1,7 +1,7 @@
 /**
  * OrganizationAdminPage — Painel de Administração base (Pacote DW).
  *
- * Gestão de Empresas, contas de utilizadores e acessos UCR (User-Company-Role).
+ * Gestão de Empresas, contas de utilizadores, acessos UCR (User-Company-Role) e parceiros.
  * Visível e acessível apenas quando o perfil activo é admin ou ceo.
  *
  * @route /admin/organizacao
@@ -11,7 +11,7 @@
  * só quando o perfil activo é admin ou ceo.
  */
 import { Navigate, useSearchParams } from "react-router-dom";
-import { Building2, Users } from "lucide-react";
+import { Building2, Handshake, Users } from "lucide-react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import PageHeader from "../components/shared/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
@@ -19,11 +19,13 @@ import { useAuth } from "../contexts/AuthContext";
 import { canAccessOrgAdmin } from "../utils/roleUtils";
 import CompaniesAdminTab from "../components/admin/CompaniesAdminTab";
 import UsersAccessAdminTab from "../components/admin/UsersAccessAdminTab";
+import PartnersAdminTab from "../components/admin/PartnersAdminTab";
 
 export default function OrganizationAdminPage() {
   const { effectiveRole } = useAuth();
   const [searchParams] = useSearchParams();
-  const defaultTab = searchParams.get("tab") === "utilizadores" ? "acessos" : "empresas";
+  const separador = searchParams.get("tab");
+  const defaultTab = separador === "utilizadores" ? "acessos" : separador === "parceiros" ? "parceiros" : "empresas";
 
   if (!canAccessOrgAdmin(effectiveRole)) {
     return <Navigate to="/staff" replace />;
@@ -48,12 +50,19 @@ export default function OrganizationAdminPage() {
               <Users className="h-4 w-4" />
               Utilizadores
             </TabsTrigger>
+            <TabsTrigger value="parceiros" className="gap-1.5" data-testid="tab-parceiros">
+              <Handshake className="h-4 w-4" />
+              Parceiros
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="empresas" className="mt-4">
             <CompaniesAdminTab isMaster={effectiveRole === "master"} />
           </TabsContent>
           <TabsContent value="acessos" className="mt-4">
             <UsersAccessAdminTab isMaster={effectiveRole === "master"} />
+          </TabsContent>
+          <TabsContent value="parceiros" className="mt-4">
+            <PartnersAdminTab />
           </TabsContent>
         </Tabs>
       </div>

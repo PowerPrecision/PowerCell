@@ -1,0 +1,74 @@
+{
+  "client_name": "Cliente a-novo",
+  "consultor_name": "Carla Consultora",
+  "created_at": "2026-10-01T10:00:00+00:00",
+  "etapa": "novo",
+  "etapa_label": "Em preparação",
+  "ficheiros": [
+    {
+      "by": "cliente",
+      "content_type": null,
+      "file_size": null,
+      "filename": "foto.jpg",
+      "id": "solto-cliente",
+      "uploaded_at": "2026-10-06T11:00:00+00:00"
+    },
+    {
+      "by": "eu",
+      "content_type": null,
+      "file_size": null,
+      "filename": "extra.pdf",
+      "id": "solto-eu",
+      "uploaded_at": "2026-10-06T10:00:00+00:00"
+    }
+  ],
+  "id": "a-novo",
+  "kind": "process",
+  "pedidos": [
+    {
+      "category": "Cartão de Cidadão",
+      "created_at": "2026-10-04T10:00:00+00:00",
+      "estado": "pendente",
+      "expected_count": 2,
+      "ficheiros": [],
+      "id": "req-1",
+      "label": "CC frente e verso",
+      "notes": "Frente e verso, por favor",
+      "updated_at": null,
+      "uploaded_count": 0
+    },
+    {
+      "category": "IRS",
+      "created_at": "2026-10-05T10:00:00+00:00",
+      "estado": "recebido",
+      "expected_count": 1,
+      "ficheiros": [
+        {
+          "by": "cliente",
+          "content_type": null,
+          "file_size": 10,
+          "filename": "irs-cliente.pdf",
+          "id": "f-cli",
+          "uploaded_at": "2026-10-05T11:00:00+00:00"
+        },
+        {
+          "by": "eu",
+          "content_type": null,
+          "file_size": 11,
+          "filename": "irs-parceiro.pdf",
+          "id": "f-eu",
+          "uploaded_at": "2026-10-05T12:00:00+00:00"
+        }
+      ],
+      "id": "req-2",
+      "label": "Declaração de IRS",
+      "notes": "",
+      "updated_at": null,
+      "uploaded_count": 4
+    }
+  ],
+  "pedidos_pendentes": 1,
+  "process_number": "PROC-a-novo",
+  "process_type": "credito_habitacao",
+  "updated_at": "2026-10-02T10:00:00+00:00"
+}

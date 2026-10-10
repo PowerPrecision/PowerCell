@@ -1,0 +1,28 @@
+{
+  "client_name": "Lead lead-1",
+  "consultor_name": null,
+  "created_at": "2026-10-03T10:00:00+00:00",
+  "etapa": "lead",
+  "etapa_label": "Leads",
+  "ficheiros": [],
+  "id": "lead-1",
+  "kind": "lead",
+  "pedidos": [
+    {
+      "category": "Cartão de Cidadão",
+      "created_at": "2026-10-03T12:00:00+00:00",
+      "estado": "pendente",
+      "expected_count": 2,
+      "ficheiros": [],
+      "id": "req-lead",
+      "label": "Cartão de Cidadão",
+      "notes": "Frente e verso",
+      "updated_at": null,
+      "uploaded_count": 0
+    }
+  ],
+  "pedidos_pendentes": 1,
+  "process_number": null,
+  "process_type": "credito_habitacao",
+  "updated_at": "2026-10-03T10:00:00+00:00"
+}

@@ -1,4 +1,39 @@
 ---
+Task ID: portal-do-parceiro-v1
+Agent: Cloud Agent
+Task: Portal do Parceiro (V1) — identidade própria, leitura (casos, funil, métricas), escrita (lead, ficheiros) e controlo interno «Serviço pago pelo parceiro»
+
+Date: 2026-10-10
+
+Work Log:
+
+IDENTIDADE — `services/partner_security.py`, `partner_accounts.py`, `routes/partner_portal.py`, `routes/partners_admin.py`
+- Coleção própria `db.partners` e JWT próprio (`type:"partner"`, `aud:"powercell-partner"`, segredo `JWT_PARTNER_SECRET`; em produção sem segredo ≥32 caracteres o portal responde 503 — nunca deriva do `JWT_SECRET`; em dev deriva um HMAC *diferente*). Claim `tv` = `token_epoch`: suspender, mudar password ou aceitar convite sobe-o e invalida os tokens vivos. 8 h, sem refresh. `get_current_partner` relê o parceiro em CADA pedido (estado, época, redes activas); todas as recusas são o mesmo 401.
+- Só email + password. Onboarding SÓ por convite de Admin/CEO/Master (`/admin/partners*`, âmbito pela REDE da empresa convidada; `exigir_empresas_concediveis`); link de uso único (hash em BD, 7 dias), mostrado uma vez a quem convida. Parceiro é pessoa individual. `redes: [{network_id, company_id, status…}]` — suspensão por ligação; o esquema suporta várias redes.
+- Linha-fantasma em `users` (mesmo id, `role: parceiro`, sem password, `partner_directory`) para o atribuidor existente continuar a funcionar; login-v2 recusa contas sem password. Travão de força bruta POR IDENTIDADE (`portal_brute_force`, âmbito `partner_login`; 429 antes de olhar para a credencial; 400 não conta); chave do limiter por parceiro (o IP via XFF é falsificável — D-4).
+
+LEITURA — `partner_visibility.py` (puro), `partner_portal_read.py`
+- Visibilidade = RELAÇÃO (`assigned_parceiro_id == eu`) ∧ rede nas ligações activas. NÃO usa a variante de processo com o ramo de convidados da D-25. Leads = `clients` com `submitted_by_partner_id`, sem processo. 404 igual para alheio e inexistente.
+- DTO por listas positivas (nada financeiro, nada de notas internas, nada do documento). Funil a partir de `macro_da_fase`; fase desconhecida → «em curso» (nunca «análise» por omissão); conversão `null` sem base (não «0 %»).
+
+ESCRITA — `partner_leads.py`, `partner_upload_ops.py`, `partner_attribution.py`
+- Lead: `extra=forbid`, carimbos (rede, empresa, autor, estado, origem) SEMPRE do servidor, consentimento obrigatório, PII cifrada, sem find-or-create, `possible_duplicate_of` só dentro da rede e só para a equipa, duplo clique devolve a existente, tecto diário, checklist de documentos pedida, alerta à gestão.
+- Ficheiros: chave nunca de confiança (`assert_portal_file_key_e_do_cliente` na escrita E na leitura), quarentena de conteúdo (`exigir_conteudo_valido`, tamanho/tipo REAIS), e as regras do Bloco 2 via `planear_entrada` (processo por indexar → `Index` + fila da IA; indexado → pasta pedida, sem IA). Descarga por `file_id`, nunca por chave. Cumpre pedidos (`apply_portal_request_upload`; origem `partner_portal` entrou em `PORTAL_REQUEST_SOURCES`). O CRM reage: a bolinha verde acende com `uploaded_by: partner:<id>`.
+- `aplicar_parceiro_do_cliente` ligado aos CINCO escritores de processo (inventário por AST).
+
+CONTROLO INTERNO — `servico_do_parceiro.py`, `process_partner_service`
+- O parceiro NÃO recebe comissões: paga-nos. Sem motor financeiro. Caixa «Serviço pago pelo parceiro» + observações em texto livre, em coleção própria (nunca no documento do processo: `extra="allow"` vazá-la-ia), só para processos com parceiro, vista pela equipa (master/admin/ceo/diretor/administrativo/consultor/intermediario), alteração por gestão+administrativo, só na casa DONA. Histórico e trilho (o texto das observações nunca vai para o registo). Nenhum módulo do portal do parceiro o lê (guarda por AST).
+
+FRONTEND — `pages/partner/*`, `contexts/PartnerAuthContext.jsx`, `services/partnerApi.js`, `components/admin/PartnersAdminTab.jsx`, `components/processDetails/ServicoDoParceiroCard.jsx`
+- Cliente Axios SEPARADO (sem `X-Company-Id`/`X-Active-Role`, sem token do staff), sessão em `sessionStorage`, evento de expiração próprio; `/parceiro` entrou em `PUBLIC_ROUTE_PREFIXES` **e na regex do Sentry em `main.jsx`** (o replay regista texto — nomes e NIFs de leads); chunk lazy. Ecrãs: convite/aceitação, login, painel (métricas + funil + lista + pesquisa + paginação), nova lead (consentimento, rede quando há mais de uma), caso (pedidos pendentes primeiro, envio por botão e arrasto com os mesmos tipos), conta/mudar password. Staff: separador Parceiros no painel de administração e cartão no `ProcessDetails`.
+- Os mocks do frontend NÃO são escritos à mão: são fixtures geradas pelos serviços reais (`test_parceiro_contrato_frontend.py`, regenera/compara).
+
+VERIFICAÇÃO
+- ~80 mutações sobre as paredes do backend (token, estado, visibilidade, quarentena, desvio para a Index, carimbos, papéis do controlo interno, histórico): as 3 que sobreviveram à primeira medição eram testes fracos (audiência/tipo do token sem teste de rejeição pela razão certa; «pedido cria envio solto» sem teste de corrida 409) — reforçados e mortas. No frontend, mutações na invalidação de cache, no gate do cartão, na lista pública e no Sentry: todas mortas.
+- Achados: (1) `limpar_observacoes` tirava `3 < 5 e 5 > 3` — a expressão regular passou a visar só etiquetas reais; (2) o `deep link` perdia-se após o login (o ramo `Navigate` antecipava o `navigate`); (3) D-32 (registo público procura em todas as redes) e D-33 (o que ficou fora da V1) em `TECHNICAL_DEBT.md`.
+- **Passo operacional no deploy:** definir `JWT_PARTNER_SECRET` (≥32 caracteres, diferente do `JWT_SECRET`) no serviço web — declarado em `render.yaml` com `sync: false`. Sem ele o portal fica desligado (503) e o resto do sistema não é afectado.
+
+---
 Task ID: adenda-rbac-master-global-admin-local
 Agent: Cloud Agent
 Task: ADENDA DE ARQUITECTURA — hierarquia de perfis (Master global, Admin/CEO locais, 9 perfis) e isolamento do Relatório Semanal
