@@ -30,6 +30,7 @@ import re
 import html as html_module
 
 from database import db
+from services.email_tenant_stamp import inserir_email
 from services.email_threading import (
     build_reference_chain,
     domain_from_email,
@@ -1231,7 +1232,7 @@ async def send_email(
             }
             if active_company_id and active_company_id != "default":
                 email_doc["company_id"] = active_company_id
-            await db.emails.insert_one(email_doc)
+            await inserir_email(db, email_doc)
         
         return {"success": True, "account": account.name}
         
@@ -1832,7 +1833,7 @@ async def sync_webmail_emails(
                         from services.email_draft_service import stamp_draft_ttl_fields
                         stamp_draft_ttl_fields(email_doc)
                     
-                    await db.emails.insert_one(email_doc)
+                    await inserir_email(db, email_doc)
                     synced += 1
 
                     # ── WebSocket: Notificar utilizadores em tempo real ──
@@ -2245,7 +2246,7 @@ async def sync_user_emails(
                     from services.email_draft_service import stamp_draft_ttl_fields
                     stamp_draft_ttl_fields(email_doc)
                 
-                await db.emails.insert_one(email_doc)
+                await inserir_email(db, email_doc)
                 total_synced += 1
 
                 # ── WebSocket: Notificar o dono da caixa pessoal em tempo real ──
@@ -2459,7 +2460,7 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
                     "in_reply_to": email_data.get("in_reply_to") or None,
                     "references": email_data.get("references") or [],
                 }
-                await db.emails.insert_one(email_doc)
+                await inserir_email(db, email_doc)
                 total_synced += 1
                 try:
                     from services.email_realtime import notify_new_email_for_shared_role
@@ -2544,7 +2545,7 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
                     "in_reply_to": email_data.get("in_reply_to") or None,
                     "references": email_data.get("references") or [],
                 }
-                await db.emails.insert_one(email_doc)
+                await inserir_email(db, email_doc)
                 total_synced += 1
                 try:
                     from services.email_realtime import notify_new_email_for_shared_role

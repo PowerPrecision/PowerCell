@@ -1,4 +1,43 @@
 ---
+Task ID: d31-d8-rascunho-de-rececao
+Agent: Cloud Agent
+Task: Três pendências da gaveta — D-31 (rotas por id de clientes/tarefas), D-8 (carimbo de rede nos emails) e rascunho de IA a confirmar a receção de documentos críticos
+
+Date: 2026-10-11
+
+Work Log:
+
+CI — `seed.py` rebentava com `UserRole.MASTER` (a adenda de RBAC passou a conta de sistema a Master no seed, mas o seed tem uma cópia LOCAL de `UserRole`). Corrigido e coberto por `test_seed_perfis.py` (guarda por AST). Verificado: seed completo contra um `mongod` e `login-v2` do `admin@sistema.pt` como master.
+
+D-31 — `services/by_id_scope.py` + dependências de router em `/clients`, `/tasks` e `/restore`
+- 404 igual ao de «não existe» (nunca 403) para o cliente/tarefa de outra rede. Master passa sem ler nada; um id inexistente passa para o handler.
+- Cliente: carimbo no meu âmbito (o MESMO predicado das listagens); **ou** da Pool (sem carimbo, sem `process_ids`, não convertido, e nenhum processo o refere — o `process_ids` do cliente nem sempre está mantido); **ou** titular de um processo meu. Este último ramo existe porque `POST /clients` NUNCA carimbou e o `ProcessDetails` carrega `GET /clients/{id}` do titular: sem ele o cartão do cliente do próprio processo de um utilizador da Domus dava 404. Para LER/EDITAR conta também o processo partilhado (D-25); eliminar/atribuir/ligar/criar processo exigem um processo DA MINHA rede.
+- Tarefa: carimbo no meu âmbito, **ou** atribuída a mim/criada por mim, **ou** de um processo que vejo.
+- `POST /clients` passou a carimbar (`resolve_tenant_stamp`).
+- 57 testes sobre os routers reais (os `run_*` são sentinelas: o ataque exige que o handler NUNCA seja chamado). 25 mutações: 3 sobreviveram — «só `client_id`» (faltava testar 2.º titular/co-titular) e duas do Master (a guarda e o âmbito `sem_fronteira` dizem o mesmo; só um teste que proíba resolver o âmbito as distingue) — reforçados e mortas.
+
+D-8 — `services/email_tenant_stamp.py` + `scripts/backfill_email_network_id.py`
+- Os OITO `db.emails.insert_one` passam por `inserir_email(db, doc)` (o `db` do próprio módulo, para os testes que o patcham). Rede = do processo e/ou da empresa do email; duas candidatas diferentes não se resolvem; nunca derruba a escrita. Inventário por AST com contraprova.
+- Backfill: omissão só lê e conta, `--aplicar` escreve, usa a MESMA função de produção, idempotente (verificado contra um `mongod` real: 1.ª passagem carimba 4/6, 2.ª escreve 0). **Passo operacional: correr uma vez depois do deploy.** Ficam por carimbar as caixas partilhadas por cargo sem processo nem empresa (ver D-8).
+
+RASCUNHO DE CONFIRMAÇÃO DE RECEÇÃO — `services/document_receipt_draft.py`
+- Upload de um documento CRÍTICO (identificação, IRS, recibo de vencimento) pelo cliente do Portal ou pelo parceiro → em segundo plano, a IA gera um rascunho (`status: draft`, `is_auto_draft`, `auto_draft_kind: document_receipt`) no processo, carimbado com a rede, dirigido a QUEM ENVIOU (o cliente → o email dele; o parceiro → o do parceiro). Nunca envia.
+- A instrução do dono do produto vai ao modelo VERBATIM (`PROMPT_DE_RECEPCAO`, afirmado por teste); o formato JSON e as paredes vão no prompt de sistema. O «nome do documento» sai de um registo FECHADO (nunca do nome do ficheiro: injecção de prompt a partir de uma superfície externa).
+- «Nunca prometas prazos» é uma parede NO CÓDIGO (`promete_prazo`): uma resposta que prometa um prazo (24 horas, amanhã, dois dias, até sexta…), venha em HTML, seja comprida ou fora do formato é substituída pelo texto seguro. Os testes apanharam duas lacunas do regex («dois dias», «nos próximos dias»).
+- Motor: dev simula sempre (só produção COM chave chama o modelo, ou `RECEIPT_DRAFT_PROVIDER`); o modelo vem do painel de IA (tarefa `document_receipt_draft`), nunca fixo. Interruptor `SystemConfig.auto_draft.receipt_enabled` (ligado por omissão) e `RECEIPT_DRAFT_ENABLED=false`; em testes (`TESTING=true`) está desligado salvo pedido explícito.
+- Dedupe: um rascunho PENDENTE por (processo, tipo) — índice único parcial `idx_emails_receipt_draft_pending` (verificado em `mongod` real: bloqueia a corrida, não colide com rascunhos antigos, e depois de enviado um novo upload gera novo).
+- **Sem processo não há rascunho** (uploads do onboarding): não existe pasta de Rascunhos de um processo que ainda não existe.
+- **Os rascunhos expiram ao fim de 7 dias de inactividade** (TTL `ttl_email_drafts` já existente): um rascunho de confirmação que ninguém reveja nesse prazo desaparece.
+
+RASCUNHOS AUTOMÁTICOS — a fronteira que lhes faltava (achada ao ligar a funcionalidade)
+- `GET /emails/drafts` mostrava a admin/CEO os rascunhos de TODAS as redes e `PUT/POST send/DELETE /emails/drafts/{id}` recebiam só o id: qualquer staff enviava (do seu servidor de email) ou apagava o de outra rede. Agora: listagem na rede do utilizador (gestão e administrativo vêem todos os da rede; os outros, os dos seus processos ou os seus), as três rotas por id exigem poder LER o rascunho (404 igual) e `POST /emails/drafts/create` exige poder ver o processo. O filtro dos «outros» olhava para `processes.assigned_to`, que o processo quase nunca tem: o consultor não via rascunho nenhum — passou a ler os campos canónicos. Papel EFECTIVO, não o do token.
+- 11 mutações sobre estas paredes, 1 sobreviveu (a guarda e o serviço filtram ambos por `is_auto_draft`) → teste que neutraliza o serviço.
+
+VERIFICAÇÃO
+- `pytest tests/unit` 7947 e a suite completa do CI 8158 (com Mongo), sem falhas; flake8 e bandit limpos.
+- Não verificado: o modelo real (OpenAI) nunca foi chamado — os testes afirmam os PARÂMETROS que saem; o envio real de um rascunho (SMTP); o ecrã (não há alterações de frontend).
+
+---
 Task ID: portal-do-parceiro-v1
 Agent: Cloud Agent
 Task: Portal do Parceiro (V1) — identidade própria, leitura (casos, funil, métricas), escrita (lead, ficheiros) e controlo interno «Serviço pago pelo parceiro»

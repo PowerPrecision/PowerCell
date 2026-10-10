@@ -788,6 +788,14 @@ EXCEPCOES_ESCRITAS = {
         "processo partilhado de outra rede"
     ),
     "admin_users_scope": "a colecção é `db.users`, que não é partilhável",
+    "email_draft_service": (
+        "a condição de rede aplica-se à colecção `db.emails` (rascunhos, que "
+        "levam o carimbo do dono do processo); as leituras de `db.processes` "
+        "resolvem QUAIS processos estão atribuídos a quem pergunta e enriquecem "
+        "o nome do cliente — não decidem visibilidade. Um rascunho do dono não "
+        "se mostra à rede convidada: o convidado vê o processo, não a "
+        "correspondência de quem o trata"
+    ),
     "automation_api_rules": "a colecção é `db.automation_rules` (regras da casa)",
     "companies_crud_api_list": "a colecção é `db.companies` (as empresas)",
     "deadline_scope": "regra PURA do calendário; não consulta nada",

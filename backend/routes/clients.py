@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Query, Request
 
 from models.client import Client, ClientCreate, ClientUpdate
 from services.auth import get_current_user, get_effective_role_async, require_roles
+from services.by_id_scope import exigir_cliente_no_ambito
 from models.auth import UserRole
 
 from services.client_me import run_get_my_assigned_clients
@@ -42,7 +43,13 @@ from services.client_portal_access import run_resend_portal_access
 from services.client_find_or_create import run_find_or_create_client
 from services.client_delete import PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES, run_delete_client
 
-router = APIRouter(prefix="/clients", tags=["Clients"])
+# D-31: o PEDIDO POR ID também tem fronteira de rede. A dependência actua em
+# toda a rota com `{client_id}` no caminho (404 igual ao de «não existe»);
+# ver `services/by_id_scope.py`.
+router = APIRouter(
+    prefix="/clients", tags=["Clients"],
+    dependencies=[Depends(exigir_cliente_no_ambito)],
+)
 
 
 # Static paths before /{client_id}

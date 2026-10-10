@@ -34,6 +34,7 @@ from email.mime.base import MIMEBase
 from email import encoders as email_encoders
 
 from database import db
+from services.email_tenant_stamp import inserir_email
 from services.encryption import encryption_service
 
 logger = logging.getLogger(__name__)
@@ -653,7 +654,7 @@ async def gmail_api_sync_to_db(
                     "source": "gmail_api",
                 }
 
-                await db.emails.insert_one(email_doc)
+                await inserir_email(db, email_doc)
                 total_synced += 1
                 try:
                     from services.email_realtime import notify_new_email_for_shared_role

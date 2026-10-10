@@ -598,6 +598,18 @@ async def create_indexes(db) -> dict:
             "keys": [("message_id", 1), ("account", 1)],
             "name": "idx_emails_message_dedup",
         },
+        # Um rascunho de confirmação de receção PENDENTE por (processo, tipo
+        # de documento): fecha a corrida de dois uploads simultâneos. Parcial
+        # — só abrange esses rascunhos, pelo que não toca nos emails que já lá
+        # estão (nenhum tem `auto_draft_kind`).
+        {
+            "keys": [("process_id", 1), ("auto_draft_kind", 1), ("auto_draft_doc_type", 1)],
+            "name": "idx_emails_receipt_draft_pending",
+            "unique": True,
+            "partialFilterExpression": {
+                "status": "draft", "auto_draft_kind": "document_receipt",
+            },
+        },
     ]
     for idx in email_indexes:
         await _create_index_safe(db.emails, idx, "emails", results)

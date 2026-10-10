@@ -382,22 +382,29 @@ do passo 2.
 
 ## Produto e âmbito
 
-### D-8 · `db.emails` não tem carimbo de rede
-**Onde:** colecção `emails`
+### D-8 · `db.emails`: o carimbo de rede está fechado na ESCRITA; faltam as caixas partilhadas por cargo
+**Onde:** colecção `emails`, `services/email_tenant_stamp.py`, `scripts/backfill_email_network_id.py`
 
-Os processos, clientes e leads têm `network_id`; os emails não. Pertence ao
-lote do webmail.
+**Fechado (Out 2026, D-31/D-8):** os emails novos nascem com `network_id`. Os
+oito `db.emails.insert_one` (envio, sincronização pessoal, caixas partilhadas
+×3, Gmail API, registo manual, rascunhos) passam todos por
+`email_tenant_stamp.inserir_email` — inventário por AST, com contraprova. A
+rede vem do PROCESSO do email e/ou da EMPRESA gravada nele; duas candidatas
+diferentes **não se resolvem** (fica por carimbar, com aviso) e uma falha a
+resolver nunca derruba a escrita. O backfill
+(`python -m scripts.backfill_email_network_id [--aplicar]`) usa a MESMA função
+de produção; a omissão é só ler e contar, e a segunda passagem escreve 0.
+Verificado contra um `mongod` real.
 
-**Bloco 2 (Out 2026):** a LEITURA passou a ter fronteira sem o carimbo —
-`services/email_access.py` deduz a rede pela empresa do email
-(`documento_no_ambito`; sem marca nenhuma pertence à rede de omissão) e todas
-as rotas de leitura/anexos/processo a usam. **O que continua aberto:** o
-carimbo na escrita e o backfill (a dedução falha para um email com
-`company_id` em branco numa instalação sem `TENANT_DEFAULT_NETWORK_ID`), e as
-caixas partilhadas por cargo (`shared_role`) não distinguem redes.
+**Passo operacional:** correr o backfill UMA vez depois do deploy
+(`--aplicar`), por esta ordem — código primeiro, base de dados depois.
 
-**Para fechar:** carimbo na escrita (`resolve_tenant_stamp`) + backfill com a
-regra do `rede_consensual` (recusa adivinhar quando há mais de uma candidata).
+**O que continua aberto:** os emails das caixas partilhadas por CARGO
+(`shared_role`) sem processo e sem empresa — a sincronização das contas
+partilhadas não tem utilizador nem empresa de onde derivar a rede, pelo que
+continuam por carimbar e a LEITURA continua a deduzir (`email_access`) como no
+Bloco 2. Fechar exige associar cada conta partilhada a uma empresa na
+configuração (`shared_email_config`), que hoje é só por cargo.
 
 ---
 
@@ -521,66 +528,39 @@ selectores falhados por execução (passo e selector, sem credenciais) e uma
 rotina de verificação mensal com uma conta de teste; só depois faz sentido
 partir o módulo.
 
-### D-31 · Rotas «por id» fora do router de processos não perguntam a que rede pertence o objecto
-**Onde:** `routes/clients.py` (`/clients/{id}`), `routes/tasks.py` (`/tasks/{id}`), e as restantes rotas com um id no caminho que não passem por um construtor de âmbito
+### D-31 · Rotas «por id» sem pergunta de rede: fechadas as de clientes, tarefas, restauro e rascunhos
+**Onde:** `services/by_id_scope.py`, `routes/clients.py`, `routes/tasks.py`, `routes/restore.py`, `services/email_templates_drafts.py`
 
-A adenda de RBAC (Out 2026) tornou o Admin e o CEO perfis **locais** e fechou
-o pedido de processos por id com uma dependência de router
-(`process_scope_guard.exigir_processo_no_ambito`). Fica por varrer o resto:
-`require_roles`/`get_current_user` autorizam o VERBO e, onde o serviço não
-volta a perguntar pelo OBJECTO, um staff que adivinhe o id de um cliente ou de
-uma tarefa de outra rede lê-o (clientes), ou muda-o (tarefas). Não foi medido
-rota a rota — o inventário por AST desta adenda cobre as listas de papéis, não
-as posses. Fechar exige o mesmo inventário que o Lote 5 fez para as listagens,
-agora para os handlers com `{..._id}` no caminho, com excepções escritas.
+**Fechado (Out 2026):** `GET/PUT/DELETE /clients/{id}` (e as restantes rotas
+com `{client_id}`), `GET/PUT/DELETE /tasks/{id}` (e `complete`/`reopen`), os
+três `/…/restore` por id e `PUT/POST send/DELETE /emails/drafts/{id}` +
+`POST /emails/drafts/create` respondem **404 igual ao de «não existe»** para
+um objecto de outra rede. Duas dependências de router
+(`exigir_cliente_no_ambito`, `exigir_tarefa_no_ambito`) mais o
+`exigir_processo_no_ambito` que já existia; testes montam os routers REAIS.
+**Três ramos que NÃO são «a rede do carimbo» e existem por motivo escrito:**
+a Pool (registo público sem carimbo, sem processo, por reivindicar —
+claim-based routing); o cliente que é titular de um processo MEU (porque
+`POST /clients` não carimbava e o cartão do titular do `ProcessDetails` abre
+`GET /clients/{id}`) — a rede convidada de uma partilha conta só para
+ler/editar, nunca para eliminar, atribuir ou criar processo; e, nas tarefas,
+as atribuídas a mim ou criadas por mim. `POST /clients` passou a carimbar.
 
-**Relacionado — fronteira de dados é a REDE, não a empresa.** Power e Precision
-partilham rede por decisão do Lote 4, logo um Admin da Power vê os dados da
-Precision. A gestão de utilizadores, os UCR, as configs de email e o relatório
-de segunda-feira seguem a rede; só `system_config` é por empresa. Se o dono do
-produto quiser isolamento por EMPRESA dentro da mesma rede, é um carimbo novo
-em todas as colecções, não uma correcção desta adenda.
+**O que continua aberto:** as outras rotas por id que o serviço resolve à sua
+maneira e que ESTA varredura não percorreu —
+`/documents/client/{client_id}/*` (a guarda de documentos tem a sua fronteira,
+D-26, mas não passa por aqui), `/task-logs/{id}` (jobs do próprio
+utilizador), `/admin/migration/run-single/{client_id}` (só Master) e
+`/portal/{client_id}/verify` (pública, com travão). Cada uma precisa do mesmo
+inventário por AST das rotas com `{…_id}` no caminho que esta iteração fez
+para clientes e tarefas.
 
-### D-32 · O registo público de clientes procura por email/NIF em TODAS as redes e funde
-**Onde:** `backend/services/public_registration.py` (`run_public_client_registration`)
-
-Descoberto ao desenhar o Portal do Parceiro (a lead do parceiro **não** usa este
-caminho de propósito: não há «find-or-create» na lead, porque o encontrar
-atravessaria redes). O registo público é anónimo, e abre com
-`db.clients.find_one` por `contacto.email_hash`/`email` e por
-`dados_pessoais.nif_hash`/`nif` **sem condição de rede**: quem submeter o email
-ou o NIF de um cliente de OUTRA rede cai no ramo «cliente já existe», que
-actualiza campos vazios, junta `custom_fields` e emite o convite do Portal.
-O modo de falhar não dá erro. Não foi alterado neste lote (comportamento de
-produto antigo, e a regra de duplicados é decisão do dono). Fechar exige decidir
-a regra: procurar só na rede por omissão do formulário público (que carimbo tem
-o formulário?) e criar sempre um cliente novo — marcado `possible_duplicate_of`
-— quando o encontrado for de outra rede.
-
-### D-33 · Portal do Parceiro: o que ficou de fora da V1 (decidido)
-**Onde:** `services/partner_*.py`, `routes/partner_portal.py`, `routes/partners_admin.py`, `pages/partner/`
-
-Cada ponto é uma decisão assumida, não um esquecimento:
-- **Sem «esqueci-me da palavra-passe» autónomo.** A recuperação é um novo convite
-  (`POST /admin/partners/{id}/resend-invite`), que reutiliza o token de uso único.
-  Um fluxo público de recuperação precisa do travão por IP (D-4).
-- **Sem link de referência / registo por link** (ideia original do dono). Depende
-  de o `_get_client_ip` ler o XFF certo (D-4): um limite por IP que se contorna
-  mudando um cabeçalho não protege um endpoint anónimo que cria registos.
-- **Um parceiro numa 2.ª rede:** o esquema (`redes: [...]`) e as paredes já o
-  suportam (visibilidade = relação ∧ rede activa); falta o endpoint de
-  «acrescentar ligação» a um parceiro existente — hoje o convite a um email já
-  em uso devolve 409.
-- **O DTO não leva contactos do parceiro nem da equipa** (nem email do consultor).
-  A comunicação é pelos «Pedidos de Documentos»; se o negócio quiser um nome de
-  contacto, é um campo novo e uma decisão de privacidade.
-- **Mesma origem do SPA:** `/parceiro/*` é um chunk do mesmo bundle. Separar num
-  subdomínio/entrada Vite própria tiraria o código do staff da superfície do
-  parceiro; a fronteira real é o servidor (token e segredo próprios), por isso
-  adiou-se.
-- **`uploaded_count` de um pedido inclui ficheiros que a equipa juntou** (é a
-  contagem que decide o estado no servidor); o ecrã do parceiro limita-a a
-  `expected_count` para não mostrar «4/1».
+**Relacionado — fronteira de dados é a REDE, não a empresa.** Power e
+Precision partilham rede por decisão do Lote 4, logo um Admin da Power vê os
+dados da Precision. A gestão de utilizadores, os UCR, as configs de email e o
+relatório de segunda-feira seguem a rede; só `system_config` é por empresa. Se
+o dono do produto quiser isolamento por EMPRESA dentro da mesma rede, é um
+carimbo novo em todas as colecções, não uma correcção desta adenda.
 
 ## Fechadas
 
