@@ -27,7 +27,7 @@ from services import master_promotion as mp  # noqa: E402
 
 
 async def principal(args: argparse.Namespace) -> int:
-    emails = mp.normalizar_emails(args.emails)
+    emails = mp.normalizar_emails(args.emails.split(','))
     if not emails:
         print("Indique pelo menos um email em --emails.")
         return 2
