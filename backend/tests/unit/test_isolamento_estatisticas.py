@@ -769,14 +769,18 @@ class TestFugaNoDesempenhoDaEquipa:
         assert any("âmbito global" in r.message for r in caplog.records)
 
     async def test_o_endpoint_passa_o_utilizador(self):
-        """Contraprova: sem isto o parâmetro novo era decorativo."""
+        """Contraprova: sem isto o parâmetro novo era decorativo.
+
+        O endpoint passou a `executive_report_api` (Bloco 4): o âmbito
+        resolve-se a partir de QUEM PEDE, e é esse âmbito que o motor usa.
+        """
         fonte = codigo_sem_comentarios(
-            (RAIZ_BACKEND / "services" / "admin_observability.py").read_text(
+            (RAIZ_BACKEND / "services" / "executive_report_api.py").read_text(
                 encoding="utf-8",
             )
         )
-        assert "generate_weekly_team_report(" in fonte
-        assert "user=user" in fonte
+        assert fonte.count("resolver_ambito(user)") >= 2
+        assert "gerar_relatorio(ambito" in fonte
 
 
 # ════════════════════════════════════════════════════════════════════

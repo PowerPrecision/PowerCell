@@ -176,7 +176,7 @@ const DashboardLayout = ({ children, title }) => {
     // Rotas do grupo Comunicações e Ficheiros
     const comunicacoesRoutes = ["/webmail", "/minutas", "/ficheiros"];
     // Rotas do grupo Dashboard Executivo (admin/CEO only)
-    const dashboardExecutivoRoutes = ["/admin/desempenho"];
+    const dashboardExecutivoRoutes = ["/admin/desempenho", "/admin/relatorio-semanal"];
     // Rotas do grupo Gestão e Operações
     const gestaoRoutes = ["/estatisticas", "/performance-balcoes", "/rascunhos"];
     return {
@@ -229,9 +229,11 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const getNavItems = () => {
-    // PACOTE DM: em impersonate, o menu segue o role REAL do utilizador
-    // impersonado — nunca o activeRole residual do admin original.
-    const userRole = (isImpersonating ? user?.role : effectiveRole)?.toLowerCase();
+    // Bloco 4, ponto 33 — o menu lê o MESMO perfil que as guardas de rota.
+    // Em impersonate o `AuthContext` já só publica um perfil do utilizador-
+    // alvo (ver utils/papelEfectivo.js): o menu não precisa de atalho
+    // nenhum, e um atalho aqui era a segunda fonte da mesma pergunta.
+    const userRole = effectiveRole?.toLowerCase();
     const canSeeAdminPanel = canAccessOrgAdmin(userRole); // Sidebar Administração + Painel (activeRole admin/ceo)
     // ====================================================================
     // DASHBOARD
@@ -523,6 +525,11 @@ const DashboardLayout = ({ children, title }) => {
             icon: TrendingUp,
             href: "/admin/desempenho",
           },
+          {
+            label: "Relatório Semanal",
+            icon: CalendarDays,
+            href: "/admin/relatorio-semanal",
+          },
         ],
       };
 
@@ -554,24 +561,6 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const navData = getNavItems();
-  // PACOTE DM: defesa extra — menus de administração nunca visíveis se o
-  // utilizador impersonado não for admin/CEO, mesmo com activeRole residual.
-  if (
-    isImpersonating
-    && !["admin", "ceo"].includes((user?.role || "").toLowerCase())
-  ) {
-    navData.showAdminButton = false;
-    navData.groups = (navData.groups || []).filter(
-      (g) => g.id !== "dashboard-executivo" && g.id !== "organizacao",
-    );
-    navData.main = (navData.main || []).filter(
-      (item) => item.href !== "/admin/organizacao",
-    );
-    if (navData.main?.[0]) {
-      navData.main[0] = { ...navData.main[0], href: "/staff" };
-    }
-  }
-  
   // Impersonate offset (isImpersonating already consumed above)
   const impersonateOffset = isImpersonating ? 'top-12' : 'top-0';
 

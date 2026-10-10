@@ -167,11 +167,31 @@ async def _enrich_calendar_rows(deadlines: list[dict]) -> list[dict]:
     return result
 
 
+def janela_de_datas(desde: Optional[str], ate: Optional[str]) -> dict:
+    """Eventos que TOCAM `[desde, ate[` (datas `AAAA-MM-DD`, texto ISO).
+
+    Um evento de vários dias (ausência) começa antes e acaba dentro da
+    janela: por isso a condição é «começa antes do fim E (acaba ou começa
+    depois do início)». Comparação lexicográfica de texto ISO, que é como o
+    calendário guarda as datas. Sem janela devolve `{}` (o calendário
+    completo, como sempre).
+    """
+    if not desde or not ate:
+        return {}
+    return {"$and": [
+        {"due_date": {"$lt": ate}},
+        {"$or": [{"end_date": {"$gte": desde}}, {"due_date": {"$gte": desde}}]},
+    ]}
+
+
 async def run_get_calendar_deadlines(
     consultor_id: Optional[str],
     mediador_id: Optional[str],
     user: dict,
     request: Optional[Request] = None,
+    *,
+    desde: Optional[str] = None,
+    ate: Optional[str] = None,
 ):
     """Obter eventos para o calendário (enriched with process + responsável).
 
@@ -248,5 +268,8 @@ async def run_get_calendar_deadlines(
         deadline_query["$or"] = personal_deadline_or_clauses(user["id"], my_process_ids)
 
     final = com_isolamento(condicao_de_rede, deadline_query)
+    janela = janela_de_datas(desde, ate)
+    if janela:
+        final = {"$and": [final, janela]}
     deadlines = await db.deadlines.find(final, {"_id": 0}).to_list(1000)
     return await _enrich_calendar_rows(deadlines)

@@ -73,16 +73,41 @@ class FakeAsyncCursor:
             include = {k for k, v in self._projection.items() if v}
             exclude = {k for k, v in self._projection.items() if not v}
             if include:
-                docs = [
-                    {k: d[k] for k in include if k in d and k not in exclude}
-                    for d in docs
-                ]
+                docs = [self._incluir(d, include - exclude) for d in docs]
             else:
                 docs = [
                     {k: v for k, v in d.items() if k not in exclude}
                     for d in docs
                 ]
         return docs
+
+    @staticmethod
+    def _incluir(doc: dict, campos) -> dict:
+        """Projecção de inclusão, com dot-notation (`a.b` copia só `a.b`).
+
+        No Mongo `{"real_estate_data.data_cpcv": 1}` devolve
+        `{"real_estate_data": {"data_cpcv": ...}}`. O duplo ignorava o campo
+        (a chave com ponto não existe no topo do documento) e um teste de
+        código com projecção aninhada via sempre «sem dados» — o defeito
+        estava no duplo, não no código. Semântica afirmada em
+        `test_duplo_de_mongo_projeccao.py`.
+        """
+        saida: dict = {}
+        for campo in campos:
+            partes = campo.split(".")
+            origem, destino = doc, saida
+            for i, parte in enumerate(partes):
+                if not isinstance(origem, dict) or parte not in origem:
+                    break  # contentor inexistente: nada (como o Mongo)
+                if i == len(partes) - 1:
+                    destino[parte] = origem[parte]
+                else:
+                    if not isinstance(origem[parte], dict):
+                        break
+                    # Contentor existente com folha em falta: fica `{}` (como o Mongo).
+                    destino = destino.setdefault(parte, {})
+                    origem = origem[parte]
+        return saida
 
     def __aiter__(self):
         """PACOTE 9 — iteração assíncrona (``async for doc in cursor``),

@@ -29,6 +29,12 @@ from services.alerts import get_process_alerts
 from services.encryption import decrypt_client_data
 
 from services.process_sharing_api import run_revoke_partner
+from services.origem_financeira import (
+    OrigemFinanceiraBody,
+    run_get_origem,
+    run_list_candidatos,
+    run_set_origem,
+)
 from services.process_service import (
     can_view_process,
     can_edit_process_data,
@@ -769,6 +775,37 @@ async def revoke_process_partner(
 ):
     """Revoga à mão a partilha com UMA empresa (a Via Rápida só acrescenta)."""
     return await run_revoke_partner(process_id, company_id, user, request)
+
+
+@router.get("/{process_id}/origem-financeira")
+async def get_origem_financeira(
+    process_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Origem financeira (orgânica vs angariação) — só a gestão."""
+    return await run_get_origem(process_id, user, request)
+
+
+@router.get("/{process_id}/origem-financeira/candidatos")
+async def list_candidatos_origem_financeira(
+    process_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Utilizadores que podem ser escolhidos como angariador — só a gestão."""
+    return await run_list_candidatos(process_id, user, request)
+
+
+@router.put("/{process_id}/origem-financeira")
+async def set_origem_financeira(
+    process_id: str,
+    body: OrigemFinanceiraBody,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Define a origem: `{"tipo": "organica"|"angariacao", "angariador_id"?}`."""
+    return await run_set_origem(process_id, body.tipo, body.angariador_id, user, request)
 
 
 @router.put("/{process_id}", response_model=ProcessResponse)

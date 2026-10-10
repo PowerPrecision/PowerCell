@@ -95,6 +95,10 @@ export const queryKeys = {
     // só esta query é invalidada, não a query das colunas activas
     kanbanCompleted: (filters) => [...queryKeys.processes.all, 'kanban-completed', filters],
     myClients: (filters) => [...queryKeys.processes.all, 'my-clients', filters],
+    // Bloco 4, ponto 7 — a origem financeira desce do detalhe: invalidar o
+    // processo recarrega-a, e ela nunca viaja DENTRO do documento do processo.
+    origemFinanceira: (id) => [...queryKeys.processes.detail(id), 'origem-financeira'],
+    candidatosOrigemFinanceira: (id) => [...queryKeys.processes.detail(id), 'origem-financeira', 'candidatos'],
   },
   
   // Histórico/Timeline
@@ -112,6 +116,7 @@ export const queryKeys = {
   // Prazos/Deadlines
   deadlines: {
     all: ['deadlines'],
+    dashboardCalendar: (month) => ['deadlines', 'dashboard-calendar', month],
     lists: () => [...queryKeys.deadlines.all, 'list'],
     byProcess: (processId) => [...queryKeys.deadlines.all, 'process', processId],
     myDeadlines: () => [...queryKeys.deadlines.all, 'my'],

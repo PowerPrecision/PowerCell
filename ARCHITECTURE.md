@@ -9621,3 +9621,14 @@ O admin liga/desliga se as acções ficam guardadas no histórico **por pessoa e
 **Histórico.** `_is_stealth_user` continua o ponto único; `send_email` não regista — o envio com processo regista via `_registar_envio_no_historico` (silêncio decidido ao enfileirar). A ordenação é por instante (`instanteDoEvento`).
 
 **`/portal/status`.** `nota_do_pedido`/`rotulo_do_pedido` servem as quatro serializações.
+
+
+## Dashboards, Finanças e Interface (Bloco 4, Lote 11)
+
+**Origem financeira.** `services/origem_financeira.py` + colecção `process_financial_origins` (índice único `process_id`). Fora do documento de processo de propósito: `ProcessResponse` é `extra="allow"` e o detalhe devolve o documento inteiro. Rotas `GET/PUT /processes/{id}/origem-financeira` e `GET .../candidatos` (só admin/CEO/diretor pelo papel efectivo; processo fora do âmbito = 404; convidado de rede partilhada = 403). O histórico regista a alteração sem valores; o trilho de auditoria leva o antes/depois.
+
+**Relatório executivo.** `services/executive_report.py` é o motor (período semiaberto, âmbito = rede de quem pede, pipelines com `$match` indexado, `maxTimeMS`, cache de 60 s por âmbito). `executive_weekly.py` guarda a semana fechada em `executive_weekly_reports` (`scope_key`+`week_start`, único). `executive_report_pdf.py` gera o PDF no servidor. Rotas em `/admin`: `team-performance` (+`/pdf`), `executive-weekly` (+`/regenerate`, `/pdf`), só admin/CEO. Índices em `db_indexes.py`. `analytics_service.generate_weekly_team_report` é fachada (email de segunda = semana ISO anterior, consolidado D-7).
+
+**Calendário do Dashboard.** `services/dashboard_calendar.py` junta os eventos do calendário (com janela de datas) e as datas de escritura/CPCV dos processos visíveis ao utilizador. `GET /deadlines/dashboard-calendar?month=AAAA-MM`.
+
+**Perfil visível em impersonate.** `frontend/src/utils/papelEfectivo.js` → `AuthContext.effectiveRole`. `impersonate`/`stopImpersonating` sincronizam os cabeçalhos e limpam a cache do TanStack.

@@ -1345,7 +1345,17 @@ class ScheduledTasksService:
             # 1. Gerar dados de agregação
             from services.analytics_service import generate_weekly_team_report, format_report_html
 
-            report = await generate_weekly_team_report(self.db)
+            # A semana ISO ANTERIOR, fechada (segunda a domingo): era «os
+            # últimos 7 dias até agora», que à segunda-feira apanhava a
+            # manhã de segunda e fazia o relatório deslizar de dia a dia.
+            from services.executive_report import semana_de
+
+            segunda, domingo = semana_de(today.date() - timedelta(days=7))
+            report = await generate_weekly_team_report(
+                self.db,
+                period_start=datetime.combine(segunda, datetime.min.time(), tzinfo=timezone.utc),
+                period_end=datetime.combine(domingo, datetime.min.time(), tzinfo=timezone.utc),
+            )
 
             # 2. Formatar HTML
             html_content = format_report_html(report)

@@ -509,3 +509,65 @@ describe("WebmailPage — anexos: descarregar e arquivar no processo (Bloco 2)",
     expect(await leitura.findByRole("button", { name: "Arquivar cc-joana.pdf no processo" })).toBeInTheDocument();
   });
 });
+
+describe("WebmailPage — abrir um rascunho a partir do Dashboard (Bloco 4, ponto 32)", () => {
+  /**
+   * Os rascunhos automáticos («documento em falta») pertencem a um PROCESSO,
+   * não à caixa pessoal: a pasta Rascunhos nunca os traz. O link do
+   * Dashboard (`/webmail?folder=drafts&id=…`) abria o Webmail e não abria
+   * nada, porque o rascunho não estava na lista carregada.
+   */
+  const RASCUNHO_AUTOMATICO = {
+    id: "auto-1", status: "draft", is_auto_draft: true, process_id: "p-1",
+    subject: "Documento necessário: IRS", to_emails: ["cliente@exemplo.pt"],
+    body: "Caro Silva, precisamos do IRS.",
+  };
+
+  it("um rascunho que não está na lista é pedido pelo id e abre o editor", async () => {
+    apiFalsa.getWebmailEmail = () => Promise.resolve({ data: RASCUNHO_AUTOMATICO });
+    montar("/webmail?folder=drafts&id=auto-1");
+
+    const assunto = await screen.findByPlaceholderText("Assunto do email");
+    expect(assunto).toHaveValue("Documento necessário: IRS");
+    expect(screen.getByDisplayValue(/Caro Silva/)).toBeInTheDocument();
+    expect(apiFalsa.chamadas.filter((c) => c.nome === "getWebmailEmail")).toHaveLength(1);
+  });
+
+  it("um rascunho que ESTÁ na lista abre sem pedir nada ao servidor", async () => {
+    estadoDaLista.valor = respostaDaLista([email({ id: "auto-1", status: "draft", subject: "Já na lista" })]);
+    montar("/webmail?folder=drafts&id=auto-1");
+
+    expect(await screen.findByDisplayValue("Já na lista")).toBeInTheDocument();
+    expect(apiFalsa.chamadas.filter((c) => c.nome === "getWebmailEmail")).toHaveLength(0);
+  });
+
+  it("não pede o email enquanto a lista ainda não carregou (podia estar nela)", async () => {
+    estadoDaLista.valor = { ...respostaDaLista([]), isFetched: false, isLoading: true };
+    montar("/webmail?folder=drafts&id=auto-1");
+
+    await screen.findByTestId("webmail-list-pane");
+    expect(apiFalsa.chamadas.filter((c) => c.nome === "getWebmailEmail")).toHaveLength(0);
+  });
+
+  it("se o servidor recusar, diz-o e não deixa o editor aberto", async () => {
+    apiFalsa.getWebmailEmail = () => Promise.reject(new Error("404"));
+    montar("/webmail?folder=drafts&id=auto-1");
+
+    await waitFor(() =>
+      expect(apiFalsa.chamadas.filter((c) => c.nome === "getWebmailEmail")).toHaveLength(1),
+    );
+    expect(screen.queryByPlaceholderText("Assunto do email")).not.toBeInTheDocument();
+  });
+
+  it("um email que não é rascunho abre para leitura, não no editor", async () => {
+    apiFalsa.getWebmailEmail = () => Promise.resolve({
+      data: { ...RASCUNHO_AUTOMATICO, status: "sent", subject: "Já enviado" },
+    });
+    montar("/webmail?id=auto-1");
+
+    await waitFor(() =>
+      expect(apiFalsa.chamadas.filter((c) => c.nome === "getWebmailEmail").length).toBeGreaterThan(0),
+    );
+    expect(screen.queryByPlaceholderText("Assunto do email")).not.toBeInTheDocument();
+  });
+});

@@ -487,6 +487,16 @@ com o mesmo TTL curto do `history_tracking`, para os workers convergirem),
 decidir o que fazer com o documento já gravado (mostrá-lo ao admin antes de o
 aplicar), e um teste que reinicie o módulo e afirme que o valor sobrevive.
 
+### D-28 · O `history` não leva carimbo de rede
+**Onde:** colecção `history`, `services/executive_report.py`
+
+As CONTAGENS de mudanças de fase do relatório executivo são por pessoa do âmbito
+(o mesmo contrato do relatório que existia antes): uma pessoa que trabalha em
+duas redes tem na rede A as mudanças que fez na rede B. A lista de movimentos já
+filtra pelos processos do âmbito; as contagens não. Fechar exige carimbar
+`history` (escritor único `log_history`) e migrar o legado — adiado por ser um
+escritor central e por o impacto ser só em quem trabalha em duas redes.
+
 ## Fechadas
 
 Ficam aqui só o número e a iteração que as fechou — o detalhe vive no

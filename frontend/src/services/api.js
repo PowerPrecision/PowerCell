@@ -664,6 +664,18 @@ export const revokeProcessPartner = (processId, companyId) =>
     skipErrorToast: true,
   });
 
+// Bloco 4, ponto 7 — origem financeira (orgânica vs angariação). Só a gestão:
+// o servidor responde 403 com o motivo a quem não pode, e `skipErrorToast`
+// deixa o cartão mostrá-lo no sítio em vez de um toast genérico por cima.
+export const getOrigemFinanceira = (processId) =>
+  api.get(`/processes/${processId}/origem-financeira`, { skipErrorToast: true });
+
+export const getCandidatosOrigemFinanceira = (processId) =>
+  api.get(`/processes/${processId}/origem-financeira/candidatos`, { skipErrorToast: true });
+
+export const setOrigemFinanceira = (processId, corpo) =>
+  api.put(`/processes/${processId}/origem-financeira`, corpo, { skipErrorToast: true });
+
 export const deleteProcess = (processId) => api.delete(`/processes/${processId}`);
 export const restoreProcess = (processId) => api.post(`/processes/${processId}/restore`);
 // PACOTE 11 (Eixo 4) — restauro rápido de cliente no ecrã de detalhes
@@ -726,6 +738,9 @@ export const getCalendarDeadlines = (consultorId, mediadorId) =>
   api.get("/deadlines/calendar", { 
     params: { consultor_id: consultorId, mediador_id: mediadorId } 
   });
+// Bloco 4, ponto 29 — marcações, escrituras, CPCVs e ausências de um mês.
+export const getDashboardCalendar = (month) =>
+  api.get("/deadlines/dashboard-calendar", { params: month ? { month } : {}, skipErrorToast: true });
 export const createDeadline = (data) => api.post("/deadlines", data);
 /** Pacote FA — edição de eventos do calendário (PUT /deadlines/{id}). */
 export const updateDeadline = (id, data) => api.put(`/deadlines/${id}`, data);
@@ -793,7 +808,24 @@ export const getStatsLeads = () => api.get("/stats/leads");
 export const getStatsConversion = () => api.get("/stats/conversion");
 
 // Team Performance (Admin/CEO) — desempenho da equipa por período
-export const getTeamPerformance = (params = {}) => api.get("/admin/team-performance", { params });
+// Bloco 4, pontos 13 e 16 — Dashboard Executivo e Relatório Semanal. TUDO por
+// Axios (o `fetch` cru da página antiga perdia o `X-Company-Id`/`X-Active-Role`).
+// `skipErrorToast`: a página mostra o motivo (422 período inválido, 503 «demorou
+// demasiado») no sítio, em vez de um toast genérico por cima.
+export const getTeamPerformance = (params = {}) =>
+  api.get("/admin/team-performance", { params, skipErrorToast: true });
+// PDF: `responseType: "blob"` faz o corpo de ERRO vir também como Blob —
+// quem chama lê-o com `readBlobErrorBody`.
+export const downloadTeamPerformancePdf = (params = {}) =>
+  api.get("/admin/team-performance/pdf", { params, responseType: "blob", skipErrorToast: true });
+export const getExecutiveWeekly = (week) =>
+  api.get("/admin/executive-weekly", { params: week ? { week } : {}, skipErrorToast: true });
+export const regenerateExecutiveWeekly = (week) =>
+  api.post("/admin/executive-weekly/regenerate", null, { params: week ? { week } : {}, skipErrorToast: true });
+export const downloadExecutiveWeeklyPdf = (week) =>
+  api.get("/admin/executive-weekly/pdf", {
+    params: week ? { week } : {}, responseType: "blob", skipErrorToast: true,
+  });
 
 // Activities/Comments
 export const getActivities = (processId, limit = 50) => {

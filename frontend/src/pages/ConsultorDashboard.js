@@ -47,6 +47,7 @@ import { safeDateStr } from "../lib/utils";
 import { sanitizeHtml } from "../utils/sanitize";
 import { markdownToHtml } from "../utils/markdown";
 import { getDraftNavigationTarget, PROCESS_DRAFT_STATUSES } from "../utils/draftNavigation";
+import DashboardCalendar from "../components/dashboard/DashboardCalendar";
 import { agruparEmFunil } from "../utils/funilDeFases";
 import AgendaCalendar from "../components/calendar/AgendaCalendar";
 import { isTeamCalendarRole } from "../utils/agendaCalendar";
@@ -357,6 +358,9 @@ const ConsultorDashboard = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Bloco 4, ponto 29 — marcações, escrituras, CPCVs e ausências do mês */}
+        <DashboardCalendar />
 
         {/* ── Zona 2: Negócio — Funil ── */}
         <Card className="border-border" data-testid="pipeline-funnel-zone">

@@ -23,6 +23,7 @@
  * <AdminDashboard />
  * // Acesso via layout protegido — visível para roles admin e CEO
  */
+import DashboardCalendar from "../components/dashboard/DashboardCalendar";
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -493,6 +494,9 @@ const AdminDashboard = () => {
             </Card>
           </div>
         )}
+
+        {/* Bloco 4, ponto 29 — marcações, escrituras, CPCVs e ausências do mês */}
+        <DashboardCalendar />
 
         {/* Stale Processes Alert */}
         {safeStaleStats && safeStaleStats.total > 0 && (

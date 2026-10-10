@@ -140,6 +140,8 @@ import ClientContextCard from "../components/processDetails/ClientContextCard";
 import AssignmentContextCard from "../components/processDetails/AssignmentContextCard";
 import PartilhaCard from "../components/processDetails/PartilhaCard";
 import { podeRevogarPartilha } from "../utils/partilhaProcesso";
+import OrigemFinanceiraCard from "../components/processDetails/OrigemFinanceiraCard";
+import { podeGerirOrigemFinanceira } from "../utils/origemFinanceira";
 import DataConflictResolver from "../components/DataConflictResolver";
 import CPCVModal from "../components/CPCVModal";
 import AutoDSTIBadge from "../components/AutoDSTIBadge";
@@ -3122,6 +3124,13 @@ const ProcessDetails = () => {
                 partner_companies: restantes,
                 partner_network_ids: restantes.map((p) => p.network_id).filter(Boolean),
               }))}
+            />
+
+            {/* Bloco 4, ponto 7 — a quem se atribui o negócio (comissões).
+                Só a gestão: o cartão nem pede o dado a quem não pode. */}
+            <OrigemFinanceiraCard
+              processId={id}
+              podeGerir={podeGerirOrigemFinanceira(effectiveRole)}
             />
 
             {/* Tarefas - visível se tem manage_tasks.

@@ -1,4 +1,38 @@
 ---
+Task ID: bloco-4-dashboards-financas-interface
+Agent: Cloud Agent
+Task: BLOCO 4 (Lote 11) — Dashboards, Finanças e Interface
+
+Date: 2026-10-10
+
+Work Log:
+
+ORIGEM FINANCEIRA (ponto 7) — `services/origem_financeira.py`
+- «Veio diretamente à empresa» (orgânica) vs «foi angariado por um utilizador específico». **Vive numa colecção à parte** (`process_financial_origins`, índice único por processo): o `GET /processes/{id}` devolve o documento inteiro (`extra="allow"`) e há dezenas de leitores de `processes`; um campo lá dentro vazava para quem não o pode ver. A restrição é da arquitectura, não de um filtro que alguém esqueça.
+- Só admin/CEO/diretor (papel EFECTIVO; 403 aos outros), processo no âmbito (404 igual ao de «não existe»), diretor só da casa DONA (um convidado vê o processo e não decide a quem se atribui o negócio). O angariador tem de ser utilizador activo do âmbito de quem decide; `orgânica` descarta o angariador. Histórico do processo regista que mudou **sem o valor** (é lido por quem não vê a origem); o valor vai para o trilho de auditoria; actor silenciado não deixa rasto. UI: `OrigemFinanceiraCard` (só pedido à gestão; candidatos só ao abrir «Alterar»).
+- Não está ligada ao cálculo de comissões (pedido: «para o posterior cálculo»): fica pronta e auditada.
+
+RELATÓRIO EXECUTIVO E SEMANAL (pontos 13 e 16) — `services/executive_report.py`
+- **Um motor para quatro superfícies** (Dashboard, Relatório Semanal, PDF e email de segunda); `analytics_service` é agora fachada. **Defeitos do anterior encontrados ao lê-lo:** «tarefas» eram os `task_logs` (trabalhos de fundo da IA), não `db.tasks`; o fim do período era ignorado (`Semana passada` contava esta semana); `$regex` com `i` sobre `action` (sem índice); a Indexação aparecia com linhas de zeros.
+- Regras com teste: concluída conta a quem a CONCLUIU; pendente/em atraso contam a quem está ATRIBUÍDO, **no estado do fim do período** (reconstruído) — uma semana fechada dá os mesmos números hoje e daqui a um mês. Perfil `indexacao` fora de todas as colunas; histórico desligado = «—», nunca 0.
+- **Base de dados:** todas as agregações abrem com `$match` sobre campos indexados (índices novos em `db_indexes.py`: `tasks(completed_by,completed_at)`, `tasks(assigned_to,created_at)`), `$group` encadeados reduzem para pessoas×fases, `maxTimeMS` + `allowDiskUse`, em série, tecto de 366 dias / 500 pessoas / 200 movimentos, cache de 60 s com o ÂMBITO na chave. Corte por tempo → 503 com instrução, nunca um relatório vazio. **Provado contra um mongod real** (`tests/integration/test_relatorio_executivo_mongo.py`): números contados à mão e `explain` sem COLLSCAN nas seis pipelines.
+- Relatório Semanal (`executive_weekly.py`): semana FECHADA = registo guardado uma vez por (âmbito, segunda-feira) em `executive_weekly_reports`; semana a decorrer = vista ao vivo que não se guarda; futura = 422. O registo não guarda nomes de clientes (resolvem-se na leitura: RGPD). Criação lazy na primeira abertura (o relatório é reproduzível); «Recalcular» explícito. O email de segunda passou a ser a semana ISO anterior fechada.
+- PDF (`executive_report_pdf.py`, reportlab em executor, fora do event loop): gerado no servidor a partir do MESMO relatório do ecrã, com gráficos vectoriais, tabela, movimentos e critérios. Limites 6/min (PDF) e 30/min.
+- Filtros do Dashboard Executivo: período predefinido ou intervalo de datas, colaborador e perfil — aplicados NO SERVIDOR. A página usava `fetch` cru (perdia `X-Company-Id`): passou a Axios. **Cores:** o par vermelho/verde dos gráficos falhava a verificação de daltonismo (ΔE 5); passaram a azul/verde-azulado/âmbar (validadas no claro e no escuro).
+
+CALENDÁRIO DO DASHBOARD E RASCUNHOS (pontos 29 e 32)
+- `GET /deadlines/dashboard-calendar?month=`: marcações e ausências vêm do MESMO serviço do Calendário (ganhou uma janela de datas); **escrituras e CPCVs não são eventos, vivem no processo** (`real_estate_data.data_escritura_prevista/data_cpcv`) e são lidas com a visibilidade das listagens de processos (rede e partilhados). Sem duplicar um evento «Escritura» criado à mão; índices esparsos novos nas duas datas. UI `DashboardCalendar` nos dois dashboards (letra + cor por categoria; a identidade nunca depende só da cor).
+- **Rascunhos:** os rascunhos automáticos («documento em falta») pertencem a um PROCESSO e não à caixa pessoal, logo a pasta Rascunhos nunca os traz; o link do Dashboard abria o Webmail e não abria nada. O Webmail pede agora o email pelo id quando o rascunho não está na lista (depois de a lista carregar) e abre o editor.
+
+IMPERSONATE (ponto 33)
+- **Não consegui reproduzir uma fuga no menu lateral**: um teste que monta o `DashboardLayout` REAL sobre o `AuthProvider` REAL passou também contra o código anterior. O que encontrei foram duas fontes para a mesma pergunta (o menu lia `user.role`, as guardas de rota o `activeRole`) e uma defesa por lista de exclusão. `utils/papelEfectivo.js` é agora a fonte única (`effectiveRole` do contexto): em impersonate só vale um perfil que o ALVO tenha. Trocar de identidade sincroniza os cabeçalhos e **esvazia a cache** (a do administrador era servida ao alvo). `MobileBottomNav` usa o mesmo perfil. **Nota:** o frontend não tem nenhum botão que chame `impersonate()` (só o `ImpersonateBanner`).
+
+Stage Summary:
+- Backend (integração + unit com Mongo local) 7083 verdes; frontend 2324 verdes; eslint limpo. Mutações em todos os módulos novos; sobreviventes eram testes fracos ou mutações equivalentes (reforçados/retirados).
+- O duplo de Mongo ganhou projecção com dot-notation (semântica confirmada contra um mongod real e afirmada em `test_duplo_de_mongo_projeccao.py`).
+- Dívida nova: o `history` não leva carimbo de rede — as CONTAGENS de mudanças de fase são por pessoa do âmbito (a lista de movimentos filtra pelos processos do âmbito). Ver D-28.
+
+---
 Task ID: bloco-3-portal-e-automacoes
 Agent: Cloud Agent
 Task: BLOCO 3 (Lote 13) — Portal do Cliente e Fluxo de Automações

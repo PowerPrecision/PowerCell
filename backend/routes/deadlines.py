@@ -3,12 +3,12 @@
 DEADLINES ROUTES — thin FastAPI stubs
 ====================================================================
 Logic in services/deadlines_api_*.py.
-Keep static /my-deadlines and /calendar before /{deadline_id}.
+Keep static /my-deadlines, /calendar and /dashboard-calendar before /{deadline_id}.
 ====================================================================
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from models.auth import UserRole
 from models.deadline import DeadlineCreate, DeadlineUpdate, DeadlineResponse
@@ -23,6 +23,7 @@ from services.deadlines_api_list import (
     run_get_my_deadlines,
 )
 from services.deadlines_api_calendar import run_get_calendar_deadlines
+from services.dashboard_calendar import run_dashboard_calendar
 
 router = APIRouter(prefix="/deadlines", tags=["Deadlines"])
 
@@ -66,6 +67,15 @@ async def get_calendar_deadlines(
     return await run_get_calendar_deadlines(
         consultor_id, mediador_id, user, request,
     )
+
+
+@router.get("/dashboard-calendar")
+async def get_dashboard_calendar(
+    request: Request, month: Optional[str] = Query(None),
+    user: dict = Depends(get_current_user),
+):
+    """Marcações, escrituras, CPCVs e ausências de um mês (AAAA-MM)."""
+    return await run_dashboard_calendar(user, request, month)
 
 
 @router.put("/{deadline_id}", response_model=DeadlineResponse)

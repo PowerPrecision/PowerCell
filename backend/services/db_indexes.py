@@ -818,6 +818,57 @@ async def create_ttl_indexes(db) -> dict:
     for idx in [{"keys": [("chave", 1)], "name": "idx_job_schedule_chave", "unique": True}]:
         await _create_index_safe(db.job_schedule_marks, idx, "job_schedule_marks", results)
 
+    # ====================================================================
+    # ÍNDICES DO RELATÓRIO EXECUTIVO (Bloco 4, pontos 13 e 16)
+    # ====================================================================
+    # As agregações de `services/executive_report.py` abrem com um `$match`
+    # sobre estes campos: sem eles varriam `tasks` inteira a cada clique em
+    # «Actualizar». O histórico já tem `idx_history_user_time`
+    # (user_id, created_at), que serve a pergunta «o que fez cada pessoa».
+    #   - concluídas no período, por quem concluiu;
+    #   - carga em aberto: atribuídas a X e criadas antes do fim.
+    executive_task_indexes = [
+        {"keys": [("completed_by", 1), ("completed_at", 1)], "name": "idx_tasks_completed_by_time"},
+        {"keys": [("assigned_to", 1), ("created_at", 1)], "name": "idx_tasks_assigned_created"},
+    ]
+    for idx in executive_task_indexes:
+        await _create_index_safe(db.tasks, idx, "tasks", results)
+
+    # Calendário do Dashboard (ponto 29): as datas de escritura e de CPCV
+    # vivem no processo e a consulta do mês filtra por elas. `sparse`: a
+    # maioria dos processos não tem as datas preenchidas.
+    for idx in [
+        {"keys": [("real_estate_data.data_escritura_prevista", 1)], "name": "idx_proc_data_escritura", "sparse": True},
+        {"keys": [("real_estate_data.data_cpcv", 1)], "name": "idx_proc_data_cpcv", "sparse": True},
+    ]:
+        await _create_index_safe(db.processes, idx, "processes", results)
+
+    # O registo semanal: um por (âmbito, semana). O `unique` impede que dois
+    # pedidos concorrentes do mesmo CEO deixem dois registos da mesma semana.
+    for idx in [{
+        "keys": [("scope_key", 1), ("week_start", -1)],
+        "name": "idx_exec_weekly_scope_week",
+        "unique": True,
+    }]:
+        await _create_index_safe(
+            db.executive_weekly_reports, idx, "executive_weekly_reports", results,
+        )
+
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'process_financial_origins' (Bloco 4, ponto 7)
+    # ====================================================================
+    # Uma origem por processo: o `unique` é o que impede duas escritas
+    # concorrentes de deixarem duas origens (e o cálculo de comissões de
+    # escolher uma à sorte).
+    origin_indexes = [
+        {"keys": [("process_id", 1)], "name": "idx_origin_process", "unique": True},
+        {"keys": [("angariador_id", 1)], "name": "idx_origin_angariador", "sparse": True},
+    ]
+    for idx in origin_indexes:
+        await _create_index_safe(
+            db.process_financial_origins, idx, "process_financial_origins", results,
+        )
+
     return results
 
 

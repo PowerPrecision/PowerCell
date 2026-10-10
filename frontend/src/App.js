@@ -64,6 +64,7 @@ const PropertiesPage = React.lazy(() => import("./pages/PropertiesPage"));
 const ClientsPage = React.lazy(() => import("./pages/ClientsPage"));
 const LeadsPage = React.lazy(() => import("./pages/LeadsPage"));
 const TeamPerformanceDashboard = React.lazy(() => import("./pages/TeamPerformanceDashboard"));
+const WeeklyExecutiveReport = React.lazy(() => import("./pages/WeeklyExecutiveReport"));
 const VisitsPage = React.lazy(() => import("./pages/VisitsPage"));
 const CalendarPage = React.lazy(() => import("./pages/CalendarPage"));
 const MyClientsPage = React.lazy(() => import("./pages/MyClientsPage"));
@@ -401,6 +402,18 @@ function App() {
             }
           />
           
+          {/* Relatório Semanal Executivo (admin + CEO) — Bloco 4, ponto 13 */}
+          <Route
+            path="/admin/relatorio-semanal"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+                <RouteBoundary name="Relatório Semanal">
+                  <WeeklyExecutiveReport />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+
           {/* System Admin Panel - Configurações do Sistema (admin + CEO) */}
           <Route
             path="/system-admin"

@@ -281,6 +281,7 @@ const WebmailPage = () => {
   const [contextMenuFolder, setContextMenuFolder] = useState(null);
 
   const openedUrlDraftRef = useRef(false);
+  const fetchedDraftRef = useRef(false);
   // PACOTE 12 — garante que o ?compose=new abre o compositor apenas uma vez
   const openedUrlComposeRef = useRef(false);
   // PACOTE 12 — FIX 6: id do timer do toast pós-janela (cancelado no Desfazer)
@@ -1071,16 +1072,33 @@ const WebmailPage = () => {
   // (suporte ao botão "Abrir em novo separador" do Webmail — o novo
   // separador carrega /webmail?folder=X&mailbox=Y&id=Z).
   useEffect(() => {
-    if (openedUrlDraftRef.current || !draftIdFromUrl || !emails.length) return;
+    if (openedUrlDraftRef.current || !draftIdFromUrl) return;
     const match = emails.find((e) => e.id === draftIdFromUrl);
-    if (!match) return;
-    openedUrlDraftRef.current = true;
-    if (initialFolder === "drafts" || match.status === "draft") {
-      openComposer("draft", match);
-    } else {
-      handleSelectEmail(match);
+    if (match) {
+      openedUrlDraftRef.current = true;
+      if (initialFolder === "drafts" || match.status === "draft") {
+        openComposer("draft", match);
+      } else {
+        handleSelectEmail(match);
+      }
+      return;
     }
-  }, [emails, draftIdFromUrl, openComposer, handleSelectEmail, initialFolder]);
+    // Bloco 4, ponto 32 — o rascunho NÃO está na lista carregada. É o caso dos
+    // rascunhos automáticos do Dashboard («documento em falta»): pertencem a um
+    // PROCESSO e não à caixa pessoal, logo a pasta Rascunhos nunca os traz e o
+    // link do Dashboard abria o Webmail sem abrir nada. Depois de a lista
+    // carregar, pede-se o email pelo id (o servidor decide se o pode ler).
+    if (!emailsFetched || fetchedDraftRef.current) return;
+    fetchedDraftRef.current = true;
+    getWebmailEmail(draftIdFromUrl)
+      .then(({ data }) => {
+        if (!data || openedUrlDraftRef.current) return;
+        openedUrlDraftRef.current = true;
+        if (data.status === "draft") openComposer("draft", data);
+        else handleSelectEmail(data);
+      })
+      .catch(() => toast.error("Não foi possível abrir o rascunho."));
+  }, [emails, emailsFetched, draftIdFromUrl, openComposer, handleSelectEmail, initialFolder]);
 
   // PACOTE 12 (Eixo 2) — "?compose=new&to=...&process_id=...": abre o
   // compositor PRÉ-PREENCHIDO no mount (botão "+ Novo" da tab Emails do

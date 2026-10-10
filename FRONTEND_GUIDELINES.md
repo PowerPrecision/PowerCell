@@ -2573,3 +2573,14 @@ A configuração global é do administrador. Em vez de deixar o CEO abrir separa
 * **Três estados no editor de fases:** `null` (herdar) ≠ `[]` (nada). Um interruptor «Personalizar» por secção; desligar envia `null`. O prazo vive em TEXTO no estado (0 é um prazo) e o servidor gera os ids das tarefas novas.
 * **Ordenar por instante, não por texto.** `instanteDoEvento` lê `+00:00`, `Z`, fusos e datas sem fuso (UTC); ilegíveis vão para o fim. A data que se mostra e a que ordena vêm da mesma função (`dataDoEvento`). Um teste que dependa do fuso fixa `process.env.TZ`: o sandbox corre em UTC e esconde a leitura local.
 * **Uma nota de instrução nunca se corta** (`NotaDoPedido`: `whitespace-pre-line`, contraste, só texto).
+
+
+## 27.62 — Dashboards executivos, calendário e perfil em impersonate (Bloco 4)
+
+* **Filtros no servidor, não no browser.** O Dashboard Executivo envia período, `user_ids` e `roles`; o servidor só agrega o que foi pedido. A lista do seletor de colaboradores guarda-se do relatório SEM colaborador escolhido (com um escolhido o servidor devolve só esse e a lista encolhia). Validar o intervalo antes de pedir (`validarIntervalo`); datas sempre `AAAA-MM-DD` em UTC.
+* **O PDF é o relatório do ecrã.** «Gerar PDF» pede ao servidor os MESMOS parâmetros; `responseType: "blob"` faz o erro chegar como Blob — ler com `readBlobErrorBody` (`descarregarPdf`), senão o motivo desaparece. Desactivar o botão enquanto gera.
+* **Cores de séries validadas para daltonismo** (`components/executive/cores.js`, `utils/calendarioDashboard.js`): correr o validador do `dataviz` antes de escolher; vermelho/verde falha. Legenda sempre; categoria com cor **e** letra; tabela como alternativa em texto.
+* **«—» não é 0.** Quem tem o histórico desligado mostra-se com traço (`valorOuTraco`); taxa de conclusão sem tarefas é «—».
+* **Grelha de calendário:** semanas de segunda a domingo em UTC (`construirGrelha`); sem destino não se desenha a ligação (`rotaDoItem`); uma ausência nunca leva a um cliente.
+* **Perfil em impersonate:** ler SEMPRE `effectiveRole` do contexto (já só devolve perfis do alvo). Um atalho `isImpersonating ? user.role : …` num componente é a segunda fonte da mesma pergunta. O teste afirma a ESPELHAÇÃO (menu do admin a ver como X = menu de X em sessão própria), não uma lista de proibidos.
+* **Deep-link para um rascunho** (`/webmail?folder=drafts&id=`): o rascunho pode não estar na lista (pertence a um processo); o Webmail pede-o pelo id depois de a lista carregar.

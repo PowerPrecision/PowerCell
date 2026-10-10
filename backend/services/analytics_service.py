@@ -2,8 +2,10 @@
 ====================================================================
 SERVIÇO DE ANALYTICS - RELATÓRIO SEMANAL DO CEO
 ====================================================================
-Agregação de dados de produtividade por utilizador para o relatório
-semanal enviado ao CEO todas as Segundas-feiras às 06:00.
+Fachada do relatório semanal enviado ao CEO às Segundas-feiras e do
+formatador do email. A agregação vive em `services/executive_report.py`
+(Bloco 4): UM motor para o email, o Dashboard Executivo, o Relatório
+Semanal e o PDF.
 
 Métricas por utilizador:
 - Processos Movidos/Avançados
@@ -13,7 +15,7 @@ Métricas por utilizador:
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -24,266 +26,43 @@ async def generate_weekly_team_report(
     period_start: Optional[datetime] = None,
     period_end: Optional[datetime] = None,
     user: Optional[Dict[str, Any]] = None,
+    user_ids: Optional[List[str]] = None,
+    papeis: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """
-    Gerar relatório semanal de produtividade da equipa.
+    """Relatório de produtividade da equipa — fachada do motor executivo.
 
-    Agrega dados das colecções `history`, `task_logs` e `processes`
-    do período especificado, agrupados por utilizador.
+    Bloco 4 (pontos 13 e 16): a agregação mudou para
+    `services/executive_report.py`, que serve também o Dashboard Executivo,
+    o Relatório Semanal e o PDF. Esta assinatura mantém-se para o email de
+    segunda-feira e para o painel antigo; duas implementações da mesma
+    política divergem (ver a docstring do motor para os defeitos corrigidos).
 
     Args:
-        db: Instância Motor da base de dados MongoDB (async)
-        period_start: Data de início do período (UTC). Por defeito, há 7 dias.
-        period_end: Data de fim do período (UTC). Por defeito, agora.
-        user: Quem pede. Restringe o relatório aos utilizadores da REDE
-            de quem pede (Dashboard, ponto 1). `None` mantém o âmbito
-            global — é o caso do email automático de Segunda-feira, que
-            não tem utilizador a pedir; ver o aviso no log.
-
-    Returns:
-        Dict com:
-        - period_start: data de início do período (ISO string)
-        - period_end: data de fim do período (ISO string)
-        - users: lista de dicts com métricas por utilizador
-        - summary: métricas globais da equipa
+        db: Base de dados Motor (a do chamador; os testes passam uma falsa).
+        period_start / period_end: instantes UTC; contam os DIAS que tocam
+            (o fim é inclusivo). Omissão: os 7 dias que terminam hoje.
+        user: Quem pede. Restringe o relatório à REDE de quem pede. `None`
+            é o consolidado do email automático (D-7) e é avisado no log.
+        user_ids / papeis: filtros que só estreitam o âmbito.
     """
-    now = datetime.now(timezone.utc)
-    if period_end is None:
-        period_end = now
-    if period_start is None:
-        period_start = period_end - timedelta(days=7)
+    from services import executive_report as er
 
-    period_start_iso = period_start.isoformat()
-    period_end_iso = period_end.isoformat()
-
-    logger.info(
-        f"[Analytics] A gerar relatório de produtividade: "
-        f"{period_start.strftime('%d/%m/%Y')} - {period_end.strftime('%d/%m/%Y')}"
+    fim = period_end.astimezone(timezone.utc).date() if period_end else None
+    inicio = period_start.astimezone(timezone.utc).date() if period_start else None
+    periodo = er.construir_periodo(
+        inicio.isoformat() if inicio else None,
+        fim.isoformat() if fim else None,
     )
-
-    # ----------------------------------------------------------------
-    # 1. BUSCAR UTILIZADORES ACTIVOS (staff only — sem clientes/parceiros)
-    # ----------------------------------------------------------------
-    from services.role_query import deep_role_in_filter
-
-    staff_filter = deep_role_in_filter(
-        ["consultor", "intermediario", "administrativo", "indexacao", "diretor", "ceo", "admin"]
+    ambito = await er.resolver_ambito(user)
+    return await er.gerar_relatorio(
+        ambito,
+        er.Filtros(
+            periodo=periodo,
+            user_ids=er.normalizar_lista(user_ids),
+            papeis=er.normalizar_lista(papeis),
+        ),
+        base=db,
     )
-
-    # ISOLAMENTO DE REDE (Dashboard, ponto 1)
-    # ----------------------------------------------------------------
-    # Este relatório é o nome, o email e a produtividade de cada pessoa.
-    # Sem âmbito, o painel de Desempenho da Equipa mostrava a uma Diretora
-    # da Domus quantos processos cada consultor da Power avançou na
-    # semana. O `user_map` governa TODO o resultado — as agregações de
-    # `history` e `task_logs` só entram no relatório através dele —, por
-    # isso restringi-lo aqui restringe o relatório inteiro.
-    condicoes = [staff_filter, {"is_active": {"$ne": False}}]
-    if user:
-        from services.admin_users_scope import (
-            build_users_scope_query,
-            empresas_do_ambito,
-        )
-
-        condicoes.append(await build_users_scope_query(await empresas_do_ambito(user)))
-    else:
-        # O email automático não tem quem peça. Fica global como estava —
-        # decidir se passa a ser um email POR REDE é uma decisão de
-        # produto, não uma mudança a fazer de passagem — mas nunca em
-        # silêncio.
-        logger.warning(
-            "[Analytics] Relatório gerado SEM utilizador: âmbito global, "
-            "atravessa todas as redes. Só o email automático deve chegar aqui."
-        )
-
-    users_cursor = db.users.find(
-        {"$and": condicoes},
-        {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}
-    )
-    users_list = await users_cursor.to_list(200)
-
-    # Mapear user_id -> {name, email, role}
-    user_map: Dict[str, Dict[str, str]] = {}
-    for u in users_list:
-        user_map[u["id"]] = {
-            "name": u.get("name", "Desconhecido"),
-            "email": u.get("email", ""),
-            "role": u.get("role", ""),
-        }
-
-    # ----------------------------------------------------------------
-    # 2. PROCESSOS MOVIDOS / AVANÇADOS (histórico de status_change)
-    # ----------------------------------------------------------------
-    # Query à colecção `history` — entradas onde action contém
-    # "status_change" ou "status_update" nos últimos 7 dias.
-    # Agrupar por user_id para contar quantos processos cada
-    # utilizador avançou.
-    moved_pipeline = [
-        {
-            "$match": {
-                "action": {"$regex": "status_change|status_update|moveu|avançou", "$options": "i"},
-                "created_at": {"$gte": period_start_iso}
-            }
-        },
-        {
-            "$group": {
-                "_id": "$user_id",
-                "processes_moved": {"$sum": 1},
-                "unique_processes": {"$addToSet": "$process_id"}
-            }
-        }
-    ]
-
-    moved_results = await db.history.aggregate(moved_pipeline).to_list(200)
-
-    # Contar processos únicos movidos por user
-    user_moved_counts: Dict[str, Dict[str, Any]] = {}
-    for entry in moved_results:
-        uid = entry["_id"]
-        if uid:
-            user_moved_counts[uid] = {
-                "processes_moved": len(entry.get("unique_processes", [])),
-                "total_actions": entry.get("processes_moved", 0),
-            }
-
-    # ----------------------------------------------------------------
-    # 3. TAREFAS CONCLUÍDAS (task_logs com status=completed)
-    # ----------------------------------------------------------------
-    completed_pipeline = [
-        {
-            "$match": {
-                "status": "completed",
-                "completed_at": {"$gte": period_start_iso}
-            }
-        },
-        {
-            "$group": {
-                "_id": "$user_id",
-                "tasks_completed": {"$sum": 1}
-            }
-        }
-    ]
-
-    completed_results = await db.task_logs.aggregate(completed_pipeline).to_list(200)
-
-    user_completed_counts: Dict[str, int] = {}
-    for entry in completed_results:
-        uid = entry["_id"]
-        if uid:
-            user_completed_counts[uid] = entry.get("tasks_completed", 0)
-
-    # ----------------------------------------------------------------
-    # 4. TAREFAS ATRASADAS / PENDENTES
-    # ----------------------------------------------------------------
-    # Atrasadas: task_logs com status=failed ou PENDING com created_at
-    #   anterior a 7 dias atrás (ainda não concluídas).
-    # Pendentes: task_logs com status em (pending, processing) criadas
-    #   no período que ainda não foram concluídas.
-
-    overdue_pipeline = [
-        {
-            "$match": {
-                "status": {"$in": ["pending", "processing", "failed"]},
-                "created_at": {"$lt": period_start_iso}
-            }
-        },
-        {
-            "$group": {
-                "_id": "$user_id",
-                "tasks_overdue": {"$sum": 1}
-            }
-        }
-    ]
-
-    overdue_results = await db.task_logs.aggregate(overdue_pipeline).to_list(200)
-
-    user_overdue_counts: Dict[str, int] = {}
-    for entry in overdue_results:
-        uid = entry["_id"]
-        if uid:
-            user_overdue_counts[uid] = entry.get("tasks_overdue", 0)
-
-    # Pendentes criadas no período (ainda não concluídas)
-    pending_pipeline = [
-        {
-            "$match": {
-                "status": {"$in": ["pending", "processing"]},
-                "created_at": {"$gte": period_start_iso}
-            }
-        },
-        {
-            "$group": {
-                "_id": "$user_id",
-                "tasks_pending": {"$sum": 1}
-            }
-        }
-    ]
-
-    pending_results = await db.task_logs.aggregate(pending_pipeline).to_list(200)
-
-    user_pending_counts: Dict[str, int] = {}
-    for entry in pending_results:
-        uid = entry["_id"]
-        if uid:
-            user_pending_counts[uid] = entry.get("tasks_pending", 0)
-
-    # ----------------------------------------------------------------
-    # 5. MONTAR RESULTADO POR UTILIZADOR
-    # ----------------------------------------------------------------
-    user_reports: List[Dict[str, Any]] = []
-
-    for uid, info in user_map.items():
-        moved = user_moved_counts.get(uid, {})
-        report = {
-            "user_id": uid,
-            "name": info["name"],
-            "email": info["email"],
-            "role": info["role"],
-            "processes_moved": moved.get("processes_moved", 0),
-            "tasks_completed": user_completed_counts.get(uid, 0),
-            "tasks_overdue": user_overdue_counts.get(uid, 0),
-            "tasks_pending": user_pending_counts.get(uid, 0),
-        }
-        user_reports.append(report)
-
-    # Ordenar por processos movidos (desc), depois tarefas concluídas (desc)
-    user_reports.sort(
-        key=lambda x: (x["processes_moved"], x["tasks_completed"]),
-        reverse=True
-    )
-
-    # ----------------------------------------------------------------
-    # 6. RESUMO GLOBAL
-    # ----------------------------------------------------------------
-    total_processes_moved = sum(u["processes_moved"] for u in user_reports)
-    total_tasks_completed = sum(u["tasks_completed"] for u in user_reports)
-    total_tasks_overdue = sum(u["tasks_overdue"] for u in user_reports)
-    total_tasks_pending = sum(u["tasks_pending"] for u in user_reports)
-
-    summary = {
-        "total_users": len(user_reports),
-        "total_processes_moved": total_processes_moved,
-        "total_tasks_completed": total_tasks_completed,
-        "total_tasks_overdue": total_tasks_overdue,
-        "total_tasks_pending": total_tasks_pending,
-    }
-
-    result = {
-        "period_start": period_start_iso,
-        "period_end": period_end_iso,
-        "users": user_reports,
-        "summary": summary,
-    }
-
-    logger.info(
-        f"[Analytics] Relatório gerado: {len(user_reports)} utilizadores, "
-        f"{total_processes_moved} processos movidos, "
-        f"{total_tasks_completed} tarefas concluídas, "
-        f"{total_tasks_overdue} atrasadas, "
-        f"{total_tasks_pending} pendentes"
-    )
-
-    return result
 
 
 def format_report_html(report: Dict[str, Any]) -> str:
@@ -297,6 +76,15 @@ def format_report_html(report: Dict[str, Any]) -> str:
     Returns:
         HTML string pronto para ser enviado como body_html no send_email
     """
+    import html as _html
+
+    def _n(valor) -> int:
+        """`None` (histórico desligado) conta como 0 nas somas."""
+        return int(valor or 0)
+
+    def _mostra(valor) -> str:
+        return "—" if valor is None else str(valor)
+
     period_start = datetime.fromisoformat(report["period_start"])
     period_end = datetime.fromisoformat(report["period_end"])
     period_label = (
@@ -308,7 +96,7 @@ def format_report_html(report: Dict[str, Any]) -> str:
     user_rows = ""
     for idx, user in enumerate(report["users"], 1):
         # Indicador visual de performance
-        score = user["processes_moved"] + user["tasks_completed"]
+        score = _n(user["processes_moved"]) + _n(user["tasks_completed"])
         if score >= 10:
             badge = '<span style="background:#16a34a;color:white;padding:2px 8px;border-radius:10px;font-size:11px;">Top</span>'
         elif score >= 5:
@@ -332,9 +120,9 @@ def format_report_html(report: Dict[str, Any]) -> str:
         user_rows += f"""
             <tr style="border-bottom:1px solid #e2e8f0;">
                 <td style="padding:10px 12px;font-size:13px;color:#334155;">{idx}</td>
-                <td style="padding:10px 12px;font-size:13px;color:#334155;font-weight:600;">{user['name']} {badge}</td>
+                <td style="padding:10px 12px;font-size:13px;color:#334155;font-weight:600;">{_html.escape(str(user['name']))} {badge}</td>
                 <td style="padding:10px 12px;font-size:13px;color:#64748b;">{role_label}</td>
-                <td style="padding:10px 12px;font-size:13px;color:#0f766e;font-weight:700;text-align:center;">{user['processes_moved']}</td>
+                <td style="padding:10px 12px;font-size:13px;color:#0f766e;font-weight:700;text-align:center;">{_mostra(user['processes_moved'])}</td>
                 <td style="padding:10px 12px;font-size:13px;color:#16a34a;font-weight:700;text-align:center;">{user['tasks_completed']}</td>
                 <td style="padding:10px 12px;font-size:13px;color:{overdue_color};font-weight:600;text-align:center;">{user['tasks_overdue']}</td>
                 <td style="padding:10px 12px;font-size:13px;color:{pending_color};font-weight:600;text-align:center;">{user['tasks_pending']}</td>
@@ -343,18 +131,18 @@ def format_report_html(report: Dict[str, Any]) -> str:
     # Top performers
     top_performers = sorted(
         report["users"],
-        key=lambda x: x["processes_moved"] + x["tasks_completed"],
+        key=lambda x: _n(x["processes_moved"]) + _n(x["tasks_completed"]),
         reverse=True
     )[:3]
     top_performers_html = ""
     medals = ["🥇", "🥈", "🥉"]
     for i, tp in enumerate(top_performers):
-        score = tp["processes_moved"] + tp["tasks_completed"]
+        score = _n(tp["processes_moved"]) + _n(tp["tasks_completed"])
         if score > 0:
             top_performers_html += f"""
                 <div style="display:flex;align-items:center;padding:8px 0;border-bottom:1px solid #f1f5f9;">
                     <span style="font-size:20px;margin-right:10px;">{medals[i]}</span>
-                    <span style="font-size:14px;font-weight:600;color:#334155;">{tp['name']}</span>
+                    <span style="font-size:14px;font-weight:600;color:#334155;">{_html.escape(str(tp['name']))}</span>
                     <span style="margin-left:auto;font-size:13px;color:#0f766e;font-weight:700;">{score} acções</span>
                 </div>"""
 

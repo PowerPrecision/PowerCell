@@ -2,13 +2,15 @@
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, BackgroundTasks
 from pydantic import BaseModel
 
 from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from models.email_config import EmailConfigCreate, EmailConfigResponse
 from services.auth import require_roles, get_current_user
+from middleware.rate_limit import limiter
+from services import executive_report_api as exec_api
 from services.admin_helpers import _safe_float, _audit_log  # re-export if needed
 from services.admin_permissions import CapabilityUpdateRequest
 from services.admin_dev_ops import SyncDatabaseRequest, SeedRequest
@@ -96,7 +98,6 @@ from services.admin_observability import (
     run_get_system_error_logs,
     run_get_system_log_detail,
     run_get_system_logs_stats,
-    run_get_team_performance,
     run_list_client_registrations,
     run_mark_errors_as_read,
     run_resolve_all_system_errors,
@@ -663,12 +664,67 @@ async def get_stale_processes(
 
 
 @router.get("/team-performance")
+@limiter.limit("30/minute")
 async def get_team_performance(
-    start_date: Optional[str] = Query(None, description="Data de início (YYYY-MM-DD). Por defeito, há 7 dias"),
-    end_date: Optional[str] = Query(None, description="Data de fim (YYYY-MM-DD). Por defeito, hoje"),
+    request: Request,
+    response: Response,
+    start_date: Optional[str] = Query(None, description="Data de início (AAAA-MM-DD). Por defeito, há 7 dias"),
+    end_date: Optional[str] = Query(None, description="Data de fim (AAAA-MM-DD, inclusivo). Por defeito, hoje"),
+    user_ids: Optional[str] = Query(None, description="Ids de utilizadores, separados por vírgula (só estreita)"),
+    roles: Optional[str] = Query(None, description="Perfis, separados por vírgula (só estreita)"),
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
-    return await run_get_team_performance(user, start_date, end_date)
+    return await exec_api.run_team_performance(user, start_date, end_date, user_ids, roles)
+
+
+@router.get("/team-performance/pdf")
+@limiter.limit("6/minute")
+async def get_team_performance_pdf(
+    request: Request,
+    response: Response,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    user_ids: Optional[str] = Query(None),
+    roles: Optional[str] = Query(None),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """PDF do Dashboard Executivo — o MESMO relatório que o ecrã mostra."""
+    return await exec_api.run_team_performance_pdf(user, start_date, end_date, user_ids, roles)
+
+
+@router.get("/executive-weekly")
+@limiter.limit("30/minute")
+async def get_executive_weekly(
+    request: Request,
+    response: Response,
+    week: Optional[str] = Query(None, description="Qualquer dia da semana (AAAA-MM-DD). Por defeito, a semana anterior"),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """Relatório semanal executivo (do registo, se a semana estiver fechada)."""
+    return await exec_api.run_weekly(user, week)
+
+
+@router.post("/executive-weekly/regenerate")
+@limiter.limit("6/minute")
+async def regenerate_executive_weekly(
+    request: Request,
+    response: Response,
+    week: Optional[str] = Query(None),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """Recalcula e substitui o registo de uma semana fechada (pedido explícito)."""
+    return await exec_api.run_weekly(user, week, regenerate=True)
+
+
+@router.get("/executive-weekly/pdf")
+@limiter.limit("6/minute")
+async def get_executive_weekly_pdf(
+    request: Request,
+    response: Response,
+    week: Optional[str] = Query(None),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    return await exec_api.run_weekly_pdf(user, week)
 
 
 @router.get("/sync-database/status")
