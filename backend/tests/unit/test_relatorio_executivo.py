@@ -577,7 +577,7 @@ class TestOAmbito:
                 ",".join(sorted(scope.company_names)),
                 "1" if scope.inclui_rede_de_omissao else "0",
             ])
-            return hashlib.sha1(assinatura.encode()).hexdigest()[:16]
+            return hashlib.sha256(assinatura.encode()).hexdigest()[:16]
 
         a = TenantScope(company_ids=("c1",), company_names=("A",))
         b = TenantScope(company_ids=("c2",), company_names=("B",))

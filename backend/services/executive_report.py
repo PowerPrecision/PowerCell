@@ -219,7 +219,7 @@ async def resolver_ambito(user: Optional[dict]) -> Ambito:
         "1" if scope.inclui_rede_de_omissao else "0",
     ])
     return Ambito(
-        chave=hashlib.sha1(assinatura.encode("utf-8")).hexdigest()[:16],
+        chave=hashlib.sha256(assinatura.encode("utf-8")).hexdigest()[:16],
         consulta_de_utilizadores=consulta,
         condicao_de_tarefas=build_network_scope_condition(scope),
         scope=scope,
