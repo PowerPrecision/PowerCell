@@ -15,7 +15,7 @@ from services.ai_improvement_agent import analyze_process, run_weekly_analysis
 
 async def run_analyze_all(user: dict) -> Dict[str, Any]:
     """Executa análise completa de todos os processos ativos."""
-    if user.get("role") not in ["admin", "ceo"]:
+    if user.get("role") not in ["master", "admin", "ceo"]:
         raise HTTPException(status_code=403, detail="Acesso não autorizado")
 
     return await run_weekly_analysis()

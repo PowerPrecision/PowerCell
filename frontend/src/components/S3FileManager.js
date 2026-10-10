@@ -211,7 +211,7 @@ const CATEGORIES = [
 // documentos — o filtro abaixo remove-a da UI para esses roles.
 // ====================================================================
 const INDEX_CATEGORY_ID = "Index";
-const INDEX_CATEGORY_ALLOWED_ROLES = ["admin", "ceo", "diretor", "indexacao"];
+const INDEX_CATEGORY_ALLOWED_ROLES = ["master", "admin", "ceo", "diretor", "indexacao"];
 
 /**
  * Os tipos que o upload aceita — UMA lista, usada pelo `accept` do botão E
@@ -356,7 +356,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
   });
   
   // Verificar se o utilizador pode mapear S3 (apenas admin)
-  const canMapS3 = hasRole(user, "admin");
+  const canMapS3 = hasRole(user, "master");
 
   // Verificar se o utilizador é de indexacao (precisa de NIF da empresa)
   const isIndexacao = hasRole(user, "indexacao");

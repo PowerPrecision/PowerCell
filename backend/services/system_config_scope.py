@@ -49,6 +49,7 @@ from fastapi import HTTPException, Request
 
 from database import db
 from services.tenant_access_context import resolver_papel_efectivo
+from services.role_scope import e_papel_global
 from services.tenant_network import TenantScope, resolve_tenant_scope
 
 logger = logging.getLogger(__name__)
@@ -59,12 +60,17 @@ EMPRESA_GLOBAL = "default"
 ERRO_EMPRESA_NAO_ENCONTRADA = "Empresa não encontrada"
 ERRO_CONFIGURACAO_GLOBAL = (
     "A configuração global (infraestrutura partilhada) é exclusiva do "
-    "administrador do sistema."
+    "perfil Master."
 )
 
 
 def _texto(valor: Any) -> str:
     return str(valor).strip() if valor not in (None, "") else ""
+
+
+def _e_master(papel: Any) -> bool:
+    """O ÚNICO perfil que possui a configuração global (e todas as empresas)."""
+    return e_papel_global(papel)
 
 
 def _e_admin(papel: Any) -> bool:
@@ -76,7 +82,7 @@ def _e_ceo(papel: Any) -> bool:
 
 
 def _e_papel_de_configuracao(papel: Any) -> bool:
-    return _e_admin(papel) or _e_ceo(papel)
+    return _e_master(papel) or _e_admin(papel) or _e_ceo(papel)
 
 
 def e_empresa_global(company_id: Any) -> bool:
@@ -92,13 +98,13 @@ class AmbitoDeConfiguracao:
     scope: TenantScope
 
     @property
-    def e_admin(self) -> bool:
-        return _e_admin(self.papel)
+    def e_master(self) -> bool:
+        return _e_master(self.papel)
 
     @property
     def pode_a_global(self) -> bool:
-        """A infra partilhada: só o admin. Nem o CEO da rede principal."""
-        return self.e_admin
+        """A infra partilhada: só o Master. Nem o Admin, nem o CEO."""
+        return self.e_master
 
     def empresa_e_minha(self, company_id: str) -> bool:
         """O `company_id` é uma das empresas (UCR) do utilizador?
@@ -130,7 +136,7 @@ async def carregar_ambito_de_configuracao(
 
 
 async def _empresa_existe(company_id: str) -> bool:
-    """O ADMIN pode escolher qualquer empresa — desde que ela exista.
+    """O MASTER pode escolher qualquer empresa — desde que ela exista.
 
     Existe se está na colecção `companies` (pelo id) ou se já tem
     configuração própria gravada (empresas anteriores ao registo).
@@ -166,12 +172,14 @@ async def exigir_empresa_configuravel(
         return exigir_configuracao_global(ambito)
 
     alvo = _texto(company_id)
-    if ambito.e_admin:
+    if ambito.e_master:
         if await _empresa_existe(alvo):
             return alvo
         raise HTTPException(status_code=404, detail=ERRO_EMPRESA_NAO_ENCONTRADA)
 
-    if _e_ceo(ambito.papel) and ambito.empresa_e_minha(alvo):
+    # Admin e CEO são perfis LOCAIS: só as empresas onde têm UCR. Empresa
+    # alheia → 404, igual ao de «não existe» (não é um directório).
+    if (_e_ceo(ambito.papel) or _e_admin(ambito.papel)) and ambito.empresa_e_minha(alvo):
         # Devolve o id tal como está nos UCR (a caixa pode diferir).
         return next(
             (c for c in ambito.scope.company_ids if _texto(c).lower() == alvo.lower()),
@@ -211,7 +219,7 @@ async def resolver_empresa_para_leitura(
         return EMPRESA_GLOBAL
     ambito = await carregar_ambito_de_configuracao(user, request)
     alvo = _texto(company_id)
-    if ambito.e_admin and await _empresa_existe(alvo):
+    if ambito.e_master and await _empresa_existe(alvo):
         return alvo
     if ambito.empresa_e_minha(alvo):
         return alvo
@@ -221,8 +229,8 @@ async def resolver_empresa_para_leitura(
 async def listar_empresas_configuraveis(ambito: AmbitoDeConfiguracao) -> list[dict]:
     """As empresas que o ecrã pode oferecer a este utilizador.
 
-    * ADMIN — a global e todas as empresas do CRM;
-    * CEO — só as dele (nunca a global);
+    * MASTER — a global e todas as empresas do CRM;
+    * ADMIN e CEO — só as deles (nunca a global);
     * os outros — só as empresas onde trabalham, sem a global.
     """
     resultado: list[dict] = []
@@ -231,7 +239,7 @@ async def listar_empresas_configuraveis(ambito: AmbitoDeConfiguracao) -> list[di
 
     nomes: dict[str, str] = {}
     try:
-        if ambito.e_admin:
+        if ambito.e_master:
             cursor = db.companies.find({}, {"_id": 0, "id": 1, "name": 1})
             for empresa in await cursor.to_list(500):
                 if _texto(empresa.get("id")):
@@ -253,7 +261,7 @@ async def listar_empresas_configuraveis(ambito: AmbitoDeConfiguracao) -> list[di
             "[system_config] Falha a listar as empresas configuráveis (%s); "
             "a lista fica reduzida ao que se derivou dos UCR.", exc,
         )
-        if not ambito.e_admin:
+        if not ambito.e_master:
             nomes = {_texto(c): _texto(c) for c in ambito.scope.company_ids if _texto(c)}
 
     for cid, nome in sorted(nomes.items(), key=lambda par: par[1].lower()):

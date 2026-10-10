@@ -65,8 +65,10 @@ from services.tenant_network import TenantScope
 logger = logging.getLogger(__name__)
 
 # Quem vê o que NÃO tem rede conhecida. Não é hierarquia — é o trabalho de
-# reconciliação das 250 órfãs e das 45 ambíguas.
-PAPEIS_DE_RECONCILIACAO = frozenset({UserRole.ADMIN, UserRole.CEO})
+# reconciliação das 250 órfãs e das 45 ambíguas. Só o MASTER: uma pasta sem
+# dono conhecido pode ser de qualquer empresa, e mostrá-la a um Admin ou CEO
+# local era mostrar-lhe os clientes das outras.
+PAPEIS_DE_RECONCILIACAO = frozenset({UserRole.MASTER})
 
 PROJECCAO = {"_id": 0, "id": 1, "s3_folder": 1, "network_id": 1,
              "company_id": 1, "company_name": 1, "client_id": 1,

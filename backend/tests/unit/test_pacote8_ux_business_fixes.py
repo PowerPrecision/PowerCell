@@ -70,7 +70,7 @@ class TestBug1GhostProfiles:
              "company_name": "Ghost", "is_active": False},
         ]
         with patch("services.user_company_roles_api_crud.db", fake):
-            result = await run_list_user_company_roles(user_id="u1")
+            result = await run_list_user_company_roles(user_id="u1", actor={"id": "u-master", "role": "master", "effective_role": "master"})
         assert result["total"] == 1
         assert result["roles"][0]["company_id"] == "c1"
 
@@ -129,7 +129,7 @@ class TestBug1GhostProfiles:
             # 1 UCR válido (r1) + 1 apagado (r2) — apagar r1 tem de ser
             # recusado (ficaria sem nenhum acesso VÁLIDO).
             with pytest.raises(HTTPException) as exc_info:
-                await run_delete_user_company_role("r1")
+                await run_delete_user_company_role("r1", actor={"id": "u-master", "role": "master", "effective_role": "master"})
         assert exc_info.value.status_code == 400
 
 

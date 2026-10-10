@@ -326,7 +326,7 @@ const DashboardLayout = ({ children, title }) => {
         // casar com as `allowedRoles` da rota em App.js: um item de menu
         // que leva a um redireccionamento é o produto a contradizer-se
         // — ver `App.rotasMenu.test.js`.
-        ...(["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"].includes(userRole)
+        ...(["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"].includes(userRole)
           ? [{
               label: "Ficheiros",
               icon: Database,

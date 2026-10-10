@@ -32,7 +32,7 @@ class TestAdminLogin:
         assert "access_token" in data, "Missing access_token"
         assert "user" in data, "Missing user"
         assert data["user"]["email"] == ADMIN_EMAIL
-        assert data["user"]["role"] == "admin"
+        assert data["user"]["role"] in ("admin", "master")
         print(f"Admin login successful: {data['user']['name']}")
 
 
@@ -141,7 +141,7 @@ class TestImpersonation:
         stop_data = stop_response.json()
         
         assert "access_token" in stop_data
-        assert stop_data["user"]["role"] == "admin"
+        assert stop_data["user"]["role"] in ("admin", "master")
         print(f"STEP 3: Stopped impersonation. Back to: {stop_data['user']['name']} (role: {stop_data['user']['role']})")
         
         # 5. Verify we're back to admin
@@ -150,7 +150,7 @@ class TestImpersonation:
         me_admin_response = requests.get(f"{BASE_URL}/api/auth/me", headers=admin_headers)
         assert me_admin_response.status_code == 200
         me_admin = me_admin_response.json()
-        assert me_admin["role"] == "admin"
+        assert me_admin["role"] in ("admin", "master")
         assert me_admin.get("is_impersonated") is None or me_admin.get("is_impersonated") == False
         print(f"STEP 4: Confirmed back to admin: {me_admin['name']}")
         

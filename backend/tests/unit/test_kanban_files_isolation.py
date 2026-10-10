@@ -165,7 +165,7 @@ class TestExploradorDeFicheirosRestrito:
         from services.admin_s3_explorer import FILE_OPS_ROLES
 
         assert set(FILE_OPS_ROLES) == {
-            UserRole.ADMIN, UserRole.CEO,
+            UserRole.MASTER, UserRole.ADMIN, UserRole.CEO,
             UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
         }
         for papel in (UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO):

@@ -55,6 +55,7 @@ import { isTeamCalendarRole } from "../utils/agendaCalendar";
 const DRAFT_STATUSES = PROCESS_DRAFT_STATUSES;
 
 const roleLabels = {
+  master: "Master",
   admin: "Administrador",
   ceo: "CEO",
   consultor: "Consultor",

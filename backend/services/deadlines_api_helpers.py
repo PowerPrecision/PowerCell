@@ -14,7 +14,7 @@ from services.auth import get_all_user_roles
 
 # Diretor / CEO / Admin vêem o calendário da empresa activa.
 TEAM_CALENDAR_ROLES = {
-    UserRole.ADMIN,
+    UserRole.MASTER, UserRole.ADMIN,
     UserRole.CEO,
     UserRole.DIRETOR,
 }

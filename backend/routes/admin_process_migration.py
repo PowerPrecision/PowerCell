@@ -31,7 +31,7 @@ router = APIRouter(prefix="/admin/process-migration", tags=["Admin Process Migra
 
 @router.get("/status")
 async def get_migration_status(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Verificar o estado actual da migração Fase 1 (Separação Cliente ↔ Processo)."""
     return await run_get_migration_status(user)
@@ -40,7 +40,7 @@ async def get_migration_status(
 @router.post("/dry-run")
 async def dry_run_migration(
     background_tasks: BackgroundTasks,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Executar simulação da migração Fase 1 (não modifica a BD)."""
     return await run_dry_run_migration(background_tasks, user)
@@ -49,7 +49,7 @@ async def dry_run_migration(
 @router.post("/run")
 async def run_migration(
     background_tasks: BackgroundTasks,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Executar a migração Fase 1 (modifica a BD)."""
     return await run_run_migration(background_tasks, user)
@@ -57,7 +57,7 @@ async def run_migration(
 
 @router.post("/rollback")
 async def rollback_migration(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Reverter a migração restaurando as colecções originais a partir dos backups."""
     return await run_rollback_migration(user)
@@ -65,7 +65,7 @@ async def rollback_migration(
 
 @router.post("/reset")
 async def reset_migration_state(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Reset forçado do estado da migração para 'idle'."""
     return await run_reset_migration_state(user)

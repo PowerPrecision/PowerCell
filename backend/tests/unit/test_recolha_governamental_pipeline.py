@@ -279,11 +279,23 @@ async def test_em_dev_o_scraper_nao_arranca(mundo, monkeypatch):
     assert not tarefas.tasks and not mundo.db.portal_scraper_jobs.docs
 
 
+def _recente(minutos_atras: int = 0) -> str:
+    """Um instante RELATIVO a agora.
+
+    Os jobs com mais de 24 min são dados por mortos (`encerrar_jobs_mortos`);
+    um `created_at` escrito à mão deixava de ser «recente» passada meia hora
+    do dia em que o teste foi escrito — uma bomba-relógio, não um teste.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) - timedelta(minutes=minutos_atras)).isoformat()
+
+
 # ── MFA ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_mfa_so_aceita_codigo_quando_ha_job_a_espera(mundo):
-    await mundo.db.portal_scraper_jobs.insert_one({"id": "j", "process_id": "p1", "source": "financas", "status": "processing", "created_at": "2026-10-10T10:00:00+00:00"})
+    await mundo.db.portal_scraper_jobs.insert_one({"id": "j", "process_id": "p1", "source": "financas", "status": "processing", "created_at": _recente()})
     with pytest.raises(HTTPException) as erro:
         await pgf.run_submit_mfa_code({"mfa_code": "123456"}, CLIENTE)
     assert erro.value.status_code == 409
@@ -293,8 +305,8 @@ async def test_mfa_so_aceita_codigo_quando_ha_job_a_espera(mundo):
 @pytest.mark.asyncio
 async def test_mfa_a_resposta_descreve_o_job_mais_recente_e_nao_o_mais_antigo(mundo):
     docs = mundo.db.portal_scraper_jobs.docs
-    docs.append({"id": "velho", "process_id": "p1", "source": "financas", "status": "success", "created_at": "2026-01-01T10:00:00+00:00"})
-    docs.append({"id": "novo", "process_id": "p1", "source": "financas", "status": "processing", "created_at": "2026-10-10T09:59:00+00:00"})
+    docs.append({"id": "velho", "process_id": "p1", "source": "financas", "status": "success", "created_at": _recente(60 * 24 * 200)})
+    docs.append({"id": "novo", "process_id": "p1", "source": "financas", "status": "processing", "created_at": _recente(1)})
     with pytest.raises(HTTPException) as erro:
         await pgf.run_submit_mfa_code({"mfa_code": "123456"}, CLIENTE)
     assert "processar" in erro.value.detail, "respondeu com o estado do job de Janeiro"
@@ -319,7 +331,7 @@ async def test_mfa_formato_invalido_e_400(mundo, codigo):
 
 @pytest.mark.asyncio
 async def test_estado_do_job_de_outro_processo_e_404(mundo):
-    await mundo.db.portal_scraper_jobs.insert_one({"id": "alheio", "process_id": "p2", "source": "financas", "status": "processing", "created_at": "2026-10-10T10:00:00+00:00"})
+    await mundo.db.portal_scraper_jobs.insert_one({"id": "alheio", "process_id": "p2", "source": "financas", "status": "processing", "created_at": _recente()})
     with pytest.raises(HTTPException) as erro:
         await pgf.run_get_scraper_job_status("alheio", CLIENTE)
     assert erro.value.status_code == 404
@@ -328,7 +340,7 @@ async def test_estado_do_job_de_outro_processo_e_404(mundo):
 @pytest.mark.asyncio
 async def test_estado_do_job_proprio_nao_leva_o_codigo(mundo):
     await mundo.db.portal_scraper_jobs.insert_one(
-        {"id": "meu", "process_id": "p1", "source": "financas", "status": "awaiting_mfa", "mfa_code": "123456", "created_at": "2026-10-10T10:00:00+00:00"}
+        {"id": "meu", "process_id": "p1", "source": "financas", "status": "awaiting_mfa", "mfa_code": "123456", "created_at": _recente()}
     )
     lido = await pgf.run_get_scraper_job_status("meu", CLIENTE)
     assert lido["status"] == "awaiting_mfa" and "mfa_code" not in lido

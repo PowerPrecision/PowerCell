@@ -40,6 +40,7 @@ const roleLabels = {
   indexacao: "Indexação",
   diretor: "Diretor",
   ceo: "CEO",
+  master: "Master",
   admin: "Admin",
 };
 

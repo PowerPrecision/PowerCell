@@ -80,7 +80,7 @@ const ProcessDetailsModal = memo(({
 
   // ── Role-Based Access: só indexacao/admin podem marcar conclusão ──
   const { user, effectiveRole } = useAuth();
-  const INDEX_ROLES = ['indexacao', 'admin'];
+  const INDEX_ROLES = ['indexacao', 'master', 'admin'];
   const canMarkIndexed = INDEX_ROLES.includes(effectiveRole?.toLowerCase()) || hasAnyRole(user, INDEX_ROLES);
   const [visits, setVisits] = useState([]);
   const [visitsLoading, setVisitsLoading] = useState(false);

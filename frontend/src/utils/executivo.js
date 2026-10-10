@@ -13,6 +13,7 @@ export const ROTULOS_DOS_PAPEIS = {
   administrativo: "Administrativo",
   diretor: "Diretor",
   ceo: "CEO",
+  master: "Master",
   admin: "Admin",
 };
 

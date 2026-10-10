@@ -19,7 +19,20 @@ from models.finance import (
     DistributionModel,
 )
 
+from services.finance_scope import carregar_ambito_financeiro, exigir_empresa_no_ambito
+
 logger = logging.getLogger(__name__)
+
+
+async def _exigir_config_no_ambito(config: dict, user: dict) -> None:
+    """404 se a configuração é de uma empresa fora da rede de quem actua.
+
+    A configuração financeira (percentagens de comissão, modelo de
+    distribuição) é de UMA empresa; ler, editar ou apagar a de outra por id
+    é a escrita cruzada que `require_roles` (autoriza o verbo) não vê.
+    """
+    await exigir_empresa_no_ambito(config.get("company_id"), user=user)
+
 
 def _doc_to_config_response(doc: dict) -> dict:
     """Converte documento MongoDB para resposta FinanceConfig (remove _id)."""
@@ -42,6 +55,8 @@ async def run_create_finance_config(
 
     Permissões: apenas Admin e CEO.
     """
+    await exigir_empresa_no_ambito(body.company_id, user=user)
+
     # Verificar duplicado: uma config por company_id
     existing = await db.finance_configs.find_one({"company_id": body.company_id})
     if existing:
@@ -87,7 +102,13 @@ async def run_list_finance_configs(
     """
     query = {}
     if company_id:
+        await exigir_empresa_no_ambito(company_id, user=user)
         query["company_id"] = company_id
+    else:
+        # Sem filtro, só as configurações das empresas da rede de quem pede.
+        ambito = await carregar_ambito_financeiro(user)
+        if ambito.condicao:
+            query["company_id"] = {"$in": sorted({str(e) for e in ambito.empresas})}
 
     configs = await db.finance_configs.find(query, {"_id": 0}).to_list(1000)
     return {"configs": configs, "total": len(configs)}
@@ -106,6 +127,7 @@ async def run_get_finance_config_by_id(
     doc = await db.finance_configs.find_one({"id": config_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Configuração financeira não encontrada")
+    await _exigir_config_no_ambito(doc, user)
     return doc
 
 
@@ -125,6 +147,7 @@ async def run_update_finance_config_by_id(
     existing = await db.finance_configs.find_one({"id": config_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Configuração financeira não encontrada")
+    await _exigir_config_no_ambito(existing, user)
 
     update_fields = body.model_dump(exclude_none=True)
     if not update_fields:
@@ -170,6 +193,7 @@ async def run_delete_finance_config(
     existing = await db.finance_configs.find_one({"id": config_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Configuração financeira não encontrada")
+    await _exigir_config_no_ambito(existing, user)
 
     await db.finance_configs.delete_one({"id": config_id})
 

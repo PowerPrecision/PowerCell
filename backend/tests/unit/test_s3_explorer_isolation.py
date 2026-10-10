@@ -225,13 +225,24 @@ class TestOrfasEReconciliacao:
                 await explorador.run_get_s3_folder_contents(PASTA_ORFA, UTILIZADOR)
         assert exc.value.status_code == 404
 
-    async def test_admin_entra_na_orfa_para_reconciliar(self, s3_falso, mundo):
-        """São ~250 depois do backfill, e 45 ambíguas. Alguém as trata."""
+    async def test_master_entra_na_orfa_para_reconciliar(self, s3_falso, mundo):
+        """São ~250 depois do backfill, e 45 ambíguas. Alguém as trata — o
+        Master, o único perfil global."""
         semear, _ = mundo
         await semear()
-        with _como(ESCOPO_POWER, UserRole.ADMIN):
+        with _como(ESCOPO_POWER, UserRole.MASTER):
             r = await explorador.run_get_s3_folder_contents(PASTA_ORFA, UTILIZADOR)
         assert r["folder_path"] == PASTA_ORFA
+
+    @pytest.mark.parametrize("papel", [UserRole.ADMIN, UserRole.CEO])
+    async def test_admin_e_ceo_locais_nao_entram_na_orfa(self, s3_falso, mundo, papel):
+        """Adenda de RBAC: uma órfã pode ser de qualquer empresa."""
+        semear, _ = mundo
+        await semear()
+        with _como(ESCOPO_POWER, papel):
+            with pytest.raises(HTTPException) as exc:
+                await explorador.run_get_s3_folder_contents(PASTA_ORFA, UTILIZADOR)
+        assert exc.value.status_code == 404
 
     async def test_ambigua_e_invisivel_as_duas_redes(self, s3_falso, mundo):
         semear, bd = mundo

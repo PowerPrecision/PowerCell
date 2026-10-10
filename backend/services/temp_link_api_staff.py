@@ -129,7 +129,7 @@ async def run_list_process_temp_links(process_id: str, user: dict) -> dict:
 
     # Verificar permissões
     user_role = user.get("role")
-    if user_role not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]:
+    if user_role not in [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]:
         if process.get("assigned_consultor_id") != user.get("id") and \
            process.get("assigned_mediador_id") != user.get("id"):
             raise HTTPException(status_code=403, detail="Acesso não autorizado")
@@ -152,7 +152,7 @@ async def run_cancel_temp_link(link_id: str, user: dict) -> dict:
         raise HTTPException(status_code=404, detail="Link não encontrado")
 
     # Verificar permissões
-    if user.get("role") not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+    if user.get("role") not in [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
         # Verificar se é o criador do link
         if link.get("created_by") != user.get("id"):
             raise HTTPException(

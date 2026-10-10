@@ -232,7 +232,7 @@ async def delete_annotation(annotation_id: str, user_id: str) -> bool:
         if author_id != user_id:
             # Verificar se é admin
             user = await db.users.find_one({"id": user_id}, {"_id": 0, "role": 1})
-            if not user or user.get("role") != "admin":
+            if not user or user.get("role") != "master":
                 logger.warning(f"Utilizador {user_id} tentou eliminar anotação {annotation_id} sem permissão")
                 return False
 

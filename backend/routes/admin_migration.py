@@ -25,7 +25,7 @@ router = APIRouter(prefix="/admin/migration", tags=["Admin Migration"])
 
 @router.get("/status")
 async def get_migration_status(
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Verifica o estado atual da migração de encriptação."""
     return await run_get_migration_status(user)
@@ -34,7 +34,7 @@ async def get_migration_status(
 @router.post("/run")
 async def run_migration(
     background_tasks: BackgroundTasks,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Executa a migração de encriptação de dados de clientes."""
     return await run_start_migration(background_tasks, user)
@@ -43,7 +43,7 @@ async def run_migration(
 @router.post("/run-single/{client_id}")
 async def run_migration_single_endpoint(
     client_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Executa a migração para um único cliente (útil para testes)."""
     return await run_migration_single(client_id, user)

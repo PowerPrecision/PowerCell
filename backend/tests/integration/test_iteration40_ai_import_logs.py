@@ -37,7 +37,7 @@ class TestAdminAuth:
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
-        assert data.get("user", {}).get("role") == "admin"
+        assert data.get("user", {}).get("role") in ("admin", "master")
 
 
 class TestSystemLogs:

@@ -29,6 +29,7 @@ from typing import Optional
 from fastapi import HTTPException, Request
 
 from database import db
+from services.role_scope import PAPEIS_GLOBAIS
 from services.history import _is_stealth_user, log_history
 from services.process_sharing import (
     CAMPO_EMPRESAS_PARCEIRAS,
@@ -46,9 +47,9 @@ from services.tenant_network import (
 
 logger = logging.getLogger(__name__)
 
-PAPEIS_QUE_REVOGAM = ("admin", "ceo", "diretor")
+PAPEIS_QUE_REVOGAM = ("master", "admin", "ceo", "diretor")
 #: Atravessam redes (reconciliam a pilha inteira).
-PAPEIS_SEM_FRONTEIRA = ("admin", "ceo")
+PAPEIS_SEM_FRONTEIRA = tuple(sorted(PAPEIS_GLOBAIS))
 
 ERRO_PROCESSO_NAO_ENCONTRADO = "Processo não encontrado"
 ERRO_SEM_PERMISSAO = "Só a administração e a direcção podem revogar uma partilha."

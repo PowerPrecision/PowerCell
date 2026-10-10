@@ -28,6 +28,7 @@ async def generate_weekly_team_report(
     user: Optional[Dict[str, Any]] = None,
     user_ids: Optional[List[str]] = None,
     papeis: Optional[List[str]] = None,
+    scope: Any = None,
 ) -> Dict[str, Any]:
     """Relatório de produtividade da equipa — fachada do motor executivo.
 
@@ -43,6 +44,9 @@ async def generate_weekly_team_report(
             (o fim é inclusivo). Omissão: os 7 dias que terminam hoje.
         user: Quem pede. Restringe o relatório à REDE de quem pede. `None`
             é o consolidado do email automático (D-7) e é avisado no log.
+        scope: `TenantScope` de UMA rede, para quem não tem utilizador (o
+            email de segunda-feira corre uma vez por rede). Tem precedência
+            sobre `user`.
         user_ids / papeis: filtros que só estreitam o âmbito.
     """
     from services import executive_report as er
@@ -53,7 +57,11 @@ async def generate_weekly_team_report(
         inicio.isoformat() if inicio else None,
         fim.isoformat() if fim else None,
     )
-    ambito = await er.resolver_ambito(user)
+    ambito = (
+        await er.resolver_ambito_do_scope(scope)
+        if scope is not None
+        else await er.resolver_ambito(user)
+    )
     return await er.gerar_relatorio(
         ambito,
         er.Filtros(

@@ -33,7 +33,7 @@ class TestHealthAndAuth:
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
-        assert data["user"]["role"] == "admin"
+        assert data["user"]["role"] in ("admin", "master")
         print(f"Admin login: PASS - Token received")
         return data["access_token"]
 

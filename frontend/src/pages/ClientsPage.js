@@ -85,7 +85,7 @@ export default function ClientsPage() {
   const [allowExcelExport, setAllowExcelExport] = useState(true);
   
   // Admin/CEO sempre podem exportar
-  const canExportExcel = allowExcelExport || hasAnyRole(user, ['admin', 'ceo']);
+  const canExportExcel = allowExcelExport || hasAnyRole(user, ['master', 'admin', 'ceo']);
   
   // Sync filters with URL search params
   const searchTerm = searchParams.get("search") || "";
@@ -142,11 +142,11 @@ export default function ClientsPage() {
 
   
   // Verificar se pode eliminar clientes (apenas admin, ceo, diretor, administrativo)
-  const canDeleteClients = hasAnyRole(user, ["admin", "ceo", "diretor", "administrativo"]);
+  const canDeleteClients = hasAnyRole(user, ["master", "admin", "ceo", "diretor", "administrativo"]);
   
   // Verificar se pode criar processos - baseado em permissões
   const userActions = user?.permissions?.actions || [];
-  const isAdminOrCEO = hasAnyRole(user, ["admin", "ceo"]);
+  const isAdminOrCEO = hasAnyRole(user, ["master", "admin", "ceo"]);
   const canCreateProcess = isAdminOrCEO || (userActions.length > 0
     ? userActions.includes("create_process")
     : !hasRole(user, "indexacao"));

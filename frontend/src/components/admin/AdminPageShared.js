@@ -135,7 +135,7 @@ export const Pagination = ({ page, totalPages, total, onPageChange }) => {
 /**
  * AccessRestricted - Componente para páginas com acesso restrito
  */
-export const AccessRestricted = ({ allowedRoles = ["admin", "staff"], userRole }) => {
+export const AccessRestricted = ({ allowedRoles = ["master", "admin", "staff"], userRole }) => {
   if (allowedRoles.includes(userRole)) return null;
   
   return (

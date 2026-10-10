@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 #: O administrativo mantém o que não destrói: desligar um processo de um
 #: cliente (`/unlink-process`) continua a admiti-lo.
 PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES = (
-    UserRole.ADMIN,
+    UserRole.MASTER, UserRole.ADMIN,
     UserRole.CEO,
     UserRole.DIRETOR,
 )

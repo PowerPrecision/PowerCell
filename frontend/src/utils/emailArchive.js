@@ -20,6 +20,7 @@
  * não deixa rasto — `archived_by` omite-se para o perfil silenciado.
  */
 export const PAPEIS_QUE_ARQUIVAM = [
+  "master",
   "admin",
   "ceo",
   "diretor",

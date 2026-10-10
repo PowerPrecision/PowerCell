@@ -21,6 +21,7 @@ from models.process import (
 )
 from services.capability_gate import exigir_capacidade
 from services.auth import get_current_user, require_roles, require_staff, get_effective_role, get_all_user_roles, get_active_company_id_async
+from services.process_scope_guard import exigir_processo_no_ambito
 from services.notification_service import send_to_admins
 from services.history import log_history
 from services.audit_trail_service import log_audit_event
@@ -140,7 +141,14 @@ logger = logging.getLogger(__name__)
 # ====================================================================
 # CONFIGURAÇÃO DO ROUTER
 # ====================================================================
-router = APIRouter(prefix="/processes", tags=["Processes"])
+# A fronteira de rede por ID (adenda de RBAC): `can_view_process` responde
+# «sim» a qualquer staff, por isso o `{process_id}` do caminho é verificado
+# aqui, uma vez, para as ~40 rotas — e para as que vierem.
+router = APIRouter(
+    prefix="/processes",
+    tags=["Processes"],
+    dependencies=[Depends(exigir_processo_no_ambito)],
+)
 
 
 # ====================================================================
@@ -531,7 +539,7 @@ async def get_my_clients(
     size: int = Query(50, ge=1, le=100, description="Itens por página"),
     user: dict = Depends(require_roles([
     UserRole.CONSULTOR, UserRole.INTERMEDIARIO, 
-    UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
+    UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
     UserRole.INDEXACAO
 ]))):
     """Lista clientes/processos atribuídos ao utilizador (com leads órfãos)."""
@@ -760,7 +768,7 @@ async def set_process_indexed(
 @router.delete("/{process_id}")
 async def delete_process(
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """Soft delete a process. Does NOT affect the client document."""
     return await soft_delete_process(process_id, user)
@@ -771,7 +779,7 @@ async def revoke_process_partner(
     process_id: str,
     company_id: str,
     request: Request,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
 ):
     """Revoga à mão a partilha com UMA empresa (a Via Rápida só acrescenta)."""
     return await run_revoke_partner(process_id, company_id, user, request)

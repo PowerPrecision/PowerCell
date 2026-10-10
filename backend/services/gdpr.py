@@ -442,7 +442,9 @@ async def anonymize_user_data(user_id: str, dry_run: bool = None) -> Dict[str, A
 # ====================================================================
 async def find_processes_for_anonymization(
     retention_days: int = None,
-    limit: int = None
+    limit: int = None,
+    *,
+    condicao_extra: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Encontra processos elegíveis para anonimização.
@@ -471,6 +473,10 @@ async def find_processes_for_anonymization(
             {"is_anonymized": False}
         ]
     }
+    # Fronteira de rede (adenda de RBAC): quem não é Master só vê os elegíveis
+    # da sua rede. `$and` e não uma fusão de chaves — o `$or` acima é nosso.
+    if condicao_extra:
+        query = {"$and": [query, condicao_extra]}
     
     processes = await db.processes.find(
         query,
@@ -608,25 +614,30 @@ async def export_personal_data(
 # ====================================================================
 # ESTATÍSTICAS GDPR
 # ====================================================================
-async def get_gdpr_statistics() -> Dict[str, Any]:
-    """Obtém estatísticas de conformidade GDPR."""
+async def get_gdpr_statistics(
+    *, condicao_extra: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Obtém estatísticas de conformidade GDPR (da rede de quem pergunta)."""
+
+    def _ambito(consulta: Dict[str, Any]) -> Dict[str, Any]:
+        return {"$and": [consulta, condicao_extra]} if condicao_extra else consulta
     
     # Total de processos
-    total_processes = await db.processes.count_documents({})
+    total_processes = await db.processes.count_documents(_ambito({}))
     
     # Processos anonimizados
-    anonymized = await db.processes.count_documents({"is_anonymized": True})
+    anonymized = await db.processes.count_documents(_ambito({"is_anonymized": True}))
     
     # Processos elegíveis para anonimização
     cutoff = datetime.now(timezone.utc) - timedelta(days=gdpr_config.retention_period_days)
-    eligible = await db.processes.count_documents({
+    eligible = await db.processes.count_documents(_ambito({
         "status": {"$in": gdpr_config.eligible_statuses},
         "updated_at": {"$lt": cutoff},
         "$or": [
             {"is_anonymized": {"$exists": False}},
             {"is_anonymized": False}
         ]
-    })
+    }))
     
     # Acções de auditoria recentes
     recent_audits = await db.gdpr_audit.count_documents({

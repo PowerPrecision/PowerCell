@@ -30,7 +30,7 @@ export default function DocumentsTab({
   return (
     <div className="space-y-4">
       {/* Header com info — só visível para admin e CEO */}
-      {hasAnyRole(user, ["admin", "ceo"]) && (
+      {hasAnyRole(user, ["master", "admin", "ceo"]) && (
       <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-amber-100 dark:bg-amber-900/40 rounded-lg">
@@ -50,7 +50,7 @@ export default function DocumentsTab({
           O Card é mantido para reativação futura — não apagar.
           Originalmente: só visível para admin e CEO. */}
       {/* eslint-disable-next-line no-constant-binary-expression -- feature flag off until AI summary is re-enabled */}
-      {hasAnyRole(user, ["admin", "ceo"]) && false && (
+      {hasAnyRole(user, ["master", "admin", "ceo"]) && false && (
       <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-900/10 dark:to-purple-900/10" style={{ display: 'none' }}>
         <CardContent className="pt-4">
           <div className="flex items-center justify-between">

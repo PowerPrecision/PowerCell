@@ -88,7 +88,7 @@ async def run_get_my_assigned_clients(
                 {"created_by": user_email}
             ]
         }
-    elif user_role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+    elif user_role in [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
         # Fix: Normalize process status filters — inclui as variações
         # legadas singular/plural (ver services/process_status.py).
         query = {

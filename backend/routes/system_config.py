@@ -54,7 +54,7 @@ router = APIRouter(prefix="/system-config", tags=["System Configuration"])
 async def get_config(
     request: Request,
     company_id: Optional[str] = Query("default", description="ID da empresa (default = global)"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Obter todas as configurações do sistema.
@@ -87,7 +87,7 @@ async def get_excel_export_permission(
 
 
 @router.get("/fields")
-async def get_config_fields(user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
+async def get_config_fields(user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))):
     """
     Obter definição dos campos de configuração.
     Útil para o frontend construir os formulários.
@@ -118,7 +118,7 @@ async def update_config(
     data: Dict[str, Any],
     request: Request,
     company_id: Optional[str] = Query("default", description="ID da empresa (default = global)"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Actualizar uma secção da configuração.
@@ -134,7 +134,7 @@ async def update_config(
 async def test_service_connection(
     service: str,
     request: Request,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Testar ligação a um serviço (email, storage, etc.).
@@ -145,7 +145,7 @@ async def test_service_connection(
 
 
 @router.post("/complete-setup")
-async def complete_setup(request: Request, user: dict = Depends(require_roles([UserRole.ADMIN]))):
+async def complete_setup(request: Request, user: dict = Depends(require_roles([UserRole.MASTER]))):
     """
     Marcar a configuração inicial como concluída (global).
     """
@@ -169,7 +169,7 @@ async def get_storage_info(user: dict = Depends(get_current_user)):
 
 
 @router.post("/reset-cache")
-async def reset_cache(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+async def reset_cache(user: dict = Depends(require_roles([UserRole.MASTER]))):
     """
     Forçar recarga das configurações do sistema.
     """
@@ -181,7 +181,7 @@ async def reveal_secrets(
     request: Request,
     section: Optional[str] = Query(None, description="Secção a revelar (email, ai, storage, credit_services)"),
     company_id: Optional[str] = Query("default", description="ID da empresa (default = global)"),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """
     Revelar valores sensíveis (passwords, API keys) de uma secção de configuração.
@@ -196,7 +196,7 @@ async def reveal_secrets(
 # =====================================================================
 
 @router.get("/system-emails")
-async def list_system_email_configs(request: Request, user: dict = Depends(require_roles([UserRole.ADMIN]))):
+async def list_system_email_configs(request: Request, user: dict = Depends(require_roles([UserRole.MASTER]))):
     """
     Listar todas as configurações de email do sistema.
     Passwords são substituídas por has_password: true/false.
@@ -210,7 +210,7 @@ async def list_system_email_configs(request: Request, user: dict = Depends(requi
 async def get_system_email_config(
     purpose: str,
     request: Request,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Obter configuração de email do sistema por propósito.
@@ -223,7 +223,7 @@ async def get_system_email_config(
 async def create_system_email_config(
     payload: SystemEmailConfigCreate,
     request: Request,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Criar nova configuração de email do sistema.
@@ -238,7 +238,7 @@ async def update_system_email_config(
     purpose: str,
     payload: SystemEmailConfigUpdate,
     request: Request,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Actualizar configuração de email do sistema.
@@ -252,7 +252,7 @@ async def update_system_email_config(
 async def delete_system_email_config(
     purpose: str,
     request: Request,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Eliminar configuração de email do sistema.
@@ -265,7 +265,7 @@ async def delete_system_email_config(
 async def test_system_email_config(
     purpose: str,
     request: Request,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Testar ligação SMTP para um propósito específico.

@@ -41,8 +41,9 @@ class CompanyRoleEnum(str, Enum):
     """Roles que um utilizador pode ter numa empresa específica.
 
     Alinhado com UserRoleEnum (exceto o pseudo-role `cliente`).
-    `admin` é o cargo canónico de administrador; `administrativo` é
-    Apoio Administrativo — cargos distintos, não aliases.
+    `master` é o único cargo global; `admin` é o administrador LOCAL da
+    empresa; `administrativo` é Apoio Administrativo — cargos distintos,
+    não aliases.
     """
     CONSULTOR = "consultor"
     INTERMEDIARIO = "intermediario"
@@ -51,6 +52,7 @@ class CompanyRoleEnum(str, Enum):
     DIRETOR = "diretor"
     CEO = "ceo"
     ADMIN = "admin"
+    MASTER = "master"
     PARCEIRO = "parceiro"
 
 

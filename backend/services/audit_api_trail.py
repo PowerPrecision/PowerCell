@@ -10,6 +10,7 @@ import logging
 from fastapi import HTTPException
 
 from services.audit_trail_service import get_audit_trail, get_audit_stats
+from services.user_management_scope import ids_dos_autores_no_ambito
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,10 @@ async def run_list_audit_trail(
     ai_suggested=None,
     page: int = 1,
     page_size: int = 50,
+    *,
+    actor: dict,
 ):
+    autores = await ids_dos_autores_no_ambito(actor)
     try:
         return await get_audit_trail(
             process_id=process_id,
@@ -36,15 +40,17 @@ async def run_list_audit_trail(
             ai_suggested=ai_suggested,
             page=page,
             page_size=page_size,
+            autores=autores,
         )
     except Exception as e:
         logger.error(f"Erro ao consultar audit trail: {e}")
         raise HTTPException(status_code=500, detail="Erro ao consultar registos de auditoria")
 
 
-async def run_audit_statistics():
+async def run_audit_statistics(*, actor: dict):
+    autores = await ids_dos_autores_no_ambito(actor)
     try:
-        return await get_audit_stats()
+        return await get_audit_stats(autores=autores)
     except Exception as e:
         logger.error(f"Erro ao obter estatísticas de auditoria: {e}")
         raise HTTPException(status_code=500, detail="Erro ao obter estatísticas")

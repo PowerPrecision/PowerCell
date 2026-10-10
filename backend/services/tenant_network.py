@@ -127,6 +127,12 @@ class TenantScope:
     company_names: tuple[str, ...] = ()
     # Os documentos por carimbar entram no âmbito deste utilizador?
     inclui_rede_de_omissao: bool = False
+    # O Master (único perfil global) não tem fronteira: vê todas as redes.
+    # É um campo EXPLÍCITO e não uma lista vazia/`None`: um âmbito sem
+    # redes continua a significar «nada» (condição impossível), e só esta
+    # bandeira — que só `resolve_tenant_scope` liga, e só para o Master —
+    # abre a porta. Ver `services/role_scope.py`.
+    sem_fronteira: bool = False
 
 
 def _sem_marca_de_tenant() -> dict:
@@ -144,11 +150,20 @@ def _sem_marca_de_tenant() -> dict:
     }
 
 
+#: «Sem fronteira»: casa com tudo. Só o Master a recebe, e é uma constante
+#: com nome para que uma pesquisa por `{}` à mão numa guarda continue a ser
+#: sinal de defeito, enquanto ESTA é a excepção declarada.
+CONDICAO_SEM_FRONTEIRA: dict = {}
+
+
 def build_network_scope_condition(scope: TenantScope) -> dict:
     """Condição Mongo que restringe uma listagem ao âmbito do utilizador.
 
     Pura e testável: não toca na base de dados nem no ambiente.
     """
+    if scope.sem_fronteira:
+        return dict(CONDICAO_SEM_FRONTEIRA)
+
     ramos: list[dict] = []
 
     if scope.network_ids:
@@ -196,6 +211,9 @@ def build_process_scope_condition(scope: TenantScope) -> dict:
     impossível, que é a que se lê.
     """
     base = build_network_scope_condition(scope)
+
+    if scope.sem_fronteira:
+        return base
 
     redes = sorted({_texto(r) for r in scope.network_ids if _texto(r)})
     if not redes:
@@ -273,6 +291,7 @@ def build_pool_scope_condition(scope: TenantScope) -> dict:
             company_ids=scope.company_ids,
             company_names=scope.company_names,
             inclui_rede_de_omissao=True,
+            sem_fronteira=scope.sem_fronteira,
         )
     )
 
@@ -318,6 +337,10 @@ async def _redes_das_empresas(company_ids: Sequence[str]) -> dict[str, Optional[
 async def resolve_tenant_scope(user: dict) -> TenantScope:
     """Âmbito de dados de um utilizador: todas as redes a que pertence."""
     from services.auth import get_user_companies
+    from services.role_scope import utilizador_e_global
+
+    if utilizador_e_global(user):
+        return TenantScope(inclui_rede_de_omissao=True, sem_fronteira=True)
 
     user_id = _texto((user or {}).get("id") or (user or {}).get("user_id"))
 
@@ -506,6 +529,9 @@ def documento_no_ambito(doc: Optional[dict], scope: TenantScope) -> bool:
     Sem nenhum dos três: **não**. Falha fechada, como o construtor, que
     devolve uma condição impossível em vez de `None`.
     """
+    if scope.sem_fronteira:
+        return True
+
     doc = doc or {}
 
     rede = _texto(doc.get(CAMPO_REDE))
@@ -575,6 +601,20 @@ async def empresas_das_minhas_redes(scope: TenantScope) -> tuple[str, ...]:
     A ilha implícita (`rede:<company_id>`) devolve o seu próprio id: é
     uma empresa sem grupo configurado, e é dela que a rede deriva.
     """
+    if scope.sem_fronteira:
+        encontradas_todas: list[str] = []
+        try:
+            cursor = db.companies.find({}, {"_id": 0, "id": 1, "name": 1})
+            for empresa in await cursor.to_list(2000):
+                encontradas_todas.extend(
+                    v for v in (_texto(empresa.get("id")), _texto(empresa.get("name"))) if v
+                )
+        except Exception as exc:
+            logger.warning(
+                "[tenant_network] Falha a listar as empresas para o Master (%s).", exc,
+            )
+        return tuple(dict.fromkeys(encontradas_todas))
+
     redes = {_texto(r) for r in scope.network_ids if _texto(r)}
     if not redes:
         return ()

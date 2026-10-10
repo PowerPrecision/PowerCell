@@ -53,7 +53,7 @@ S3_EXPLORER_BASE_PATH = RAIZ_DO_EXPLORADOR
 # o que eles têm a mais é ver as pastas órfãs e ambíguas, para reconciliar.
 # ────────────────────────────────────────────────────────────────────
 FILE_VIEW_ROLES = [
-    UserRole.ADMIN,
+    UserRole.MASTER, UserRole.ADMIN,
     UserRole.CEO,
     UserRole.DIRETOR,
     UserRole.ADMINISTRATIVO,
@@ -65,7 +65,7 @@ FILE_VIEW_ROLES = [
 FILE_WRITE_ROLES = list(FILE_VIEW_ROLES)
 
 FILE_OPS_ROLES = [
-    UserRole.ADMIN,
+    UserRole.MASTER, UserRole.ADMIN,
     UserRole.CEO,
     UserRole.DIRETOR,
     UserRole.ADMINISTRATIVO,

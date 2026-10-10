@@ -428,7 +428,7 @@ const RGPDTemplateTab = () => {
     updated_by: null,
   });
 
-  const isAdminOrCEO = hasAnyRole(user, ["admin", "ceo"]);
+  const isAdminOrCEO = hasAnyRole(user, ["master", "admin", "ceo"]);
 
   useEffect(() => {
     fetchTemplate();
@@ -991,7 +991,7 @@ const MinutaTemplateTab = () => {
     updated_by: null,
   });
 
-  const isAdminOrCEO = hasAnyRole(user, ["admin", "ceo"]);
+  const isAdminOrCEO = hasAnyRole(user, ["master", "admin", "ceo"]);
 
   useEffect(() => {
     fetchTemplate();
@@ -1264,7 +1264,7 @@ const RGPDAdminPage = ({ embedded = false }) => {
   // Para admin/ceo/administrativo, AccessRestricted retorna null → página vazia.
   // AGORA: verifica o role com hasAnyRole (boolean real) e só mostra
   // AccessRestricted se o utilizador NÃO tiver permissão.
-  const RGPD_ALLOWED_ROLES = ["admin", "ceo", "administrativo"];
+  const RGPD_ALLOWED_ROLES = ["master", "admin", "ceo", "administrativo"];
   if (!hasAnyRole(user, RGPD_ALLOWED_ROLES)) {
     return wrapLayout(
       <AccessRestricted userRole={user?.role} allowedRoles={RGPD_ALLOWED_ROLES} />

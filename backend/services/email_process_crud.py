@@ -654,7 +654,7 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
             )
 
     user_role = current_user.get("role", "")
-    can_use_global_accounts = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    can_use_global_accounts = user_role in (UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     from_box = payload.from_box
     from_email = current_user.get("email")  # Remetente Base
 
@@ -688,7 +688,7 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
 
     # === from_box == "general": use shared geral account ===
     elif from_box == "general":
-        if user_role not in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR):
+        if user_role not in (UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR):
             raise HTTPException(
                 status_code=403,
                 detail="Apenas admin, CEO e diretor podem enviar emails a partir da caixa geral."

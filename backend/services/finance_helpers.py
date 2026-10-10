@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Roles com acesso de leitura ao dashboard financeiro
 # Alinhado com a sidebar do frontend (STAFF_ROLES)
 FINANCE_READ_ROLES = [
-    UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
+    UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
     UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
     UserRole.ADMINISTRATIVO, UserRole.INDEXACAO,
 ]
@@ -101,8 +101,12 @@ async def _get_pct(config: dict, area: str, field: str) -> float:
         return _safe_float(DEFAULT_CONFIG.get(area, {}).get(field, 50.0))
 
 
-async def _get_processes(year: Optional[int] = None) -> list:
-    """Busca processos concluídos, opcionalmente filtrados por ano."""
+async def _get_processes(year: Optional[int] = None, ambito: Optional[dict] = None) -> list:
+    """Busca processos concluídos, opcionalmente filtrados por ano.
+
+    `ambito` é a condição de rede de quem pede (`{}`/`None` só para o Master):
+    sem ela, o painel financeiro de uma empresa somava a de todas.
+    """
     # Fix: Normalize process status filters — inclui a variação legada
     # singular "concluido" para não sub-contar comissões.
     won_statuses = STATUS_VALUE_ALIASES["concluidos"]
@@ -112,6 +116,9 @@ async def _get_processes(year: Optional[int] = None) -> list:
         start_of_year = f"{year}-01-01T00:00:00.000Z"
         end_of_year = f"{year}-12-31T23:59:59.999Z"
         query["updated_at"] = {"$gte": start_of_year, "$lte": end_of_year}
+
+    if ambito:
+        query = {"$and": [ambito, query]}
 
     return await db.processes.find(
         query,

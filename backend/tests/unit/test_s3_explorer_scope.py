@@ -73,11 +73,22 @@ class TestOrfasEAmbiguas:
             pasta("Antiga", redes=(), orfa=True), ESCOPO_POWER, role=UserRole.CONSULTOR
         )
 
-    @pytest.mark.parametrize("papel", [UserRole.ADMIN, UserRole.CEO])
-    def test_orfa_e_visivel_a_gestao_de_topo(self, papel):
+    def test_orfa_e_visivel_ao_master(self):
         """São 250 pastas depois do backfill, e alguém tem de as reconciliar.
-        Invisíveis a toda a gente seria perder o histórico em silêncio."""
-        assert pode_ver(pasta("Antiga", redes=(), orfa=True), ESCOPO_POWER, role=papel)
+        Invisíveis a toda a gente seria perder o histórico em silêncio. Só o
+        MASTER (único perfil global): uma pasta sem dono conhecido pode ser
+        de qualquer empresa."""
+        assert pode_ver(
+            pasta("Antiga", redes=(), orfa=True), ESCOPO_POWER, role=UserRole.MASTER
+        )
+
+    @pytest.mark.parametrize("papel", [UserRole.ADMIN, UserRole.CEO])
+    def test_orfa_e_invisivel_ao_admin_e_ao_ceo_que_sao_locais(self, papel):
+        """Adenda de RBAC: Admin e CEO são perfis LOCAIS. Antes viam as
+        órfãs «para reconciliar» — mas uma órfã pode ser de outra empresa."""
+        assert not pode_ver(
+            pasta("Antiga", redes=(), orfa=True), ESCOPO_POWER, role=papel
+        )
 
     def test_diretor_NAO_conta_como_gestao_de_topo_aqui(self):
         """A excepção é para reconciliação, não para hierarquia: um director
@@ -91,9 +102,13 @@ class TestOrfasEAmbiguas:
         assert not pode_ver(ambigua, ESCOPO_POWER, role=UserRole.DIRETOR)
         assert not pode_ver(ambigua, ESCOPO_DOMUS, role=UserRole.DIRETOR)
 
-    def test_ambigua_e_visivel_ao_admin_para_reconciliar(self):
+    def test_ambigua_e_visivel_ao_master_para_reconciliar(self):
         ambigua = pasta("Maria_Santos", redes=(REDE_POWER, REDE_DOMUS))
-        assert pode_ver(ambigua, ESCOPO_POWER, role=UserRole.ADMIN)
+        assert pode_ver(ambigua, ESCOPO_POWER, role=UserRole.MASTER)
+
+    def test_ambigua_e_invisivel_ao_admin_local(self):
+        ambigua = pasta("Maria_Santos", redes=(REDE_POWER, REDE_DOMUS))
+        assert not pode_ver(ambigua, ESCOPO_POWER, role=UserRole.ADMIN)
 
     def test_duas_empresas_da_MESMA_rede_nao_e_ambiguidade(self):
         """Power e Precision partilham rede: um cliente de ambas é normal."""
@@ -240,13 +255,21 @@ class TestFiltrarSubpastas:
         visiveis = await filtrar_subpastas(entrada, ESCOPO_DOMUS, role=UserRole.CONSULTOR)
         assert [p["name"] for p in visiveis] == ["Domus_A"]
 
-    async def test_admin_ve_tudo_incluindo_as_orfas(self, fake_async_db, monkeypatch):
+    async def test_master_ve_tudo_incluindo_as_orfas(self, fake_async_db, monkeypatch):
+        import services.s3_explorer_scope as alvo
+
+        monkeypatch.setattr(alvo, "db", fake_async_db)
+        entrada = [{"path": f"{R}/Orfa", "name": "Orfa"}]
+        visiveis = await filtrar_subpastas(entrada, ESCOPO_DOMUS, role=UserRole.MASTER)
+        assert len(visiveis) == 1
+
+    async def test_admin_local_nao_ve_as_orfas(self, fake_async_db, monkeypatch):
         import services.s3_explorer_scope as alvo
 
         monkeypatch.setattr(alvo, "db", fake_async_db)
         entrada = [{"path": f"{R}/Orfa", "name": "Orfa"}]
         visiveis = await filtrar_subpastas(entrada, ESCOPO_DOMUS, role=UserRole.ADMIN)
-        assert len(visiveis) == 1
+        assert visiveis == []
 
 
 class TestFalhaFechadaQueAsMutacoesDenunciaram:
@@ -263,8 +286,8 @@ class TestFalhaFechadaQueAsMutacoesDenunciaram:
         constasse do mapa — e o mapa é construído por uma leitura que pode
         falhar.
         """
-        assert pode_ver(None, ESCOPO_POWER, role=UserRole.ADMIN) is False
-        assert pode_ver(None, None, role=UserRole.ADMIN) is False
+        assert pode_ver(None, ESCOPO_POWER, role=UserRole.MASTER) is False
+        assert pode_ver(None, None, role=UserRole.MASTER) is False
 
     def test_pasta_sem_orfandade_mas_sem_escopo_nao_e_visivel(self):
         assert pode_ver(pasta("Joao"), None, role=UserRole.CONSULTOR) is False
@@ -290,7 +313,7 @@ class TestFalhaFechadaQueAsMutacoesDenunciaram:
         assert mapa[f"{R}/Joao"].orfa is True
         assert pode_ver(mapa[f"{R}/Joao"], ESCOPO_POWER, role=UserRole.CONSULTOR) is False
 
-    async def test_leitura_falhada_nao_esconde_do_admin(self, monkeypatch):
+    async def test_leitura_falhada_nao_esconde_do_master(self, monkeypatch):
         """Contraprova: quem reconcilia continua a poder trabalhar."""
         import services.s3_explorer_scope as alvo
 
@@ -300,4 +323,4 @@ class TestFalhaFechadaQueAsMutacoesDenunciaram:
 
         monkeypatch.setattr(alvo, "db", BaseDeDadosPartida())
         mapa = await alvo.carregar_pastas([f"{R}/Joao"])
-        assert pode_ver(mapa[f"{R}/Joao"], ESCOPO_POWER, role=UserRole.ADMIN) is True
+        assert pode_ver(mapa[f"{R}/Joao"], ESCOPO_POWER, role=UserRole.MASTER) is True

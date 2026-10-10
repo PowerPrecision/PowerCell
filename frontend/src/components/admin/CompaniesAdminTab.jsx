@@ -85,7 +85,15 @@ function imapFieldsFromForm(form) {
   return { imap_email, imap_password, imap_host, imap_port };
 }
 
-export default function CompaniesAdminTab() {
+/**
+ * @param {boolean} isMaster Só o Master (único perfil global) cria empresas
+ *   e muda a REDE de uma: criar um inquilino e decidir quem vê os dados de
+ *   quem são decisões globais. Admin e CEO editam a sua empresa. O servidor
+ *   é a parede (403/404); isto só evita prometer acções que ele recusa.
+ *   Por omissão `false`: um chamador que se esqueça de o passar perde botões
+ *   (visível) em vez de os mostrar a quem não pode (enganador).
+ */
+export default function CompaniesAdminTab({ isMaster = false }) {
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -226,7 +234,7 @@ export default function CompaniesAdminTab() {
         // Rede / Grupo Empresarial: vazio significa ILHA (a empresa não
         // partilha dados com ninguém). Não preencher por omissão — herdar
         // a rede de outra empresa aqui abriria a fuga na criação.
-        network_id: form.network_id.trim() || null,
+        ...(isMaster ? { network_id: form.network_id.trim() || null } : {}),
         nif: form.nif.trim() || null,
         email: form.email.trim() || null,
         is_active: form.is_active,
@@ -273,10 +281,12 @@ export default function CompaniesAdminTab() {
             data-testid="org-admin-companies-search"
           />
         </div>
-        <Button onClick={openCreate} className="gap-1.5" data-testid="btn-new-company">
-          <Plus className="h-4 w-4" />
-          Nova Empresa
-        </Button>
+        {isMaster && (
+          <Button onClick={openCreate} className="gap-1.5" data-testid="btn-new-company">
+            <Plus className="h-4 w-4" />
+            Nova Empresa
+          </Button>
+        )}
       </div>
 
       {isLoading && companies.length === 0 ? (
@@ -285,12 +295,18 @@ export default function CompaniesAdminTab() {
         <EmptyState
           icon={Building2}
           title="Nenhuma empresa"
-          message="Crie a primeira empresa do grupo para começar a atribuir acessos."
+          message={
+            isMaster
+              ? "Crie a primeira empresa do grupo para começar a atribuir acessos."
+              : "Não há empresas no seu âmbito."
+          }
           action={
-            <Button onClick={openCreate} className="gap-1.5">
-              <Plus className="h-4 w-4" />
-              Nova Empresa
-            </Button>
+            isMaster ? (
+              <Button onClick={openCreate} className="gap-1.5">
+                <Plus className="h-4 w-4" />
+                Nova Empresa
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -391,11 +407,13 @@ export default function CompaniesAdminTab() {
               </div>
               {/* Lote 5, ponto 2: era texto livre, e uma gralha criava
                   silenciosamente uma rede nova de uma empresa só. */}
-              <CompanyNetworkField
-                value={form.network_id}
-                onChange={(network_id) => setForm((p) => ({ ...p, network_id }))}
-                companies={companies}
-              />
+              {isMaster && (
+                <CompanyNetworkField
+                  value={form.network_id}
+                  onChange={(network_id) => setForm((p) => ({ ...p, network_id }))}
+                  companies={companies}
+                />
+              )}
               <div className="space-y-2">
                 <Label htmlFor="company-nif">NIF</Label>
                 <Input

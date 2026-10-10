@@ -52,6 +52,7 @@ const formatDate = (dateStr) => {
 
 const formatRole = (role) => {
   const map = {
+    master: "Master",
     admin: "Admin",
     ceo: "CEO",
     diretor: "Diretor",

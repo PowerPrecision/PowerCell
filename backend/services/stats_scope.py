@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 #: Versão do esquema do sufixo. Muda quando o SIGNIFICADO do âmbito muda,
 #: para as entradas antigas do Redis não serem servidas com semântica nova.
-VERSAO_DO_AMBITO = "a1"
+VERSAO_DO_AMBITO = "a2"
 
 #: 64 bits de resumo. Um prefixo curto era económico e um choque de hash
 #: entre dois âmbitos serviria os números de uma rede a outra — é o único
@@ -86,6 +86,10 @@ def _canonico(scope: TenantScope) -> str:
         "e=" + ",".join(sorted(scope.company_ids)),
         "n=" + ",".join(sorted(scope.company_names)),
         "o=" + ("1" if scope.inclui_rede_de_omissao else "0"),
+        # O Master (sem fronteira) tem as listas vazias, tal como um
+        # utilizador sem redes — SEM esta marca os dois partilhariam a chave
+        # e o utilizador sem redes serviria os números do sistema inteiro.
+        "g=" + ("1" if scope.sem_fronteira else "0"),
     ]
     return "|".join(partes)
 

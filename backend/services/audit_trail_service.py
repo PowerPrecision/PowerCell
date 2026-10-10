@@ -189,6 +189,7 @@ async def get_audit_trail(
     ai_suggested: bool = None,
     page: int = 1,
     page_size: int = 50,
+    autores: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Consultar registos de auditoria com filtros e paginação.
@@ -213,6 +214,15 @@ async def get_audit_trail(
         query["process_id"] = process_id
     if user_id:
         query["user_id"] = user_id
+    if autores is not None:
+        # Fronteira de rede (adenda de RBAC): o registo não leva carimbo de
+        # rede, mas leva o autor — quem não é Master só vê o que fizeram os
+        # utilizadores do seu âmbito. Um filtro por `user_id` pedido por
+        # quem consulta NÃO pode alargar isto: intersecta-se.
+        if user_id:
+            query["user_id"] = user_id if user_id in autores else {"$in": []}
+        else:
+            query["user_id"] = {"$in": list(autores)}
     if action_type:
         query["action"] = {"$regex": action_type, "$options": "i"}
     if source:
@@ -245,7 +255,7 @@ async def get_audit_trail(
     }
 
 
-async def get_audit_stats() -> Dict[str, Any]:
+async def get_audit_stats(autores: Optional[List[str]] = None) -> Dict[str, Any]:
     """
     Obter estatísticas de auditoria para o dashboard.
     
@@ -256,31 +266,37 @@ async def get_audit_stats() -> Dict[str, Any]:
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     week_start = (now - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
 
+    def _a(filtro: Dict[str, Any]) -> Dict[str, Any]:
+        """Restringe ao âmbito dos autores (`None` = Master, sem restrição)."""
+        if autores is None:
+            return filtro
+        return {**filtro, "user_id": {"$in": list(autores)}}
+
     # Total de alterações hoje
-    total_today = await db.audit_trail.count_documents({"created_at": {"$gte": today_start}})
+    total_today = await db.audit_trail.count_documents(_a({"created_at": {"$gte": today_start}}))
 
     # Total de alterações esta semana
-    total_week = await db.audit_trail.count_documents({"created_at": {"$gte": week_start}})
+    total_week = await db.audit_trail.count_documents(_a({"created_at": {"$gte": week_start}}))
 
     # Aprovações de IA (total e esta semana)
-    ai_approvals_total = await db.audit_trail.count_documents({"ai_suggested": True})
-    ai_approvals_week = await db.audit_trail.count_documents({
+    ai_approvals_total = await db.audit_trail.count_documents(_a({"ai_suggested": True}))
+    ai_approvals_week = await db.audit_trail.count_documents(_a({
         "ai_suggested": True,
         "created_at": {"$gte": week_start},
-    })
+    }))
 
     # Alterações de campos críticos esta semana
     config = await get_audit_config()
     critical_fields = config.get("critical_fields", ["financial_data", "credit_data", "status"])
 
-    critical_changes_week = await db.audit_trail.count_documents({
+    critical_changes_week = await db.audit_trail.count_documents(_a({
         "field": {"$in": critical_fields},
         "created_at": {"$gte": week_start},
-    })
+    }))
 
     # Alterações por utilizador (top 10 esta semana)
     pipeline_users = [
-        {"$match": {"created_at": {"$gte": week_start}}},
+        {"$match": _a({"created_at": {"$gte": week_start}})},
         {"$group": {"_id": "$user_name", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
         {"$limit": 10},
@@ -289,7 +305,7 @@ async def get_audit_stats() -> Dict[str, Any]:
 
     # Alterações por dia (últimos 7 dias)
     pipeline_daily = [
-        {"$match": {"created_at": {"$gte": week_start}}},
+        {"$match": _a({"created_at": {"$gte": week_start}})},
         {"$group": {
             "_id": {"$dateFromString": {"dateString": "$created_at"}},
             "count": {"$sum": 1},
@@ -300,7 +316,7 @@ async def get_audit_stats() -> Dict[str, Any]:
 
     # Campos mais alterados (últimos 7 dias)
     pipeline_fields = [
-        {"$match": {"created_at": {"$gte": week_start}, "field": {"$ne": None}}},
+        {"$match": _a({"created_at": {"$gte": week_start}, "field": {"$ne": None}})},
         {"$group": {"_id": "$field", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
         {"$limit": 10},
@@ -309,7 +325,7 @@ async def get_audit_stats() -> Dict[str, Any]:
 
     # Alterações por origem (últimos 7 dias)
     pipeline_source = [
-        {"$match": {"created_at": {"$gte": week_start}}},
+        {"$match": _a({"created_at": {"$gte": week_start}})},
         {"$group": {"_id": "$source", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
@@ -338,6 +354,7 @@ async def export_audit_trail(
     source: str = None,
     date_from: str = None,
     date_to: str = None,
+    autores: Optional[List[str]] = None,
 ) -> str:
     """
     Exportar registos de auditoria para CSV.
@@ -353,6 +370,7 @@ async def export_audit_trail(
         date_to=date_to,
         page=1,
         page_size=10000,  # Máximo 10.000 registos
+        autores=autores,
     )
 
     output = io.StringIO()

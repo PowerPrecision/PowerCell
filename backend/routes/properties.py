@@ -138,7 +138,7 @@ async def update_property_status(
 async def delete_property(
     request: Request,
     property_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
 ):
     return await run_delete_property(property_id, user, request)
 
@@ -198,7 +198,7 @@ async def remove_property_photo(
 @router.post("/bulk/import-excel")
 async def import_properties_from_excel(
     file: UploadFile,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
 ):
     return await run_import_properties_from_excel(file, user)
 

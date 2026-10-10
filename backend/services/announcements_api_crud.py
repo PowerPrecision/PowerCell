@@ -56,7 +56,7 @@ async def run_delete_announcement(announcement_id: str, user: dict):
     if not announcement:
         raise HTTPException(status_code=404, detail="Mensagem não encontrada")
 
-    if announcement["author_id"] != user["id"] and user["role"] != "admin":
+    if announcement["author_id"] != user["id"] and user["role"] != "master":
         raise HTTPException(status_code=403, detail="Só pode eliminar as suas próprias mensagens")
 
     await db.announcements.delete_one({"id": announcement_id})

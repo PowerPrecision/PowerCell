@@ -23,6 +23,7 @@ import {
 } from "../../utils/agendaCalendar";
 
 const roleLabels = {
+  master: "Master",
   admin: "Administrador",
   ceo: "CEO",
   consultor: "Consultor",

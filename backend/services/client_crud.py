@@ -365,7 +365,7 @@ async def run_update_client(
     if not can_edit and not user_actions:
         # Sem permissões personalizadas - verificar pelo role
         from models.auth import UserRole
-        can_edit = user_role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
+        can_edit = user_role in [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
                                 UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
     
     if not can_edit:

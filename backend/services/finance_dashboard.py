@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from database import db
 from services.process_status import STATUS_VALUE_ALIASES
+from services.tenant_network import build_tenant_process_condition
 from services.finance_helpers import (
     DEFAULT_CONFIG,
     FINANCE_CONFIG_KEY,
@@ -132,7 +133,7 @@ async def run_get_finance_summary(
     - global: totais consolidados
     """
     config = await _get_finance_config()
-    processes = await _get_processes(year)
+    processes = await _get_processes(year, await build_tenant_process_condition(user))
 
     # Calcular por área
     imob_data = _calc_area_metrics(processes, "imobiliaria", config)
@@ -177,13 +178,15 @@ async def run_get_finance_monthly(
     start_of_year = f"{year}-01-01T00:00:00.000Z"
     end_of_year = f"{year}-12-31T23:59:59.999Z"
 
+    ambito = await build_tenant_process_condition(user)
+    consulta_mensal = {
+        # Fix: Normalize process status filters — inclui a variação
+        # legada singular "concluido".
+        "status": {"$in": STATUS_VALUE_ALIASES["concluidos"]},
+        "updated_at": {"$gte": start_of_year, "$lte": end_of_year}
+    }
     processes = await db.processes.find(
-        {
-            # Fix: Normalize process status filters — inclui a variação
-            # legada singular "concluido".
-            "status": {"$in": STATUS_VALUE_ALIASES["concluidos"]},
-            "updated_at": {"$gte": start_of_year, "$lte": end_of_year}
-        },
+        {"$and": [ambito, consulta_mensal]} if ambito else consulta_mensal,
         {
             "_id": 0,
             "financial_data": 1,
@@ -312,6 +315,7 @@ async def run_get_finance_performance(
     previous_year = current_year - 1
 
     config = await _get_finance_config()
+    ambito = await build_tenant_process_condition(user)
 
     async def _calc_year_metrics(yr: int) -> dict:
         """Calcula métricas financeiras agregadas para um ano.
@@ -326,7 +330,7 @@ async def run_get_finance_performance(
             dict: Métricas do ano (receita, lucro, valor_imoveis,
                 num_processos, receitas/lucros por área).
         """
-        processes = await _get_processes(yr)
+        processes = await _get_processes(yr, ambito)
         imob = _calc_area_metrics(processes, "imobiliaria", config)
         cred = _calc_area_metrics(processes, "credito", config)
         return {

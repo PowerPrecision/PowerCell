@@ -12,14 +12,16 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from database import db
+from services.user_management_scope import exigir_empresas_concediveis
 from models.company_email_config import CompanyEmailConfigCreate
 from services.encryption import encryption_service
 
 logger = logging.getLogger(__name__)
 
 
-async def run_create_company_config(payload: CompanyEmailConfigCreate):
-    """Cria uma nova config de email por empresa."""
+async def run_create_company_config(payload: CompanyEmailConfigCreate, *, actor: dict):
+    """Cria uma nova config de email por empresa (da rede de quem actua)."""
+    await exigir_empresas_concediveis(actor, [payload.company_name])
     existing = await db.company_email_configs.find_one(
         {"company_name": payload.company_name}
     )
@@ -61,8 +63,11 @@ async def run_create_company_config(payload: CompanyEmailConfigCreate):
     }
 
 
-async def run_update_company_config(company_name: str, payload: CompanyEmailConfigCreate):
+async def run_update_company_config(
+    company_name: str, payload: CompanyEmailConfigCreate, *, actor: dict,
+):
     """Atualiza a config de email de uma empresa."""
+    await exigir_empresas_concediveis(actor, [company_name, payload.company_name])
     existing = await db.company_email_configs.find_one(
         {"company_name": company_name}
     )
@@ -113,8 +118,9 @@ async def run_update_company_config(company_name: str, payload: CompanyEmailConf
     return {"success": True, "message": "Configuração atualizada"}
 
 
-async def run_delete_company_config(company_name: str):
+async def run_delete_company_config(company_name: str, *, actor: dict):
     """Remove a config de email de uma empresa."""
+    await exigir_empresas_concediveis(actor, [company_name])
     existing = await db.company_email_configs.find_one(
         {"company_name": company_name}
     )

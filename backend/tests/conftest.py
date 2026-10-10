@@ -75,7 +75,9 @@ TEST_USERS = [
         "email": "admin@sistema.pt",
         "password": "admin123",
         "name": "Admin Teste",
-        "role": "admin"
+        # O operador global (Master): os testes de integração exercitam a
+        # infraestrutura (logs, backups, impersonate) e a visibilidade total.
+        "role": "master"
     },
     {
         "email": "consultor@sistema.pt",

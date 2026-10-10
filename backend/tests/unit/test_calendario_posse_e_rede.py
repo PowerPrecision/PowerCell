@@ -152,11 +152,20 @@ class TestQuemPodeMexer:
             redes=(REDE_POWER,),
         ) is False
 
-    @pytest.mark.parametrize("papel", ["admin", "ceo", "ADMIN", " Ceo "])
-    def test_a_administracao_reconcilia_a_pilha_inteira(self, papel):
+    @pytest.mark.parametrize("papel", ["master", "MASTER", " Master "])
+    def test_o_master_reconcilia_a_pilha_inteira(self, papel):
         assert pode_mexer_no_evento(
             _evento(network_id=REDE_DOMUS), user_id="u-admin", papel=papel,
         ) is True
+
+    @pytest.mark.parametrize("papel", ["admin", "ceo", "ADMIN", " Ceo "])
+    def test_admin_e_ceo_sao_locais_e_nao_mexem_na_outra_rede(self, papel):
+        """Adenda de RBAC: antes eram «sem fronteira» e apagavam eventos de
+        qualquer rede. Agora só mexem no que é da sua."""
+        assert pode_mexer_no_evento(
+            _evento(network_id=REDE_DOMUS), user_id="u-admin", papel=papel,
+            redes=(REDE_POWER,),
+        ) is False
 
     def test_sem_evento_nao_se_mexe(self):
         for vazio in (None, {}):
@@ -198,7 +207,9 @@ class TestOsPrimitivos:
         assert e_papel_sem_fronteira("diretor") is False, (
             "um diretor é diretor da SUA rede"
         )
-        assert e_papel_sem_fronteira("admin") is True
+        assert e_papel_sem_fronteira("master") is True
+        assert e_papel_sem_fronteira("admin") is False
+        assert e_papel_sem_fronteira("ceo") is False
         assert e_papel_de_equipa("consultor") is False
 
 

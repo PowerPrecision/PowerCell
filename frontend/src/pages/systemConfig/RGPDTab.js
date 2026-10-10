@@ -44,7 +44,7 @@ export default function RGPDTab({ token, user }) {
   const [changelog, setChangelog] = useState("");
   const [showRgpdPreview, setShowRgpdPreview] = useState(false);
   
-  const isAdminOrCEO = hasAnyRole(user, ["admin", "ceo"]);
+  const isAdminOrCEO = hasAnyRole(user, ["master", "admin", "ceo"]);
 
   useEffect(() => {
     fetchTemplate();

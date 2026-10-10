@@ -34,7 +34,7 @@ PROCESS_ROOM_ACL_PROJECTION = {
 
 # Gestores + administrativo: vêem todos os processos (igual à listagem global).
 _PROCESS_ROOM_GLOBAL_ROLES = {
-    UserRole.ADMIN,
+    UserRole.MASTER, UserRole.ADMIN,
     UserRole.CEO,
     UserRole.DIRETOR,
     UserRole.ADMINISTRATIVO,

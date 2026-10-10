@@ -39,7 +39,8 @@ from tests.unit.helpers_tenant import (  # noqa: F401  (fixture)
     tenant_db,
 )
 
-ADMIN = {"id": "u-admin", "name": "Admin", "email": "admin@x.pt", "role": "admin"}
+ADMIN = {"id": "u-admin", "name": "Admin", "email": "admin@x.pt", "role": "admin", "effective_role": "admin"}
+MASTER = {"id": "u-master", "name": "Master", "email": "master@x.pt", "role": "master", "effective_role": "master"}
 CEO_POWER = {"id": "u-ceo-power", "name": "CEO Power", "email": "ceo@power.pt", "role": "ceo"}
 CEO_DOMUS = {"id": "u-ceo-domus", "name": "CEO Domus", "email": "ceo@domus.pt", "role": "ceo"}
 CONSULTOR = {"id": "u-consultor", "name": "Cons", "email": "c@power.pt", "role": "consultor"}
@@ -236,33 +237,33 @@ class TestAExploracao:
 # ════════════════════════════════════════════════════════════════════
 class TestAContraprova:
     @pytest.mark.asyncio
-    async def test_o_ADMIN_le_a_configuracao_de_TODAS_as_empresas(self, mundo, rede_de_omissao_incumbente):
-        """O admin só tem UCR na Power — e tem de chegar à Domus."""
+    async def test_o_MASTER_le_a_configuracao_de_TODAS_as_empresas(self, mundo, rede_de_omissao_incumbente):
+        """O Master não tem UCR nenhuma — e chega a todas as empresas."""
         from routes.system_config import get_config
 
         for company_id in ("default", "cmp-power", "cmp-precision", "cmp-domus"):
-            res = await get_config(request=None, company_id=company_id, user=ADMIN)
+            res = await get_config(request=None, company_id=company_id, user=MASTER)
             assert "config" in res, company_id
 
     @pytest.mark.asyncio
-    async def test_o_ADMIN_escreve_na_configuracao_de_outra_empresa(self, mundo, rede_de_omissao_incumbente):
+    async def test_o_MASTER_escreve_na_configuracao_de_outra_empresa(self, mundo, rede_de_omissao_incumbente):
         from routes.system_config import update_config
 
         res = await update_config(
             section="storage", data={"provider": "none"},
-            request=None, company_id="cmp-domus", user=ADMIN,
+            request=None, company_id="cmp-domus", user=MASTER,
         )
         assert res["success"] is True
         doc = next(d for d in mundo.system_config.docs if d["_id"] == "company:cmp-domus")
         assert doc["storage"]["provider"] == "none"
 
     @pytest.mark.asyncio
-    async def test_o_ADMIN_tambem_nao_inventa_empresas(self, mundo, rede_de_omissao_incumbente):
+    async def test_o_MASTER_tambem_nao_inventa_empresas(self, mundo, rede_de_omissao_incumbente):
         from routes.system_config import get_config
 
         antes = _ids_de_config(mundo)
         with pytest.raises(HTTPException) as exc:
-            await get_config(request=None, company_id="empresa-inventada", user=ADMIN)
+            await get_config(request=None, company_id="empresa-inventada", user=MASTER)
         assert exc.value.status_code == 404
         assert _ids_de_config(mundo) == antes
 
@@ -286,6 +287,60 @@ class TestAContraprova:
         assert "config" in res
 
     @pytest.mark.asyncio
+    async def test_o_ADMIN_e_LOCAL_le_e_escreve_na_PROPRIA_empresa(self, mundo, rede_de_omissao_incumbente):
+        """Adenda de RBAC: o Admin deixou de ser o perfil global."""
+        from routes.system_config import get_config, update_config
+
+        assert "config" in await get_config(request=None, company_id="cmp-power", user=ADMIN)
+        res = await update_config(
+            section="settings", data={"company_name": "Power SA"},
+            request=None, company_id="cmp-power", user=ADMIN,
+        )
+        assert res["success"] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("empresa", ["cmp-domus", "cmp-precision"])
+    async def test_o_ADMIN_NAO_le_a_configuracao_de_outra_empresa(self, mundo, rede_de_omissao_incumbente, empresa):
+        """Nem a de outra rede (Domus) nem a da mesma rede (Precision): o
+        mesmo que o CEO — Admin e CEO são locais."""
+        from routes.system_config import get_config
+
+        with pytest.raises(HTTPException) as exc:
+            await get_config(request=None, company_id=empresa, user=ADMIN)
+        assert exc.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_o_ADMIN_NAO_escreve_na_configuracao_de_outra_empresa(self, mundo, rede_de_omissao_incumbente):
+        from routes.system_config import update_config
+
+        with pytest.raises(HTTPException) as exc:
+            await update_config(
+                section="storage", data={"provider": "none"},
+                request=None, company_id="cmp-domus", user=ADMIN,
+            )
+        assert exc.value.status_code == 404
+        doc = next(d for d in mundo.system_config.docs if d["_id"] == "company:cmp-domus")
+        assert doc["storage"]["provider"] == "aws_s3"
+
+    @pytest.mark.asyncio
+    async def test_o_ADMIN_NAO_toca_na_global_nem_revela_os_segredos_dela(self, mundo, rede_de_omissao_incumbente):
+        from routes.system_config import get_config, reveal_secrets
+
+        with pytest.raises(HTTPException) as exc:
+            await get_config(request=None, company_id="default", user=ADMIN)
+        assert exc.value.status_code == 403
+        with pytest.raises(HTTPException) as exc:
+            await reveal_secrets(section="storage", request=None, company_id="default", user=ADMIN)
+        assert exc.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_a_listagem_do_ADMIN_traz_so_as_dele(self, mundo, rede_de_omissao_incumbente):
+        from routes.system_config import get_available_companies
+
+        res = await get_available_companies(request=None, user=ADMIN)
+        assert {c["company_id"] for c in res["companies"]} == {"cmp-power"}
+
+    @pytest.mark.asyncio
     async def test_so_as_empresas_DELE_a_mesma_rede_nao_chega(self, mundo, rede_de_omissao_incumbente):
         """Decisão do dono do produto: UCR, não rede. A Precision é da mesma
         rede da Power e o CEO da Power NÃO configura a Precision."""
@@ -296,13 +351,13 @@ class TestAContraprova:
         assert exc.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_o_ADMIN_mantem_a_global_e_os_segredos_dela(self, mundo, rede_de_omissao_incumbente):
+    async def test_o_MASTER_mantem_a_global_e_os_segredos_dela(self, mundo, rede_de_omissao_incumbente):
         """A contraprova: retirar a global ao CEO não pode tirá-la ao dono."""
         from routes.system_config import get_config, reveal_secrets
 
-        res = await get_config(request=None, company_id="default", user=ADMIN)
+        res = await get_config(request=None, company_id="default", user=MASTER)
         assert "config" in res
-        res = await reveal_secrets(section="storage", request=None, company_id="default", user=ADMIN)
+        res = await reveal_secrets(section="storage", request=None, company_id="default", user=MASTER)
         assert "secrets" in res
 
     @pytest.mark.asyncio
@@ -325,14 +380,14 @@ class TestAContraprova:
         enquanto o formulário mostrava os campos da empresa."""
         from routes.system_config import reveal_secrets
 
-        res = await reveal_secrets(section="storage", request=None, company_id="cmp-domus", user=ADMIN)
+        res = await reveal_secrets(section="storage", request=None, company_id="cmp-domus", user=MASTER)
         assert res["secrets"].get("aws_secret_access_key") == "SEGREDO-DA-DOMUS"
 
     @pytest.mark.asyncio
-    async def test_a_listagem_do_ADMIN_traz_todas_as_empresas_do_CRM(self, mundo, rede_de_omissao_incumbente):
+    async def test_a_listagem_do_MASTER_traz_todas_as_empresas_do_CRM(self, mundo, rede_de_omissao_incumbente):
         from routes.system_config import get_available_companies
 
-        res = await get_available_companies(request=None, user=ADMIN)
+        res = await get_available_companies(request=None, user=MASTER)
         ids = {c["company_id"] for c in res["companies"]}
         assert ids == {"default", "cmp-power", "cmp-precision", "cmp-domus"}
         nomes = {c["company_id"]: c["company_name"] for c in res["companies"]}
@@ -446,7 +501,7 @@ class TestAGuardaEstaLigada:
         assert "resolver_empresa_pedida" not in ast.unparse(nu)
 
     def test_as_rotas_so_globais_estao_fechadas_ao_CEO_logo_na_porta(self):
-        """Não basta a guarda dentro: a porta (`require_roles`) também diz ADMIN."""
+        """Não basta a guarda dentro: a porta (`require_roles`) também diz MASTER."""
         so_admin = {
             "test_service_connection", "complete_setup", "list_system_email_configs",
             "get_system_email_config", "create_system_email_config",
@@ -458,7 +513,8 @@ class TestAGuardaEstaLigada:
             if h.name in so_admin:
                 fonte = ast.unparse(h)
                 assert "UserRole.CEO" not in fonte, h.name
-                assert "UserRole.ADMIN" in fonte, h.name
+                assert "UserRole.ADMIN" not in fonte, h.name
+                assert "UserRole.MASTER" in fonte, h.name
                 vistos.add(h.name)
         assert vistos == so_admin
 

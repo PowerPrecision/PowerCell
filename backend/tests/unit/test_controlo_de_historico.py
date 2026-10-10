@@ -456,7 +456,8 @@ class TestALigacao:
         assert "aplicar_politica_de_historico" in ast.unparse(no)
 
     def test_todas_as_rotas_sao_so_de_admin(self):
-        """Master/admin. Nem o CEO desliga o registo de outras pessoas."""
+        """Só o Master (global). A política de histórico é por PERFIL de todo o
+        sistema: nem o Admin nem o CEO locais a desligam."""
         arvore = ast.parse((BACKEND / "routes" / "history_tracking.py").read_text(encoding="utf-8"))
         handlers = [
             n for n in arvore.body
@@ -465,7 +466,8 @@ class TestALigacao:
         assert len(handlers) >= 4
         for h in handlers:
             fonte = ast.unparse(h)
-            assert "UserRole.ADMIN" in fonte, h.name
+            assert "UserRole.MASTER" in fonte, h.name
+            assert "UserRole.ADMIN" not in fonte, h.name
             assert "UserRole.CEO" not in fonte, h.name
 
     def test_o_router_esta_registado_no_servidor(self):

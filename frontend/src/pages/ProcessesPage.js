@@ -65,6 +65,7 @@ const roleLabels = {
   administrativo: "Administrativo",
   diretor: "Diretor",
   ceo: "CEO",
+  master: "Master",
   admin: "Administrador",
 };
 
@@ -243,7 +244,7 @@ const ProcessesPage = () => {
 
   const canMarkIndexed = useMemo(() => {
     const role = user?.role?.toLowerCase();
-    return role === 'indexacao' || role === 'admin' || role === 'ceo';
+    return role === 'indexacao' || role === 'master' || role === 'admin' || role === 'ceo';
   }, [user?.role]);
 
   // Sync filters with URL — searchTerm precisa de ser declarado antes de handleExportExcel

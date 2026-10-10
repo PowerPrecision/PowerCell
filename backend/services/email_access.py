@@ -52,6 +52,7 @@ from typing import Any, Iterable, Optional
 from fastapi import HTTPException
 
 from database import db
+from services.role_scope import PAPEIS_GLOBAIS
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,9 @@ logger = logging.getLogger(__name__)
 #: Espelha `process_service.can_view_process`; um parceiro ou um cliente não
 #: entram pela regra 7.
 PAPEIS_DE_EQUIPA = frozenset(
-    {"admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"}
+    {"master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"}
 )
-PAPEIS_QUE_ATRAVESSAM_REDES = frozenset({"admin", "ceo"})
+PAPEIS_QUE_ATRAVESSAM_REDES = frozenset(PAPEIS_GLOBAIS)
 
 ERRO_SEM_PERMISSAO = "Sem permissão para aceder a este email"
 

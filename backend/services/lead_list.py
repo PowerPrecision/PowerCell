@@ -30,7 +30,7 @@ async def run_list_leads(
     user_id = user.get("id")
 
     # Filtrar por utilizador se não for admin/director
-    if user_role not in ["admin", "diretor"]:
+    if user_role not in ["master", "admin", "diretor"]:
         query["created_by_id"] = user_id
     elif consultor_id:
         query["created_by_id"] = consultor_id
@@ -81,7 +81,7 @@ async def run_get_leads_by_status(
     user_id = user.get("id")
 
     # Filtrar por utilizador se não for admin/director
-    if user_role not in ["admin", "diretor"]:
+    if user_role not in ["master", "admin", "diretor"]:
         # Consultor/Mediador só vê os seus leads
         query["created_by_id"] = user_id
     elif consultor_id:
@@ -140,7 +140,7 @@ async def run_get_consultores_for_filter(user: dict):
     """
     from services.role_query import deep_role_in_filter
     consultores = await db.users.find(
-        deep_role_in_filter(["consultor", "diretor", "admin", "administrativo"]),
+        deep_role_in_filter(["consultor", "diretor", "master", "admin", "administrativo"]),
         {"_id": 0, "id": 1, "name": 1, "email": 1}
     ).to_list(length=100)
 

@@ -656,15 +656,26 @@ class TestOQueNAOSeFecha:
         assert "fin-domus" in ids, "a Carla também trabalha na Domus"
 
     @pytest.mark.asyncio
-    async def test_o_ADMIN_atravessa_redes_de_proposito(self, carteira):
-        """ADMIN/CEO reconciliam a pilha inteira. O **diretor não** — tem
-        passe livre DENTRO da sua rede, que é o que o produto promete."""
+    async def test_o_MASTER_atravessa_redes_de_proposito(self, carteira):
+        """Só o MASTER (único perfil global) atravessa redes. O **diretor, o
+        CEO e o Admin não** — têm passe livre DENTRO da sua rede."""
+        from services import property_list
+
+        master = {**ORFAO, "id": "u-master", "role": "master"}
+        with _casa_de_imoveis(carteira):
+            visiveis = await property_list.run_list_properties(master)
+
+        assert {p.title for p in visiveis} == {"T3 em Cascais", "T2 em Leiria"}
+
+    @pytest.mark.asyncio
+    async def test_o_ADMIN_sem_rede_NAO_atravessa_redes(self, carteira):
+        """Antes da adenda de RBAC o Admin via a carteira de todas as redes."""
         from services import property_list
 
         with _casa_de_imoveis(carteira):
             visiveis = await property_list.run_list_properties(ORFAO)
 
-        assert {p.title for p in visiveis} == {"T3 em Cascais", "T2 em Leiria"}
+        assert {p.title for p in visiveis} != {"T3 em Cascais", "T2 em Leiria"}
 
     @pytest.mark.asyncio
     async def test_a_pilha_POR_CARIMBAR_e_do_grupo_incumbente(

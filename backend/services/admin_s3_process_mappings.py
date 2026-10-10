@@ -108,6 +108,12 @@ async def run_get_process_s3_mappings(
 
     skip = (page - 1) * limit
 
+    # Fronteira de rede (adenda de RBAC): o alias `/client-s3-mappings` é
+    # lido por Admin/CEO/Diretor, que só vêem a sua rede. `{}` para o Master.
+    from services.tenant_network import build_tenant_process_condition, com_isolamento
+
+    query = com_isolamento(await build_tenant_process_condition(user or {}), query)
+
     total = await db.processes.count_documents(query)
 
     # Contar processos com e sem mapeamento S3

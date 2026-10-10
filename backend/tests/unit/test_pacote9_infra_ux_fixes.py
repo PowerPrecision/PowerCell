@@ -580,9 +580,16 @@ class TestUndoSendQueue:
                 )
             assert e403.value.status_code == 403
 
-            # admin pode cancelar por outro utilizador
+            # um Admin é LOCAL (adenda de RBAC): não cancela o envio de outro
+            with pytest.raises(HTTPException) as e403_admin:
+                await q.cancel_pending_email_send(
+                    record["id"], {"id": "u-admin", "role": "admin"}
+                )
+            assert e403_admin.value.status_code == 403
+
+            # o Master (único perfil global) pode cancelar por outro utilizador
             cancel_admin = await q.cancel_pending_email_send(
-                record["id"], {"id": "u-admin", "role": "admin"}
+                record["id"], {"id": "u-master", "role": "master"}
             )
             assert cancel_admin["cancelled"] is True
 

@@ -38,7 +38,7 @@ async def get_my_clients(
 async def get_my_clients_stats(
     user: dict = Depends(require_roles([
         UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
-        UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO,
+        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO,
         UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
     ])),
 ):

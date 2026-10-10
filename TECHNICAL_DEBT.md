@@ -521,6 +521,26 @@ selectores falhados por execução (passo e selector, sem credenciais) e uma
 rotina de verificação mensal com uma conta de teste; só depois faz sentido
 partir o módulo.
 
+### D-31 · Rotas «por id» fora do router de processos não perguntam a que rede pertence o objecto
+**Onde:** `routes/clients.py` (`/clients/{id}`), `routes/tasks.py` (`/tasks/{id}`), e as restantes rotas com um id no caminho que não passem por um construtor de âmbito
+
+A adenda de RBAC (Out 2026) tornou o Admin e o CEO perfis **locais** e fechou
+o pedido de processos por id com uma dependência de router
+(`process_scope_guard.exigir_processo_no_ambito`). Fica por varrer o resto:
+`require_roles`/`get_current_user` autorizam o VERBO e, onde o serviço não
+volta a perguntar pelo OBJECTO, um staff que adivinhe o id de um cliente ou de
+uma tarefa de outra rede lê-o (clientes), ou muda-o (tarefas). Não foi medido
+rota a rota — o inventário por AST desta adenda cobre as listas de papéis, não
+as posses. Fechar exige o mesmo inventário que o Lote 5 fez para as listagens,
+agora para os handlers com `{..._id}` no caminho, com excepções escritas.
+
+**Relacionado — fronteira de dados é a REDE, não a empresa.** Power e Precision
+partilham rede por decisão do Lote 4, logo um Admin da Power vê os dados da
+Precision. A gestão de utilizadores, os UCR, as configs de email e o relatório
+de segunda-feira seguem a rede; só `system_config` é por empresa. Se o dono do
+produto quiser isolamento por EMPRESA dentro da mesma rede, é um carimbo novo
+em todas as colecções, não uma correcção desta adenda.
+
 ## Fechadas
 
 Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
@@ -542,4 +562,4 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 | D-16 | Eliminar um cliente não deixava entrada no trilho de auditoria | Iteração `sub35-estrito-e-auditoria` — `audit_trail_service.log_audit_event` nos **dois** pontos de saída do `run_delete_client` (o cliente pode viver em `processes` ou em `clients`, e um registo escrito só num ramo era a forma de defeito desta casa); com IP, papel EFECTIVO em `metadata` (o campo partilhado guarda o do JWT) e os ids da cascata. O registo é escrito DEPOIS da eliminação e nunca a faz falhar |
 | D-20 | A Listagem de Processos e o Kanban sem teste que monte a página | Iteração `medicao-d19-e-paginas-montadas` — `ProcessesPage.test.jsx` (14) e `KanbanPage.test.jsx` (14, com o `KanbanBoard` REAL). Apanharam três defeitos que nenhum teste de componente podia ver: uma coluna sem `processes` rebentava o quadro (`filter` de `undefined` — havia `|| []` nos dois sítios do arrasto e em nenhum dos quatro do caminho normal), o botão «Exportar Excel» do cabeçalho do quadro tinha ficado FORA do fecho dos botões fantasma (sem gate, e exporta NIF/telefone/email), e o `BotaoComPermissao` dava nome acessível «Acção — sem permissão» a TODOS os botões bloqueados do sistema (o `typeof children === "string"` nunca é verdadeiro com ícone + rótulo) |
 | D-17 | Os `co_buyers` não tinham data de nascimento | Iteração `identidade-documental-e-d17` — a data entrou no esquema de extracção do CPCV (opcional, e com instrução explícita de NÃO inferir: uma data inventada é pior do que nenhuma) e a regra estrita estendeu-se aos compradores, em Python e na condição Mongo (`$nor` + `$elemMatch`, porque o quantificador é «todos» e no Mongo isso não tem forma positiva). A desduplicação por identidade é o que impede a regra de se desligar a si mesma — ver D-18 |
-| D-7 | Relatório semanal do CEO com âmbito global | Iteração `motor-fila-e-agenda` — decisão de produto tomada (a Direcção quer o CONSOLIDADO, e fica a única excepção deliberada ao isolamento por rede); a dívida fechou com o defeito que ninguém tinha visto ao lado dela — o «às 06:00» vivia só na docstring e o relatório saía **24 vezes** à segunda-feira |
+| D-7 | Relatório semanal do CEO com âmbito global | Iteração `motor-fila-e-agenda` — decisão de produto tomada (a Direcção quer o CONSOLIDADO, e fica a única excepção deliberada ao isolamento por rede) — **revista na adenda de RBAC (Out 2026): o consolidado passou a ser só do Master e cada rede recebe o seu (`relatorio_semanal_destinos`)**; a dívida fechou com o defeito que ninguém tinha visto ao lado dela — o «às 06:00» vivia só na docstring e o relatório saía **24 vezes** à segunda-feira |

@@ -23,7 +23,7 @@ ASSIGNMENT_ALLOWED_ROLES = (
 
 # Cargo actual (role principal) que nunca entra nestas listas.
 ASSIGNMENT_EXCLUDED_PRIMARY_ROLES = (
-    "admin",
+    "master", "admin",
     "cliente",
     "parceiro",
 )

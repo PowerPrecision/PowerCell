@@ -40,7 +40,7 @@ class TestAuthentication:
         assert response.status_code == 200, f"Login failed: {response.text}"
         data = response.json()
         assert "access_token" in data, "No access_token in response"
-        assert data.get("user", {}).get("role") == "admin", "User is not admin"
+        assert data.get("user", {}).get("role") in ("admin", "master"), "User is not admin"
         print(f"✓ Admin login successful, role: {data['user']['role']}")
         # Store token for other tests
         TestAuthentication.token = data["access_token"]

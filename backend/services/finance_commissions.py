@@ -20,9 +20,16 @@ from services.finance_helpers import (
     _safe_float,
 )
 
+from services.finance_scope import exigir_empresa_no_ambito
+from services.tenant_network import build_tenant_process_condition
+
 logger = logging.getLogger(__name__)
 
-async def _calc_commissions_data(year: Optional[int], company_id: Optional[str] = None):
+async def _calc_commissions_data(
+    year: Optional[int],
+    company_id: Optional[str] = None,
+    ambito: Optional[dict] = None,
+):
     """
     Calcula comissões por colaborador, suportando ambos os modelos:
     - Tradicional (individual_split): cada consultor recebe % do que fechou
@@ -31,7 +38,7 @@ async def _calc_commissions_data(year: Optional[int], company_id: Optional[str] 
     Retorna dict com collaborators, totais e distribution_model.
     """
     config = await _get_finance_config()
-    processes = await _get_processes(year)
+    processes = await _get_processes(year, ambito)
 
     # Determinar distribution_model a partir do _get_finance_config()
     distribution_model = config.get("distribution_model", "individual_split")
@@ -227,7 +234,11 @@ async def run_get_finance_commissions(
     - commission_share: Parte Variável — comissão individual ou quota do Pool (€)
     - total_payout: Total a Receber = Fixo + Variável (€)
     """
-    return await _calc_commissions_data(year, company_id)
+    if company_id:
+        await exigir_empresa_no_ambito(company_id, user=user)
+    return await _calc_commissions_data(
+        year, company_id, await build_tenant_process_condition(user),
+    )
 
 
 
@@ -249,7 +260,10 @@ async def run_export_commissions_csv(
 
     Permissões: apenas Admin e CEO.
     """
-    data = await _calc_commissions_data(year, company_id)
+    await exigir_empresa_no_ambito(company_id, user=user)
+    data = await _calc_commissions_data(
+        year, company_id, await build_tenant_process_condition(user),
+    )
 
     distribution_model = data.get("distribution_model", "individual_split")
     model_label = "Pool Global" if distribution_model == "global_pool" else "Tradicional (Split Individual)"

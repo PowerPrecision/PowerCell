@@ -203,7 +203,7 @@ async def link_process_to_client(
 async def unlink_process_from_client(
     client_id: str,
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO]))
 ):
     return await run_unlink_process_from_client(client_id, process_id, user)
 

@@ -488,7 +488,7 @@ async def cancel_pending_email_send(send_id: str, user: dict) -> dict:
 
     requester_id = user.get("id")
     requester_role = (user.get("effective_role") or user.get("role") or "").lower()
-    if record.get("created_by") != requester_id and requester_role != "admin":
+    if record.get("created_by") != requester_id and requester_role != "master":
         raise HTTPException(
             status_code=403,
             detail="Só o autor do envio pode cancelá-lo.",

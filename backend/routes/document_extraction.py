@@ -32,7 +32,7 @@ async def extract_document_data(
     process_id: str,
     payload: DocumentExtractRequest,
     user: dict = Depends(
-        require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])
+        require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])
     ),
 ):
     """Lê um documento arquivado no S3 e devolve os dados para revisão.

@@ -236,7 +236,7 @@ class TestLeastBusyEstrito:
         assert clauses[1] == deep_role_nin_filter(pa.LEAST_BUSY_EXCLUDED_ROLES)
         # espelha os _ADMIN_BYPASS_ROLES do document_visibility.py
         assert set(pa.LEAST_BUSY_EXCLUDED_ROLES) == {
-            "admin", "ceo", "diretor", "administrativo",
+            "master", "admin", "ceo", "diretor", "administrativo",
             "system_admin", "super_admin",
         }
 

@@ -848,7 +848,7 @@ async def consultant_inactive_statuses() -> set[str]:
 # absoluto de visibilidade). Espelha os _ADMIN_BYPASS_ROLES do
 # services/document_visibility.py (inclui variantes legadas defensivas).
 LEAST_BUSY_EXCLUDED_ROLES = [
-    "admin", "ceo", "diretor", "administrativo", "system_admin", "super_admin",
+    "master", "admin", "ceo", "diretor", "administrativo", "system_admin", "super_admin",
 ]
 
 

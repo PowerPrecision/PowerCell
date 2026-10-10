@@ -88,7 +88,7 @@ def pode_ver_registo(
 ) -> bool:
     """Predicado GÉMEO da condição — a mesma pergunta em Python.
 
-    Um registo **sem empresa** é recusado a quem não é ADMIN/CEO. É
+    Um registo **sem empresa** é recusado a quem não é Master. É
     deliberadamente mais estrito do que a tolerância do legado nas
     outras colecções: o `company_id` é obrigatório na criação desde
     sempre, logo um registo sem ele é dados corrompidos e não história —
@@ -116,8 +116,8 @@ async def carregar_ambito_financeiro(
     empresas = await empresas_das_minhas_redes(scope)
 
     if e_papel_sem_fronteira(papel):
-        # ADMIN/CEO reconciliam a pilha inteira — é o único `{}` que
-        # atravessa redes de propósito, e diz-se.
+        # O MASTER (único perfil global) vê a pilha inteira — é o único `{}`
+        # que atravessa redes de propósito, e diz-se.
         return AmbitoFinanceiro(papel=papel, empresas=empresas, condicao={})
 
     condicao = build_company_field_condition(empresas, campo=CAMPO_EMPRESA)

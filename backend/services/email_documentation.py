@@ -96,7 +96,7 @@ async def run_get_document_recipients(current_user: dict):
         "default_to": doc_config.default_to,
         "default_to_name": doc_config.default_to_name,
         "default_to_emails": default_to_emails,
-        "can_edit": current_user["role"] in ["admin", "ceo"]
+        "can_edit": current_user["role"] in ["master", "admin", "ceo"]
     }
 
 

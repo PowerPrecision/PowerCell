@@ -11,14 +11,25 @@ from services.process_status import DELETED_STATUS_VALUES
 
 async def run_list_deleted_items(item_type: str, limit: int, user: dict):
     """Lista itens eliminados recentemente que podem ser restaurados."""
+    from services.tenant_network import (
+        build_tenant_condition,
+        build_tenant_process_condition,
+        com_isolamento,
+    )
+
     items = []
+
+    # Fronteira de rede: o Master vê tudo; os outros só o que é da sua rede.
+    # `{}` (Master) não filtra.
+    cond_processos = await build_tenant_process_condition(user or {})
+    cond_tarefas = await build_tenant_condition(user or {})
 
     if item_type in ["all", "processes"]:
         # Processos eliminados
         # Fix: Normalize process status filters — reconhece tanto o
         # singular ("eliminado") como o plural legado ("eliminados").
         deleted_processes = await db.processes.find(
-            {"status": {"$in": DELETED_STATUS_VALUES}, "is_active": False},
+            com_isolamento(cond_processos, {"status": {"$in": DELETED_STATUS_VALUES}, "is_active": False}),
             {"_id": 0}
         ).sort("updated_at", -1).limit(limit).to_list(limit)
 
@@ -33,8 +44,13 @@ async def run_list_deleted_items(item_type: str, limit: int, user: dict):
 
     if item_type in ["all", "documents"]:
         # Documentos eliminados
+        consulta_docs: dict = {"deleted": True}
+        if cond_processos:
+            # Os documentos não levam carimbo de rede: herdam o do processo.
+            visiveis = await db.processes.find(cond_processos, {"_id": 0, "id": 1}).to_list(20000)
+            consulta_docs["process_id"] = {"$in": [p["id"] for p in visiveis if p.get("id")]}
         deleted_docs = await db.documents.find(
-            {"deleted": True},
+            consulta_docs,
             {"_id": 0}
         ).sort("deleted_at", -1).limit(limit).to_list(limit)
 
@@ -50,7 +66,7 @@ async def run_list_deleted_items(item_type: str, limit: int, user: dict):
     if item_type in ["all", "tasks"]:
         # Tarefas eliminadas
         deleted_tasks = await db.tasks.find(
-            {"deleted": True},
+            com_isolamento(cond_tarefas, {"deleted": True}),
             {"_id": 0}
         ).sort("deleted_at", -1).limit(limit).to_list(limit)
 

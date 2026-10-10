@@ -14,7 +14,7 @@ def require_admin(current_user: dict) -> None:
     """Verifica se o cargo efetivo (UCR) ou, em fallback, o JWT, é admin/CEO."""
     from models.auth import UserRole
     role = authorization_role_from_user(current_user)
-    if role not in (UserRole.ADMIN, UserRole.CEO):
+    if role not in (UserRole.MASTER, UserRole.ADMIN, UserRole.CEO):
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
 
 

@@ -29,7 +29,7 @@ const EmailAccountsPage = ({ embedded = false }) => {
 
   // Os cartões desta página (SMTP do sistema, IMAP de indexação, contas
   // partilhadas) são configuração GLOBAL: exclusiva do administrador.
-  if (!hasAnyRole(user, ["admin"])) {
+  if (!hasAnyRole(user, ["master"])) {
     return wrapLayout(
       <div className="text-center py-12">
         <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />

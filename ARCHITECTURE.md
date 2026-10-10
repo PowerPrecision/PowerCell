@@ -9643,3 +9643,20 @@ O admin liga/desliga se as acções ficam guardadas no histórico **por pessoa e
 **Email dos balcões.** `mailbox_backoff.deve_esperar` (puro) tira do ciclo automático as contas com autenticação recusada duas ou mais vezes; `get_active_email_configs_for_sync(respeitar_recuo=True)` aplica-o aos três sincronizadores. `send_email` devolve `error_code`/`account_email` e `descrever_falha_de_envio` compõe a mensagem.
 
 **Minuta assinada.** `services/minuta_pdf.build_signed_minuta_pdf` (platypus, mesma pipeline `_html_to_flowables` do PDF pré-preenchido); `rgpd_service._build_minuta_pdf` delega. Alinhamento por classes `ql-align-*` (`rgpd_pdf._atributo_permitido`, `_estilo_de_alinhamento_para_classe`).
+
+## Hierarquia de Perfis: Master global, o resto local (adenda de RBAC ao Bloco 5)
+
+**Os 9 perfis.** `master`, `admin`, `ceo`, `diretor`, `administrativo`, `consultor`, `intermediario`, `parceiro` e `indexacao` («Index» no ecrã; o valor guardado não muda — `models.auth.normalizar_papel`). `UserRoleEnum`/`CompanyRoleEnum`/`VALID_ROLES` (frontend) dizem o mesmo e há um teste que cruza as duas linguagens.
+
+**Duas perguntas que não se misturam.** (1) *Guarda de papel* (`require_roles`/`effective_role_is_allowed`): o Master passa sempre; o Admin passa tudo menos o declarado só-Master (`require_roles([UserRole.MASTER])` / `require_master()`). (2) *Âmbito de dados* (`tenant_network`): `TenantScope.sem_fronteira` só o liga `resolve_tenant_scope` para o Master a trabalhar COMO Master (perfil activo, não o da conta); então `build_network_scope_condition == {}` e `documento_no_ambito == True`. Admin e CEO resolvem a rede pelos UCR, como o Diretor. `services/role_scope.py` é o ponto único (`PAPEIS_GLOBAIS`, `e_papel_global`, `utilizador_e_global`, `pode_conceder_papel`); as constantes `*SEM_FRONTEIRA*` (calendário, imóveis, visitas, finanças, emails, partilhas, origem financeira, Explorador S3, fases desconhecidas) derivam dele.
+
+**Só-Master (infraestrutura e configuração global).** Logs, backups e `/restore`, índices, encriptação, mapeamentos e religamento S3, jobs de fundo, IA (treino/modelos/cache), migrações, diagnósticos, limpezas, anonimização em lote, edição de fases (workflow) e dos modelos de tarefas por fase, defaults por cargo, política de histórico, `PUT /finance/config` (global), criar/apagar empresas e mudar a REDE de uma, configuração `default`, preferências de notificação.
+
+**Gestão de utilizadores (`user_management_scope`).** `carregar_utilizador_gerivel` (404 se o alvo está fora do âmbito ou é um perfil global), `exigir_papeis_concediveis` (só o Master concede `master`), `exigir_empresas_concediveis`, `ids_dos_autores_no_ambito` (para registos que levam o autor e não a rede). Ligada a: editar/eliminar/personificar utilizador, email-config do alvo, permissões por utilizador, o router `/admin/user-company-roles` e `POST /admin/users/{id}/roles` (o `actor` é argumento OBRIGATÓRIO), actualizar/ler empresas e as configs de email por empresa.
+
+**Por id, não só por listagem.** `process_scope_guard.exigir_processo_no_ambito` é dependência do router de processos: o `{process_id}` do caminho tem de ser da rede de quem pede (404 igual ao de «não existe»), cobrindo as ~40 rotas e as que vierem. Antes, `can_view_process` respondia «sim» a qualquer staff.
+
+**Relatório de segunda-feira.** `relatorio_semanal_destinos`: UM relatório por rede, para a gestão (CEO/Admin) dessa rede; o consolidado só para os Master (`CEO_EMAIL` filtrado). Marca de «já enviei» por destino. A página «Relatório Semanal» resolve o âmbito pelo utilizador autenticado (`executive_report.resolver_ambito`), nunca por parâmetro.
+
+**Migração.** `scripts/promote_to_master.py --emails … [--aplicar]` (omissão: só mostra). Sem este passo no deploy ninguém é Master.
+

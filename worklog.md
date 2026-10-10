@@ -1,4 +1,37 @@
 ---
+Task ID: adenda-rbac-master-global-admin-local
+Agent: Cloud Agent
+Task: ADENDA DE ARQUITECTURA — hierarquia de perfis (Master global, Admin/CEO locais, 9 perfis) e isolamento do Relatório Semanal
+
+Date: 2026-10-10
+
+Work Log:
+
+HIERARQUIA — `services/role_scope.py` (ponto único), `models/auth.py`, `services/auth.py`, `services/tenant_network.py`
+- Os 9 perfis do sistema são `master`, `admin`, `ceo`, `diretor`, `administrativo`, `consultor`, `intermediario`, `parceiro` e `indexacao` («Index» no ecrã; `normalizar_papel` mapeia o alias). **Só o Master é global** (`PAPEIS_GLOBAIS`). O Admin deixou de atravessar redes: as ~15 constantes `{ADMIN, CEO}` que diziam «sem fronteira» (calendário, emails, origem financeira, partilhas, explorador S3, reconciliação de fases…) passaram a `{MASTER}`. `TenantScope.sem_fronteira` só o liga `resolve_tenant_scope`, pelo perfil ACTIVO, e entra nas chaves de cache (`stats_scope`, `executive_report`) — um âmbito sem listas é «nada» para um utilizador comum e «tudo» para o Master.
+- **Guarda de papel ≠ âmbito de dados.** `require_roles`: Master passa sempre; Admin passa tudo menos o declarado só-Master (`effective_role_is_allowed`). As ~108 rotas «só Admin» de infraestrutura (logs, backups, índices, encriptação, S3, jobs, IA, migrações, diagnósticos, restore, anonimização em lote, empresas, política de histórico, defaults de cargo) são hoje só-Master. Inventário por AST falha por omissão se uma lista com `ADMIN` esquecer o `MASTER`.
+
+ESCALADA DE PRIVILÉGIOS — `services/user_management_scope.py`
+- `require_roles` autorizava o verbo: `PUT/DELETE /admin/users/{id}` e `POST /admin/impersonate/{id}` não verificavam o objecto (o CEO de uma empresa redefinia a password de qualquer utilizador pelo id); o router `/admin/user-company-roles` e `POST /admin/users/{id}/roles` permitiam **dar-se a si próprio o cargo `master`**; `PUT /admin/companies/{id}` deixava mudar o `network_id`. Hoje: alvo no âmbito (404, nunca 403), perfil local nunca é alvo de um global, só o Master concede `master`, só se concede acesso a empresas do próprio âmbito. Serviços de UCR e empresas exigem `actor` kw-only OBRIGATÓRIO.
+- Superfícies que operavam sobre a colecção inteira e foram escopadas: RGPD, registos de clientes, estatísticas e parados do painel, `audit_logs`/trilho (filtra por autores no âmbito), painel financeiro, configs de email por empresa, itens eliminados, mapeamentos S3.
+- **Achado a verificar o Admin:** o pedido de processo POR ID estava aberto a qualquer staff (`can_view_process` responde sim a todos). Fechado com uma dependência do router `/processes` (`process_scope_guard`): 404 igual ao de «não existe», rede convidada conta, Master passa sem ler a BD.
+
+RELATÓRIO SEMANAL — `relatorio_semanal_destinos.py`, `scheduled_tasks.send_weekly_ceo_report`
+- Um relatório por REDE, enviado à gestão dessa rede (CEO/Admin com acesso numa empresa da rede, mais contas antigas só com `users.company`). Quem gere duas redes recebe dois emails. O consolidado vai só aos Master; um endereço de `CEO_EMAIL` que não seja Master activo é ignorado com aviso. A marca de «já enviei» é por destino. A página «Relatório Semanal» já resolvia o âmbito pelo utilizador autenticado; há guarda a impedir que algum handler aceite `company_id`/`scope` do pedido.
+- **Efeito no 1.º deploy:** as marcas por destino são novas, logo o primeiro envio de segunda-feira pode repetir-se por destino.
+
+MIGRAÇÃO — `scripts/promote_to_master.py` (`services/master_promotion.py`)
+- **Passo operacional obrigatório:** nenhuma conta existente é Master. Omissão = só mostra; emails EXPLÍCITOS; um plano com qualquer recusa não escreve nada; deixa rasto em `audit_logs`. `seed.py` e o `conftest` passam `admin@sistema.pt` a Master.
+
+FRONTEND — `utils/roleUtils.js` (9 perfis, `hasRole` com master ⊇ admin, `isMaster`, `grantableRoles`), rotas só-Master em `App.js`, separadores de administração, `CompaniesAdminTab` sem criar empresa nem escolher rede para não-Master, `UsersAccessAdminTab` sem oferecer `master`.
+
+VERIFICAÇÃO
+- 28 mutações sobre as paredes novas: 27 mortas à primeira; **1 sobreviveu** (esconder o Master a um perfil local) porque a consulta de âmbito tem o mesmo `$nin` — duas camadas a dizer o mesmo. Era teste fraco, não mutação perdida: o teste novo neutraliza a segunda camada e a mutação morre.
+- Decisões que mudam comportamento: edição de fases e modelos de tarefas por fase passam a só-Master; o Admin deixa de poder cancelar envios pendentes, apagar anotações e ver jobs de importação de outrem (só o autor e o Master).
+- **Não varrido (D-31):** rotas por id de clientes e tarefas; a fronteira de dados é a REDE (Power e Precision partilham-na), não a empresa.
+- Cobertura: `test_hierarquia_de_perfis.py`, `test_admin_fronteira_de_empresa.py`, `test_relatorio_semanal_por_rede.py`, `test_processo_por_id_na_rede.py`, `src/utils/hierarquiaDePerfis.test.js`, `CompaniesAdminTab.master.test.jsx`.
+
+---
 Task ID: bloco-5-testes-externos-e-minor-fixes
 Agent: Cloud Agent
 Task: BLOCO 5 — Testes Externos e Minor Fixes (integrações do Estado, scraper de visitas, autenticação dos balcões, minuta)

@@ -223,7 +223,7 @@ class LazyChunkErrorBoundary extends Component {
 import "./App.css";
 
 // Admin roles for automation and system config
-const ADMIN_ROLES = ["admin", "ceo"];
+const ADMIN_ROLES = ["master", "admin", "ceo"];
 
 function ProtectedRoute({ children, allowedRoles, requiredCapability }) {
   const { user, loading, effectiveRole } = useAuth();
@@ -370,7 +370,7 @@ function App() {
           <Route
             path="/admin"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Dashboard Operacional">
                   <AdminDashboard />
                 </RouteBoundary>
@@ -382,7 +382,7 @@ function App() {
           <Route
             path="/admin/organizacao"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Administração — Empresas e Acessos">
                   <OrganizationAdminPage />
                 </RouteBoundary>
@@ -394,7 +394,7 @@ function App() {
           <Route
             path="/admin/desempenho"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Desempenho da Equipa">
                   <TeamPerformanceDashboard />
                 </RouteBoundary>
@@ -406,7 +406,7 @@ function App() {
           <Route
             path="/admin/relatorio-semanal"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Relatório Semanal">
                   <WeeklyExecutiveReport />
                 </RouteBoundary>
@@ -418,7 +418,7 @@ function App() {
           <Route
             path="/system-admin"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Painel de Administração do Sistema">
                   <SystemAdminPanel />
                 </RouteBoundary>
@@ -561,7 +561,7 @@ function App() {
           <Route
             path="/meus-clientes"
             element={
-              <ProtectedRoute allowedRoles={["consultor", "intermediario", "diretor", "admin", "ceo", "indexacao"]}>
+              <ProtectedRoute allowedRoles={["consultor", "intermediario", "diretor", "master", "admin", "ceo", "indexacao"]}>
                 <RouteBoundary name="Meus Clientes">
                   <MyClientsPage />
                 </RouteBoundary>
@@ -630,7 +630,7 @@ function App() {
           <Route
             path="/workflow-estados"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Estados de Workflow">
                   <WorkflowStatusesPage />
                 </RouteBoundary>
@@ -662,7 +662,7 @@ function App() {
           <Route
             path="/templates"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "administrativo"]}>
                 <RouteBoundary name="Templates">
                   <TemplatesPage />
                 </RouteBoundary>
@@ -698,7 +698,7 @@ function App() {
           <Route
             path="/configuracoes"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Configurações do Sistema">
                   <SystemConfigPage />
                 </RouteBoundary>
@@ -710,7 +710,7 @@ function App() {
           <Route
             path="/contas-email"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Contas de Email">
                   <EmailAccountsPage />
                 </RouteBoundary>
@@ -722,7 +722,7 @@ function App() {
           <Route
             path="/configuracoes/ia"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Configuração IA">
                   <AIConfigPage />
                 </RouteBoundary>
@@ -734,7 +734,7 @@ function App() {
           <Route
             path="/configuracoes/treino-ia"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Treino IA">
                   <AITrainingPage />
                 </RouteBoundary>
@@ -746,7 +746,7 @@ function App() {
           <Route
             path="/admin/processos-background"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Processos em Background">
                   <BackgroundJobsPage />
                 </RouteBoundary>
@@ -758,7 +758,7 @@ function App() {
           <Route
             path="/configuracoes/notificacoes"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Configurações de Notificações">
                   <NotificationSettingsPage />
                 </RouteBoundary>
@@ -782,7 +782,7 @@ function App() {
           <Route
             path="/admin/logs"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Logs do Sistema">
                   <UnifiedLogsPage />
                 </RouteBoundary>
@@ -800,7 +800,7 @@ function App() {
           <Route
             path="/admin/backups"
             element={
-              <ProtectedRoute allowedRoles={["admin"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Backups">
                   <BackupsPage />
                 </RouteBoundary>
@@ -812,7 +812,7 @@ function App() {
           <Route
             path="/diagnosticos"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master"]}>
                 <RouteBoundary name="Diagnósticos">
                   <DiagnosticsPage />
                 </RouteBoundary>
@@ -824,7 +824,7 @@ function App() {
           <Route
             path="/minutas"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]}>
                 <RouteBoundary name="Minutas">
                   <MinutasPage />
                 </RouteBoundary>
@@ -867,7 +867,7 @@ function App() {
           <Route
             path="/ai-insights"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="AI Insights">
                   <AIInsightsPage />
                 </RouteBoundary>
@@ -879,7 +879,7 @@ function App() {
           <Route
             path="/revisao-dados-ia"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "administrativo"]}>
                 <RouteBoundary name="Revisão de Dados IA">
                   <AIDataReviewPage />
                 </RouteBoundary>
@@ -891,7 +891,7 @@ function App() {
           <Route
             path="/auditoria"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Auditoria">
                   <AuditTrailPage />
                 </RouteBoundary>
@@ -903,7 +903,7 @@ function App() {
           <Route
             path="/rgpd-admin"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "administrativo"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "administrativo"]}>
                 <RouteBoundary name="Administração RGPD">
                   <RGPDAdminPage />
                 </RouteBoundary>
@@ -915,7 +915,7 @@ function App() {
           <Route
             path="/admin/migracao-rgpd"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "diretor"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "diretor"]}>
                 <RouteBoundary name="Migração RGPD">
                   <RGPDMigrationPage />
                 </RouteBoundary>
@@ -973,7 +973,7 @@ function App() {
           <Route
             path="/ficheiros"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]}>
                 <RouteBoundary name="Explorador de Ficheiros">
                   <FilesExplorerPage />
                 </RouteBoundary>

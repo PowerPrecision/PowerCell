@@ -30,7 +30,7 @@ router = APIRouter(prefix="/backup", tags=["Backup"])
 
 @router.get("/statistics")
 async def get_statistics(
-    current_user: dict = Depends(require_roles([UserRole.ADMIN])),
+    current_user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     return await run_get_statistics(current_user)
 
@@ -39,7 +39,7 @@ async def get_statistics(
 async def trigger_backup(
     request: BackupRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN])),
+    current_user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     return await run_trigger_backup(request, background_tasks, current_user)
 
@@ -47,21 +47,21 @@ async def trigger_backup(
 @router.get("/history")
 async def get_history(
     limit: int = 20,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN])),
+    current_user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     return await run_get_history(current_user, limit=limit)
 
 
 @router.post("/verify")
 async def verify_backups(
-    current_user: dict = Depends(require_roles([UserRole.ADMIN])),
+    current_user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     return await run_verify_backups(current_user)
 
 
 @router.get("/config")
 async def get_backup_config(
-    current_user: dict = Depends(require_roles([UserRole.ADMIN])),
+    current_user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     return await run_get_backup_config(current_user)
 
@@ -69,7 +69,7 @@ async def get_backup_config(
 @router.post("/run-now")
 async def run_backup_now(
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN])),
+    current_user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     return await run_backup_now_svc(background_tasks, current_user)
 
@@ -77,7 +77,7 @@ async def run_backup_now(
 @router.get("/status/{backup_id}")
 async def get_backup_status(
     backup_id: str,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN])),
+    current_user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     return await run_get_backup_status(backup_id, current_user)
 
@@ -85,7 +85,7 @@ async def get_backup_status(
 @router.post("/restore-from-s3")
 async def restore_from_s3(
     data: dict,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN])),
+    current_user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     return await run_restore_from_s3(data, current_user)
 
@@ -93,6 +93,6 @@ async def restore_from_s3(
 @router.post("/restore")
 async def emergency_restore(
     data: dict,
-    current_user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO])),
+    current_user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     return await run_emergency_restore(data, current_user)

@@ -111,7 +111,7 @@ def assert_mark_indexed_permission(user_role: str, all_roles: list) -> None:
     from fastapi import HTTPException
 
     role = (user_role or "").lower()
-    allowed = {"indexacao", "admin", "ceo"}
+    allowed = {"indexacao", "master", "admin", "ceo"}
     if role not in allowed and not any(r in all_roles for r in allowed):
         raise HTTPException(
             status_code=403,

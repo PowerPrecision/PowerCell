@@ -45,6 +45,34 @@ from models.permissions import (
 logger = logging.getLogger(__name__)
 
 
+async def _condicao_de_processos(user: dict) -> dict:
+    """Âmbito de PROCESSOS de quem pede (`{}` só para o Master).
+
+    Os registos de clientes, as estatísticas e os processos parados são
+    consultas ao `db.processes` inteiro; sem esta condição, o CEO/Admin de
+    uma empresa listava (com dados pessoais) os clientes de todas as outras.
+    """
+    from services.tenant_network import build_tenant_process_condition
+
+    return await build_tenant_process_condition(user or {})
+
+
+def _com_ambito(query: dict, condicao: dict) -> dict:
+    from services.tenant_network import com_isolamento
+
+    return com_isolamento(condicao, query) if condicao else query
+
+
+async def _processo_gerivel(process_id: str, user: dict, projeccao: Optional[dict] = None) -> dict:
+    """O processo, se estiver no âmbito de quem actua; **404** caso contrário."""
+    from services.tenant_network import processo_no_ambito, resolve_tenant_scope
+
+    processo = await db.processes.find_one({"id": process_id}, projeccao)
+    if not processo or not processo_no_ambito(processo, await resolve_tenant_scope(user or {})):
+        raise HTTPException(status_code=404, detail="Registo não encontrado")
+    return processo
+
+
 
 async def run_get_system_error_logs(user: dict, page: int = 1, limit: int = 50, severity: str = None, component: str = None, error_type: str = None, resolved: bool = None, days: int = 7):
     """
@@ -339,6 +367,8 @@ async def run_list_client_registrations(user: dict, page: int = 1, limit: int = 
         query["source"] = source
     
     skip = (page - 1) * limit
+
+    query = _com_ambito(query, await _condicao_de_processos(user))
     
     total = await db.processes.count_documents(query)
     
@@ -360,13 +390,7 @@ async def run_get_client_registration(process_id: str, user: dict):
     """
     Obtém detalhes de um registo de cliente.
     """
-    process = await db.processes.find_one(
-        {"id": process_id},
-        {"_id": 0}
-    )
-    
-    if not process:
-        raise HTTPException(status_code=404, detail="Registo não encontrado")
+    process = await _processo_gerivel(process_id, user, {"_id": 0})
     
     return {"registration": process}
 
@@ -382,10 +406,7 @@ async def run_update_client_registration(process_id: str, data: dict, user: dict
     - Dados financeiros (financial_data)
     - Informações de contacto (client_name, client_email, client_phone)
     """
-    process = await db.processes.find_one({"id": process_id})
-    
-    if not process:
-        raise HTTPException(status_code=404, detail="Registo não encontrado")
+    process = await _processo_gerivel(process_id, user)
     
     update_data = {}
     
@@ -453,10 +474,7 @@ async def run_delete_client_registration(process_id: str, user: dict):
     NOTA: Esta ação agora faz soft delete em vez de hard delete.
     O processo é marcado como eliminado mas permanece na base de dados.
     """
-    process = await db.processes.find_one({"id": process_id})
-    
-    if not process:
-        raise HTTPException(status_code=404, detail="Registo não encontrado")
+    process = await _processo_gerivel(process_id, user)
     
     # Guardar log antes de eliminar (pelo ponto único do histórico)
     await log_history(
@@ -481,36 +499,40 @@ async def run_get_client_registrations_stats(user: dict):
     """
     Obtém estatísticas de registos de clientes.
     """
+    ambito = await _condicao_de_processos(user)
+
     # Total de registos
-    total = await db.processes.count_documents({})
+    total = await db.processes.count_documents(ambito)
     
     # Registos por origem
     by_source = await db.processes.aggregate([
+        *([{"$match": ambito}] if ambito else []),
         {"$group": {"_id": "$source", "count": {"$sum": 1}}}
     ]).to_list(10)
     
     # Registos por estado
     by_status = await db.processes.aggregate([
+        *([{"$match": ambito}] if ambito else []),
         {"$group": {"_id": "$status", "count": {"$sum": 1}}}
     ]).to_list(50)
     
     # Registos hoje
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    today_count = await db.processes.count_documents({
+    today_count = await db.processes.count_documents(_com_ambito({
         "created_at": {"$gte": today.isoformat()}
-    })
+    }, ambito))
     
     # Registos esta semana
     week_start = today - timedelta(days=today.weekday())
-    week_count = await db.processes.count_documents({
+    week_count = await db.processes.count_documents(_com_ambito({
         "created_at": {"$gte": week_start.isoformat()}
-    })
+    }, ambito))
     
     # Registos este mês
     month_start = today.replace(day=1)
-    month_count = await db.processes.count_documents({
+    month_count = await db.processes.count_documents(_com_ambito({
         "created_at": {"$gte": month_start.isoformat()}
-    })
+    }, ambito))
     
     return {
         "total": total,
@@ -523,8 +545,16 @@ async def run_get_client_registrations_stats(user: dict):
 
 
 async def run_get_audit_logs(user: dict, limit: int = 100, skip: int = 0, action: Optional[str] = None, entity: Optional[str] = None):
-    """O18 - Lista de audit logs para acções críticas do sistema."""
+    """O18 - Lista de audit logs para acções críticas do sistema.
+
+    Perfis locais só vêem as acções dos utilizadores do seu âmbito.
+    """
+    from services.user_management_scope import ids_dos_autores_no_ambito
+
     query = {}
+    autores = await ids_dos_autores_no_ambito(user)
+    if autores is not None:
+        query["performed_by_id"] = {"$in": autores}
     if action:
         query["action"] = action
     if entity:
@@ -552,13 +582,13 @@ async def run_get_stale_processes(user: dict, days: int = 14):
     
     cutoff = (now - timedelta(days=days)).isoformat()
     
-    stale = await db.processes.find({
+    stale = await db.processes.find(_com_ambito({
         "status": {"$nin": final_statuses},
         "$or": [
             {"updated_at": {"$lte": cutoff}},
             {"updated_at": {"$exists": False}, "created_at": {"$lte": cutoff}}
         ]
-    }, {"_id": 0, "id": 1, "client_name": 1, "status": 1, "consultor_name": 1, 
+    }, await _condicao_de_processos(user)), {"_id": 0, "id": 1, "client_name": 1, "status": 1, "consultor_name": 1, 
         "mediador_name": 1, "updated_at": 1, "created_at": 1}).to_list(500)
     
     # Calcular dias desde última actualização

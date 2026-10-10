@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 PAPEIS_QUE_ARQUIVAM = frozenset(
     {
-        "admin", "ceo", "diretor", "administrativo", "consultor",
+        "master", "admin", "ceo", "diretor", "administrativo", "consultor",
         "intermediario", "indexacao",
     }
 )

@@ -1226,7 +1226,7 @@ const ProcessDetails = () => {
       return;
     }
 
-    const canChangeStatus = ["consultor", "intermediario", "admin", "ceo", "diretor", "administrativo"].includes(user?.role?.toLowerCase());
+    const canChangeStatus = ["consultor", "intermediario", "master", "admin", "ceo", "diretor", "administrativo"].includes(user?.role?.toLowerCase());
     if (!canChangeStatus) {
       return;
     }
@@ -1359,7 +1359,7 @@ const ProcessDetails = () => {
       processUpdateData.financial_data = cleanedFinancialData;
       processUpdateData.titular2_data = cleanTitular2DataForSubmit(titular2Data);
 
-      if (hasAnyRole(user, ["consultor", "admin"])) {
+      if (hasAnyRole(user, ["consultor", "master", "admin"])) {
         processUpdateData.real_estate_data = cleanRealEstateDataForSubmit(realEstateData);
       }
 
@@ -1830,25 +1830,25 @@ const ProcessDetails = () => {
   // Permissões baseadas em actions (se disponíveis) ou fallback para role
   const hasEditProcess = userActions.length > 0 
     ? userActions.includes("edit_process") 
-    : ["cliente", "consultor", "intermediario", "admin", "ceo", "administrativo", "diretor"].includes(userRole);
+    : ["cliente", "consultor", "intermediario", "master", "admin", "ceo", "administrativo", "diretor"].includes(userRole);
   
   const canEditPersonal = hasEditProcess;
   const canEditFinancial = hasEditProcess || (userActions.includes("view_financials") && userRole === "indexacao");
   const canEditRealEstate = hasEditProcess && 
-    (userActions.length > 0 ? true : ["consultor", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
+    (userActions.length > 0 ? true : ["consultor", "master", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canEditCredit = hasEditProcess && 
-    (userActions.length > 0 ? true : ["intermediario", "admin", "ceo", "administrativo", "diretor", "consultor"].includes(userRole));
+    (userActions.length > 0 ? true : ["intermediario", "master", "admin", "ceo", "administrativo", "diretor", "consultor"].includes(userRole));
   const canChangeStatus = hasEditProcess && 
-    (userActions.length > 0 ? true : ["consultor", "intermediario", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
+    (userActions.length > 0 ? true : ["consultor", "intermediario", "master", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canManageDeadlines = hasEditProcess && 
-    (userActions.length > 0 ? true : ["consultor", "intermediario", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
-  const canDeleteClient = ["admin", "ceo", "diretor", "administrativo"].includes(userRole);
+    (userActions.length > 0 ? true : ["consultor", "intermediario", "master", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
+  const canDeleteClient = ["master", "admin", "ceo", "diretor", "administrativo"].includes(userRole);
   
   // PACOTE 9 — Toggle "Indexado" no header: visível apenas para perfis de
   // gestão/indexação (mesma regra do backend assert_mark_indexed_permission:
   // indexacao/admin/ceo). Usa o perfil ACTIVO (effectiveRole) e, em fallback,
   // hasAnyRole — o padrão já usado no Kanban para multi-perfis.
-  const INDEX_TOGGLE_ROLES = ["indexacao", "admin", "ceo"];
+  const INDEX_TOGGLE_ROLES = ["indexacao", "master", "admin", "ceo"];
   const canMarkIndexed =
     INDEX_TOGGLE_ROLES.includes((effectiveRole || userRole || "").toLowerCase()) ||
     hasAnyRole(user, INDEX_TOGGLE_ROLES);
@@ -1894,12 +1894,12 @@ const ProcessDetails = () => {
   // Permissões específicas por action
   const canManageTasks = userActions.length > 0 
     ? userActions.includes("manage_tasks") 
-    : ["admin", "ceo", "consultor", "intermediario", "diretor", "administrativo"].includes(userRole);
+    : ["master", "admin", "ceo", "consultor", "intermediario", "diretor", "administrativo"].includes(userRole);
   // Modo de visualização (read-only) quando não tem edit_process
   // OU quando o processo está em status terminal (eliminados, desistências, concluídos)
   // EXCEPÇÃO: admin e CEO NUNCA sofrem lock — podem editar processos concluídos retroativamente
   const BLOCKED_STATUSES = ["eliminados", "desistencias", "concluidos"];
-  const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status) && !['admin', 'ceo'].includes(userRole);
+  const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status) && !['master', 'admin', 'ceo'].includes(userRole);
 
   // PACOTE 11 (Eixo 4) — Proteção Soft-Delete: quando o processo está
   // eliminado (is_deleted OU status 'eliminado'), TODOS os inputs e botões
@@ -2281,7 +2281,7 @@ const ProcessDetails = () => {
             </span>
           </div>
         )}
-        {!isProcessLocked && ['admin', 'ceo'].includes(userRole) && process && BLOCKED_STATUSES.includes(process.status) && (
+        {!isProcessLocked && ['master', 'admin', 'ceo'].includes(userRole) && process && BLOCKED_STATUSES.includes(process.status) && (
           <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-800 dark:text-blue-200 text-sm">
             <Shield className="h-4 w-4 shrink-0" />
             <span>
@@ -2939,7 +2939,7 @@ const ProcessDetails = () => {
                 )}
 
                 {/* Conexões de Dados - Visível apenas para admin */}
-                {userRole === "admin" && (
+                {["master", "admin"].includes(userRole) && (
                   <Card className="mt-6 border-blue-200 bg-blue-50/50">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm flex items-center gap-2 text-blue-700">

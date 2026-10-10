@@ -202,10 +202,14 @@ class TestSoAdminECeoConfiguram:
         raise AssertionError(f"rota {funcao} não encontrada")
 
     @pytest.mark.parametrize("funcao", ["create_workflow_status", "update_workflow_status"])
-    def test_as_rotas_que_gravam_exigem_admin_ou_ceo(self, funcao):
+    def test_as_rotas_que_gravam_exigem_master(self, funcao):
+        """Adenda de RBAC (Out 2026): as fases são GLOBAIS (partilhadas por
+        todas as empresas), logo só o Master — o único perfil global — as
+        configura. Antes eram Admin/CEO, o que deixava o CEO de uma empresa
+        reescrever o fluxo de todas as outras."""
         linha = self._roles_da_rota(funcao)
-        assert "UserRole.ADMIN" in linha and "UserRole.CEO" in linha
-        for papel in ("DIRETOR", "CONSULTOR", "INTERMEDIARIO", "INDEXACAO", "ADMINISTRATIVO"):
+        assert "UserRole.MASTER" in linha
+        for papel in ("ADMIN", "CEO", "DIRETOR", "CONSULTOR", "INTERMEDIARIO", "INDEXACAO", "ADMINISTRATIVO"):
             assert f"UserRole.{papel}" not in linha, f"{papel} não pode configurar fases"
 
     def test_o_detector_le_mesmo_a_rota(self):

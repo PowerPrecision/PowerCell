@@ -667,7 +667,7 @@ async def move_file_to_category(
 @router.post("/expiry", response_model=DocumentExpiryResponse, responses={404: HTTP_404_RESPONSE})
 async def create_document_expiry(
     data: DocumentExpiryCreate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO]))
 ):
     """Registar validade de um documento."""
     return await run_create_document_expiry(data, user=user)
@@ -702,7 +702,7 @@ async def get_expiry_calendar_events(user: dict = Depends(get_current_user)):
 
 
 @router.delete("/expiry/{doc_id}", responses={404: HTTP_404_RESPONSE})
-async def delete_document_expiry(doc_id: str, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INDEXACAO]))):
+async def delete_document_expiry(doc_id: str, user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INDEXACAO]))):
     """Remove uma regra de validade de documento."""
     return await run_delete_document_expiry(doc_id)
 
@@ -866,7 +866,7 @@ async def ai_analyze_documents(
     process_id: str,
     files: List[UploadFile] = File(...),
     file_paths: Optional[str] = Form(None),
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
 ):
     """
     Analisa documentos com IA para extração de dados.
@@ -988,7 +988,7 @@ async def rename_document_smart(
 @router.post("/rename-all-smart/{process_id}", responses={403: {"description": "Forbidden"}, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def rename_all_documents_smart(
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
 ):
     """
     Renomeia TODOS os documentos de um processo usando nomes inteligentes IA.
@@ -1147,7 +1147,7 @@ async def bulk_download_documents(
 @router.get("/portal-requests/{process_id}")
 async def get_portal_document_requests(
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """
     Lista todos os pedidos de documentos do portal para um processo.
@@ -1193,7 +1193,7 @@ class DocumentRequestCreate(BaseModel):
 async def create_portal_document_request(
     process_id: str,
     data: DocumentRequestCreate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """
     Solicita um documento ao cliente via portal.
@@ -1232,7 +1232,7 @@ async def update_portal_document_request(
     process_id: str,
     document_id: str,
     data: DocumentStatusUpdate,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """
     Atualiza o status de um documento do portal.
@@ -1255,7 +1255,7 @@ async def update_portal_document_request(
 async def delete_portal_document_request(
     process_id: str,
     document_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """
     Remove um pedido de documento do portal.

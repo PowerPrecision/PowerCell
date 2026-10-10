@@ -319,7 +319,7 @@ const SystemConfigPage = ({ embedded = false }) => {
     );
     return embedded ? loadingContent : <DashboardLayout>{loadingContent}</DashboardLayout>;
   }
-  if (!hasAnyRole(user, ["admin", "ceo"])) {
+  if (!hasAnyRole(user, ["master", "admin", "ceo"])) {
     const accessDeniedContent = (
       <div className="text-center py-12">
         <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
@@ -335,13 +335,14 @@ const SystemConfigPage = ({ embedded = false }) => {
   const sections = Object.keys(fields).filter(key => key !== "email");
   // Qual secção o separador activo pede. Deriva do registo — ver
   // `SECCOES_DEDICADAS`: é o que garante que nunca se renderizam as duas.
-  // A configuração GLOBAL é exclusiva do administrador: o CEO só vê as secções
-  // genéricas da(s) sua(s) empresa(s). Um `?tab=` antigo que aponte para uma
-  // dedicada diz-se, em vez de abrir um ecrã de erros 403.
-  const isAdmin = hasRole(user, "admin");
-  const navegacao = seccoesDaNavegacao(isAdmin);
-  const SeccaoDedicada = isAdmin ? SECCOES_DEDICADAS[activeTab] : undefined;
-  const seccaoReservada = !isAdmin && Boolean(SECCOES_DEDICADAS[activeTab]);
+  // A configuração GLOBAL é exclusiva do MASTER (o único perfil global): o
+  // Admin e o CEO só vêem as secções genéricas da(s) sua(s) empresa(s). Um
+  // `?tab=` antigo que aponte para uma dedicada diz-se, em vez de abrir um
+  // ecrã de erros 403.
+  const isMaster = hasRole(user, "master");
+  const navegacao = seccoesDaNavegacao(isMaster);
+  const SeccaoDedicada = isMaster ? SECCOES_DEDICADAS[activeTab] : undefined;
+  const seccaoReservada = !isMaster && Boolean(SECCOES_DEDICADAS[activeTab]);
 
 
   const pageContent = (

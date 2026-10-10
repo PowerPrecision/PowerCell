@@ -22,6 +22,7 @@ from tests.unit.helpers_tenant import (  # noqa: F401
 
 PARCEIRO = {"id": "u-parc", "email": "p@x.pt", "role": "parceiro"}
 ADMIN = {"id": "u-adm", "email": "a@x.pt", "role": "admin"}
+MASTER = {"id": "u-mst", "email": "m@x.pt", "role": "master"}
 CEO = {"id": "u-ceo", "email": "c@x.pt", "role": "ceo"}
 # Apoio administrativo da Power — para a Caixa Geral.
 ADMINISTRATIVA = {"id": "u-adv", "email": "adv@power.pt", "role": "administrativo"}
@@ -109,9 +110,14 @@ class TestAExploracao:
 
 @pytest.mark.asyncio
 class TestAsRegras:
-    async def test_admin_e_ceo_atravessam_redes(self, mundo):
-        assert await _pode(mundo, E_DOMUS, ADMIN) is True
-        assert await _pode(mundo, E_POWER_GERAL, CEO) is True
+    async def test_so_o_master_atravessa_redes(self, mundo):
+        """Adenda de RBAC: o Master é o único perfil global."""
+        assert await _pode(mundo, E_DOMUS, MASTER) is True
+        assert await _pode(mundo, E_POWER_GERAL, MASTER) is True
+
+    async def test_admin_e_ceo_sao_locais_e_nao_atravessam_redes(self, mundo):
+        assert await _pode(mundo, E_DOMUS, ADMIN) is False
+        assert await _pode(mundo, E_DOMUS, CEO) is False
 
     async def test_o_diretor_le_dentro_da_sua_rede(self, mundo):
         assert await _pode(mundo, E_POWER, ANA) is True

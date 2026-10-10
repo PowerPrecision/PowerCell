@@ -20,7 +20,7 @@ async def run_get_ai_import_log(log_id: str):
 
 
 async def run_delete_ai_import_log(log_id: str, user: dict):
-    if user.get("role") not in ["admin", "ceo"]:
+    if user.get("role") not in ["master", "admin", "ceo"]:
         raise HTTPException(status_code=403, detail="Apenas administradores podem eliminar logs")
 
     result = await db.ai_import_logs.delete_one({"id": log_id})

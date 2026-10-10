@@ -230,7 +230,7 @@ const KanbanPage = () => {
               Quadro Geral de Processos
             </CardTitle>
             <CardDescription className="text-xs sm:text-sm flex items-center gap-2 flex-wrap">
-              {user?.name?.split(' ')[0]} · {hasRole(user, "admin") ? "Administrador" : hasRole(user, "ceo") ? "CEO" : hasRole(user, "consultor") ? "Consultor" : hasRole(user, "intermediario") ? "Intermediário" : hasRole(user, "indexacao") ? "Indexação" : hasRole(user, "diretor") ? "Diretor(a)" : hasRole(user, "administrativo") ? "Administrativo(a)" : user?.role}
+              {user?.name?.split(' ')[0]} · {user?.role === "master" ? "Master" : hasRole(user, "admin") ? "Administrador" : hasRole(user, "ceo") ? "CEO" : hasRole(user, "consultor") ? "Consultor" : hasRole(user, "intermediario") ? "Intermediário" : hasRole(user, "indexacao") ? "Indexação" : hasRole(user, "diretor") ? "Diretor(a)" : hasRole(user, "administrativo") ? "Administrativo(a)" : user?.role}
               {/* PACOTE BQ — Indicador visual para indexacao: vista scoped global */}
               {hasRole(user, "indexacao") && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-50 text-teal-700 border border-teal-200 dark:bg-teal-900/20 dark:text-teal-400 dark:border-teal-800" data-testid="kanban-indexacao-scoped-badge">

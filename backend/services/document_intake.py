@@ -54,7 +54,7 @@ CATEGORIAS_SEM_ESCOLHA = ("", "auto", "other", "outros")
 #: servidor devolvia-a na mesma, pelo que aqui passa a ser o servidor a
 #: decidir. Escrever na `Index` não exige poder lê-la (um consultor envia,
 #: não vê).
-PAPEIS_QUE_VEEM_O_INDEX = ("admin", "ceo", "diretor", "indexacao")
+PAPEIS_QUE_VEEM_O_INDEX = ("master", "admin", "ceo", "diretor", "indexacao")
 
 
 def _texto(valor: Any) -> str:

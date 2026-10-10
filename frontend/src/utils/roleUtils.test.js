@@ -65,6 +65,7 @@ describe("isAssignmentEligibleUser / filterAssignmentStaff", () => {
 describe("Pacote DW — org admin + UCR roles", () => {
   it("UCR_ASSIGNABLE_ROLES includes Index, administrativo and parceiro", () => {
     assert.deepEqual(UCR_ASSIGNABLE_ROLES, [
+      "master",
       "admin",
       "ceo",
       "diretor",
@@ -81,7 +82,8 @@ describe("Pacote DW — org admin + UCR roles", () => {
     assert.equal(ROLE_SHORT_LABELS.administrativo, "Administrativo");
     assert.equal(ROLE_SHORT_LABELS.parceiro, "Parceiro");
     assert.notEqual(ROLE_SHORT_LABELS.administrativo, ROLE_SHORT_LABELS.admin);
-    assert.equal(ROLE_LABELS.admin, "Administrador do Sistema");
+    assert.equal(ROLE_LABELS.admin, "Administrador da Empresa");
+    assert.equal(ROLE_LABELS.master, "Master (Global)");
     assert.equal(ROLE_LABELS.administrativo, "Apoio Administrativo");
     assert.equal(ROLE_LABELS.parceiro, "Parceiro");
     assert.equal(UCR_ASSIGNABLE_ROLES.includes("adm"), false);
@@ -106,7 +108,8 @@ describe("Pacote DW — org admin + UCR roles", () => {
   });
 
   it("hasNoClientPortfolio for admin, ceo and indexacao", () => {
-    assert.deepEqual(NO_CLIENT_PORTFOLIO_ROLES, ["admin", "ceo", "indexacao"]);
+    assert.deepEqual(NO_CLIENT_PORTFOLIO_ROLES, ["master", "admin", "ceo", "indexacao"]);
+    assert.equal(hasNoClientPortfolio("master"), true);
     assert.equal(hasNoClientPortfolio("admin"), true);
     assert.equal(hasNoClientPortfolio("CEO"), true);
     assert.equal(hasNoClientPortfolio("indexacao"), true);

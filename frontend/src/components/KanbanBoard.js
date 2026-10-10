@@ -188,7 +188,7 @@ const KanbanBoard = ({
   const [assigningProcess] = useState(null);
   
   // Verificar se o utilizador pode criar processos (qualquer staff)
-  const canCreateProcess = hasAnyRole(user, ['admin', 'ceo', 'consultor', 'intermediario', 'administrativo', 'diretor', 'indexacao']);
+  const canCreateProcess = hasAnyRole(user, ['master', 'admin', 'ceo', 'consultor', 'intermediario', 'administrativo', 'diretor', 'indexacao']);
 
   // === REACT QUERY - DATA FETCHING (QUERIES SEPARADAS) ===
   // Memoize filters to prevent infinite re-renders in dependent hooks

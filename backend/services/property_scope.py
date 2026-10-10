@@ -119,9 +119,9 @@ def pode_ver_imovel(
     """Pode este utilizador LER este imóvel?
 
     1. não há imóvel → não;
-    2. ADMIN/CEO → sim (reconciliam a pilha inteira, a por carimbar
-       incluída). O **diretor não** atravessa redes: tem passe livre
-       DENTRO da sua, que é o que o ramo 3 lhe dá;
+    2. MASTER → sim (único perfil global). O **diretor, o CEO e o Admin
+       não** atravessam redes: têm passe livre DENTRO da sua, que é o que
+       o ramo 3 lhes dá;
     3. o imóvel está no âmbito do utilizador → sim;
     4. o resto → não. **Falha fechada.**
     """
@@ -201,7 +201,7 @@ def condicao_dos_imoveis_visiveis(
 ) -> dict:
     """O recorte da LISTAGEM.
 
-    Para ADMIN/CEO é `{}` — e é o único sítio onde um `{}` que atravessa
+    Para o MASTER é `{}` — e é o único sítio onde um `{}` que atravessa
     redes é deliberado, como a nota do `run_get_deadlines` manda dizer.
     Para todos os outros é a condição de REDE, aplicada por fora com o
     `com_isolamento`.

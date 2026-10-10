@@ -69,7 +69,7 @@ async def run_get_communications_feed(user: dict):
     # ── Determinar process_ids do utilizador (filtragem por atribuição) ──
     process_ids = None  # None = sem restrição por atribuição
 
-    if role not in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
+    if role not in [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         # Consultores/Intermediários/Indexação: apenas os seus processos
         or_conditions = [
             {"assigned_consultor_id": user_id},

@@ -33,7 +33,7 @@ class UserHistoryBody(BaseModel):
 
 
 @router.get("")
-async def get_history_tracking(user: dict = Depends(require_roles([UserRole.ADMIN]))):
+async def get_history_tracking(user: dict = Depends(require_roles([UserRole.MASTER]))):
     """Os perfis e se cada um deixa rasto no histórico."""
     return await run_get_history_tracking(user)
 
@@ -42,7 +42,7 @@ async def get_history_tracking(user: dict = Depends(require_roles([UserRole.ADMI
 async def set_role_history(
     role: str,
     body: RoleHistoryBody,
-    user: dict = Depends(require_roles([UserRole.ADMIN])),
+    user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     """Liga/desliga o registo de um perfil. `indexacao` é sempre recusado."""
     return await run_set_role_history(role, body.enabled, user)
@@ -53,7 +53,7 @@ async def list_users_history(
     search: Optional[str] = Query(None, description="Nome ou email"),
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=100),
-    user: dict = Depends(require_roles([UserRole.ADMIN])),
+    user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     """Utilizadores com o override pessoal e o estado efectivo."""
     return await run_list_users_history(search=search, page=page, size=size)
@@ -63,7 +63,7 @@ async def list_users_history(
 async def set_user_history(
     user_id: str,
     body: UserHistoryBody,
-    user: dict = Depends(require_roles([UserRole.ADMIN])),
+    user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
     """Liga/desliga o registo de uma pessoa (`enabled: null` remove o override)."""
     return await run_set_user_history(user_id, body.enabled, user)

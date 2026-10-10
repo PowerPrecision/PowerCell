@@ -269,7 +269,7 @@ async def run_list_clients(
     status_map = {s["name"]: s for s in workflow_statuses}
     
     # Se show_all=True OU é admin/ceo/diretor, mostrar todos
-    if show_all or user_role in ["admin", "ceo", "diretor"]:
+    if show_all or user_role in ["master", "admin", "ceo", "diretor"]:
         # Mostrar todos os clientes da empresa
         process_query = {}
         # Os filtros que são do PROCESSO (e não do cliente): valem também para o

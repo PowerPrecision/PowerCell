@@ -279,7 +279,7 @@ async def link_clients_after_process_create(
 def assert_can_create_staff_process(role: str) -> None:
     """Roles permitidos em POST /create-client (role EFECTIVA — Pacote 9)."""
     allowed = [
-        UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
+        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
         UserRole.INTERMEDIARIO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR,
     ]
     if role not in allowed:

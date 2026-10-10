@@ -29,7 +29,7 @@ const UnifiedDocumentsPanel = ({ processId, clientName, onAIDataExtracted, onDoc
   // O separador "Links" só é visível para admin e CEO
   const canSeeLinks = useMemo(() => {
     const role = (effectiveRole || "").toLowerCase();
-    return role === "admin" || role === "ceo";
+    return role === "master" || role === "admin" || role === "ceo";
   }, [effectiveRole]);
 
   // PACOTE BL — Verificação de acesso à categoria "Index" (pasta cofre).
@@ -39,7 +39,7 @@ const UnifiedDocumentsPanel = ({ processId, clientName, onAIDataExtracted, onDoc
   const canSeeIndexCategory = useMemo(() => {
     if (!user) return false;
     const role = (user.role || "").toLowerCase();
-    return ["admin", "ceo", "diretor", "indexacao"].includes(role);
+    return ["master", "admin", "ceo", "diretor", "indexacao"].includes(role);
   }, [user]);
 
   // Se o utilizador não tem acesso ao tab Links e está nele, voltar ao files

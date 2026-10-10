@@ -46,6 +46,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
 from database import db
+from services.role_scope import PAPEIS_GLOBAIS
 from services.history import _is_stealth_user, log_history
 from services.tenant_access_context import resolver_papel_efectivo
 from services.tenant_network import (
@@ -69,9 +70,9 @@ ROTULOS = {
     TIPO_ANGARIACAO: "Foi angariado por um utilizador específico",
 }
 
-PAPEIS_DE_GESTAO = ("admin", "ceo", "diretor")
+PAPEIS_DE_GESTAO = ("master", "admin", "ceo", "diretor")
 #: Atravessam redes (reconciliam a pilha inteira).
-PAPEIS_SEM_FRONTEIRA = ("admin", "ceo")
+PAPEIS_SEM_FRONTEIRA = tuple(sorted(PAPEIS_GLOBAIS))
 
 ERRO_PROCESSO_NAO_ENCONTRADO = "Processo não encontrado"
 ERRO_SEM_PERMISSAO = "Só a gestão (administração, CEO e direcção) vê e altera a origem financeira."

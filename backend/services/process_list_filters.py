@@ -154,7 +154,7 @@ def build_role_visibility_conditions(
                     {"assigned_mediador_id": user_id},
                 ])
             elif r in [
-                UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO,
+                UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO,
                 UserRole.DIRETOR, UserRole.INDEXACAO,
             ]:
                 # Indexação: quadro geral da rede (Bloco 2) — a rede é
@@ -170,7 +170,7 @@ def build_role_visibility_conditions(
     # Indexação vê o mesmo âmbito do Kanban (Bloco 2, ponto 18): a lista
     # geral da sua rede, não só a fila. A fronteira de rede não sai daqui.
     if role in [
-        UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO,
+        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO,
         UserRole.DIRETOR, UserRole.INDEXACAO,
     ]:
         return []
@@ -881,7 +881,7 @@ def build_kanban_query(
 # todos os clientes da plataforma nesta vista (nem os que eventualmente
 # estejam atribuídos a si enquanto cargo operacional).
 NO_CLIENT_PORTFOLIO_ROLES = frozenset({
-    UserRole.ADMIN,
+    UserRole.MASTER, UserRole.ADMIN,
     UserRole.CEO,
     UserRole.INDEXACAO,
 })

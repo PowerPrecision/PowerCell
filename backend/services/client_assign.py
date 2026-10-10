@@ -120,7 +120,7 @@ async def run_assign_client_to_user(
     
     
     # Determinar utilizador de destino
-    if user_role in ["admin", "ceo", "diretor"]:
+    if user_role in ["master", "admin", "ceo", "diretor"]:
         target_user_id = assign_to_user_id or user_id
     else:
         target_user_id = user_id  # Apenas a si próprio
@@ -140,7 +140,7 @@ async def run_assign_client_to_user(
     if (
         existing_assignee
         and existing_assignee != target_user_id
-        and user_role not in ("admin", "ceo", "diretor")
+        and user_role not in ("master", "admin", "ceo", "diretor")
     ):
         raise HTTPException(
             status_code=409,

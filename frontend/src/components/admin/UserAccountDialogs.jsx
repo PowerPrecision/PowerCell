@@ -10,6 +10,7 @@ import {
   PRIMARY_ROLE_OPTIONS,
   ROLE_LABELS,
   UCR_ASSIGNABLE_ROLES,
+  grantableRoles,
 } from "../../utils/roleUtils";
 import { Button } from "../ui/button";
 import {
@@ -126,7 +127,11 @@ export function UserCreateDialog({
   onSubmit,
   saving,
   companies = [],
+  isMaster = false,
 }) {
+  const viewerRole = isMaster ? "master" : "";
+  const perfisPrincipais = grantableRoles(viewerRole, PRIMARY_ROLE_OPTIONS);
+  const cargosPorEmpresa = grantableRoles(viewerRole, UCR_ASSIGNABLE_ROLES);
   const [form, setForm] = useState({ ...EMPTY_USER_FORM });
   const [acessos, setAcessos] = useState([{ ...LINHA_DE_ACESSO_VAZIA }]);
   const isParceiro = form.role === "parceiro";
@@ -255,7 +260,7 @@ export function UserCreateDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PRIMARY_ROLE_OPTIONS.map((role) => (
+                {perfisPrincipais.map((role) => (
                   <SelectItem key={role} value={role}>
                     {ROLE_LABELS[role]}
                   </SelectItem>
@@ -315,7 +320,7 @@ export function UserCreateDialog({
                             />
                           </SelectTrigger>
                           <SelectContent>
-                            {UCR_ASSIGNABLE_ROLES.map((cargo) => (
+                            {cargosPorEmpresa.map((cargo) => (
                               <SelectItem key={cargo} value={cargo}>
                                 {ROLE_LABELS[cargo] || cargo}
                               </SelectItem>

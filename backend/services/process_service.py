@@ -104,7 +104,7 @@ def can_view_process(user: dict, process: dict) -> bool:
     
     # Todos os staff podem ver todos os processos
     # Indexação incluído pois precisa de ver todos para atribuir processos
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]
+    staff_roles = ["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]
     if user_role in staff_roles:
         return True
     
@@ -163,11 +163,11 @@ def can_edit_process_data(user: dict, process: dict) -> tuple:
             return False, "Indexação não tem permissão para editar dados do processo"
     
     # Staff roles que podem editar (verificar se tem action edit_process)
-    staff_edit_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]
+    staff_edit_roles = ["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]
     
     if user_role in staff_edit_roles:
         # Admin e CEO podem editar qualquer processo
-        if user_role in ["admin", "ceo"]:
+        if user_role in ["master", "admin", "ceo"]:
             return True, "OK"
         
         # Diretor e Administrativo podem editar todos os processos
@@ -214,7 +214,7 @@ def build_query_filter(user: dict) -> dict:
     
     # Staff (incluindo indexacao) veem todos os processos
     # Indexação precisa de ver todos para poder atribuir a consultores/intermediários
-    staff_roles = ["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]
+    staff_roles = ["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]
     if user_role in staff_roles:
         return {}
     

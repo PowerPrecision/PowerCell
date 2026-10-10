@@ -51,6 +51,7 @@ import {
   ROLE_LABELS,
   ROLE_SHORT_LABELS,
   UCR_ASSIGNABLE_ROLES,
+  grantableRoles,
 } from "../../utils/roleUtils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -101,7 +102,13 @@ import {
 const UNDO_WINDOW_MS = 8000;
 const LAST_UCR_TOAST = LAST_UCR_DELETE_MESSAGE;
 
-export default function UsersAccessAdminTab() {
+/**
+ * @param {boolean} isMaster Só o Master concede o perfil `master`. O servidor
+ *   recusa (403) a quem não é; aqui só se evita oferecê-lo. Por omissão
+ *   `false`: esquecer a prop esconde uma opção em vez de a mostrar a quem não
+ *   a pode usar.
+ */
+export default function UsersAccessAdminTab({ isMaster = false }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState(null);
@@ -232,8 +239,9 @@ export default function UsersAccessAdminTab() {
     : [];
 
   const availableCompanies = companiesForNewAccess(companies);
+  const cargosAtribuiveis = grantableRoles(isMaster ? "master" : "", UCR_ASSIGNABLE_ROLES);
   const availableRoles = rolesForNewAccess(
-    UCR_ASSIGNABLE_ROLES,
+    cargosAtribuiveis,
     newCompanyId,
     selectedRoles,
   );
@@ -343,7 +351,7 @@ export default function UsersAccessAdminTab() {
 
   const handleToggleUserStatus = async (user) => {
     const currentlyActive = isUserActive(user);
-    if (currentlyActive && user.role === "admin") {
+    if (currentlyActive && ["master", "admin"].includes(user.role)) {
       toast.error("Não é possível desactivar o utilizador administrador.");
       return;
     }
@@ -587,7 +595,7 @@ export default function UsersAccessAdminTab() {
                             </DropdownMenuItem>
                           ) : null}
                           <DropdownMenuItem
-                            disabled={active && user.role === "admin"}
+                            disabled={active && ["master", "admin"].includes(user.role)}
                             onClick={() => handleToggleUserStatus(user)}
                           >
                             {active ? (
@@ -632,6 +640,7 @@ export default function UsersAccessAdminTab() {
         onSubmit={handleCreateUser}
         saving={saving}
         companies={companies}
+        isMaster={isMaster}
       />
       <UserEditDialog
         open={editOpen}
@@ -731,7 +740,7 @@ export default function UsersAccessAdminTab() {
                   onValueChange={(id) => {
                     setNewCompanyId(id);
                     const nextRoles = rolesForNewAccess(
-                      UCR_ASSIGNABLE_ROLES,
+                      cargosAtribuiveis,
                       id,
                       selectedRoles,
                     );

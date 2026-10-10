@@ -352,7 +352,7 @@ async def resolve_email_config_for_sync(
 # esconderia a caixa a um cargo sem dar erro. Os dois nomes antigos ficam
 # como alias, porque o resto do código importa-os.
 CAIXA_GERAL_ACCOUNT_ID = "caixa-geral"
-CAIXA_GERAL_ROLES = frozenset({"diretor", "ceo", "admin", "administrativo"})
+CAIXA_GERAL_ROLES = frozenset({"diretor", "ceo", "master", "admin", "administrativo"})
 CAIXA_GERAL_INJECT_ROLES = CAIXA_GERAL_ROLES
 CAIXA_GERAL_ACCESS_ROLES = CAIXA_GERAL_ROLES
 

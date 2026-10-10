@@ -50,10 +50,10 @@ export default function OrganizationAdminPage() {
             </TabsTrigger>
           </TabsList>
           <TabsContent value="empresas" className="mt-4">
-            <CompaniesAdminTab />
+            <CompaniesAdminTab isMaster={effectiveRole === "master"} />
           </TabsContent>
           <TabsContent value="acessos" className="mt-4">
-            <UsersAccessAdminTab />
+            <UsersAccessAdminTab isMaster={effectiveRole === "master"} />
           </TabsContent>
         </Tabs>
       </div>

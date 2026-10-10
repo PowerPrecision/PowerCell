@@ -35,6 +35,7 @@ from services.tenant_network import (
     build_network_scope_condition,
     resolve_tenant_scope,
 )
+from services.role_scope import PAPEIS_GLOBAIS
 from utils.input_sanitization import escape_regex
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,10 @@ class EmpresasDoAmbito:
     #: do painel no dia do deploy, e ninguém a poderia voltar a associar
     #: a uma empresa porque deixava de a ver.
     inclui_sem_empresa: bool = True
+    #: O Master (único perfil global) não tem fronteira: vê todos os
+    #: utilizadores, os perfis globais incluídos. Todos os outros nunca
+    #: vêem um perfil global — ver `build_users_scope_query`.
+    sem_fronteira: bool = False
 
 
 async def empresas_do_ambito(user: dict) -> EmpresasDoAmbito:
@@ -84,7 +89,16 @@ async def empresas_do_ambito(user: dict) -> EmpresasDoAmbito:
     único de `services/tenant_network.py`. Duplicar a cadeia aqui daria
     dois sítios a divergir, que é a raiz do incidente de 2026-09-21.
     """
-    scope = await resolve_tenant_scope(user or {})
+    return await empresas_do_scope(await resolve_tenant_scope(user or {}))
+
+
+async def empresas_do_scope(scope) -> EmpresasDoAmbito:
+    """Como `empresas_do_ambito`, mas a partir de um âmbito já resolvido.
+
+    Existe porque o relatório semanal de segunda-feira não tem utilizador:
+    corre uma vez por REDE, com o âmbito dessa rede. Sem esta entrada, o
+    único caminho sem utilizador era o consolidado global.
+    """
     condicao = build_network_scope_condition(scope)
 
     # SEM `try/except` de propósito. Engolir a falha devolvia um âmbito
@@ -104,6 +118,7 @@ async def empresas_do_ambito(user: dict) -> EmpresasDoAmbito:
         nomes=nomes,
         fechado=True,
         inclui_sem_empresa=bool(scope.inclui_rede_de_omissao),
+        sem_fronteira=bool(scope.sem_fronteira),
     )
 
 
@@ -114,8 +129,14 @@ async def build_users_scope_query(ambito: EmpresasDoAmbito) -> dict:
     próprio utilizador (o NOME). Um utilizador antigo sem UCR só tem o
     segundo; ignorá-lo fá-lo-ia desaparecer do painel.
     """
-    if not ambito.fechado:
+    if not ambito.fechado or ambito.sem_fronteira:
         return {}
+
+    # Um perfil local NUNCA vê um perfil global na listagem: o Master não
+    # pertence a empresa nenhuma do ponto de vista de quem gere uma. Sem
+    # isto, um Master com UCR na empresa do Admin aparecia na tabela dele
+    # e podia ser editado (palavra-passe incluída).
+    sem_globais = {"role": {"$nin": sorted(PAPEIS_GLOBAIS)}}
 
     ramos: list[dict] = []
 
@@ -145,7 +166,9 @@ async def build_users_scope_query(ambito: EmpresasDoAmbito) -> dict:
         )
 
     # Fail-closed: sem ramos nenhuns, ZERO — nunca "sem filtro".
-    return {"$or": ramos} if ramos else QUERY_IMPOSSIVEL
+    if not ramos:
+        return QUERY_IMPOSSIVEL
+    return {"$and": [{"$or": ramos}, sem_globais]}
 
 
 def build_users_search_condition(termo) -> dict | None:

@@ -53,7 +53,7 @@ def _format_duration(seconds: float) -> str:
 async def get_background_jobs(
     status: Optional[str] = None,
     limit: int = Query(50, le=200),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Lista jobs em background com filtros opcionais."""
     query = {}
@@ -95,7 +95,7 @@ async def get_background_jobs(
 @router.get("/background-jobs/metrics")
 async def get_job_metrics(
     days: int = Query(7, ge=1, le=30),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Obtém métricas agregadas de jobs em background."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -186,7 +186,7 @@ async def get_job_metrics(
 @router.get("/background-jobs/notifications")
 async def get_job_notifications(
     unread_only: bool = True,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Obtém notificações de jobs (ex: jobs stuck)."""
     try:
@@ -209,7 +209,7 @@ async def get_job_notifications(
 @router.put("/background-jobs/notifications/{notification_id}/read")
 async def mark_notification_read(
     notification_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Marca notificação como lida."""
     result = await db.job_notifications.update_one(
@@ -222,7 +222,7 @@ async def mark_notification_read(
 
 @router.delete("/background-jobs/notifications/clear")
 async def clear_job_notifications(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Limpa todas as notificações de jobs."""
     result = await db.job_notifications.delete_many({})
@@ -232,7 +232,7 @@ async def clear_job_notifications(
 @router.get("/background-jobs/{job_id}")
 async def get_background_job_status(
     job_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Obtém estado de um job específico."""
     # Primeiro tentar memória (mais rápido)
@@ -251,7 +251,7 @@ async def get_background_job_status(
 @router.delete("/background-jobs/{job_id}")
 async def delete_background_job(
     job_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Remove um job em background."""
     success = await delete_job(job_id)
@@ -261,7 +261,7 @@ async def delete_background_job(
 @router.post("/background-jobs/{job_id}/cancel")
 async def cancel_background_job(
     job_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Cancela um job em execução."""
     job = background_processes.get(job_id)
@@ -282,7 +282,7 @@ async def cancel_background_job(
 @router.post("/background-jobs/{job_id}/pause")
 async def pause_background_job(
     job_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Pausa um job em execução."""
     try:
@@ -296,7 +296,7 @@ async def pause_background_job(
 @router.post("/background-jobs/{job_id}/resume")
 async def resume_background_job(
     job_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Retoma um job pausado."""
     try:
@@ -310,7 +310,7 @@ async def resume_background_job(
 @router.post("/background-jobs/cleanup-stuck")
 async def cleanup_stuck_jobs_endpoint(
     hours: int = Query(2, ge=1, le=24),
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Limpa jobs que estão stuck há mais de X horas."""
     result = await cleanup_stuck_jobs(hours)
@@ -319,7 +319,7 @@ async def cleanup_stuck_jobs_endpoint(
 
 @router.delete("/background-jobs")
 async def clear_finished_jobs(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Remove jobs terminados (success ou failed)."""
     result = await db.background_jobs.delete_many({
@@ -337,7 +337,7 @@ async def clear_finished_jobs(
 
 @router.post("/background-jobs/clear-all")
 async def clear_all_jobs(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Remove TODOS os jobs (usar com cuidado)."""
     result = await db.background_jobs.delete_many({})
@@ -364,7 +364,7 @@ class ProgressUpdateRequest(BaseModel):
 async def update_background_job_progress(
     job_id: str,
     request: ProgressUpdateRequest,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """
     Actualizar progresso de um job em background.

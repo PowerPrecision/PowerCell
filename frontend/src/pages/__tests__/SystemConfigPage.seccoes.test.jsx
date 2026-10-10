@@ -29,7 +29,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../contexts/AuthContext", () => ({
   useAuth: () => ({
     token: "t",
-    user: { id: "u1", name: "Admin", role: "admin" },
+    user: { id: "u1", name: "Master", role: "master" },
     effectiveCompanyId: "default",
   }),
 }));

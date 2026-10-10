@@ -100,7 +100,7 @@ async def delete_deadline(
     user: dict = Depends(
         require_roles([
             UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
-            UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
+            UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
             UserRole.ADMINISTRATIVO,
         ])
     ),

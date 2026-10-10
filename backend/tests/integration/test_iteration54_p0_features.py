@@ -35,7 +35,7 @@ class TestHealthAndAuth:
         data = response.json()
         assert "access_token" in data, "No access_token in response"
         assert "user" in data, "No user in response"
-        assert data["user"]["role"] == "admin", f"User role is {data['user']['role']}, expected admin"
+        assert data["user"]["role"] in ("admin", "master"), f"User role is {data['user']['role']}, expected admin"
         print("✓ Admin login OK")
 
 

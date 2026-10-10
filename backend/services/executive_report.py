@@ -83,7 +83,7 @@ MAX_CACHE = 64
 
 #: Perfis que entram no relatório. `indexacao` NUNCA: ver o ponto 4 acima.
 PAPEIS_DO_RELATORIO = (
-    "consultor", "intermediario", "administrativo", "diretor", "ceo", "admin",
+    "consultor", "intermediario", "administrativo", "diretor", "ceo", "master", "admin",
 )
 
 CAMPOS_DE_FASE = tuple(sorted(_STATUS_FIELDS))
@@ -207,16 +207,30 @@ async def resolver_ambito(user: Optional[dict]) -> Ambito:
         )
         return Ambito(chave="global")
 
-    from services.admin_users_scope import build_users_scope_query, empresas_do_ambito
-    from services.tenant_network import build_network_scope_condition, resolve_tenant_scope
+    from services.tenant_network import resolve_tenant_scope
 
-    scope = await resolve_tenant_scope(user)
-    consulta = await build_users_scope_query(await empresas_do_ambito(user))
+    return await resolver_ambito_do_scope(await resolve_tenant_scope(user))
+
+
+async def resolver_ambito_do_scope(scope) -> Ambito:
+    """O âmbito do relatório para um `TenantScope` (sem utilizador).
+
+    É o que o email de segunda-feira usa: corre UMA vez por rede, com o
+    âmbito dessa rede, e nunca mistura dados de duas. `sem_fronteira` (o
+    Master) entra na chave: um âmbito sem listas é «nada» para um
+    utilizador comum e «tudo» para o Master, e partilhar a chave de cache
+    serviria os números globais a quem não os pode ver.
+    """
+    from services.admin_users_scope import build_users_scope_query, empresas_do_scope
+    from services.tenant_network import build_network_scope_condition
+
+    consulta = await build_users_scope_query(await empresas_do_scope(scope))
     assinatura = "|".join([
         ",".join(sorted(scope.network_ids)),
         ",".join(sorted(scope.company_ids)),
         ",".join(sorted(scope.company_names)),
         "1" if scope.inclui_rede_de_omissao else "0",
+        "g" if scope.sem_fronteira else "l",
     ])
     return Ambito(
         chave=hashlib.sha256(assinatura.encode("utf-8")).hexdigest()[:16],

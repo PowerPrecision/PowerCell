@@ -149,7 +149,7 @@ export function estadoDaSincronizacao({ syncing, ultimaSinc, agora } = {}) {
  * caixa fantasma em todos os perfis de quem tem um cargo de gestão noutra
  * empresa. A parede é o servidor, isto só decide se o separador aparece.
  */
-export const PAPEIS_COM_CAIXA_GERAL = ["admin", "ceo", "diretor", "administrativo"];
+export const PAPEIS_COM_CAIXA_GERAL = ["master", "admin", "ceo", "diretor", "administrativo"];
 
 export function temDireitoACaixaGeral(papelEfectivo) {
   return PAPEIS_COM_CAIXA_GERAL.includes(String(papelEfectivo || "").toLowerCase());

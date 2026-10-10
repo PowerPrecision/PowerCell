@@ -12,7 +12,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const auth = { effectiveCompanyId: null, user: { id: "u1", name: "A", role: "admin" } };
+const auth = { effectiveCompanyId: null, user: { id: "u1", name: "A", role: "master" } };
 vi.mock("../../contexts/AuthContext", () => ({
   useAuth: () => ({ token: "t", ...auth }),
 }));
@@ -61,7 +61,7 @@ describe("SystemConfigPage — a empresa cuja configuração se mostra", () => {
     vi.clearAllMocks();
     urlsPedidos = [];
     auth.effectiveCompanyId = null;
-    auth.user = { id: "u1", name: "A", role: "admin" };
+    auth.user = { id: "u1", name: "A", role: "master" };
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url) => {
@@ -73,7 +73,7 @@ describe("SystemConfigPage — a empresa cuja configuração se mostra", () => {
 
   const pedidosDeConfig = () => urlsPedidos.filter((u) => /\/api\/system-config\?company_id=/.test(u));
 
-  it("o ADMIN vê o selector com TODAS as empresas do CRM", async () => {
+  it("o MASTER vê o selector com TODAS as empresas do CRM", async () => {
     apiMock.getSystemConfigCompanies.mockResolvedValue({ data: LISTA_ADMIN });
     montar();
 
@@ -125,10 +125,10 @@ describe("SystemConfigPage — a empresa cuja configuração se mostra", () => {
     expect(pedidosDeConfig().some((u) => u.includes("company_id=default"))).toBe(false);
   });
 
-  describe("a configuração GLOBAL é exclusiva do administrador", () => {
+  describe("a configuração GLOBAL é exclusiva do Master", () => {
     const SECCOES_GLOBAIS = ["nav-dashboard-slas", "nav-mandatory-documents", "nav-maintenance", "nav-portal", "nav-changelog"];
 
-    it("o ADMIN vê as secções dedicadas (globais) na navegação", async () => {
+    it("o MASTER vê as secções dedicadas (globais) na navegação", async () => {
       apiMock.getSystemConfigCompanies.mockResolvedValue({ data: LISTA_ADMIN });
       montar();
       await screen.findByTestId("config-section-generica");
@@ -137,8 +137,8 @@ describe("SystemConfigPage — a empresa cuja configuração se mostra", () => {
       }
     });
 
-    it("o CEO NÃO vê nenhuma — nem nos chips nem na barra lateral", async () => {
-      auth.user = { id: "u2", name: "C", role: "ceo" };
+    it.each(["ceo", "admin"])("o %s NÃO vê nenhuma — nem nos chips nem na barra lateral", async (papel) => {
+      auth.user = { id: "u2", name: "C", role: papel };
       auth.effectiveCompanyId = "cmp-power";
       apiMock.getSystemConfigCompanies.mockResolvedValue({
         data: { companies: [{ company_id: "cmp-power", company_name: "Power" }], total: 1 },

@@ -98,7 +98,9 @@ async def seed_users():
             "email": "admin@sistema.pt",
             "password": admin_password,
             "name": "Administrador Sistema",
-            "role": UserRole.ADMIN,
+            # Conta de sistema: o ÚNICO perfil global (Master). O Admin é
+            # local à empresa (adenda de RBAC) e não opera a infraestrutura.
+            "role": UserRole.MASTER,
             "phone": None,
             "company": "Sistema"
         },

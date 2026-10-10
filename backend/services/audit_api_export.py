@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from services.audit_trail_service import export_audit_trail
+from services.user_management_scope import ids_dos_autores_no_ambito
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,10 @@ async def run_export_audit(
     source=None,
     date_from=None,
     date_to=None,
+    *,
+    actor: dict,
 ):
+    autores = await ids_dos_autores_no_ambito(actor)
     try:
         csv_content = await export_audit_trail(
             process_id=process_id,
@@ -30,6 +34,7 @@ async def run_export_audit(
             source=source,
             date_from=date_from,
             date_to=date_to,
+            autores=autores,
         )
 
         filename = f"audit_trail_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"

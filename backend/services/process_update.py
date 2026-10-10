@@ -153,17 +153,17 @@ def build_role_update_permissions(role: str) -> dict[str, bool]:
     """Flags de permissão de edição por role no PUT do processo."""
     return {
         "can_update_personal": role in [
-            UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
+            UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
             UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
         ],
         "can_update_financial": role in [
-            UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
+            UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
             UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO,
         ],
         "can_update_real_estate": UserRole.can_act_as_consultor(role),
         "can_update_credit": UserRole.can_act_as_intermediario(role),
         "can_update_status": role in [
-            UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
+            UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
             UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
         ],
     }
@@ -385,7 +385,7 @@ def assert_process_editable_for_role(
     from fastapi import HTTPException
 
     fechadas = tuple(terminais) if terminais else tuple(INACTIVE_STATUSES)
-    is_admin_or_ceo = role in [UserRole.ADMIN, UserRole.CEO]
+    is_admin_or_ceo = role in [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]
     if status in fechadas and not is_admin_or_ceo:
         raise HTTPException(
             status_code=403,
@@ -786,7 +786,7 @@ def parse_update_request_meta(raw_body: Optional[dict]) -> tuple[dict, Any, bool
 
 def assert_can_reassign_primary_client(role: str) -> None:
     from fastapi import HTTPException
-    if role not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]:
+    if role not in [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]:
         raise HTTPException(
             status_code=403,
             detail=(

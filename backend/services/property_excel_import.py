@@ -534,7 +534,7 @@ async def run_get_import_job_status(
         raise HTTPException(status_code=404, detail="Job não encontrado")
     
     # Verificar se o utilizador tem acesso ao job
-    if job.get("user_id") != user.get("id") and user.get("role") != "admin":
+    if job.get("user_id") != user.get("id") and user.get("role") != "master":
         raise HTTPException(status_code=403, detail="Sem permissão para ver este job")
     
     return job

@@ -25,7 +25,7 @@ router = APIRouter(prefix="/admin/encryption", tags=["Admin - Encryption"])
 
 @router.get("/status")
 async def get_encryption_status(
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Obtém o status atual da encriptação."""
     return await run_get_encryption_status()
@@ -35,7 +35,7 @@ async def get_encryption_status(
 async def migrate_encryption(
     background_tasks: BackgroundTasks,
     dry_run: bool = False,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Executa a migração de encriptação em background."""
     return await run_migrate_encryption(background_tasks, dry_run, user)
@@ -45,7 +45,7 @@ async def migrate_encryption(
 async def migrate_encryption_sync(
     dry_run: bool = False,
     batch_size: int = 50,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Executa a migração de encriptação síncrona (para conjuntos pequenos)."""
     return await run_migrate_encryption_sync(dry_run, batch_size)
@@ -54,7 +54,7 @@ async def migrate_encryption_sync(
 @router.post("/verify/{process_id}")
 async def verify_process_encryption(
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Verifica se um processo específico tem dados encriptados."""
     return await run_verify_process_encryption(process_id)
@@ -63,7 +63,7 @@ async def verify_process_encryption(
 @router.post("/encrypt-process/{process_id}")
 async def encrypt_single_process(
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.ADMIN]))
+    user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
     """Encripta os dados sensíveis de um processo específico."""
     return await run_encrypt_single_process(process_id)

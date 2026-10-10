@@ -8,7 +8,7 @@
  */
 
 /** Perfis que o servidor admite a revogar (a casa dona é validada lá). */
-export const PAPEIS_QUE_REVOGAM = ["admin", "ceo", "diretor"];
+export const PAPEIS_QUE_REVOGAM = ["master", "admin", "ceo", "diretor"];
 
 export function podeRevogarPartilha(papel) {
   return PAPEIS_QUE_REVOGAM.includes(String(papel || "").trim().toLowerCase());

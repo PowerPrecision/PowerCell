@@ -163,7 +163,7 @@ async def test_create_and_update_company_config_encrypts_imap_password(fake_asyn
             imap_password="segredo123",
             smtp_server="smtp.exemplo.pt",
             smtp_port=465,
-        ))
+        ), actor={"id": "u-master", "role": "master", "effective_role": "master"})
         stored = await fake_async_db.company_email_configs.find_one(
             {"company_name": company_name}
         )
@@ -181,7 +181,7 @@ async def test_create_and_update_company_config_encrypts_imap_password(fake_asyn
             imap_password="",  # vazio -> não apaga a password existente
             smtp_server="smtp.exemplo.pt",
             smtp_port=465,
-        ))
+        ), actor={"id": "u-master", "role": "master", "effective_role": "master"})
         updated = await fake_async_db.company_email_configs.find_one(
             {"company_name": company_name}
         )

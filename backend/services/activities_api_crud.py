@@ -130,7 +130,7 @@ async def run_delete_activity(activity_id: str, user: dict):
     `user_id`) não tem dono e só o admin a rectifica: tratar "sem dono"
     como "de todos" abriria a trilha de auditoria a qualquer utilizador.
     """
-    e_admin = (user or {}).get("role") == UserRole.ADMIN
+    e_admin = (user or {}).get("role") in (UserRole.MASTER, UserRole.ADMIN)
     user_id = str((user or {}).get("id") or "")
 
     for nome in COLECCOES_DA_TRILHA:

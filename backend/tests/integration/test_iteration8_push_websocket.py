@@ -41,7 +41,7 @@ class TestHealthAndAuth:
         data = response.json()
         assert "access_token" in data
         assert data["user"]["email"] == ADMIN_EMAIL
-        assert data["user"]["role"] == "admin"
+        assert data["user"]["role"] in ("admin", "master")
         print("✓ Admin login passed")
 
 

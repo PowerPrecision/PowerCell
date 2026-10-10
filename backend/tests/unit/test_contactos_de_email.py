@@ -285,7 +285,9 @@ class TestAssociarEPesquisarPorRede:
         assert {e["id"] for e in res["emails"]} == {"e-power", "e-axb"}
 
     async def test_o_termo_nao_e_uma_expressao_regular(self, mundo):
-        admin = {"id": "u-adm", "email": "a@x.pt", "role": "admin"}
+        # O Master atravessa redes: o teste é sobre o ESCAPE do termo, não
+        # sobre o âmbito, e precisa de ver os emails das duas redes.
+        admin = {"id": "u-adm", "email": "a@x.pt", "role": "master"}
         with patch.object(crud, "db", mundo), patch.object(crud, "enrich_emails", AsyncMock(side_effect=lambda e: e)):
             res = await crud.run_search_emails("a.b", admin)
         assert [e["id"] for e in res["emails"]] == ["e-power"]

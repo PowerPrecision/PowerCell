@@ -16,7 +16,7 @@ export const ROTULOS_DA_ORIGEM = {
 };
 
 /** Perfis que o servidor admite (a casa dona é validada lá). */
-export const PAPEIS_DE_GESTAO = ["admin", "ceo", "diretor"];
+export const PAPEIS_DE_GESTAO = ["master", "admin", "ceo", "diretor"];
 
 export function podeGerirOrigemFinanceira(papel) {
   return PAPEIS_DE_GESTAO.includes(String(papel || "").trim().toLowerCase());

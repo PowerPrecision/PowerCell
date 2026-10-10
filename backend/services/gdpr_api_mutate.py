@@ -19,6 +19,23 @@ from services.gdpr import (
     gdpr_config,
 )
 from services.gdpr_api_models import AnonymizeRequest, BatchAnonymizeRequest
+from services.tenant_network import processo_no_ambito, resolve_tenant_scope, PROJECCAO_DO_CARIMBO
+from services.user_management_scope import carregar_utilizador_gerivel
+
+
+async def _exigir_processo_no_ambito(process_id: str, user: dict) -> None:
+    """404 se o processo não é da rede de quem actua (nem convidada).
+
+    `require_roles` autoriza o VERBO; sem esta verificação, o CEO de uma
+    empresa anonimizava ou exportava os dados pessoais de um cliente de
+    qualquer outra pelo id — uma operação irreversível (a anonimização).
+    """
+    processo = await db.processes.find_one(
+        {"id": process_id}, {"_id": 0, "id": 1, "partner_network_ids": 1, **PROJECCAO_DO_CARIMBO},
+    )
+    scope = await resolve_tenant_scope(user)
+    if not processo or not processo_no_ambito(processo, scope):
+        raise HTTPException(404, "Processo não encontrado")
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +45,15 @@ async def run_anonymize_single(request: AnonymizeRequest, current_user: dict):
         raise HTTPException(400, "Especifique process_id ou user_id")
 
     results = {}
+
+    # A fronteira vem ANTES de qualquer escrita (e do dry-run): o resultado
+    # de uma simulação sobre um processo alheio já confirma que ele existe.
+    if request.process_id:
+        await _exigir_processo_no_ambito(request.process_id, current_user)
+    if request.user_id:
+        await carregar_utilizador_gerivel(
+            request.user_id, current_user, projeccao={"_id": 0, "id": 1, "role": 1},
+        )
 
     if request.process_id:
         results["process"] = await anonymize_process_data(
@@ -89,7 +115,8 @@ async def run_anonymize_batch(request: BatchAnonymizeRequest, current_user: dict
     }
 
 
-async def run_export_data(process_id: str):
+async def run_export_data(process_id: str, current_user: dict):
+    await _exigir_processo_no_ambito(process_id, current_user)
     data = await export_personal_data(process_id=process_id)
 
     if not data.get("data"):
