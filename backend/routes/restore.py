@@ -10,13 +10,24 @@ from fastapi import APIRouter, Depends
 
 from models.auth import UserRole
 from services.auth import require_roles
+from services.by_id_scope import exigir_cliente_no_ambito, exigir_tarefa_no_ambito
+from services.process_scope_guard import exigir_processo_no_ambito
 from services.restore_api_process import run_restore_process
 from services.restore_api_client import run_restore_client
 from services.restore_api_document import run_restore_document
 from services.restore_api_task import run_restore_task
 from services.restore_api_list import run_list_deleted_items
 
-router = APIRouter(tags=["Restore"])
+# D-31: restaurar é um PEDIDO POR ID — `require_roles` autoriza o verbo, não o
+# objecto. Cada dependência só actua na rota que tem o seu id no caminho.
+router = APIRouter(
+    tags=["Restore"],
+    dependencies=[
+        Depends(exigir_processo_no_ambito),
+        Depends(exigir_cliente_no_ambito),
+        Depends(exigir_tarefa_no_ambito),
+    ],
+)
 
 
 @router.post("/processes/{process_id}/restore")

@@ -20,6 +20,7 @@ from services.document_process_resolve import (
     assert_s3_file_belongs_to_process,
 )
 from services.s3_content_quarantine import exigir_conteudo_valido
+from services.document_receipt_draft import agendar_apos_upload_do_cliente
 from services.portal_assigned_users import get_all_assigned_user_ids as _get_all_assigned_user_ids
 from services.portal_onboarding_advance import _trigger_onboarding_check
 from services.notification_service import send_notification_with_preference_check
@@ -689,6 +690,16 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
             logger.warning(f"[PORTAL] Erro ao registar histórico de upload: {e}")
 
         await _notify_assigned_team_upload(process, original_filename, category)
+
+        # Documento crítico (identificação, IRS, recibo de vencimento): rascunho
+        # de confirmação de receção para a equipa rever e enviar. Em segundo
+        # plano, só com processo, e nunca falha o upload — que já está feito.
+        # A categoria é a que o CLIENTE declarou (a guardada é sempre `Index`).
+        await agendar_apos_upload_do_cliente(
+            db, process=process, client=client,
+            categoria=original_category_from_client, custom_label=custom_label,
+            request_id=document_id,
+        )
 
     # INCIDENTE P0 — o `temporary_url` SAIU da resposta de propósito.
     # Era ele a carga útil do ataque: um URL pré-assinado de leitura devolvido

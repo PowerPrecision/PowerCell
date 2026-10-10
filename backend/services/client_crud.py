@@ -38,6 +38,7 @@ from services.client_uniqueness import assert_cliente_unico
 from services.process_service import get_next_process_number
 from services.s3_document_root import pasta_para_gravar
 from services.s3_storage import s3_service
+from services.tenant_network import resolve_tenant_stamp
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
     sanitize_string, sanitize_url, log_sanitization_rejection,
@@ -250,6 +251,18 @@ async def run_create_client(
             f"[CLIENT-CREATE] Auto-atribuição ao criador ({creator_role}): "
             f"cliente {client.id} → {user.get('id')}"
         )
+
+    # ── Carimbo de rede na ESCRITA (D-31) ──
+    # `POST /clients` nunca carimbou: o cliente nascia por carimbar e só o
+    # grupo incumbente o via nas listagens. Com o pedido por ID fechado à
+    # rede, um cliente criado por um utilizador de outra rede deixava de ter
+    # dono visível. `resolve_tenant_stamp` devolve `None` sem contexto de
+    # empresa, e aí NÃO se carimba (uma rede errada é permanente).
+    carimbo = await resolve_tenant_stamp(
+        user, active_company_id=user.get("active_company_id"),
+    )
+    if carimbo:
+        client_dict.update(carimbo)
 
     await db.clients.insert_one(client_dict)
 

@@ -282,6 +282,11 @@ class FinancialSimulatorConfig(BaseModel):
 class AutoDraftConfig(BaseModel):
     """Configuração de rascunhos automáticos de e-mails"""
     enabled: bool = False
+    # Rascunho de CONFIRMAÇÃO DE RECEÇÃO quando um cliente ou parceiro envia um
+    # documento crítico (identificação, IRS, recibo de vencimento). É outra
+    # funcionalidade que `enabled` (documentos em falta) e tem o seu
+    # interruptor; ligada por omissão porque só gera RASCUNHOS — nunca envia.
+    receipt_enabled: bool = True
     base_prompt: Optional[str] = None  # Prompt base para geração de rascunhos pela IA
     eligible_doc_types: List[str] = [
         "irs",

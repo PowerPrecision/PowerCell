@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 
 from models.task import TaskCreate, TaskUpdate, TaskResponse
 from services.auth import get_current_user
+from services.by_id_scope import exigir_tarefa_no_ambito
 from services.task_api_crud import (
     run_create_task,
     run_get_tasks,
@@ -26,7 +27,12 @@ from services.task_api_background import (
     run_cancel_background_task,
 )
 
-router = APIRouter(prefix="/tasks", tags=["Tasks"])
+# D-31: o PEDIDO POR ID também tem fronteira de rede (404 igual ao de «não
+# existe»). Ver `services/by_id_scope.py`.
+router = APIRouter(
+    prefix="/tasks", tags=["Tasks"],
+    dependencies=[Depends(exigir_tarefa_no_ambito)],
+)
 
 
 @router.post("", response_model=TaskResponse)

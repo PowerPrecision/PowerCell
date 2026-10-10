@@ -553,6 +553,12 @@ CONFIG_FIELDS = {
                 help_text="Gera automaticamente rascunhos de e-mail quando documentos em falta são detetados pela IA"
             ),
             ConfigField(
+                key="receipt_enabled",
+                label="Rascunho de Confirmação de Receção",
+                type="boolean",
+                help_text="Quando um cliente ou parceiro envia um documento crítico (identificação, IRS, recibo de vencimento), gera um rascunho de e-mail a confirmar a receção, para a equipa rever e enviar. Nunca envia sozinho.",
+            ),
+            ConfigField(
                 key="base_prompt",
                 label="Prompt Base para IA",
                 type="textarea",

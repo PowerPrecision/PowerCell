@@ -15,6 +15,7 @@ from typing import Optional, List
 from fastapi import HTTPException, BackgroundTasks, Request
 
 from database import db
+from services.email_tenant_stamp import inserir_email
 from models.email import (
     EmailCreate, EmailUpdate, EmailResponse, EmailDirection, EmailStatus,
     EmailFilter, EmailSendRequest,
@@ -864,7 +865,7 @@ async def run_create_email_record(email_data: EmailCreate, current_user: dict):
     if is_draft_status(email_data.status):
         stamp_draft_ttl_fields(email, now=now_dt)
     
-    await db.emails.insert_one(email)
+    await inserir_email(db, email)
     logger.info(f"Email registado: {email_id} para processo {email_data.process_id}")
     
     enriched = await enrich_email(email)

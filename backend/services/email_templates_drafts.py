@@ -213,19 +213,41 @@ async def run_get_unread_notifications(current_user: dict):
     }
 
 
+def _papel_efectivo(current_user: dict) -> str:
+    """O cargo EFECTIVO (perfil activo), não o do JWT."""
+    return str(current_user.get("effective_role") or current_user.get("role") or "")
+
+
+async def _exigir_rascunho_legivel(draft_id: str, current_user: dict) -> None:
+    """D-31: editar, enviar ou descartar um rascunho exige poder LÊ-LO.
+
+    Estas três rotas recebiam só o id do rascunho: qualquer sessão de staff
+    enviava (do seu servidor de email) ou apagava o rascunho de um cliente de
+    outra rede. **404 e nunca 403** — distinguir «não existe» de «não é teu»
+    confirma o id a quem o adivinha.
+    """
+    from services.email_access import pode_ler_email
+
+    rascunho = await db.emails.find_one({"id": draft_id, "is_auto_draft": True}, {"_id": 0})
+    if not rascunho or not await pode_ler_email(rascunho, current_user):
+        raise HTTPException(status_code=404, detail="Rascunho não encontrado")
+
+
 async def run_list_auto_drafts(current_user: dict, limit: int = 20):
     """
-    Listar rascunhos automáticos pendentes.
-    Admin/CEO veem todos, outros só os dos seus processos.
+    Listar rascunhos automáticos pendentes — os da rede do utilizador.
+    Gestão e administrativo vêem todos os da rede; os outros, os dos seus processos.
     """
     drafts = await get_pending_drafts(
         user_id=current_user["id"],
-        user_role=current_user["role"],
+        user_role=_papel_efectivo(current_user),
         limit=limit,
+        user=current_user,
     )
     stats = await get_draft_stats(
         user_id=current_user["id"],
-        user_role=current_user["role"],
+        user_role=_papel_efectivo(current_user),
+        user=current_user,
     )
     return {"drafts": drafts, "stats": stats}
 
@@ -234,13 +256,15 @@ async def run_auto_drafts_stats(current_user: dict):
     """Obter estatísticas de rascunhos automáticos pendentes."""
     stats = await get_draft_stats(
         user_id=current_user["id"],
-        user_role=current_user["role"],
+        user_role=_papel_efectivo(current_user),
+        user=current_user,
     )
     return stats
 
 
 async def run_edit_auto_draft(draft_id: str, data: dict, current_user: dict):
     """Editar um rascunho automático (subject, body, to_emails)."""
+    await _exigir_rascunho_legivel(draft_id, current_user)
     # Sanitize user inputs before passing to service
     if "subject" in data and data["subject"]:
         data["subject"] = sanitize_string(data["subject"], max_length=300)
@@ -257,6 +281,7 @@ async def run_edit_auto_draft(draft_id: str, data: dict, current_user: dict):
 
 async def run_send_auto_draft(draft_id: str, current_user: dict, account: str = "power"):
     """Enviar um rascunho automático."""
+    await _exigir_rascunho_legivel(draft_id, current_user)
     result = await send_draft(
         draft_id=draft_id,
         user_id=current_user["id"],
@@ -269,6 +294,7 @@ async def run_send_auto_draft(draft_id: str, current_user: dict, account: str = 
 
 async def run_delete_auto_draft(draft_id: str, current_user: dict):
     """Descartar (eliminar) um rascunho automático."""
+    await _exigir_rascunho_legivel(draft_id, current_user)
     result = await discard_draft(draft_id)
     if not result["success"]:
         raise HTTPException(status_code=404, detail=result.get("error", "Rascunho não encontrado"))
@@ -285,6 +311,11 @@ async def run_manually_create_draft(data: dict, current_user: dict):
 
     if not process_id or not doc_type:
         raise HTTPException(status_code=400, detail="process_id e doc_type são obrigatórios")
+
+    # D-31: criar um rascunho NUM processo exige poder vê-lo (rede incluída).
+    from services.email_access import exigir_processo_legivel
+
+    await exigir_processo_legivel(process_id, current_user)
 
     # Obter dados do processo
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})

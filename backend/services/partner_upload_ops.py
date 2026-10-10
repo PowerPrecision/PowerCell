@@ -51,6 +51,7 @@ from services.document_intake import (
 )
 from services.document_portal_counts import apply_portal_request_upload
 from services.document_portal_request import clientes_do_processo
+from services.document_receipt_draft import agendar_apos_upload_do_parceiro
 from services.partner_portal_read import (
     Caso,
     _consulta_de_pedidos,
@@ -251,6 +252,15 @@ async def run_partner_confirm_upload(partner: dict, case_id: str, data: PartnerC
 
     # 5. Efeitos que NUNCA fazem falhar o envio (o ficheiro já está gravado).
     await _depois_de_guardar(caso, partner, plano, file_key=data.file_key, filename=data.original_filename)
+
+    # 6. Documento crítico (identificação, IRS, recibo de vencimento): rascunho
+    #    de confirmação de receção para a equipa rever. Só com processo, em
+    #    segundo plano, e nunca falha o envio.
+    if caso.e_processo:
+        await agendar_apos_upload_do_parceiro(
+            db, process=caso.process, parceiro=partner,
+            categoria=data.category, request_id=data.request_id,
+        )
 
     return {
         "success": True,

@@ -18,6 +18,7 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
 from database import db
+from services.email_tenant_stamp import inserir_email
 from services.ai_document_analyzer import get_openai_client
 
 logger = logging.getLogger(__name__)
@@ -260,7 +261,7 @@ async def create_missing_doc_draft(
         }
         stamp_draft_ttl_fields(draft_doc, now=now)
 
-        await db.emails.insert_one(draft_doc)
+        await inserir_email(db, draft_doc)
 
         logger.info(
             f"Rascunho automático criado: {draft_id} para processo {process_id} "
@@ -280,33 +281,64 @@ async def create_missing_doc_draft(
         return {"success": False, "reason": "error", "error": str(e)}
 
 
+#: Quem vê TODOS os rascunhos da sua rede. Os restantes (consultor,
+#: intermediário…) vêem os dos processos a que estão atribuídos e os seus.
+PAPEIS_QUE_VEEM_OS_RASCUNHOS_DA_REDE = frozenset(
+    {"master", "admin", "ceo", "diretor", "administrativo"}
+)
+
+#: Os campos onde uma atribuição de processo pode estar escrita. O antigo
+#: filtro olhava só para `assigned_to`, que o processo quase nunca tem — o
+#: consultor não via rascunho nenhum dos seus.
+_CAMPOS_DE_ATRIBUICAO = (
+    "assigned_consultor_ids", "assigned_consultor_id", "consultor_id", "consultant_id",
+    "assigned_mediador_ids", "assigned_mediador_id", "mediador_id", "assigned_to",
+)
+
+
+async def _consulta_de_rascunhos(user_id: str, user_role: str, user: Optional[dict]) -> dict:
+    """A consulta dos rascunhos automáticos que ESTE utilizador pode ver.
+
+    D-31: com `user`, a rede entra SEMPRE (um admin/CEO é local desde a adenda
+    de RBAC; antes via os rascunhos — com o nome do cliente — de todas as
+    redes). Sem `user` (chamadores antigos) mantém-se o comportamento anterior.
+    """
+    query: Dict[str, Any] = {"is_auto_draft": True, "status": "draft"}
+
+    if user is not None:
+        from services.tenant_network import build_tenant_condition, com_isolamento
+
+        query = com_isolamento(await build_tenant_condition(user), query)
+
+    if str(user_role or "").lower() not in PAPEIS_QUE_VEEM_OS_RASCUNHOS_DA_REDE:
+        meus = await db.processes.distinct(
+            "id", {"$or": [{campo: user_id} for campo in _CAMPOS_DE_ATRIBUICAO]},
+        )
+        restricao = {"$or": [{"process_id": {"$in": meus}}, {"created_by": user_id}]}
+        query = {"$and": [query, restricao]}
+
+    return query
+
+
 async def get_pending_drafts(
     user_id: str,
     user_role: str,
     limit: int = 20,
+    user: Optional[dict] = None,
 ) -> List[Dict[str, Any]]:
     """
     Obter rascunhos pendentes para o utilizador.
 
     Args:
         user_id: ID do utilizador
-        user_role: Role do utilizador (admin/ceo veem todos)
+        user_role: Role EFECTIVO do utilizador
         limit: Número máximo de resultados
+        user: o utilizador (para o âmbito de rede); sem ele não há fronteira
 
     Returns:
         Lista de rascunhos pendentes
     """
-    query = {
-        "is_auto_draft": True,
-        "status": "draft",
-    }
-
-    # Filtro por acesso - admin/ceo veem todos, outros só os seus processos
-    if user_role not in ["master", "admin", "ceo"]:
-        process_ids = await db.processes.distinct(
-            "id", {"assigned_to": user_id}
-        )
-        query["process_id"] = {"$in": process_ids}
+    query = await _consulta_de_rascunhos(user_id, user_role, user)
 
     drafts = await db.emails.find(
         query, {"_id": 0}
@@ -326,23 +358,14 @@ async def get_pending_drafts(
     return drafts
 
 
-async def get_draft_stats(user_id: str, user_role: str) -> Dict[str, Any]:
+async def get_draft_stats(user_id: str, user_role: str, user: Optional[dict] = None) -> Dict[str, Any]:
     """
     Obter estatísticas de rascunhos pendentes.
 
     Returns:
         Dict com total e contagem por tipo de documento
     """
-    query = {
-        "is_auto_draft": True,
-        "status": "draft",
-    }
-
-    if user_role not in ["master", "admin", "ceo"]:
-        process_ids = await db.processes.distinct(
-            "id", {"assigned_to": user_id}
-        )
-        query["process_id"] = {"$in": process_ids}
+    query = await _consulta_de_rascunhos(user_id, user_role, user)
 
     total = await db.emails.count_documents(query)
 
