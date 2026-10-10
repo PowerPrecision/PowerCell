@@ -686,10 +686,13 @@ async def get_team_performance_pdf(
     end_date: Optional[str] = Query(None),
     user_ids: Optional[str] = Query(None),
     roles: Optional[str] = Query(None),
+    ai_analysis: bool = Query(False, description="Incluir no PDF uma análise de desempenho escrita por IA (opcional)"),
     user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """PDF do Dashboard Executivo — o MESMO relatório que o ecrã mostra."""
-    return await exec_api.run_team_performance_pdf(user, start_date, end_date, user_ids, roles)
+    return await exec_api.run_team_performance_pdf(
+        user, start_date, end_date, user_ids, roles, ai_analysis=ai_analysis,
+    )
 
 
 @router.get("/executive-weekly")
@@ -722,9 +725,10 @@ async def get_executive_weekly_pdf(
     request: Request,
     response: Response,
     week: Optional[str] = Query(None),
+    ai_analysis: bool = Query(False, description="Incluir no PDF uma análise de desempenho escrita por IA (opcional)"),
     user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
-    return await exec_api.run_weekly_pdf(user, week)
+    return await exec_api.run_weekly_pdf(user, week, ai_analysis=ai_analysis)
 
 
 @router.get("/sync-database/status")

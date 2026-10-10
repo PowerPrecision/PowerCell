@@ -8,9 +8,10 @@ Lógica em `services/voice_note_api.py` e `services/voice_note_engine.py`.
 from fastapi import APIRouter, Depends, File, UploadFile
 
 from services.auth import get_current_user
+from services.process_closed_guard import exigir_processo_editavel
 from services.voice_note_api import run_create_voice_note, run_list_voice_notes
 
-router = APIRouter(tags=["Voice Notes"])
+router = APIRouter(tags=["Voice Notes"], dependencies=[Depends(exigir_processo_editavel)])
 
 
 @router.post("/processes/{process_id}/voice-notes")

@@ -35,6 +35,9 @@ import { Link, useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { useAuth } from "../contexts/AuthContext";
 import { safeLabel } from "../components/dashboard/DashboardShared";
 import { buildStatusOptions, formatStatusLabel } from "../utils/workflowStatuses";
+import useVoltar from "../hooks/useVoltar";
+import { processoEstaFechado, fasesParaReabrir, PAPEIS_QUE_REABREM } from "../utils/processoFechado";
+import ReabrirProcessoDialog from "../components/processDetails/dialogs/ReabrirProcessoDialog";
 import DashboardLayout from "../layouts/DashboardLayout";
 import useWebSocket from "../hooks/useWebSocket";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -94,6 +97,8 @@ import {
   setProcessIndexed,
   // PACOTE 11 (Eixo 4) — restauro rápido do processo eliminado (banner)
   restoreProcess,
+  // Reabrir um processo fechado (fase terminal) para uma fase activa
+  reopenProcess,
   // ÉPICO 7 — nota de voz do consultor
   uploadVoiceNote,
   // Ponto 15 — catálogo de etiquetas para as sugestões do editor
@@ -179,6 +184,7 @@ import {
   CheckCircle,
   Database,
   Lock,
+  Unlock,
   Eye,
   X,
   Home,
@@ -253,10 +259,17 @@ const ProcessDetails = () => {
   const irParaProcesso = useCallback((destinoId) => {
     // O contexto viaja com a seta: sem isto, o primeiro clique
     // consumia-o e o segundo já não teria vizinhança nenhuma.
+    //
+    // `replace`: as setas percorrem a MESMA listagem, não são passos de
+    // navegação. Empilhá-las fazia o «Voltar» recuar um processo de cada vez
+    // em vez de regressar à listagem — e a pesquisa que lá estava parecia
+    // perdida.
     navigate(`/process/${destinoId}`, {
       state: { contextoDeNavegacao: vizinhos.contexto },
+      replace: true,
     });
   }, [navigate, vizinhos.contexto]);
+  const voltar = useVoltar(vizinhos.contexto);
 
   // Live TanStack queries (process + client + side panels)
   const processBundle = useProcessFullData(id);
@@ -1900,8 +1913,9 @@ const ProcessDetails = () => {
   // Modo de visualização (read-only) quando não tem edit_process
   // OU quando o processo está em status terminal (eliminados, desistências, concluídos)
   // EXCEPÇÃO: admin e CEO NUNCA sofrem lock — podem editar processos concluídos retroativamente
-  const BLOCKED_STATUSES = ["eliminados", "desistencias", "concluidos"];
-  const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status) && !['master', 'admin', 'ceo'].includes(userRole);
+  // Sem excepção por cargo: o servidor deixou de isentar Master/Admin/CEO
+  // (`process_closed_guard`). Para mexer, reabre-se primeiro.
+  const isProcessLocked = processoEstaFechado(process, workflowStatuses);
 
   // PACOTE 11 (Eixo 4) — Proteção Soft-Delete: quando o processo está
   // eliminado (is_deleted OU status 'eliminado'), TODOS os inputs e botões
@@ -1952,6 +1966,28 @@ const ProcessDetails = () => {
 
   // PACOTE 11 (Eixo 4) — Restauro Rápido: reactiva o processo eliminado
   // via POST /processes/{id}/restore e refresca os dados da página.
+  // Reabrir um processo fechado (fase terminal). O servidor só deixa alterar
+  // depois disto; a interface mostra o modo de leitura até lá.
+  const [reabrirOpen, setReabrirOpen] = useState(false);
+  const [aReabrir, setAReabrir] = useState(false);
+  const handleReabrirProcesso = async (novaFase) => {
+    if (!id || !novaFase || aReabrir) return;
+    setAReabrir(true);
+    try {
+      await reopenProcess(id, novaFase);
+      toast.success("Processo reaberto");
+      setReabrirOpen(false);
+      await fetchData();
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(err?.response?.data?.detail, "Não foi possível reabrir o processo")
+      );
+    } finally {
+      setAReabrir(false);
+    }
+  };
+  const podeReabrir = PAPEIS_QUE_REABREM.includes((effectiveRole || userRole || "").toLowerCase());
+
   const [restoringProcess, setRestoringProcess] = useState(false);
   const handleRestoreProcess = async () => {
     if (!id || restoringProcess) return;
@@ -2173,7 +2209,7 @@ const ProcessDetails = () => {
             <p className="text-sm text-muted-foreground mb-6">
               Este processo não lhe está atribuído. Se acha que deveria ter acesso, contacte o administrador.
             </p>
-            <Button onClick={() => navigate(-1)}>Voltar</Button>
+            <Button onClick={voltar}>Voltar</Button>
           </CardContent>
         </Card>
       </DashboardLayout>
@@ -2207,7 +2243,7 @@ const ProcessDetails = () => {
           <CardContent className="p-8 text-center">
             <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
             <p className="text-muted-foreground">Processo não encontrado</p>
-            <Button className="mt-4" onClick={() => navigate(-1)}>Voltar</Button>
+            <Button className="mt-4" onClick={voltar}>Voltar</Button>
           </CardContent>
         </Card>
       </DashboardLayout>
@@ -2275,22 +2311,26 @@ const ProcessDetails = () => {
         {/* Aviso de processo bloqueado ou em modo retroativo
             (oculto quando já está visível o banner de eliminado) */}
         {isProcessLocked && !isDeletedProcess && (
-          <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-800 dark:text-amber-200 text-sm">
+          <div
+            className="flex flex-wrap items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-800 dark:text-amber-200 text-sm"
+            data-testid="processo-fechado-banner"
+          >
             <Lock className="h-4 w-4 shrink-0" />
-            <span>
-              Este processo encontra-se em estado terminal (<strong>{safeLabel(currentStatusInfo.label)}</strong>). 
-              A edição de dados está bloqueada para todos os utilizadores.
+            <span className="flex-1 min-w-[220px]">
+              Este processo está fechado (<strong>{safeLabel(currentStatusInfo.label)}</strong>) e em modo de leitura.
+              Para o alterar ou carregar documentos, reabra-o primeiro.
             </span>
-          </div>
-        )}
-        {!isProcessLocked && ['master', 'admin', 'ceo'].includes(userRole) && process && BLOCKED_STATUSES.includes(process.status) && (
-          <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-800 dark:text-blue-200 text-sm">
-            <Shield className="h-4 w-4 shrink-0" />
-            <span>
-              Este processo está em estado terminal (<strong>{safeLabel(currentStatusInfo.label)}</strong>), 
-              mas como <strong>{roleLabels[userRole] || userRole}</strong> pode editar valores retroativamente. 
-              As alterações serão sincronizadas com o snapshot financeiro.
-            </span>
+            {podeReabrir && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setReabrirOpen(true)}
+                data-testid="reabrir-processo-btn"
+              >
+                <Unlock className="h-4 w-4 mr-2" />
+                Reabrir
+              </Button>
+            )}
           </div>
         )}
 
@@ -2299,7 +2339,7 @@ const ProcessDetails = () => {
             atribuições passou para o Cartão de Atribuição (coluna direita) —
             fica junto da informação que edita, em vez de solta no cabeçalho. */}
         <div className="flex items-start gap-2">
-          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Voltar" className="mt-0.5 shrink-0">
+          <Button variant="ghost" size="icon" onClick={voltar} aria-label="Voltar" className="mt-0.5 shrink-0">
             <ArrowLeft className="h-5 w-5" />
           </Button>
           {/* Ponto 17 — setas Anterior/Seguinte. Só aparecem quando há
@@ -3062,6 +3102,7 @@ const ProcessDetails = () => {
                   handleAIDataExtractedFromDocs={handleAIDataExtractedFromDocs}
                   handleDocumentDataExtracted={handleDocumentDataExtracted}
                   setDocumentsRefreshKey={setDocumentsRefreshKey}
+                  processoFechado={isProcessLocked}
                 />
               </TabsContent>
 
@@ -3205,6 +3246,14 @@ const ProcessDetails = () => {
           aProcessar={Boolean(notaDeVozEmCurso)}
         />
       )}
+
+      <ReabrirProcessoDialog
+        open={reabrirOpen}
+        onOpenChange={setReabrirOpen}
+        fases={fasesParaReabrir(workflowStatuses)}
+        aReabrir={aReabrir}
+        onConfirmar={handleReabrirProcesso}
+      />
 
       <ProcessAssignDialog
         open={showAssignDialog}

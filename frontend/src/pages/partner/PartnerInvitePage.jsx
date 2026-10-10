@@ -11,7 +11,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
+import PartnerTemaToggle from "@/components/partner/PartnerTemaToggle";
+import PasswordInput from "@/components/shared/PasswordInput";
 import { Label } from "@/components/ui/label";
 import { ESTADO_AUTENTICADO, usePartnerAuth } from "@/contexts/PartnerAuthContext";
 import { lerConvite } from "@/services/partnerApi";
@@ -75,12 +76,12 @@ export default function PartnerInvitePage() {
         </p>
         <div className="space-y-2">
           <Label htmlFor="convite-password">Palavra-passe</Label>
-          <Input id="convite-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <PasswordInput id="convite-password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
           <p className="text-xs text-muted-foreground">Mínimo 8 caracteres, com maiúscula, minúscula, número e símbolo.</p>
         </div>
         <div className="space-y-2">
           <Label htmlFor="convite-confirmacao">Repetir palavra-passe</Label>
-          <Input id="convite-confirmacao" type="password" autoComplete="new-password" value={confirmacao} onChange={(e) => setConfirmacao(e.target.value)} />
+          <PasswordInput id="convite-confirmacao" autoComplete="new-password" value={confirmacao} onChange={(e) => setConfirmacao(e.target.value)} />
         </div>
         {c.first_access && (
           <div className="flex items-start gap-2">
@@ -103,7 +104,8 @@ export default function PartnerInvitePage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-background px-4">
+      <PartnerTemaToggle className="absolute right-4 top-4" />
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Bem-vindo ao Portal do Parceiro</CardTitle>

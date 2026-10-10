@@ -103,6 +103,7 @@ import {
   FileText,
   ScanText,
   Upload,
+  Lock,
   Loader2,
   Download,
   Trash2,
@@ -237,7 +238,16 @@ const FileIcon = ({ filename }) => {
   return <File className="h-4 w-4 text-gray-500" />;
 };
 
-const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDataExtracted }) => {
+const S3FileManager = ({
+  processId,
+  clientName,
+  onAIDataExtracted,
+  onDocumentDataExtracted,
+  // Processo FECHADO (fase terminal): ver os ficheiros sim, alterá-los não.
+  // O servidor recusa na mesma (403) — isto é a interface a dizer a verdade
+  // antes de o utilizador tentar.
+  readOnly = false,
+}) => {
   const { token, user, effectiveRole } = useAuth();
   const queryClient = useQueryClient();
   const [files, setFiles] = useState({});
@@ -360,10 +370,14 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
 
   // Verificar se o utilizador é de indexacao (precisa de NIF da empresa)
   const isIndexacao = hasRole(user, "indexacao");
+  // Quem não pode alterar documentos: a Indexação (que só vê) e qualquer
+  // utilizador num processo fechado. Os dois motivos desligam o MESMO
+  // conjunto de botões, por isso há UMA condição e não duas.
+  const somenteLeitura = isIndexacao || readOnly;
 
   // Analisar / Renomear com IA — apenas cargos superiores (admin, CEO, diretor/"gestor")
   // Usa effectiveRole (perfil activo), não hasRole, para multi-perfil.
-  const canUseAIDocumentTools = MANAGEMENT_ROLES.includes(effectiveRole);
+  const canUseAIDocumentTools = MANAGEMENT_ROLES.includes(effectiveRole) && !readOnly;
 
   // PACOTE BL — Bloqueio de segurança: categoria "Index" (pasta cofre)
   // Apenas admin/CEO/diretor/indexacao vêem documentos da categoria "Index".
@@ -698,6 +712,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
    */
   const enviarFicheiros = async (selectedFiles, category) => {
     if (!selectedFiles || selectedFiles.length === 0) return;
+    if (readOnly) return;
 
     // Verificar conflitos antes de fazer upload
     const filenames = selectedFiles.map(f => f.name);
@@ -1735,6 +1750,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
 
   // Drag and Drop handlers
   const handleDragStart = (e, file) => {
+    if (readOnly) {
+      e.preventDefault();
+      return;
+    }
     // Se o ficheiro arrastado está entre os selecionados, arrastar todos os selecionados
     // Caso contrário, arrastar apenas este ficheiro
     const isSelected = selectedFilesForAI.some(f => f.path === file.path);
@@ -1838,6 +1857,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
     e.preventDefault();
     setDropTarget(null);
     setDragCounter(0);
+    if (readOnly) return;
 
     // DOIS gestos com o mesmo nome (Lote 6, ponto 3):
     //   * arrastar do Finder/Explorador → ENVIAR para esta categoria;
@@ -2180,6 +2200,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
               </Button>
             </div>
             
+            {readOnly && (
+              <p
+                className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+                data-testid="documentos-processo-fechado"
+              >
+                <Lock className="h-3.5 w-3.5 shrink-0" />
+                Processo fechado: os documentos estão em modo de leitura. Reabra o processo para os alterar.
+              </p>
+            )}
+
             {/* Linha 2: Botões de acção */}
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <Button
@@ -2197,7 +2227,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
                 <span className="hidden sm:inline">Gerar</span> Minuta
               </Button>
               {/* INDEXAÇÃO READ-ONLY: Ocultar botão de upload */}
-              {!isIndexacao && (
+              {!somenteLeitura && (
                 <Button
                   size="sm"
                   onClick={() => fileInputRef.current?.click()}
@@ -2710,7 +2740,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
                               <Pencil className="h-3 w-3" />
                             </Button>
                             {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar; também ocultar para pastas */}
-                            {!isIndexacao && !isFolder && (
+                            {!somenteLeitura && !isFolder && (
                               <Button 
                                 variant="ghost" 
                                 size="icon" 
@@ -2909,7 +2939,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
                         <Pencil className="h-3 w-3" />
                       </Button>
                       {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar; também ocultar para pastas */}
-                      {!isIndexacao && !previewFile?.path?.endsWith('/') && (
+                      {!somenteLeitura && !previewFile?.path?.endsWith('/') && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -3076,7 +3106,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
                                   <Download className="h-3.5 w-3.5" />
                                 </Button>
                                 {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar; também ocultar para pastas */}
-                                {!isIndexacao && !isFolder && (
+                                {!somenteLeitura && !isFolder && (
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -3285,7 +3315,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
                                     <Download className="h-3.5 w-3.5" />
                                   </Button>
                                   {/* INDEXAÇÃO READ-ONLY: Ocultar botão de eliminar; também ocultar para pastas */}
-                                  {!isIndexacao && !previewFile?.path?.endsWith('/') && (
+                                  {!somenteLeitura && !previewFile?.path?.endsWith('/') && (
                                     <Button
                                       variant="ghost"
                                       size="icon"

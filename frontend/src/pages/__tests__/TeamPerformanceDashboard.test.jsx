@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../layouts/DashboardLayout", () => ({
   default: ({ children }) => <div data-testid="layout">{children}</div>,
 }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 
 const api = vi.hoisted(() => ({
   getTeamPerformance: vi.fn(),
@@ -209,8 +209,38 @@ describe("Gerar PDF", () => {
     await userEvent.click(screen.getByRole("button", { name: /Gerar PDF/ }));
 
     await waitFor(() => expect(baixar).toHaveBeenCalledWith(expect.any(Blob), "r.pdf"));
-    expect(api.downloadTeamPerformancePdf).toHaveBeenCalledWith(doEcra);
+    // Sem a caixa marcada NÃO se pede a análise de IA.
+    expect(api.downloadTeamPerformancePdf).toHaveBeenCalledWith(doEcra, { analiseIA: false });
     expect(toast.success).toHaveBeenCalled();
+  });
+
+  it("a caixa «Incluir análise de IA» existe e vem DESLIGADA", async () => {
+    montar();
+    const caixa = await screen.findByRole("checkbox", { name: /Incluir análise de IA/ });
+    expect(caixa).not.toBeChecked();
+  });
+
+  it("marcada, o pedido leva a análise de IA — e só então", async () => {
+    montar();
+    await screen.findByTestId("linha-u-ana");
+    await userEvent.click(screen.getByRole("checkbox", { name: /Incluir análise de IA/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Gerar PDF/ }));
+    await waitFor(() => expect(api.downloadTeamPerformancePdf).toHaveBeenCalledWith(
+      expect.any(Object), { analiseIA: true },
+    ));
+  });
+
+  it("pediu a análise e o servidor não a incluiu: avisa em vez de dar sucesso mudo", async () => {
+    api.downloadTeamPerformancePdf.mockResolvedValue({
+      data: new Blob(["%PDF-"]), headers: { "x-analise-ia": "indisponivel" },
+    });
+    montar();
+    await screen.findByTestId("linha-u-ana");
+    await userEvent.click(screen.getByRole("checkbox", { name: /Incluir análise de IA/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Gerar PDF/ }));
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(expect.stringMatching(/sem a análise de IA/)));
+    expect(baixar).toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it("a falha mostra o motivo do servidor (lido do Blob de erro)", async () => {

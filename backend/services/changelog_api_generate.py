@@ -20,7 +20,8 @@ async def run_generate_changelog(payload: ChangelogGenerateRequest, user: dict):
         return await generate_changelog_ai(
             source_type=payload.source_type,
             max_source_lines=payload.max_source_lines,
-            custom_prompt_suffix=payload.custom_prompt_suffix
+            custom_prompt_suffix=payload.custom_prompt_suffix,
+            is_premium=payload.is_premium,
         )
     except ValueError as e:
         error_msg = str(e)

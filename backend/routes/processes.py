@@ -13,6 +13,7 @@ Autor: PowerCell Development Team
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, Body, Depends, Query, Request
+from pydantic import BaseModel
 
 from database import db
 from models.auth import UserRole
@@ -21,6 +22,8 @@ from models.process import (
 )
 from services.capability_gate import exigir_capacidade
 from services.auth import get_current_user, require_roles, require_staff, get_effective_role, get_all_user_roles, get_active_company_id_async
+from services.process_closed_guard import exigir_processo_editavel
+from services.process_reopen import run_reopen_process
 from services.process_scope_guard import exigir_processo_no_ambito
 from services.notification_service import send_to_admins
 from services.history import log_history
@@ -152,7 +155,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/processes",
     tags=["Processes"],
-    dependencies=[Depends(exigir_processo_no_ambito)],
+    # A ordem importa: primeiro a rede (404 igual ao de «não existe»), só
+    # depois o estado — senão «está fechado» seria um oráculo sobre um
+    # processo de outra rede. Ver `process_closed_guard`.
+    dependencies=[Depends(exigir_processo_no_ambito), Depends(exigir_processo_editavel)],
 )
 
 
@@ -576,6 +582,30 @@ async def move_process_kanban(
         new_status,
         user,
         deed_date=deed_date,
+        can_view_fn=can_view_process,
+        inject_cdc_fn=inject_cdc_context,
+        broadcast_fn=broadcast_process_delta,
+        create_finance_snapshot_fn=_create_finance_snapshot,
+    )
+
+
+class ReopenProcessRequest(BaseModel):
+    """Fase activa para onde o processo fechado volta."""
+
+    new_status: str
+
+
+@router.post("/{process_id}/reopen")
+async def reopen_process(
+    process_id: str,
+    data: ReopenProcessRequest,
+    user: dict = Depends(require_staff()),
+):
+    """Reabre um processo fechado (a única saída do modo de leitura)."""
+    return await run_reopen_process(
+        process_id,
+        data.new_status,
+        user,
         can_view_fn=can_view_process,
         inject_cdc_fn=inject_cdc_context,
         broadcast_fn=broadcast_process_delta,

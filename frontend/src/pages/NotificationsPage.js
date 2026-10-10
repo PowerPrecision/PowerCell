@@ -6,6 +6,7 @@
  * ====================================================================
  */
 
+import { useEstadoNaUrl, useTextoNaUrl } from "../hooks/useEstadoNaUrl";
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -103,8 +104,10 @@ export default function NotificationsPage() {
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState([]);
   const [filteredNotifications, setFilteredNotifications] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [activeTab, setActiveTab] = useState("all");
+  // Pesquisa e separador no URL: abrir o processo de uma notificação e voltar
+  // devolve a lista como estava.
+  const [searchTerm, setSearchTerm] = useTextoNaUrl("q");
+  const [activeTab, setActiveTab] = useEstadoNaUrl("separador", "all");
   const [selectedIds, setSelectedIds] = useState([]);
   const [processing, setProcessing] = useState(false);
 

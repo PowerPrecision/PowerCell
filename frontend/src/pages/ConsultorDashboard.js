@@ -44,7 +44,7 @@ import TeamMural from "../components/TeamMural";
 import { getWebmailStats, getCalendarDeadlines, getCommunicationsFeed, getSystemChangelogs, getAutoDrafts } from "../services/api";
 import { safeString } from "../utils/safeString";
 import { safeDateStr } from "../lib/utils";
-import { sanitizeHtml } from "../utils/sanitize";
+import NovidadesDoCrm from "../components/changelog/NovidadesDoCrm";
 import { markdownToHtml } from "../utils/markdown";
 import { getDraftNavigationTarget, PROCESS_DRAFT_STATUSES } from "../utils/draftNavigation";
 import DashboardCalendar from "../components/dashboard/DashboardCalendar";
@@ -76,7 +76,9 @@ const ConsultorDashboard = () => {
   const [commsFeed, setCommsFeed] = useState({
     portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0,
   });
-  const [changelog, setChangelog] = useState(null);
+  // As últimas novidades do CRM (globais): um Premium não pode ficar escondido
+  // atrás de uma novidade mais recente que não o é.
+  const [novidades, setNovidades] = useState([]);
 
   const {
     processes,
@@ -127,10 +129,10 @@ const ConsultorDashboard = () => {
     getAutoDrafts(5)
       .then((res) => setEmailDrafts(res.data?.drafts || []))
       .catch(() => {});
-    getSystemChangelogs(1)
+    getSystemChangelogs(5)
       .then((res) => {
         const data = res.data;
-        if (Array.isArray(data) && data.length > 0) setChangelog(data[0]);
+        if (Array.isArray(data)) setNovidades(data);
       })
       .catch(() => {});
   }, []);
@@ -613,31 +615,12 @@ const ConsultorDashboard = () => {
           </TabsContent>
 
           <TabsContent value="changelog" className="mt-6">
-            {changelog?.content_markdown ? (
-              <Card className="border-border bg-secondary/40">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Megaphone className="h-5 w-5 text-primary" />
-                    Novidades do CRM
-                    {changelog.version && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                        {safeString(changelog.version)}
-                      </Badge>
-                    )}
-                  </CardTitle>
-                  <CardDescription className="text-xs">
-                    {changelog.published_at && formatDate(changelog.published_at)}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div
-                    className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed changelog-content"
-                    dangerouslySetInnerHTML={{
-                      __html: sanitizeHtml(markdownToHtml(changelog.content_markdown))
-                    }}
-                  />
-                </CardContent>
-              </Card>
+            {novidades.some((n) => n?.content_markdown) ? (
+              <NovidadesDoCrm
+                entradas={novidades}
+                markdownParaHtml={markdownToHtml}
+                formatarData={formatDate}
+              />
             ) : (
               <Card className="border-border">
                 <CardContent>

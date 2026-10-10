@@ -528,6 +528,34 @@ selectores falhados por execução (passo e selector, sem credenciais) e uma
 rotina de verificação mensal com uma conta de teste; só depois faz sentido
 partir o módulo.
 
+### D-34 · Superfícies que escrevem num processo fechado fora da guarda, e conteúdo global escrito por perfis locais
+**Onde:** `services/process_closed_guard.py` (`FORA_DA_GUARDA` em `tests/unit/test_processo_fechado_equipa.py`), `routes/clients.py`, `routes/emails.py`, `routes/templates.py`, `routes/changelog.py`
+
+**Fechado (Out 2026):** a equipa já não altera campos nem carrega ficheiros num
+processo em fase terminal (403), em `/processes`, `/documents`, `/onedrive`,
+`/storage` e nas notas de voz, mais o upload, a eliminação de ficheiros e o
+`PUT`; sem excepção por cargo. Reabre-se com `POST /processes/{id}/reopen`.
+
+**O que continua aberto, de propósito e dito:** (1) `DELETE
+/clients/{id}/unlink-process/{process_id}` altera a relação cliente↔processo e
+não passa pela guarda (vive na ficha do cliente, D-31); (2) os routers de
+finanças, emails (`send-documentation`, `sync`, `monitored`), modelos
+(`document-request`) e `ai_analysis` escrevem com `{process_id}` mas fora do
+que o produto chama «editar o processo» — cada um tem o motivo escrito no
+teste, e a decisão de os incluir é de produto; (3) o **Kanban** deixa mover
+entre duas fases terminais (concluído → arquivo) sem reabrir — não edita
+campos, e proibi-lo partiria o arquivo de processos concluídos; (4) as
+**semanas já fechadas** do relatório executivo guardam os números com que
+foram registadas (ainda com Admin/Master nas linhas).
+Separadamente: `POST /system/changelog/generate-ai` e `/diagnose` aceitam
+**Admin e CEO**, que são perfis LOCAIS, para escrever conteúdo GLOBAL (todas
+as redes veem as novidades). Só o Master marca Premium (feito); a geração em si
+devia ser só-Master pela mesma razão — não se mudou porque a geração é um
+fluxo de trabalho existente da equipa e a decisão é de quem gere o produto.
+**O que fecha isto:** decidir (1)–(3) com o dono do produto e, para a geração,
+passar a lista de papéis a `[MASTER]` (o ecrã `ChangelogSection` já só é
+alcançável pelo Master).
+
 ### D-31 · Rotas «por id» sem pergunta de rede: fechadas as de clientes, tarefas, restauro e rascunhos
 **Onde:** `services/by_id_scope.py`, `routes/clients.py`, `routes/tasks.py`, `routes/restore.py`, `services/email_templates_drafts.py`
 

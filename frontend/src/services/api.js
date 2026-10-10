@@ -645,6 +645,10 @@ export const moveProcessKanban = (processId, newStatus) =>
   api.put(`/processes/kanban/${processId}/move`, null, {
     params: { new_status: newStatus }
   });
+// Reabrir um processo FECHADO (fase terminal) para uma fase activa — a única
+// saída do modo de leitura. O servidor recusa edições e uploads até lá.
+export const reopenProcess = (processId, newStatus) =>
+  api.post(`/processes/${processId}/reopen`, { new_status: newStatus });
 export const getMyClients = (params = {}) => api.get("/processes/my-clients", { params });
 export const markProcessIndexed = (processId) =>
   api.post(`/processes/${processId}/mark-indexed`);
@@ -830,15 +834,23 @@ export const getTeamPerformance = (params = {}) =>
   api.get("/admin/team-performance", { params, skipErrorToast: true });
 // PDF: `responseType: "blob"` faz o corpo de ERRO vir também como Blob —
 // quem chama lê-o com `readBlobErrorBody`.
-export const downloadTeamPerformancePdf = (params = {}) =>
-  api.get("/admin/team-performance/pdf", { params, responseType: "blob", skipErrorToast: true });
+// `analiseIA`: a análise de desempenho escrita por IA é OPCIONAL — só vai no
+// pedido quando o utilizador marcou a caixa (sem ela o servidor não chama o modelo).
+export const downloadTeamPerformancePdf = (params = {}, { analiseIA = false } = {}) =>
+  api.get("/admin/team-performance/pdf", {
+    params: analiseIA ? { ...params, ai_analysis: true } : params,
+    responseType: "blob",
+    skipErrorToast: true,
+  });
 export const getExecutiveWeekly = (week) =>
   api.get("/admin/executive-weekly", { params: week ? { week } : {}, skipErrorToast: true });
 export const regenerateExecutiveWeekly = (week) =>
   api.post("/admin/executive-weekly/regenerate", null, { params: week ? { week } : {}, skipErrorToast: true });
-export const downloadExecutiveWeeklyPdf = (week) =>
+export const downloadExecutiveWeeklyPdf = (week, { analiseIA = false } = {}) =>
   api.get("/admin/executive-weekly/pdf", {
-    params: week ? { week } : {}, responseType: "blob", skipErrorToast: true,
+    params: { ...(week ? { week } : {}), ...(analiseIA ? { ai_analysis: true } : {}) },
+    responseType: "blob",
+    skipErrorToast: true,
   });
 
 // Activities/Comments
@@ -1727,6 +1739,9 @@ export const rollbackProcessMigration = () => api.post("/admin/process-migration
 // ===== SYSTEM CHANGELOG (Mural de Atualizações gerado por IA) =====
 export const getSystemChangelogs = (limit = 5) => api.get("/system/changelog", { params: { limit } });
 export const generateChangelogAI = (data = {}) => api.post("/system/changelog/generate-ai", data);
+// Marcar/desmarcar uma atualização como Premium (upsell) — só o Master.
+export const setChangelogPremium = (changelogId, isPremium) =>
+  api.patch(`/system/changelog/${changelogId}/premium`, { is_premium: isPremium });
 export const diagnoseChangelog = () => api.get("/system/changelog/diagnose");
 
 // ===== COMPANIES CRUD (Multi-Tenant — Gestão de Empresas) =====

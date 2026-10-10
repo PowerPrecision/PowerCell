@@ -145,5 +145,8 @@ describe("gráfico, ficheiro e semana", () => {
   });
   it("a Indexação não é um perfil filtrável", () => {
     expect(PAPEIS_FILTRAVEIS).not.toContain("indexacao");
+    expect(PAPEIS_FILTRAVEIS).not.toContain("master");
+    expect(PAPEIS_FILTRAVEIS).not.toContain("admin");
+    expect(PAPEIS_FILTRAVEIS).toEqual(["consultor", "intermediario", "administrativo", "diretor", "ceo"]);
   });
 });

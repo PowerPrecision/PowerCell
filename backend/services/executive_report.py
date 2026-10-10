@@ -81,9 +81,17 @@ DIAS_MAXIMOS_DA_SERIE = 92
 TTL_DA_CACHE_SEGUNDOS = 60
 MAX_CACHE = 64
 
-#: Perfis que entram no relatório. `indexacao` NUNCA: ver o ponto 4 acima.
+#: Perfis que NUNCA entram no relatório (Out 2026, decisão do dono do produto).
+#: `indexacao`: as suas acções não geram registo (ponto 4 acima). `master` e
+#: `admin`: contas de gestão do sistema e da rede — não são operação, e uma
+#: linha delas num gráfico de desempenho ou nas médias da equipa distorce o
+#: que o relatório existe para mostrar (o trabalho real de consultores,
+#: intermediários, diretores, administrativos…).
+PAPEIS_FORA_DO_RELATORIO = ("master", "admin", "indexacao")
+
+#: Perfis que entram no relatório: a operação real.
 PAPEIS_DO_RELATORIO = (
-    "consultor", "intermediario", "administrativo", "diretor", "ceo", "master", "admin",
+    "consultor", "intermediario", "administrativo", "diretor", "ceo",
 )
 
 CAMPOS_DE_FASE = tuple(sorted(_STATUS_FIELDS))
@@ -94,7 +102,8 @@ NOTAS_DE_CRITERIO = (
     "quem está atribuído, no estado do fim do período.",
     "Mudança de fase: as registadas no histórico do processo. Quem tem o "
     "histórico desligado aparece com «—».",
-    "O perfil Indexação não consta deste relatório (as suas acções não geram registo).",
+    "Os perfis Master, Admin e Indexação não constam deste relatório: os dois "
+    "primeiros são contas de gestão, a Indexação não gera registo.",
 )
 
 
@@ -390,7 +399,9 @@ async def _ler_utilizadores(base, ambito: Ambito, filtros: Filtros) -> list[dict
         return []
     condicoes: list[dict] = [
         deep_role_in_filter(papeis),
-        {"role": {"$ne": "indexacao"}},
+        # Pelo cargo da CONTA, não pelo perfil que se vista: um admin que
+        # trabalhe também como consultor continua a ser uma conta de gestão.
+        {"role": {"$nin": list(PAPEIS_FORA_DO_RELATORIO)}},
         {"is_active": {"$ne": False}},
     ]
     if ambito.consulta_de_utilizadores:

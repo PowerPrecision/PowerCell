@@ -9,6 +9,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import PartnerTemaToggle from "@/components/partner/PartnerTemaToggle";
+import PasswordInput from "@/components/shared/PasswordInput";
 import { Label } from "@/components/ui/label";
 import { ESTADO_A_CARREGAR, ESTADO_AUTENTICADO, usePartnerAuth } from "@/contexts/PartnerAuthContext";
 import { mensagemDeErro } from "@/utils/partnerPortal";
@@ -45,7 +47,8 @@ export default function PartnerLoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-background px-4">
+      <PartnerTemaToggle className="absolute right-4 top-4" />
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Portal do Parceiro</CardTitle>
@@ -62,8 +65,8 @@ export default function PartnerLoginPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="parceiro-password">Palavra-passe</Label>
-              <Input
-                id="parceiro-password" type="password" autoComplete="current-password" required
+              <PasswordInput
+                id="parceiro-password" autoComplete="current-password" required
                 value={password} onChange={(e) => setPassword(e.target.value)}
               />
             </div>

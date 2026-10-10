@@ -372,7 +372,13 @@ def assert_process_editable_for_role(
     terminais: Optional[tuple[str, ...]] = None,
 ) -> None:
     """
-    Bloqueia edição em estados terminais (exceto admin/CEO).
+    Bloqueia edição em estados terminais — PARA TODOS os perfis de staff.
+
+    Já isentou Master/Admin/CEO; deixou de isentar: o ecrã trata toda a gente
+    por igual (modo de leitura até «Reabrir») e um bypass no servidor que a
+    interface não tem é o «menu e rotas têm de concordar» ao contrário.
+    Reabre-se com `POST /processes/{id}/reopen`. O `role` mantém-se na
+    assinatura por compatibilidade com os chamadores; já não decide nada.
 
     ``terminais`` vem do MOTOR. Continua SÍNCRONA e pura de propósito: é
     uma regra de permissão, o sítio onde um teste tem de poder afirmar o
@@ -385,13 +391,11 @@ def assert_process_editable_for_role(
     from fastapi import HTTPException
 
     fechadas = tuple(terminais) if terminais else tuple(INACTIVE_STATUSES)
-    is_admin_or_ceo = role in [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]
-    if status in fechadas and not is_admin_or_ceo:
+    if status in fechadas:
+        from services.process_closed_guard import mensagem_de_processo_fechado
+
         raise HTTPException(
-            status_code=403,
-            detail=(
-                f"Não é possível editar um processo em estado terminal ({status})."
-            ),
+            status_code=403, detail=mensagem_de_processo_fechado(status),
         )
 
 
@@ -947,6 +951,13 @@ async def run_update_process(
         pass
     raw_body, audit_reason, ai_suggested = parse_update_request_meta(raw_body)
 
+    # Processo fechado: recusa-se ANTES de gravar o que quer que seja (antes,
+    # o 403 chegava depois de a ficha do cliente e o titular já terem sido
+    # alterados). Reabre-se primeiro — `POST /processes/{id}/reopen`.
+    assert_process_editable_for_role(
+        process.get("status"), role, await terminal_process_statuses(),
+    )
+
     client_id = process.get("client_id")
     client_updates = extract_client_updates_fn(raw_body)
     raw_client_email = raw_body.get("client_email")
@@ -970,9 +981,6 @@ async def run_update_process(
         log_audit_event_fn=log_audit_event_fn,
     )
 
-    assert_process_editable_for_role(
-        process.get("status"), role, await terminal_process_statuses(),
-    )
     update_data = seed_update_data(
         process=process,
         client_id_before=client_id,

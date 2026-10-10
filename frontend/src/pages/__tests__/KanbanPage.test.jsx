@@ -34,12 +34,27 @@ vi.mock("../../components/kanban/CreateClientModal", () => ({
 
 let parametros = new URLSearchParams();
 const definirParametros = vi.fn();
-vi.mock("react-router-dom", () => ({
-  useSearchParams: () => [parametros, definirParametros],
+// O `useSearchParams` falso é STATEFUL: o quadro guarda os filtros no URL, e um
+// mock que ignorasse a escrita deixava o ecrã parado depois de cada clique.
+vi.mock("react-router-dom", async () => {
+  const React = await import("react");
+  return {
+  useSearchParams: () => {
+    const [, forcar] = React.useReducer((n) => n + 1, 0);
+    const definir = (argumento, opcoes) => {
+      definirParametros(argumento, opcoes);
+      parametros = new URLSearchParams(
+        typeof argumento === "function" ? argumento(parametros) : argumento,
+      );
+      forcar();
+    };
+    return [parametros, definir];
+  },
   useNavigate: () => vi.fn(),
   useLocation: () => ({ pathname: "/kanban", search: "" }),
   Link: ({ children, to }) => <a href={to}>{children}</a>,
-}));
+  };
+});
 
 let papelActivo = "diretor";
 let capacidadesPorPapel = null;
@@ -376,5 +391,36 @@ describe("KanbanPage — a partilha (D-25)", () => {
       .map(([params]) => String(params ?? ""))
       .join("|");
     expect(enviados).toContain("partilha=partilhados");
+  });
+});
+
+
+describe("KanbanPage — a pesquisa e os filtros do quadro sobrevivem a «entrar e voltar»", () => {
+  it("arranca com a pesquisa e o Sub35 que estão no URL", async () => {
+    parametros = new URLSearchParams("kb_q=ana&kb_sub35=true");
+    montar();
+    expect(await screen.findByPlaceholderText("Pesquisar cliente...")).toHaveValue("ana");
+    await waitFor(() => expect(api.getKanbanBoard).toHaveBeenCalled());
+    // O Sub35 é parâmetro do PEDIDO ao servidor, não só do ecrã.
+    const pedidos = api.getKanbanBoard.mock.calls.map(([p]) => String(p ?? "")).join("|");
+    expect(pedidos).toMatch(/sub35/);
+  });
+
+  it("sem parâmetros o quadro abre limpo (contraprova)", async () => {
+    montar();
+    expect(await screen.findByPlaceholderText("Pesquisar cliente...")).toHaveValue("");
+  });
+
+  it("escrever na pesquisa grava-a no URL com replace, sem pisar os outros parâmetros", async () => {
+    parametros = new URLSearchParams("consultor=u2");
+    montar();
+    await userEvent.type(await screen.findByPlaceholderText("Pesquisar cliente..."), "rui");
+
+    await waitFor(() => expect(definirParametros).toHaveBeenCalled());
+    const [actualizador, opcoes] = definirParametros.mock.calls.at(-1);
+    const resultado = actualizador(new URLSearchParams("consultor=u2"));
+    expect(resultado.get("kb_q")).toBe("rui");
+    expect(resultado.get("consultor")).toBe("u2");
+    expect(opcoes).toEqual({ replace: true });
   });
 });

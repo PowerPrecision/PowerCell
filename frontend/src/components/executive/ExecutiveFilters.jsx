@@ -10,6 +10,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { PAPEIS_FILTRAVEIS, PREDEFINICOES, ROTULOS_DOS_PAPEIS } from "../../utils/executivo";
+import OpcaoAnaliseIA from "./OpcaoAnaliseIA";
 
 const TODOS = "__todos__";
 
@@ -22,10 +23,12 @@ const TODOS = "__todos__";
  * @param {Array<{id: string, nome: string}>} props.opcoesDeUtilizadores
  * @param {string|null} props.erroDoIntervalo
  * @param {boolean} props.aCarregar / props.aGerarPdf
+ * @param {boolean} [props.analiseIA] / props.onAnaliseIA - «Incluir análise de IA» (opcional, desligada por omissão)
  */
 export default function ExecutiveFilters({
   predefinicao, inicio, fim, utilizador, papel, opcoesDeUtilizadores, erroDoIntervalo,
   aCarregar, aGerarPdf, onPredefinicao, onInicio, onFim, onUtilizador, onPapel, onActualizar, onGerarPdf,
+  analiseIA = false, onAnaliseIA,
 }) {
   return (
     <div className="space-y-3" data-testid="filtros-executivos">
@@ -89,6 +92,7 @@ export default function ExecutiveFilters({
           {aCarregar ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-4 w-4" aria-hidden="true" />}
           Actualizar
         </Button>
+        {onAnaliseIA && <OpcaoAnaliseIA marcada={analiseIA} onChange={onAnaliseIA} desactivada={aGerarPdf} />}
         <Button type="button" size="sm" onClick={onGerarPdf} disabled={aGerarPdf || aCarregar || Boolean(erroDoIntervalo)} className="gap-1.5">
           {aGerarPdf ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <FileDown className="h-4 w-4" aria-hidden="true" />}
           Gerar PDF

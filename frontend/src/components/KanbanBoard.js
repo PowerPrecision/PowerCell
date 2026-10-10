@@ -41,6 +41,12 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { ScrollArea, ScrollBar } from './ui/scroll-area';
 import { toast } from 'sonner';
 import { hasAnyRole } from '../utils/roleUtils';
+import {
+  CODEC_BOOLEANO,
+  CODEC_LISTA,
+  useEstadoNaUrl,
+  useTextoNaUrl,
+} from '../hooks/useEstadoNaUrl';
 import { safeDateStr } from '../lib/utils';
 
 // React Query hooks
@@ -66,6 +72,10 @@ import AssignUsersModal from './kanban/AssignUsersModal';
 // Peso: Alta=3, Urgente tag=3, Média=2, Baixa=1, undefined=0
 // Ordenação primária por peso (desc), secundária por updated_at (desc)
 // ====================================================================
+// Constante de módulo: a omissão da lista de etiquetas tem de ser ESTÁVEL entre
+// renders (é dependência de memoização no `useEstadoNaUrl`).
+const SEM_ETIQUETAS = [];
+
 const PRIORITY_WEIGHT = { alta: 3, media: 2, baixa: 1, high: 3, medium: 2, low: 1 };
 
 const hasUrgentTag = (process) => {
@@ -116,22 +126,27 @@ const KanbanBoard = ({
   papelEfectivo = null,
 }) => {
   // === ESTADO LOCAL (apenas UI state, não server state) ===
-  const [searchTerm, setSearchTerm] = useState('');
-  const [dateFilter, setDateFilter] = useState('all');
-  const [urgencyFilter, setUrgencyFilter] = useState('all');
+  //
+  // Os FILTROS vivem no URL (`kb_*`), não em `useState`: abrir um processo e
+  // carregar em «Voltar» devolve o quadro tal como estava — pesquisa, urgência,
+  // datas, etiquetas, Sub35 e partilha. Em `useState` perdiam-se todos ao
+  // desmontar o quadro.
+  const [searchTerm, setSearchTerm] = useTextoNaUrl('kb_q');
+  const [dateFilter, setDateFilter] = useEstadoNaUrl('kb_data', 'all');
+  const [urgencyFilter, setUrgencyFilter] = useEstadoNaUrl('kb_urg', 'all');
   // Ponto 15 — etiquetas. Vive aqui (no contentor) e não no
   // `KanbanHeader`: o cabeçalho apresenta, o quadro é que sabe que isto
   // é um parâmetro do pedido e não um filtro em memória.
-  const [labelsFilter, setLabelsFilter] = useState([]);
-  const [labelsLogic, setLabelsLogic] = useState('OR');
+  const [labelsFilter, setLabelsFilter] = useEstadoNaUrl('kb_labels', SEM_ETIQUETAS, CODEC_LISTA);
+  const [labelsLogic, setLabelsLogic] = useEstadoNaUrl('kb_logic', 'OR');
   // Ponto 1 (Lote 4) — Sub35. Como as etiquetas: é um parâmetro do
   // PEDIDO (o quadro pede ao servidor só os processos elegíveis) e não
   // um filtro em memória, logo vive no contentor.
-  const [sub35, setSub35] = useState(false);
+  const [sub35, setSub35] = useEstadoNaUrl('kb_sub35', false, CODEC_BOOLEANO);
   // D-25 — '' (todos) | 'exclusivos' | 'partilhados'. A normalização
   // vive no `kanbanFiltros`, que é o ponto único dos parâmetros E da
   // chave de cache.
-  const [partilha, setPartilha] = useState('');
+  const [partilha, setPartilha] = useEstadoNaUrl('kb_partilha', '');
   const [etiquetasDisponiveis, setEtiquetasDisponiveis] = useState([]);
 
   useEffect(() => {
@@ -147,7 +162,7 @@ const KanbanBoard = ({
       cancelado = true;
     };
   }, []);
-  const [viewMode, setViewMode] = useState('kanban');
+  const [viewMode, setViewMode] = useEstadoNaUrl('kb_vista', 'kanban');
   const [scrollPosition, setScrollPosition] = useState(0);
 
   // ═══════════════════════════════════════════════════════════
@@ -155,7 +170,7 @@ const KanbanBoard = ({
   // Quando ativo, mostra APENAS processos com:
   //   has_unread_messages === true OU has_new_documents === true
   // ═══════════════════════════════════════════════════════════
-  const [showOnlyPendingActions, setShowOnlyPendingActions] = useState(false);
+  const [showOnlyPendingActions, setShowOnlyPendingActions] = useEstadoNaUrl('kb_pend', false, CODEC_BOOLEANO);
 
   // === FILTRO ISOLADO DE CONCLUÍDOS ===
   // O estado do completedDays vive isolado NESTE hook, NÃO no estado global.

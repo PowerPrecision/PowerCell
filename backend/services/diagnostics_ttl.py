@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 
 from database import db
+from services.db_indexes import RASCUNHOS_TTL_DIAS, RASCUNHOS_TTL_SEGUNDOS
 from services.diagnostics_helpers import TTLMigrationResult, TTLMigrationResponse
 
 logger = logging.getLogger(__name__)
@@ -260,8 +261,8 @@ async def run_get_ttl_index_status():
         {
             "name": "emails",
             "ttl_field": "updated_at_dt",
-            "ttl_seconds": 604800,
-            "ttl_description": "7 dias (rascunhos)",
+            "ttl_seconds": RASCUNHOS_TTL_SEGUNDOS,
+            "ttl_description": f"{RASCUNHOS_TTL_DIAS} dias (rascunhos)",
             "filter": {"status": "draft"}
         }
     ]

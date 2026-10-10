@@ -11,6 +11,7 @@
  *
  * @route /visitas
  */
+import { useEstadoNaUrl, useTextoNaUrl } from "../hooks/useEstadoNaUrl";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 import VisitasTable from "@/components/visitas/VisitasTable";
@@ -903,14 +904,16 @@ const VisitsPage = () => {
   // impedia o `.filter` de rebentar. É a forma do `KanbanBoard` da D-20,
   // e a saída é a mesma: a forma normaliza-se UMA vez, num ponto único.
   const [visits, setVisits] = useState(QUADRO_VAZIO);
-  const [viewMode, setViewMode] = useState("tabela");
+  // Vista, consultor e pesquisa no URL: abrir um processo/cliente a partir de
+  // uma visita e voltar devolve o quadro como estava.
+  const [viewMode, setViewMode] = useEstadoNaUrl("vista", "tabela");
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [properties, setProperties] = useState([]);
   const [processes, setProcesses] = useState([]);
   const [users, setUsers] = useState([]);
-  const [filterConsultor, setFilterConsultor] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
+  const [filterConsultor, setFilterConsultor] = useEstadoNaUrl("consultor", "");
+  const [searchTerm, setSearchTerm] = useTextoNaUrl("q");
   const [schedulingVisit, setSchedulingVisit] = useState(null);
 
   // Fetch visits kanban
