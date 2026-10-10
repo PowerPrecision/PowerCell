@@ -9700,3 +9700,15 @@ funcional, omissão fora do URL) e `hooks/useVoltar.js`.
 **Análise de IA opcional no PDF do relatório executivo.** `services/executive_report_ai.py`;
 tarefa de IA `executive_report_analysis` (modelo do painel); cabeçalho de resposta
 `X-Analise-IA`.
+
+---
+
+## Hub & Spoke, filtro de viabilidade do Parceiro e validação financeira (Out 2026)
+
+**Isolamento.** Toda a listagem de processos/clientes pergunta a rede (`build_tenant_process_condition` + `com_isolamento`); `TestInventarioDasListagens` falha por omissão. «Os Meus Clientes» não tinha nenhuma (diretor/administrativo → `{}`).
+
+**Hub & Spoke.** `companies.is_hub` (Master). Satélite = rede que não é Hub quando há Hub: os processos nascem sem Index (`aplicar_regime_de_indexacao`); ao serem partilhados com o Hub entram na sua triagem (`hub_triage.entrar_na_triagem_do_hub`, `hub_triage` no processo) ou, com `via_verde`, saltam-na. Os pools de auto-atribuição são da equipa do processo (`rede_da_equipa`).
+
+**Parceiro.** Lead retida em `partner_drafts` → comprovativo → `db.clients` com `validacao_financeira` → Validar/Rejeitar (CEO, Diretor, Administrativo): aviso, nunca travão. Rejeitada volta ao parceiro (`devolvida`). 60 dias parada → `expirado` (job `scheduled_tasks`). Dados do cliente editáveis com a estrutura do registo público (`partner_client_form`).
+
+Ver `worklog.md` (bloco-a-b-c-…), `TECHNICAL_DEBT.md` D-35 e `FRONTEND_GUIDELINES.md` § 27.67.

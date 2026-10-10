@@ -14,7 +14,7 @@ import PartnerUploadBox from "@/components/partner/PartnerUploadBox";
 import FicheiroDoCaso from "@/components/partner/FicheiroDoCaso";
 import { progressoDoPedido } from "@/utils/partnerPortal";
 
-export default function PedidoDeDocumento({ caseId, pedido }) {
+export default function PedidoDeDocumento({ caseId, pedido, desactivado = false }) {
   const pendente = pedido.estado === "pendente";
   const { enviados, esperados } = progressoDoPedido(pedido);
 
@@ -48,7 +48,7 @@ export default function PedidoDeDocumento({ caseId, pedido }) {
           </ul>
         )}
 
-        {pendente && <PartnerUploadBox caseId={caseId} requestId={pedido.id} rotulo="Enviar ficheiro" />}
+        {pendente && !desactivado && <PartnerUploadBox caseId={caseId} requestId={pedido.id} rotulo="Enviar ficheiro" />}
       </CardContent>
     </Card>
   );

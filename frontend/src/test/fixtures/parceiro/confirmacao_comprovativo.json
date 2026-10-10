@@ -1,0 +1,13 @@
+{
+  "destino": {
+    "aviso": "O processo ainda não está indexado: o ficheiro fica na pasta Index e entra na fila da Indexação.",
+    "categoria_final": "Index",
+    "categoria_pedida": "Comprovativo_Pagamento",
+    "fila_ia": true
+  },
+  "filename": "pagamento.pdf",
+  "id": "ficheiro-novo",
+  "lead_submetida": true,
+  "request_id": null,
+  "success": true
+}

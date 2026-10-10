@@ -2618,3 +2618,13 @@ A configuração global é do administrador. Em vez de deixar o CEO abrir separa
 * **Setas de vizinhança usam `replace`**; o «Voltar» usa `useVoltar`.
 * **Portais:** o olho é `PasswordInput`; o botão de tema é `TemaToggle`. No Portal do Cliente as cores são classes cruas — **não se acrescenta uma classe de cor sem correr `yarn gerar:portal-escuro`** (o teste falha, com a instrução). O botão vive no invólucro, não na página.
 * **Selo Premium:** `PremiumBadge` + `NovidadesDoCrm`; o controlo de marcar é só do Master.
+
+## 27.67 — Filtro de viabilidade, dados do cliente e validação financeira (Out 2026)
+
+* **O estado de uma lead de parceiro vem do servidor** (`etapa`: `pendente`, `devolvida`, `expirado`, `lead`, …) e o ecrã não o infere. Retida (`pendente`/`devolvida`): o «Comprovativo de Pagamento» aparece nos **Pendentes** como obrigatório e é a única coisa que a liberta; expirada: aviso, sem envios nem edição.
+* **«Pendentes» / «Submetidos»** em vez de «Outros ficheiros». O que o próprio parceiro submeteu **não tem botão de descarga** (`podeDescarregar`; o servidor também recusa — esconder um botão é cortesia).
+* **Categorias de envio**: as do Portal do Cliente + o Comprovativo, vindas do servidor (`caso.categorias`) — uma lista paralela divergia. Um envio sem categoria deixa a classificação à equipa.
+* **«Dados do cliente»** desenha o `DynamicFormField` do registo público a partir do esquema do servidor (que deriva do `form_config`). O campo que liga o 2.º titular é um **interruptor**, não um selector; só vai no pedido **o que mudou** (`camposAlterados`) e nunca os campos do 2.º titular com o interruptor desligado. Desligar apaga os dados do 2.º titular, e o ecrã di-lo antes de guardar.
+* **Validação financeira = aviso**: `ValidacaoFinanceira` mostra o selo vermelho e (CEO, Diretor, Administrativo) os botões; **nenhum ecrã desactiva nada por causa dela** (guarda de fonte em `validacaoFinanceira.test.js`). A rejeição exige motivo (vai por email ao parceiro).
+* **Listas da equipa**: a origem passa SEMPRE por `formatFonteLabel` (nunca `partner_portal` em bruto) e a lista de registos tem a coluna «Parceiro»; as colunas vivem numa constante partilhada pelo cabeçalho e pelas linhas (`COLUNAS_DA_LISTA`).
+* **Hub**: o interruptor `is_hub` é só do Master (`CompaniesAdminTab`); «Via Verde ao partilhar com o Hub» (`ViaVerdeDoHub`) é DIFERENTE de «Via Verde (Ignorar fase de Indexação)».

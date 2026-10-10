@@ -1,4 +1,25 @@
 ---
+Task ID: bloco-a-b-c-isolamento-hub-e-filtro-de-viabilidade
+Agent: Cloud Agent
+Task: Fuga de clientes entre redes, Hub & Spoke (triagem no Hub, Via Verde), filtro de viabilidade do Parceiro e limpezas de UI
+
+Date: 2026-10-10
+
+Work Log:
+
+A1. FUGA DOMUS («Os Meus Clientes»). A causa NÃO era a rede de omissão: `build_my_clients_process_query` devolve `{}` para diretor/administrativo («todos os meus»), e nenhuma das listagens de «Os Meus Clientes» (`/processes/my-clients` — a que o ecrã usa, com tamanho de página 50, o número que o utilizador contou —, `/my-clients`, `/my-clients/stats`, `/clients/me`) passava pela condição de rede. Todas passam agora por `build_tenant_process_condition` + `com_isolamento`. O varrimento encontrou mais seis superfícies na mesma forma (dashboard de documentos a expirar, validades de documentos, NIF de empresa, DSTI, notificações de email não lidas, revisões pendentes da IA, lista de clientes do upload em massa) — também fechadas. `TestInventarioDasListagens` falha por OMISSÃO para um módulo novo que leia `db.processes`/`db.clients` sem rede (excepções escritas com motivo). A exploração reproduz-se sem a correcção (4 testes vermelhos) e não com ela.
+- O escritor `run_create_process_for_client` (criar processo na ficha do cliente) NUNCA carimbava a rede: o processo de um utilizador da Domus caía na pilha por carimbar (a do grupo incumbente) e desaparecia da Domus. Hoje carimba.
+- A ausência de `TENANT_DEFAULT_NETWORK_ID` em produção é agora um `error` no log, não um aviso: com a variável por definir a pilha por carimbar fica visível a TODAS as redes.
+
+A2. HUB & SPOKE. `companies.is_hub` (só o Master) define o Hub (a rede das empresas marcadas; sem nenhum, NADA muda — senão todas as redes seriam satélites, a da Precision incluída). Uma rede satélite não tem Index: os processos nascem com `skip_index` (`aplicar_regime_de_indexacao`, nos cinco escritores de processos, inventário por AST). Partilhar com o Hub (a Via Rápida, por atribuição) põe o processo na fila de triagem do Hub (`hub_triage.entrar_na_triagem_do_hub`: `skip_index` desligado, indexador do pool do Hub, registo `hub_triage`, histórico e trilho) — salvo `via_verde`, que salta o Index. O primeiro registo ganha (idempotente). ACHADO: os pools de auto-atribuição (indexador, consultor, mediador) liam `db.users` inteiro — um processo da Domus era dado a um indexador/consultor da Precision sem partilha nenhuma; agora o pool é o da equipa do processo (`rede_da_equipa`).
+
+B3-4. FILTRO DE VIABILIDADE DO PARCEIRO. A lead nasce RETIDA numa colecção própria (`partner_drafts`) — não em `db.clients` com uma marca, porque há mais de vinte superfícies da equipa que leem clientes e este projecto já falhou o inventário delas cinco vezes. Só o ficheiro enviado com a categoria «Comprovativo de Pagamento» (categoria inteira, normalizada; não o nome do ficheiro) a liberta: movimento (mesmo id), `validacao_financeira: pendente`, aviso à gestão. Rejeitada → volta ao parceiro como «devolvida» com o motivo (email); só um comprovativo NOVO a liberta outra vez. A validação (CEO, Diretor, Administrativo pelo perfil efectivo; 404 fora do âmbito) é um AVISO: selo vermelho «⚠️ Processo Não Validado» e nenhum módulo do motor a lê (guarda de fonte nos dois lados). Rejeitar um processo fecha-o na fase «perdido» do motor (sai do Index; reabrível).
+
+C5-8. Portal do Parceiro: «Pendentes» / «Submetidos», categorias do Portal do Cliente + Comprovativo no envio, sem descarga dos ficheiros que o próprio parceiro submeteu (UI E servidor), separador «Dados do cliente» com a estrutura do registo público (deriva do `form_config`) e 2.º titular (desligar apaga, dito no ecrã). Expiração aos 60 dias (`expirar_leads_inactivas`, no job `scheduled_tasks`; edições e envios contam como actividade). Listas da equipa: coluna «Parceiro» e etiquetas de origem em PT (`partner_portal` → «Portal do Parceiro»).
+
+Verificação: ver o relatório final (suites completas). Mutações: 7 no filtro de viabilidade, 7 no frontend do parceiro e 2 no Hub — todas mortas (as que sobreviveram à primeira passagem eram testes fracos e foram reforçadas). Não verificado: nenhum fluxo contra um S3/portal real; o ecrã só em jsdom; o encaminhamento ao Hub só com o duplo de Mongo (a semântica de `$in` sobre arrays já enganou este projecto — ver `fix_s3_folder_anomalies`).
+
+---
 Task ID: oito-pontos-processo-fechado-e-ux
 Agent: Cloud Agent
 Task: 1 bug de lógica (processo fechado alterável pela equipa) + 7 melhorias de UX/negócio

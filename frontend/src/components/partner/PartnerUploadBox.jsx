@@ -30,29 +30,48 @@ import {
   resumirLote,
 } from "@/utils/portalUploadStaging";
 
-export default function PartnerUploadBox({ caseId, requestId, rotulo = "Enviar ficheiros", className = "" }) {
+export default function PartnerUploadBox({
+  caseId,
+  requestId,
+  rotulo = "Enviar ficheiros",
+  className = "",
+  // Uma categoria FIXA (ex.: o Comprovativo de Pagamento) ou, com `categorias`,
+  // um seletor — as MESMAS categorias do Portal do Cliente.
+  categoria,
+  categorias,
+  desactivado = false,
+  testId,
+}) {
   const queryClient = useQueryClient();
   const entrada = useRef(null);
   const [lote, setLote] = useState([]);
   const [recusa, setRecusa] = useState("");
   const [aviso, setAviso] = useState("");
   const [aEnviar, setAEnviar] = useState(false);
+  const [escolhida, setEscolhida] = useState("");
+  const comSeletor = Array.isArray(categorias) && categorias.length > 0 && !requestId && !categoria;
+  const categoriaFinal = categoria || (comSeletor ? escolhida : "");
 
   const enviar = async (ficheiros) => {
-    if (!ficheiros?.length || aEnviar) return;
+    if (!ficheiros?.length || aEnviar || desactivado) return;
     setAEnviar(true);
     setRecusa("");
     setAviso("");
     let actual = criarLote(ficheiros);
     setLote(actual);
     let foiParaIndexacao = false;
+    let leadSubmetida = false;
 
     for (let i = 0; i < ficheiros.length; i += 1) {
       actual = marcar(actual, i, A_ENVIAR);
       setLote(actual);
       try {
-        const resposta = await enviarFicheiro(caseId, ficheiros[i], { requestId });
+        const resposta = await enviarFicheiro(caseId, ficheiros[i], {
+          requestId,
+          ...(categoriaFinal ? { category: categoriaFinal } : {}),
+        });
         if (resposta?.destino?.fila_ia) foiParaIndexacao = true;
+        if (resposta?.lead_submetida) leadSubmetida = true;
         actual = marcar(actual, i, ENVIADO);
       } catch (erro) {
         actual = marcar(actual, i, FALHOU, mensagemDeErro(erro, "Não foi possível enviar."));
@@ -60,7 +79,9 @@ export default function PartnerUploadBox({ caseId, requestId, rotulo = "Enviar f
       setLote(actual);
     }
 
-    if (foiParaIndexacao) {
+    if (leadSubmetida) {
+      setAviso("Comprovativo recebido. A lead seguiu para a nossa equipa e fica a aguardar a validação financeira.");
+    } else if (foiParaIndexacao) {
       setAviso("Recebido. O ficheiro segue para a análise da nossa equipa antes de ficar arquivado.");
     }
     // O detalhe, a lista e o painel mudaram (pedido satisfeito, contagens).
@@ -79,10 +100,27 @@ export default function PartnerUploadBox({ caseId, requestId, rotulo = "Enviar f
       onFicheiros={enviar}
       onRecusados={(_r, mensagem) => setRecusa(mensagem)}
       accept={TIPOS_ACEITES_NO_PARCEIRO}
-      disabled={aEnviar}
+      disabled={aEnviar || desactivado}
       className={`rounded-md border border-dashed border-border p-3 ${className}`}
-      testId={requestId ? `dropzone-${requestId}` : "dropzone-solto"}
+      testId={testId || (requestId ? `dropzone-${requestId}` : "dropzone-solto")}
     >
+      {comSeletor && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <label htmlFor={`tipo-${caseId}`} className="text-sm font-medium">Tipo de documento</label>
+          <select
+            id={`tipo-${caseId}`}
+            value={escolhida}
+            onChange={(e) => setEscolhida(e.target.value)}
+            disabled={aEnviar || desactivado}
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            <option value="">Sem categoria (a nossa equipa classifica)</option>
+            {categorias.map((c) => (
+              <option key={c.value} value={c.value}>{c.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <input
           ref={entrada}
@@ -91,14 +129,14 @@ export default function PartnerUploadBox({ caseId, requestId, rotulo = "Enviar f
           className="hidden"
           accept={TIPOS_ACEITES_NO_PARCEIRO}
           aria-label={rotulo}
-          data-testid={requestId ? `input-${requestId}` : "input-solto"}
+          data-testid={testId ? `input-${testId}` : requestId ? `input-${requestId}` : "input-solto"}
           onChange={(e) => {
             const escolhidos = Array.from(e.target.files || []);
             e.target.value = "";
             enviar(escolhidos);
           }}
         />
-        <Button type="button" size="sm" variant="outline" disabled={aEnviar} onClick={() => entrada.current?.click()}>
+        <Button type="button" size="sm" variant="outline" disabled={aEnviar || desactivado} onClick={() => entrada.current?.click()}>
           {aEnviar ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : <Upload className="mr-2 h-4 w-4" aria-hidden="true" />}
           {aEnviar ? "A enviar…" : rotulo}
         </Button>

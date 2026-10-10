@@ -225,7 +225,7 @@ async def mundo(fake_async_db):
     for u in (CONSULTOR, MEDIADOR):
         await fake_async_db.users.insert_one({**u, "role": "x", "is_active": True})
 
-    async def _menos_ocupado(papel, company_id=None):
+    async def _menos_ocupado(papel, company_id=None, network_id=None):
         return CONSULTOR if papel == "consultor" else MEDIADOR
 
     with patch.object(pa, "db", fake_async_db), \

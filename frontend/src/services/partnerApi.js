@@ -76,6 +76,12 @@ export const obterCaso = (caseId) => dados(partnerHttp.get(`/cases/${encodeURICo
 // ── Escrita ─────────────────────────────────────────────────────────
 export const submeterLead = (payload) => dados(partnerHttp.post("/leads", payload));
 
+// ── Dados do cliente: a estrutura do registo público, com 2.º titular ──
+export const obterFormularioDoCliente = (caseId) =>
+  dados(partnerHttp.get(`/cases/${encodeURIComponent(caseId)}/client-form`));
+export const guardarFormularioDoCliente = (caseId, values) =>
+  dados(partnerHttp.put(`/cases/${encodeURIComponent(caseId)}/client-form`, { values }));
+
 export const pedirUrlDeEnvio = (caseId, body) =>
   dados(partnerHttp.post(`/cases/${encodeURIComponent(caseId)}/upload-url`, body));
 export const confirmarEnvio = (caseId, body) =>

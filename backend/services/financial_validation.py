@@ -44,6 +44,7 @@ from fastapi import HTTPException, Request
 
 from database import db
 from services.partner_drafts import CAMPO_VALIDACAO, devolver_ao_parceiro
+from services.phase_automation import ORIGEM_MOVIMENTO, ao_entrar_na_fase_sem_falhar
 from services.tenant_network import (
     documento_no_ambito,
     processo_no_ambito,
@@ -267,6 +268,9 @@ async def _tirar_da_operacao(processo: dict) -> None:
             montar_update({"status": destino, "updated_at": _agora(), "assigned_indexacao_id": None,
                            "indexacao_name": None}, transicao),
         )
+        # Fase terminal: o gancho corta as sessões do Portal do cliente (processo
+        # inativo) e nunca atribui nem cria trabalho. Não propaga.
+        await ao_entrar_na_fase_sem_falhar(processo["id"], destino, origem=ORIGEM_MOVIMENTO)
     except Exception as exc:  # noqa: BLE001 — a rejeição já está gravada
         logger.warning("[VALIDACAO] Falha a fechar o processo rejeitado %s: %s", processo.get("id"), exc)
 

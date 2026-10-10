@@ -9,7 +9,7 @@ import { Download, FileText, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { obterUrlDeDescarga } from "@/services/partnerApi";
-import { formatarData, mensagemDeErro, rotuloDeAutoria, tamanhoLegivel } from "@/utils/partnerPortal";
+import { formatarData, mensagemDeErro, podeDescarregar, rotuloDeAutoria, tamanhoLegivel } from "@/utils/partnerPortal";
 
 export default function FicheiroDoCaso({ caseId, ficheiro }) {
   const [aObter, setAObter] = useState(false);
@@ -29,9 +29,17 @@ export default function FicheiroDoCaso({ caseId, ficheiro }) {
     }
   };
 
-  const detalhe = [rotuloDeAutoria(ficheiro.by), tamanhoLegivel(ficheiro.file_size), formatarData(ficheiro.uploaded_at)]
+  const detalhe = [
+    ficheiro.category_label,
+    rotuloDeAutoria(ficheiro.by),
+    tamanhoLegivel(ficheiro.file_size),
+    formatarData(ficheiro.uploaded_at),
+  ]
     .filter(Boolean)
     .join(" · ");
+  // O que o próprio parceiro submeteu não se descarrega de volta (o servidor
+  // também o recusa; esconder o botão é só a cortesia).
+  const comDescarga = podeDescarregar(ficheiro);
 
   return (
     <li className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
@@ -43,9 +51,11 @@ export default function FicheiroDoCaso({ caseId, ficheiro }) {
           {erro && <p role="alert" className="text-xs text-destructive">{erro}</p>}
         </div>
       </div>
-      <Button type="button" size="sm" variant="ghost" onClick={descarregar} disabled={aObter} aria-label={`Descarregar ${ficheiro.filename || "ficheiro"}`}>
-        {aObter ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
-      </Button>
+      {comDescarga && (
+        <Button type="button" size="sm" variant="ghost" onClick={descarregar} disabled={aObter} aria-label={`Descarregar ${ficheiro.filename || "ficheiro"}`}>
+          {aObter ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
+        </Button>
+      )}
     </li>
   );
 }

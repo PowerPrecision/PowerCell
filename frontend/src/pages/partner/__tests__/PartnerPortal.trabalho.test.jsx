@@ -25,6 +25,8 @@ vi.mock("@/services/partnerApi", () => ({
   submeterLead: vi.fn(),
   obterUrlDeDescarga: vi.fn(),
   enviarFicheiro: vi.fn(),
+  obterFormularioDoCliente: vi.fn(),
+  guardarFormularioDoCliente: vi.fn(),
 }));
 
 import * as api from "@/services/partnerApi";
@@ -75,7 +77,7 @@ describe("o painel", () => {
     await within(grupo).findByRole("button", { name: "Leads (2)" });
     const botoes = within(grupo).getAllByRole("button");
     expect(botoes.map((b) => b.textContent)).toEqual([
-      "Todos (6)", "Leads (2)", "Em preparação (1)", "Em análise (0)", "Em aprovação (1)", "Escriturados (1)", "Perdidos (1)",
+      "Todos (6)", "Pendentes (0)", "Leads (2)", "Em preparação (1)", "Em análise (0)", "Em aprovação (1)", "Escriturados (1)", "Perdidos (1)",
     ]);
   });
 
@@ -282,11 +284,22 @@ describe("o caso", () => {
     expect(within(recebido).queryByRole("button", { name: "Enviar ficheiro" })).not.toBeInTheDocument();
   });
 
-  it("os ficheiros soltos aparecem à parte", async () => {
+  it("os ficheiros soltos aparecem em «Submetidos»", async () => {
     montar("/parceiro/casos/a-novo");
-    const seccao = await screen.findByRole("region", { name: "Outros ficheiros" });
+    const seccao = await screen.findByRole("region", { name: "Documentos submetidos" });
     expect(within(seccao).getByText("foto.jpg")).toBeInTheDocument();
     expect(within(seccao).getByText("extra.pdf")).toBeInTheDocument();
+  });
+
+  it("os documentos dividem-se em Pendentes e Submetidos", async () => {
+    montar("/parceiro/casos/a-novo");
+    const pendentes = await screen.findByRole("region", { name: "Documentos pendentes" });
+    const submetidos = screen.getByRole("region", { name: "Documentos submetidos" });
+    // req-1 está por satisfazer; req-2 já foi recebido.
+    expect(within(pendentes).getByTestId("pedido-req-1")).toBeInTheDocument();
+    expect(within(pendentes).queryByTestId("pedido-req-2")).not.toBeInTheDocument();
+    expect(within(submetidos).getByTestId("pedido-req-2")).toBeInTheDocument();
+    expect(within(submetidos).queryByTestId("pedido-req-1")).not.toBeInTheDocument();
   });
 
   it("uma lead explica que está em análise e mostra os pedidos dela", async () => {
@@ -392,18 +405,29 @@ describe("enviar e descarregar", () => {
 
   it("descarregar pede o URL pelo id do ficheiro e abre-o sem `opener`", async () => {
     const abrir = vi.spyOn(window, "open").mockImplementation(() => null);
-    api.obterUrlDeDescarga.mockResolvedValue({ url: "https://s3.exemplo/get", filename: "irs-parceiro.pdf" });
+    api.obterUrlDeDescarga.mockResolvedValue({ url: "https://s3.exemplo/get", filename: "irs-cliente.pdf" });
     montar("/parceiro/casos/a-novo");
-    await userEvent.click(await screen.findByRole("button", { name: "Descarregar irs-parceiro.pdf" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Descarregar irs-cliente.pdf" }));
     await waitFor(() => expect(abrir).toHaveBeenCalledWith("https://s3.exemplo/get", "_blank", "noopener,noreferrer"));
-    expect(api.obterUrlDeDescarga).toHaveBeenCalledWith("a-novo", "f-eu");
+    expect(api.obterUrlDeDescarga).toHaveBeenCalledWith("a-novo", "f-cli");
   });
 
   it("uma descarga que falha diz porquê", async () => {
     vi.spyOn(window, "open").mockImplementation(() => null);
     api.obterUrlDeDescarga.mockRejectedValue(erroHttp(404, "Ficheiro não encontrado."));
     montar("/parceiro/casos/a-novo");
-    await userEvent.click(await screen.findByRole("button", { name: "Descarregar irs-parceiro.pdf" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Descarregar irs-cliente.pdf" }));
     expect(await screen.findByText("Ficheiro não encontrado.")).toBeInTheDocument();
+  });
+
+  it("o que o próprio parceiro submeteu NÃO tem botão de descarga (e o do cliente tem)", async () => {
+    montar("/parceiro/casos/a-novo");
+    await screen.findByText("irs-parceiro.pdf");
+    // submetidos pelo parceiro: sem botão
+    expect(screen.queryByRole("button", { name: /Descarregar irs-parceiro\.pdf/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Descarregar extra\.pdf/ })).not.toBeInTheDocument();
+    // submetidos pelo cliente: com botão (contraprova — esconder tudo passaria acima)
+    expect(screen.getByRole("button", { name: "Descarregar irs-cliente.pdf" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Descarregar foto.jpg" })).toBeInTheDocument();
   });
 });

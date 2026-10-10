@@ -50,6 +50,7 @@ import { TableSkeleton } from "../ui/skeletons";
 const EMPTY_FORM = {
   name: "",
   network_id: "",
+  is_hub: false,
   nif: "",
   email: "",
   is_active: true,
@@ -168,6 +169,7 @@ export default function CompaniesAdminTab({ isMaster = false }) {
     setForm({
       name: company.name || "",
       network_id: company.network_id || "",
+      is_hub: company.is_hub === true,
       nif: company.nif || "",
       email: company.email || company.contact_email || "",
       is_active: isCompanyActive(company),
@@ -235,6 +237,8 @@ export default function CompaniesAdminTab({ isMaster = false }) {
         // partilha dados com ninguém). Não preencher por omissão — herdar
         // a rede de outra empresa aqui abriria a fuga na criação.
         ...(isMaster ? { network_id: form.network_id.trim() || null } : {}),
+        // Hub & Spoke: só o Master decide quem é o Hub (a equipa de Index).
+        ...(isMaster ? { is_hub: Boolean(form.is_hub) } : {}),
         nif: form.nif.trim() || null,
         email: form.email.trim() || null,
         is_active: form.is_active,
@@ -336,6 +340,9 @@ export default function CompaniesAdminTab({ isMaster = false }) {
                     <TableCell className="font-medium">{company.name}</TableCell>
                     <TableCell>
                       <NetworkChip {...chipDaRede(company)} />
+                      {company.is_hub === true && (
+                        <Badge variant="outline" className="ml-1" data-testid="company-hub-badge">Hub</Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {company.nif || "—"}
@@ -413,6 +420,23 @@ export default function CompaniesAdminTab({ isMaster = false }) {
                   onChange={(network_id) => setForm((p) => ({ ...p, network_id }))}
                   companies={companies}
                 />
+              )}
+              {isMaster && (
+                <div className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-3">
+                  <Switch
+                    id="company-is-hub"
+                    checked={Boolean(form.is_hub)}
+                    onCheckedChange={(is_hub) => setForm((p) => ({ ...p, is_hub }))}
+                    data-testid="company-is-hub-switch"
+                  />
+                  <div className="space-y-0.5">
+                    <Label htmlFor="company-is-hub" className="cursor-pointer text-sm">Hub (tem a equipa de Index)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Os processos das redes satélite (sem Index) que forem partilhados com esta rede
+                      entram na sua fila de triagem. Sem nenhum Hub marcado, nada muda.
+                    </p>
+                  </div>
+                </div>
               )}
               <div className="space-y-2">
                 <Label htmlFor="company-nif">NIF</Label>

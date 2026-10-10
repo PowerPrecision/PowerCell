@@ -29,8 +29,10 @@ describe("normalizarPainel (sobre a resposta REAL do servidor)", () => {
   const p = normalizarPainel(painel);
 
   it("lê o funil, os totais e a conversão", () => {
-    expect(p.funil.map((e) => e.etapa)).toEqual(["lead", "novo", "analise", "aprovado", "concluido", "perdido"]);
-    expect(p.funil[0]).toEqual({ etapa: "lead", label: "Leads", total: 2 });
+    expect(p.funil.map((e) => e.etapa)).toEqual(["pendente", "lead", "novo", "analise", "aprovado", "concluido", "perdido"]);
+    expect(p.funil[0]).toEqual({ etapa: "pendente", label: "Pendentes", total: 0 });
+    expect(p.funil[1]).toEqual({ etapa: "lead", label: "Leads", total: 2 });
+    expect(p.pendentes).toBe(0);
     expect(p.totalDeCasos).toBe(6);
     expect(p.escriturados).toBe(1);
     expect(p.leads).toBe(2);

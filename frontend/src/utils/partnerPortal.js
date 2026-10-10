@@ -21,6 +21,17 @@ export const TIPOS_ACEITES_NO_PARCEIRO = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
 export const ETAPA_LEAD = "lead";
 export const ETAPA_CONCLUIDO = "concluido";
 export const ETAPA_PERDIDO = "perdido";
+// O filtro de viabilidade: a lead fica RETIDA do lado do parceiro até haver
+// um Comprovativo de Pagamento.
+export const ETAPA_PENDENTE = "pendente";
+export const ETAPA_DEVOLVIDA = "devolvida";
+export const ETAPA_EXPIRADO = "expirado";
+
+/** A categoria que liberta uma lead retida (o valor que o servidor reconhece). */
+export const CATEGORIA_DO_COMPROVATIVO = "Comprovativo_Pagamento";
+
+/** Etapas em que o parceiro ainda pode editar os dados e enviar ficheiros. */
+export const ETAPAS_DE_LEAD_RETIDA = [ETAPA_PENDENTE, ETAPA_DEVOLVIDA];
 
 /** Variante do `Badge` por etapa — tokens semânticos, nunca cores cruas. */
 export function variantDaEtapa(etapa) {
@@ -28,8 +39,10 @@ export function variantDaEtapa(etapa) {
     case ETAPA_CONCLUIDO:
       return "default";
     case ETAPA_PERDIDO:
+    case ETAPA_DEVOLVIDA:
       return "destructive";
     case ETAPA_LEAD:
+    case ETAPA_PENDENTE:
       return "secondary";
     default:
       return "outline";
@@ -49,6 +62,7 @@ export function normalizarPainel(resposta) {
     totalDeCasos: numero(r.total_de_casos),
     escriturados: numero(r.escriturados),
     leads: numero(r.leads),
+    pendentes: numero(r.pendentes),
     // `null` é «sem base» — NÃO é zero: «0 %» a quem ainda não trouxe nada lê-se como fracasso.
     taxaDeConversao: typeof r.taxa_de_conversao === "number" ? r.taxa_de_conversao : null,
     pedidosPendentes: numero(r.pedidos_pendentes),
@@ -83,7 +97,42 @@ export function normalizarCaso(resposta) {
       .filter((p) => p && typeof p === "object" && p.id)
       .map((p) => ({ ...p, ficheiros: ficheiros(p.ficheiros) })),
     ficheiros: ficheiros(r.ficheiros),
+    // As categorias que o parceiro pode escolher (as do Portal do Cliente +
+    // o Comprovativo de Pagamento), sempre uma lista.
+    categorias: (Array.isArray(r.categorias) ? r.categorias : []).filter(
+      (c) => c && typeof c === "object" && texto(c.value)
+    ),
   };
+}
+
+/** A lead está retida (pendente ou devolvida): falta o Comprovativo de Pagamento. */
+export function leadRetida(caso) {
+  return caso?.kind === "lead" && ETAPAS_DE_LEAD_RETIDA.includes(caso?.etapa);
+}
+
+/** Uma lead que expirou (60 dias sem actividade): vê-se, já não se trabalha. */
+export function leadExpirada(caso) {
+  return caso?.kind === "lead" && caso?.etapa === ETAPA_EXPIRADO;
+}
+
+/**
+ * Documentos «Pendentes» e «Submetidos» — a divisão que o parceiro vê.
+ *
+ * Pendentes: os pedidos por satisfazer (e, numa lead retida, o comprovativo
+ * obrigatório — tratado à parte pela página). Submetidos: os pedidos já
+ * recebidos e os ficheiros soltos que enviou ou que o cliente enviou.
+ */
+export function separarDocumentos(caso) {
+  return {
+    pendentes: pedidosPendentes(caso),
+    pedidosSubmetidos: pedidosRecebidos(caso),
+    ficheirosSubmetidos: caso?.ficheiros || [],
+  };
+}
+
+/** Pode descarregar? O que o próprio parceiro submeteu não se descarrega. */
+export function podeDescarregar(ficheiro) {
+  return ficheiro?.by !== "eu";
 }
 
 /** Os pedidos por satisfazer, primeiro — é com eles que parceiro e consultor falam. */

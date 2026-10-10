@@ -14,6 +14,7 @@ import { Filter, RotateCcw } from "lucide-react";
 
 export const CLIENT_FONTE_OPTIONS = [
   { value: "staff_created", label: "Criado pela equipa" },
+  { value: "partner_portal", label: "Portal do Parceiro" },
   { value: "Website", label: "Website" },
   { value: "Manual", label: "Manual" },
   { value: "Indicação", label: "Indicação" },

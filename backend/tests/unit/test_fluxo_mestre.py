@@ -340,7 +340,7 @@ class TestOPercursoInteiro:
         for u in (CONSULTOR, MEDIADOR, INDEXADOR):
             await mundo.users.insert_one({**u, "is_active": True})
 
-        async def _menos_ocupado(papel, company_id=None):
+        async def _menos_ocupado(papel, company_id=None, network_id=None):
             return CONSULTOR if papel == "consultor" else MEDIADOR
 
         async def _atribuir_indexador(process_id, update_status=True):

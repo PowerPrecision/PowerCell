@@ -38,6 +38,7 @@ import { buildStatusOptions, formatStatusLabel } from "../utils/workflowStatuses
 import useVoltar from "../hooks/useVoltar";
 import { processoEstaFechado, fasesParaReabrir, PAPEIS_QUE_REABREM } from "../utils/processoFechado";
 import ReabrirProcessoDialog from "../components/processDetails/dialogs/ReabrirProcessoDialog";
+import ValidacaoFinanceira from "../components/validacao/ValidacaoFinanceira";
 import DashboardLayout from "../layouts/DashboardLayout";
 import useWebSocket from "../hooks/useWebSocket";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -2332,6 +2333,18 @@ const ProcessDetails = () => {
               </Button>
             )}
           </div>
+        )}
+
+        {/* Validação financeira de uma lead de parceiro: um AVISO vermelho
+            («Processo Não Validado») que NUNCA bloqueia o trabalho. Só
+            CEO, Diretor e Administrativo veem os botões. */}
+        {!isDeletedProcess && process?.validacao_financeira && (
+          <ValidacaoFinanceira
+            registo={process}
+            tipo="process"
+            papelEfectivo={effectiveRole || userRole}
+            onDecidido={fetchData}
+          />
         )}
 
         {/* Header (Progressive Disclosure): PageHeader partilhado + StatusBadge

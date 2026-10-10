@@ -80,3 +80,55 @@ describe("CompaniesAdminTab — o que só o Master faz", () => {
     }
   });
 });
+
+
+describe("CompaniesAdminTab — o Hub (Hub & Spoke) é decisão do Master", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("o Master vê o interruptor «Hub» ao editar; o Admin não", async () => {
+    const master = montar({ isMaster: true });
+    fireEvent.click(await screen.findByTestId("btn-edit-company-c1"));
+    expect(await screen.findByTestId("company-is-hub-switch")).toBeTruthy();
+    master.unmount();
+
+    montar({ isMaster: false });
+    fireEvent.click(await screen.findByTestId("btn-edit-company-c1"));
+    await screen.findByTestId("company-name-input");
+    expect(screen.queryByTestId("company-is-hub-switch")).toBeNull();
+  });
+
+  it("o pedido de um Admin NÃO leva is_hub; o do Master leva", async () => {
+    for (const [isMaster, leva] of [[false, false], [true, true]]) {
+      vi.clearAllMocks();
+      const { unmount } = montar({ isMaster });
+      fireEvent.click(await screen.findByTestId("btn-edit-company-c1"));
+      const nome = await screen.findByTestId("company-name-input");
+      fireEvent.change(nome, { target: { value: "Power SA" } });
+      fireEvent.submit(nome.closest("form"));
+      await waitFor(() => expect(api.updateCompany).toHaveBeenCalled());
+      expect("is_hub" in api.updateCompany.mock.calls[0][1], `isMaster=${isMaster}`).toBe(leva);
+      unmount();
+    }
+  });
+
+  it("ligar o interruptor envia is_hub: true", async () => {
+    montar({ isMaster: true });
+    fireEvent.click(await screen.findByTestId("btn-edit-company-c1"));
+    const interruptor = await screen.findByTestId("company-is-hub-switch");
+    fireEvent.click(interruptor);
+    fireEvent.submit((await screen.findByTestId("company-name-input")).closest("form"));
+    await waitFor(() => expect(api.updateCompany).toHaveBeenCalled());
+    expect(api.updateCompany.mock.calls[0][1].is_hub).toBe(true);
+  });
+
+  it("uma empresa Hub mostra o selo «Hub» na lista", async () => {
+    api.getCompanies.mockResolvedValue({ data: { companies: [{ ...EMPRESAS[0], is_hub: true }], total: 1 } });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CompaniesAdminTab isMaster />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByTestId("company-hub-badge")).toHaveTextContent("Hub");
+  });
+});

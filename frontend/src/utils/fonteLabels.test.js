@@ -40,3 +40,11 @@ test("dicionário exportado contém as chaves essenciais", () => {
   assert.ok(FONTE_LABELS["public_form"]);
   assert.ok(FONTE_LABELS["auto_created"]);
 });
+
+test("origens do Portal do Parceiro e dos processos nunca aparecem em snake_case", () => {
+  assert.equal(formatFonteLabel("partner_portal"), "Portal do Parceiro");
+  assert.equal(formatFonteLabel("staff_created"), "Criado pela Equipa");
+  assert.equal(formatFonteLabel("client_assignment"), "Atribuição de Cliente");
+  assert.equal(formatFonteLabel("client_portal"), "Portal do Cliente");
+  assert.equal(formatFonteLabel("lead"), "Registo (Lead)");
+});
