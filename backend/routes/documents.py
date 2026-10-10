@@ -27,6 +27,7 @@ from database import db
 from models.auth import UserRole
 from models.document import DocumentExpiryCreate, DocumentExpiryResponse
 from services.auth import get_current_user, require_roles, require_staff
+from services.process_closed_guard import exigir_processo_editavel
 from middleware.rate_limit import limiter
 
 # Importar verificação de permissões de processo
@@ -43,7 +44,7 @@ from services.file_validation import validate_file_content, validate_and_extract
 from services.history import log_history
 from utils.input_sanitization import (sanitize_string, sanitize_name, sanitize_email, sanitize_phone, sanitize_url, sanitize_html, log_sanitization_rejection)
 
-router = APIRouter(prefix="/documents", tags=["Document Management"])
+router = APIRouter(prefix="/documents", tags=["Document Management"], dependencies=[Depends(exigir_processo_editavel)])
 logger = logging.getLogger(__name__)
 
 from services.document_constants import (

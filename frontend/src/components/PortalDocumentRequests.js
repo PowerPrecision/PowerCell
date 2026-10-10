@@ -114,7 +114,14 @@ const STATUS_CONFIG = {
   pending: { label: "Pendente", color: "bg-amber-100 text-amber-800 border-amber-200", icon: Clock },
 };
 
-export default function PortalDocumentRequests({ processId, processNumber, clientName, onDocumentsChange }) {
+export default function PortalDocumentRequests({
+  processId,
+  processNumber,
+  clientName,
+  onDocumentsChange,
+  // Processo fechado: os pedidos veem-se, não se criam nem se alteram.
+  readOnly = false,
+}) {
   const queryClient = useQueryClient();
   const { documents, isLoading: loading } = usePortalRequestsQuery(processId);
   const [actionLoading, setActionLoading] = useState(null); // track which action is loading
@@ -278,6 +285,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
       <CardContent className="space-y-4">
         {/* Add new document button */}
         <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+          {!readOnly && (
           <DialogTrigger asChild>
             <Button
               size="sm"
@@ -288,6 +296,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
               Solicitar Documento ao Cliente
             </Button>
           </DialogTrigger>
+          )}
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Solicitar Documento</DialogTitle>
@@ -410,6 +419,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
                     doc={doc}
                     loading={actionLoading === doc.id}
                     onViewDetails={() => setDetailsDoc(doc)}
+                    readOnly={readOnly}
                     onMarkReceived={() => handleMarkReceived(doc.id)}
                     onDelete={() => handleDelete(doc.id)}
                   />
@@ -430,6 +440,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
                     doc={doc}
                     loading={actionLoading === doc.id}
                     onViewDetails={() => setDetailsDoc(doc)}
+                    readOnly={readOnly}
                     onMarkReceived={() => handleMarkReceived(doc.id)}
                     onDelete={() => handleDelete(doc.id)}
                   />
@@ -450,6 +461,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
                     doc={doc}
                     loading={actionLoading === doc.id}
                     onViewDetails={() => setDetailsDoc(doc)}
+                    readOnly={readOnly}
                     onMarkPending={() => handleMarkPending(doc.id)}
                     onDelete={() => handleDelete(doc.id)}
                     isReceived
@@ -470,6 +482,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
         processNumber={processNumber}
         clientName={clientName}
         loading={detailsDoc ? actionLoading === detailsDoc.id : false}
+        readOnly={readOnly}
         onAccept={() => detailsDoc && handleMarkReceived(detailsDoc.id)}
         onReject={() => detailsDoc && handleDelete(detailsDoc.id)}
         onReactivate={() => detailsDoc && handleMarkPending(detailsDoc.id)}
@@ -479,7 +492,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
 }
 
 // ── Individual document item ──────────────────────────────────────
-function DocItem({ doc, loading, onViewDetails, onMarkReceived, onMarkPending, onDelete, isReceived }) {
+function DocItem({ doc, loading, onViewDetails, onMarkReceived, onMarkPending, onDelete, isReceived, readOnly = false }) {
   const catInfo = getCategoryInfo(doc.category);
   const statusKey = safeString(doc.status, 'REQUESTED').toUpperCase();
   const statusCfg = STATUS_CONFIG[statusKey] || STATUS_CONFIG[safeString(doc.status)] || STATUS_CONFIG.REQUESTED;
@@ -538,7 +551,7 @@ function DocItem({ doc, loading, onViewDetails, onMarkReceived, onMarkPending, o
             >
               <Eye className="h-4 w-4" />
             </button>
-            {!isReceived ? (
+            {readOnly ? null : !isReceived ? (
               <>
                 <button
                   type="button"
@@ -605,6 +618,7 @@ function RequestDetailsDialog({
   onAccept,
   onReject,
   onReactivate,
+  readOnly = false,
 }) {
   if (!doc) return null;
 
@@ -689,6 +703,10 @@ function RequestDetailsDialog({
         <DialogFooter className="gap-2 sm:gap-2">
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          ) : readOnly ? (
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Fechar
+            </Button>
           ) : isReceived ? (
             <>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

@@ -523,8 +523,21 @@ class TestOsUtilizadoresDoRelatorio:
         base = type("DB", (), {"users": _Users()})()
         await er._ler_utilizadores(base, er.Ambito(chave="x"), _filtros())
         texto = json.dumps(capturado["query"])
-        assert '{"role": {"$ne": "indexacao"}}' in texto
+        assert '{"role": {"$nin": ["master", "admin", "indexacao"]}}' in texto
         assert "indexacao" not in json.dumps(er.PAPEIS_DO_RELATORIO)
+
+    def test_master_e_admin_estao_fora_dos_perfis_do_relatorio(self):
+        """Decisão do dono do produto (Out 2026): só a operação real."""
+        assert set(er.PAPEIS_FORA_DO_RELATORIO) == {"master", "admin", "indexacao"}
+        assert not set(er.PAPEIS_DO_RELATORIO) & set(er.PAPEIS_FORA_DO_RELATORIO)
+        assert set(er.PAPEIS_DO_RELATORIO) == {
+            "consultor", "intermediario", "administrativo", "diretor", "ceo",
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("papel", ["master", "admin", "indexacao"])
+    async def test_pedir_so_um_perfil_excluido_nao_devolve_nada(self, papel):
+        assert await er._ler_utilizadores(object(), er.Ambito(chave="x"), _filtros(papeis=(papel,))) == []
 
     @pytest.mark.asyncio
     async def test_pedir_so_a_indexacao_nao_devolve_nada(self):

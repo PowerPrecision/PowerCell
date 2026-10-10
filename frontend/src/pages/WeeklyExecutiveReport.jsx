@@ -16,7 +16,8 @@ import DashboardLayout from "../layouts/DashboardLayout";
 import ExecutiveCharts from "../components/executive/ExecutiveCharts";
 import ExecutiveKpis from "../components/executive/ExecutiveKpis";
 import ExecutiveUsersTable from "../components/executive/ExecutiveUsersTable";
-import { descarregarPdf } from "../components/executive/descarregarPdf";
+import { descarregarPdf, mensagemDoPdf } from "../components/executive/descarregarPdf";
+import OpcaoAnaliseIA from "../components/executive/OpcaoAnaliseIA";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -40,6 +41,7 @@ export default function WeeklyExecutiveReport() {
   const queryClient = useQueryClient();
   const [semana, setSemana] = useState(""); // "" = a semana anterior (fechada)
   const [aGerarPdf, setAGerarPdf] = useState(false);
+  const [analiseIA, setAnaliseIA] = useState(false);
   const [aRecalcular, setARecalcular] = useState(false);
 
   const { data, error, isFetching } = useQuery({
@@ -70,9 +72,15 @@ export default function WeeklyExecutiveReport() {
 
   const gerarPdf = async () => {
     setAGerarPdf(true);
-    const r = await descarregarPdf(() => downloadExecutiveWeeklyPdf(actual || undefined), "relatorio-semanal.pdf");
+    const r = await descarregarPdf(
+      () => downloadExecutiveWeeklyPdf(actual || undefined, { analiseIA }), "relatorio-semanal.pdf",
+    );
     setAGerarPdf(false);
-    if (r.ok) toast.success("PDF gerado");
+    if (r.ok) {
+      const msg = mensagemDoPdf(r, analiseIA);
+      if (msg.tipo === "aviso") toast.warning(msg.texto);
+      else toast.success(msg.texto);
+    }
     else toast.error(r.erro);
   };
 
@@ -95,10 +103,13 @@ export default function WeeklyExecutiveReport() {
               Progresso dos processos e tarefas de cada colaborador, de segunda a domingo.
             </p>
           </div>
+          <div className="flex flex-wrap items-center gap-3">
+          <OpcaoAnaliseIA marcada={analiseIA} onChange={setAnaliseIA} desactivada={aGerarPdf} />
           <Button type="button" size="sm" onClick={gerarPdf} disabled={aGerarPdf || !data} className="gap-1.5">
             {aGerarPdf ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <FileDown className="h-4 w-4" aria-hidden="true" />}
             Gerar PDF
           </Button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2" data-testid="navegador-de-semanas">

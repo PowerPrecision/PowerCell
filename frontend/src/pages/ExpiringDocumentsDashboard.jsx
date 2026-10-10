@@ -8,6 +8,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
+import { CODEC_NUMERO, useEstadoNaUrl, useTextoNaUrl } from "../hooks/useEstadoNaUrl";
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -50,10 +51,11 @@ const ExpiringDocumentsDashboard = () => {
   const [error, setError] = useState(null);
   
   // Filtros
-  const [searchTerm, setSearchTerm] = useState("");
-  const [urgencyFilter, setUrgencyFilter] = useState("all");
-  const [consultorFilter, setConsultorFilter] = useState("all");
-  const [daysAhead, setDaysAhead] = useState(60);
+  // Filtros no URL: abrir um processo e voltar devolve a lista como estava.
+  const [searchTerm, setSearchTerm] = useTextoNaUrl("q");
+  const [urgencyFilter, setUrgencyFilter] = useEstadoNaUrl("urgencia", "all");
+  const [consultorFilter, setConsultorFilter] = useEstadoNaUrl("consultor", "all");
+  const [daysAhead, setDaysAhead] = useEstadoNaUrl("dias", 60, CODEC_NUMERO);
 
   const fetchData = useCallback(async (showRefreshing = false) => {
     if (showRefreshing) setRefreshing(true);

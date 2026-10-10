@@ -426,6 +426,7 @@ AI_CONFIG_DEFAULTS = {
     "weekly_report": "gpt-4o-mini",            # Relatório semanal
     "error_analysis": "gpt-4o-mini",           # Análise de erros
     "voice_note_extraction": "gpt-4o-mini",    # Notas de voz: resumo + tarefas
+    "executive_report_analysis": "gpt-4o-mini",  # Análise opcional no PDF do relatório executivo
 }
 
 # Log de configuração de IA

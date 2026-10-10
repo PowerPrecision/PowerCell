@@ -361,9 +361,14 @@ class TestUpdateProcessLeftovers:
         except HTTPException as e:
             assert e.status_code == 403
 
-    def test_terminal_guard_allows_admin(self):
+    def test_terminal_guard_also_blocks_admin(self):
+        """Sem isenção por cargo: o ecrã trata toda a gente por igual."""
+        import pytest
+        from fastapi import HTTPException
         from services.process_update import assert_process_editable_for_role
-        assert_process_editable_for_role("concluidos", UserRole.ADMIN)
+        with pytest.raises(HTTPException) as e:
+            assert_process_editable_for_role("concluidos", UserRole.ADMIN)
+        assert e.value.status_code == 403
 
     def test_seed_update_data_contacts_and_reassign(self):
         from services.process_update import seed_update_data

@@ -7,6 +7,7 @@ Do **not** overwrite s3_storage.py / storage_service.py.
 ====================================================================
 """
 from fastapi import APIRouter, Depends
+from services.process_closed_guard import exigir_processo_editavel
 
 from routes.auth import get_current_user
 from services.storage_api_status import run_get_storage_status
@@ -20,7 +21,7 @@ from services.storage_api_checklist import (
     run_get_document_checklist,
 )
 
-router = APIRouter(prefix="/storage", tags=["Storage"])
+router = APIRouter(prefix="/storage", tags=["Storage"], dependencies=[Depends(exigir_processo_editavel)])
 
 
 @router.get("/status")

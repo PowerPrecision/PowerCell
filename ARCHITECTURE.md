@@ -1910,7 +1910,7 @@ queryKeys.orgAdmin.ucrByUser(userId)
 |----------|-------|-----|------|--------|
 | `refresh_tokens` | `created_at_dt` | 24 h | `ttl_refresh_tokens` | Extra à expiração lógica `expires_at` |
 | `system_error_logs` | `timestamp_dt` | 30 dias | `ttl_system_error_logs` | Substitui o `idx_ttl` antigo em ISO string |
-| `emails` | `updated_at_dt` | 7 dias | `ttl_email_drafts` | Partial index `status: draft` |
+| `emails` | `updated_at_dt` | 15 dias | `ttl_email_drafts` | Partial index `status: draft`; prazo em `db_indexes.RASCUNHOS_TTL_DIAS` (era 7) |
 | `oauth_states` | `created_at` | 10 min | `idx_oauth_state_ttl` | CSRF state OAuth |
 
 Diagnóstico: `GET /diagnostics/ttl-status` e migração `POST /diagnostics/migrate-ttl-fields` (documentos antigos só com ISO string).
@@ -9676,3 +9676,27 @@ Terceiro plano de identidade, ao lado do staff (`users`) e do cliente (`portal_t
 | Rate limit | chave do limiter por parceiro; travão de força bruta por identidade (D-4 para o IP) |
 
 Ver `worklog.md` (portal-do-parceiro-v1), `TECHNICAL_DEBT.md` D-32/D-33 e `FRONTEND_GUIDELINES.md` § 27.65.
+
+---
+
+## Processo fechado, vista noturna dos portais e estado das listagens no URL (Out 2026)
+
+**Processo em fase terminal = só leitura para a equipa.** `services/process_closed_guard.py`:
+dependência de router `exigir_processo_editavel` (qualquer escrita com `{process_id}`
+no caminho nos routers `processes`, `documents`, `onedrive`, `storage`, `voice_notes`) +
+`exigir_processo_aberto` nos serviços cujo processo não vem no caminho (upload,
+eliminação de ficheiros, `PUT`). A autoridade é a fase gravada lida pelo MOTOR
+(`portal_estado.estado_e_terminal`, a mesma do Portal do Cliente). A única saída é
+`POST /processes/{id}/reopen` (`services/process_reopen.py`), que reutiliza o movimento
+de fase do Kanban. Sem excepção por cargo.
+
+**Vista noturna.** Parceiro: `ThemeContext` global. Cliente: `usePortalTheme` +
+`styles/portalEscuro.css` gerado de `portalEscuroGerador.mjs` (sobreposições só sob
+`html.portal-ativo.dark`; guarda em `portalEscuro.test.js`).
+
+**Estado de listagem no URL.** `hooks/useEstadoNaUrl.js` (`replace`, actualização
+funcional, omissão fora do URL) e `hooks/useVoltar.js`.
+
+**Análise de IA opcional no PDF do relatório executivo.** `services/executive_report_ai.py`;
+tarefa de IA `executive_report_analysis` (modelo do painel); cabeçalho de resposta
+`X-Analise-IA`.

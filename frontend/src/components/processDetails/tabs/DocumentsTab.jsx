@@ -26,6 +26,8 @@ export default function DocumentsTab({
   handleAIDataExtractedFromDocs,
   handleDocumentDataExtracted,
   setDocumentsRefreshKey,
+  // Processo fechado (fase terminal): documentos em modo de leitura.
+  processoFechado = false,
 }) {
   return (
     <div className="space-y-4">
@@ -139,6 +141,7 @@ export default function DocumentsTab({
             clientName={process?.client_name}
             onAIDataExtracted={handleAIDataExtractedFromDocs}
             onDocumentDataExtracted={handleDocumentDataExtracted}
+            readOnly={processoFechado}
           />
         </CardContent>
       </Card>
@@ -149,6 +152,7 @@ export default function DocumentsTab({
         processNumber={process?.process_number}
         clientName={process?.client_name}
         onDocumentsChange={() => setDocumentsRefreshKey(k => k + 1)}
+        readOnly={processoFechado}
       />
     </div>
   );

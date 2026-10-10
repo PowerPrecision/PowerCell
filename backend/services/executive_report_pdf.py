@@ -136,6 +136,7 @@ def construir_pdf(
     gerado_por: str = "",
     titulo: str = TITULO,
     subtitulo: str = "",
+    analise: Optional[dict] = None,
 ) -> bytes:
     """Constrói o PDF. Síncrono — correr num executor."""
     from reportlab.lib import colors
@@ -232,6 +233,20 @@ def construir_pdf(
                               ("BACKGROUND", (0, 0), (-1, -1), zebra), ("TOPPADDING", (0, 0), (-1, -1), 5),
                               ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
     historia.append(kpis)
+
+    # ── Análise de IA (opcional: só existe se foi pedida e o modelo respondeu) ──
+    if analise and analise.get("texto"):
+        simulada = analise.get("origem") == "simulado"
+        historia.append(Paragraph("Análise de desempenho", s_seccao))
+        s_analise = ParagraphStyle("ExecAnalise", parent=s_celula, fontSize=9, leading=13, spaceAfter=4)
+        for paragrafo in str(analise["texto"]).split("\n\n"):
+            historia.append(Paragraph(esc(paragrafo), s_analise))
+        historia.append(Paragraph(esc(
+            "Texto simulado (ambiente de desenvolvimento), calculado dos números do relatório."
+            if simulada else
+            "Texto gerado por inteligência artificial a partir dos números deste relatório. "
+            "Confirme os valores na tabela antes de tomar decisões."
+        ), s_nota))
 
     # ── Gráficos ──────────────────────────────────────────────────
     nomes, series = dados_do_grafico_de_pessoas(relatorio)

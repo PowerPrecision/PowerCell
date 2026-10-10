@@ -18,6 +18,7 @@ from services.document_process_resolve import (
     build_s3_valid_prefixes,
     resolve_process_from_flexible_id,
 )
+from services.process_closed_guard import exigir_processo_aberto
 from services.process_status import INACTIVE_STATUSES
 from services.history import log_history
 from services.s3_document_root import dentro_da_pasta
@@ -153,6 +154,9 @@ async def run_delete_file_s3(
         )
 
     assert_s3_file_belongs_to_process(file_path, process)
+    # Depois da posse do ficheiro: «está fechado» não é um oráculo para quem
+    # só adivinha ids. Reabre-se primeiro (ver `process_closed_guard`).
+    await exigir_processo_aberto(process)
 
     doc_metadata = await db.document_metadata.find_one(
         {"s3_path": file_path}, {"_id": 0}
@@ -209,6 +213,7 @@ async def run_bulk_delete_files(
         client_id,
         log_prefix="[DELETE-BATCH]",
     )
+    await exigir_processo_aberto(process)
     valid_prefixes = build_s3_valid_prefixes(process)
 
     deleted_count = 0

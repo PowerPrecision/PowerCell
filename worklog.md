@@ -1,9 +1,37 @@
 ---
+Task ID: oito-pontos-processo-fechado-e-ux
+Agent: Cloud Agent
+Task: 1 bug de lógica (processo fechado alterável pela equipa) + 7 melhorias de UX/negócio
+
+Date: 2026-10-10
+
+Work Log:
+
+1. PROCESSO FECHADO (`services/process_closed_guard.py`, `process_reopen.py`)
+- O bloqueio antigo só existia no `PUT` e corria DEPOIS de gravar a ficha do cliente e a troca de titular; isentava Master/Admin/CEO; o resto do CRM nem perguntava. Hoje: dependência de router (processes, documents, onedrive, storage, notas de voz) + `exigir_processo_aberto` nos serviços com processo fora do caminho (upload, eliminação, PUT — que agora recusa ANTES de gravar). Sem excepção por cargo. 404 antes de 403.
+- `POST /processes/{id}/reopen` (fase ACTIVA obrigatória, reutiliza o movimento do Kanban). Frontend: aviso + «Reabrir», `S3FileManager`/pedidos do Portal em modo de leitura.
+- 131 testes nos routers reais + 24 mutações (1 sobrevivente: um atalho de optimização sem teste — acrescentado). Três testes legados que afirmavam a isenção de Admin/CEO foram INVERTIDOS.
+
+2. RASCUNHOS 7 → 15 DIAS: `db_indexes.RASCUNHOS_TTL_DIAS` (o índice e o diagnóstico derivam dela). Verificado num `mongod` real que o índice existente de 7 dias é recriado a 15 (caminho de conflito do `_create_index_safe`).
+
+3. RELATÓRIO EXECUTIVO sem Master/Admin/Indexação (`PAPEIS_FORA_DO_RELATORIO`, `role $nin`). Os números e as séries derivam dos ids filtrados: um ponto cobre Dashboard, Semanal, PDF e email. Testado em MongoDB real (inclui admin com cargo adicional de consultor, e consultor com cargo adicional de admin).
+
+4. ANÁLISE DE IA NO PDF, OPCIONAL: caixa «Incluir análise de IA» (desligada), `ai_analysis=true`, só números agregados ao modelo, tarefa de IA própria, dev simula, falha → PDF sem a secção + `X-Analise-IA`. Uma mutação sobreviveu (HTML não retirado: a asserção olhava para `<b>` e o `>` já tinha sido removido por outra regra) — corrigida; três sobreviventes no frontend eram testes que falseavam a função de transporte — acrescentado teste ao nível do pedido.
+
+5. «VOLTAR» E ESTADO NO URL: as setas Anterior/Seguinte EMPILHAVAM história (a pesquisa «perdia-se» porque «Voltar» recuava um processo de cada vez); o quadro Kanban guardava todos os filtros em `useState`. `useEstadoNaUrl`/`useTextoNaUrl`/`useVoltar`.
+
+6/7. PORTAL DO PARCEIRO: olho nas palavras-passe (login, convite, conta) e botão de tema. PORTAL DO CLIENTE: vista noturna a pedido (claro por omissão), CSS GERADO das classes de cor do Portal com guarda de contraste AA.
+
+8. ATUALIZAÇÕES DO SISTEMA: `GET` só staff do CRM, globais (consulta `{}`), `is_premium` posto só pelo Master (PATCH Master-only; 403 na geração antes de pagar a IA). Selo «Módulo Premium» e convite a pedir o módulo; o Dashboard pede as últimas 5.
+
+Verificação: suites completas (backend com MongoDB real, frontend, ESLint, flake8, bandit) — números no relatório final. Não verificado: nenhuma chamada real ao modelo de IA; o aspecto do tema noturno do Portal do Cliente só foi verificado por regras (contraste, âmbito, cobertura das classes), não visualmente; o fluxo «Reabrir» e o modo de leitura só em jsdom.
+
+---
 Task ID: d31-d8-rascunho-de-rececao
 Agent: Cloud Agent
 Task: Três pendências da gaveta — D-31 (rotas por id de clientes/tarefas), D-8 (carimbo de rede nos emails) e rascunho de IA a confirmar a receção de documentos críticos
 
-Date: 2026-10-11
+Date: 2026-10-10
 
 Work Log:
 

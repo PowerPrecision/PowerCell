@@ -308,3 +308,78 @@ class TestOTempoLimite:
 
         await er.gerar_relatorio(AMBITO, _filtros(), base=_Base(), agora=AGORA)
         assert pedidos and all(p.get("maxTimeMS", 0) > 0 and p.get("allowDiskUse") is True for p in pedidos)
+
+
+class TestMasterAdminEIndexacaoForaDoRelatorio:
+    """Contas de gestão não são operação (Out 2026).
+
+    Um admin que mova processos ou conclua tarefas NÃO pode aparecer na tabela,
+    nos totais, nas fases nem na série diária — senão o gráfico de desempenho
+    da equipa mede também quem gere o sistema.
+    """
+
+    async def _com_gestao(self, bd):
+        """Acrescenta as contas de gestão e o seu trabalho a uma base já semeada."""
+        await bd.users.insert_many([
+            {"id": "u-admin", "name": "Admin", "email": "a@x.pt", "role": "admin", "is_active": True},
+            {"id": "u-master", "name": "Master", "email": "m@x.pt", "role": "master", "is_active": True},
+            # Conta de gestão que também trabalha como consultor: continua fora.
+            {"id": "u-admin-consultor", "name": "Admin Consultor", "email": "ac@x.pt",
+             "role": "admin", "additional_roles": ["consultor"], "is_active": True},
+            # Consultor com cargo adicional de admin: a conta é de consultor, entra.
+            {"id": "u-consultor-admin", "name": "Consultor Admin", "email": "ca@x.pt",
+             "role": "consultor", "additional_roles": ["admin"], "is_active": True},
+        ])
+        await bd.history.insert_many([
+            _h("u-admin", "p9", DENTRO, novo="aprovado"),
+            _h("u-master", "p9", DENTRO_2, novo="aprovado"),
+            _h("u-admin-consultor", "p9", DENTRO, novo="aprovado"),
+        ])
+        await bd.tasks.insert_many([
+            _t("t-admin", ["u-admin"], feita=DENTRO, por="u-admin"),
+            _t("t-master", ["u-master"], feita=DENTRO, por="u-master"),
+        ])
+
+    @pytest.mark.asyncio
+    async def test_nao_aparecem_na_tabela(self, base):
+        await _semear(base)
+        await self._com_gestao(base)
+        r = await er.gerar_relatorio(AMBITO, _filtros(), base=base, agora=AGORA)
+        ids = {u["user_id"] for u in r["users"]}
+        assert not ids & {"u-admin", "u-master", "u-admin-consultor", "u-ix"}
+        assert "u-consultor-admin" in ids  # contraprova: a conta de consultor entra
+
+    @pytest.mark.asyncio
+    async def test_o_trabalho_deles_nao_entra_nos_totais_nas_fases_nem_na_serie(self, base):
+        await _semear(base)
+        sem = await er.gerar_relatorio(AMBITO, _filtros(), base=base, agora=AGORA)
+        er.limpar_cache()
+        await self._com_gestao(base)
+        com = await er.gerar_relatorio(AMBITO, _filtros(), base=base, agora=AGORA)
+
+        assert com["summary"]["total_phase_changes"] == sem["summary"]["total_phase_changes"]
+        assert com["summary"]["total_tasks_completed"] == sem["summary"]["total_tasks_completed"]
+        assert com["por_fase"] == sem["por_fase"]
+        assert sum(d["mudancas_de_fase"] for d in com["serie_diaria"]) == \
+            sum(d["mudancas_de_fase"] for d in sem["serie_diaria"])
+
+    @pytest.mark.asyncio
+    async def test_pedir_so_admin_ou_master_nao_devolve_ninguem(self, base):
+        await _semear(base)
+        await self._com_gestao(base)
+        for papel in ("admin", "master", "indexacao"):
+            r = await er.gerar_relatorio(AMBITO, _filtros(papeis=(papel,)), base=base, agora=AGORA)
+            assert r["users"] == [], papel
+
+    @pytest.mark.asyncio
+    async def test_pedir_um_admin_pelo_id_tambem_nao_o_traz(self, base):
+        await _semear(base)
+        await self._com_gestao(base)
+        r = await er.gerar_relatorio(AMBITO, _filtros(user_ids=("u-admin",)), base=base, agora=AGORA)
+        assert r["users"] == []
+
+    @pytest.mark.asyncio
+    async def test_as_notas_de_criterio_dizem_quem_ficou_de_fora(self, base):
+        await _semear(base)
+        r = await er.gerar_relatorio(AMBITO, _filtros(), base=base, agora=AGORA)
+        assert any("Master, Admin e Indexação" in n for n in r["notas"])

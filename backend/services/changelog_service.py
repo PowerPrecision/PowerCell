@@ -432,11 +432,13 @@ async def get_changelogs(limit: int = 5) -> List[Dict[str, Any]]:
         cursor = db.system_changelogs.find(
             {},
             {"_id": 1, "version": 1, "content_markdown": 1, "published_at": 1,
-             "generated_by": 1, "source_summary": 1}
+             "generated_by": 1, "source_summary": 1, "is_premium": 1}
         ).sort("published_at", -1).limit(limit)
         changelogs = []
         async for doc in cursor:
             doc["id"] = str(doc.pop("_id"))
+            # Entradas anteriores ao campo não o têm: não são Premium.
+            doc["is_premium"] = doc.get("is_premium") is True
             changelogs.append(doc)
         return changelogs
     except Exception as e:
@@ -447,7 +449,8 @@ async def get_changelogs(limit: int = 5) -> List[Dict[str, Any]]:
 async def generate_changelog_ai(
     source_type: str = "git",
     max_source_lines: int = 50,
-    custom_prompt_suffix: Optional[str] = None
+    custom_prompt_suffix: Optional[str] = None,
+    is_premium: bool = False,
 ) -> Dict[str, Any]:
     """
     Gerar notas de atualização por IA a partir de logs técnicos.
@@ -610,6 +613,7 @@ Transforma estes dados num anúncio de lançamento amigável para os utilizadore
         "published_at": now_iso,
         "generated_by": "ai",
         "source_summary": source_summary,
+        "is_premium": bool(is_premium),
     }
     try:
         result = await db.system_changelogs.insert_one(doc)
@@ -626,3 +630,24 @@ Transforma estes dados num anúncio de lançamento amigável para os utilizadore
         "changelog": doc,
         "tokens_used": tokens_used,
     }
+
+
+async def set_changelog_premium(changelog_id: str, is_premium: bool) -> Optional[Dict[str, Any]]:
+    """Marca/desmarca uma novidade como Premium. ``None`` se o id não existe.
+
+    O id é o ``ObjectId`` em texto que a listagem devolve; um texto que não o
+    seja é «não existe», não um erro de servidor.
+    """
+    from bson import ObjectId
+    from bson.errors import InvalidId
+
+    try:
+        oid = ObjectId(str(changelog_id))
+    except (InvalidId, TypeError):
+        return None
+    resultado = await db.system_changelogs.update_one(
+        {"_id": oid}, {"$set": {"is_premium": bool(is_premium)}},
+    )
+    if not resultado.matched_count:
+        return None
+    return {"id": str(oid), "is_premium": bool(is_premium)}

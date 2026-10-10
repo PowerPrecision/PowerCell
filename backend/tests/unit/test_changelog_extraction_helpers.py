@@ -9,6 +9,7 @@ def test_changelog_api_modules_exist():
         "changelog_api_diagnose.py",
         "changelog_api_generate.py",
         "changelog_api_list.py",
+        "changelog_api_premium.py",
     ]
     for name in expected:
         assert (services_dir / name).exists(), f"missing {name}"
@@ -23,8 +24,10 @@ def test_changelog_api_export_run_entrypoints():
         changelog_api_list,
         changelog_api_diagnose,
         changelog_api_generate,
+        changelog_api_premium,
     )
 
+    assert callable(changelog_api_premium.run_set_changelog_premium)
     assert callable(changelog_api_list.run_list_changelogs)
     assert callable(changelog_api_diagnose.run_diagnose_changelog_generation)
     assert callable(changelog_api_generate.run_generate_changelog)

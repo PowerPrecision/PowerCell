@@ -237,8 +237,8 @@ class TestOPerfilActivoMandaNaEscrita:
     async def test_o_bloqueio_de_estado_terminal_tambem_segue_o_chapeu(
         self, processo_na_base,
     ):
-        # `assert_process_editable_for_role` isenta admin/CEO. Um admin
-        # que trocou para consultor deixa de ter essa isenção.
+        # Já não há isenção por cargo; o teste fica porque o que ele prova
+        # é que o chapéu posto é o que conta.
         from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc:
@@ -250,16 +250,21 @@ class TestOPerfilActivoMandaNaEscrita:
         assert exc.value.status_code == 403
 
     @pytest.mark.asyncio
-    async def test_o_admin_sem_troca_de_chapeu_mantem_a_isencao(
+    async def test_o_admin_ja_nao_tem_isencao_num_processo_fechado(
         self, processo_na_base,
     ):
-        # Contraprova do teste anterior.
-        await _actualizar(
-            processo_na_base,
-            papel_jwt="admin", papel_activo=None,
-            novo_estado="cpcv", estado_actual="concluido",
-        )
-        assert processo_na_base.processes.docs[0]["status"] == "cpcv"
+        # Inverso do que aqui estava: a isenção de admin/CEO caiu — reabre-se
+        # primeiro (`POST /processes/{id}/reopen`) e só depois se edita.
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            await _actualizar(
+                processo_na_base,
+                papel_jwt="admin", papel_activo=None,
+                novo_estado="cpcv", estado_actual="concluido",
+            )
+        assert exc.value.status_code == 403
+        assert processo_na_base.processes.docs[0]["status"] == "concluido"
 
 
 # ====================================================================

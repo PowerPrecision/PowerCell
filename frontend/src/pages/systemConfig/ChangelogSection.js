@@ -18,7 +18,10 @@ import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import { formatDateTime } from "../../lib/utils";
 import { sanitizeHtml } from "../../utils/sanitize";
 import { toast } from "sonner";
-import { getSystemChangelogs, generateChangelogAI, diagnoseChangelog, createAnnouncement } from "../../services/api";
+import { getSystemChangelogs, generateChangelogAI, diagnoseChangelog, createAnnouncement, setChangelogPremium } from "../../services/api";
+import { useAuth } from "../../contexts/AuthContext";
+import { Checkbox } from "../../components/ui/checkbox";
+import PremiumBadge from "../../components/changelog/PremiumBadge";
 import {
   Sparkles,
   Loader2,
@@ -42,6 +45,12 @@ function markdownToHtml(md) {
 }
 
 export default function ChangelogSection() {
+  // Marcar uma novidade como Premium (upsell) é decisão da plataforma: só o
+  // Master. O servidor recusa a qualquer outro (403); aqui nem se oferece.
+  const { effectiveRole } = useAuth();
+  const eMaster = (effectiveRole || "").toLowerCase() === "master";
+  const [geraComoPremium, setGeraComoPremium] = useState(false);
+  const [aMarcar, setAMarcar] = useState(null);
   const [changelogs, setChangelogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -87,7 +96,11 @@ export default function ChangelogSection() {
   const handleGenerate = async () => {
     setGenerating(true);
     try {
-      const res = await generateChangelogAI({ source_type: sourceType });
+      const res = await generateChangelogAI({
+        source_type: sourceType,
+        // Só o Master a pode pedir; nunca se envia a quem não o é.
+        ...(eMaster && geraComoPremium ? { is_premium: true } : {}),
+      });
       toast.success("Notas de atualização geradas com sucesso!");
       // Adicionar o novo changelog ao início da lista
       if (res.data?.changelog) {
@@ -99,6 +112,20 @@ export default function ChangelogSection() {
       toast.error(extractErrorMessage(err, "Erro ao gerar notas de atualização"));
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const alternarPremium = async (entrada) => {
+    const novo = !(entrada.is_premium === true);
+    setAMarcar(entrada.id);
+    try {
+      await setChangelogPremium(entrada.id, novo);
+      setChangelogs((anteriores) => anteriores.map((e) => (e.id === entrada.id ? { ...e, is_premium: novo } : e)));
+      toast.success(novo ? "Marcada como Premium." : "Deixou de ser Premium.");
+    } catch (err) {
+      toast.error(extractErrorMessage(err?.response?.data?.detail, "Não foi possível alterar a marca Premium."));
+    } finally {
+      setAMarcar(null);
     }
   };
 
@@ -137,6 +164,18 @@ export default function ChangelogSection() {
                 </SelectContent>
               </Select>
             </div>
+            {eMaster && (
+              <div className="flex items-end gap-2 pb-2">
+                <Checkbox
+                  id="gerar-como-premium"
+                  checked={geraComoPremium}
+                  onCheckedChange={(v) => setGeraComoPremium(v === true)}
+                />
+                <Label htmlFor="gerar-como-premium" className="text-xs cursor-pointer">
+                  Marcar como Premium
+                </Label>
+              </div>
+            )}
             <div className="flex items-end gap-2">
               <Button onClick={handleGenerate} disabled={generating} className="gap-2">
                 {generating ? (
@@ -239,6 +278,7 @@ export default function ChangelogSection() {
                         ✨ IA
                       </Badge>
                     )}
+                    {entry.is_premium === true && <PremiumBadge />}
                   </CardTitle>
                   <span className="text-xs text-muted-foreground">
                     {formatDateTime(entry.published_at)}
@@ -253,7 +293,18 @@ export default function ChangelogSection() {
                   }}
                 />
                 {/* PACOTE AW: Botão Publicar no Mural da Equipa */}
-                <div className="mt-4 pt-3 border-t flex items-center justify-end">
+                <div className="mt-4 pt-3 border-t flex items-center justify-end gap-2">
+                  {eMaster && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={aMarcar === entry.id}
+                      onClick={() => alternarPremium(entry)}
+                      data-testid={`alternar-premium-${entry.id}`}
+                    >
+                      {entry.is_premium === true ? "Remover Premium" : "Marcar como Premium"}
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"

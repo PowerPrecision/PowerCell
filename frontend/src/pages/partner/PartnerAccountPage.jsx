@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import PasswordInput from "@/components/shared/PasswordInput";
 import { Label } from "@/components/ui/label";
 import { usePartnerAuth } from "@/contexts/PartnerAuthContext";
 import { mensagemDeErro } from "@/utils/partnerPortal";
@@ -58,15 +58,15 @@ export default function PartnerAccountPage() {
           <form onSubmit={submeter} className="space-y-4" noValidate>
             <div className="space-y-2">
               <Label htmlFor="pp-actual">Palavra-passe actual</Label>
-              <Input id="pp-actual" type="password" autoComplete="current-password" value={actual} onChange={(e) => setActual(e.target.value)} />
+              <PasswordInput id="pp-actual" autoComplete="current-password" value={actual} onChange={(e) => setActual(e.target.value)} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="pp-nova">Palavra-passe nova</Label>
-              <Input id="pp-nova" type="password" autoComplete="new-password" value={nova} onChange={(e) => setNova(e.target.value)} />
+              <PasswordInput id="pp-nova" autoComplete="new-password" value={nova} onChange={(e) => setNova(e.target.value)} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="pp-confirmacao">Repetir palavra-passe nova</Label>
-              <Input id="pp-confirmacao" type="password" autoComplete="new-password" value={confirmacao} onChange={(e) => setConfirmacao(e.target.value)} />
+              <PasswordInput id="pp-confirmacao" autoComplete="new-password" value={confirmacao} onChange={(e) => setConfirmacao(e.target.value)} />
             </div>
             {erro && <Alert variant="destructive" role="alert"><AlertDescription>{erro}</AlertDescription></Alert>}
             {feito && <p role="status" className="text-sm text-muted-foreground">Palavra-passe alterada.</p>}

@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../layouts/DashboardLayout", () => ({
   default: ({ children }) => <div data-testid="layout">{children}</div>,
 }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 
 const api = vi.hoisted(() => ({
   getExecutiveWeekly: vi.fn(),
@@ -143,8 +143,29 @@ describe("PDF e erros", () => {
     montar();
     await screen.findByTestId("estado-do-registo");
     await userEvent.click(screen.getByRole("button", { name: /Gerar PDF/ }));
-    await waitFor(() => expect(api.downloadExecutiveWeeklyPdf).toHaveBeenCalledWith("2026-10-05"));
+    await waitFor(() => expect(api.downloadExecutiveWeeklyPdf).toHaveBeenCalledWith("2026-10-05", { analiseIA: false }));
     expect(baixar).toHaveBeenCalled();
+  });
+
+  it("a caixa «Incluir análise de IA» vem desligada e, marcada, vai no pedido", async () => {
+    montar();
+    await screen.findByTestId("estado-do-registo");
+    const caixa = screen.getByRole("checkbox", { name: /Incluir análise de IA/ });
+    expect(caixa).not.toBeChecked();
+    await userEvent.click(caixa);
+    await userEvent.click(screen.getByRole("button", { name: /Gerar PDF/ }));
+    await waitFor(() => expect(api.downloadExecutiveWeeklyPdf).toHaveBeenCalledWith("2026-10-05", { analiseIA: true }));
+  });
+
+  it("pediu a análise e o servidor não a incluiu: avisa", async () => {
+    api.downloadExecutiveWeeklyPdf.mockResolvedValue({
+      data: new Blob(["%PDF-"]), headers: { "x-analise-ia": "indisponivel" },
+    });
+    montar();
+    await screen.findByTestId("estado-do-registo");
+    await userEvent.click(screen.getByRole("checkbox", { name: /Incluir análise de IA/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Gerar PDF/ }));
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(expect.stringMatching(/sem a análise de IA/)));
   });
 
   it("o erro do servidor aparece e não há tabelas vazias a fingir", async () => {

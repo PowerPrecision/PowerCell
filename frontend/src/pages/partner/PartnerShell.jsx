@@ -10,6 +10,7 @@ import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 import { LogOut, PlusCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import PartnerTemaToggle from "@/components/partner/PartnerTemaToggle";
 import { cn } from "@/lib/utils";
 import {
   ESTADO_A_CARREGAR,
@@ -56,6 +57,7 @@ export default function PartnerShell() {
             <Button asChild size="sm">
               <Link to="/parceiro/novo-lead"><PlusCircle className="mr-2 h-4 w-4" aria-hidden="true" />Novo lead</Link>
             </Button>
+            <PartnerTemaToggle className="h-8 w-8" />
             <Button type="button" size="sm" variant="ghost" onClick={sair} aria-label="Terminar sessão">
               <LogOut className="h-4 w-4" aria-hidden="true" />
             </Button>

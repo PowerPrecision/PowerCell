@@ -13,11 +13,13 @@ export const ROTULOS_DOS_PAPEIS = {
   administrativo: "Administrativo",
   diretor: "Diretor",
   ceo: "CEO",
-  master: "Master",
-  admin: "Admin",
 };
 
-/** Perfis filtráveis. `indexacao` NÃO existe aqui: o relatório não o inclui. */
+/**
+ * Perfis filtráveis. `master`, `admin` e `indexacao` NÃO existem aqui: o
+ * relatório não os inclui (contas de gestão e perfil sem registo) — o servidor
+ * é a autoridade, isto só evita oferecer um filtro que devolve sempre vazio.
+ */
 export const PAPEIS_FILTRAVEIS = Object.keys(ROTULOS_DOS_PAPEIS);
 
 export const MAX_DIAS = 366;

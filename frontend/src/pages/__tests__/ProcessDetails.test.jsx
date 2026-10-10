@@ -18,7 +18,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import servicoPorPagar from "@/test/fixtures/parceiro/servico_por_pagar.json";
 
@@ -40,6 +40,7 @@ vi.mock("../../services/api", async (importOriginal) => ({
   getCandidatosOrigemFinanceira: vi.fn(() => Promise.resolve({ data: { candidatos: [] } })),
   // Forma REAL do servidor (fixture gerada pelo serviço), não uma inventada.
   getServicoDoParceiro: vi.fn(() => Promise.resolve({ data: servicoPorPagar })),
+  reopenProcess: vi.fn(() => Promise.resolve({ data: { reopened: true } })),
 }));
 
 vi.mock("../../contexts/AuthContext", () => ({
@@ -111,6 +112,7 @@ vi.mock("../../hooks/mutations/useProcessMutations", () => ({
 }));
 
 import ProcessDetails from "../ProcessDetails";
+import { construirContextoDeNavegacao } from "../../utils/processNavigation";
 
 // ── Dados ────────────────────────────────────────────────────────────
 const PROCESSO = {
@@ -519,5 +521,165 @@ describe("ProcessDetails — estados de carregamento e erro", () => {
     montar();
 
     expect(await screen.findByTestId("layout")).toBeInTheDocument();
+  });
+});
+
+
+describe("ProcessDetails — processo FECHADO: modo de leitura e Reabrir", () => {
+  const FASES = [
+    { id: "s1", name: "Em Análise", label: "Em Análise", order: 1, is_active: true },
+    { id: "s2", name: "Aprovado", label: "Aprovado", order: 2, is_active: true },
+    { id: "s3", name: "concluidos", label: "Concluído", order: 3, is_active: false },
+  ];
+
+  const fechado = () =>
+    pacoteCompleto({
+      process: { ...PROCESSO, status: "concluidos" },
+      workflowStatuses: FASES,
+    });
+
+  afterEach(() => { sessao.papel = "consultor"; });
+
+  it.each(["consultor", "admin", "ceo", "master"])(
+    "%s vê o aviso de processo fechado e o botão Reabrir (sem isenção por cargo)",
+    async (papel) => {
+      sessao.papel = papel;
+      pacote.valor = fechado();
+      montar();
+
+      expect(await screen.findByTestId("processo-fechado-banner")).toBeInTheDocument();
+      expect(screen.getByTestId("reabrir-processo-btn")).toBeInTheDocument();
+      expect(screen.queryByText(/pode editar valores retroativamente/i)).toBeNull();
+    },
+  );
+
+  it("um processo aberto não mostra aviso nem Reabrir (contraprova)", async () => {
+    pacote.valor = pacoteCompleto({ workflowStatuses: FASES });
+    montar();
+    await screen.findByTestId("layout");
+    await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+
+    expect(screen.queryByTestId("processo-fechado-banner")).toBeNull();
+    expect(screen.queryByTestId("reabrir-processo-btn")).toBeNull();
+  });
+
+  it("o motor manda: uma fase configurada como inativa fecha mesmo fora da lista legada", async () => {
+    pacote.valor = pacoteCompleto({
+      process: { ...PROCESSO, status: "renegociacao" },
+      workflowStatuses: [
+        ...FASES,
+        { id: "s4", name: "renegociacao", label: "Renegociação", order: 4, is_active: false },
+      ],
+    });
+    montar();
+
+    expect(await screen.findByTestId("processo-fechado-banner")).toBeInTheDocument();
+  });
+
+  it("o separador Documentos fica em modo de leitura: sem Upload", async () => {
+    pacote.valor = fechado();
+    montar();
+    await screen.findByTestId("processo-fechado-banner");
+    await userEvent.click(screen.getByRole("tab", { name: /documentos/i }));
+
+    expect(await screen.findByTestId("documentos-processo-fechado")).toBeInTheDocument();
+    expect(screen.queryByTestId("upload-file-btn")).toBeNull();
+    expect(screen.queryByTestId("portal-request-add-button")).toBeNull();
+  });
+
+  it("o separador Documentos de um processo ABERTO mantém o Upload (contraprova)", async () => {
+    pacote.valor = pacoteCompleto({ workflowStatuses: FASES });
+    montar();
+    await screen.findByTestId("layout");
+    await userEvent.click(await screen.findByRole("tab", { name: /documentos/i }));
+
+    expect(await screen.findByTestId("upload-file-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("documentos-processo-fechado")).toBeNull();
+  });
+
+  it("Reabrir só oferece fases activas e chama o servidor com a escolhida", async () => {
+    const api = await import("../../services/api");
+    api.reopenProcess.mockClear();
+    pacote.valor = fechado();
+    montar();
+
+    await userEvent.click(await screen.findByTestId("reabrir-processo-btn"));
+    const dialogo = await screen.findByTestId("reabrir-processo-dialog");
+    expect(within(dialogo).getByTestId("reabrir-confirmar")).toBeDisabled();
+
+    await userEvent.click(within(dialogo).getByTestId("reabrir-fase-select"));
+    expect(screen.queryByRole("option", { name: "Concluído" })).toBeNull();
+    await userEvent.click(await screen.findByRole("option", { name: "Aprovado" }));
+    await userEvent.click(within(dialogo).getByTestId("reabrir-confirmar"));
+
+    await waitFor(() => expect(api.reopenProcess).toHaveBeenCalledWith("proc-1", "Aprovado"));
+    await waitFor(() => expect(pacote.valor.refetchAll).toHaveBeenCalled());
+  });
+});
+
+
+describe("ProcessDetails — «Voltar» devolve a listagem com a pesquisa", () => {
+  const LISTA = "/processos?search=ana&status=cpcv&page=2";
+
+  function Sonda() {
+    const l = useLocation();
+    const tipo = useNavigationType();
+    const nav = useNavigate();
+    return (
+      <div>
+        <div data-testid="sonda">{l.pathname}{l.search}</div>
+        <div data-testid="tipo">{tipo}</div>
+        <button type="button" onClick={() => nav(-1)}>recuar-na-historia</button>
+      </div>
+    );
+  }
+
+  /** Listagem → detalhe, com o contexto de navegação que a listagem leva consigo. */
+  function montarDaLista({ ids = ["proc-1", "proc-2", "proc-3"], semHistoria = false } = {}) {
+    const contexto = construirContextoDeNavegacao({
+      ids, page: 1, size: 20, total: ids.length, origem: LISTA,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const detalhe = { pathname: "/process/proc-1", state: { contextoDeNavegacao: contexto } };
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter
+          initialEntries={semHistoria ? [detalhe] : [LISTA, detalhe]}
+          initialIndex={semHistoria ? 0 : 1}
+        >
+          <Routes>
+            <Route path="/processos" element={<Sonda />} />
+            <Route path="/process/:id" element={<><ProcessDetails /><Sonda /></>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  beforeEach(() => { window.sessionStorage.clear(); });
+
+  it("Voltar regressa à listagem COM a pesquisa e os filtros", async () => {
+    montarDaLista();
+    await userEvent.click(await screen.findByRole("button", { name: "Voltar" }));
+    expect(await screen.findByTestId("sonda")).toHaveTextContent(LISTA);
+  });
+
+  it("as setas SUBSTITUEM a entrada: a história não cresce, e recuar regressa à listagem", async () => {
+    montarDaLista();
+    await userEvent.click(await screen.findByRole("button", { name: "Processo seguinte" }));
+    await waitFor(() => expect(screen.getByTestId("sonda")).toHaveTextContent("/process/proc-2"));
+
+    // Antes, a seta empilhava: recuar levava ao processo anterior, não à listagem.
+    expect(screen.getByTestId("tipo")).toHaveTextContent("REPLACE");
+    await userEvent.click(screen.getByRole("button", { name: "recuar-na-historia" }));
+    expect(await screen.findByTestId("sonda")).toHaveTextContent(LISTA);
+  });
+
+  it("aberto sem história (separador novo), Voltar vai para a listagem de origem", async () => {
+    montarDaLista({ semHistoria: true });
+    await userEvent.click(await screen.findByRole("button", { name: "Voltar" }));
+    expect(await screen.findByTestId("sonda")).toHaveTextContent(LISTA);
   });
 });

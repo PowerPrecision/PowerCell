@@ -443,4 +443,10 @@ async def assert_can_upload_to_process(user: dict, process: dict) -> None:
         )
         raise HTTPException(status_code=403, detail=_ERROR_DETAIL)
     await assert_can_view_process_documents(user, process)
+    # Só depois de provar que o pode ver: «está fechado» não é um oráculo
+    # sobre um processo que não é seu. Para escrever num processo fechado
+    # reabre-se primeiro (ver `process_closed_guard`).
+    from services.process_closed_guard import exigir_processo_aberto
+
+    await exigir_processo_aberto(process)
 

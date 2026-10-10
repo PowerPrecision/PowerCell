@@ -2610,3 +2610,11 @@ A configuração global é do administrador. Em vez de deixar o CEO abrir separa
 * **Esperar pelo elemento que se afirma:** o grupo «Filtrar por etapa» existe desde o primeiro render; os botões do funil só quando o painel chega — `findAllByRole("button")` resolvia só com «Todos». E um mock de lista paginada tem de devolver a página PEDIDA, porque o ecrã lê a do servidor.
 * **Só o que está montado refaz o pedido:** na página do caso o painel não está montado, logo `invalidateQueries` não produz GET; afirma-se a invalidação (chaves), não a contagem de pedidos.
 * **Staff:** o cartão «Serviço do parceiro» desenha-se só com `assigned_parceiro_id` E perfil efectivo que vê; as listas de papéis do JS são lidas contra as do Python em teste.
+
+## 27.66 — Processo fechado, vista noturna e estado no URL (Out 2026)
+
+* **Modo de leitura de um processo fechado:** `utils/processoFechado.js` decide (o MOTOR — `is_active` — manda; a lista legada é só recurso) e o servidor recusa na mesma. O aviso do `ProcessDetails` traz o botão «Reabrir» (`ReabrirProcessoDialog`, só fases activas, sem adivinhar a anterior). Componentes que alteram documentos recebem `readOnly`; o que se desliga é o MESMO conjunto de botões que a Indexação já não via, por isso há UMA condição (`somenteLeitura`) e não duas.
+* **Filtros e pesquisa de uma listagem vão no URL** (`useEstadoNaUrl`/`useTextoNaUrl`), com `replace`. Um parâmetro novo de uma página que já tem outros usa prefixo (`kb_*` no Kanban) e actualização funcional. O mock de `useSearchParams` num teste tem de ser STATEFUL.
+* **Setas de vizinhança usam `replace`**; o «Voltar» usa `useVoltar`.
+* **Portais:** o olho é `PasswordInput`; o botão de tema é `TemaToggle`. No Portal do Cliente as cores são classes cruas — **não se acrescenta uma classe de cor sem correr `yarn gerar:portal-escuro`** (o teste falha, com a instrução). O botão vive no invólucro, não na página.
+* **Selo Premium:** `PremiumBadge` + `NovidadesDoCrm`; o controlo de marcar é só do Master.

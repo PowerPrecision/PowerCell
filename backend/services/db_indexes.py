@@ -152,6 +152,15 @@ DEPRECATED_INDEXES = {
 # Os índices TTL automatizam a purga de dados efémeros sem cron-jobs.
 # IMPORTANTE: O campo deve ser um BSON Date (datetime nativo), NÃO string ISO!
 # ====================================================================
+#: Quanto tempo um rascunho de email sobrevive SEM ser tocado (decisão do dono
+#: do produto, Out 2026: era 7 dias; no mínimo 15). Os rascunhos automáticos —
+#: confirmações de receção de documentos, lembretes — esperam por uma pessoa
+#: que pode estar de férias ou ocupada; ao fim de 7 dias desapareciam sem
+#: ninguém os ter visto. É UMA constante porque o índice e o diagnóstico
+#: (`diagnostics_ttl`) têm de dizer o mesmo número.
+RASCUNHOS_TTL_DIAS = 15
+RASCUNHOS_TTL_SEGUNDOS = RASCUNHOS_TTL_DIAS * 86400
+
 TTL_INDEXES = [
     {
         "collection": "refresh_tokens",
@@ -170,9 +179,9 @@ TTL_INDEXES = [
     {
         "collection": "emails",
         "field": "updated_at_dt",  # Campo datetime nativo para TTL
-        "seconds": 604800,  # 7 dias
+        "seconds": RASCUNHOS_TTL_SEGUNDOS,
         "name": "ttl_email_drafts",
-        "description": "Purga rascunhos de email antigos após 7 dias de inatividade",
+        "description": f"Purga rascunhos de email antigos após {RASCUNHOS_TTL_DIAS} dias de inatividade",
         "partial_filter": {"status": "draft"},  # Só aplica a rascunhos
     },
     {

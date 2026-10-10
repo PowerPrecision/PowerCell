@@ -2,6 +2,7 @@
  * PropertiesPage - Gestão de Imóveis Angariados
  * Lista, cria e edita imóveis listados pela agência
  */
+import { useEstadoNaUrl, useTextoNaUrl } from "../hooks/useEstadoNaUrl";
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, MapPin, Home, Ruler, User, Building2, MoreHorizontal, Trash2, Edit, FileSpreadsheet, Loader2, ExternalLink, AlertTriangle, Calendar } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -723,9 +724,10 @@ const PropertiesPage = () => {
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [typeFilter, setTypeFilter] = useState('all');
+  // Filtros no URL: abrir um imóvel e voltar devolve a lista como estava.
+  const [searchTerm, setSearchTerm] = useTextoNaUrl('q');
+  const [statusFilter, setStatusFilter] = useEstadoNaUrl('estado', 'all');
+  const [typeFilter, setTypeFilter] = useEstadoNaUrl('tipo', 'all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProperty, setEditingProperty] = useState(null);
   const [urlWarning, setUrlWarning] = useState(null);

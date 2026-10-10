@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from fastapi.responses import Response
 
 from services import executive_report as er
+from services import executive_report_ai as ia
 from services import executive_weekly as ew
 from services.executive_report_pdf import construir_pdf, nome_do_ficheiro
 
@@ -81,11 +82,35 @@ async def _pdf(relatorio: dict, user: dict, **opcoes) -> bytes:
     )
 
 
-def _resposta_pdf(conteudo: bytes, nome: str) -> Response:
+#: Valor do cabeçalho `X-Analise-IA`: o ecrã diz ao utilizador o que aconteceu
+#: à análise que pediu (um PDF sem ela, sem aviso, parecia um defeito).
+ANALISE_NAO_PEDIDA = "nao-pedida"
+ANALISE_INCLUIDA = "incluida"
+ANALISE_SIMULADA = "simulada"
+ANALISE_INDISPONIVEL = "indisponivel"
+
+
+async def _analise_se_pedida(relatorio: dict, pedida: bool) -> tuple[Optional[dict], str]:
+    """A análise de IA SÓ se foi pedida — sem o pedido não há chamada nenhuma."""
+    if not pedida:
+        return None, ANALISE_NAO_PEDIDA
+    analise = await ia.gerar_analise(relatorio)
+    if not analise:
+        return None, ANALISE_INDISPONIVEL
+    return analise, (ANALISE_SIMULADA if analise["origem"] == ia.ORIGEM_SIMULADA else ANALISE_INCLUIDA)
+
+
+def _resposta_pdf(conteudo: bytes, nome: str, estado_da_analise: str = ANALISE_NAO_PEDIDA) -> Response:
     return Response(
         content=conteudo,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{nome}"', "Cache-Control": "no-store"},
+        headers={
+            "Content-Disposition": f'attachment; filename="{nome}"',
+            "Cache-Control": "no-store",
+            "X-Analise-IA": estado_da_analise,
+            # Sem isto o browser não deixa o JavaScript ler o cabeçalho.
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Analise-IA",
+        },
     )
 
 
@@ -95,11 +120,13 @@ async def run_team_performance_pdf(
     end_date: Optional[str] = None,
     user_ids: Optional[str] = None,
     papeis: Optional[str] = None,
+    ai_analysis: bool = False,
 ) -> Response:
     filtros = _filtros(start_date, end_date, user_ids, papeis, com_movimentos=False)
     ambito = await er.resolver_ambito(user)
     relatorio = await _correr(er.gerar_relatorio(ambito, filtros))
-    return _resposta_pdf(await _pdf(relatorio, user), nome_do_ficheiro(relatorio))
+    analise, estado = await _analise_se_pedida(relatorio, ai_analysis)
+    return _resposta_pdf(await _pdf(relatorio, user, analise=analise), nome_do_ficheiro(relatorio), estado)
 
 
 async def run_weekly(user: dict, week: Optional[str] = None, regenerate: bool = False) -> dict:
@@ -108,11 +135,13 @@ async def run_weekly(user: dict, week: Optional[str] = None, regenerate: bool = 
     return relatorio
 
 
-async def run_weekly_pdf(user: dict, week: Optional[str] = None) -> Response:
+async def run_weekly_pdf(user: dict, week: Optional[str] = None, ai_analysis: bool = False) -> Response:
     relatorio = await _correr(ew.obter_semana(user, week))
+    analise, estado = await _analise_se_pedida(relatorio, ai_analysis)
     pdf = await _pdf(
         relatorio, user,
         titulo="Relatório Semanal Executivo",
         subtitulo="semana de segunda a domingo",
+        analise=analise,
     )
-    return _resposta_pdf(pdf, nome_do_ficheiro(relatorio, "relatorio-semanal"))
+    return _resposta_pdf(pdf, nome_do_ficheiro(relatorio, "relatorio-semanal"), estado)

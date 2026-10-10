@@ -19,7 +19,7 @@ import ExecutiveCharts from "../components/executive/ExecutiveCharts";
 import ExecutiveFilters from "../components/executive/ExecutiveFilters";
 import ExecutiveKpis from "../components/executive/ExecutiveKpis";
 import ExecutiveUsersTable from "../components/executive/ExecutiveUsersTable";
-import { descarregarPdf } from "../components/executive/descarregarPdf";
+import { descarregarPdf, mensagemDoPdf } from "../components/executive/descarregarPdf";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { downloadTeamPerformancePdf, getTeamPerformance } from "../services/api";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
@@ -41,6 +41,7 @@ export default function TeamPerformanceDashboard() {
   const [papel, setPapel] = useState("");
   const [opcoes, setOpcoes] = useState([]);
   const [aGerarPdf, setAGerarPdf] = useState(false);
+  const [analiseIA, setAnaliseIA] = useState(false);
 
   const erroDoIntervalo = validarIntervalo(inicio, fim);
   const params = useMemo(
@@ -74,10 +75,17 @@ export default function TeamPerformanceDashboard() {
 
   const gerarPdf = async () => {
     setAGerarPdf(true);
-    const resultado = await descarregarPdf(() => downloadTeamPerformancePdf(params), "relatorio-executivo.pdf");
+    const resultado = await descarregarPdf(
+      () => downloadTeamPerformancePdf(params, { analiseIA }), "relatorio-executivo.pdf",
+    );
     setAGerarPdf(false);
-    if (resultado.ok) toast.success("PDF gerado");
-    else toast.error(resultado.erro);
+    if (!resultado.ok) {
+      toast.error(resultado.erro);
+      return;
+    }
+    const msg = mensagemDoPdf(resultado, analiseIA);
+    if (msg.tipo === "aviso") toast.warning(msg.texto);
+    else toast.success(msg.texto);
   };
 
   const utilizadores = listaOuVazia(data?.users);
@@ -103,6 +111,7 @@ export default function TeamPerformanceDashboard() {
           predefinicao={predefinicao} inicio={inicio} fim={fim} utilizador={utilizador} papel={papel}
           opcoesDeUtilizadores={opcoes} erroDoIntervalo={erroDoIntervalo}
           aCarregar={isFetching} aGerarPdf={aGerarPdf}
+          analiseIA={analiseIA} onAnaliseIA={setAnaliseIA}
           onPredefinicao={escolherPredefinicao}
           onInicio={(v) => { setInicio(v); setPredefinicao("custom"); setUtilizador(""); }}
           onFim={(v) => { setFim(v); setPredefinicao("custom"); setUtilizador(""); }}

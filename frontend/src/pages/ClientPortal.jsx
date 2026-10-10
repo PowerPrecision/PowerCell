@@ -18,6 +18,9 @@
  *   - Após 15 min de inactividade → logout automático
  *   - Ao fechar a aba → limpa storage (obriga novo login)
  */
+import usePortalTheme from "../hooks/usePortalTheme";
+import TemaToggle from "../components/shared/TemaToggle";
+import "../styles/portalEscuro.css";
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { toast } from 'sonner';
 import PortalProfileFields from '../components/portal/PortalProfileFields';
@@ -1796,27 +1799,16 @@ function IframeDetector({ children }) {
 // ====================================================================
 // MAIN CLIENT PORTAL
 // ====================================================================
-export default function ClientPortal() {
+function ClientPortalPagina() {
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('A carregar o seu processo...');
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // ── Portal do Cliente: sem suporte a Dark Mode ──
-  // O Portal é sempre apresentado em Light Mode, independentemente da
-  // preferência de tema guardada para o CRM (ThemeContext) ou do SO do
-  // utilizador. Removemos a classe "dark" do <html> enquanto o Portal está
-  // montado e restauramos o estado anterior ao sair (ex: staff a navegar
-  // de volta para o CRM em modo escuro).
-  useEffect(() => {
-    const root = document.documentElement;
-    const hadDarkClass = root.classList.contains('dark');
-    root.classList.remove('dark');
-    return () => {
-      if (hadDarkClass) root.classList.add('dark');
-    };
-  }, []);
+  // O tema do Portal (claro por omissão, noturno só a pedido do cliente) é
+  // gerido por `usePortalTheme`, no invólucro `ClientPortal` aí em baixo — o
+  // Portal nunca segue o tema do CRM nem o do sistema operativo.
 
   // ── Login obrigatório ──
   const [isVerified, setIsVerified] = useState(false);
@@ -3073,5 +3065,27 @@ export default function ClientPortal() {
       </footer>
     </div>
     </IframeDetector>
+  );
+}
+
+// ====================================================================
+// INVÓLUCRO — vista noturna (botão explícito, em todos os estados do Portal)
+// ====================================================================
+// O botão vive aqui, e não dentro da página, porque a página tem vários
+// `return` antecipados (login, carregamento, erro, processo inativo) e o
+// cliente tem de poder mudar a vista em qualquer um deles. Fica em baixo à
+// esquerda: o canto de baixo à direita é do botão de mensagens e o de cima
+// é do cabeçalho.
+export default function ClientPortal() {
+  const { escuro, alternar } = usePortalTheme();
+  return (
+    <>
+      <ClientPortalPagina />
+      <TemaToggle
+        escuro={escuro}
+        onAlternar={alternar}
+        className="fixed bottom-6 left-6 z-40 h-10 w-10 rounded-full shadow-lg"
+      />
+    </>
   );
 }

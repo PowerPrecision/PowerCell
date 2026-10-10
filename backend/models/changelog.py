@@ -18,6 +18,10 @@ class ChangelogEntry(BaseModel):
     published_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     generated_by: str = Field(default="ai", description="Quem gerou: 'ai' ou 'manual'")
     source_summary: Optional[str] = Field(None, description="Resumo do texto técnico usado como fonte")
+    is_premium: bool = Field(
+        default=False,
+        description="Novidade de um módulo Premium (upsell). Só o Master a marca.",
+    )
 
     model_config = {"populate_by_name": True, "arbitrary_types_allowed": True}
 
@@ -30,6 +34,7 @@ class ChangelogResponse(BaseModel):
     published_at: datetime
     generated_by: str
     source_summary: Optional[str] = None
+    is_premium: bool = False
 
     model_config = {"populate_by_name": True, "arbitrary_types_allowed": True}
 
@@ -44,6 +49,15 @@ class ChangelogGenerateRequest(BaseModel):
     source_type: str = Field(default="worklog", description="Fonte dos dados: 'worklog', 'changelog_file', 'git' (git pode falhar no Render)")
     max_source_lines: int = Field(default=50, description="Número máximo de linhas a ler da fonte")
     custom_prompt_suffix: Optional[str] = Field(None, description="Sufixo opcional a adicionar ao prompt da IA")
+    is_premium: bool = Field(
+        default=False,
+        description="Marcar a novidade como Premium já na geração (só o Master pode pedi-lo)",
+    )
+
+
+class ChangelogPremiumRequest(BaseModel):
+    """Marcar/desmarcar uma novidade como Premium (só o Master)."""
+    is_premium: bool
 
 
 class ChangelogGenerateResponse(BaseModel):

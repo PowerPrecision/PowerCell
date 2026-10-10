@@ -154,11 +154,17 @@ class TestEdicaoEmFaseTerminal:
         """A prova de que a injecção muda mesmo o comportamento."""
         assert_process_editable_for_role("renegociacao", UserRole.CONSULTOR)
 
-    def test_admin_e_ceo_continuam_isentos(self):
-        for papel in (UserRole.ADMIN, UserRole.CEO):
-            assert_process_editable_for_role(
-                "renegociacao", papel, tuple(TERMINAIS),
-            )
+    def test_ninguem_esta_isento_nem_o_master(self):
+        """Antes, Master/Admin/CEO passavam por cima: o ecrã tratava toda a
+        gente por igual e o servidor não. Reabre-se primeiro."""
+        from fastapi import HTTPException
+
+        for papel in (UserRole.MASTER, UserRole.ADMIN, UserRole.CEO):
+            with pytest.raises(HTTPException) as e:
+                assert_process_editable_for_role(
+                    "renegociacao", papel, tuple(TERMINAIS),
+                )
+            assert e.value.status_code == 403, papel
 
     def test_uma_fase_aberta_nao_bloqueia(self):
         assert_process_editable_for_role(

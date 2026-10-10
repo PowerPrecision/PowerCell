@@ -7,6 +7,7 @@ Do **not** overwrite services/onedrive.py (Graph OAuth core).
 from fastapi import APIRouter, Depends
 
 from services.auth import get_current_user
+from services.process_closed_guard import exigir_processo_editavel
 from services.onedrive_status import run_get_onedrive_status
 from services.onedrive_folder_url import (
     run_get_process_folder_url,
@@ -27,7 +28,7 @@ from services.onedrive_links import (
     run_update_process_link,
 )
 
-router = APIRouter(prefix="/onedrive", tags=["OneDrive"])
+router = APIRouter(prefix="/onedrive", tags=["OneDrive"], dependencies=[Depends(exigir_processo_editavel)])
 
 
 @router.get("/status")
