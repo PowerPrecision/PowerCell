@@ -278,6 +278,26 @@ def test_decrypt_email_secret_passthrough_and_failed_enc():
     assert leftover == "" or not leftover.startswith("ENC:")
 
 
+def _sem_empresas_no_ambito():
+    """O âmbito de um Master lê `companies`; aqui não há base de dados.
+
+    Patcha a leitura de empresas do módulo do âmbito (que importa `db` no
+    topo), para o teste medir só o que interessa: a query da lista.
+    """
+    from unittest.mock import MagicMock, patch
+
+    from services import admin_users_scope
+
+    class _Vazio:
+        async def to_list(self, _n):
+            return []
+
+    falso = MagicMock()
+    falso.companies.find = MagicMock(return_value=_Vazio())
+    return patch.object(admin_users_scope, "db", falso)
+
+
+
 @pytest.mark.asyncio
 async def test_run_get_users_includes_admin_index_and_inactive():
     """Pacote EB: GET /users sem for_assignment devolve a lista completa."""
@@ -301,8 +321,11 @@ async def test_run_get_users_includes_admin_index_and_inactive():
     mock_db = MagicMock()
     mock_db.users.find = MagicMock(return_value=_Cursor())
 
-    with patch.object(ual, "db", mock_db):
-        result = await ual.run_get_users(None, {"id": "caller", "role": "admin"})
+    with patch.object(ual, "db", mock_db), _sem_empresas_no_ambito():
+        # Master: único perfil global, logo sem fronteira de rede. Um admin
+        # é admin da SUA rede e a lista é filtrada (ver
+        # `test_atribuicao_na_mesma_rede.py`).
+        result = await ual.run_get_users(None, {"id": "caller", "role": "master"})
 
     query = mock_db.users.find.call_args[0][0]
     assert query == {}
@@ -329,8 +352,8 @@ async def test_run_get_staff_users_excludes_admin_includes_indexacao():
     mock_db = MagicMock()
     mock_db.users.find = MagicMock(return_value=_Cursor())
 
-    with patch.object(ual, "db", mock_db):
-        result = await ual.run_get_staff_users({"id": "caller", "role": "admin"})
+    with patch.object(ual, "db", mock_db), _sem_empresas_no_ambito():
+        result = await ual.run_get_staff_users({"id": "caller", "role": "master"})
 
     ids = [u["id"] for u in result]
     assert ids == ["u-index", "u-con"]
