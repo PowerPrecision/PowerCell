@@ -25,8 +25,14 @@
  */
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
-import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import {
+  getFormConfigAdmin, updateFormConfigAdmin, resetFormConfigAdmin,
+  createFormCustomField, deleteFormCustomField,
+  listFormTemplates, saveFormTemplate, previewFormTemplate,
+  activateFormTemplate, duplicateFormTemplate, deleteFormTemplate,
+} from "../services/api";
+import { linkDeRegistoDaEmpresa } from "../utils/formularioPorRede";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -49,8 +55,6 @@ import {
   GripHorizontal, Inbox, ArrowRightLeft, Star, Pencil, Check, GitBranch, Info,
   Settings, ChevronDown, ChevronRight
 } from "lucide-react";
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -354,7 +358,8 @@ const CompactFieldCard = ({ field, isDragging, dragHandleProps }) => (
 // ─── Main Component ────────────────────────────────────────────────
 
 const FormManagementPage = ({ embedded = false }) => {
-  const { token } = useAuth();
+  // Workflow/formulário POR REDE: de que rede é o que se está a editar.
+  const [contextoDaRede, setContextoDaRede] = useState(null);
 
   // ── Core state (single source of truth) ──
   const [fields, setFields] = useState([]);
@@ -412,39 +417,35 @@ const FormManagementPage = ({ embedded = false }) => {
   // ── Data fetching ──
   const fetchConfig = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const { data } = await getFormConfigAdmin();
+      setFields(normalizeFields(data.fields));
+      setStepConfig(data.step_config || {});
+      setStepLabels(data.step_labels || {});
+      setContextoDaRede({
+        networkId: data.network_id || "",
+        empresas: Array.isArray(data.empresas) ? data.empresas : [],
+        empresasDetalhe: Array.isArray(data.empresas_detalhe) ? data.empresas_detalhe : [],
+        temProprio: data.tem_formulario_proprio === true,
       });
-      if (res.ok) {
-        const data = await res.json();
-        setFields(normalizeFields(data.fields));
-        setStepConfig(data.step_config || {});
-        setStepLabels(data.step_labels || {});
-        setHasChanges(false);
-      }
+      setHasChanges(false);
     } catch (err) {
       console.error(err);
       toast.error("Erro ao carregar configuração do formulário");
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => { fetchConfig(); }, [fetchConfig]);
 
   const fetchTemplates = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/templates`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTemplates(data.templates || []);
-      }
+      const { data } = await listFormTemplates();
+      setTemplates(Array.isArray(data.templates) ? data.templates : []);
     } catch (err) {
       console.error(err);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
@@ -548,26 +549,18 @@ const FormManagementPage = ({ embedded = false }) => {
     // Persist to backend immediately
     setSaving(true);
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ fields: prepareFieldsForSave(fields), step_config: newStepConfig, step_labels: stepLabels }),
-      });
-      if (res.ok) {
-        setStepConfig(newStepConfig);
-        setHasChanges(false);
-        toast.success("Configuração do passo guardada com sucesso");
-      } else {
-        toast.error("Erro ao guardar configuração do passo");
-      }
+      await updateFormConfigAdmin({ fields: prepareFieldsForSave(fields), step_config: newStepConfig, step_labels: stepLabels });
+      setStepConfig(newStepConfig);
+      setHasChanges(false);
+      toast.success("Configuração do passo guardada com sucesso");
     } catch {
-      toast.error("Erro de rede ao guardar");
+      toast.error("Erro ao guardar configuração do passo");
     } finally {
       setSaving(false);
     }
     setEditingStep(null);
     setEditStepFormData({});
-  }, [editingStep, editStepFormData, stepConfig, stepLabels, fields, token]);
+  }, [editingStep, editStepFormData, stepConfig, stepLabels, fields]);
 
   // Create a new step
   const handleCreateStep = useCallback(() => {
@@ -677,19 +670,13 @@ const FormManagementPage = ({ embedded = false }) => {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/fields`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ fields: prepareFieldsForSave(fields), step_config: stepConfig, step_labels: stepLabels }),
-      });
-      if (res.ok) {
-        toast.success("Configuração guardada com sucesso");
-        setHasChanges(false);
-      } else {
-        toast.error("Erro ao guardar configuração");
-      }
+      await updateFormConfigAdmin({ fields: prepareFieldsForSave(fields), step_config: stepConfig, step_labels: stepLabels });
+      toast.success("Configuração guardada com sucesso");
+      setHasChanges(false);
+      // A primeira escrita cria a cópia própria da rede: o aviso «usa o modelo» deixa de valer.
+      setContextoDaRede((c) => (c ? { ...c, temProprio: true } : c));
     } catch {
-      toast.error("Erro de rede");
+      toast.error("Erro ao guardar configuração");
     } finally {
       setSaving(false);
     }
@@ -699,19 +686,13 @@ const FormManagementPage = ({ embedded = false }) => {
     if (!window.confirm("Tem a certeza? Todos os campos personalizados serão eliminados e as configurações voltam ao padrão.")) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/reset`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setFields(normalizeFields(data.fields));
-        setStepConfig(data.step_config || {});
-        setHasChanges(false);
-        toast.success("Configuração reposta para valores padrão");
-      }
+      const { data } = await resetFormConfigAdmin();
+      setFields(normalizeFields(data.fields));
+      setStepConfig(data.step_config || {});
+      setHasChanges(false);
+      toast.success("Configuração reposta para valores padrão");
     } catch {
-      toast.error("Erro de rede");
+      toast.error("Erro ao repor a configuração");
     } finally {
       setSaving(false);
     }
@@ -743,31 +724,22 @@ const FormManagementPage = ({ embedded = false }) => {
 
     setCreating(true);
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/custom-field`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          label: newField.label,
-          step: parseInt(newField.step),
-          field_type: newField.field_type,
-          is_required: newField.is_required,
-          options: ["select", "checkbox", "radio"].includes(newField.field_type) ? newField.options : null,
-          placeholder: newField.placeholder || null,
-          hint: newField.hint || null,
-        }),
+      await createFormCustomField({
+        label: newField.label,
+        step: parseInt(newField.step),
+        field_type: newField.field_type,
+        is_required: newField.is_required,
+        options: ["select", "checkbox", "radio"].includes(newField.field_type) ? newField.options : null,
+        placeholder: newField.placeholder || null,
+        hint: newField.hint || null,
       });
-      if (res.ok) {
-        toast.success("Campo personalizado criado com sucesso");
-        setCreateDialog(false);
-        setNewField({ label: "", step: "1", field_type: "text", is_required: false, placeholder: "", hint: "", options: [] });
-        setNewOption("");
-        fetchConfig();
-      } else {
-        const err = await res.json();
-        toast.error(extractErrorMessage(err.detail, "Erro ao criar campo"));
-      }
-    } catch {
-      toast.error("Erro de rede");
+      toast.success("Campo personalizado criado com sucesso");
+      setCreateDialog(false);
+      setNewField({ label: "", step: "1", field_type: "text", is_required: false, placeholder: "", hint: "", options: [] });
+      setNewOption("");
+      fetchConfig();
+    } catch (err) {
+      toast.error(extractErrorMessage(err?.response?.data?.detail, "Erro ao criar campo"));
     } finally {
       setCreating(false);
     }
@@ -776,19 +748,11 @@ const FormManagementPage = ({ embedded = false }) => {
   const handleDeleteCustomField = async (fieldKey) => {
     if (!window.confirm("Tem a certeza que quer eliminar este campo personalizado?")) return;
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/custom-field/${fieldKey}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        toast.success("Campo eliminado");
-        fetchConfig();
-      } else {
-        const err = await res.json();
-        toast.error(extractErrorMessage(err.detail, "Erro ao eliminar"));
-      }
-    } catch {
-      toast.error("Erro de rede");
+      await deleteFormCustomField(fieldKey);
+      toast.success("Campo eliminado");
+      fetchConfig();
+    } catch (err) {
+      toast.error(extractErrorMessage(err?.response?.data?.detail, "Erro ao eliminar"));
     }
   };
 
@@ -898,57 +862,33 @@ const FormManagementPage = ({ embedded = false }) => {
   const handleActivateTemplate = async (tplId, tplName) => {
     if (!window.confirm(`Ativar o template "${tplName}"? A configuração atual será substituída.`)) return;
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${tplId}/activate`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        toast.success(`Template "${tplName}" ativado`);
-        setTemplateDialog(false);
-        fetchConfig();
-      } else {
-        const err = await res.json();
-        toast.error(extractErrorMessage(err.detail, "Erro ao ativar template"));
-      }
-    } catch {
-      toast.error("Erro de rede");
+      await activateFormTemplate(tplId);
+      toast.success(`Template "${tplName}" ativado`);
+      setTemplateDialog(false);
+      fetchConfig();
+    } catch (err) {
+      toast.error(extractErrorMessage(err?.response?.data?.detail, "Erro ao ativar template"));
     }
   };
 
   const handleDuplicateTemplate = async (tplId) => {
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${tplId}/duplicate`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        toast.success("Template duplicado");
-        fetchTemplates();
-      } else {
-        const err = await res.json();
-        toast.error(extractErrorMessage(err.detail, "Erro ao duplicar"));
-      }
-    } catch {
-      toast.error("Erro de rede");
+      await duplicateFormTemplate(tplId);
+      toast.success("Template duplicado");
+      fetchTemplates();
+    } catch (err) {
+      toast.error(extractErrorMessage(err?.response?.data?.detail, "Erro ao duplicar"));
     }
   };
 
   const handleDeleteTemplate = async (tplId) => {
     if (!window.confirm("Eliminar este template?")) return;
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${tplId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        toast.success("Template eliminado");
-        fetchTemplates();
-      } else {
-        const err = await res.json();
-        toast.error(extractErrorMessage(err.detail, "Erro ao eliminar"));
-      }
-    } catch {
-      toast.error("Erro de rede");
+      await deleteFormTemplate(tplId);
+      toast.success("Template eliminado");
+      fetchTemplates();
+    } catch (err) {
+      toast.error(extractErrorMessage(err?.response?.data?.detail, "Erro ao eliminar"));
     }
   };
 
@@ -959,23 +899,14 @@ const FormManagementPage = ({ embedded = false }) => {
     }
     setSavingTemplate(true);
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/templates`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ name: templateName, description: templateDesc }),
-      });
-      if (res.ok) {
-        toast.success("Template guardado com sucesso");
-        setSaveTemplateDialog(false);
-        setTemplateName("");
-        setTemplateDesc("");
-        fetchTemplates();
-      } else {
-        const err = await res.json();
-        toast.error(extractErrorMessage(err.detail, "Erro ao guardar"));
-      }
-    } catch {
-      toast.error("Erro de rede");
+      await saveFormTemplate({ name: templateName, description: templateDesc });
+      toast.success("Template guardado com sucesso");
+      setSaveTemplateDialog(false);
+      setTemplateName("");
+      setTemplateDesc("");
+      fetchTemplates();
+    } catch (err) {
+      toast.error(extractErrorMessage(err?.response?.data?.detail, "Erro ao guardar"));
     } finally {
       setSavingTemplate(false);
     }
@@ -986,18 +917,10 @@ const FormManagementPage = ({ embedded = false }) => {
     setPreviewLoading(true);
     setPreviewDialog(true);
     try {
-      const res = await fetch(`${API_URL}/api/admin/form-config/templates/${tplId}/preview`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPreviewData({ ...data, _templateId: tplId });
-      } else {
-        toast.error("Erro ao carregar pré-visualização");
-        setPreviewDialog(false);
-      }
+      const { data } = await previewFormTemplate(tplId);
+      setPreviewData({ ...data, _templateId: tplId });
     } catch {
-      toast.error("Erro de rede");
+      toast.error("Erro ao carregar pré-visualização");
       setPreviewDialog(false);
     } finally {
       setPreviewLoading(false);
@@ -1049,6 +972,52 @@ const FormManagementPage = ({ embedded = false }) => {
             </Button>
           </div>
         </div>
+
+        {/* ── Rede em contexto: o formulário é POR REDE; cada empresa tem o seu link ── */}
+        {contextoDaRede && (
+          <Card data-testid="formulario-rede">
+            <CardContent className="p-4 space-y-2">
+              <p className="text-sm" data-testid="formulario-rede-aviso">
+                Está a editar o formulário de registo da rede{" "}
+                <strong>{contextoDaRede.empresas.length ? contextoDaRede.empresas.join(", ") : contextoDaRede.networkId}</strong>
+                {" "}— as outras redes não são afetadas.
+              </p>
+              {!contextoDaRede.temProprio && (
+                <p className="text-xs text-muted-foreground" data-testid="formulario-rede-modelo">
+                  Esta rede ainda usa o modelo base: a primeira alteração cria a cópia própria.
+                </p>
+              )}
+              {contextoDaRede.empresasDetalhe.length > 0 && (
+                <div className="space-y-1" data-testid="links-de-registo">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Links de registo público</p>
+                  {contextoDaRede.empresasDetalhe.map((empresa) => {
+                    const link = linkDeRegistoDaEmpresa(window.location.origin, empresa.id);
+                    return (
+                      <div key={empresa.id} className="flex items-center gap-2 text-xs">
+                        <span className="font-medium shrink-0">{empresa.name}</span>
+                        <code className="truncate text-muted-foreground flex-1">{link}</code>
+                        <Button
+                          type="button" size="sm" variant="outline" className="h-7 gap-1 shrink-0"
+                          aria-label={`Copiar link de registo de ${empresa.name}`}
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(link);
+                              toast.success(`Link de ${empresa.name} copiado`);
+                            } catch {
+                              toast.error("Não foi possível copiar o link");
+                            }
+                          }}
+                        >
+                          <Copy className="h-3 w-3" /> Copiar
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* ── Unsaved changes warning ── */}
         {hasChanges && (

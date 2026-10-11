@@ -905,6 +905,22 @@ export const getWorkflowStatuses = () => api.get("/admin/workflow-statuses");
 // O workflow é POR REDE: o editor pede o da rede EM CONTEXTO (a empresa activa)
 // e recebe também o nome das empresas dessa rede, para dizer onde está a editar.
 export const getWorkflowEditor = () => api.get("/admin/workflow-statuses/editor");
+
+// ===== FORMULÁRIO PÚBLICO (admin) — POR REDE =====
+// Tudo por Axios, NUNCA `fetch`: a rede em contexto sai do `X-Company-Id` que só o
+// interceptor acrescenta. Um `fetch` cru editava sempre a rede por omissão.
+export const getFormConfigAdmin = () => api.get("/admin/form-config/fields");
+export const updateFormConfigAdmin = (body) => api.put("/admin/form-config/fields", body);
+export const resetFormConfigAdmin = () => api.post("/admin/form-config/reset");
+export const createFormCustomField = (body) => api.post("/admin/form-config/custom-field", body);
+export const deleteFormCustomField = (fieldKey) =>
+  api.delete(`/admin/form-config/custom-field/${encodeURIComponent(fieldKey)}`);
+export const listFormTemplates = () => api.get("/admin/form-config/templates");
+export const saveFormTemplate = (body) => api.post("/admin/form-config/templates", body);
+export const previewFormTemplate = (id) => api.get(`/admin/form-config/templates/${encodeURIComponent(id)}/preview`);
+export const activateFormTemplate = (id) => api.post(`/admin/form-config/templates/${encodeURIComponent(id)}/activate`);
+export const duplicateFormTemplate = (id) => api.post(`/admin/form-config/templates/${encodeURIComponent(id)}/duplicate`);
+export const deleteFormTemplate = (id) => api.delete(`/admin/form-config/templates/${encodeURIComponent(id)}`);
 export const createWorkflowStatus = (data) => api.post("/admin/workflow-statuses", data);
 export const updateWorkflowStatus = (id, data) => api.put(`/admin/workflow-statuses/${id}`, data);
 export const deleteWorkflowStatus = (id) => api.delete(`/admin/workflow-statuses/${id}`);

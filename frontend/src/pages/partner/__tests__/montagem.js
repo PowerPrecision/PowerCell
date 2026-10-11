@@ -13,13 +13,14 @@ import { vi } from "vitest";
 import casoDeLead from "@/test/fixtures/parceiro/caso_lead.json";
 import casoDeProcesso from "@/test/fixtures/parceiro/caso_processo.json";
 import casos from "@/test/fixtures/parceiro/casos.json";
+import destinos from "@/test/fixtures/parceiro/destinos.json";
 import painel from "@/test/fixtures/parceiro/painel.json";
 import perfil from "@/test/fixtures/parceiro/perfil.json";
 import PartnerPortalRoutes from "@/pages/partner/PartnerPortalRoutes";
 import * as api from "@/services/partnerApi";
 import { guardarSessao } from "@/utils/partnerSession";
 
-export const FIXTURES = { casoDeLead, casoDeProcesso, casos, painel, perfil };
+export const FIXTURES = { casoDeLead, casoDeProcesso, casos, destinos, painel, perfil };
 
 /** Um 404 como o Axios o levanta. */
 export const erroHttp = (status, detail) => ({ response: { status, data: { detail } } });
@@ -29,6 +30,7 @@ export function prepararApi() {
   vi.clearAllMocks();
   api.obterPerfil.mockResolvedValue(perfil);
   api.obterPainel.mockResolvedValue(painel);
+  api.obterDestinos.mockResolvedValue(destinos);
   api.listarCasos.mockResolvedValue(casos);
   api.obterCaso.mockImplementation(async (id) => {
     if (id === "a-novo") return structuredClone(casoDeProcesso);

@@ -410,6 +410,30 @@ async def parceiro_no_ambito(partner: Optional[dict], actor: dict) -> bool:
     )
 
 
+async def acrescentar_ligacao_de_mercado(partner_id: str, ligacao: dict) -> None:
+    """Liga o parceiro à rede de uma empresa de destino que ele escolheu (marketplace B2B).
+
+    O parceiro é um agente livre: escolhe a empresa de destino de cada lead entre as que
+    têm Index. A primeira escolha de uma rede cria a LIGAÇÃO dele a ela — é essa lista que
+    a visibilidade lê («relação ∧ rede activa»), pelo que nada do resto do modelo muda, e
+    a gestão dessa rede pode suspendê-la como a qualquer outra. Nunca reactiva uma
+    ligação existente (suspensa ou não): quem chama já verificou que não há nenhuma.
+    """
+    agora = datetime.now(timezone.utc).isoformat()
+    entrada = {
+        "network_id": ligacao["network_id"],
+        "company_id": ligacao.get("company_id"),
+        "company_name": ligacao.get("company_name"),
+        "status": ESTADO_ACTIVO,
+        "origem": "marketplace",
+        "invited_at": agora,
+    }
+    await db.partners.update_one(
+        {"id": partner_id},
+        {"$push": {"redes": entrada}, "$set": {"updated_at": agora}},
+    )
+
+
 async def contacto_do_parceiro(partner_id: str) -> Optional[dict]:
     """``{email, name}`` de um parceiro, para o avisar (ex.: lead devolvida).
 

@@ -203,6 +203,8 @@ export const TIPOS_DE_PROCESSO = [
 ];
 
 export const LEAD_VAZIA = {
+  // A EMPRESA DE DESTINO vem primeiro: sem ela não há lead (nem onde pedir o comprovativo).
+  empresa_id: "",
   name: "",
   email: "",
   phone: "",
@@ -219,6 +221,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 export function validarLead(form) {
   const f = { ...LEAD_VAZIA, ...(form || {}) };
   const erros = {};
+  if (!texto(f.empresa_id).trim()) erros.empresa_id = "Escolha a empresa de destino.";
   if (texto(f.name).trim().length < 2) erros.name = "Indique o nome do cliente.";
   if (!EMAIL.test(texto(f.email).trim())) erros.email = "Indique um email válido.";
   const nif = texto(f.nif).replace(/\s/g, "");
@@ -232,9 +235,10 @@ export function validarLead(form) {
  * sem os opcionais vazios. Nada de carimbos — rede, empresa, estado e autor
  * são do servidor, e enviá-los seria um 422.
  */
-export function construirPayloadDaLead(form, redeEscolhida) {
+export function construirPayloadDaLead(form) {
   const f = { ...LEAD_VAZIA, ...(form || {}) };
   const payload = {
+    empresa_id: texto(f.empresa_id).trim(),
     name: texto(f.name).trim(),
     email: texto(f.email).trim(),
     process_type: f.process_type || LEAD_VAZIA.process_type,
@@ -249,11 +253,10 @@ export function construirPayloadDaLead(form, redeEscolhida) {
   for (const [chave, valor] of Object.entries(opcionais)) {
     if (valor) payload[chave] = valor;
   }
-  if (redeEscolhida) payload.network_id = redeEscolhida;
   return payload;
 }
 
-/** Ligações activas do parceiro (para escolher a rede quando há mais do que uma). */
+/** Ligações activas do parceiro (as suas redes; o DESTINO de uma lead escolhe-se entre as empresas com Index). */
 export function redesActivas(partner) {
   return (Array.isArray(partner?.redes) ? partner.redes : []).filter(
     (r) => r && r.network_id && (r.status || "active") === "active"

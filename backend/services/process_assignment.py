@@ -1141,7 +1141,23 @@ async def process_queue_for_freed_indexer(indexer_id: str) -> int:
         {"_id": 0}
     ).sort("created_at", 1)
 
-    queue_processes = await queue_cursor.to_list(length=MAX_ACTIVE_PROCESSES_PER_INDEXER - active_count)
+    queue_processes = await queue_cursor.to_list(length=100)
+
+    # A fila é do DESTINO: um indexador só puxa processos cuja equipa é a sua rede.
+    # Sem isto, o indexador da Precision libertava-se e levava um processo da fila
+    # de outra rede (o pool central de cada rede não se mistura com o das outras).
+    from services import network_triage
+
+    membros_por_rede: dict = {}
+    elegiveis = []
+    for proc in queue_processes:
+        rede = network_triage.rede_da_equipa(proc)
+        if rede not in membros_por_rede:
+            membros_por_rede[rede] = await network_triage.user_ids_da_rede(rede)
+        membros = membros_por_rede[rede]
+        if membros is None or indexer_id in membros:
+            elegiveis.append(proc)
+    queue_processes = elegiveis[: MAX_ACTIVE_PROCESSES_PER_INDEXER - active_count]
 
     assigned_count = 0
     for proc in queue_processes:

@@ -86,6 +86,8 @@ describe("efeitoDaPartilha / nomeDoDestino", () => {
     expect(efeitoDaPartilha(null, false)).toBe("");
     expect(efeitoDaPartilha({ tem_index: true }, false)).toMatch(/fila de Index/i);
     expect(efeitoDaPartilha({ tem_index: true }, true)).toMatch(/Via Verde/);
+    expect(efeitoDaPartilha({ tem_index: true }, true)).toMatch(/pela própria rede de destino/);
+    expect(efeitoDaPartilha({ tem_index: true }, false)).toMatch(/a rede que decide quem o trata/);
     expect(efeitoDaPartilha({ tem_index: false }, true)).toMatch(/não tem equipa de Index/i);
     expect(efeitoDaPartilha({ tem_index: true, ja_partilhado: true }, false)).toMatch(/já está partilhado/i);
   });

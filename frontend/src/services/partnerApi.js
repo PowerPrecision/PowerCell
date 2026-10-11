@@ -74,6 +74,8 @@ export const listarCasos = ({ etapa, q, page, size } = {}) =>
 export const obterCaso = (caseId) => dados(partnerHttp.get(`/cases/${encodeURIComponent(caseId)}`));
 
 // ── Escrita ─────────────────────────────────────────────────────────
+// As empresas de destino que o parceiro pode escolher (têm Index) — ANTES de criar a lead.
+export const obterDestinos = () => dados(partnerHttp.get("/destinos"));
 export const submeterLead = (payload) => dados(partnerHttp.post("/leads", payload));
 
 // ── Dados do cliente: a estrutura do registo público, com 2.º titular ──

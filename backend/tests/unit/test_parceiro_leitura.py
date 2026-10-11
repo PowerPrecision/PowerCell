@@ -38,6 +38,18 @@ PT2 = {"id": "pt-2", "name": "Sara", "email": "sara@p.pt", "status": "active",
 PT3 = {"id": "pt-3", "name": "Tomé", "email": "tome@p.pt", "status": "active",
        "redes": [{"network_id": REDE_DOMUS, "company_id": "cmp-domus", "status": "active"}]}
 
+def com_indexador(db):
+    """A rede Power/Precision passa a TER Index (um indexador activo): sem isso não há
+    empresa de destino — o parceiro escolhe a empresa entre as que têm Index."""
+    if not any(u.get("id") == "u-idx-teste" for u in db.users.docs):
+        db.users.docs.append({"id": "u-idx-teste", "name": "Indexador", "email": "idx@t.pt",
+                              "role": "indexacao", "is_active": True})
+        db.user_company_roles.docs.append({"user_id": "u-idx-teste", "company_id": "cmp-power",
+                                           "company_name": "Power Real Estate", "role": "indexacao",
+                                           "is_default": True})
+    return db
+
+
 FASES = [
     {"name": "fase_documental", "label": "Documental", "order": 1, "macro_fase": "novo"},
     {"name": "fase_bancaria", "label": "Bancária", "order": 2, "macro_fase": "analise"},

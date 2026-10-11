@@ -1,0 +1,12 @@
+{
+  "destinos": [
+    {
+      "company_id": "cmp-power",
+      "company_name": "Power Real Estate"
+    },
+    {
+      "company_id": "cmp-precision",
+      "company_name": "Precision Crédito"
+    }
+  ]
+}

@@ -51,6 +51,7 @@ def test_form_config_no_collision():
     assert form_files == [
         "form_config_defaults.py",
         "form_config_fields.py",
+        "form_config_scope.py",
         "form_config_templates.py",
     ]
 

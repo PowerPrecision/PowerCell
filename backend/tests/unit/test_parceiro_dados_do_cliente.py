@@ -36,7 +36,7 @@ from tests.unit.test_parceiro_leitura import PT1, PT2
 @pytest.fixture
 def com_form(com_bd):
     import services.partner_client_form as pcf
-    import services.public_form_config as pfc
+    import services.form_config_scope as pfc  # o formulário lê-se por aqui (por rede)
 
     with tenant_db(com_bd, pcf, pfc):
         yield com_bd

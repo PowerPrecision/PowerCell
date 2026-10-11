@@ -112,7 +112,21 @@ async def _fases_dos_processos_do_cliente(process_ids) -> list[dict]:
     return juntar_fases([await carregar_fases(rede=r or None) for r in redes])
 
 
-async def carregar_campos_editaveis() -> dict:
+def rede_do_formulario_do_cliente(client: Optional[dict]) -> Optional[str]:
+    """A rede cujo formulário o Portal deste cliente usa: a do cliente, senão a de omissão.
+
+    O formulário é POR REDE. O cliente nasceu de um link de registo de uma empresa
+    (e foi carimbado com a rede dela), logo é o formulário DESSA rede que define
+    o que o Portal mostra e aceita gravar. Sem carimbo, a rede de omissão (clientes
+    anteriores a esta separação) — o que dava o formulário global de então.
+    """
+    from services.tenant_network import rede_de_omissao
+
+    rede = str((client or {}).get("network_id") or "").strip()
+    return rede or (rede_de_omissao() or None)
+
+
+async def carregar_campos_editaveis(rede: Optional[str] = None) -> dict:
     """Campos que o Portal pode gravar, derivados do formulário interno.
 
     O allowlist e o que o Portal MOSTRA saem do mesmo sítio
@@ -130,7 +144,7 @@ async def carregar_campos_editaveis() -> dict:
         )
         from services.public_form_config import load_merged_form_fields
 
-        schema = build_portal_profile_schema(await load_merged_form_fields())
+        schema = build_portal_profile_schema(await load_merged_form_fields(rede))
         campos = portal_updatable_fields(schema)
         # A validação é sobre `dados_pessoais`: `contacto` vem sempre com
         # os extras do Portal (email/telefone secundários), pelo que um
@@ -416,7 +430,9 @@ async def run_get_client_profile(client_data: dict):
         from services.portal_profile_schema import build_portal_profile_schema
         from services.public_form_config import load_merged_form_fields
 
-        form_schema = build_portal_profile_schema(await load_merged_form_fields())
+        form_schema = build_portal_profile_schema(
+            await load_merged_form_fields(rede_do_formulario_do_cliente(client))
+        )
     except Exception as e:  # noqa: BLE001 - o perfil abre à mesma
         logger.warning("[PORTAL PROFILE] Falha a montar o esquema: %s", e)
 
@@ -466,7 +482,7 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
     # s3_folder — este endpoint não deve ler nem escrever mapeamentos S3.
     client = await db.clients.find_one(
         {"id": client_id},
-        {"_id": 0, "process_ids": 1, "field_metadata": 1}
+        {"_id": 0, "process_ids": 1, "field_metadata": 1, "network_id": 1}
     )
 
     if not client:
@@ -501,7 +517,7 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
     # completo nem sub-documentos inteiros, por isso `s3_folder`,
     # `process_ids` e outras relações internas nunca são tocados aqui.
     now = datetime.now(timezone.utc).isoformat()
-    campos_editaveis = await carregar_campos_editaveis()
+    campos_editaveis = await carregar_campos_editaveis(rede_do_formulario_do_cliente(client))
     recusados: list = []
     mongo_update = build_portal_profile_mongo_update(
         data, client, now, campos_editaveis=campos_editaveis, recusados=recusados

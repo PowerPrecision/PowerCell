@@ -2,14 +2,20 @@
  * Submeter uma lead: os dados do cliente e a confirmação de que o parceiro
  * tem autorização para os partilhar.
  *
+ * MARKETPLACE B2B: o parceiro é um agente livre. A primeira coisa que faz é
+ * escolher a EMPRESA DE DESTINO entre as que têm Index (`obterDestinos`); sem
+ * isso o resto do formulário está bloqueado e a lead não existe. Só depois de a
+ * lead existir (já dirigida a essa empresa) se pede o Comprovativo de Pagamento,
+ * que a envia para a fila dessa rede.
+ *
  * O formulário só envia os campos que o servidor aceita
- * (`construirPayloadDaLead`). A rede, a empresa, o estado e o autor são do
- * servidor — enviá-los seria um 422. A lead cai na triagem da equipa; o
- * processo só nasce quando a equipa o decide, e é aí que o caso passa de
+ * (`construirPayloadDaLead`). A rede, o estado e o autor são do servidor —
+ * enviá-los seria um 422. A lead cai na triagem da equipa de destino; o
+ * processo só nasce quando essa equipa o decide, e é aí que o caso passa de
  * «lead» a processo no painel do parceiro.
  */
 import React, { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -21,14 +27,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { usePartnerAuth } from "@/contexts/PartnerAuthContext";
 import { queryKeys } from "@/lib/queryClient";
-import { submeterLead } from "@/services/partnerApi";
+import { obterDestinos, submeterLead } from "@/services/partnerApi";
 import {
   LEAD_VAZIA,
   TIPOS_DE_PROCESSO,
   caminhoDoCaso,
   construirPayloadDaLead,
   mensagemDeErro,
-  redesActivas,
   validarLead,
 } from "@/utils/partnerPortal";
 
@@ -43,11 +48,11 @@ function Campo({ id, rotulo, erro, children }) {
 }
 
 export default function PartnerLeadPage() {
-  const { partner } = usePartnerAuth();
+  usePartnerAuth();
   const queryClient = useQueryClient();
-  const redes = redesActivas(partner);
+  const destinos = useQuery({ queryKey: queryKeys.partner.destinos(), queryFn: obterDestinos });
+  const empresas = Array.isArray(destinos.data?.destinos) ? destinos.data.destinos : [];
   const [form, setForm] = useState(LEAD_VAZIA);
-  const [rede, setRede] = useState("");
   const [erros, setErros] = useState({});
   const [erroGeral, setErroGeral] = useState("");
   const [aEnviar, setAEnviar] = useState(false);
@@ -59,15 +64,14 @@ export default function PartnerLeadPage() {
     e.preventDefault();
     if (aEnviar) return;
     const encontrados = validarLead(form);
-    if (redes.length > 1 && !rede) encontrados.rede = "Escolha a rede a que esta lead se destina.";
     setErros(encontrados);
     setErroGeral("");
     if (Object.keys(encontrados).length > 0) return;
 
     setAEnviar(true);
     try {
-      const resposta = await submeterLead(construirPayloadDaLead(form, redes.length > 1 ? rede : undefined));
-      setCriada(resposta);
+      const resposta = await submeterLead(construirPayloadDaLead(form));
+      setCriada({ ...resposta, empresa: empresas.find((e) => e.company_id === form.empresa_id)?.company_name || "" });
       setForm(LEAD_VAZIA);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.partner.casosAll() }),
@@ -84,15 +88,15 @@ export default function PartnerLeadPage() {
     return (
       <Card className="mx-auto max-w-xl">
         <CardHeader>
-          <CardTitle>{criada.repetida ? "Esta lead já tinha sido submetida" : "Lead submetida"}</CardTitle>
-          <CardDescription>
+          <CardTitle>{criada.repetida ? "Esta lead já tinha sido submetida" : "Lead criada — falta o comprovativo"}</CardTitle>
+          <CardDescription data-testid="lead-criada-aviso">
             {criada.repetida
               ? "Submeteu os mesmos dados há instantes — não criámos uma segunda."
-              : "A nossa equipa vai analisar e entrar em contacto. Pode acompanhar o caso no painel."}
+              : `Envie agora o Comprovativo de Pagamento: é ele que a faz seguir para a fila${criada.empresa ? ` de ${criada.empresa}` : " da empresa de destino"}. Até lá, a lead fica retida do seu lado.`}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
-          <Button asChild><Link to={caminhoDoCaso(criada.id)}>Ver o caso e enviar documentos</Link></Button>
+          <Button asChild><Link to={caminhoDoCaso(criada.id)}>Enviar o comprovativo</Link></Button>
           <Button type="button" variant="outline" onClick={() => setCriada(null)}>Submeter outra</Button>
         </CardContent>
       </Card>
@@ -107,6 +111,34 @@ export default function PartnerLeadPage() {
       </CardHeader>
       <CardContent>
         <form onSubmit={submeter} className="space-y-4" noValidate>
+          <Campo id="lead-empresa" rotulo="1. Empresa de destino *" erro={erros.empresa_id}>
+            <select
+              id="lead-empresa" value={form.empresa_id}
+              onChange={(e) => setForm((f) => ({ ...f, empresa_id: e.target.value }))}
+              disabled={destinos.isPending}
+              aria-invalid={Boolean(erros.empresa_id)}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="">{destinos.isPending ? "A carregar…" : "Escolha a empresa…"}</option>
+              {empresas.map((e) => <option key={e.company_id} value={e.company_id}>{e.company_name}</option>)}
+            </select>
+            {destinos.isError && (
+              <p role="alert" className="text-xs text-destructive" data-testid="destinos-erro">
+                {mensagemDeErro(destinos.error, "Não foi possível carregar as empresas de destino.")}
+              </p>
+            )}
+            {destinos.isSuccess && empresas.length === 0 && (
+              <p className="text-xs text-muted-foreground" data-testid="sem-destinos">
+                Não há empresas disponíveis para receber leads neste momento.
+              </p>
+            )}
+            {!form.empresa_id && empresas.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Escolha primeiro a empresa que vai tratar do cliente: só depois pode preencher os dados e enviar o comprovativo.
+              </p>
+            )}
+          </Campo>
+          <fieldset disabled={!form.empresa_id} className="space-y-4 disabled:opacity-60" data-testid="dados-da-lead">
           <Campo id="lead-nome" rotulo="Nome do cliente *" erro={erros.name}>
             <Input id="lead-nome" value={form.name} onChange={mudar("name")} autoComplete="off" aria-invalid={Boolean(erros.name)} />
           </Campo>
@@ -132,18 +164,6 @@ export default function PartnerLeadPage() {
             </Campo>
           </div>
 
-          {redes.length > 1 && (
-            <Campo id="lead-rede" rotulo="Rede *" erro={erros.rede}>
-              <select
-                id="lead-rede" value={rede} onChange={(e) => setRede(e.target.value)}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="">Escolha…</option>
-                {redes.map((r) => <option key={r.network_id} value={r.network_id}>{r.company_name || r.network_id}</option>)}
-              </select>
-            </Campo>
-          )}
-
           <div className="flex items-center gap-2">
             <Checkbox id="lead-imovel" checked={form.has_property} onCheckedChange={(v) => setForm((f) => ({ ...f, has_property: v === true }))} />
             <Label htmlFor="lead-imovel" className="font-normal">O cliente já tem imóvel</Label>
@@ -166,7 +186,8 @@ export default function PartnerLeadPage() {
           {erroGeral && (
             <Alert variant="destructive" role="alert"><AlertDescription>{erroGeral}</AlertDescription></Alert>
           )}
-          <Button type="submit" disabled={aEnviar}>{aEnviar ? "A submeter…" : "Submeter lead"}</Button>
+          <Button type="submit" disabled={aEnviar || !form.empresa_id}>{aEnviar ? "A submeter…" : "Submeter lead"}</Button>
+          </fieldset>
         </form>
       </CardContent>
     </Card>

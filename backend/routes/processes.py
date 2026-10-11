@@ -13,7 +13,7 @@ Autor: PowerCell Development Team
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, Body, Depends, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from database import db
 from models.auth import UserRole
@@ -814,7 +814,14 @@ async def delete_process(
 
 
 class ShareProcessBody(BaseModel):
-    """Destino da partilha. `via_verde` (opcional) grava a flag ANTES da triagem."""
+    """Destino da partilha. `via_verde` (opcional) grava a flag ANTES da triagem.
+
+    O destino é uma REDE, nunca uma pessoa: quem remete não escolhe o utilizador
+    final (a distribuição é do destino). `extra="forbid"` faz um `user_id` a mais
+    ser 422 em vez de ser ignorado em silêncio.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     network_id: str
     via_verde: Optional[bool] = None

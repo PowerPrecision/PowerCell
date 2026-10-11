@@ -293,6 +293,9 @@ def dto_da_lead(client: dict, *, pedidos_pendentes: int = 0) -> dict:
         # Falta o comprovativo: só enquanto a lead está retida.
         "requer_comprovativo": etapa in (ETAPA_PENDENTE, ETAPA_DEVOLVIDA),
         "editavel": etapa in (ETAPA_PENDENTE, ETAPA_DEVOLVIDA, ETAPA_LEAD),
+        # A empresa de destino que o PARCEIRO escolheu: é o que ele precisa de ver para
+        # perceber a que fila segue o comprovativo (nunca a rede, chave interna).
+        "empresa_destino": _texto(client.get("company_name")),
         "consultor_name": None,
         "pedidos_pendentes": int(pedidos_pendentes),
         "created_at": client.get("created_at"),

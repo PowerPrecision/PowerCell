@@ -22,6 +22,7 @@ vi.mock("@/services/partnerApi", () => ({
   listarCasos: vi.fn(),
   obterCaso: vi.fn(),
   submeterLead: vi.fn(),
+  obterDestinos: vi.fn(),
   obterUrlDeDescarga: vi.fn(),
   enviarFicheiro: vi.fn(),
   obterFormularioDoCliente: vi.fn(),
