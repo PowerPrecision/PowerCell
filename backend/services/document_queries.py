@@ -136,12 +136,20 @@ async def run_get_document_metadata(process_id: str, user: Optional[dict] = None
     }
 
 
-async def run_search_documents(request, user: Optional[dict] = None) -> dict[str, Any]:
+async def run_search_documents(request, *, user: dict) -> dict[str, Any]:
+    from services.by_id_scope import ids_de_processos_no_ambito
     from services.document_categorization import search_documents_by_content
 
     query: dict[str, Any] = {"is_categorized": True}
     if request.process_id:
         query["process_id"] = request.process_id
+    else:
+        # D-31: sem `process_id` a pesquisa percorria os metadados de TODAS as
+        # redes (e devolvia URLs pré-assinados). Recorta-se aos processos do
+        # âmbito; o Master (`None`) não tem fronteira.
+        visiveis = await ids_de_processos_no_ambito(user)
+        if visiveis is not None:
+            query["process_id"] = {"$in": visiveis}
     if request.categories:
         query["ai_category"] = {"$in": request.categories}
 
@@ -165,10 +173,18 @@ async def run_search_documents(request, user: Optional[dict] = None) -> dict[str
     }
 
 
-async def run_get_all_categories(process_id: Optional[str] = None) -> dict[str, Any]:
+async def run_get_all_categories(
+    process_id: Optional[str] = None, *, user: dict,
+) -> dict[str, Any]:
+    from services.by_id_scope import ids_de_processos_no_ambito
+
     query: dict[str, Any] = {"ai_category": {"$ne": None}}
     if process_id:
         query["process_id"] = process_id
+    else:
+        visiveis = await ids_de_processos_no_ambito(user)
+        if visiveis is not None:
+            query["process_id"] = {"$in": visiveis}
 
     pipeline = [
         {"$match": query},

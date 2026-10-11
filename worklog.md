@@ -11847,3 +11847,14 @@ Fecho da D-31 (rotas por id) nas três superfícies que ficaram nomeadas.
 
 **Dito:** `portal_verify_attempts` sem TTL; rotas com o id no corpo (`search`, `confirm-upload`, `generate-upload-url`, `check-*-conflict`) não varridas; sem alterações de frontend.
 
+---
+
+## Iteração `d31-id-no-corpo-e-ttl-do-verify` (Out 2026)
+
+**1. `process_id` no corpo/query dos documentos.** `exigir_process_id_do_pedido_no_ambito` (dependência de router, só JSON, 404 uniforme, 400 para valores que não são texto). Achados: `check-move-conflict` sem guarda e sem utilizador; `/search` sem `process_id` varria todas as redes e devolvia URLs pré-assinados; `/categories` idem nas contagens.
+
+**2. TTL em `portal_verify_attempts`.** `expire_at` (Date) deslizante, 30 min > bloqueio de 15; índice em `db_indexes`; backfill `scripts/backfill_portal_verify_ttl.py`. Verificado contra `mongod` 7.0 real: índice com `expireAfterSeconds: 0`, script idempotente, purga observada em 45 s (o registo antigo saiu, o bloqueado ficou). Efeito: o bloqueio sem fim deixou de existir.
+
+**Medição:** 14 mutações na parte 1 e 12 na parte 2, todas mortas. Uma sobreviveu à primeira (o `update_one` do backfill sem a condição «ainda sem `expire_at`»): só uma corrida com a aplicação a distingue; acrescentei esse teste.
+
+**Dito:** `portal_login_attempts` tem o mesmo desenho e não foi tocada; a pesquisa sem `process_id` recorta por rede, não pela regra de pré-indexação.

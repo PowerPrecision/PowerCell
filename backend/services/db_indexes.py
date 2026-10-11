@@ -196,6 +196,19 @@ TTL_INDEXES = [
         "name": "ttl_task_queue",
         "description": "Purga tarefas terminadas da fila após 7 dias",
     },
+    {
+        # Travão do `/portal/{client_id}/verify` (D-31, remate). O `client_id`
+        # é escolhido por quem pergunta, logo cada id inventado deixava um
+        # documento para sempre. `seconds: 0` = expira no INSTANTE de
+        # `expire_at` (o serviço grava-o já com a margem: ver
+        # `portal_security.VERIFY_ATTEMPTS_TTL_MINUTES`, maior que o bloqueio).
+        # Datetime nativo, nunca a string ISO de `last_attempt_at`.
+        "collection": "portal_verify_attempts",
+        "field": "expire_at",
+        "seconds": 0,
+        "name": "ttl_portal_verify_attempts",
+        "description": "Purga tentativas de verificação do Portal na data de expiração do registo",
+    },
 ]
 
 

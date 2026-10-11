@@ -297,6 +297,91 @@ async def documento_no_ambito_por_id(doc_id: str, user: dict) -> Optional[bool]:
     return False
 
 
+# ════════════════════════════════════════════════════════════════════
+#  O `process_id` que NÃO vem no caminho: corpo JSON e query string
+# ════════════════════════════════════════════════════════════════════
+ERRO_PROCESSO_NAO_ENCONTRADO = "Processo não encontrado"
+ERRO_PROCESS_ID_INVALIDO = "process_id inválido"
+
+#: Quantos processos do âmbito se enumeram para recortar uma pesquisa sem
+#: `process_id`. Cortar errado é FECHADO (vê-se menos, nunca mais): o mesmo
+#: tecto do `run_get_document_expiries`.
+LIMITE_DE_PROCESSOS_NO_AMBITO = 5000
+
+_METODOS_COM_CORPO = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+async def _process_id_do_corpo(request: Request):
+    """O `process_id` do corpo JSON, ou ``None`` se não há corpo JSON.
+
+    Só lê JSON: o upload multipart não pode ser carregado para memória por
+    uma guarda (o ficheiro inteiro ficava em RAM antes do handler). Um corpo
+    ilegível passa — o FastAPI responde o 422 dele.
+    """
+    if request.method not in _METODOS_COM_CORPO:
+        return None
+    if "json" not in (request.headers.get("content-type") or "").lower():
+        return None
+    try:
+        corpo = await request.json()
+    except Exception:  # noqa: BLE001 — corpo ilegível: o 422 é do FastAPI
+        return None
+    return corpo.get("process_id") if isinstance(corpo, dict) else None
+
+
+async def exigir_process_id_do_pedido_no_ambito(
+    request: Request, user: dict = Depends(get_current_user),
+) -> None:
+    """Dependência do router `/documents`: o `process_id` do CORPO ou da QUERY.
+
+    O `{process_id}` do caminho tem a sua (`exigir_processo_no_ambito`); estas
+    rotas — `search`, `confirm-upload`, `generate-upload-url`,
+    `check-move-conflict`, `check-upload-conflict`, `expiry`, `categories` —
+    levam o id noutro sítio e passavam por baixo de qualquer dependência de
+    caminho. 404 igual ao de «não existe»; id inexistente passa (o handler
+    responde o seu 404).
+
+    **Um `process_id` que não é texto é recusado (400)**, não ignorado: os
+    handlers fazem `find_one({"id": process_id})` e um `{"$ne": null}`
+    devolvia o primeiro processo de QUALQUER rede — a guarda a ignorar o
+    valor era a porta aberta para a contornar.
+    """
+    candidatos = [request.query_params.get("process_id"), await _process_id_do_corpo(request)]
+    for process_id in candidatos:
+        if process_id is None or process_id == "":
+            continue
+        if not isinstance(process_id, str):
+            raise HTTPException(status_code=400, detail=ERRO_PROCESS_ID_INVALIDO)
+        if await id_flexivel_no_ambito(process_id, user) is False:
+            logger.warning(
+                "[DOCUMENTOS] %s pediu %s %s (process_id %s no pedido), fora da sua rede.",
+                (user or {}).get("id"), request.method, request.url.path, process_id,
+            )
+            raise HTTPException(status_code=404, detail=ERRO_PROCESSO_NAO_ENCONTRADO)
+
+
+async def ids_de_processos_no_ambito(user: dict) -> Optional[list[str]]:
+    """Os ids dos processos que `user` vê — ``None`` para o Master (sem fronteira).
+
+    Serve as pesquisas que não trazem `process_id`: sem este recorte
+    percorriam os metadados de documentos de TODAS as redes (e devolviam
+    URLs pré-assinados). Conta a rede convidada. Um utilizador sem âmbito
+    determinável recebe ``[]`` — nada, nunca «tudo».
+    """
+    if utilizador_e_global(user):
+        return None
+    scope = await resolve_tenant_scope(user)
+    visiveis = await db.processes.find(
+        build_process_scope_condition(scope), {"_id": 0, "id": 1},
+    ).to_list(LIMITE_DE_PROCESSOS_NO_AMBITO)
+    if len(visiveis) >= LIMITE_DE_PROCESSOS_NO_AMBITO:
+        logger.warning(
+            "[DOCUMENTOS] âmbito de %s cortado nos %d processos.",
+            (user or {}).get("id"), LIMITE_DE_PROCESSOS_NO_AMBITO,
+        )
+    return [p["id"] for p in visiveis if p.get("id")]
+
+
 def _aceita_convidado(request: Request) -> bool:
     rota = request.scope.get("route")
     caminho = getattr(rota, "path", "") or ""

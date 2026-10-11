@@ -612,14 +612,46 @@ as atribuídas a mim ou criadas por mim. `POST /clients` passou a carimbar.
   existe», «NIF errado» e «processo alheio» (todos 401 com a mesma mensagem) e
   que o travão não distingue ids reais de inexistentes.
 
+**Remate (Out 2026) — fechados os dois pontos que ficaram em aberto:**
+
+* **Rotas com o `process_id` no corpo/query** — `services/by_id_scope.exigir_process_id_do_pedido_no_ambito`,
+  4.ª dependência do router `/documents` (antes da guarda de processo fechado).
+  Lê o `process_id` do **corpo JSON** e da **query** (nunca de multipart: o
+  ficheiro inteiro não pode ficar em RAM antes do handler) e responde 404 igual
+  ao de «não existe». Cobre `check-upload-conflict`, `generate-upload-url`,
+  `confirm-upload`, `check-move-conflict`, `search`, `POST/GET /expiry` e
+  `GET /categories`. Um `process_id` que não é texto (`{"$ne": null}`) é
+  **400**, não ignorado: os handlers fazem `find_one({"id": ...})` e o operador
+  devolvia o primeiro processo de qualquer rede. Achados ao varrer: o
+  `check-move-conflict` **não tinha guarda nenhuma nem recebia o utilizador**
+  (oráculo de «este ficheiro existe?»); e o `/search` **sem `process_id`
+  percorria os metadados de todas as redes e devolvia URLs pré-assinados** —
+  agora recortado aos processos do âmbito (`ids_de_processos_no_ambito`, rede
+  convidada incluída, tecto de 5000 que corta para FECHADO). O `GET /categories`
+  tinha o mesmo defeito (contagens de todas as redes).
+* **`portal_verify_attempts` com TTL** — o registo ganha `expire_at` (BSON Date;
+  o TTL ignora strings ISO) a cada falha, 30 min depois (`VERIFY_ATTEMPTS_TTL_MINUTES`,
+  **maior que o bloqueio de 15** — um prazo menor desbloqueava o alvo a meio),
+  e o índice `ttl_portal_verify_attempts` (`expireAfterSeconds: 0`) vive em
+  `db_indexes.TTL_INDEXES`. Registos antigos: `scripts/backfill_portal_verify_ttl.py`
+  (omissão só lê; `--aplicar`; idempotente; nunca antes do fim de um bloqueio
+  em curso) — **correr uma vez depois do deploy**.
+  *Efeito colateral dito:* antes, quem esgotava as 5 tentativas ficava trancado
+  **para sempre** (com `attempts >= 5` cada pedido renovava o bloqueio antes de
+  olhar para a credencial); agora o contador volta a zero ≤ 30 min depois da
+  última falha. Troca assumida: um atacante persistente tem 5 tentativas por
+  30 min por `client_id` em vez de zero, mas o cliente legítimo deixa de ficar
+  preso sem intervenção na base de dados.
+
 **O que continua aberto (dito):**
 
-* `portal_verify_attempts` não tem índice TTL: cada `client_id` inventado deixa
-  um documento de tentativas (travado a 10 pedidos/minuto por IP, mas nunca
-  expira). Não é fuga entre redes; é crescimento de coleção.
-* Rotas que recebem o id **no corpo** (`/documents/search`, `confirm-upload`,
-  `generate-upload-url`, `check-move-conflict`, `check-upload-conflict`) não
-  passam por dependências de caminho e não foram varridas por este inventário.
+* `portal_login_attempts` (o login por **email** + código, `portal_brute_force`)
+  tem o mesmo desenho — registo por identidade escolhida por quem pergunta, sem
+  TTL, e o mesmo bloqueio sem fim. Não foi tocado: é outra porta, com outra
+  política (8/10).
+* O `/search` e o `/categories` sem `process_id` recortam por **rede**; a regra de
+  visibilidade documental de processos por indexar (a que o `process_id` explícito
+  aplica) não é aplicada por processo nesta listagem agregada.
 * `/task-logs/{id}`: «cancelar» por um gestor que não é o dono responde 400 (o
   serviço filtra por `user_id`) — comportamento anterior, agora só acessível
   dentro do âmbito. E a excepção de gestão lê o cargo da CONTA, não o perfil

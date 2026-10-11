@@ -492,11 +492,14 @@ class TestOsFluxosLegitimosDosDocumentos:
 
 
 class TestAGuardaDosDocumentosEstaLigada:
-    def test_o_router_leva_as_tres_dependencias_pela_ordem_certa(self):
+    def test_o_router_leva_as_quatro_dependencias_pela_ordem_certa(self):
         """A fronteira de rede vem ANTES da guarda de processo fechado: esta
         nunca pode ser um oráculo sobre outra rede."""
         import routes.documents as rd
-        from services.by_id_scope import exigir_alvo_do_documento_no_ambito
+        from services.by_id_scope import (
+            exigir_alvo_do_documento_no_ambito,
+            exigir_process_id_do_pedido_no_ambito,
+        )
         from services.process_closed_guard import exigir_processo_editavel
         from services.process_scope_guard import exigir_processo_no_ambito
 
@@ -504,6 +507,7 @@ class TestAGuardaDosDocumentosEstaLigada:
         assert chamaveis == [
             exigir_processo_no_ambito,
             exigir_alvo_do_documento_no_ambito,
+            exigir_process_id_do_pedido_no_ambito,
             exigir_processo_editavel,
         ]
 

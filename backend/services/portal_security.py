@@ -46,6 +46,17 @@ PORTAL_SESSION_VALIDITY_HOURS = 4  # Sessão verificada: 4 horas (mais curta que
 MAX_VERIFY_ATTEMPTS = 5
 VERIFY_LOCKOUT_MINUTES = 15
 
+# Quanto tempo o registo de tentativas sobrevive depois da última escrita
+# (D-31, remate). O `client_id` do `verify` é escolhido por quem pergunta: cada
+# id inventado deixava um documento em `portal_verify_attempts` que nunca
+# expirava. O índice TTL (`db_indexes`, campo `expire_at`) purga-os.
+#
+# **Tem de ser MAIOR que o bloqueio**: um registo apagado a meio do bloqueio
+# desbloqueava o alvo antes do tempo. 30 minutos dão ao bloqueio (15) o seu
+# prazo inteiro e mais uma janela igual antes de o contador voltar a zero.
+VERIFY_ATTEMPTS_TTL_MINUTES = 30
+assert VERIFY_ATTEMPTS_TTL_MINUTES > VERIFY_LOCKOUT_MINUTES
+
 # Security scheme (igual ao staff, mas validado separadamente)
 _portal_security = HTTPBearer(auto_error=False)
 
@@ -351,19 +362,28 @@ async def verify_client_credentials(client_id: str, nif: str, process_number: in
     }
 
 
+def expira_em(agora: datetime) -> datetime:
+    """Quando o registo de tentativas deixa de interessar (BSON Date, UTC)."""
+    return agora + timedelta(minutes=VERIFY_ATTEMPTS_TTL_MINUTES)
+
+
 async def _record_failed_attempt(lockout_key: str) -> None:
     """
     Regista uma tentativa falhada de verificação e aplica lockout se necessário.
 
     Incrementa o contador de tentativas. Se atingir o limite, aplica lockout.
     """
-    now = datetime.now(timezone.utc).isoformat()
+    agora = datetime.now(timezone.utc)
+    now = agora.isoformat()
 
     result = await db.portal_verify_attempts.update_one(
         {"_id": lockout_key},
         {
             "$inc": {"attempts": 1},
-            "$set": {"last_attempt_at": now},
+            # `expire_at` é um datetime NATIVO de propósito: o TTL do Mongo
+            # não actua sobre uma string ISO (foi o que inutilizou o
+            # `idx_ttl` antigo). A `last_attempt_at` em texto fica como está.
+            "$set": {"last_attempt_at": now, "expire_at": expira_em(agora)},
         },
         upsert=True,
     )

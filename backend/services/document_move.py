@@ -48,8 +48,12 @@ def build_move_target_path(
     return target_path, safe_category, final_filename
 
 
-async def run_check_move_conflict(data: dict) -> dict:
-    """Verifica conflito ao mover/renomear um ficheiro no S3."""
+async def run_check_move_conflict(data: dict, *, user: dict) -> dict:
+    """Verifica conflito ao mover/renomear um ficheiro no S3.
+
+    `user` é obrigatório e kw-only: o endpoint respondia «este ficheiro
+    existe?» sobre a pasta de qualquer processo a qualquer sessão (D-31).
+    """
     process_id = data.get("process_id")
     source_path = data.get("source_path")
     target_category = data.get("target_category")
@@ -63,6 +67,11 @@ async def run_check_move_conflict(data: dict) -> dict:
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    # Rede já provada pela dependência do router; aqui a regra de
+    # visibilidade documental (pré-indexação), como nas leituras.
+    from services.document_visibility import assert_can_view_process_documents
+
+    await assert_can_view_process_documents(user, process)
 
     base_path = resolve_upload_base_path(process, process_id)
     target_path, safe_category, final_filename = build_move_target_path(
