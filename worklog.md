@@ -11814,3 +11814,18 @@ Fecho da falha arquitectural identificada na iteração dos formulários.
 **Medição:** 4 mutações (guarda do `/assign`, guarda do `client_assign`, `pode_atribuir` sempre verdadeiro, lista sem âmbito) — todas mortas. A primeira versão do teste da lista passou com o defeito presente porque o fixture não dava `company` aos utilizadores (contam como órfãos, admitidos por desenho); o teste de «atribuir a si próprio» arrastava o fluxo todo e foi removido por não provar nada sobre a guarda.
 
 **Deploy:** correr `cd backend && python -m scripts.migrar_formularios_por_rede` (e depois `--aplicar`) na base de dados hospedada; confirmar `TENANT_DEFAULT_NETWORK_ID`; avisar a equipa de que atribuir fora da rede passa a pedir «Partilhar com Empresa…».
+
+---
+
+## Iteração `users-fronteira-de-rede` (Out 2026)
+
+Fecho das duas dívidas registadas na Via Rápida.
+
+**1. `GET /users/{id}`.** `require_staff` autorizava o verbo, não o objecto: bastava o id para ler o perfil de alguém de uma rede concorrente. `run_get_user` usa agora `carregar_utilizador_gerivel` (a mesma regra da gestão de utilizadores e da lista): o próprio, o Master, ou alguém das empresas da rede; um perfil global nunca é visível a um local. **404** e não 403, igual ao de «não existe». O frontend não tinha chamadores.
+
+**2. Dropdown do Master.** `GET /users` e `/users/staff` aceitam `?process_id=`; para o Master, a lista sai limitada ao alcance do processo (dono + convidadas) e mantém quem já está na equipa (regra 1 da guarda: a UI devolve a lista inteira ao gravar). Para os restantes nada muda e o processo nem é lido. `ProcessDetails` (3 listas) e `AssignUsersModal` passam o id; o modal passou de `fetch` cru a Axios e refaz o pedido ao mudar de processo.
+
+**Medição:** 9 mutações (5 backend, 4 frontend). Uma sobreviveu — tirar o desvio «só o Master precisa do processo» não muda a lista (já vem limitada), mas lê um processo alheio sem necessidade; passou a haver teste a afirmar que não é lido. O duplo de Mongo ignora a projecção em `find_one`, pelo que a palavra-passe e a projecção do processo se medem um nível abaixo (parâmetro que sai).
+
+**Dito:** o mesmo `GET /users/{id}` admite as contas «órfãs» (sem empresa) quando a rede de omissão está no âmbito — por desenho, igual à lista.
+

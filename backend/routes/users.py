@@ -38,10 +38,11 @@ async def get_users(
         description="Se true, devolve staff elegível para atribuições "
         "(exclui admin; inclui indexação).",
     ),
+    process_id: Optional[str] = Query(None, description="Processo da atribuição."),
     user: dict = Depends(require_staff()),
 ):
     """Listar utilizadores do sistema."""
-    return await run_get_users(role, user, for_assignment=for_assignment)
+    return await run_get_users(role, user, for_assignment, process_id=process_id)
 
 
 @router.get("/me/email-config")
@@ -160,9 +161,12 @@ async def set_primary_email_account(
 
 
 @router.get("/staff", response_model=List[UserResponse])
-async def get_staff_users(user: dict = Depends(require_staff())):
+async def get_staff_users(
+    process_id: Optional[str] = Query(None, description="Processo da atribuição."),
+    user: dict = Depends(require_staff()),
+):
     """Staff para dropdowns de atribuição (sem admin; inclui indexação)."""
-    return await run_get_staff_users(user)
+    return await run_get_staff_users(user, process_id=process_id)
 
 
 @router.get("/{user_id}", response_model=UserResponse)
