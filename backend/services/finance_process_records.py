@@ -28,8 +28,55 @@ from models.finance import (
     FinanceStatus,
 )
 from services.finance_helpers import _safe_float
+from services.portal_estado import estado_e_terminal
+from services.process_closed_guard import (
+    PROJECCAO_DO_PROCESSO_FECHADO,
+    exigir_processo_aberto,
+)
+from services.workflow_phases import carregar_fases
 
 logger = logging.getLogger(__name__)
+
+
+async def marcar_processos_fechados(registos: list[dict]) -> list[dict]:
+    """Acrescenta `processo_fechado` (booleano, calculado ao servir) a cada registo.
+
+    O ecrã das finanças não conhece a fase dos processos: sem esta flag
+    mostrava o botão de mudar o estado de uma comissão e o servidor respondia
+    403 só depois do clique. NUNCA se grava — um booleano persistido ficava
+    errado no dia em que o processo fosse reaberto. Uma falha a ler os
+    processos deixa a flag a `False` (o servidor continua a ser a parede).
+    """
+    ids = sorted({r.get("process_id") for r in registos if r.get("process_id")})
+    fechados: set[str] = set()
+    if ids:
+        try:
+            fases = await carregar_fases()
+            processos = await db.processes.find(
+                {"id": {"$in": ids}}, {"_id": 0, "id": 1, "status": 1},
+            ).to_list(len(ids))
+            fechados = {
+                p["id"] for p in processos
+                if p.get("status") and estado_e_terminal(p["status"], fases)
+            }
+        except Exception as exc:  # noqa: BLE001 — a flag é conveniência, a parede é o 403
+            logger.warning("[FINANCAS] Não foi possível marcar processos fechados: %s", exc)
+    return [{**r, "processo_fechado": r.get("process_id") in fechados} for r in registos]
+
+
+async def _exigir_processo_do_registo_aberto(process_id: Optional[str]) -> None:
+    """D-34: o registo financeiro de um processo FECHADO não se cria, altera nem
+    elimina — reabre-se o processo primeiro (sem excepção por cargo).
+
+    Corre DEPOIS da verificação de âmbito do registo, pelo que o 403 nunca
+    confirma a existência de um registo de outra empresa. Um registo sem
+    processo (ou com um id que já não existe) não tem o que fechar.
+    """
+    if not process_id:
+        return
+    processo = await db.processes.find_one({"id": process_id}, PROJECCAO_DO_PROCESSO_FECHADO)
+    await exigir_processo_aberto(processo)
+
 
 def _doc_to_process_finance_response(doc: dict) -> dict:
     """Converte documento MongoDB para resposta ProcessFinance (remove _id).
@@ -159,6 +206,7 @@ async def run_create_process_finance(
     # ilha criava registos financeiros na empresa de outra rede — e o
     # `(process_id, company_id)` é a própria repartição de comissões.
     await exigir_empresa_no_ambito(body.company_id, user=user, request=request)
+    await _exigir_processo_do_registo_aberto(body.process_id)
 
     # Verificar se já existe registo financeiro para este processo
     existing = await db.process_finances.find_one({
@@ -259,6 +307,7 @@ async def run_list_process_finances(
     consulta = com_isolamento(ambito.condicao, query) if ambito.condicao else query
 
     finances = await db.process_finances.find(consulta, {"_id": 0}).to_list(1000)
+    finances = await marcar_processos_fechados(finances)
     return {"finances": finances, "total": len(finances)}
 
 
@@ -301,6 +350,7 @@ async def run_update_process_finance(
         raise HTTPException(status_code=404, detail=ERRO_REGISTO_NAO_ENCONTRADO)
 
     await exigir_registo_no_ambito(existing, user=user, request=request)
+    await _exigir_processo_do_registo_aberto(existing.get("process_id"))
 
     update_fields = body.model_dump(exclude_none=True)
     if not update_fields:
@@ -431,6 +481,7 @@ async def run_update_process_finance_status(
         raise HTTPException(status_code=404, detail=ERRO_REGISTO_NAO_ENCONTRADO)
 
     await exigir_registo_no_ambito(existing, user=user, request=request)
+    await _exigir_processo_do_registo_aberto(existing.get("process_id"))
 
     now = datetime.now(timezone.utc).isoformat()
     await db.process_finances.update_one(
@@ -468,6 +519,7 @@ async def run_delete_process_finance(
         raise HTTPException(status_code=404, detail=ERRO_REGISTO_NAO_ENCONTRADO)
 
     await exigir_registo_no_ambito(existing, user=user, request=request)
+    await _exigir_processo_do_registo_aberto(existing.get("process_id"))
 
     await db.process_finances.delete_one({"id": finance_id})
 

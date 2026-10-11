@@ -11723,3 +11723,42 @@ Mas duas regras ficaram escritas, porque ambas já tinham custado um CI
 vermelho antes com outra roupagem: a do singleton mutado por outro módulo
 (ARCHITECTURE.md) e a da espera sobre o elemento que se afirma
 (FRONTEND_GUIDELINES.md § 27.52).
+
+
+---
+
+# D-34 — Processo fechado: as cinco áreas que escapavam (Out 2026)
+
+**Pedido:** alargar a guarda do processo fechado a Finanças, Comunicações,
+links do Portal, Kanban e `unlink-process`, sem excepção por cargo.
+
+**Backend**
+- `ROTAS_QUE_FUNCIONAM_COM_O_PROCESSO_FECHADO` passou de 9 a 3 entradas
+  (reabrir, eliminar, revogar partilha). Kanban, `portal-messages`,
+  `generate-magic-link` (+`/send`), `origem-financeira` e `partner-service` caem
+  na dependência de router que já existia.
+- Novo `exigir_processo_aberto_por_id` (só decide se o processo é visível a quem
+  pede — sem oráculo); `exigir_processo_editavel` passou a usá-lo.
+- `run_unlink_process_from_client` e os quatro escritores de
+  `finance_process_records` (criar, editar, estado, eliminar) chamam a guarda
+  **antes de escrever**; nas finanças corre depois do âmbito do registo.
+- `GET /finance/processes` devolve `processo_fechado` (calculado, nunca gravado;
+  uma falha a ler os processos deixa a flag a `False`). Colunas do Kanban levam
+  `is_active`.
+
+**Frontend**
+- Cartões de fases fechadas já não são `draggable`; mensagens, origem
+  financeira, serviço do parceiro, links do Portal e o estado da comissão
+  ficam em modo de leitura com o motivo.
+- `podeEditarFase` deixa de abrir excepção a master/admin/CEO (o servidor já
+  respondia 403 ao clique).
+- O interceptor do Axios distingue «Processo fechado» de «Acesso Negado».
+
+**Medição:** 7 mutações no backend/frontend sobre a guarda, o helper, o
+`draggable`, a prop das mensagens, o interceptor e a célula da fase — todas
+mortas. A primeira mutação das finanças deu 49 erros em vez de falhas: estava
+sintacticamente partida; refeita, matou 4 testes.
+
+**Dito:** o duplo de Mongo não implementa `$pull`, por isso o teste de
+`unlink` num processo aberto prova o `$unset` do processo e não o `$pull` do
+cliente. `link-process`, emails/modelos/`ai_analysis` continuam fora (D-34).

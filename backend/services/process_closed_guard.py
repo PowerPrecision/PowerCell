@@ -38,11 +38,14 @@ COMO SE APLICA  (duas camadas, e a segunda não é redundante)
      o que quer que seja).
 
 O QUE FICA DE FORA, de propósito  (`ROTAS_QUE_FUNCIONAM_COM_O_PROCESSO_FECHADO`)
-  Cada entrada tem o motivo escrito: reabrir, mover no Kanban (é como se
-  reabre arrastando), eliminar o processo, falar com o cliente, gerar o
-  acesso ao Portal e os registos de contabilidade interna (origem financeira,
-  serviço pago pelo parceiro, revogar uma partilha) — não alteram os dados do
-  processo e acontecem, legitimamente, depois de ele fechar.
+  Só três coisas, e nenhuma é «alterar o processo»: reabrir (é a saída),
+  eliminar o processo e revogar uma partilha (limpeza de acesso).
+
+  (Out 2026, D-34) Já NÃO ficam de fora, e passam a exigir «Reabrir» primeiro:
+  mover no Kanban (mesmo entre duas fases terminais), mensagens ao cliente,
+  gerar/enviar o link do Portal, origem financeira, serviço pago pelo parceiro,
+  os registos financeiros (`/finance/processes`) e desligar um cliente do
+  processo (`unlink-process`). Sem excepção por cargo.
 
 SEM ORÁCULO
   Um processo de OUTRA rede não responde «está fechado»: a dependência só
@@ -83,20 +86,8 @@ METODOS_DE_LEITURA = frozenset({"GET", "HEAD", "OPTIONS"})
 ROTAS_QUE_FUNCIONAM_COM_O_PROCESSO_FECHADO: dict[tuple[str, str], str] = {
     ("POST", "/processes/{process_id}/reopen"):
         "É a própria saída: reabrir tem de funcionar num processo fechado.",
-    ("PUT", "/processes/kanban/{process_id}/move"):
-        "Arrastar para uma fase activa é reabrir; o movimento não edita campos.",
     ("DELETE", "/processes/{process_id}"):
         "Eliminar não é editar — tem a sua permissão e o seu rasto.",
-    ("POST", "/processes/{process_id}/portal-messages"):
-        "Comunicar com o cliente não altera os dados do processo.",
-    ("POST", "/processes/{process_id}/generate-magic-link"):
-        "Dá acesso ao Portal; o Portal fechado recusa-o por si.",
-    ("POST", "/processes/{process_id}/generate-magic-link/send"):
-        "Idem: envia o acesso ao Portal, que o recusa se estiver fechado.",
-    ("PUT", "/processes/{process_id}/origem-financeira"):
-        "Contabilidade interna (coleção própria); acontece depois de fechar.",
-    ("PUT", "/processes/{process_id}/partner-service"):
-        "O pagamento do parceiro é registado depois do serviço concluído.",
     ("DELETE", "/processes/{process_id}/partners/{company_id}"):
         "Revogar uma partilha é limpeza de acesso, não edição do processo.",
 }
@@ -142,6 +133,25 @@ def _rota_permitida(request: Request) -> bool:
     )
 
 
+async def exigir_processo_aberto_por_id(process_id: str, user: dict) -> None:
+    """403 se o processo `process_id` está fechado E é visível a `user`.
+
+    Para os serviços que recebem o id fora do caminho (ficha do cliente,
+    registos financeiros). Um id que não existe, ou que é de outra rede,
+    passa: a resposta é a do handler — «fechado» não pode ser um oráculo.
+    """
+    if not process_id:
+        return
+    processo = await db.processes.find_one({"id": process_id}, PROJECCAO_DO_PROCESSO_FECHADO)
+    if not processo:
+        return
+    if not utilizador_e_global(user):
+        scope = await resolve_tenant_scope(user)
+        if not processo_no_ambito(processo, scope):
+            return
+    await exigir_processo_aberto(processo)
+
+
 async def exigir_processo_editavel(
     request: Request, user: dict = Depends(get_current_user),
 ) -> None:
@@ -155,12 +165,4 @@ async def exigir_processo_editavel(
     process_id = request.path_params.get("process_id")
     if not process_id or _rota_permitida(request):
         return
-
-    processo = await db.processes.find_one({"id": process_id}, PROJECCAO_DO_PROCESSO_FECHADO)
-    if not processo:
-        return
-    if not utilizador_e_global(user):
-        scope = await resolve_tenant_scope(user)
-        if not processo_no_ambito(processo, scope):
-            return
-    await exigir_processo_aberto(processo)
+    await exigir_processo_aberto_por_id(process_id, user)

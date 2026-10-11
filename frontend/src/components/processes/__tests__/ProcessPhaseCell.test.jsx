@@ -124,3 +124,32 @@ describe("ProcessPhaseCell", () => {
     ).toHaveTextContent("escriturado");
   });
 });
+
+
+describe("ProcessPhaseCell — D-34: fase terminal é só leitura para TODOS os perfis", () => {
+  const MOTOR_COM_FECHADA = [
+    ...MOTOR,
+    { name: "pos_venda", label: "Pós-venda", color: "gray", order: 3, is_active: false },
+  ];
+
+  it.each(["master", "admin", "ceo", "diretor", "consultor"])(
+    "%s: uma fase só terminal no motor não abre o dropdown",
+    (papel) => {
+      montar({ status: "pos_venda", role: papel, workflowStatuses: MOTOR_COM_FECHADA });
+      expect(screen.queryByRole("combobox", { name: /fase do processo/i })).toBeNull();
+    },
+  );
+
+  it.each(["master", "admin", "ceo"])(
+    "%s: a lista legada também fecha ('concluido') — já não há excepção por cargo",
+    (papel) => {
+      montar({ status: "concluido", role: papel, workflowStatuses: MOTOR });
+      expect(screen.queryByRole("combobox", { name: /fase do processo/i })).toBeNull();
+    },
+  );
+
+  it("uma fase activa continua editável (contraprova)", () => {
+    montar({ status: "cpcv", role: "admin", workflowStatuses: MOTOR_COM_FECHADA });
+    expect(screen.getByRole("combobox", { name: /fase do processo/i })).toBeInTheDocument();
+  });
+});

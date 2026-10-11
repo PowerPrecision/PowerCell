@@ -39,6 +39,7 @@ import {
 } from '../ui/select';
 import { ChevronLeft, ChevronRight, Users, Calendar, History, Loader2 } from 'lucide-react';
 import KanbanCard from './KanbanCard';
+import { processoEstaFechado } from '../../utils/processoFechado';
 import { statusColors, statusHeaderColors } from './constants';
 import { safeLabel } from '../dashboard/DashboardShared';
 
@@ -70,6 +71,11 @@ const KanbanColumn = memo(({
   // pedir ao servidor um estado que não existe, e ele responde 400; o
   // certo é o cartão só poder SAIR daqui, para uma fase a sério.
   const isReconciliacao = column.reconciliacao === true;
+
+  // D-34: os cartões de uma fase FECHADA (terminal) não se arrastam — nem
+  // para outra fase terminal. Para os mover, reabre-se o processo primeiro.
+  // A autoridade é o motor (`is_active` da coluna); sem a flag, a lista legada.
+  const colunaFechada = !isReconciliacao && processoEstaFechado({ status: column.name }, [column]);
 
   // Handlers memoizados
   const handleDragOver = useCallback((e) => {
@@ -220,6 +226,7 @@ const KanbanColumn = memo(({
                     key={process.id}
                     process={process}
                     columnName={column.name}
+                    fechado={colunaFechada}
                     draggingCard={draggingCard}
                     onDragStart={onDragStart}
                     onCardClick={onCardClick}

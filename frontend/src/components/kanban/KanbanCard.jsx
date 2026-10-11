@@ -57,6 +57,7 @@ const arePropsEqual = (prevProps, nextProps) => {
     prevProps.process.latest_activity_preview === nextProps.process.latest_activity_preview &&
     prevProps.process.observation_notes === nextProps.process.observation_notes &&
     prevProps.isDragging === nextProps.isDragging &&
+    prevProps.fechado === nextProps.fechado &&
     prevProps.isLocked === nextProps.isLocked &&
     prevProps.lockedBy === nextProps.lockedBy
   );
@@ -71,6 +72,7 @@ const KanbanCard = memo(({
   draggingCard,
   isLocked = false,
   lockedBy,
+  fechado = false,
 }) => {
   const navigate = useNavigate();
 
@@ -83,8 +85,13 @@ const KanbanCard = memo(({
 
   // Handlers memoizados para prevenir re-criação
   const handleDragStart = useCallback((e) => {
+    // D-34: um processo fechado não se move (nem entre fases terminais).
+    if (fechado) {
+      e.preventDefault();
+      return;
+    }
     onDragStart?.(e, process, columnName);
-  }, [onDragStart, process, columnName]);
+  }, [onDragStart, process, columnName, fechado]);
 
   const handleClick = useCallback(() => {
     // Não navegar se estiver arrastando
@@ -139,9 +146,11 @@ const KanbanCard = memo(({
       className={`cursor-pointer hover:shadow-md transition-all duration-200 relative ${
         isCurrentlyDragging ? "opacity-50" : ""
       } ${priorityStyles.borderClass} ${priorityStyles.bgClass} ${priorityStyles.shadowClass}`}
-      draggable
+      draggable={!fechado}
       onDragStart={handleDragStart}
       onClick={handleClick}
+      title={fechado ? "Processo fechado — reabra-o para o mover" : undefined}
+      data-fechado={fechado ? "true" : undefined}
       data-testid={`process-card-${process.id}`}
     >
       {/* Lock indicator badge */}

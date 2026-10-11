@@ -53,3 +53,23 @@ export function fasesParaReabrir(fases) {
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     .map((f) => ({ name: f.name, label: f.label || f.name }));
 }
+
+/**
+ * Início da mensagem que o servidor devolve no 403 de «processo fechado»
+ * (`mensagem_de_processo_fechado` em `process_closed_guard.py`; há um teste
+ * que LÊ o Python e falha se as duas divergirem).
+ */
+export const PREFIXO_DA_RECUSA_DE_PROCESSO_FECHADO = "Este processo está fechado";
+
+/**
+ * O `detail` de um 403 é a recusa de «processo fechado»? Serve ao
+ * interceptor do Axios: essa recusa vale para TODOS os perfis e diz como
+ * sair (Reabrir) — um «Acesso Negado» genérico mandava pedir permissões.
+ *
+ * @param {unknown} detalhe
+ * @returns {boolean}
+ */
+export function eRecusaDeProcessoFechado(detalhe) {
+  return typeof detalhe === "string"
+    && detalhe.startsWith(PREFIXO_DA_RECUSA_DE_PROCESSO_FECHADO);
+}

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { fasesParaReabrir, processoEstaFechado } from "./processoFechado";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import {
+  eRecusaDeProcessoFechado,
+  fasesParaReabrir,
+  PREFIXO_DA_RECUSA_DE_PROCESSO_FECHADO,
+  processoEstaFechado,
+} from "./processoFechado";
 
 const FASES = [
   { name: "novo", label: "Novo", order: 1, is_active: true },
@@ -77,5 +86,39 @@ describe("fasesParaReabrir", () => {
   it("lista inválida dá lista vazia", () => {
     expect(fasesParaReabrir(null)).toEqual([]);
     expect(fasesParaReabrir({})).toEqual([]);
+  });
+});
+
+
+describe("eRecusaDeProcessoFechado (D-34: o toast do 403 diz a verdade)", () => {
+  it("reconhece a mensagem que o servidor devolve", () => {
+    expect(eRecusaDeProcessoFechado(
+      "Este processo está fechado (fase «concluido»). Reabra-o para o poder alterar.",
+    )).toBe(true);
+  });
+
+  it("um 403 de permissões, vazio ou que não é texto NÃO conta", () => {
+    expect(eRecusaDeProcessoFechado("Sem permissão para esta acção")).toBe(false);
+    expect(eRecusaDeProcessoFechado("")).toBe(false);
+    expect(eRecusaDeProcessoFechado(undefined)).toBe(false);
+    expect(eRecusaDeProcessoFechado({ detail: "Este processo está fechado" })).toBe(false);
+    expect(eRecusaDeProcessoFechado(["Este processo está fechado"])).toBe(false);
+  });
+
+  it("o prefixo é o MESMO que o servidor escreve (lê o Python)", () => {
+    const raiz = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+    const py = readFileSync(join(raiz, "backend", "services", "process_closed_guard.py"), "utf8");
+    const bloco = py.slice(py.indexOf("def mensagem_de_processo_fechado"));
+    expect(bloco).toContain(PREFIXO_DA_RECUSA_DE_PROCESSO_FECHADO);
+  });
+});
+
+describe("o interceptor do Axios usa a regra (D-34)", () => {
+  it("o ramo do 403 distingue 'processo fechado' do 'Acesso Negado' genérico", () => {
+    const api = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "services", "api.js"), "utf8");
+    const ramo = api.slice(api.indexOf("if (status === 403) {"), api.indexOf("// 429 - TOO MANY REQUESTS"));
+    expect(ramo).toContain("eRecusaDeProcessoFechado(");
+    expect(ramo).toContain("Processo fechado");
+    expect(ramo).toContain("Acesso Negado"); // contraprova: o genérico continua para o resto
   });
 });
