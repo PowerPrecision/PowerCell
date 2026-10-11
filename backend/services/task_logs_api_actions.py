@@ -37,9 +37,10 @@ logger = logging.getLogger(__name__)
 
 ERRO_TAREFA_NAO_ENCONTRADA = "Tarefa não encontrada"
 
-#: Perfis (cargo da conta) que podem consultar registos de OUTROS — mas só
-#: os de utilizadores do seu âmbito. Master não está aqui: não tem fronteira.
-PAPEIS_QUE_VEEM_OS_DOS_OUTROS = frozenset({"admin", "ceo"})
+#: Perfis (cargo da conta) que podem consultar registos de OUTROS. O Master
+#: consta por coerência com o inventário de papéis, mas decide-se antes, em
+#: `utilizador_e_global` (sem fronteira); Admin e CEO só os do seu âmbito.
+PAPEIS_QUE_VEEM_OS_DOS_OUTROS = frozenset({"master", "admin", "ceo"})
 
 
 async def _carregar_acessivel(task_id: str, user: dict, *, so_o_dono: bool = False):
