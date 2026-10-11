@@ -333,8 +333,20 @@ class TestAssignmentGuards:
         await fake_async_db.users.insert_one(
             {"id": "u-new", "name": "Novo", "role": "consultor", "email": "n@x.pt"}
         )
+        # Atribuição directa só dentro da própria rede: admin e destino na
+        # mesma empresa (e rede), como acontece na operação normal.
+        from tests.unit.helpers_tenant import semear, tenant_db
+        from services import assignment_network_guard
 
-        with patch.object(client_assign, "db", fake_async_db), \
+        semear(fake_async_db)
+        for uid, papel in (("u-admin", "admin"), ("u-new", "consultor")):
+            fake_async_db.user_company_roles.docs.append({
+                "user_id": uid, "company_id": "cmp-power",
+                "company_name": "Power Real Estate", "role": papel,
+                "is_default": True,
+            })
+
+        with tenant_db(fake_async_db, client_assign, assignment_network_guard), \
              patch.object(client_assign, "decrypt_client_data", lambda c: c), \
              patch.object(client_assign, "get_next_process_number", AsyncMock(return_value=9)), \
              patch("services.process_service.encrypt_sensitive_data", lambda d: d), \

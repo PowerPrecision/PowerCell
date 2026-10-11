@@ -541,10 +541,8 @@ ausente) só se faz por script.
 carimbar (Pool) — mantém os links existentes a funcionar, mas é o que se deve
 substituir pelos links por empresa; (f) o directório «Empresa de Destino» do
 Portal do Parceiro expõe o nome das empresas das redes com Index a qualquer
-parceiro activo (o mesmo compromisso do D-36); (g) a **Via Rápida** (partilha
-implícita ao atribuir um utilizador de outra rede) ainda deixa o remetente
-escolher o utilizador — só a partilha explícita (Via Verde / rede de destino)
-distribui sozinha. Decidir se a Via Rápida se desliga.
+parceiro activo (o mesmo compromisso do D-36); (g) ~~a **Via Rápida**~~ — **extinta** (Out 2026, ver «Fechadas»).
+**Em aberto, da iteração da Via Rápida:** (h) `GET /users/{id}` devolve qualquer utilizador a qualquer staff — o mesmo defeito de `GET /users`, por id (a lista já respeita o âmbito); (i) os processos que a Via Rápida antiga já partilhou mantêm a partilha até alguém a revogar à mão — não se migra, por decisão de produto; (j) o Master a atribuir é limitado ao alcance do processo, mas a dropdown dele lista todos (recusa-se no servidor com a mensagem certa).
 
 ### D-35 · Bloco A/B/C: o que ficou de fora, dito
 **Onde:** `services/network_triage.py` (ex-`hub_triage.py`; o Hub único acabou — ver AGENTS.md), `services/partner_drafts.py`, `services/financial_validation.py`, `services/tenant_network.py`
@@ -601,6 +599,7 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 
 | # | Dívida | Fechada em |
 |---|---|---|
+| — | A Via Rápida (partilha implícita ao atribuir alguém de outra rede), antes ponto (g) da D-37 | Iteração `via-rapida-extinta` — apagada, não desligada. `assignment_network_guard` recusa a atribuição directa fora da rede (403 que aponta «Partilhar com Empresa…»), a lista de atribuíveis sai do servidor já filtrada (`/users` e `/users/staff` não tinham filtro de rede) e a Partilha Explícita é o único caminho para outra rede, com distribuição pelas regras do destino |
 | D-37 (formulários) | `form_config` global; registo público sem rede | Iteração `formularios-por-rede-e-mercado-b2b` — `form_config` tem `network_id` com o mesmo molde do workflow (modelo sem rede, copy-on-write, leitura própria → modelo → omissões) num ponto único, `form_config_scope`; o registo público carrega `?empresa=<company_id>` e abre estritamente o formulário dessa rede (empresa desconhecida/inactiva = 404, nada é criado); o Portal e o Portal do Parceiro derivam o esquema da rede do cliente/destino. A administração edita só a rede em contexto (Axios, não `fetch`). Migração: `scripts/migrar_formularios_por_rede.py` |
 | — | Tipificação rígida do serviço partilhado entre empresas (o «D-33» da directiva de Out 2026) | **Fora de âmbito por decisão do dono do produto (Out 2026):** a empresa A partilha com a B sem tipificar o serviço contratado |
 | — | O Hub único (`is_hub`), parte da D-35 | Iteração `multi-fornecedor` — a flag global saiu; quem tem Index deriva da equipa e a partilha escolhe a rede de destino (`network_triage`). A migração `--limpar-is-hub` retira o resíduo |

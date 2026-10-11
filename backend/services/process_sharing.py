@@ -1,56 +1,45 @@
-"""Partilha de um processo entre redes — a Via Rápida (D-25, Out 2026).
+"""Partilha de um processo entre redes (D-25, Out 2026; Via Rápida extinta).
 
 O PROBLEMA QUE ISTO RESOLVE
 ==========================
 A topologia é «Power + Precision partilham; a Domus é uma ilha». O modelo
-implementava-a com **um** `network_id` por documento: um processo
-pertence a uma rede e só essa o vê. Mas a partilha entre agências é uma
-operação NORMAL do negócio (a co-angariação), e o modelo financeiro **já
-a conhecia**: `db.process_finances` é chaveada por
-`(process_id, company_id)` — um registo por empresa no mesmo processo,
-que é exactamente o rateio de comissão de uma partilha. Era só a
-VISIBILIDADE que não tinha como o expressar.
+implementa-a com **um** `network_id` por documento: um processo pertence
+a uma rede e só essa o vê. Mas passar trabalho a outra empresa é uma
+operação NORMAL do negócio, e o modelo financeiro **já a conhecia**:
+`db.process_finances` é chaveada por `(process_id, company_id)` — um
+registo por empresa no mesmo processo, que é o rateio de uma partilha.
+Era só a VISIBILIDADE que não tinha como o expressar.
 
-O recurso disponível até aqui era dar à pessoa um UCR nas duas empresas —
-e esse é o pior negócio possível: o âmbito é do UTILIZADOR, logo um
-consultor da Precision com acesso à Domus passa a ver **toda** a Domus, e
-não aquele processo.
+O atalho de dar à pessoa um UCR nas duas empresas é o pior negócio
+possível: o âmbito é do UTILIZADOR, logo um consultor da Precision com
+acesso à Domus passa a ver **toda** a Domus, e não aquele processo.
 
 O QUE A PARTILHA É, E O QUE NÃO É
 =================================
 * **Acrescenta quem VÊ, nunca muda de quem É.** `network_id` continua a
   ser o carimbo de propriedade e é permanente;
   `CAMPO_REDES_PARCEIRAS` é uma lista de convidados. A rede do DONO
-  nunca entra na lista de convidados — seria redundante hoje e, no dia
-  em que o dono mudasse, deixava lá uma chave da rede antiga.
+  nunca entra na lista de convidados.
 * **O âmbito é o PROCESSO, não a rede.** O convidado vê aquele processo
-  (decisão do dono do produto: «a ficha inteira»), e a fronteira
-  continua fechada em todos os restantes. É esta a diferença entre isto
-  e o atalho do UCR.
-* **Via Rápida: nasce da ATRIBUIÇÃO**, sem aprovação manual. Foi a
-  decisão do produto, e tem uma consequência que é preciso dizer: uma
-  abertura de fronteira que ninguém aprovou tem de ser **visível e
-  auditada**, senão é silenciosa — e uma abertura silenciosa é o oposto
-  de tolerância zero. Daí a entrada no trilho, a entrada no histórico do
-  processo e a etiqueta na listagem.
-* **A revogação é MANUAL** (decisão do dono do produto, 2026-10-09).
-  Tirar a atribuição **não** revoga: o parceiro mantém o histórico e os
-  documentos que ele próprio produziu, e o registo de comissão continua
-  coerente. Revogar em automático fazia desaparecer trabalho real sem
-  ninguém decidir — e um documento que desaparece não produz erro
-  nenhum. Por isso `sincronizar_parceiros` só **ACRESCENTA**; quem
-  retira é `revogar_parceiro`, à mão, e deixa rasto.
-
-PORQUE É QUE A SINCRONIZAÇÃO DERIVA DO DOCUMENTO E NÃO DO DIFF
-==============================================================
-Há CINCO escritores de atribuições neste projecto, e a lição do Lote 5
-(repetida no Lote 7, no ponto 9 e na contagem por campo que encontrou o
-quinto) é sempre a mesma: **a regra aplicada aos construtores e não a
-quem os usa divergiu em todos eles**. `sincronizar_parceiros` lê o
-documento JÁ GRAVADO, resolve as redes de **todos** os atribuídos e
-acrescenta as que faltam. É idempotente, não depende de nenhum diff, e
-um escritor novo que se esqueça de a chamar é um bug de UM sítio e não
-de cinco.
+  (a ficha inteira), e a fronteira continua fechada em todos os outros.
+* **Só EXPLÍCITA.** A «Via Rápida» — abrir o processo a uma rede por se
+  atribuir lá uma pessoa — foi extinta (Out 2026): quem atribuía
+  escolhia o utilizador final de outra rede e saltava a fila de triagem
+  dela, e quem tinha UCRs em duas redes abria a segunda por acaso. Hoje a
+  atribuição directa só alcança a própria rede
+  (`assignment_network_guard`) e passar um processo a outra empresa é
+  `partilhar_com_rede` («Partilhar com Empresa…»), que o põe na fila
+  central do destino; a distribuição é das regras dessa rede. **Apagada,
+  não desligada**: código adormecido atrás de uma condição é um convite a
+  religá-lo (`sincronizar_parceiros` já não existe, e há um teste que o
+  afirma).
+* **A revogação é MANUAL** (decisão do dono do produto, 2026-10-09):
+  o parceiro mantém o histórico e os documentos que ele próprio produziu
+  e o registo de comissão continua coerente — revogar em automático fazia
+  desaparecer trabalho real sem ninguém decidir. Quem retira é
+  `revogar_parceiro`, à mão, e deixa rasto.
+* **Visível e auditada.** A abertura de uma fronteira deixa entrada no
+  trilho, no histórico do processo e na etiqueta da listagem.
 
 As DUAS listas derivam uma da outra
 -----------------------------------
@@ -68,7 +57,6 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
 from database import db
-from services.task_assignment_hygiene import ids_atribuidos_do_processo
 from services.tenant_network import CAMPO_REDE, CAMPO_REDES_PARCEIRAS
 
 logger = logging.getLogger(__name__)
@@ -242,205 +230,6 @@ def condicao_de_filtro(partilha: Optional[str]) -> Optional[dict]:
     return None
 
 
-async def _associacoes_dos_atribuidos(ids: Iterable[str]) -> dict[str, list[dict]]:
-    """Mapa user_id → associações (UCRs). Uma leitura por utilizador."""
-    from services.auth import get_user_companies
-
-    mapa: dict[str, list[dict]] = {}
-    for uid in sorted({_texto(i) for i in ids if _texto(i)}):
-        try:
-            mapa[uid] = await get_user_companies(uid) or []
-        except Exception as exc:
-            logger.warning(
-                "[PARTILHA] Falha a ler as empresas de %s (%s); a partilha "
-                "não é aberta por causa dele.", uid, exc,
-            )
-            mapa[uid] = []
-    return mapa
-
-
-async def _redes_das_empresas(chaves: Iterable[str]) -> dict[str, str]:
-    """Mapa chave de empresa (id OU nome) → rede.
-
-    DERIVA do `tenant_network`: a rede de uma empresa sem grupo
-    configurado é a ilha implícita, e é a mesma função que o
-    `resolve_tenant_scope` usa — uma segunda regra aqui divergiria, e a
-    que divergisse abria ou fechava a rede errada.
-    """
-    from services.tenant_network import resolve_network_id
-
-    identificadores = sorted({_texto(c) for c in chaves if _texto(c)})
-    if not identificadores:
-        return {}
-
-    encontradas: dict[str, dict] = {}
-    try:
-        cursor = db.companies.find(
-            {"$or": [
-                {"id": {"$in": identificadores}},
-                {"name": {"$in": identificadores}},
-            ]},
-            {"_id": 0, "id": 1, "name": 1, CAMPO_REDE: 1},
-        )
-        for empresa in await cursor.to_list(200):
-            for chave in (_texto(empresa.get("id")), _texto(empresa.get("name"))):
-                if chave:
-                    encontradas[chave] = empresa
-    except Exception as exc:
-        logger.warning(
-            "[PARTILHA] Falha a ler `companies` (%s); sem redes resolvidas "
-            "não se abre partilha nenhuma.", exc,
-        )
-        return {}
-
-    return {
-        chave: resolve_network_id(encontradas.get(chave), company_id=chave) or ""
-        for chave in identificadores
-    }
-
-
-async def calcular_parceiros_a_acrescentar(
-    processo: dict,
-    *,
-    por_ordem_de: Any = None,
-) -> list[dict]:
-    """Que empresas convidadas faltam no registo deste processo.
-
-    PURA em relação à escrita: lê, resolve e devolve — não grava. É o que
-    permite ao teste medir a decisão sem medir o `update_one`.
-
-    A EMPRESA DA ETIQUETA É A DA REDE, NÃO A POR OMISSÃO
-    ----------------------------------------------------
-    A primeira versão resolvia a empresa pela associação **por omissão**
-    do utilizador. Para quem trabalha em duas redes — a Carla do cenário
-    de testes, que é o caso real deste grupo — abria a rede da Domus e
-    escrevia na etiqueta «Precision Crédito»: a partilha ficava rotulada
-    com a empresa errada. Uma etiqueta que mente sobre quem passou a ver
-    o processo é pior do que etiqueta nenhuma, porque é ela a única
-    coisa que torna a Via Rápida visível. Hoje percorre-se
-    (utilizador × EMPRESA) e a rede sai da empresa.
-
-    **NÃO usa o `resolve_tenant_scope`**, de propósito: aquele atribui a
-    rede de OMISSÃO a um utilizador órfão de empresa (para não cegar
-    contas de administração antigas). Aqui isso seria abrir o processo ao
-    grupo incumbente por não se saber a empresa de alguém — falha
-    ABERTA, no sítio exactamente errado. Sem associações, sem partilha.
-    """
-    rede_do_dono = _texto(processo.get(CAMPO_REDE))
-    ja_convidadas = set(redes_do_registo(parceiros_do_processo(processo)))
-
-    atribuidos = sorted(ids_atribuidos_do_processo(processo))
-    if not atribuidos:
-        return []
-
-    associacoes = await _associacoes_dos_atribuidos(atribuidos)
-
-    chaves = [
-        _texto(a.get("company_id")) or _texto(a.get("company_name"))
-        for lista in associacoes.values()
-        for a in lista
-    ]
-    redes_por_empresa = await _redes_das_empresas(chaves)
-
-    novas: list[dict] = []
-    vistas = set(ja_convidadas)
-    for uid in atribuidos:
-        for assoc in associacoes.get(uid) or []:
-            cid = _texto(assoc.get("company_id"))
-            nome = _texto(assoc.get("company_name"))
-            rede = _texto(redes_por_empresa.get(cid) or redes_por_empresa.get(nome))
-
-            if not rede or rede == rede_do_dono or rede in vistas:
-                continue
-            vistas.add(rede)
-
-            novas.append({
-                "company_id": cid,
-                "company_name": nome,
-                CAMPO_REDE: rede,
-                "added_at": _agora(),
-                "added_by": _texto(por_ordem_de),
-            })
-
-    return novas
-
-
-async def sincronizar_parceiros(
-    process_id: str,
-    *,
-    por_ordem_de: Any = None,
-    registar_historico=None,
-) -> list[dict]:
-    """Abre a partilha para as redes dos atribuídos que faltem.
-
-    **Só acrescenta.** A revogação é manual (`revogar_parceiro`), por
-    decisão de produto: tirar a atribuição não pode fazer desaparecer o
-    histórico e os documentos que o parceiro produziu.
-
-    Lê o documento JÁ GRAVADO: é isso que a torna idempotente e
-    independente de qualquer diff, e é o que impede os cinco escritores
-    de atribuições de divergirem (a lição do Lote 5).
-
-    Devolve as entradas acrescentadas — vazio quando não há nada a fazer,
-    que é o caso normal (a atribuição dentro da própria rede).
-    """
-    processo = await db.processes.find_one(
-        {"id": process_id},
-        {"_id": 0, "id": 1, "process_number": 1, CAMPO_REDE: 1,
-         CAMPO_REDES_PARCEIRAS: 1, CAMPO_EMPRESAS_PARCEIRAS: 1,
-         "assigned_consultor_ids": 1, "assigned_consultor_id": 1,
-         "consultor_id": 1, "consultant_id": 1,
-         "assigned_mediador_ids": 1, "assigned_mediador_id": 1,
-         "mediador_id": 1, "assigned_indexacao_id": 1},
-    )
-    if not processo:
-        return []
-
-    novas = await calcular_parceiros_a_acrescentar(
-        processo, por_ordem_de=por_ordem_de
-    )
-    if not novas:
-        return []
-
-    registo = [*parceiros_do_processo(processo), *novas]
-    await db.processes.update_one(
-        {"id": process_id},
-        {"$set": {
-            CAMPO_EMPRESAS_PARCEIRAS: registo,
-            # DERIVA do registo, sempre. Escrever as duas listas à mão
-            # era garantir que uma delas divergia.
-            CAMPO_REDES_PARCEIRAS: redes_do_registo(registo),
-        }},
-    )
-
-    nomes = [n.get("company_name") or n.get(CAMPO_REDE) for n in novas]
-    logger.info(
-        "[PARTILHA] Processo %s partilhado com %s (por ordem de %s).",
-        process_id, nomes, por_ordem_de or "?",
-    )
-
-    # VISÍVEL E AUDITADA: a Via Rápida não tem aprovação, logo o rasto é
-    # a única responsabilização. Nunca faz a operação falhar — observa,
-    # não intercepta (regra do `job_heartbeat`).
-    await _deixar_rasto(
-        process_id=process_id,
-        processo=processo,
-        novas=novas,
-        por_ordem_de=por_ordem_de,
-        registar_historico=registar_historico,
-    )
-
-    # Partilhar com uma rede que tem Index põe o processo na fila de
-    # triagem dessa rede — salvo Via Verde. Corre DEPOIS de a partilha
-    # estar gravada e nunca a faz falhar.
-    from services.network_triage import entrar_na_triagem_da_rede_sem_falhar
-
-    await entrar_na_triagem_da_rede_sem_falhar(
-        process_id, novas, por_ordem_de=por_ordem_de,
-    )
-    return novas
-
-
 class DestinoInvalido(Exception):
     """A rede de destino não serve (vazia, a do dono, ou sem empresas)."""
 
@@ -543,7 +332,7 @@ async def partilhar_com_rede(
 
     com_index = await redes_com_index()
     triagem = await entrar_na_triagem_da_rede_sem_falhar(
-        process_id, [nova], por_ordem_de=por_ordem_de, explicita=True,
+        process_id, [nova], por_ordem_de=por_ordem_de,
     )
     return {
         "partilhado": not ja_partilhado,
@@ -553,44 +342,6 @@ async def partilhar_com_rede(
         "destino_tem_index": destino in com_index,
         "triagem": triagem,
     }
-
-
-async def sincronizar_parceiros_sem_falhar(
-    process_id: str,
-    *,
-    por_ordem_de: Any = None,
-    registar_historico=None,
-) -> list[dict]:
-    """O que os ESCRITORES de atribuições chamam.
-
-    Uma partilha que rebenta não pode fazer falhar a atribuição: a
-    atribuição é a acção do utilizador e **já está gravada** quando isto
-    corre, logo propagar daria um 500 por uma operação que teve sucesso,
-    e deixava o estado a meio.
-
-    Falhar aqui é falhar FECHADO (o parceiro não ganha visibilidade), que
-    é o sentido seguro — e a sincronização é idempotente, pelo que a
-    acção de atribuição seguinte repara. Mas **nunca em silêncio**: o
-    `warning` nomeia o processo, é a regra do `_emit_event_safe` (uma
-    excepção neste ponto é sempre inesperada e não pode ficar invisível).
-
-    A versão ESTRITA fica para os testes: é ela que mede a decisão, e
-    embrulhar tudo numa só função escondia um defeito meu atrás do
-    mesmo `except` que protege a produção.
-    """
-    try:
-        return await sincronizar_parceiros(
-            process_id,
-            por_ordem_de=por_ordem_de,
-            registar_historico=registar_historico,
-        )
-    except Exception as exc:
-        logger.warning(
-            "[PARTILHA] Falha a sincronizar os parceiros do processo %s "
-            "(%s); a atribuição mantém-se e a partilha NÃO foi aberta.",
-            process_id, exc,
-        )
-        return []
 
 
 async def revogar_parceiro(
@@ -751,7 +502,6 @@ __all__ = [
     "VALORES_DO_FILTRO",
     "condicao_de_filtro",
     "CAMPO_EMPRESAS_PARCEIRAS",
-    "calcular_parceiros_a_acrescentar",
     "DestinoInvalido",
     "empresas_da_rede",
     "partilhar_com_rede",
@@ -760,6 +510,4 @@ __all__ = [
     "parceiros_do_processo",
     "redes_do_registo",
     "revogar_parceiro",
-    "sincronizar_parceiros",
-    "sincronizar_parceiros_sem_falhar",
 ]

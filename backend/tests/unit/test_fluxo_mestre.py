@@ -352,13 +352,11 @@ class TestOPercursoInteiro:
         with patch.object(process_assignment, "_find_least_busy_user", AsyncMock(side_effect=_menos_ocupado)), \
              patch.object(process_assignment, "_notify_newly_assigned_users", AsyncMock()), \
              patch.object(process_assignment, "assign_to_indexer", AsyncMock(side_effect=_atribuir_indexador)), \
-             patch("services.process_sharing.sincronizar_parceiros_sem_falhar", AsyncMock()), \
              patch.object(process_indexing, "libertar_index_sem_falhar", AsyncMock(return_value={})), \
              patch.object(process_indexing, "trigger_financial_engine_safe", AsyncMock(return_value={})), \
              patch.object(process_indexing, "notify_assigned_users_indexing_complete", AsyncMock()), \
              patch.object(process_indexing, "trigger_indexer_waitlist", AsyncMock()), \
-             patch("services.workflow_engine.process_trigger", AsyncMock()), \
-             patch("services.process_sharing.sincronizar_parceiros_sem_falhar", AsyncMock()):
+             patch("services.workflow_engine.process_trigger", AsyncMock()):
 
             # ── 1. PRÉ-REGISTO: sem processo, o Portal não tem o que bloquear ──
             await _semear_cliente_com_checklist_completa(mundo)

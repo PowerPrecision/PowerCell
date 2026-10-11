@@ -11798,3 +11798,19 @@ Quatro directivas do dono do produto, depois da migração do workflow por rede.
 **Dito:** links sem `empresa` caem na rede de omissão; o directório de destinos mostra nomes de empresa a parceiros activos; a Via Rápida ainda deixa escolher o utilizador.
 
 **Deploy:** `cd backend && python -m scripts.migrar_formularios_por_rede` e depois `--aplicar`; distribuir os links `/registo?empresa=<company_id>`; confirmar `TENANT_DEFAULT_NETWORK_ID` e `TRUSTED_PROXY_HOPS`.
+
+---
+
+## Iteração `via-rapida-extinta` (Out 2026)
+
+Fecho da falha arquitectural identificada na iteração dos formulários.
+
+**1. Via Rápida extinta.** `services/assignment_network_guard.py`: o atribuído novo tem de ser de uma rede de quem atribui (403), com a regra do Master (só o alcance do processo), falha fechada e «só se valida o que entra». Ligada a `run_staff_assign_process` e `run_assign_client_to_user`; apagados `sincronizar_parceiros*` e `calcular_parceiros_a_acrescentar`, e o `explicita` do `network_triage`. `GET /users` e `/users/staff` passaram a filtrar por rede (não tinham filtro). UI: notas nos diálogos de atribuição e toast próprio para a recusa (`atribuicaoEntreRedes.js`).
+
+**2. Migração dos formulários (D-37) corrida no ambiente de desenvolvimento** (MongoDB local — o Atlas é inalcançável a partir daqui): dry-run → `--aplicar` → 2.ª passagem. Criou 2 formulários de rede (`grupo_domus`, `grupo_power_precision`) a partir do modelo, carimbou 1 modelo personalizado, e a 2.ª passagem escreveu 0. Verificado com a API real: `?empresa=cmp-domus` → 200 com o formulário da rede, link antigo → 200 (rede de omissão), empresa desconhecida → 404. **Não foi corrida na base de dados hospedada** (sem acesso daqui).
+
+**3. Links antigos** (sem `?empresa=`): fallback para a rede de omissão confirmado e documentado.
+
+**Medição:** 4 mutações (guarda do `/assign`, guarda do `client_assign`, `pode_atribuir` sempre verdadeiro, lista sem âmbito) — todas mortas. A primeira versão do teste da lista passou com o defeito presente porque o fixture não dava `company` aos utilizadores (contam como órfãos, admitidos por desenho); o teste de «atribuir a si próprio» arrastava o fluxo todo e foi removido por não provar nada sobre a guarda.
+
+**Deploy:** correr `cd backend && python -m scripts.migrar_formularios_por_rede` (e depois `--aplicar`) na base de dados hospedada; confirmar `TENANT_DEFAULT_NETWORK_ID`; avisar a equipa de que atribuir fora da rede passa a pedir «Partilhar com Empresa…».

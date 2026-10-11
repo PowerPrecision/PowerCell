@@ -9716,3 +9716,5 @@ tarefa de IA `executive_report_analysis` (modelo do painel); cabeçalho de respo
 Ver `worklog.md` (bloco-a-b-c-…), `TECHNICAL_DEBT.md` D-35 e `FRONTEND_GUIDELINES.md` § 27.67.
 
 **Formulários por rede e mercado B2B (Out 2026).** `form_config.network_id` (sem rede = modelo, copy-on-write) via `services/form_config_scope.py`; o registo público abre o formulário da empresa do link (`?empresa=<company_id>`). O Parceiro escolhe a «Empresa de Destino» (`GET /partner/destinos`, redes com Index) antes de anexar documentos; a partilha explícita entra na fila de triagem da rede destino e a Via Verde distribui nela, sem o remetente escolher o utilizador. Ver `worklog.md` (`formularios-por-rede-e-mercado-b2b`) e AGENTS.md.
+
+**Atribuição entre redes (Out 2026).** A Via Rápida foi extinta: a atribuição directa só alcança a própria rede (`services/assignment_network_guard.py`; a lista de atribuíveis sai do servidor já filtrada) e a passagem para outra rede é a Partilha Explícita, que cai na fila central do destino. Ver `worklog.md` (`via-rapida-extinta`) e AGENTS.md.

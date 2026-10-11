@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from database import db
+from services.assignment_network_guard import exigir_atribuidos_da_minha_rede
 from services.task_assignment_hygiene import (
     ids_atribuidos_do_processo,
     limpar_tarefas_orfas,
@@ -765,6 +766,34 @@ def schedule_assignment_emails(
             )
 
 
+def ids_a_atribuir(
+    *,
+    consultor_ids: Optional[str] = None,
+    mediador_ids: Optional[str] = None,
+    indexacao_id: Optional[str] = None,
+    parceiro_id: Optional[str] = None,
+    consultor_id: Optional[str] = None,
+    mediador_id: Optional[str] = None,
+) -> list[str]:
+    """Os ids que um pedido de `/assign` quer PÔR (nunca os que limpa).
+
+    Usa a mesma normalização do escritor (`normalize_compat_assignment_params`
+    e `parse_assignment_ids_csv`): uma segunda leitura dos parâmetros
+    validaria uma coisa e gravaria outra.
+    """
+    consultores, mediadores = normalize_compat_assignment_params(
+        consultor_ids, mediador_ids, consultor_id, mediador_id,
+    )
+    ids: list[str] = []
+    for csv in (consultores, mediadores):
+        if csv is not None and not is_clear_assignment_value(csv):
+            ids.extend(parse_assignment_ids_csv(csv))
+    for unico in (indexacao_id, parceiro_id):
+        if unico is not None and not is_clear_assignment_value(unico):
+            ids.append(unico)
+    return ids
+
+
 async def run_staff_assign_process(
     process_id: str,
     user: dict,
@@ -782,8 +811,6 @@ async def run_staff_assign_process(
     """Orquestra POST /assign: persist + cache + WS + emails."""
     from fastapi import HTTPException
 
-    from services.history import log_history
-    from services.process_sharing import sincronizar_parceiros_sem_falhar
     from services.websocket_manager import WSEventType
 
     process = await db.processes.find_one({"id": process_id})
@@ -791,6 +818,21 @@ async def run_staff_assign_process(
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
     equipa_antes = ids_atribuidos_do_processo(process)
+
+    # FRONTEIRA DE REDE (Out 2026): só se atribui directamente gente da
+    # própria rede. Corre ANTES de montar o `$set`, porque os `apply_*`
+    # escrevem no histórico à medida que avançam — recusar depois deixava
+    # entradas de uma atribuição que não aconteceu.
+    await exigir_atribuidos_da_minha_rede(
+        user,
+        ids_a_atribuir(
+            consultor_ids=consultor_ids, mediador_ids=mediador_ids,
+            indexacao_id=indexacao_id, parceiro_id=parceiro_id,
+            consultor_id=consultor_id, mediador_id=mediador_id,
+        ),
+        processo=process,
+        ja_atribuidos=equipa_antes,
+    )
 
     update_data, newly = await build_staff_assign_update(
         process=process,
@@ -816,19 +858,6 @@ async def run_staff_assign_process(
     # ANTES e o DEPOIS reais do documento — não sobre o que o construtor
     # da query julga ter mudado.
     equipa_depois = ids_atribuidos_do_processo(updated_process)
-
-    # PARTILHA — Via Rápida (D-25): atribuir a alguém de outra rede
-    # ABRE o processo a essa rede. Lê o documento JÁ GRAVADO em vez de
-    # qualquer diff: é o que a torna idempotente e o que impede os cinco
-    # escritores de atribuições de divergirem (a lição do Lote 5).
-    await sincronizar_parceiros_sem_falhar(
-        process_id,
-        por_ordem_de=user.get("id"),
-        registar_historico=lambda texto: log_history(
-            process_id=process_id, user=user, action=texto,
-            field="partilha", old_value="", new_value=texto,
-        ),
-    )
 
     removidos = equipa_antes - equipa_depois
     if removidos:
@@ -873,8 +902,6 @@ async def run_assign_me_to_process(
     """Orquestra POST /assign-me."""
     from fastapi import HTTPException
 
-    from services.process_sharing import sincronizar_parceiros_sem_falhar
-
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -885,16 +912,6 @@ async def run_assign_me_to_process(
     await log_history_fn(
         process_id, user, f"Atribuiu-se como {assignment_type}",
         f"assigned_{assignment_type}_ids", None, user["name"],
-    )
-
-    # PARTILHA (D-25): o «atribuir-me» é um dos caminhos pelos quais
-    # alguém de outra rede entra num processo.
-    await sincronizar_parceiros_sem_falhar(
-        process_id,
-        por_ordem_de=user.get("id"),
-        registar_historico=lambda texto: log_history_fn(
-            process_id, user, texto, "partilha", None, texto,
-        ),
     )
 
     return {
