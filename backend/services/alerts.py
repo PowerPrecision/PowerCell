@@ -157,9 +157,11 @@ async def check_pre_approval_countdown(process: dict) -> Dict[str, Any]:
     # (Épico 10, Parte 3). Eram três nomes cravados: uma fase de
     # aprovação nova nunca contava para o prazo da pré-aprovação, que é
     # precisamente o alerta que impede um crédito de caducar.
-    from services.workflow_phases import carregar_fases, nomes_por_macro
+    from services.workflow_phases import carregar_fases, nomes_por_macro, rede_do_processo
 
-    fases_aprovadas = nomes_por_macro(await carregar_fases(), "aprovado")
+    fases_aprovadas = nomes_por_macro(
+        await carregar_fases(rede=rede_do_processo(process)), "aprovado",
+    )
     if process.get("status") not in fases_aprovadas:
         return {"type": ALERT_TYPES["PRE_APPROVAL_COUNTDOWN"], "active": False}
     
@@ -531,7 +533,7 @@ async def notify_cpcv_or_deed_document_check(process: dict, new_status: str):
         new_status: O novo estado do processo (nome de uma fase do motor)
     """
     from services.realtime_notifications import send_realtime_notification
-    from services.workflow_phases import carregar_fases, resolver_nome
+    from services.workflow_phases import carregar_fases, rede_do_processo, resolver_nome
 
     # O TÍTULO VEM DO MOTOR (Épico 10, Parte 3).
     #
@@ -543,7 +545,7 @@ async def notify_cpcv_or_deed_document_check(process: dict, new_status: str):
     # O `label` da fase é exactamente o texto que o administrador
     # escreveu. Usá-lo faz a notificação falar a língua do produto sem
     # ninguém ter de a manter.
-    fases = await carregar_fases()
+    fases = await carregar_fases(rede=rede_do_processo(process))
     resolucao = resolver_nome(new_status, fases)
     fase_doc = next(
         (f for f in fases if f.get("name") == resolucao.fase), None,

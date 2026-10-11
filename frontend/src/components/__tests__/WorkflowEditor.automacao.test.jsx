@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
-  getWorkflowStatuses: vi.fn(),
+  getWorkflowEditor: vi.fn(),
   createWorkflowStatus: vi.fn(),
   updateWorkflowStatus: vi.fn(),
   deleteWorkflowStatus: vi.fn(),
@@ -36,7 +36,12 @@ const FASES = [
 
 beforeEach(() => {
   vi.clearAllMocks();
-  api.getWorkflowStatuses.mockResolvedValue({ data: FASES });
+  api.getWorkflowEditor.mockResolvedValue({
+    data: {
+      network_id: "grupo_a", empresas: ["Empresa A", "Empresa B"],
+      tem_workflow_proprio: true, statuses: FASES,
+    },
+  });
   api.updateWorkflowStatus.mockResolvedValue({ data: {} });
   api.createWorkflowStatus.mockResolvedValue({ data: {} });
 });
@@ -139,5 +144,34 @@ describe("Editor de fases — editar a automação", () => {
     await userEvent.click(screen.getByRole("button", { name: /guardar|atualizar/i }));
     await waitFor(() => expect(api.updateWorkflowStatus).toHaveBeenCalled());
     expect(api.updateWorkflowStatus.mock.calls[0][1].task_templates).toEqual([]);
+  });
+});
+
+describe("Editor de fases — workflow POR REDE", () => {
+  it("diz de que rede é o workflow que se está a editar", async () => {
+    render(<WorkflowEditor />);
+    await screen.findByText("Fase Index");
+    const aviso = screen.getByTestId("workflow-rede");
+    expect(aviso).toHaveTextContent("Empresa A, Empresa B");
+    expect(aviso).toHaveTextContent("as outras redes não são afetadas");
+    expect(screen.queryByTestId("workflow-rede-modelo")).not.toBeInTheDocument();
+  });
+
+  it("avisa que a rede ainda usa o modelo base (a 1.ª alteração cria a cópia)", async () => {
+    api.getWorkflowEditor.mockResolvedValue({
+      data: { network_id: "grupo_b", empresas: [], tem_workflow_proprio: false, statuses: FASES },
+    });
+    render(<WorkflowEditor />);
+    await screen.findByText("Fase Index");
+    expect(screen.getByTestId("workflow-rede")).toHaveTextContent("grupo_b");
+    expect(screen.getByTestId("workflow-rede-modelo")).toHaveTextContent("modelo base");
+  });
+
+  it("uma resposta sem `statuses` em lista não rebenta o ecrã", async () => {
+    api.getWorkflowEditor.mockResolvedValue({ data: { network_id: "x", statuses: { a: 1 } } });
+    render(<WorkflowEditor />);
+    expect(await screen.findByTestId("add-workflow-status-btn")).toBeInTheDocument();
+    // Sem a guarda, o erro era engolido pelo `catch` e o ecrã vinha vazio com um toast.
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });

@@ -430,15 +430,129 @@ async def sincronizar_parceiros(
         registar_historico=registar_historico,
     )
 
-    # HUB & SPOKE (Bloco A): partilhar com o Hub põe o processo na fila de
-    # triagem (Index) do Hub — salvo Via Verde. Corre DEPOIS de a partilha
+    # Partilhar com uma rede que tem Index põe o processo na fila de
+    # triagem dessa rede — salvo Via Verde. Corre DEPOIS de a partilha
     # estar gravada e nunca a faz falhar.
-    from services.hub_triage import entrar_na_triagem_do_hub_sem_falhar
+    from services.network_triage import entrar_na_triagem_da_rede_sem_falhar
 
-    await entrar_na_triagem_do_hub_sem_falhar(
+    await entrar_na_triagem_da_rede_sem_falhar(
         process_id, novas, por_ordem_de=por_ordem_de,
     )
     return novas
+
+
+class DestinoInvalido(Exception):
+    """A rede de destino não serve (vazia, a do dono, ou sem empresas)."""
+
+
+async def empresas_da_rede(network_id: str) -> list[dict]:
+    """As empresas de uma rede, por nome. Vazio = a rede não existe."""
+    from services.tenant_network import resolve_network_id
+
+    rede = _texto(network_id)
+    if not rede:
+        return []
+    empresas = await db.companies.find(
+        {}, {"_id": 0, "id": 1, "name": 1, CAMPO_REDE: 1, "is_active": 1},
+    ).to_list(1000)
+    return sorted(
+        (
+            e for e in empresas
+            if e.get("is_active") is not False
+            and resolve_network_id(e, company_id=e.get("id")) == rede
+        ),
+        key=lambda e: _texto(e.get("name")).lower(),
+    )
+
+
+async def partilhar_com_rede(
+    process_id: str,
+    network_id: str,
+    *,
+    via_verde: Optional[bool] = None,
+    por_ordem_de: Any = None,
+    registar_historico=None,
+) -> dict:
+    """Envia um processo para uma rede de destino ESCOLHIDA (multi-fornecedor).
+
+    É a versão explícita da Via Rápida: a partilha por atribuição deduz o
+    destino de quem foi atribuído; aqui o utilizador di-lo. Acrescenta a
+    rede aos convidados (nunca muda o dono), e se o destino tem Index o
+    processo entra na fila dessa rede — salvo `via_verde`, que o salta.
+
+    `via_verde` é gravada no processo ANTES da triagem (a triagem lê-a do
+    documento); `None` mantém o que lá está.
+
+    Levanta `DestinoInvalido` para um destino que não serve. Devolve
+    `{partilhado, ja_partilhado, rede, empresas, triagem, destino_tem_index}`.
+    """
+    from services.network_triage import (
+        entrar_na_triagem_da_rede_sem_falhar,
+        redes_com_index,
+    )
+
+    destino = _texto(network_id)
+    if not destino:
+        raise DestinoInvalido("Escolha a rede de destino.")
+
+    processo = await db.processes.find_one(
+        {"id": process_id},
+        {"_id": 0, "id": 1, "process_number": 1, CAMPO_REDE: 1,
+         CAMPO_REDES_PARCEIRAS: 1, CAMPO_EMPRESAS_PARCEIRAS: 1, "via_verde": 1},
+    )
+    if not processo:
+        raise DestinoInvalido("Processo não encontrado.")
+    if destino == _texto(processo.get(CAMPO_REDE)):
+        raise DestinoInvalido("O processo já pertence a essa rede.")
+
+    empresas = await empresas_da_rede(destino)
+    if not empresas:
+        raise DestinoInvalido("Rede de destino desconhecida.")
+
+    if via_verde is not None and bool(via_verde) != (processo.get("via_verde") is True):
+        await db.processes.update_one(
+            {"id": process_id},
+            {"$set": {"via_verde": bool(via_verde), "updated_at": _agora()}},
+        )
+
+    registo = parceiros_do_processo(processo)
+    ja_partilhado = destino in redes_do_registo(registo)
+    nova = {
+        "company_id": _texto(empresas[0].get("id")),
+        "company_name": " / ".join(_texto(e.get("name")) for e in empresas if _texto(e.get("name"))),
+        CAMPO_REDE: destino,
+        "added_at": _agora(),
+        "added_by": _texto(por_ordem_de),
+    }
+    if not ja_partilhado:
+        novo_registo = [*registo, nova]
+        await db.processes.update_one(
+            {"id": process_id},
+            {"$set": {
+                CAMPO_EMPRESAS_PARCEIRAS: novo_registo,
+                CAMPO_REDES_PARCEIRAS: redes_do_registo(novo_registo),
+            }},
+        )
+        await _deixar_rasto(
+            process_id=process_id,
+            processo=processo,
+            novas=[nova],
+            por_ordem_de=por_ordem_de,
+            registar_historico=registar_historico,
+        )
+
+    com_index = await redes_com_index()
+    triagem = await entrar_na_triagem_da_rede_sem_falhar(
+        process_id, [nova], por_ordem_de=por_ordem_de, explicita=True,
+    )
+    return {
+        "partilhado": not ja_partilhado,
+        "ja_partilhado": ja_partilhado,
+        "rede": destino,
+        "empresas": [_texto(e.get("name")) for e in empresas],
+        "destino_tem_index": destino in com_index,
+        "triagem": triagem,
+    }
 
 
 async def sincronizar_parceiros_sem_falhar(
@@ -638,6 +752,9 @@ __all__ = [
     "condicao_de_filtro",
     "CAMPO_EMPRESAS_PARCEIRAS",
     "calcular_parceiros_a_acrescentar",
+    "DestinoInvalido",
+    "empresas_da_rede",
+    "partilhar_com_rede",
     "esta_partilhado",
     "etiquetas_da_partilha",
     "parceiros_do_processo",

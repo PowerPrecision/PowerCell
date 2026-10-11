@@ -48,15 +48,22 @@ FECHADO_DA_POWER = "p-fechado-power"
 
 
 def _modulos_dos_routers():
+    import routes.ai_analysis as ai_analysis
+    import routes.document_extraction as extraccao
     import routes.documents as documentos
+    import routes.emails as emails
     import routes.onedrive as onedrive
     import routes.processes as processos
     import routes.storage as storage
+    import routes.templates as templates
     import routes.voice_notes as notas_de_voz
 
     return {
         "processes": processos, "documents": documentos, "onedrive": onedrive,
         "storage": storage, "voice_notes": notas_de_voz,
+        # D-34 (fecho): comunicação, modelos e IA sobre o processo.
+        "emails": emails, "templates": templates, "ai_analysis": ai_analysis,
+        "document_extraction": extraccao,
     }
 
 
@@ -268,14 +275,11 @@ class TestInventarios:
     FORA_DA_GUARDA = {
         "admin.py": "Ferramentas de administração do Master sobre registos de clientes.",
         "admin_encryption.py": "Infraestrutura do Master (encriptação); não edita dados de negócio.",
-        "ai_analysis.py": "Gera uma análise de IA guardada à parte; não altera os campos do processo.",
         "alerts.py": "Cria um lembrete de escritura; não altera o processo.",
-        "clients.py": "Desligar um cliente de um processo (D-31): pertence à ficha do cliente.",
-        "document_extraction.py": "Só LÊ o ficheiro e propõe; quem grava é outra rota.",
-        "emails.py": "Comunicação e sincronização de correio; não alteram os dados do processo.",
+        "finance.py": "A excepção cirúrgica do pagamento (`mark-paid`): só passa a «pago», com guarda no serviço.",
+        "clients.py": "Ligar/desligar um cliente (D-31): o `process_id` vai na query/caminho do CLIENTE e a guarda é do serviço (`exigir_processo_aberto_por_id`).",
         "portal_admin.py": "«Ver como cliente»: abre o Portal, que se bloqueia a si próprio.",
         "restore.py": "Repor um processo eliminado: tem de funcionar sobre o que está fechado.",
-        "templates.py": "Pede documentos ao cliente por email; não altera o processo.",
     }
 
     def test_nenhum_outro_router_escreve_num_processo_sem_estar_justificado(self):

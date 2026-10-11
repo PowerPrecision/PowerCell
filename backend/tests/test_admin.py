@@ -70,9 +70,12 @@ async def test_filter_users_by_role(client, admin_token):
 
 
 @pytest.mark.asyncio
-async def test_create_workflow_status_as_admin(client, admin_token):
+async def test_create_workflow_status_as_admin(client, admin_token, monkeypatch):
     """Test admin can create workflow status"""
     import uuid
+    # Workflow POR REDE: a conta de teste não tem empresa, logo a rede em
+    # contexto é a de omissão (em produção vem da empresa activa).
+    monkeypatch.setenv("TENANT_DEFAULT_NETWORK_ID", "rede_teste_admin")
     unique_name = f"test_status_{uuid.uuid4().hex[:8]}"
     
     response = await client.post(
@@ -98,8 +101,9 @@ async def test_create_workflow_status_as_admin(client, admin_token):
 
 
 @pytest.mark.asyncio
-async def test_create_duplicate_workflow_status_fails(client, admin_token):
+async def test_create_duplicate_workflow_status_fails(client, admin_token, monkeypatch):
     """Test cannot create duplicate workflow status"""
+    monkeypatch.setenv("TENANT_DEFAULT_NETWORK_ID", "rede_teste_admin")
     # First get existing statuses
     existing = await client.get(
         "/admin/workflow-statuses",

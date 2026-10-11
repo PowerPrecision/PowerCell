@@ -25,6 +25,17 @@ FINANCE_READ_ROLES = [
 ]
 
 
+#: Quem altera um registo financeiro (valores, estados). Como sempre foi.
+FINANCE_WRITE_ROLES = [
+    UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
+]
+
+#: Quem pode marcar uma comissão como PAGA — o único acto financeiro que o
+#: administrativo faz (é o back-office que confirma a entrada do pagamento).
+#: Não pode alterar valores, nem faturar, nem cancelar.
+PAPEIS_QUE_MARCAM_COMO_PAGO = [*FINANCE_WRITE_ROLES, UserRole.ADMINISTRATIVO]
+
+
 # ====================================================================
 # DEFAULTS & HELPERS
 # ====================================================================

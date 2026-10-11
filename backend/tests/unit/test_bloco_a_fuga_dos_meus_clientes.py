@@ -104,7 +104,7 @@ async def _meus_clientes_do_ecra(db, user, role):
         slice_page,
     )
 
-    async def _mapa():
+    async def _mapa(_user=None):
         return {"novo": {"label": "Novo", "color": "#000"}}
 
     import services.document_novelty as novidade
@@ -395,6 +395,7 @@ SEM_CONDICAO_DE_REDE_POR_DESENHO = {
     "email_client_match.py": "ligação email→cliente na rede do email",
     "portal_auth.py": "autenticação do cliente do Portal (id próprio)",
     "portal_security.py": "autenticação do cliente do Portal (id próprio)",
+    "portal_profile.py": "Portal: os ids são os dos processos do PRÓPRIO cliente autenticado (lê só a rede dona, para escolher o workflow)",
     "process_assignment.py": "escritas por id guardadas por process_scope_guard",
     "process_clients_nm.py": "escritas por id guardadas por process_scope_guard",
     "process_service.py": "núcleo de criação/leitura por id (guardas a montante)",

@@ -51,7 +51,7 @@ from services.stats_scope import AmbitoEstatistico, com_ambito, resolver_ambito
 from services.workflow_phases import (
     ETIQUETA_DESCONHECIDA,
     FASE_DESCONHECIDA,
-    carregar_fases,
+    fases_do_ambito,
     macro_da_fase,
 )
 
@@ -307,7 +307,7 @@ async def run_get_funnel(
     # para a UI o poder DIZER, em vez de o utilizador descobrir que a soma
     # das barras não dá o total.
     try:
-        fases = await carregar_fases()
+        fases = await fases_do_ambito(ambito.scope)
         resultado["macro_fases_sem_classificacao"] = sorted(
             f.get("name") for f in fases
             if isinstance(f, dict) and f.get("name") and not macro_da_fase(f)

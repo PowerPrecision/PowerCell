@@ -67,6 +67,7 @@ import {
 } from "../components/ui/dialog";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
+import { temDireitoAMarcarComoPago } from "../utils/marcarComoPago";
 import { hasRole } from "../utils/roleUtils";
 import { StatCard } from "../components/shared/StatCard";
 import { StatusBadge as SharedStatusBadge } from "../components/shared/StatusBadge";
@@ -82,6 +83,7 @@ import {
   getFinanceConfigs,
   getProcessFinances,
   updateProcessFinance,
+  markProcessFinanceAsPaid,
   getProcessFinanceSummary,
   getPoolDistribution,
   exportPoolDistributionCSV,
@@ -896,6 +898,8 @@ const AreaDetail = ({ area, data, monthlyData, performanceData, selectedYear }) 
 // ====================================================================
 
 const ProcessFinancesTab = ({ companyId }) => {
+  const { effectiveRole } = useAuth();
+  const podeMarcarComoPago = temDireitoAMarcarComoPago(effectiveRole);
   const navigate = useNavigate();
   const [finances, setFinances] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -928,6 +932,25 @@ const ProcessFinancesTab = ({ companyId }) => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // «Marcar como Pago» num processo FECHADO: o servidor deixa passar só isto
+  // (PATCH do estado para `paid`), sem reabrir o processo.
+  const handleMarcarComoPago = async (financeId) => {
+    setUpdatingId(financeId);
+    try {
+      await markProcessFinanceAsPaid(financeId);
+      setFinances((prev) =>
+        prev.map((f) => (f.id === financeId ? { ...f, status: "paid" } : f))
+      );
+      const sumRes = await getProcessFinanceSummary({ company_id: companyId });
+      setSummary(sumRes.data || null);
+    } catch (err) {
+      console.error("Erro ao marcar como pago:", err);
+      // O toast de erro vem do interceptor.
+    } finally {
+      setUpdatingId(null);
+    }
+  };
 
   // Alterar status de um registo (PUT)
   const handleStatusChange = async (financeId, newStatus) => {
@@ -1117,6 +1140,8 @@ const ProcessFinancesTab = ({ companyId }) => {
                           <EstadoEditavelDoRegisto
                             id={f.id}
                             processoFechado={f.processo_fechado === true}
+                            estado={f.status}
+                            onMarcarComoPago={podeMarcarComoPago ? () => handleMarcarComoPago(f.id) : undefined}
                             tituloDoBotao={`Clique para alterar para ${STATUS_MAP[NEXT_STATUS[f.status]]?.label}`}
                             onAlterar={() => handleStatusChange(f.id, NEXT_STATUS[f.status])}
                           >

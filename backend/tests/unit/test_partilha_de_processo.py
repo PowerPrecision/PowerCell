@@ -757,6 +757,11 @@ def test_a_sincronizacao_ESTRITA_propaga_e_a_outra_nao():
 #: ausentes, com o motivo — uma lista de exclusão sem motivo é a forma de
 #: isto se desligar sozinho.
 EXCEPCOES_ESCRITAS = {
+    "admin_workflow": (
+        "apagar uma fase move os processos DA REDE dona dessa fase (o `status` "
+        "é um nome do workflow do dono): um convidado nunca é afectado, "
+        "e a condição é a de propriedade de propósito"
+    ),
     "deadlines_api_calendar": (
         "lê processos por ID para ENRIQUECER linhas já filtradas; a "
         "fronteira do calendário vem do `carregar_contexto_de_acesso`, "

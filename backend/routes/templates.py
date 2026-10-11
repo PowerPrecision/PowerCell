@@ -23,6 +23,7 @@ from services.templates_api_checklist import (
     run_get_document_checklist,
     run_get_document_types,
 )
+from services.process_closed_guard import exigir_processo_editavel
 from services.templates_api_generic import (
     run_download_template_generic,
     run_generate_template_generic,
@@ -33,7 +34,10 @@ from services.templates_api_generic import (
 router = APIRouter(
     prefix="/templates",
     tags=["Templates"],
-    dependencies=[Depends(require_roles(TEMPLATES_ALLOWED_ROLES))],
+    dependencies=[
+        Depends(require_roles(TEMPLATES_ALLOWED_ROLES)),
+        Depends(exigir_processo_editavel),
+    ],
 )
 
 

@@ -218,14 +218,14 @@ class ProcessCreate(BaseModel):
             "consultor (em vez do indexador)."
         ),
     )
-    # HUB & SPOKE (Bloco A) — excepção ao encaminhamento para o Hub: se
-    # True, quando este processo for partilhado com o Hub (Precision) salta
-    # o Index do Hub e vai direto para a consultoria.
+    # Excepção ao encaminhamento para o Index de outra rede: se True,
+    # quando este processo for partilhado com uma rede que tem Index salta
+    # a fila de triagem dessa rede e vai direto para a consultoria.
     via_verde: Optional[bool] = Field(
         False,
         description=(
-            "Se True, ao ser partilhado com o Hub o processo salta a fila de "
-            "triagem (Index) e vai direto para a consultoria."
+            "Se True, ao ser partilhado com uma rede de destino o processo "
+            "salta a fila de triagem (Index) e vai direto para a consultoria."
         ),
     )
 

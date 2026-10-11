@@ -384,7 +384,7 @@ class TestMontarUpdate:
 class TestResolucaoPeloMotor:
     @pytest.fixture(autouse=True)
     def motor(self, monkeypatch):
-        async def fases():
+        async def fases(*_a, **_k):
             return FASES
 
         import services.workflow_phases as wp
@@ -445,7 +445,7 @@ class TestResolucaoPeloMotor:
         """
         import services.workflow_phases as wp
 
-        async def rebenta():
+        async def rebenta(*_a, **_k):
             raise RuntimeError("Mongo em baixo")
 
         monkeypatch.setattr(wp, "carregar_fases", rebenta)

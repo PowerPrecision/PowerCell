@@ -120,9 +120,9 @@ async def run_get_my_deadlines(user: dict, request: Optional[Request] = None):
     # Fases fechadas ditadas pelo motor (ÉPICO 10, ponto 1). "arquivado"
     # (com D) não é fase nenhuma: é um valor legado que nunca existiu no
     # workflow e mantém-se só para não ressuscitar prazos antigos.
-    from services.workflow_phases import carregar_fases, nomes_terminais
+    from services.workflow_phases import fases_do_utilizador, nomes_terminais
 
-    FINISHED_STATUS = nomes_terminais(await carregar_fases()) + ["arquivado"]
+    FINISHED_STATUS = nomes_terminais(await fases_do_utilizador(user)) + ["arquivado"]
     contexto = await carregar_contexto_de_acesso(user, request)
 
     if user.get("role") == UserRole.CLIENTE:

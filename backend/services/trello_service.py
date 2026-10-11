@@ -136,7 +136,7 @@ def _build_card_description(process: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-async def _get_status_label(status: str) -> str:
+async def _get_status_label(status: str, rede: Optional[str] = None) -> str:
     """Lê o label humano do status na coleção workflow_statuses.
 
     Retorna o próprio status se não encontrar (fallback).
@@ -144,7 +144,9 @@ async def _get_status_label(status: str) -> str:
     if not status:
         return "Sem Estado"
     try:
-        doc = await db.workflow_statuses.find_one({"name": status}, {"_id": 0})
+        from services.workflow_phases import carregar_fases
+
+        doc = next((f for f in await carregar_fases(rede=rede) if f.get("name") == status), None)
         if doc and doc.get("label"):
             return doc["label"]
     except Exception as e:
@@ -316,7 +318,9 @@ async def sync_process_to_trello(
         return
 
     # Resolver nome da coluna (label humana do workflow_statuses)
-    list_name = await _get_status_label(target_status)
+    from services.workflow_phases import rede_do_processo
+
+    list_name = await _get_status_label(target_status, rede_do_processo(process))
     list_id = await get_or_create_trello_list(list_name)
     if not list_id:
         logger.error(f"[Trello] Não foi possível obter/criar lista '{list_name}' "

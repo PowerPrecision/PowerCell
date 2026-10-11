@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
 from database import db
+from middleware.client_ip import ip_do_cliente
 from models.auth import UserLogin
 from services.auth import (
     hash_password,
@@ -111,12 +112,7 @@ async def run_login_v2(request, data: UserLogin, response):
 
         # Criar refresh token
         device_info = str(request.headers.get("User-Agent", ""))[:200]
-        client_host = ""
-        try:
-            client_host = request.client.host if request.client else ""
-        except Exception:
-            pass
-        ip_address = str(request.headers.get("X-Forwarded-For", client_host))[:45]
+        ip_address = ip_do_cliente(request)[:45]
 
         _, refresh_token = await create_refresh_token_db(
             user["id"],

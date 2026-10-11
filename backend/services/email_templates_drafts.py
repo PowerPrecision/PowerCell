@@ -237,6 +237,19 @@ async def _exigir_rascunho_legivel(draft_id: str, current_user: dict) -> None:
         raise HTTPException(status_code=404, detail="Rascunho não encontrado")
 
 
+async def _exigir_processo_do_rascunho_aberto(draft_id: str, current_user: dict) -> None:
+    """D-34: o rascunho de um processo FECHADO não se envia (reabrir primeiro).
+
+    Só o ENVIO: descartar continua a ser possível — é a saída de quem não
+    quer que o rascunho fique pendente. Corre depois da visibilidade, para
+    «fechado» não ser um oráculo sobre outra rede.
+    """
+    from services.process_closed_guard import exigir_processo_aberto_por_id
+
+    rascunho = await db.emails.find_one({"id": draft_id}, {"_id": 0, "process_id": 1})
+    await exigir_processo_aberto_por_id((rascunho or {}).get("process_id") or "", current_user)
+
+
 async def run_list_auto_drafts(current_user: dict, limit: int = 20):
     """
     Listar rascunhos automáticos pendentes — os da rede do utilizador.
@@ -286,6 +299,7 @@ async def run_edit_auto_draft(draft_id: str, data: dict, current_user: dict):
 async def run_send_auto_draft(draft_id: str, current_user: dict, account: str = "power"):
     """Enviar um rascunho automático."""
     await _exigir_rascunho_legivel(draft_id, current_user)
+    await _exigir_processo_do_rascunho_aberto(draft_id, current_user)
     result = await send_draft(
         draft_id=draft_id,
         user_id=current_user["id"],
@@ -320,6 +334,11 @@ async def run_manually_create_draft(data: dict, current_user: dict):
     from services.email_access import exigir_processo_legivel
 
     await exigir_processo_legivel(process_id, current_user)
+
+    # D-34: criar um rascunho de email NUM processo fechado também exige reabrir.
+    from services.process_closed_guard import exigir_processo_aberto_por_id
+
+    await exigir_processo_aberto_por_id(process_id, current_user)
 
     # Obter dados do processo
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})

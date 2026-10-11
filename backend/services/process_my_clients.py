@@ -369,7 +369,7 @@ async def run_get_my_clients(
     leads = await fetch_orphan_leads_for_my_clients(
         db, user_id, role, build_leads_query_fn,
     )
-    status_map = await load_status_map_fn()
+    status_map = await load_status_map_fn(user)
 
     all_items = sorted(processes + leads, key=my_clients_sort_key(status_map))
     paginated_items, total, pages = slice_page_fn(all_items, page, size)

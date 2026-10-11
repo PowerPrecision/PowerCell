@@ -11,7 +11,7 @@ from fastapi import Request
 
 from database import db
 from models.auth import UserRole
-from services.workflow_phases import carregar_fases, nomes_terminais
+from services.workflow_phases import fases_do_utilizador, nomes_terminais
 from services.my_clients_api_helpers import (
     LEADS_PROJECTION,
     PROCESS_LIST_PROJECTION,
@@ -52,7 +52,7 @@ async def run_get_my_clients(request: Request, user: dict):
         user_email=user_email,
         role=role,
         wants_deleted=wants_deleted,
-        terminais=nomes_terminais(await carregar_fases()),
+        terminais=nomes_terminais(await fases_do_utilizador(user)),
     )
     query = apply_pre_registo_exclusion(query)
     # Fronteira de rede (Bloco A): para diretor/administrativo o construtor
@@ -85,7 +85,7 @@ async def run_get_my_clients(request: Request, user: dict):
             leads.append(format_lead_row(lead))
 
     if processes:
-        statuses = await db.workflow_statuses.find({}, {"_id": 0}).to_list(100)
+        statuses = await fases_do_utilizador(user)
         status_map = {s["name"]: s for s in statuses}
         for p in processes:
             status_info = status_map.get(p.get("status"), {})

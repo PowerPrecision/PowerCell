@@ -636,6 +636,29 @@ describe("ProcessDetails — processo FECHADO: modo de leitura e Reabrir", () =>
       expect(screen.getByRole("menuitem", { name: /enviar por email/i })).not.toHaveAttribute("aria-disabled", "true");
     });
 
+    it.each(["consultor", "admin", "master"])(
+      "%s: «Enviar Balcões» fica desactivado (fecho do D-34)",
+      async (papel) => {
+        sessao.papel = papel;
+        pacote.valor = soNoMotor();
+        montar();
+        await screen.findByTestId("processo-fechado-banner");
+
+        const botao = screen.getByRole("button", { name: /enviar balcões/i });
+        expect(botao).toBeDisabled();
+        expect(botao).toHaveAttribute("title", expect.stringMatching(/reabra/i));
+      },
+    );
+
+    it("com o processo ABERTO «Enviar Balcões» está activo (contraprova)", async () => {
+      pacote.valor = pacoteCompleto({ workflowStatuses: FASES });
+      montar();
+      await screen.findByTestId("layout");
+      await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+
+      expect(screen.getByRole("button", { name: /enviar balcões/i })).not.toBeDisabled();
+    });
+
     it("o separador Mensagens não deixa escrever ao cliente", async () => {
       pacote.valor = soNoMotor();
       montar();

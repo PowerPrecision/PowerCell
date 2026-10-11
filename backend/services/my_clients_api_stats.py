@@ -5,7 +5,7 @@ Extraído de `routes/my_clients.py`.
 from __future__ import annotations
 
 from database import db
-from services.workflow_phases import carregar_fases, nomes_terminais
+from services.workflow_phases import fases_do_utilizador, nomes_terminais
 from services.my_clients_api_helpers import build_my_clients_stats_query
 from services.process_list_filters import role_has_client_portfolio
 from services.tenant_network import build_tenant_process_condition, com_isolamento
@@ -28,7 +28,7 @@ async def run_get_my_clients_stats(user: dict):
         user_id=user_id,
         user_email=user_email,
         role=role,
-        terminais=nomes_terminais(await carregar_fases()),
+        terminais=nomes_terminais(await fases_do_utilizador(user)),
     )
     # Fronteira de rede (Bloco A): sem ela o diretor contava os processos
     # de todas as redes.

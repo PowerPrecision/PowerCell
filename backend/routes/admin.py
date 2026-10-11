@@ -31,6 +31,8 @@ from services.admin_workflow import (
     run_create_workflow_status,
     run_delete_workflow_status,
     run_fix_duplicate_workflow_statuses,
+    PAPEIS_QUE_EDITAM_O_WORKFLOW,
+    run_get_workflow_editor,
     run_get_workflow_statuses,
     run_migrate_portal_labels,
     run_s3_cors_diagnostic,
@@ -185,23 +187,29 @@ async def update_user_permissions(
 
 
 @router.get("/workflow-statuses", response_model=List[WorkflowStatusResponse])
-async def get_workflow_statuses(user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))):
-    return await run_get_workflow_statuses(user)
+async def get_workflow_statuses(request: Request, network_id: Optional[str] = Query(None), user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))):
+    return await run_get_workflow_statuses(user, request, network_id)
+
+
+@router.get("/workflow-statuses/editor")
+async def get_workflow_editor(request: Request, network_id: Optional[str] = Query(None), user: dict = Depends(require_roles(PAPEIS_QUE_EDITAM_O_WORKFLOW))):
+    """O workflow da rede EM CONTEXTO, com o nome das empresas (o ecrã diz o que edita)."""
+    return await run_get_workflow_editor(user, request, network_id)
 
 
 @router.post("/workflow-statuses", response_model=WorkflowStatusResponse)
-async def create_workflow_status(data: WorkflowStatusCreate, user: dict = Depends(require_roles([UserRole.MASTER]))):
-    return await run_create_workflow_status(data, user)
+async def create_workflow_status(data: WorkflowStatusCreate, request: Request, user: dict = Depends(require_roles(PAPEIS_QUE_EDITAM_O_WORKFLOW))):
+    return await run_create_workflow_status(data, user, request)
 
 
 @router.put("/workflow-statuses/{status_id}", response_model=WorkflowStatusResponse)
-async def update_workflow_status(status_id: str, data: WorkflowStatusUpdate, user: dict = Depends(require_roles([UserRole.MASTER]))):
-    return await run_update_workflow_status(status_id, data, user)
+async def update_workflow_status(status_id: str, data: WorkflowStatusUpdate, request: Request, user: dict = Depends(require_roles(PAPEIS_QUE_EDITAM_O_WORKFLOW))):
+    return await run_update_workflow_status(status_id, data, user, request)
 
 
 @router.delete("/workflow-statuses/{status_id}")
-async def delete_workflow_status(status_id: str, user: dict = Depends(require_roles([UserRole.MASTER]))):
-    return await run_delete_workflow_status(status_id, user)
+async def delete_workflow_status(status_id: str, request: Request, user: dict = Depends(require_roles(PAPEIS_QUE_EDITAM_O_WORKFLOW))):
+    return await run_delete_workflow_status(status_id, user, request)
 
 
 @router.post("/workflow-statuses/fix-duplicates")

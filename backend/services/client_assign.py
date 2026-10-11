@@ -62,7 +62,7 @@ from utils.input_sanitization import (
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 from services.partner_attribution import aplicar_parceiro_do_cliente
-from services.hub_triage import aplicar_regime_de_indexacao
+from services.network_triage import aplicar_regime_de_indexacao
 
 logger = logging.getLogger(__name__)
 
@@ -171,8 +171,12 @@ async def run_assign_client_to_user(
         process_number = await get_next_process_number()
         process_id = str(uuid.uuid4())
         
-        # Obter estado inicial
-        first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
+        # Obter estado inicial: a 1ª fase do workflow da REDE do processo.
+        from services.workflow_phases import carregar_fases
+
+        carimbo_inicial = await resolve_tenant_stamp(target_user) or {}
+        fases_iniciais = await carregar_fases(rede=carimbo_inicial.get("network_id"))
+        first_status = fases_iniciais[0] if fases_iniciais else None
         initial_status = first_status["name"] if first_status else "clientes_espera"
         
         # Preparar dados do processo

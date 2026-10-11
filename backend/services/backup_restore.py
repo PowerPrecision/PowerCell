@@ -76,7 +76,10 @@ _INDEX_DEFINITIONS = {
         {"keys": [("process_id", 1)], "name": "idx_portal_msg_process"},
     ],
     "workflow_statuses": [
-        {"keys": [("name", 1)], "name": "idx_workflow_name", "unique": True},
+        # Workflow POR REDE: o nome é único DENTRO da rede (duas redes têm,
+        # legitimamente, uma fase com o mesmo nome). Um índice único só por
+        # `name` recusava as cópias por rede.
+        {"keys": [("network_id", 1), ("name", 1)], "name": "idx_workflow_network_name", "unique": True},
     ],
     "companies": [
         {"keys": [("id", 1)], "name": "idx_company_id", "unique": True},

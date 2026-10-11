@@ -158,11 +158,13 @@ class TestAsCincoAreasRecusamUmProcessoFechado:
 # ====================================================================
 
 class TestAListaDeExcepcoes:
-    def test_so_ficam_reabrir_eliminar_e_revogar_a_partilha(self):
+    def test_so_ficam_reabrir_eliminar_revogar_a_partilha_e_recolher_correio(self):
         assert set(guarda.ROTAS_QUE_FUNCIONAM_COM_O_PROCESSO_FECHADO) == {
             ("POST", "/processes/{process_id}/reopen"),
             ("DELETE", "/processes/{process_id}"),
             ("DELETE", "/processes/{process_id}/partners/{company_id}"),
+            # (fecho do D-34) a única que entrou: recolher correio não é escrever.
+            ("POST", "/emails/sync/{process_id}"),
         }
 
     @pytest.mark.parametrize("sufixo", [
@@ -223,9 +225,11 @@ class TestFinancasDeUmProcessoFechado:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("perfil", ["master", "diretor"])
     async def test_alterar_o_estado_e_403_e_nada_muda(self, financas, perfil):
+        """Faturar continua fechado. («Pago» é a excepção cirúrgica — ver
+        `test_excepcao_de_pagamento_processo_fechado.py`.)"""
         fpr, bd = financas
         with pytest.raises(HTTPException) as exc:
-            await fpr.run_update_process_finance_status("f-fechado", "paid", PERFIS[perfil])
+            await fpr.run_update_process_finance_status("f-fechado", "invoiced", PERFIS[perfil])
         assert exc.value.status_code == 403
         assert next(d for d in bd.process_finances.docs if d["id"] == "f-fechado")["status"] == "pending"
 
@@ -375,7 +379,7 @@ class TestAListagemFinanceiraMarcaOsFechados:
     @pytest.mark.asyncio
     async def test_uma_falha_a_ler_os_processos_nao_derruba_a_listagem(self, financas):
         fpr, _bd = financas
-        with patch.object(fpr, "carregar_fases", AsyncMock(side_effect=RuntimeError("bd em baixo"))):
+        with patch.object(fpr, "fases_por_rede", AsyncMock(side_effect=RuntimeError("bd em baixo"))):
             resposta = await fpr.run_list_process_finances(None, None, None, None, PERFIS["master"])
         assert resposta["total"] == 2
         assert all(f["processo_fechado"] is False for f in resposta["finances"])

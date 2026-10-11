@@ -50,7 +50,14 @@ from typing import Iterable, Optional
 
 from fastapi import HTTPException
 
-from services.workflow_phases import carregar_fases, nomes_terminais, resolver_nome
+from services.workflow_phases import (
+    carregar_fases,
+    chave_da_rede,
+    fases_por_rede,
+    nomes_terminais,
+    rede_do_processo,
+    resolver_nome,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +90,9 @@ async def processo_esta_inativo(processo: Optional[dict]) -> bool:
     """O processo está numa fase terminal? (`None` → não está inativo.)"""
     if not processo:
         return False
-    return estado_e_terminal(processo.get("status"), await carregar_fases())
+    return estado_e_terminal(
+        processo.get("status"), await carregar_fases(rede=rede_do_processo(processo)),
+    )
 
 
 def erro_portal_inativo() -> HTTPException:
@@ -114,8 +123,11 @@ async def escolher_processo_do_cliente(processos: Iterable[dict]) -> Optional[di
     processos = [p for p in processos if p]
     if not processos:
         return None
-    fases = await carregar_fases()
+    # Cada processo é governado pelo workflow da rede DONA (um cliente pode ter
+    # processos de redes diferentes: os partilhados).
+    fases_das_redes = await fases_por_rede(rede_do_processo(p) for p in processos)
     for processo in processos:
+        fases = fases_das_redes[chave_da_rede(rede_do_processo(processo))]
         if not estado_e_terminal(processo.get("status"), fases):
             return processo
     logger.info(

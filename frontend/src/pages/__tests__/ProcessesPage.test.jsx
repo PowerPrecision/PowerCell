@@ -86,6 +86,7 @@ vi.mock("../../services/api", () => ({
   restoreProcess: vi.fn(),
   getProcessLabels: vi.fn(),
   updateProcess: vi.fn(),
+  markProcessFinancesPaid: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -94,6 +95,7 @@ vi.mock("sonner", () => ({
 
 import ProcessesPage from "../ProcessesPage";
 import * as api from "../../services/api";
+import { toast } from "sonner";
 
 /**
  * A página tem de ser montada DENTRO de um `QueryClientProvider`: o
@@ -408,5 +410,99 @@ describe("ProcessesPage — a partilha (D-25)", () => {
     const [updater] = definirParametros.mock.calls.at(-1);
     const resultado = updater(new URLSearchParams());
     expect(resultado.get("partilha")).toBe("partilhados");
+  });
+});
+
+
+// ====================================================================
+// «Marcar como Pago» — o atalho de quem fecha as contas (excepção ao D-34)
+// ====================================================================
+describe("ProcessesPage — «Marcar como Pago» num processo fechado", () => {
+  // Forma que `enriquecer_comissoes_pendentes` acrescenta (calculada ao servir).
+  const FECHADA_COM_COMISSOES = {
+    ...LINHAS[1],
+    id: "p-fechado",
+    process_number: "PROC-0999",
+    client_name: "Carla Fechada",
+    status: "concluido",
+    is_indexed: true,
+    processo_fechado: true,
+    comissoes_pendentes: 2,
+  };
+
+  function servir(...linhas) {
+    api.getProcesses.mockResolvedValue({
+      data: { items: linhas, total: linhas.length, page: 1, size: 20, pages: 1, view_mode: "active_only" },
+    });
+  }
+
+  it("mostra o botão numa linha fechada com comissões por pagar", async () => {
+    servir(FECHADA_COM_COMISSOES);
+    montar();
+    expect(await screen.findByTestId("marcar-pago-p-fechado")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["aberta, mesmo com comissões", { processo_fechado: false, comissoes_pendentes: 2 }],
+    ["fechada mas sem nada por pagar", { processo_fechado: true, comissoes_pendentes: 0 }],
+    ["sem as chaves (perfil que não paga)", { processo_fechado: undefined, comissoes_pendentes: undefined }],
+  ])("não mostra o botão numa linha %s", async (_nome, chaves) => {
+    servir({ ...FECHADA_COM_COMISSOES, ...chaves });
+    montar();
+    await screen.findByText("Carla Fechada");
+    expect(screen.queryByTestId("marcar-pago-p-fechado")).toBeNull();
+  });
+
+  it("confirma, paga sem reabrir e tira o botão da linha", async () => {
+    servir(FECHADA_COM_COMISSOES);
+    api.markProcessFinancesPaid.mockResolvedValue({ data: { process_id: "p-fechado", updated: 2 } });
+    montar();
+
+    await userEvent.click(await screen.findByTestId("marcar-pago-p-fechado"));
+    const dialogo = await screen.findByTestId("marcar-pago-dialogo");
+    expect(dialogo).toHaveTextContent(/2 comissões/);
+    expect(dialogo).toHaveTextContent(/PROC-0999/);
+    expect(api.markProcessFinancesPaid).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId("marcar-pago-confirmar"));
+
+    await waitFor(() => expect(api.markProcessFinancesPaid).toHaveBeenCalledWith("p-fechado"));
+    await waitFor(() => expect(screen.queryByTestId("marcar-pago-p-fechado")).toBeNull());
+    expect(toast.success).toHaveBeenCalled();
+    // NÃO reabre o processo, nem o move de fase.
+    expect(api.updateProcess).not.toHaveBeenCalled();
+  });
+
+  it("cancelar não paga nada", async () => {
+    servir(FECHADA_COM_COMISSOES);
+    montar();
+    await userEvent.click(await screen.findByTestId("marcar-pago-p-fechado"));
+    await userEvent.click(await screen.findByRole("button", { name: /cancelar/i }));
+
+    expect(api.markProcessFinancesPaid).not.toHaveBeenCalled();
+    expect(screen.getByTestId("marcar-pago-p-fechado")).toBeInTheDocument();
+  });
+
+  it("se o servidor recusar, o botão fica e o erro diz-se", async () => {
+    servir(FECHADA_COM_COMISSOES);
+    api.markProcessFinancesPaid.mockRejectedValue({
+      response: { data: { detail: "Sem permissão para alterar o estado financeiro." } },
+    });
+    montar();
+
+    await userEvent.click(await screen.findByTestId("marcar-pago-p-fechado"));
+    await userEvent.click(await screen.findByTestId("marcar-pago-confirmar"));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      expect.stringMatching(/sem permissão/i),
+    ));
+    expect(screen.getByTestId("marcar-pago-p-fechado")).toBeInTheDocument();
+  });
+
+  it("o botão da linha não abre o processo (clicar nele não navega)", async () => {
+    servir(FECHADA_COM_COMISSOES);
+    montar();
+    await userEvent.click(await screen.findByTestId("marcar-pago-p-fechado"));
+    expect(navegar).not.toHaveBeenCalled();
   });
 });

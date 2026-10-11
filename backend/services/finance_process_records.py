@@ -33,7 +33,7 @@ from services.process_closed_guard import (
     PROJECCAO_DO_PROCESSO_FECHADO,
     exigir_processo_aberto,
 )
-from services.workflow_phases import carregar_fases
+from services.workflow_phases import chave_da_rede, fases_por_rede, rede_do_processo
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +51,16 @@ async def marcar_processos_fechados(registos: list[dict]) -> list[dict]:
     fechados: set[str] = set()
     if ids:
         try:
-            fases = await carregar_fases()
             processos = await db.processes.find(
-                {"id": {"$in": ids}}, {"_id": 0, "id": 1, "status": 1},
+                {"id": {"$in": ids}}, {"_id": 0, "id": 1, "status": 1, "network_id": 1},
             ).to_list(len(ids))
+            # Cada processo fecha segundo o workflow da rede DONA.
+            fases_das_redes = await fases_por_rede(rede_do_processo(p) for p in processos)
             fechados = {
                 p["id"] for p in processos
-                if p.get("status") and estado_e_terminal(p["status"], fases)
+                if p.get("status") and estado_e_terminal(
+                    p["status"], fases_das_redes[chave_da_rede(rede_do_processo(p))],
+                )
             }
         except Exception as exc:  # noqa: BLE001 — a flag é conveniência, a parede é o 403
             logger.warning("[FINANCAS] Não foi possível marcar processos fechados: %s", exc)
@@ -76,6 +79,88 @@ async def _exigir_processo_do_registo_aberto(process_id: Optional[str]) -> None:
         return
     processo = await db.processes.find_one({"id": process_id}, PROJECCAO_DO_PROCESSO_FECHADO)
     await exigir_processo_aberto(processo)
+
+
+#: Estados de que uma comissão pode passar a «Paga» com o processo FECHADO.
+#: Um registo `cancelled` não — «cancelado → pago» é uma decisão sobre o
+#: valor, não a confirmação de um pagamento, e exige reabrir.
+ESTADOS_QUE_PASSAM_A_PAGO = frozenset({
+    FinanceStatus.PENDING.value, FinanceStatus.INVOICED.value, FinanceStatus.PAID.value,
+})
+
+
+def e_marcar_como_pago_permitido_fechado(registo: Optional[dict], novo_estado: str) -> bool:
+    """A ÚNICA excepção ao D-34 nas finanças: confirmar um pagamento.
+
+    As comissões imobiliárias/de crédito pagam-se no FIM, quando o processo já
+    está «Concluído» — pedir para reabrir um processo só para registar uma
+    entrada de dinheiro era o D-34 a funcionar contra o negócio. A excepção é
+    cirúrgica: só o estado «pago», só a partir de pendente/faturado, e só por
+    esta via (o PUT dos valores e o resto continuam fechados).
+    """
+    return (
+        novo_estado == FinanceStatus.PAID.value
+        and (registo or {}).get("status") in ESTADOS_QUE_PASSAM_A_PAGO
+    )
+
+
+def _exigir_papel_para_o_estado(papel: str, novo_estado: str) -> None:
+    """A gestão altera estados; o administrativo só marca como pago.
+
+    Defesa em profundidade: a rota já filtra por `require_roles`, mas o
+    serviço é chamado por mais do que uma rota e não pode assumir que quem
+    chega foi triado — um papel sem direito (consultor, indexação) é 403 aqui
+    também.
+    """
+    from models.auth import UserRole
+    from services.finance_helpers import FINANCE_WRITE_ROLES
+
+    papel = str(papel or "").strip()
+    if papel in {str(p) for p in FINANCE_WRITE_ROLES}:
+        return
+    if papel == str(UserRole.ADMINISTRATIVO) and novo_estado == FinanceStatus.PAID.value:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="O seu perfil só pode marcar uma comissão como paga."
+        if papel == str(UserRole.ADMINISTRATIVO)
+        else "Sem permissão para alterar o estado financeiro.",
+    )
+
+
+async def _deixar_rasto_do_pagamento(registo: dict, user: dict, estado_anterior: Optional[str]) -> None:
+    """Histórico do processo + trilho de auditoria. **Nunca** faz o pagamento falhar.
+
+    O processo está fechado: é aqui que se vê, depois, quem registou o
+    pagamento de uma comissão sobre um processo que já ninguém abre.
+    """
+    process_id = registo.get("process_id")
+    if not process_id:
+        return
+    try:
+        from services.history import log_history
+
+        await log_history(
+            process_id, user, "Marcou a comissão como paga",
+            "finance_status", estado_anterior, FinanceStatus.PAID.value,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[FINANCAS] Falha a registar o pagamento no histórico de %s (%s).", process_id, exc)
+    try:
+        from services.audit_trail_service import log_audit_event
+
+        await log_audit_event(
+            process_id=process_id,
+            user=user,
+            action="finance_marked_paid",
+            field="finance_status",
+            old_value=estado_anterior,
+            new_value=FinanceStatus.PAID.value,
+            source="web",
+            metadata={"finance_id": registo.get("id"), "company_id": registo.get("company_id")},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[FINANCAS] Falha a registar o pagamento no trilho de %s (%s).", process_id, exc)
 
 
 def _doc_to_process_finance_response(doc: dict) -> dict:
@@ -468,7 +553,8 @@ async def run_update_process_finance_status(
 
     Útil para marcações rápidas (ex: marcar como pago).
 
-    Permissões: Admin, CEO e Diretor.
+    Permissões: Admin, CEO e Diretor; o Administrativo só para «pago».
+    Num processo FECHADO só «pago» passa (ver `e_marcar_como_pago_permitido_fechado`).
     """
     if status not in FinanceStatus.all_values():
         raise HTTPException(
@@ -480,14 +566,18 @@ async def run_update_process_finance_status(
     if not existing:
         raise HTTPException(status_code=404, detail=ERRO_REGISTO_NAO_ENCONTRADO)
 
-    await exigir_registo_no_ambito(existing, user=user, request=request)
-    await _exigir_processo_do_registo_aberto(existing.get("process_id"))
+    ambito = await exigir_registo_no_ambito(existing, user=user, request=request)
+    _exigir_papel_para_o_estado(ambito.papel, status)
+    if not e_marcar_como_pago_permitido_fechado(existing, status):
+        await _exigir_processo_do_registo_aberto(existing.get("process_id"))
 
     now = datetime.now(timezone.utc).isoformat()
     await db.process_finances.update_one(
         {"id": finance_id},
         {"$set": {"status": status, "updated_at": now}},
     )
+    if status == FinanceStatus.PAID.value and existing.get("status") != status:
+        await _deixar_rasto_do_pagamento(existing, user, existing.get("status"))
 
     logger.info(
         f"ProcessFinance status actualizado: id={finance_id}, "
@@ -502,6 +592,54 @@ async def run_update_process_finance_status(
         "updated_at": now,
     }
 
+
+
+async def run_mark_process_finances_paid(
+    process_id: str,
+    user: dict,
+    request: Request | None = None,
+):
+    """«Marcar como Pago» a partir da Lista de Processos (sem abrir o processo).
+
+    Passa a «paga» TODAS as comissões pendentes/faturadas deste processo **que
+    o utilizador pode ver** (as das empresas das suas redes — uma partilha
+    pode ter um registo por empresa e o das outras redes não é dele). É a
+    mesma excepção cirúrgica do PATCH de estado: só `paid`, só a partir de
+    pendente/faturado, e nunca toca em valores.
+
+    Idempotente: sem nada por pagar devolve `updated: 0`. Sem NENHUM registo
+    no âmbito responde 404 igual ao de «não existe» (não confirma processos
+    ou comissões de outra rede).
+    """
+    ambito = await carregar_ambito_financeiro(user, request)
+    _exigir_papel_para_o_estado(ambito.papel, FinanceStatus.PAID.value)
+
+    query = {"process_id": process_id}
+    if ambito.condicao:
+        query = {"$and": [query, ambito.condicao]}
+    registos = await db.process_finances.find(query, {"_id": 0}).to_list(50)
+    if not registos:
+        raise HTTPException(status_code=404, detail=ERRO_REGISTO_NAO_ENCONTRADO)
+
+    now = datetime.now(timezone.utc).isoformat()
+    pagos: list[str] = []
+    for registo in registos:
+        if registo.get("status") not in (
+            FinanceStatus.PENDING.value, FinanceStatus.INVOICED.value,
+        ):
+            continue
+        await db.process_finances.update_one(
+            {"id": registo["id"]},
+            {"$set": {"status": FinanceStatus.PAID.value, "updated_at": now}},
+        )
+        await _deixar_rasto_do_pagamento(registo, user, registo.get("status"))
+        pagos.append(registo["id"])
+
+    logger.info(
+        "ProcessFinance marcado como pago em bloco: process_id=%s, registos=%s, por %s",
+        process_id, pagos, user.get("email", "unknown"),
+    )
+    return {"process_id": process_id, "updated": len(pagos), "finance_ids": pagos}
 
 
 async def run_delete_process_finance(

@@ -5,17 +5,22 @@
  * ao tirar a atribuição — o parceiro mantém o que produziu. Sem este cartão a
  * abertura era irreversível sem acesso à base de dados.
  *
- * Só aparece quando há parceiros: um cartão vazio em todos os processos seria
- * ruído. Quem pode revogar vem por `podeRevogar` (perfil efectivo); a decisão
- * final é do servidor, e a mensagem dele é mostrada tal e qual.
+ * Multi-fornecedor: o cartão também ENVIA o processo para uma rede de destino
+ * escolhida («Partilhar com…»), a quem pode (`podePartilhar`, perfil efectivo) e
+ * enquanto o processo não está fechado (o servidor recusa partilhar um fechado).
+ *
+ * Só aparece quando há parceiros OU quando se pode partilhar: um cartão vazio
+ * em todos os processos seria ruído. Quem pode revogar vem por `podeRevogar`;
+ * a decisão final é do servidor, e a mensagem dele é mostrada tal e qual.
  */
 import { useState } from "react";
-import { Handshake, Loader2 } from "lucide-react";
+import { Handshake, Loader2, Share2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { revokeProcessPartner } from "../../services/api";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import { parceirosDoProcesso, sePodeRevogar } from "../../utils/partilhaProcesso";
+import PartilharComRedeDialog from "./PartilharComRedeDialog";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import {
@@ -34,13 +39,20 @@ import {
  * @param {object} props.process
  * @param {boolean} props.podeRevogar - Perfil efectivo admin/CEO/diretor.
  * @param {(restantes: Array) => void} [props.onRevoked] - Recebe `partner_companies` actualizado.
+ * @param {boolean} [props.podePartilhar] - Perfil efectivo que pode enviar para outra rede.
+ * @param {boolean} [props.processoFechado] - Fechado não se partilha (reabrir primeiro).
+ * @param {(parceiros: Array) => void} [props.onShared] - Recebe `partner_companies` actualizado.
  */
-export default function PartilhaCard({ process, podeRevogar, onRevoked }) {
+export default function PartilhaCard({
+  process, podeRevogar, onRevoked, podePartilhar = false, processoFechado = false, onShared,
+}) {
   const parceiros = parceirosDoProcesso(process);
   const [alvo, setAlvo] = useState(null);
   const [aRevogar, setARevogar] = useState(false);
+  const [aPartilhar, setAPartilhar] = useState(false);
 
-  if (parceiros.length === 0) return null;
+  const mostrarPartilhar = podePartilhar && !processoFechado;
+  if (parceiros.length === 0 && !mostrarPartilhar) return null;
 
   const confirmar = async () => {
     if (!alvo) return;
@@ -68,7 +80,23 @@ export default function PartilhaCard({ process, podeRevogar, onRevoked }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        <ul className="divide-y rounded-md border text-sm">
+        {parceiros.length === 0 && (
+          <p className="text-sm text-muted-foreground" data-testid="partilha-vazia">
+            Só a sua equipa vê este processo.
+          </p>
+        )}
+        {mostrarPartilhar && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="partilhar-com-btn"
+            onClick={() => setAPartilhar(true)}
+          >
+            <Share2 className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Partilhar com…
+          </Button>
+        )}
+        {parceiros.length > 0 && <ul className="divide-y rounded-md border text-sm">
           {parceiros.map((parceiro) => (
             <li key={parceiro.id || parceiro.nome} className="flex items-center justify-between gap-2 px-3 py-2">
               <span className="min-w-0 truncate font-medium">{parceiro.nome}</span>
@@ -85,11 +113,22 @@ export default function PartilhaCard({ process, podeRevogar, onRevoked }) {
               )}
             </li>
           ))}
-        </ul>
-        <p className="text-xs text-muted-foreground">
-          Tirar uma atribuição não revoga a partilha: o acesso só se retira aqui.
-        </p>
+        </ul>}
+        {parceiros.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Tirar uma atribuição não revoga a partilha: o acesso só se retira aqui.
+          </p>
+        )}
       </CardContent>
+
+      {mostrarPartilhar && (
+        <PartilharComRedeDialog
+          processId={process.id}
+          open={aPartilhar}
+          onOpenChange={setAPartilhar}
+          onShared={onShared}
+        />
+      )}
 
       <AlertDialog open={Boolean(alvo)} onOpenChange={(aberto) => { if (!aberto && !aRevogar) setAlvo(null); }}>
         <AlertDialogContent data-testid="dialogo-revogar-partilha">

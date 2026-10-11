@@ -11,10 +11,11 @@ from fastapi import APIRouter, Depends, Query
 
 from models.auth import UserRole
 from services.auth import require_roles
+from services.process_closed_guard import exigir_processo_editavel
 from services.ai_analysis_api_get import run_get_analysis
 from services.ai_analysis_api_generate import run_generate_analysis
 
-router = APIRouter(tags=["AI Executive Summary"])
+router = APIRouter(tags=["AI Executive Summary"], dependencies=[Depends(exigir_processo_editavel)])
 
 _ANALYSIS_ROLES = [
     UserRole.MASTER, UserRole.ADMIN,

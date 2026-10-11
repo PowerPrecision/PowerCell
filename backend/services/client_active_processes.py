@@ -41,7 +41,7 @@ from services.tenant_network import (
     build_tenant_process_condition,
     com_isolamento,
 )
-from services.workflow_phases import carregar_fases, nomes_terminais
+from services.workflow_phases import fases_do_utilizador, nomes_terminais
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ async def processos_activos_do_cliente(
     if ligados:
         vinculos.append({"id": {"$in": ligados}})
 
-    fases = await carregar_fases()
+    fases = await fases_do_utilizador(user)
     condicoes: list[dict] = [
         {"$or": vinculos},
         {"status": {"$nin": nomes_terminais(fases)}},

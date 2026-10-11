@@ -851,6 +851,9 @@ def decrypt_processes_list(processes: list, fields_to_decrypt: list = None) -> l
 PROCESS_LIST_PROJECTION = {
     "_id": 0,
     "id": 1,
+    # Workflow POR REDE: a fase de cada linha significa o que diz o workflow
+    # da rede DONA, e sem a rede na linha não há como saber qual é.
+    "network_id": 1,
     "client_id": 1,
     "process_number": 1,
     "client_name": 1,
@@ -902,6 +905,7 @@ PROCESS_LIST_PROJECTION = {
 PROCESS_KANBAN_PROJECTION = {
     "_id": 0,
     "id": 1,
+    "network_id": 1,
     "client_id": 1,
     "process_number": 1,
     "client_name": 1,

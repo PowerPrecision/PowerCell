@@ -107,11 +107,18 @@ def pode_ver_registo(
 async def carregar_ambito_financeiro(
     user: dict,
     request: Optional[Request] = None,
+    *,
+    papel: Optional[str] = None,
 ) -> AmbitoFinanceiro:
-    """Resolve o papel efectivo e as empresas das redes do utilizador."""
+    """Resolve o papel efectivo e as empresas das redes do utilizador.
+
+    `papel` é para quem JÁ resolveu o perfil activo (a listagem de processos
+    recebe-o da rota e não tem o `Request`): evita uma segunda resolução que,
+    sem pedido, cairia no papel do JWT.
+    """
     from services.property_scope import papel_efectivo
 
-    papel = await papel_efectivo(user, request)
+    papel = papel or await papel_efectivo(user, request)
     scope = await resolve_tenant_scope(user)
     empresas = await empresas_das_minhas_redes(scope)
 

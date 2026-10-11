@@ -49,7 +49,7 @@ import {
   BarChart3,
 } from "lucide-react";
 import {
-  getWorkflowStatuses,
+  getWorkflowEditor,
   createWorkflowStatus,
   updateWorkflowStatus,
   deleteWorkflowStatus,
@@ -66,6 +66,8 @@ const statusColorOptions = [
 
 const WorkflowEditor = () => {
   const [statuses, setStatuses] = useState([]);
+  // Workflow POR REDE: de que rede é o que se está a editar (e das empresas dela).
+  const [rede, setRede] = useState(null);
   const [loading, setLoading] = useState(true);
   const [formLoading, setFormLoading] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -102,8 +104,16 @@ const WorkflowEditor = () => {
   const fetchStatuses = async () => {
     try {
       setLoading(true);
-      const response = await getWorkflowStatuses();
-      setStatuses(response.data.sort((a, b) => a.order - b.order));
+      const response = await getWorkflowEditor();
+      const dados = response.data || {};
+      // `Array.isArray` e não `|| []`: um objecto é truthy (ver FRONTEND_GUIDELINES § 27.38).
+      const fases = Array.isArray(dados.statuses) ? dados.statuses : [];
+      setStatuses([...fases].sort((a, b) => a.order - b.order));
+      setRede({
+        networkId: dados.network_id || "",
+        empresas: Array.isArray(dados.empresas) ? dados.empresas : [],
+        temProprio: dados.tem_workflow_proprio === true,
+      });
     } catch {
       toast.error("Erro ao carregar estados");
     } finally {
@@ -472,6 +482,18 @@ const WorkflowEditor = () => {
               </CardTitle>
               <CardDescription>
                 Adicione, edite ou reordene as fases do processo.
+                {rede && (
+                  <span className="block text-xs mt-1" data-testid="workflow-rede">
+                    Está a editar o workflow da rede{" "}
+                    <strong>{rede.empresas.length ? rede.empresas.join(", ") : rede.networkId}</strong>
+                    {" "}— as outras redes não são afetadas.
+                    {!rede.temProprio && (
+                      <span className="block text-muted-foreground" data-testid="workflow-rede-modelo">
+                        Esta rede ainda usa o modelo base: a primeira alteração cria a cópia própria.
+                      </span>
+                    )}
+                  </span>
+                )}
                 <span className="block text-xs mt-1 text-muted-foreground">
                   <Globe className="h-3 w-3 inline mr-1" />
                   O campo &quot;Nome no Portal&quot; permite definir um nome diferente para o cliente ver.

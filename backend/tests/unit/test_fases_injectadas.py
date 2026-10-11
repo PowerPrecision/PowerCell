@@ -342,7 +342,7 @@ class TestCacheDasFases:
 
         monkeypatch.setattr(wp, "db", BDPartida())
         assert await wp.carregar_fases() == []
-        assert wp._cache_de_fases is None
+        assert not wp._cache_de_fases, "uma leitura falhada não fica em cache (de nenhuma rede)"
 
     def test_quem_escreve_uma_fase_esquece_a_cache(self):
         """Sem isto, o próprio admin continuava a ver a versão antiga

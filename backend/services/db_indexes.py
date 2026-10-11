@@ -953,6 +953,16 @@ async def create_ttl_indexes(db) -> dict:
     }]:
         await _create_index_safe(db.clients, idx, "clients", results)
 
+    # Workflow POR REDE: `carregar_fases(rede)` lê as fases de UMA rede por
+    # `order`, e a edição procura por (rede, nome). Não é único de propósito
+    # (o `scripts/migrar_workflow_por_rede.py` cria o único depois de provar
+    # que não há duplicados — um índice único que falha no arranque não ajuda).
+    for idx in [
+        {"keys": [("network_id", 1), ("order", 1)], "name": "idx_workflow_rede_ordem"},
+        {"keys": [("network_id", 1), ("name", 1)], "name": "idx_workflow_rede_nome"},
+    ]:
+        await _create_index_safe(db.workflow_statuses, idx, "workflow_statuses", results)
+
     return results
 
 

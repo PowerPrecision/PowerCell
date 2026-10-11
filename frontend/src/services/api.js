@@ -683,6 +683,18 @@ export const revokeProcessPartner = (processId, companyId) =>
     skipErrorToast: true,
   });
 
+// Multi-fornecedor: as redes para onde o processo pode ser enviado (com «tem Index») e o
+// envio para a rede ESCOLHIDA. `skipErrorToast`: o diálogo mostra o motivo do servidor
+// (403 «só a casa dona…», 400 destino inválido) no sítio.
+export const getProcessShareTargets = (processId) =>
+  api.get(`/processes/${processId}/share-targets`, { skipErrorToast: true });
+export const shareProcessWithNetwork = (processId, { networkId, viaVerde }) =>
+  api.post(
+    `/processes/${processId}/partners`,
+    { network_id: networkId, ...(typeof viaVerde === "boolean" ? { via_verde: viaVerde } : {}) },
+    { skipErrorToast: true },
+  );
+
 // Bloco 4, ponto 7 — origem financeira (orgânica vs angariação). Só a gestão:
 // o servidor responde 403 com o motivo a quem não pode, e `skipErrorToast`
 // deixa o cartão mostrá-lo no sítio em vez de um toast genérico por cima.
@@ -890,6 +902,9 @@ export const getProcessTimeline = (processId, limit = 40) =>
 
 // Workflow Statuses
 export const getWorkflowStatuses = () => api.get("/admin/workflow-statuses");
+// O workflow é POR REDE: o editor pede o da rede EM CONTEXTO (a empresa activa)
+// e recebe também o nome das empresas dessa rede, para dizer onde está a editar.
+export const getWorkflowEditor = () => api.get("/admin/workflow-statuses/editor");
 export const createWorkflowStatus = (data) => api.post("/admin/workflow-statuses", data);
 export const updateWorkflowStatus = (id, data) => api.put(`/admin/workflow-statuses/${id}`, data);
 export const deleteWorkflowStatus = (id) => api.delete(`/admin/workflow-statuses/${id}`);
@@ -1507,6 +1522,12 @@ export const getProcessFinances = (params = {}) => api.get("/finance/processes",
 export const getProcessFinanceById = (financeId) => api.get(`/finance/processes/${financeId}`);
 export const createProcessFinance = (data) => api.post("/finance/processes", data);
 export const updateProcessFinance = (financeId, data) => api.put(`/finance/processes/${financeId}`, data);
+// «Marcar como Pago» (Lista de Processos): funciona com o processo FECHADO — é a
+// única escrita financeira que o D-34 deixa passar sem reabrir (só passa a «paga»).
+export const markProcessFinanceAsPaid = (financeId) =>
+  api.patch(`/finance/processes/${financeId}/status`, null, { params: { status: "paid" } });
+export const markProcessFinancesPaid = (processId) =>
+  api.post(`/finance/processes/by-process/${processId}/mark-paid`);
 export const getProcessFinanceSummary = (params = {}) => api.get("/finance/processes/summary", { params });
 
 // Pool Distribution (modelo global_pool — fecho de mês)

@@ -80,7 +80,7 @@ def test_stats_branches_resolve_as_fases_pelo_motor():
     from services.stats_branches import run_get_branch_performance
 
     fonte = codigo_da_funcao_sem_comentarios(run_get_branch_performance)
-    assert "carregar_fases()" in fonte
+    assert "fases_do_ambito(" in fonte  # o workflow de quem olha (por rede)
     assert "nomes_por_macro(" in fonte
     assert "nomes_activos(" in fonte
 

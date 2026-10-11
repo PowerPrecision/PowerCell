@@ -45,6 +45,11 @@ services:
         value: production
       - key: PORT
         value: 8001
+      # Proxies NOSSOS entre a internet e o backend (D-4). Render sozinho = 1;
+      # se um Cloudflare for posto à frente passa a 2 — com o número errado
+      # o limite por IP agrupa clientes (ver middleware/client_ip.py).
+      - key: TRUSTED_PROXY_HOPS
+        value: 1
 
       # ── Base de Dados (SECRETS) ──
       - key: MONGO_URL

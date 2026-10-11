@@ -625,6 +625,13 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
     from models.auth import UserRole
     from services.email_config_resolver import resolve_email_config_for_sync
 
+    # D-34: um email enviado NUM processo fechado não sai — o `process_id` vem
+    # no corpo, logo escapa à dependência do router. Antes de qualquer envio.
+    if payload.process_id:
+        from services.process_closed_guard import exigir_processo_aberto_por_id
+
+        await exigir_processo_aberto_por_id(payload.process_id, current_user)
+
     # === PACOTE AL: Extração Imediata da Empresa e do Remetente Base ===
     # 1. active_company_id: tentar header direto primeiro (mais rápido),
     #    depois fallback para get_active_company_id_async.

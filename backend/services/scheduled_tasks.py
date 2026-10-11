@@ -734,13 +734,20 @@ class ScheduledTasksService:
         # criada pelo admin nunca entrava no relatório mensal e uma fase
         # renomeada saía dele — em silêncio, porque um relatório com
         # menos processos parece um mês calmo.
-        from services.workflow_phases import carregar_fases, nomes_activos
+        #
+        # Workflow POR REDE: pré-filtra-se pela união dos nomes activos e
+        # confirma-se, processo a processo, no workflow da rede dona.
+        from services.workflow_phases import (
+            nomes_activos_de_todas_as_redes,
+            so_processos_com_fase_activa,
+        )
 
-        active_statuses = nomes_activos(await carregar_fases())
+        active_statuses = await nomes_activos_de_todas_as_redes()
 
         processes = await self.db.processes.find({
             "status": {"$in": active_statuses}
         }, {"_id": 0}).to_list(1000)
+        processes = await so_processos_com_fase_activa(processes)
         
         notifications_created = 0
         

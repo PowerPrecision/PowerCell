@@ -136,9 +136,10 @@ async def run_get_portal_status(client_data: dict):
 
     # ── Workflow statuses para o stepper ──
     # Buscar todos os statuses (incluindo hidden, para calcular progresso)
-    all_statuses = await db.workflow_statuses.find(
-        {}, {"_id": 0}
-    ).sort("order", 1).to_list(100)
+    # Workflow POR REDE: o stepper do cliente é o do workflow da rede DONA.
+    from services.workflow_phases import carregar_fases, rede_do_processo
+
+    all_statuses = await carregar_fases(rede=rede_do_processo(process))
 
     current_status = process.get("status", "clientes_espera")
     current_status_label = current_status

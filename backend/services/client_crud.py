@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
+from services.workflow_phases import fases_do_utilizador
 from models.client import (
     Client, ClientCreate, ClientUpdate,
     ClientContact, ClientPersonalData,
@@ -83,7 +84,7 @@ async def run_get_client(
     
     # Enriquecer processos com labels, cores do workflow e role do cliente
     if processes:
-        statuses = await db.workflow_statuses.find({}, {"_id": 0}).to_list(100)
+        statuses = await fases_do_utilizador(user)
         status_map = {s["name"]: s for s in statuses}
         for p in processes:
             status_info = status_map.get(p.get("status"), {})

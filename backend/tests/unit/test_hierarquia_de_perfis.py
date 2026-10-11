@@ -421,8 +421,19 @@ class TestInventarioDasRotas:
         a = next(a for f, n, a in _rotas() if f == "routes/gdpr.py" and n == "anonymize_batch")
         assert "require_roles([UserRole.MASTER])" in a
 
-    def test_a_edicao_global_de_fases_e_so_master(self):
+    def test_a_edicao_das_fases_e_da_rede_em_contexto_e_nao_global(self):
+        """INVERTIDO (workflow por rede, Out 2026). Era «só Master» porque o
+        workflow era GLOBAL: editá-lo mudava a operação de todas as empresas.
+        Agora cada rede tem o seu e o Admin/CEO edita o da rede em contexto —
+        a fronteira passou da guarda de papel para a escrita (ver
+        `test_workflow_por_rede.py::TestEditarSoARedeEmContexto`, que prova que
+        o id de uma fase de outra rede é 404). O que continua só-Master é a
+        infraestrutura (`fix-duplicates`, `migrate-portal-labels`)."""
         for nome in ("create_workflow_status", "update_workflow_status", "delete_workflow_status"):
+            a = next(a for f, n, a in _rotas() if f == "routes/admin.py" and n == nome)
+            assert "PAPEIS_QUE_EDITAM_O_WORKFLOW" in a, nome
+            assert "DIRETOR" not in a and "ADMINISTRATIVO" not in a, nome
+        for nome in ("fix_duplicate_workflow_statuses", "migrate_portal_labels"):
             a = next(a for f, n, a in _rotas() if f == "routes/admin.py" and n == nome)
             assert "require_roles([UserRole.MASTER])" in a, nome
 

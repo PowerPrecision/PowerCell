@@ -32,7 +32,11 @@ from services.audit_cdc import inject_cdc_context
 from services.alerts import get_process_alerts
 from services.encryption import decrypt_client_data
 
-from services.process_sharing_api import run_revoke_partner
+from services.process_sharing_api import (
+    run_list_share_targets,
+    run_revoke_partner,
+    run_share_process,
+)
 from services.origem_financeira import (
     OrigemFinanceiraBody,
     run_get_origem,
@@ -807,6 +811,38 @@ async def delete_process(
 ):
     """Soft delete a process. Does NOT affect the client document."""
     return await soft_delete_process(process_id, user)
+
+
+class ShareProcessBody(BaseModel):
+    """Destino da partilha. `via_verde` (opcional) grava a flag ANTES da triagem."""
+
+    network_id: str
+    via_verde: Optional[bool] = None
+
+
+@router.get("/{process_id}/share-targets")
+async def list_share_targets(
+    process_id: str,
+    request: Request,
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO])),
+):
+    """As redes para onde o processo pode ser enviado (o diálogo «Partilhar com…»)."""
+    return await run_list_share_targets(process_id, user, request)
+
+
+@router.post("/{process_id}/partners")
+async def share_process_with_network(
+    process_id: str,
+    body: ShareProcessBody,
+    request: Request,
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO])),
+):
+    """Envia o processo para uma REDE DE DESTINO escolhida.
+
+    Se o destino tem Index, o processo entra na fila dessa rede — salvo
+    `via_verde`, que a salta e o deixa à guarda da consultoria.
+    """
+    return await run_share_process(process_id, body.network_id, body.via_verde, user, request)
 
 
 @router.delete("/{process_id}/partners/{company_id}")

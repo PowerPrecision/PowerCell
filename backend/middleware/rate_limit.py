@@ -7,12 +7,13 @@ Protege contra ataques DDoS e abuso de API.
 ====================================================================
 """
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from fastapi import Request
 from fastapi.responses import JSONResponse
 import logging
 import os
+
+from middleware.client_ip import ip_do_cliente
 
 logger = logging.getLogger(__name__)
 
@@ -50,20 +51,12 @@ RATE_LIMITS = {
 
 def _get_client_ip(request: Request) -> str:
     """
-    Obtém o IP real do cliente, considerando proxies.
+    IP real do cliente. Conta o `X-Forwarded-For` a partir da DIREITA
+    (`TRUSTED_PROXY_HOPS`, por omissão 1 — Render): o primeiro elemento é o
+    que o cliente envia e quem ataca muda-o a cada pedido (D-4).
+    Ver `middleware/client_ip.py`.
     """
-    # X-Forwarded-For contém lista de IPs quando há proxies
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    
-    # X-Real-IP é usado por alguns proxies (ex: Nginx)
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-    
-    # Fallback para IP directo
-    return get_remote_address(request)
+    return ip_do_cliente(request)
 
 
 def _get_rate_limit_key(request: Request) -> str:

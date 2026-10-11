@@ -10,6 +10,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from services.workflow_phases import rede_do_processo
+
 from database import db
 # Importado NO TOPO e não à primeira chamada: um `from database import db`
 # executado dentro de um `patch("database.db", fake)` ficava com o duplo para
@@ -358,10 +360,11 @@ def merge_field_metadata(existing: Optional[dict], incoming: dict) -> dict:
 # edição tal como "concluidos".
 # ÉPICO 10, PONTO 1 — deixou de ser constante de import. Uma fase
 # fechada pelo admin passava a bloquear a edição só no deploy seguinte.
-async def terminal_process_statuses() -> tuple[str, ...]:
+async def terminal_process_statuses(rede: Optional[str] = None) -> tuple[str, ...]:
+    """As fases fechadas do workflow da `rede` (a do dono do processo)."""
     from services.workflow_phases import carregar_fases, nomes_terminais
 
-    return tuple(nomes_terminais(await carregar_fases()))
+    return tuple(nomes_terminais(await carregar_fases(rede=rede)))
 FINANCE_RELEVANT_STATUSES = ("concluidos", "escritura", "escritura_agendada")
 VALID_PRIORIDADES = ("baixa", "media", "alta")
 
@@ -519,9 +522,9 @@ def apply_cpcv_and_metadata_fields(update_data: dict, data: Any) -> None:
     skip_index = getattr(data, "skip_index", None)
     if skip_index is not None:
         update_data["skip_index"] = bool(skip_index)
-    # HUB & SPOKE (Bloco A) — `via_verde` é lida quando o processo é
-    # partilhado com o Hub; mudá-la depois da entrada na triagem não
-    # reabre nem fecha a triagem (o primeiro registo ganha).
+    # `via_verde` é lida quando o processo é partilhado com uma rede que
+    # tem Index; mudá-la depois da entrada na triagem não reabre nem fecha
+    # a triagem (o primeiro registo ganha).
     via_verde = getattr(data, "via_verde", None)
     if via_verde is not None:
         update_data["via_verde"] = bool(via_verde)
@@ -844,11 +847,11 @@ def build_process_response_or_500(updated: dict, process_id: str):
         )
 
 
-async def load_valid_workflow_status_names() -> list[str]:
-    statuses = await db.workflow_statuses.find(
-        {}, {"name": 1, "_id": 0},
-    ).to_list(100)
-    return [s["name"] for s in statuses]
+async def load_valid_workflow_status_names(rede: Optional[str] = None) -> list[str]:
+    """As fases a que um processo da `rede` pode ir: as do workflow dessa rede."""
+    from services.workflow_phases import carregar_fases
+
+    return [s["name"] for s in await carregar_fases(rede=rede) if s.get("name")]
 
 
 async def maybe_reassign_primary_client_with_audit(
@@ -961,7 +964,8 @@ async def run_update_process(
     # o 403 chegava depois de a ficha do cliente e o titular já terem sido
     # alterados). Reabre-se primeiro — `POST /processes/{id}/reopen`.
     assert_process_editable_for_role(
-        process.get("status"), role, await terminal_process_statuses(),
+        process.get("status"), role,
+        await terminal_process_statuses(rede_do_processo(process)),
     )
 
     client_id = process.get("client_id")
@@ -995,7 +999,7 @@ async def run_update_process(
         raw_client_phone=raw_client_phone,
     )
 
-    valid_statuses = await load_valid_workflow_status_names()
+    valid_statuses = await load_valid_workflow_status_names(rede_do_processo(process))
     perms = build_role_update_permissions(role)
     can_update_status = perms["can_update_status"]
 

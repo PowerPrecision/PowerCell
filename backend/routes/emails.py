@@ -21,6 +21,7 @@ from services.auth import get_active_company_id_async, get_current_user
 from services.email_contacts import esconder_contacto, guardar_contacto, listar_contactos
 from middleware.rate_limit import limiter
 from services.email_access import carregar_email_legivel, exigir_processo_legivel
+from services.process_closed_guard import exigir_processo_editavel
 from services.email_archive import arquivar_anexo, sugerir_processos
 
 from services.email_labels_folders import (
@@ -96,7 +97,7 @@ from services.email_process_crud import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/emails", tags=["Emails"])
+router = APIRouter(prefix="/emails", tags=["Emails"], dependencies=[Depends(exigir_processo_editavel)])
 
 # NOTA: doc_router foi removido. Endpoints send-documentation / document-recipients
 # estão no router principal ANTES das rotas com /{email_id}.

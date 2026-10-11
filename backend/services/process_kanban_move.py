@@ -31,7 +31,9 @@ from services.process_phase_clock import (
 logger = logging.getLogger(__name__)
 
 
-async def resolve_workflow_purpose_flags(status_doc: dict, new_status: str) -> dict[str, bool]:
+async def resolve_workflow_purpose_flags(
+    status_doc: dict, new_status: str, rede: Optional[str] = None,
+) -> dict[str, bool]:
     """
     Lê flags de comportamento do workflow_status.
 
@@ -50,27 +52,27 @@ async def resolve_workflow_purpose_flags(status_doc: dict, new_status: str) -> d
 
     trigger_finance = status_doc.get("trigger_finance")
     if trigger_finance is None:
-        flagged = await get_flagged_workflow_status_names("trigger_finance")
+        flagged = await get_flagged_workflow_status_names("trigger_finance", rede)
         trigger_finance = new_status in flagged
 
     trigger_countdown = status_doc.get("trigger_countdown")
     if trigger_countdown is None:
-        flagged = await get_flagged_workflow_status_names("trigger_countdown")
+        flagged = await get_flagged_workflow_status_names("trigger_countdown", rede)
         trigger_countdown = new_status in flagged
 
     trigger_property_check = status_doc.get("trigger_property_check")
     if trigger_property_check is None:
-        flagged = await get_flagged_workflow_status_names("trigger_property_check")
+        flagged = await get_flagged_workflow_status_names("trigger_property_check", rede)
         trigger_property_check = new_status in flagged
 
     trigger_deed_reminder = status_doc.get("trigger_deed_reminder")
     if trigger_deed_reminder is None:
-        flagged = await get_flagged_workflow_status_names("trigger_deed_reminder")
+        flagged = await get_flagged_workflow_status_names("trigger_deed_reminder", rede)
         trigger_deed_reminder = new_status in flagged
 
     is_active = status_doc.get("is_active")
     if is_active is None:
-        inactive_names = await get_inactive_workflow_status_names()
+        inactive_names = await get_inactive_workflow_status_names(rede)
         is_active = new_status not in inactive_names
 
     return {
@@ -177,7 +179,12 @@ async def notify_client_and_staff_status_change(
     from services.notification_service import send_notification_with_preference_check
     from services.realtime_notifications import notify_process_status_change
 
-    status_doc = await db.workflow_statuses.find_one({"name": new_status}, {"_id": 0})
+    from services.workflow_phases import carregar_fases, rede_do_processo
+
+    status_doc = next(
+        (f for f in await carregar_fases(rede=rede_do_processo(process)) if f.get("name") == new_status),
+        None,
+    )
     status_label = status_doc.get("label", new_status) if status_doc else new_status
 
     if process.get("client_email"):
@@ -379,12 +386,18 @@ async def run_move_process_kanban(
             status_code=403, detail="Sem permissão para mover este processo",
         )
 
-    status_exists = await db.workflow_statuses.find_one({"name": new_status})
+    # O destino tem de ser uma fase do workflow da rede DONA do processo.
+    from services.workflow_phases import carregar_fases, rede_do_processo
+
+    rede = rede_do_processo(process)
+    status_exists = next(
+        (f for f in await carregar_fases(rede=rede) if f.get("name") == new_status), None,
+    )
     if not status_exists:
         raise HTTPException(status_code=400, detail="Estado inválido")
 
     old_status = process.get("status", "")
-    flags = await resolve_workflow_purpose_flags(status_exists, new_status)
+    flags = await resolve_workflow_purpose_flags(status_exists, new_status, rede)
 
     logger.info(
         f"[KANBAN-MOVE-BR] Processo {process_id} → '{new_status}'. "

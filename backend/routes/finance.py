@@ -26,6 +26,7 @@ from models.finance import (
 from services.auth import require_roles
 from services.finance_helpers import (
     FINANCE_READ_ROLES,
+    PAPEIS_QUE_MARCAM_COMO_PAGO,
     DashboardFinanceConfigUpdate,
 )
 from services.finance_dashboard import (
@@ -57,6 +58,7 @@ from services.finance_process_records import (
     run_get_process_finance_by_id,
     run_update_process_finance,
     run_update_process_finance_status,
+    run_mark_process_finances_paid,
     run_delete_process_finance,
 )
 
@@ -272,9 +274,20 @@ async def update_process_finance_status(
     request: Request,
     finance_id: str,
     status: str = Query(..., description="Novo status: pending|invoiced|paid|cancelled"),
-    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+    user: dict = Depends(require_roles(PAPEIS_QUE_MARCAM_COMO_PAGO))
 ):
+    # O administrativo entra aqui só para «paid» (o serviço recusa o resto).
     return await run_update_process_finance_status(finance_id, status, user, request)
+
+
+@router.post("/finance/processes/by-process/{process_id}/mark-paid")
+async def mark_process_finances_paid(
+    request: Request,
+    process_id: str,
+    user: dict = Depends(require_roles(PAPEIS_QUE_MARCAM_COMO_PAGO))
+):
+    """«Marcar como Pago» a partir da Lista de Processos — funciona com o processo FECHADO."""
+    return await run_mark_process_finances_paid(process_id, user, request)
 
 
 @router.delete("/finance/processes/{finance_id}")

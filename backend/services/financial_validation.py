@@ -252,9 +252,14 @@ async def _tirar_da_operacao(processo: dict) -> None:
     """
     try:
         from services.process_phase_clock import montar_update, transicao_de_fase
-        from services.workflow_phases import carregar_fases, nomes_por_macro, nomes_terminais
+        from services.workflow_phases import (
+            carregar_fases,
+            nomes_por_macro,
+            nomes_terminais,
+            rede_do_processo,
+        )
 
-        fases = await carregar_fases()
+        fases = await carregar_fases(rede=rede_do_processo(processo))
         terminais = set(nomes_terminais(fases))
         destino = next(
             (n for n in nomes_por_macro(fases, "perdido") if n in terminais),
