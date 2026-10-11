@@ -249,7 +249,10 @@ jobs:
   backend-fast:
     name: Backend CI — Fast
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 5 min era curto demais: install (~55s) + flake8 (~30s) + ~3m20s de testes
+    # já ocupavam 4m50s, e os testes novos empurraram o job para o limite
+    # (cancelado em "Post Setup Python" com os testes a passar).
+    timeout-minutes: 10
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
