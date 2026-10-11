@@ -558,8 +558,8 @@ parceiro activo (o mesmo compromisso do D-36); (g) ~~a **Via Rápida**~~ — **e
 6. **Inventário das superfícies que LISTAM:** fica com excepções escritas (`SEM_CONDICAO_DE_REDE_POR_DESENHO`); `GET /documents/client/{id}/*`, `/task-logs/{id}` e `/portal/{id}/verify` continuam na D-31.
 **O que fecha isto:** confirmar a variável em produção; decidir 2–4 com o dono do produto.
 
-### D-31 · Rotas «por id» sem pergunta de rede: fechadas as de clientes, tarefas, restauro e rascunhos
-**Onde:** `services/by_id_scope.py`, `routes/clients.py`, `routes/tasks.py`, `routes/restore.py`, `services/email_templates_drafts.py`
+### D-31 · Rotas «por id» sem pergunta de rede: fechadas as de clientes, tarefas, restauro, rascunhos, documentos e task-logs
+**Onde:** `services/by_id_scope.py`, `services/document_path_scope.py`, `routes/clients.py`, `routes/tasks.py`, `routes/restore.py`, `routes/documents.py`, `services/task_logs_api_actions.py`, `services/email_templates_drafts.py`
 
 **Fechado (Out 2026):** `GET/PUT/DELETE /clients/{id}` (e as restantes rotas
 com `{client_id}`), `GET/PUT/DELETE /tasks/{id}` (e `complete`/`reopen`), os
@@ -576,14 +576,56 @@ claim-based routing); o cliente que é titular de um processo MEU (porque
 ler/editar, nunca para eliminar, atribuir ou criar processo; e, nas tarefas,
 as atribuídas a mim ou criadas por mim. `POST /clients` passou a carimbar.
 
-**O que continua aberto:** as outras rotas por id que o serviço resolve à sua
-maneira e que ESTA varredura não percorreu —
-`/documents/client/{client_id}/*` (a guarda de documentos tem a sua fronteira,
-D-26, mas não passa por aqui), `/task-logs/{id}` (jobs do próprio
-utilizador), `/admin/migration/run-single/{client_id}` (só Master) e
-`/portal/{client_id}/verify` (pública, com travão). Cada uma precisa do mesmo
-inventário por AST das rotas com `{…_id}` no caminho que esta iteração fez
-para clientes e tarefas.
+**Fechado (Out 2026, fecho da varredura por caminho):** `/documents/**` e
+`/task-logs/{id}`, e a análise de `/portal/{client_id}/verify`.
+
+* **`/documents/client/{client_id}/*`** (files, upload, init-folders, download,
+  delete, bulk-delete) — o `{client_id}` é «flexível» (processo, cliente ou
+  `client_id` de um processo) e a dependência `exigir_alvo_do_documento_no_ambito`
+  resolve-o pela mesma ordem do handler, **incluindo o processo para onde o
+  cliente aponta** (um cliente meu com vínculo a um processo de outra rede
+  também fecha). O `init-folders` nem recebia o utilizador: escrevia
+  `s3_folder` no processo de outra rede sabendo só o id. O router passou a
+  levar `exigir_processo_no_ambito` + `exigir_alvo_do_documento_no_ambito`
+  **antes** da guarda de processo fechado, o que também cobre todas as rotas
+  com `{process_id}` (a guarda de visibilidade respondia **403**, que
+  confirmava o id) e `{doc_id}` (`/{doc_id}/ai-analyze-review`, `apply-ai-review`,
+  `reject-ai-review`: um registo sem dono não se prova meu — só o Master).
+* **Os mesmos ficheiros pela chave S3** — `/documents/proxy/{path}`,
+  `/documents/download-url/{path}` e `bulk-download` serviam qualquer chave
+  dentro de `Documentação Clientes/` (a parede da raiz impede o
+  `backups/*.zip`, não o cliente do vizinho). `services/document_path_scope.py`
+  resolve o dono da chave (pasta mapeada ou id no caminho) e decide como a
+  fronteira de documentos: rede convidada conta; sem dono → só o Master;
+  reclamada por duas redes → ninguém; 404. O `process_id` do corpo do
+  `bulk-download` também é um alvo (escrevia no histórico de outro processo).
+  A guarda corre antes de perguntar ao S3 se a chave existe (sem oráculo).
+* **`/task-logs/{id}`** — a excepção era `role in [master, admin, ceo]`, o
+  cargo da conta sem pergunta de rede: o CEO da Domus lia, cancelava e
+  apagava os registos da Power (que levam `process_name`). Hoje: o dono, o
+  Master, ou Admin/CEO só para donos do seu âmbito
+  (`carregar_utilizador_gerivel`); o resto é 404 (era 403).
+* **`/portal/{client_id}/verify`** — **não há guarda de rede a pôr**: é uma
+  porta pública, sem utilizador nem rede em contexto; a parede é a credencial
+  (NIF + nº do processo) e o travão 5/15. O que se pode afirmar, e agora tem
+  teste, é que a resposta **não distingue** «cliente de outra rede», «não
+  existe», «NIF errado» e «processo alheio» (todos 401 com a mesma mensagem) e
+  que o travão não distingue ids reais de inexistentes.
+
+**O que continua aberto (dito):**
+
+* `portal_verify_attempts` não tem índice TTL: cada `client_id` inventado deixa
+  um documento de tentativas (travado a 10 pedidos/minuto por IP, mas nunca
+  expira). Não é fuga entre redes; é crescimento de coleção.
+* Rotas que recebem o id **no corpo** (`/documents/search`, `confirm-upload`,
+  `generate-upload-url`, `check-move-conflict`, `check-upload-conflict`) não
+  passam por dependências de caminho e não foram varridas por este inventário.
+* `/task-logs/{id}`: «cancelar» por um gestor que não é o dono responde 400 (o
+  serviço filtra por `user_id`) — comportamento anterior, agora só acessível
+  dentro do âmbito. E a excepção de gestão lê o cargo da CONTA, não o perfil
+  efectivo (a rota não tem `Request`).
+* `/admin/migration/run-single/{client_id}` é só-Master (sem fronteira de
+  dados): não é fuga.
 
 **Relacionado — fronteira de dados é a REDE, não a empresa.** Power e
 Precision partilham rede por decisão do Lote 4, logo um Admin da Power vê os

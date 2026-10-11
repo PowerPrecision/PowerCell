@@ -28,6 +28,7 @@ from services.document_process_resolve import (
     extract_second_client_name,
     resolve_process_from_flexible_id,
 )
+from services.document_path_scope import exigir_ficheiro_no_ambito
 from services.document_s3_paths import s3_path_variations
 from services.s3_storage import s3_service
 
@@ -135,10 +136,12 @@ async def run_get_download_url(client_id: str, file_path: str) -> dict[str, Any]
     return {"success": True, "url": url}
 
 
-async def run_get_download_url_by_path(file_path: str) -> dict[str, Any]:
+async def run_get_download_url_by_path(file_path: str, *, user: dict) -> dict[str, Any]:
     # SEGURANÇA (IDOR/path-scope): impede gerar pre-signed URLs para chaves
     # S3 fora da árvore de documentos de clientes (ex.: backups/*.zip).
     assert_path_within_document_root(file_path)
+    # D-31: e dentro da árvore, só as pastas da rede de quem pede (404).
+    await exigir_ficheiro_no_ambito(file_path, user)
 
     loop = asyncio.get_event_loop()
     for path in s3_path_variations(file_path):

@@ -11829,3 +11829,21 @@ Fecho das duas dívidas registadas na Via Rápida.
 
 **Dito:** o mesmo `GET /users/{id}` admite as contas «órfãs» (sem empresa) quando a rede de omissão está no âmbito — por desenho, igual à lista.
 
+---
+
+## Iteração `d31-documentos-tasklogs-portal` (Out 2026)
+
+Fecho da D-31 (rotas por id) nas três superfícies que ficaram nomeadas.
+
+**1. `/documents/client/{client_id}/*`.** Dependência de router que resolve o id flexível e segue o cliente até ao processo; o router ganhou também `exigir_processo_no_ambito` (todas as rotas `{process_id}`) e a de `{doc_id}`. 404 antes de qualquer 403. O `init-folders` não recebia o utilizador.
+
+**2. O mesmo ficheiro pela chave S3** (`proxy`, `download-url`, `bulk-download`): `services/document_path_scope.py`. Um teste apanhou um defeito meu: a variação `Documentação_Clientes/` era descartada e a pasta legada ficava «órfã».
+
+**3. `/task-logs/{id}`.** O CEO da Domus lia, cancelava e apagava os registos da Power; agora dono / Master / Admin-CEO do âmbito, 404 uniforme.
+
+**4. `/portal/{client_id}/verify`.** Sem guarda de rede possível (porta pública); fixou-se por teste que a resposta não é um oráculo entre redes.
+
+**Medição:** 21 mutações; 20 morreram à primeira. A P9 (tirar a rede convidada do ramo do processo) sobreviveu porque o caso de teste passava pelo ramo do cliente; acrescentei um processo partilhado sem ficha de cliente e morreu.
+
+**Dito:** `portal_verify_attempts` sem TTL; rotas com o id no corpo (`search`, `confirm-upload`, `generate-upload-url`, `check-*-conflict`) não varridas; sem alterações de frontend.
+
