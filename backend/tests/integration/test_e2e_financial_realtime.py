@@ -184,10 +184,15 @@ class _Arnes:
     def __enter__(self):
         from services import (
             financial_engine, phase_automation, process_assignment,
-            process_indexing, task_log_service,
+            process_indexing, task_log_service, workflow_phases,
         )
 
+        # Workflow POR REDE: as fases saem do `workflow_phases` (cache por rede
+        # e `db` ao nível do módulo). Sem este patch lia a BD real do CI, onde o
+        # workflow completo tem outra 2.ª fase, e a cache de outro teste.
+        workflow_phases.invalidar_cache_de_fases()
         patches = [
+            patch.object(workflow_phases, "db", self.db),
             # Vários helpers fazem `from database import db` DENTRO da função
             # (ex.: `load_workflow_status_pipeline`), pelo que patchar apenas
             # os módulos não basta — é preciso a origem.
@@ -255,6 +260,9 @@ class _Arnes:
         for p in reversed(self._stack):
             p.stop()
         self._stack.clear()
+        from services.workflow_phases import invalidar_cache_de_fases
+
+        invalidar_cache_de_fases()  # as fases falsas não podem vazar para outros testes
         return False
 
 
