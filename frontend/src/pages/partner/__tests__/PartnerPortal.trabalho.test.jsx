@@ -23,6 +23,7 @@ vi.mock("@/services/partnerApi", () => ({
   listarCasos: vi.fn(),
   obterCaso: vi.fn(),
   submeterLead: vi.fn(),
+  obterDestinos: vi.fn(),
   obterUrlDeDescarga: vi.fn(),
   enviarFicheiro: vi.fn(),
   obterFormularioDoCliente: vi.fn(),
@@ -142,13 +143,44 @@ describe("o painel", () => {
 //  LEAD
 // ════════════════════════════════════════════════════════════════════
 describe("submeter uma lead", () => {
+  const escolherEmpresa = async (id = "cmp-power") => {
+    // Espera pelas opções (vêm do servidor): é nelas que se vai escolher.
+    await screen.findByRole("option", { name: "Power Real Estate" });
+    await userEvent.selectOptions(screen.getByLabelText("1. Empresa de destino *"), id);
+  };
   const preencherO_Essencial = async () => {
+    await escolherEmpresa();
     await userEvent.type(await screen.findByLabelText("Nome do cliente *"), "Joana Cliente");
     await userEvent.type(screen.getByLabelText("Email *"), "joana@cliente.pt");
   };
 
+  it("a empresa de destino vem PRIMEIRO: sem ela o resto está bloqueado", async () => {
+    montar("/parceiro/novo-lead");
+    const empresa = await screen.findByLabelText("1. Empresa de destino *");
+    await waitFor(() => expect(empresa).toBeEnabled());
+    expect(screen.getByTestId("dados-da-lead")).toBeDisabled();
+    expect(screen.getByLabelText("Nome do cliente *")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Submeter lead" })).toBeDisabled();
+    expect(screen.getByText(/Escolha primeiro a empresa/)).toBeInTheDocument();
+    expect(api.submeterLead).not.toHaveBeenCalled();
+
+    await escolherEmpresa();
+    expect(screen.getByLabelText("Nome do cliente *")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Submeter lead" })).toBeEnabled();
+  });
+
+  it("as empresas vêm do servidor (as que têm Index), não das ligações do parceiro", async () => {
+    api.obterPerfil.mockResolvedValue({ ...FIXTURES.perfil, redes: [] });
+    montar("/parceiro/novo-lead");
+    const empresa = await screen.findByLabelText("1. Empresa de destino *");
+    await waitFor(() => expect(within(empresa).getAllByRole("option")).toHaveLength(3));
+    expect(within(empresa).getByRole("option", { name: "Power Real Estate" })).toBeInTheDocument();
+    expect(within(empresa).getByRole("option", { name: "Precision Crédito" })).toBeInTheDocument();
+  });
+
   it("sem os dados obrigatórios e sem consentimento: mostra os erros e não envia", async () => {
     montar("/parceiro/novo-lead");
+    await escolherEmpresa();
     await userEvent.click(await screen.findByRole("button", { name: "Submeter lead" }));
     const alertas = screen.getAllByRole("alert").map((a) => a.textContent);
     expect(alertas).toEqual(expect.arrayContaining([
@@ -165,7 +197,7 @@ describe("submeter uma lead", () => {
     expect(api.submeterLead).not.toHaveBeenCalled();
   });
 
-  it("envia SÓ os campos que o servidor aceita", async () => {
+  it("envia SÓ os campos que o servidor aceita — a empresa, nunca a rede", async () => {
     api.submeterLead.mockResolvedValue(leadCriada);
     montar("/parceiro/novo-lead");
     await preencherO_Essencial();
@@ -176,6 +208,7 @@ describe("submeter uma lead", () => {
 
     await waitFor(() => expect(api.submeterLead).toHaveBeenCalledTimes(1));
     expect(api.submeterLead).toHaveBeenCalledWith({
+      empresa_id: "cmp-power",
       name: "Joana Cliente",
       email: "joana@cliente.pt",
       phone: "912345678",
@@ -183,19 +216,21 @@ describe("submeter uma lead", () => {
       has_property: true,
       consent_confirmed: true,
     });
+    expect(api.submeterLead.mock.calls[0][0]).not.toHaveProperty("network_id");
   });
 
-  it("depois de submeter, leva ao caso e deixa submeter outra", async () => {
+  it("depois de submeter, pede o comprovativo (é ele que a envia para a fila da empresa)", async () => {
     api.submeterLead.mockResolvedValue(leadCriada);
     montar("/parceiro/novo-lead");
     await preencherO_Essencial();
     await userEvent.click(screen.getByRole("checkbox", { name: /autorização do cliente/ }));
     await userEvent.click(screen.getByRole("button", { name: "Submeter lead" }));
 
-    expect(await screen.findByText("Lead submetida")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Ver o caso/ })).toHaveAttribute("href", "/parceiro/casos/lead-novo");
+    expect(await screen.findByText("Lead criada — falta o comprovativo")).toBeInTheDocument();
+    expect(screen.getByTestId("lead-criada-aviso")).toHaveTextContent(/fila de Power Real Estate/);
+    expect(screen.getByRole("link", { name: "Enviar o comprovativo" })).toHaveAttribute("href", "/parceiro/casos/lead-novo");
     await userEvent.click(screen.getByRole("button", { name: "Submeter outra" }));
-    expect(await screen.findByLabelText("Nome do cliente *")).toHaveValue("");
+    expect(await screen.findByLabelText("1. Empresa de destino *")).toHaveValue("");
   });
 
   it("o duplo clique do próprio parceiro diz que já tinha sido submetida", async () => {
@@ -215,38 +250,35 @@ describe("submeter uma lead", () => {
     await userEvent.click(screen.getByRole("button", { name: "Submeter lead" }));
     expect(await screen.findByText("Atingiu o limite diário de leads.")).toBeInTheDocument();
     expect(screen.getByLabelText("Nome do cliente *")).toHaveValue("Joana Cliente");
+    expect(screen.getByLabelText("1. Empresa de destino *")).toHaveValue("cmp-power");
   });
 
-  it("com duas redes é preciso escolher a rede — e é essa que vai", async () => {
-    api.obterPerfil.mockResolvedValue({
-      ...FIXTURES.perfil,
-      redes: [
-        { network_id: "rede-a", company_id: "c1", company_name: "Power", status: "active" },
-        { network_id: "rede-b", company_id: "c2", company_name: "Domus", status: "active" },
-      ],
-    });
-    api.submeterLead.mockResolvedValue(leadCriada);
+  it("um destino que deixou de servir (404) diz-o e mantém a escolha para trocar", async () => {
+    api.submeterLead.mockRejectedValue(erroHttp(404, "Empresa de destino indisponível."));
     montar("/parceiro/novo-lead");
     await preencherO_Essencial();
     await userEvent.click(screen.getByRole("checkbox", { name: /autorização do cliente/ }));
     await userEvent.click(screen.getByRole("button", { name: "Submeter lead" }));
-    expect(await screen.findByText("Escolha a rede a que esta lead se destina.")).toBeInTheDocument();
-    expect(api.submeterLead).not.toHaveBeenCalled();
-
-    await userEvent.selectOptions(screen.getByLabelText("Rede *"), "rede-b");
-    await userEvent.click(screen.getByRole("button", { name: "Submeter lead" }));
-    await waitFor(() => expect(api.submeterLead).toHaveBeenCalledWith(expect.objectContaining({ network_id: "rede-b" })));
+    expect(await screen.findByText("Empresa de destino indisponível.")).toBeInTheDocument();
   });
 
-  it("com uma só rede não pergunta nem envia a rede", async () => {
-    api.submeterLead.mockResolvedValue(leadCriada);
+  it("sem empresas disponíveis di-lo (e não deixa submeter)", async () => {
+    api.obterDestinos.mockResolvedValue({ destinos: [] });
     montar("/parceiro/novo-lead");
-    await preencherO_Essencial();
-    expect(screen.queryByLabelText("Rede *")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("checkbox", { name: /autorização do cliente/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Submeter lead" }));
-    await waitFor(() => expect(api.submeterLead).toHaveBeenCalled());
-    expect(api.submeterLead.mock.calls[0][0]).not.toHaveProperty("network_id");
+    expect(await screen.findByTestId("sem-destinos")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submeter lead" })).toBeDisabled();
+  });
+
+  it("uma resposta de destinos com a forma errada não rebenta o ecrã", async () => {
+    api.obterDestinos.mockResolvedValue({ destinos: { a: 1 } });
+    montar("/parceiro/novo-lead");
+    expect(await screen.findByTestId("sem-destinos")).toBeInTheDocument();
+  });
+
+  it("uma falha a carregar os destinos aparece junto ao campo", async () => {
+    api.obterDestinos.mockRejectedValue(erroHttp(500, "erro"));
+    montar("/parceiro/novo-lead");
+    expect(await screen.findByTestId("destinos-erro")).toBeInTheDocument();
   });
 });
 

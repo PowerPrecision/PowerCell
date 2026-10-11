@@ -8,12 +8,22 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
 from database import db
 from utils.input_sanitization import sanitize_string
 from services.form_config_defaults import DEFAULT_FORM_CONFIG, DEFAULT_STEP_CONFIG
+# O formulário é POR REDE: a rede em contexto de quem edita e a cópia própria
+# (copy-on-write). Ver `services/form_config_scope.py`.
+from services.form_config_scope import (
+    TIPO,
+    garantir_formulario_da_rede,
+    ler_documento,
+    tem_formulario_proprio,
+)
+from services.tenant_network import CAMPO_REDE
+from services.workflow_scope import empresas_da_rede, nomes_da_rede, rede_em_contexto
 
 
 class FormFieldConfig(BaseModel):
@@ -91,16 +101,27 @@ class CustomFieldCreate(BaseModel):
     hint: Optional[str] = None
 
 
-async def run_get_form_config(user: dict):
-    """Obter configuração atual do formulário.
+async def run_get_form_config(user: dict, request: Optional[Request] = None):
+    """Obter a configuração do formulário da REDE EM CONTEXTO.
 
     Se existir config na DB, faz merge com DEFAULT_FORM_CONFIG para garantir
     que novos campos adicionados em actualizações aparecem automaticamente.
     Campos customizados (is_custom=True) existentes na DB são preservados.
     """
-    config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
+    rede = await rede_em_contexto(user, request)
+    contexto = {
+        "network_id": rede,
+        "empresas": await nomes_da_rede(rede),
+        # O link de registo público é por EMPRESA (`/registo?empresa=<id>`).
+        "empresas_detalhe": await empresas_da_rede(rede),
+        "tem_formulario_proprio": await tem_formulario_proprio(rede),
+    }
+    config = await ler_documento(rede)
     if not config:
-        return {"fields": DEFAULT_FORM_CONFIG, "step_config": DEFAULT_STEP_CONFIG, "step_labels": {}}
+        return {
+            "fields": DEFAULT_FORM_CONFIG, "step_config": DEFAULT_STEP_CONFIG,
+            "step_labels": {}, **contexto,
+        }
 
     saved_fields = config.get("fields", [])
     # Construir mapa dos campos existentes (incluindo custom)
@@ -172,11 +193,13 @@ async def run_get_form_config(user: dict):
         else:
             merged_step_config[step_key] = db_entry or default_entry
     
-    return {"fields": merged, "step_config": merged_step_config, "step_labels": step_labels}
+    return {"fields": merged, "step_config": merged_step_config, "step_labels": step_labels, **contexto}
 
 
-async def run_update_form_config(data: FormConfigUpdate, user: dict):
-    """Actualizar configuração do formulário."""
+async def run_update_form_config(data: FormConfigUpdate, user: dict, request: Optional[Request] = None):
+    """Actualizar a configuração do formulário da REDE EM CONTEXTO."""
+    rede = await rede_em_contexto(user, request)
+    await garantir_formulario_da_rede(rede)
     now = datetime.now(timezone.utc).isoformat()
     
     # Sanitize field labels and options in incoming data
@@ -212,9 +235,9 @@ async def run_update_form_config(data: FormConfigUpdate, user: dict):
                     field["is_visible"] = True  # Force visible — it controls step visibility
     
     await db.form_config.update_one(
-        {"type": "public_form"},
+        {"type": TIPO, CAMPO_REDE: rede},
         {"$set": {
-            "type": "public_form",
+            "type": TIPO,
             "fields": data.fields,
             "step_config": step_config_to_save,
             "step_labels": data.step_labels if data.step_labels is not None else {},
@@ -224,11 +247,12 @@ async def run_update_form_config(data: FormConfigUpdate, user: dict):
         upsert=True
     )
     
-    return {"message": "Configuração atualizada com sucesso", "updated_at": now}
+    return {"message": "Configuração atualizada com sucesso", "updated_at": now, "network_id": rede}
 
 
-async def run_create_custom_field(data: CustomFieldCreate, user: dict):
-    """Criar um campo personalizado no formulário."""
+async def run_create_custom_field(data: CustomFieldCreate, user: dict, request: Optional[Request] = None):
+    """Criar um campo personalizado no formulário da REDE EM CONTEXTO."""
+    rede = await rede_em_contexto(user, request)
     if data.step < 1 or data.step > 6:
         raise HTTPException(status_code=400, detail="Passo deve ser entre 1 e 6")
     
@@ -247,8 +271,8 @@ async def run_create_custom_field(data: CustomFieldCreate, user: dict):
     # Gerar key único a partir do label
     field_key = f"custom_{uuid.uuid4().hex[:8]}"
     
-    # Obter config atual
-    config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
+    # Obter config atual (a da rede, ou o modelo de que ela vai nascer)
+    config = await ler_documento(rede)
     fields = config.get("fields", DEFAULT_FORM_CONFIG.copy()) if config else DEFAULT_FORM_CONFIG.copy()
     
     # Calcular order (último do passo)
@@ -272,11 +296,12 @@ async def run_create_custom_field(data: CustomFieldCreate, user: dict):
     
     fields.append(new_field)
     
+    await garantir_formulario_da_rede(rede)
     now = datetime.now(timezone.utc).isoformat()
     await db.form_config.update_one(
-        {"type": "public_form"},
+        {"type": TIPO, CAMPO_REDE: rede},
         {"$set": {
-            "type": "public_form",
+            "type": TIPO,
             "fields": fields,
             "updated_at": now,
             "updated_by": user.get("id"),
@@ -287,9 +312,10 @@ async def run_create_custom_field(data: CustomFieldCreate, user: dict):
     return {"message": "Campo personalizado criado", "field": new_field}
 
 
-async def run_delete_custom_field(field_key: str, user: dict):
-    """Eliminar campo personalizado do formulário."""
-    config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
+async def run_delete_custom_field(field_key: str, user: dict, request: Optional[Request] = None):
+    """Eliminar campo personalizado do formulário da REDE EM CONTEXTO."""
+    rede = await rede_em_contexto(user, request)
+    config = await ler_documento(rede)
     if not config:
         raise HTTPException(status_code=404, detail="Configuração não encontrada")
     
@@ -304,23 +330,25 @@ async def run_delete_custom_field(field_key: str, user: dict):
     
     fields = [f for f in fields if f.get("field_key") != field_key]
     
+    await garantir_formulario_da_rede(rede)
     now = datetime.now(timezone.utc).isoformat()
     await db.form_config.update_one(
-        {"type": "public_form"},
+        {"type": TIPO, CAMPO_REDE: rede},
         {"$set": {"fields": fields, "updated_at": now, "updated_by": user.get("id")}}
     )
     
     return {"message": "Campo personalizado eliminado"}
 
 
-async def run_reset_form_config(user: dict):
-    """Repor configuração padrão do formulário (remove campos personalizados)."""
+async def run_reset_form_config(user: dict, request: Optional[Request] = None):
+    """Repor a configuração padrão do formulário da REDE EM CONTEXTO (remove campos personalizados)."""
+    rede = await rede_em_contexto(user, request)
     now = datetime.now(timezone.utc).isoformat()
     
     await db.form_config.update_one(
-        {"type": "public_form"},
+        {"type": TIPO, CAMPO_REDE: rede},
         {"$set": {
-            "type": "public_form",
+            "type": TIPO,
             "fields": DEFAULT_FORM_CONFIG,
             "step_config": DEFAULT_STEP_CONFIG,
             "step_labels": {},

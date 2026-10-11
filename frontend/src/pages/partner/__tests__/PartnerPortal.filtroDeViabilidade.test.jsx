@@ -28,6 +28,7 @@ vi.mock("@/services/partnerApi", () => ({
   listarCasos: vi.fn(),
   obterCaso: vi.fn(),
   submeterLead: vi.fn(),
+  obterDestinos: vi.fn(),
   obterUrlDeDescarga: vi.fn(),
   enviarFicheiro: vi.fn(),
   obterFormularioDoCliente: vi.fn(),
@@ -63,6 +64,21 @@ describe("uma lead pendente (sem comprovativo)", () => {
     expect(aviso).toHaveTextContent("retida do seu lado");
     expect(aviso).toHaveTextContent("Comprovativo de Pagamento");
     expect(screen.getByText("Pendentes", { selector: "span, div" })).toBeInTheDocument();
+  });
+
+  it("diz a que empresa de destino o comprovativo vai fazer seguir a lead", async () => {
+    caso({ ...casoPendente, empresa_destino: "Power Real Estate" });
+    montar(`/parceiro/casos/${casoPendente.id}`);
+    const aviso = await screen.findByTestId("aviso-pendente");
+    expect(aviso).toHaveTextContent("fila da empresa de destino");
+    expect(within(aviso).getByTestId("empresa-destino")).toHaveTextContent("Power Real Estate");
+  });
+
+  it("uma lead antiga, sem empresa de destino, não mostra a linha (nem rebenta)", async () => {
+    caso({ ...casoPendente, empresa_destino: null });
+    montar(`/parceiro/casos/${casoPendente.id}`);
+    await screen.findByTestId("aviso-pendente");
+    expect(screen.queryByTestId("empresa-destino")).not.toBeInTheDocument();
   });
 
   it("mostra o comprovativo como pendente OBRIGATÓRIO, nos Pendentes", async () => {

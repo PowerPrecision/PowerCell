@@ -308,6 +308,7 @@ export const queryKeys = {
     casos: (filtros) => [...queryKeys.partner.casosAll(), filtros ?? {}],
     caso: (id) => [...queryKeys.partner.all, 'caso', id],
     formulario: (id) => [...queryKeys.partner.all, 'formulario', id],
+    destinos: () => [...queryKeys.partner.all, 'destinos'],
   },
 };
 

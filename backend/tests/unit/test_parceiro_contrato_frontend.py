@@ -39,7 +39,7 @@ from tests.unit.helpers_tenant import (  # noqa: F401
 )
 from tests.unit.test_parceiro_escrita import _S3Falso, _mundo
 from tests.unit.test_parceiro_identidade import ADMIN_POWER, PASSWORD, _activar, _convidar
-from tests.unit.test_parceiro_leitura import FASES, PT1, PT2, PT3, _documentos, _lead, _proc
+from tests.unit.test_parceiro_leitura import FASES, PT1, PT2, PT3, _documentos, _lead, _proc, com_indexador
 
 PASTA = Path(__file__).resolve().parents[3] / "frontend" / "src" / "test" / "fixtures" / "parceiro"
 ISO_COM_MICROSSEGUNDOS = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+\+00:00")
@@ -81,6 +81,7 @@ def mundo(fake_async_db, rede_de_omissao_incumbente, monkeypatch):
     monkeypatch.delenv("FRONTEND_URL", raising=False)
     monkeypatch.delenv("JWT_PARTNER_SECRET", raising=False)
     semear(fake_async_db)
+    com_indexador(fake_async_db)
     fake_async_db.workflow_statuses.docs.extend(dict(f) for f in FASES)
     fake_async_db.partners.docs.extend([copy.deepcopy(PT1), copy.deepcopy(PT2), copy.deepcopy(PT3)])
     return fake_async_db
@@ -96,19 +97,20 @@ def com_tudo(mundo):
     import services.partner_accounts as acc
     import services.partner_leads as leads
     import services.partner_portal_read as ppr
+    import services.network_triage as _triagem
     import services.partner_security as sec
     import services.partner_upload_ops as ops
     import services.portal_upload_ops as portal_ops
     import services.partner_client_form as pcf
     import services.partner_drafts as drafts
-    import services.public_form_config as pfc
+    import services.form_config_scope as pfc  # o formulário lê-se por aqui (por rede)
     import services.servico_do_parceiro as svc
     import services.user_management_scope as ums
 
     s3 = _S3Falso()
     veredicto = AsyncMock(return_value=SimpleNamespace(tamanho=48213, tipo_detectado="application/pdf"))
     with contextlib.ExitStack() as pilha:
-        pilha.enter_context(tenant_db(mundo, acc, sec, ppr, leads, ops, intake, counts, history, portal_ops,
+        pilha.enter_context(tenant_db(mundo, acc, sec, ppr, leads, ops, intake, counts, history, portal_ops, _triagem,
                                       audit, scope_mod, ums, svc, pcf, drafts, pfc))
         pilha.enter_context(patch.object(ops, "s3_service", s3))
         pilha.enter_context(patch.object(portal_ops, "s3_service", s3))
@@ -145,6 +147,9 @@ class TestOContratoComOFrontend:
             "created_at": "2026-10-03T12:00:00+00:00",
         })
 
+        import services.partner_leads as _leads
+
+        _escrever_ou_comparar("destinos", {"destinos": await _leads.destinos_do_parceiro(PT1)})
         _escrever_ou_comparar("painel", await ppr.run_get_dashboard(PT1))
         _escrever_ou_comparar("casos", await ppr.run_list_cases(PT1, page=1, size=20))
         _escrever_ou_comparar("caso_processo", await ppr.run_get_case(PT1, "a-novo"))
@@ -174,10 +179,10 @@ class TestOContratoComOFrontend:
         m = com_tudo
         _mundo(m)
         lead = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(
-            name="Joana Cliente", email="joana@cliente.pt", phone="912345678", consent_confirmed=True,
+            name="Joana Cliente", email="joana@cliente.pt", phone="912345678", empresa_id="cmp-power", consent_confirmed=True,
         ))
         repetida = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(
-            name="Joana Cliente", email="joana@cliente.pt", phone="912345678", consent_confirmed=True,
+            name="Joana Cliente", email="joana@cliente.pt", phone="912345678", empresa_id="cmp-power", consent_confirmed=True,
         ))
         mapa = {lead["id"]: "lead-novo"}
         _escrever_ou_comparar("lead_criada", _fixar(lead, mapa))
@@ -196,10 +201,10 @@ class TestOContratoComOFrontend:
         _escrever_ou_comparar("formulario_com_segundo_titular", _fixar(await pcf.run_get_client_form(PT1, lead["id"]), mapa))
 
         devolvida = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(
-            name="Carla Devolvida", email="carla@cliente.pt", consent_confirmed=True,
+            name="Carla Devolvida", email="carla@cliente.pt", empresa_id="cmp-power", consent_confirmed=True,
         ))
         expirada = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(
-            name="Eva Expirada", email="eva@cliente.pt", consent_confirmed=True,
+            name="Eva Expirada", email="eva@cliente.pt", empresa_id="cmp-power", consent_confirmed=True,
         ))
         for rascunho in m.partner_drafts.docs:
             if rascunho["id"] == devolvida["id"]:

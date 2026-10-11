@@ -342,6 +342,12 @@ async def entrar_na_triagem_da_rede(
 
     if decisao["state"] == ESTADO_EM_TRIAGEM:
         await _atribuir_indexador_da_rede(process_id, decisao[CAMPO_REDE])
+    elif explicita:
+        # Via Verde: salta o Index, mas o processo não pode ficar sem ninguém. Quem
+        # remete NUNCA escolhe o utilizador final — o destino distribui pelas suas
+        # regras de auto-atribuição (consultor e intermediário menos ocupados DA REDE
+        # DE DESTINO, que é a equipa do processo desde o registo acima).
+        await _distribuir_na_rede_de_destino(process_id, por_ordem_de)
 
     await _deixar_rasto(process_id, processo, registo, por_ordem_de)
     return registo
@@ -365,6 +371,26 @@ async def entrar_na_triagem_da_rede_sem_falhar(
             process_id, exc,
         )
         return None
+
+
+async def _distribuir_na_rede_de_destino(process_id: str, por_ordem_de: Any) -> None:
+    """Auto-atribui consultor + intermediário da rede de destino (Via Verde explícita).
+
+    Só preenche o que está vazio (a regra da dupla auto-atribuição). Sem ninguém
+    disponível não falha: o processo fica no pool do destino, visível à sua gestão,
+    que atribui à mão.
+    """
+    try:
+        from services.process_assignment import dual_auto_assign_on_pre_registo_transition
+
+        await dual_auto_assign_on_pre_registo_transition(
+            process_id, indexador_user_id=_texto(por_ordem_de) or None,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[INDEX] Falha a distribuir o processo %s na rede de destino (%s); "
+            "fica no pool do destino sem atribuição.", process_id, exc,
+        )
 
 
 async def _atribuir_indexador_da_rede(process_id: str, rede_destino: str) -> None:

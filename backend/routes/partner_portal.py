@@ -29,7 +29,7 @@ from services.partner_accounts import (
     run_partner_login,
 )
 from services.partner_client_form import ClientFormIn, run_get_client_form, run_save_client_form
-from services.partner_leads import PartnerLeadIn, run_submit_lead
+from services.partner_leads import PartnerLeadIn, destinos_do_parceiro, run_submit_lead
 from services.partner_portal_read import (
     run_get_case,
     run_get_dashboard,
@@ -114,6 +114,17 @@ async def partner_get_case(case_id: str, partner: dict = Depends(get_current_par
 
 
 # ── Escrita: leads e ficheiros ──────────────────────────────────────
+@router.get("/destinos")
+@limiter.limit("60/minute")
+async def partner_destinos(
+    request: Request,
+    response: Response,
+    partner: dict = Depends(get_current_partner),
+):
+    """As empresas de destino que o parceiro pode escolher (têm Index), ANTES de criar a lead."""
+    return {"destinos": await destinos_do_parceiro(partner)}
+
+
 @router.post("/leads")
 @limiter.limit("30/hour")
 async def partner_submit_lead(

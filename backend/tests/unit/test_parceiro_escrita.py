@@ -40,7 +40,7 @@ from tests.unit.helpers_tenant import (  # noqa: F401
     semear,
     tenant_db,
 )
-from tests.unit.test_parceiro_leitura import FASES, PT1, PT2, PT3, _lead, _proc
+from tests.unit.test_parceiro_leitura import FASES, PT1, PT2, PT3, _lead, _proc, com_indexador
 
 CHAVE_BOA = "Documentação Clientes/cli-a-novo/Index/cc.pdf"
 
@@ -85,6 +85,7 @@ class _S3Falso:
 @pytest.fixture
 def mundo(fake_async_db, rede_de_omissao_incumbente):
     semear(fake_async_db)
+    com_indexador(fake_async_db)
     fake_async_db.workflow_statuses.docs.extend(dict(f) for f in FASES)
     fake_async_db.partners.docs.extend([copy.deepcopy(PT1), copy.deepcopy(PT2), copy.deepcopy(PT3)])
     return fake_async_db
@@ -122,6 +123,8 @@ def com_bd(mundo, s3, veredicto, tarefas):
     import services.document_intake as intake
     import services.document_portal_counts as counts
     import services.history as history
+    import services.network_triage as triagem
+    import services.partner_accounts as contas
     import services.partner_drafts as drafts
     import services.partner_leads as leads
     import services.partner_portal_read as ppr
@@ -129,7 +132,7 @@ def com_bd(mundo, s3, veredicto, tarefas):
     import services.portal_upload_ops as portal_ops
 
     with contextlib.ExitStack() as pilha:
-        pilha.enter_context(tenant_db(mundo, ppr, ops, leads, intake, counts, history, portal_ops, drafts))
+        pilha.enter_context(tenant_db(mundo, ppr, ops, leads, intake, counts, history, portal_ops, drafts, triagem, contas))
         pilha.enter_context(patch.object(ops, "s3_service", s3))
         pilha.enter_context(patch.object(portal_ops, "s3_service", s3))
         pilha.enter_context(patch.object(ops, "exigir_conteudo_valido", veredicto))
@@ -157,7 +160,7 @@ def _mundo(m, *, indexado=False, skip_index=False):
 # ════════════════════════════════════════════════════════════════════
 def _corpo(**extra):
     return {"name": "Joana Cliente", "email": "joana@cliente.pt", "phone": "912345678",
-            "consent_confirmed": True, **extra}
+            "empresa_id": "cmp-power", "consent_confirmed": True, **extra}
 
 
 @pytest.mark.asyncio
@@ -197,33 +200,96 @@ class TestLeadCarimbosDoServidor:
         with pytest.raises(ValidationError):
             pl.PartnerLeadIn(**_corpo(**{campo: "x"}))
 
-    async def test_uma_rede_pedida_que_nao_e_do_parceiro_e_404(self, com_bd):
+    async def test_a_empresa_de_destino_e_obrigatoria(self, com_bd):
+        import services.partner_leads as pl
+
+        corpo = _corpo()
+        corpo.pop("empresa_id")
+        with pytest.raises(ValidationError):
+            pl.PartnerLeadIn(**corpo)
+
+    async def test_o_corpo_ja_nao_aceita_uma_rede(self, com_bd):
+        """O parceiro diz a EMPRESA; a rede deriva dela no servidor (chave interna)."""
+        import services.partner_leads as pl
+
+        with pytest.raises(ValidationError):
+            pl.PartnerLeadIn(**_corpo(network_id=REDE_INCUMBENTE))
+
+    async def test_o_parceiro_e_um_agente_livre_escolhe_qualquer_empresa_com_index(self, com_bd):
+        """A Tomé (PT3) está ligada só à Domus (sem Index) e submete à Power/Precision: a rede
+        passa a ser uma ligação dele, a lead leva o carimbo da empresa ESCOLHIDA e a
+        visibilidade continua a ser «relação ∧ ligação activa»."""
+        import services.partner_leads as pl
+        import services.partner_portal_read as ppr
+
+        r = await pl.run_submit_lead(PT3, pl.PartnerLeadIn(**_corpo(empresa_id="cmp-precision")))
+        lead = _rascunho(com_bd, r["id"])
+        assert lead["network_id"] == REDE_INCUMBENTE
+        assert lead["company_id"] == "cmp-precision" and lead["company_name"] == "Precision Crédito"
+
+        guardado = next(p for p in com_bd.partners.docs if p["id"] == "pt-3")
+        ligacao = next(x for x in guardado["redes"] if x["network_id"] == REDE_INCUMBENTE)
+        assert ligacao["status"] == "active" and ligacao["origem"] == "marketplace"
+        assert any(x["network_id"] == REDE_DOMUS for x in guardado["redes"]), "a ligação de origem fica"
+        # Na ronda seguinte (o parceiro é relido) a lead dele aparece-lhe.
+        assert r["id"] in {c["id"] for c in (await ppr.run_list_cases(guardado))["items"]}
+
+    async def test_escolher_outra_vez_a_mesma_rede_nao_duplica_a_ligacao(self, com_bd):
+        import services.partner_leads as pl
+
+        await pl.run_submit_lead(PT3, pl.PartnerLeadIn(**_corpo(empresa_id="cmp-power", email="a@c.pt")))
+        guardado = next(p for p in com_bd.partners.docs if p["id"] == "pt-3")
+        await pl.run_submit_lead(guardado, pl.PartnerLeadIn(**_corpo(empresa_id="cmp-precision", email="b@c.pt")))
+        guardado = next(p for p in com_bd.partners.docs if p["id"] == "pt-3")
+        assert len([x for x in guardado["redes"] if x["network_id"] == REDE_INCUMBENTE]) == 1
+
+    @pytest.mark.parametrize("empresa", ["cmp-domus", "cmp-que-nao-existe", "Power Real Estate"])
+    async def test_um_destino_que_nao_serve_e_404_igual_para_todos(self, com_bd, empresa):
+        """Sem Index (a Domus), inexistente, o NOME em vez do id: a mesma resposta.
+        Nada é gravado e nenhuma ligação é criada."""
         import services.partner_leads as pl
 
         with pytest.raises(HTTPException) as erro:
-            await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo(network_id=REDE_DOMUS)))
+            await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo(empresa_id=empresa)))
         assert erro.value.status_code == 404
         assert not [c for c in (*com_bd.clients.docs, *com_bd.partner_drafts.docs) if c.get("fonte") == "partner_portal"]
+        assert len(next(p for p in com_bd.partners.docs if p["id"] == "pt-1")["redes"]) == 1
 
-    async def test_com_duas_redes_e_preciso_escolher_e_so_entre_as_suas(self, com_bd):
+    async def test_uma_empresa_inactiva_nao_e_destino(self, com_bd):
         import services.partner_leads as pl
 
-        duas = {**PT1, "redes": [PT1["redes"][0], {"network_id": REDE_DOMUS, "company_id": "cmp-domus",
-                                                    "company_name": "Domus", "status": "active"}]}
-        with pytest.raises(HTTPException) as ambigua:
-            await pl.run_submit_lead(duas, pl.PartnerLeadIn(**_corpo()))
-        assert ambigua.value.status_code == 400
-        r = await pl.run_submit_lead(duas, pl.PartnerLeadIn(**_corpo(network_id=REDE_DOMUS)))
-        lead = _rascunho(com_bd, r["id"])
-        assert lead["network_id"] == REDE_DOMUS and lead["company_id"] == "cmp-domus"
+        for e in com_bd.companies.docs:
+            if e["id"] == "cmp-precision":
+                e["is_active"] = False
+        with pytest.raises(HTTPException) as erro:
+            await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo(empresa_id="cmp-precision")))
+        assert erro.value.status_code == 404
 
-    async def test_uma_ligacao_suspensa_nao_recebe_leads(self, com_bd):
+    async def test_uma_ligacao_suspensa_nunca_e_destino_nem_se_reactiva_sozinha(self, com_bd):
+        """A gestão da rede suspendeu o parceiro: escolher essa rede não o reactiva."""
         import services.partner_leads as pl
 
         suspenso = {**PT1, "redes": [{**PT1["redes"][0], "status": "suspended"}]}
+        com_bd.partners.docs[:] = [p for p in com_bd.partners.docs if p["id"] != "pt-1"] + [copy.deepcopy(suspenso)]
         with pytest.raises(HTTPException) as erro:
             await pl.run_submit_lead(suspenso, pl.PartnerLeadIn(**_corpo()))
-        assert erro.value.status_code == 403
+        assert erro.value.status_code == 404
+        guardado = next(p for p in com_bd.partners.docs if p["id"] == "pt-1")
+        assert guardado["redes"][0]["status"] == "suspended"
+        assert len(guardado["redes"]) == 1
+
+    async def test_o_directorio_so_tem_empresas_com_index_e_nunca_a_rede(self, com_bd):
+        import services.partner_leads as pl
+
+        destinos = await pl.destinos_do_parceiro(PT3)
+        assert {d["company_id"] for d in destinos} == {"cmp-power", "cmp-precision"}
+        assert all(set(d) == {"company_id", "company_name"} for d in destinos), "a chave interna não sai"
+
+    async def test_o_directorio_esconde_a_rede_onde_o_parceiro_esta_suspenso(self, com_bd):
+        import services.partner_leads as pl
+
+        suspenso = {**PT1, "redes": [{**PT1["redes"][0], "status": "suspended"}]}
+        assert await pl.destinos_do_parceiro(suspenso) == []
 
     async def test_a_lead_nao_aparece_a_outro_parceiro_nem_a_equipa_de_outra_rede(self, com_bd):
         import services.partner_leads as pl

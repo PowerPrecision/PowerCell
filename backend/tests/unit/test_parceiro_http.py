@@ -34,7 +34,7 @@ from tests.unit.helpers_tenant import (  # noqa: F401
     tenant_db,
 )
 from tests.unit.test_parceiro_escrita import _S3Falso
-from tests.unit.test_parceiro_leitura import FASES, _lead, _proc
+from tests.unit.test_parceiro_leitura import FASES, _lead, _proc, com_indexador
 
 PASSWORD = "Parceiro#2026x"
 ADMIN = {"id": "u-ana", "name": "Ana", "email": "ana@power.pt", "role": "admin", "effective_role": "admin"}
@@ -51,6 +51,7 @@ def cliente(fake_async_db, rede_de_omissao_incumbente, monkeypatch, limiter_de_p
     import services.partner_accounts as acc
     import services.partner_leads as leads
     import services.partner_portal_read as ppr
+    import services.network_triage as _triagem
     import services.partner_security as sec
     import services.partner_upload_ops as ops
     import services.portal_upload_ops as portal_ops
@@ -65,6 +66,7 @@ def cliente(fake_async_db, rede_de_omissao_incumbente, monkeypatch, limiter_de_p
     monkeypatch.delenv("FRONTEND_URL", raising=False)
     monkeypatch.delenv("JWT_PARTNER_SECRET", raising=False)
     semear(fake_async_db)
+    com_indexador(fake_async_db)
     fake_async_db.workflow_statuses.docs.extend(dict(f) for f in FASES)
     s3 = _S3Falso()
     veredicto = AsyncMock(return_value=SimpleNamespace(tamanho=2048, tipo_detectado="application/pdf"))
@@ -84,7 +86,7 @@ def cliente(fake_async_db, rede_de_omissao_incumbente, monkeypatch, limiter_de_p
         return {"ok": True}
 
     with contextlib.ExitStack() as pilha:
-        pilha.enter_context(tenant_db(fake_async_db, acc, sec, ppr, leads, ops, intake, counts, history, portal_ops,
+        pilha.enter_context(tenant_db(fake_async_db, acc, sec, ppr, leads, ops, intake, counts, history, portal_ops, _triagem,
                                       audit, scope_mod, ums))
         pilha.enter_context(patch.object(ops, "s3_service", s3))
         pilha.enter_context(patch.object(portal_ops, "s3_service", s3))
@@ -154,7 +156,7 @@ class TestOSucessoPelaPilha:
     def test_submeter_uma_lead_e_200_e_aparece_na_lista(self, sessao):
         c = sessao
         r = c.http.post("/api/partner/leads", headers=c.cab, json={
-            "name": "Joana Cliente", "email": "joana@c.pt", "phone": "912345678", "consent_confirmed": True,
+            "name": "Joana Cliente", "email": "joana@c.pt", "phone": "912345678", "empresa_id": "cmp-power", "consent_confirmed": True,
         })
         assert r.status_code == 200, r.text
         assert "x-ratelimit-limit" in {k.lower() for k in r.headers}
@@ -252,7 +254,7 @@ class TestFamiliasPelaPilha:
 class TestValidacaoETravao:
     def test_campos_a_mais_sao_422(self, sessao):
         c = sessao
-        base = {"name": "Joana Cliente", "email": "joana@c.pt", "consent_confirmed": True}
+        base = {"name": "Joana Cliente", "email": "joana@c.pt", "empresa_id": "cmp-power", "consent_confirmed": True}
         for extra in ({"lead_status": "converted"}, {"submitted_by_partner_id": "outro"}, {"company_id": "cmp-domus"}):
             assert c.http.post("/api/partner/leads", headers=c.cab, json={**base, **extra}).status_code == 422
         assert c.http.post("/api/partner/auth/login", json={"email": "a@b.pt", "password": "x", "admin": True}).status_code == 422

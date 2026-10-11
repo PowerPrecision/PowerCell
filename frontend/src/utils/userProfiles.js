@@ -180,6 +180,41 @@ export function buildUserProfileItems(user, options = {}) {
   });
 }
 
+/** Nome da vista global do Master (UCR sem empresa real). */
+export const NOME_DA_VISTA_GLOBAL = "Sistema";
+
+/**
+ * Rótulo de UMA linha do «Modo de Operação» (selector de perfil do topo).
+ *
+ * O Master tem um UCR por empresa, todos com o mesmo cargo: escrever o
+ * cargo em cada linha («Master (Global) (Domus)», «Master (Global) (Power…)»)
+ * é ruído — o que distingue as linhas é a EMPRESA. Por isso, no Master a linha
+ * mostra só o nome limpo da empresa, e «Sistema» para a vista global (UCR sem
+ * empresa real). Para os restantes cargos o cargo continua a ser a informação:
+ * quem é Diretor numa casa e Consultor noutra precisa de ver qual é qual.
+ *
+ * @param {{role: string, company_name?: string|null, company_id?: string|null}} perfil
+ * @param {{varias_empresas?: boolean}} [opcoes]
+ * @returns {{principal: string, secundario: string}} `secundario` é a empresa
+ *   entre parênteses (vazio quando não acrescenta nada).
+ */
+export function rotuloDoPerfil(perfil, opcoes = {}) {
+  const role = perfil?.role;
+  const nome = typeof perfil?.company_name === "string" ? perfil.company_name.trim() : "";
+  const empresaReal = Boolean(perfil?.company_id) && perfil.company_id !== "default";
+
+  if (role === "master") {
+    return {
+      principal: empresaReal && nome ? nome : NOME_DA_VISTA_GLOBAL,
+      secundario: "",
+    };
+  }
+  return {
+    principal: ROLE_LABELS[role] || role || "",
+    secundario: opcoes.varias_empresas && nome ? nome : "",
+  };
+}
+
 /**
  * Tabs da Área Pessoal — um ProfileRoleTab por perfil válido.
  */

@@ -370,3 +370,7 @@ class PublicClientRegistration(BaseModel):
     personal_data: Optional[dict] = None
     real_estate_data: Optional[dict] = None
     titular2_data: Optional[dict] = None
+    empresa_id: Optional[str] = Field(
+        None, max_length=100,
+        description="Identificador da empresa do link de registo (`?empresa=`): o formulário é por rede.",
+    )

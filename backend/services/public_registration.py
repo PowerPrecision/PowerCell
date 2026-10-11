@@ -19,6 +19,9 @@ from services.s3_document_root import pasta_para_gravar
 from services.s3_storage import s3_service
 from models.auth import UserRole
 from models.process import PublicClientRegistration
+from fastapi import HTTPException
+from services.form_config_scope import rede_do_link_publico
+from services.tenant_network import CAMPO_REDE, documento_sem_marca_de_tenant
 from services.email import send_new_client_notification
 from services.alerts import notify_new_client_registration
 from services.background_tasks import spawn_background_task
@@ -57,6 +60,20 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
     clean_name = sanitize_name(data.name) if data.name else ""
     clean_phone = sanitize_phone(data.phone) if data.phone else None
     
+    # O formulário é POR EMPRESA: o link diz de que empresa é, e o cliente nasce dela.
+    # Identificador desconhecido/inactivo recusa-se (404) em vez de registar no vazio.
+    carimbo_da_empresa: dict = {}
+    try:
+        _rede, _empresa = await rede_do_link_publico(data.empresa_id)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"success": False, "detail": exc.detail})
+    if _empresa:
+        carimbo_da_empresa = {
+            "company_id": _empresa.get("id"),
+            "company_name": _empresa.get("name"),
+            CAMPO_REDE: _rede,
+        }
+
     # Processar dados do formulário
     has_property = data.has_property or False
     process_type = data.process_type or "credito_habitacao"
@@ -179,6 +196,10 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         except Exception as e:
             logger.warning(f"Falha ao encriptar updates do cliente existente {client_id}: {e}")
         
+        # Um cliente da Pool (sem marca nenhuma) que se regista no formulário de uma
+        # empresa passa a ser dela; o de OUTRA rede nunca é recarimbado por um link.
+        if carimbo_da_empresa and documento_sem_marca_de_tenant(existing_client):
+            client_updates.update(carimbo_da_empresa)
         await db.clients.update_one({"id": client_id}, {"$set": client_updates})
         logger.info(f"Cliente existente atualizado via formulário público: {client_id}")
     else:
@@ -216,6 +237,7 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             "pending_process_type": process_type,
             "titular2_data": data.titular2_data if data.titular2_data else {},
             "pending_real_estate_data": data.real_estate_data if data.real_estate_data else {},
+            **carimbo_da_empresa,
         }
 
         # Merge personal_data do formulário em dados_pessoais

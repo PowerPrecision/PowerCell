@@ -9714,3 +9714,5 @@ tarefa de IA `executive_report_analysis` (modelo do painel); cabeçalho de respo
 **Parceiro.** Lead retida em `partner_drafts` → comprovativo → `db.clients` com `validacao_financeira` → Validar/Rejeitar (CEO, Diretor, Administrativo): aviso, nunca travão. Rejeitada volta ao parceiro (`devolvida`). 60 dias parada → `expirado` (job `scheduled_tasks`). Dados do cliente editáveis com a estrutura do registo público (`partner_client_form`).
 
 Ver `worklog.md` (bloco-a-b-c-…), `TECHNICAL_DEBT.md` D-35 e `FRONTEND_GUIDELINES.md` § 27.67.
+
+**Formulários por rede e mercado B2B (Out 2026).** `form_config.network_id` (sem rede = modelo, copy-on-write) via `services/form_config_scope.py`; o registo público abre o formulário da empresa do link (`?empresa=<company_id>`). O Parceiro escolhe a «Empresa de Destino» (`GET /partner/destinos`, redes com Index) antes de anexar documentos; a partilha explícita entra na fila de triagem da rede destino e a Via Verde distribui nela, sem o remetente escolher o utilizador. Ver `worklog.md` (`formularios-por-rede-e-mercado-b2b`) e AGENTS.md.

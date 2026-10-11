@@ -972,3 +972,118 @@ class TestOsEscritoresAplicamORegime:
         por carimbar e desaparecia da Domus."""
         fonte = (BACKEND / "services" / "client_process_ops.py").read_text(encoding="utf-8")
         assert "resolve_tenant_stamp(user)" in fonte
+
+
+# ════════════════════════════════════════════════════════════════════
+# Encaminhamento B2B: o remetente escolhe a REDE, nunca a pessoa
+# ════════════════════════════════════════════════════════════════════
+def _processo_por_atribuir(db):
+    p = _processo(db)
+    for chave in ("assigned_consultor_id", "assigned_consultor_ids", "consultor_name", "consultor_names"):
+        p.pop(chave, None)
+    return p
+
+
+def _com_intermediario_na_precision(db):
+    db.users.docs.append({"id": "u-ines", "name": "Inês", "email": "i@p.pt", "role": "intermediario", "is_active": True})
+    db.user_company_roles.docs.append(
+        {"user_id": "u-ines", "company_id": "cmp-precision", "company_name": "Precision Crédito",
+         "role": "intermediario", "is_default": True})
+    return db
+
+
+class TestORemetenteNuncaEscolheOUtilizador:
+    @pytest.mark.asyncio
+    async def test_via_verde_explicita_distribui_pela_equipa_do_DESTINO(self, fake_async_db):
+        """A Domus envia em Via Verde: quem trata é gente da Precision, escolhida pelas
+        regras de auto-atribuição do destino — nunca da Domus e nunca por quem remeteu."""
+        import services.process_sharing as ps
+
+        db = _com_intermediario_na_precision(_mundo(fake_async_db))
+        _processo_por_atribuir(db)
+        with _ambiente(db):
+            r = await ps.partilhar_com_rede("p-domus", REDE_INCUMBENTE, via_verde=True, por_ordem_de="u-bruno")
+
+        p = _processo(db)
+        assert r["triagem"]["state"] == "via_verde"
+        assert p["assigned_consultor_ids"] == ["u-cris"], "consultor do destino (a Dina é da Domus)"
+        assert p["assigned_mediador_ids"] == ["u-ines"]
+        assert p["network_id"] == REDE_DOMUS, "partilhar nunca muda de quem é"
+
+    @pytest.mark.asyncio
+    async def test_via_verde_nao_tira_a_quem_ja_la_estava(self, fake_async_db):
+        """Quem já tratava o processo em casa continua: a distribuição só preenche o vazio."""
+        import services.process_sharing as ps
+
+        db = _com_intermediario_na_precision(_mundo(fake_async_db))
+        with _ambiente(db):
+            await ps.partilhar_com_rede("p-domus", REDE_INCUMBENTE, via_verde=True)
+        p = _processo(db)
+        assert p["assigned_consultor_ids"] == ["u-dina"]
+        assert p["assigned_mediador_ids"] == ["u-ines"]
+
+    @pytest.mark.asyncio
+    async def test_destino_sem_gente_disponivel_nao_falha_e_fica_no_pool(self, fake_async_db):
+        import services.process_sharing as ps
+
+        db = _mundo(fake_async_db)
+        _processo_por_atribuir(db)
+        db.users.docs[:] = [u for u in db.users.docs if u["id"] not in {"u-cris"}]
+        with _ambiente(db):
+            r = await ps.partilhar_com_rede("p-domus", REDE_INCUMBENTE, via_verde=True)
+        assert r["partilhado"] is True
+        assert not _processo(db).get("assigned_consultor_ids")
+
+    @pytest.mark.asyncio
+    async def test_a_triagem_normal_continua_a_dar_so_o_indexador_do_destino(self, fake_async_db):
+        import services.process_sharing as ps
+
+        db = _com_intermediario_na_precision(_mundo(fake_async_db))
+        _processo_por_atribuir(db)
+        with _ambiente(db):
+            await ps.partilhar_com_rede("p-domus", REDE_INCUMBENTE)
+        p = _processo(db)
+        assert p["assigned_indexacao_id"] == "u-ivo"
+        assert not p.get("assigned_consultor_ids") and not p.get("assigned_mediador_ids"), \
+            "o consultor só vem depois do Index"
+
+    @pytest.mark.asyncio
+    async def test_a_distribuicao_e_uma_ordem_do_servico_nao_do_pedido(self, fake_async_db):
+        """Guarda de fonte: o `partilhar_com_rede` não tem parâmetro de utilizador a atribuir."""
+        import inspect
+        import services.process_sharing as ps
+
+        parametros = set(inspect.signature(ps.partilhar_com_rede).parameters)
+        assert not ({"user_id", "assigned_to", "consultor_id", "indexador_id", "utilizador"} & parametros), parametros
+        assert "network_id" in parametros or "rede_destino" in parametros or len(parametros) >= 2
+
+    def test_o_corpo_do_pedido_recusa_um_utilizador(self, cliente_http):
+        c, db = cliente_http
+        r = c.post("/processes/p-domus/partners", json={"network_id": "rede:omega", "user_id": "u-olga"})
+        assert r.status_code == 422
+        assert not _processo(db).get("partner_network_ids"), "nada foi partilhado"
+        ok = c.post("/processes/p-domus/partners", json={"network_id": "rede:omega"})
+        assert ok.status_code == 200
+
+
+class TestAFilaAntigaEDoDestino:
+    @pytest.mark.asyncio
+    async def test_um_indexador_so_puxa_da_fila_da_sua_rede(self, fake_async_db):
+        import services.process_assignment as pa
+
+        db = _com_a_omega(_mundo(fake_async_db))
+        db.processes.docs.append({
+            "id": "p-fila-omega", "status": "fila_espera", "network_id": REDE_DOMUS,
+            "created_at": "2026-01-01", "hub_triage": {"state": "triagem", "network_id": "rede:omega"},
+        })
+        db.processes.docs.append({
+            "id": "p-fila-precision", "status": "fila_espera", "network_id": REDE_DOMUS,
+            "created_at": "2026-01-02", "hub_triage": {"state": "triagem", "network_id": REDE_INCUMBENTE},
+        })
+        with _ambiente(db), patch("services.notification_service.send_notification_with_preference_check", AsyncMock()):
+            n = await pa.process_queue_for_freed_indexer("u-ivo")  # indexador da Precision
+        assert n == 1
+        por_id = {p["id"]: p for p in db.processes.docs}
+        assert por_id["p-fila-precision"]["assigned_indexacao_id"] == "u-ivo"
+        assert por_id["p-fila-omega"]["status"] == "fila_espera", "a fila da Omega não é da Precision"
+        assert not por_id["p-fila-omega"].get("assigned_indexacao_id")

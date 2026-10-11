@@ -32,9 +32,10 @@ export function efeitoDaPartilha(destino, viaVerde) {
   if (!destino.tem_index) {
     return "Esta rede não tem equipa de Index: vai ver o processo, sem fila de triagem.";
   }
+  // O remetente escolhe a REDE, nunca a pessoa: a distribuição interna é do destino.
   return viaVerde
-    ? "Via Verde: salta o Index desta rede e fica logo à guarda da consultoria."
-    : "Entra na fila de Index desta rede.";
+    ? "Via Verde: salta o Index desta rede; consultor e intermediário são atribuídos pela própria rede de destino."
+    : "Entra na fila de Index desta rede; é a rede que decide quem o trata.";
 }
 
 /** Nome legível de um destino: as empresas da rede. */

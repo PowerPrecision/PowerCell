@@ -37,6 +37,7 @@ import { ROLE_LABELS, ROLE_ICONS } from "../../utils/roleUtils";
 import {
   buildUserProfileItems,
   getDistinctCompanies,
+  rotuloDoPerfil,
   resolveActiveCompanyName,
 } from "../../utils/userProfiles";
 
@@ -148,7 +149,11 @@ const ContextSwitcher = () => {
               const selectedRole = profile.role;
               const selectedCompanyId = profile.company_id;
               const isActive = selectedRole === effectiveRole && (!selectedCompanyId || selectedCompanyId === effectiveCompanyId);
-              const label = ROLE_LABELS[selectedRole] || selectedRole;
+              // Master: só o nome da empresa (ou «Sistema»); os outros cargos
+              // mantêm cargo + empresa. Ver `rotuloDoPerfil`.
+              const { principal: label, secundario } = rotuloDoPerfil(profile, {
+                varias_empresas: companies.length > 1,
+              });
               const icon = ROLE_ICONS[selectedRole] || "👤";
               return (
                 <DropdownMenuItem
@@ -165,8 +170,8 @@ const ContextSwitcher = () => {
                   <span className="text-base">{icon}</span>
                   <div className="flex-1 min-w-0">
                     <span>{label}</span>
-                    {companies.length > 1 && profile.company_name && (
-                      <span className="text-[10px] text-muted-foreground ml-1">({profile.company_name})</span>
+                    {secundario && (
+                      <span className="text-[10px] text-muted-foreground ml-1">({secundario})</span>
                     )}
                   </div>
                   {isActive && (

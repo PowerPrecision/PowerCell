@@ -963,6 +963,19 @@ async def create_ttl_indexes(db) -> dict:
     ]:
         await _create_index_safe(db.workflow_statuses, idx, "workflow_statuses", results)
 
+    # Formulário público POR REDE: lê-se um documento por (tipo, rede) e o modelo
+    # é o que não tem rede. Não é único aqui pelo mesmo motivo do workflow: o único
+    # nasce no `scripts/migrar_formularios_por_rede.py`, depois de provar que não há
+    # duplicados; o upsert por (tipo, rede) já evita criá-los.
+    for idx in [
+        {"keys": [("type", 1), ("network_id", 1)], "name": "idx_form_config_tipo_rede"},
+    ]:
+        await _create_index_safe(db.form_config, idx, "form_config", results)
+    for idx in [
+        {"keys": [("network_id", 1)], "name": "idx_form_templates_rede", "sparse": True},
+    ]:
+        await _create_index_safe(db.form_templates, idx, "form_templates", results)
+
     return results
 
 

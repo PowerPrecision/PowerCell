@@ -11780,3 +11780,21 @@ Cinco directivas do dono do produto, sobre o fecho do D-34.
 **5. D-34 fechado.** Emails/modelos, análise e geração por IA e `link-process` exigem processo aberto; excepção nova escrita: `POST /emails/sync/{id}` (só lê).
 
 **Deploy:** (1) `python -m scripts.migrar_workflow_por_rede` (ver) e depois `--aplicar [--limpar-is-hub]`; (2) confirmar `TRUSTED_PROXY_HOPS=1` e `TENANT_DEFAULT_NETWORK_ID`.
+
+---
+
+## Iteração `formularios-por-rede-e-mercado-b2b` (Out 2026)
+
+Quatro directivas do dono do produto, depois da migração do workflow por rede.
+
+**1. Parceiro como agente livre.** `GET /partner/destinos` lista as empresas de redes com Index; a lead exige `empresa_id` antes de aceitar documentos; o Comprovativo liberta-a para a fila dessa rede. A ligação de mercado cria-se na primeira utilização; suspensa = nunca destino; 404 uniforme.
+
+**2. Formulários por rede (D-37).** `form_config_scope` como ponto único; `?empresa=` no registo público; Portal e Portal do Parceiro derivam o esquema da rede; administração só da rede em contexto, por Axios. Migração `migrar_formularios_por_rede`.
+
+**3. Encaminhamento B2B.** Partilha explícita → fila de triagem da rede destino; Via Verde distribui consultor + intermediário no destino; corpo `extra="forbid"`; lista de espera restrita ao destino.
+
+**4. Seletor Master.** Só o nome da empresa; «Sistema» para a vista global.
+
+**Dito:** links sem `empresa` caem na rede de omissão; o directório de destinos mostra nomes de empresa a parceiros activos; a Via Rápida ainda deixa escolher o utilizador.
+
+**Deploy:** `cd backend && python -m scripts.migrar_formularios_por_rede` e depois `--aplicar`; distribuir os links `/registo?empresa=<company_id>`; confirmar `TENANT_DEFAULT_NETWORK_ID` e `TRUSTED_PROXY_HOPS`.

@@ -525,24 +525,26 @@ existência e o nome de uma empresa-cliente do sistema é visível a outra. Se u
 rede não quiser ser listada, falta um interruptor `listavel_para_partilha` na
 empresa (ou uma lista de fornecedores aprovados por rede). **Decisão de produto.**
 
-### D-37 · Formulários continuam globais; workflow por rede ainda sem «repor modelo»
-**Onde:** `services/form_config_*.py`, `services/workflow_scope.py`
+### D-37 · Workflow por rede: o que ficou de fora (a parte dos formulários FECHOU)
+**Onde:** `services/workflow_scope.py`, `services/form_config_scope.py`
 
-O pedido incluía «formulários» entre o que deixa de ser global. Migrou-se o
-**workflow** (fases, flags, macro-fases, modelos de tarefas); o `form_config`
-(registo público, passos e campos) **não** — é consumido pelo registo público,
-pelo Portal (`portal_profile_schema`) e pelo Portal do Parceiro
-(`partner_client_form`), três leitores a que falta saber de que rede é o pedido
-(o registo público é anónimo: a rede vem do link/empresa). Fazê-lo sem esse
-desenho cortava o registo público de quem não tem rede resolvida.
-Outros pormenores assumidos do workflow por rede: (a) um processo **convidado**
-(partilhado) mostra as colunas/rótulos com as fases de QUEM OLHA, e a semântica
-(fechado, portal) com as da rede dona; (b) os contadores de carga dos pools
-usam a união das fases terminais de todas as redes (aproximação); (c) não há
-ainda botão «repor ao modelo» — apagar a cópia de uma rede à mão repõe a leitura
-do modelo; (d) editar o MODELO (`network_id` ausente) só se faz por script.
-**Para fechar:** decidir a rede do registo público e migrar o `form_config` com
-o mesmo molde (`network_id`, modelo, copy-on-write).
+Os **formulários** (`form_config`) fecharam na iteração `formularios-por-rede-e-mercado-b2b`
+(ver «Fechadas»). Do **workflow** por rede ficam, assumidos:
+(a) um processo **convidado** (partilhado) mostra as colunas/rótulos com as fases
+de QUEM OLHA, e a semântica (fechado, portal) com as da rede dona;
+(b) os contadores de carga dos pools usam a união das fases terminais de todas as
+redes (aproximação); (c) não há ainda botão «repor ao modelo» — apagar a cópia de
+uma rede à mão repõe a leitura do modelo; (d) editar o MODELO (`network_id`
+ausente) só se faz por script.
+**Novos, da iteração dos formulários:** (e) um link de registo **sem** `?empresa=`
+(links antigos) cai no formulário da rede de omissão e deixa o cliente por
+carimbar (Pool) — mantém os links existentes a funcionar, mas é o que se deve
+substituir pelos links por empresa; (f) o directório «Empresa de Destino» do
+Portal do Parceiro expõe o nome das empresas das redes com Index a qualquer
+parceiro activo (o mesmo compromisso do D-36); (g) a **Via Rápida** (partilha
+implícita ao atribuir um utilizador de outra rede) ainda deixa o remetente
+escolher o utilizador — só a partilha explícita (Via Verde / rede de destino)
+distribui sozinha. Decidir se a Via Rápida se desliga.
 
 ### D-35 · Bloco A/B/C: o que ficou de fora, dito
 **Onde:** `services/network_triage.py` (ex-`hub_triage.py`; o Hub único acabou — ver AGENTS.md), `services/partner_drafts.py`, `services/financial_validation.py`, `services/tenant_network.py`
@@ -599,6 +601,7 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 
 | # | Dívida | Fechada em |
 |---|---|---|
+| D-37 (formulários) | `form_config` global; registo público sem rede | Iteração `formularios-por-rede-e-mercado-b2b` — `form_config` tem `network_id` com o mesmo molde do workflow (modelo sem rede, copy-on-write, leitura própria → modelo → omissões) num ponto único, `form_config_scope`; o registo público carrega `?empresa=<company_id>` e abre estritamente o formulário dessa rede (empresa desconhecida/inactiva = 404, nada é criado); o Portal e o Portal do Parceiro derivam o esquema da rede do cliente/destino. A administração edita só a rede em contexto (Axios, não `fetch`). Migração: `scripts/migrar_formularios_por_rede.py` |
 | — | Tipificação rígida do serviço partilhado entre empresas (o «D-33» da directiva de Out 2026) | **Fora de âmbito por decisão do dono do produto (Out 2026):** a empresa A partilha com a B sem tipificar o serviço contratado |
 | — | O Hub único (`is_hub`), parte da D-35 | Iteração `multi-fornecedor` — a flag global saiu; quem tem Index deriva da equipa e a partilha escolhe a rede de destino (`network_triage`). A migração `--limpar-is-hub` retira o resíduo |
 | D-26 | A guarda de documentos não conhecia redes | Iteração `partilha-e-documentos` — encontrada a medir a D-24 e **só podia fechar com a D-25**: a guarda certa É a resposta da partilha. `user_can_view_process_documents` tinha ZERO ocorrências de `network` e abria por duas linhas — o bypass ABSOLUTO de {admin, ceo, **diretor**, administrativo} verificado antes de tudo, e `if not is_document_visibility_restricted(process): return True`, que tornava um processo **já indexado** (o caso NORMAL) visível a qualquer sessão autenticada. Do outro lado estava a pasta documental do cliente: cartão de cidadão, IRS, recibos, extractos, alcançável sabendo só um `process_id`. A fronteira entra **antes** do bypass (um bypass de cargo que corra primeiro é um bypass de rede — a mutação que a move para depois mata quatro testes) e usa o `processo_no_ambito`, que conta a rede convidada. O `scope` é PARÂMETRO das puras e as guardas `async` resolvem-no sempre, falhando FECHADO. Corrigiu também uma afirmação minha: o custo não-óbvio da D-25 **não** era a parede do S3 — `build_s3_valid_prefixes` deriva do PROCESSO e não da rede |

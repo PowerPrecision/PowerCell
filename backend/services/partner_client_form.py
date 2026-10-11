@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -276,9 +276,25 @@ def _exigir_editavel(caso) -> None:
 # ════════════════════════════════════════════════════════════════════
 #  LER
 # ════════════════════════════════════════════════════════════════════
+def _rede_do_formulario(caso) -> Optional[str]:
+    """A rede cujo formulário esta lead usa: a da EMPRESA DE DESTINO que o parceiro escolheu.
+
+    O formulário é por rede. Uma lead nasce já com a rede de destino (o parceiro
+    escolhe a empresa ANTES de qualquer outra coisa); um processo traz a sua. Sem
+    nenhuma (registos anteriores), a rede de omissão — o formulário de então.
+    """
+    from services.tenant_network import rede_de_omissao
+
+    for doc in (getattr(caso, "process", None), getattr(caso, "client", None)):
+        rede = str((doc or {}).get("network_id") or "").strip()
+        if rede:
+            return rede
+    return rede_de_omissao() or None
+
+
 async def run_get_client_form(partner: dict, case_id: str) -> dict:
     caso = await resolver_caso(partner, case_id)
-    esquema = construir_esquema(await load_merged_form_fields())
+    esquema = construir_esquema(await load_merged_form_fields(_rede_do_formulario(caso)))
     if caso.e_processo:
         return {"editavel": False, "passos": esquema, "values": {}, "segundo_titular": False}
 
@@ -305,7 +321,7 @@ async def run_save_client_form(partner: dict, case_id: str, data: ClientFormIn) 
     caso = await resolver_caso(partner, case_id)
     _exigir_editavel(caso)
 
-    esquema = construir_esquema(await load_merged_form_fields())
+    esquema = construir_esquema(await load_merged_form_fields(_rede_do_formulario(caso)))
     campos = _campos_por_chave(esquema)
 
     desconhecidos = sorted(k for k in data.values if k not in campos)

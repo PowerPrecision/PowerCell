@@ -8,12 +8,30 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
 from database import db
 from utils.input_sanitization import sanitize_string
 from services.form_config_defaults import DEFAULT_FORM_CONFIG
+from services.form_config_scope import (
+    TIPO,
+    SEM_REDE,
+    garantir_formulario_da_rede,
+    ler_documento,
+)
+from services.tenant_network import CAMPO_REDE
+from services.workflow_scope import rede_em_contexto
+
+
+def _visiveis_na_rede(rede: str) -> dict:
+    """Os modelos personalizados que uma rede vê: os seus e os anteriores à separação.
+
+    Um modelo guardado por uma rede é dela. Os que não têm `network_id` são os
+    de antes de o formulário passar a ser por rede (`scripts/migrar_formularios_por_rede.py`
+    carimba-os); até lá continuam visíveis para ninguém os perder.
+    """
+    return {"$or": [{CAMPO_REDE: rede}, {CAMPO_REDE: SEM_REDE}]}
 
 
 class TemplateSave(BaseModel):
@@ -89,8 +107,9 @@ SYSTEM_TEMPLATES = [TEMPLATE_CREDITO_HABITACAO, TEMPLATE_REFINANCIAMENTO, TEMPLA
 
 
 
-async def run_list_templates(user: dict):
-    """Listar todos os templates de formulário (sistema + personalizados)."""
+async def run_list_templates(user: dict, request: Optional[Request] = None):
+    """Listar os templates de formulário (sistema + os personalizados da REDE EM CONTEXTO)."""
+    rede = await rede_em_contexto(user, request)
     # Templates do sistema
     system = []
     for t in SYSTEM_TEMPLATES:
@@ -104,7 +123,7 @@ async def run_list_templates(user: dict):
     
     # Templates personalizados (guardados na DB)
     custom_templates = await db.form_templates.find(
-        {}, {"_id": 0}
+        _visiveis_na_rede(rede), {"_id": 0}
     ).to_list(100)
     
     for t in custom_templates:
@@ -114,8 +133,19 @@ async def run_list_templates(user: dict):
     return {"templates": system + custom_templates}
 
 
-async def run_preview_template(template_id: str, user: dict):
+async def _template_da_rede(template_id: str, rede: str) -> dict:
+    """Um template personalizado VISÍVEL à rede; senão 404 (igual ao de «não existe»)."""
+    tpl = await db.form_templates.find_one(
+        {"$and": [{"id": template_id}, _visiveis_na_rede(rede)]}, {"_id": 0},
+    )
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template não encontrado")
+    return tpl
+
+
+async def run_preview_template(template_id: str, user: dict, request: Optional[Request] = None):
     """Obter campos de um template para pré-visualização (sem ativar)."""
+    rede = await rede_em_contexto(user, request)
     if template_id.startswith("system_"):
         system_name = template_id.replace("system_", "").replace("_", " ")
         template = next(
@@ -131,9 +161,7 @@ async def run_preview_template(template_id: str, user: dict):
             "is_system": True,
         }
     
-    tpl = await db.form_templates.find_one({"id": template_id}, {"_id": 0})
-    if not tpl:
-        raise HTTPException(status_code=404, detail="Template não encontrado")
+    tpl = await _template_da_rede(template_id, rede)
     
     return {
         "name": tpl.get("name"),
@@ -143,8 +171,9 @@ async def run_preview_template(template_id: str, user: dict):
     }
 
 
-async def run_save_as_template(data: TemplateSave, user: dict):
-    """Guardar a configuração atual como template."""
+async def run_save_as_template(data: TemplateSave, user: dict, request: Optional[Request] = None):
+    """Guardar a configuração atual da REDE EM CONTEXTO como template (da mesma rede)."""
+    rede = await rede_em_contexto(user, request)
     if not data.name.strip():
         raise HTTPException(status_code=400, detail="Nome do template é obrigatório")
     
@@ -153,7 +182,7 @@ async def run_save_as_template(data: TemplateSave, user: dict):
     safe_description = sanitize_string(data.description, max_length=500) if data.description else ""
     
     # Obter config atual
-    config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
+    config = await ler_documento(rede)
     fields = config.get("fields", DEFAULT_FORM_CONFIG) if config else DEFAULT_FORM_CONFIG
     
     template_id = f"tpl_{uuid.uuid4().hex[:8]}"
@@ -161,6 +190,7 @@ async def run_save_as_template(data: TemplateSave, user: dict):
     
     template_doc = {
         "id": template_id,
+        CAMPO_REDE: rede,
         "name": safe_name,
         "description": safe_description,
         "fields": fields,
@@ -182,8 +212,9 @@ async def run_save_as_template(data: TemplateSave, user: dict):
     }
 
 
-async def run_activate_template(template_id: str, user: dict):
-    """Ativar um template, substituindo a configuração atual do formulário."""
+async def run_activate_template(template_id: str, user: dict, request: Optional[Request] = None):
+    """Ativar um template, substituindo a configuração do formulário da REDE EM CONTEXTO."""
+    rede = await rede_em_contexto(user, request)
     now = datetime.now(timezone.utc).isoformat()
     
     # Verificar se é template do sistema
@@ -197,17 +228,17 @@ async def run_activate_template(template_id: str, user: dict):
             raise HTTPException(status_code=404, detail="Template do sistema não encontrado")
         fields = template["fields"]
     else:
-        # Template personalizado
-        tpl = await db.form_templates.find_one({"id": template_id}, {"_id": 0})
-        if not tpl:
-            raise HTTPException(status_code=404, detail="Template não encontrado")
+        # Template personalizado (só os visíveis à rede em contexto)
+        tpl = await _template_da_rede(template_id, rede)
         fields = tpl.get("fields", DEFAULT_FORM_CONFIG)
     
-    # Aplicar ao formulário ativo
+    # Aplicar ao formulário da rede (a cópia própria nasce do modelo se ainda não existir,
+    # para não perder o `step_config` e os rótulos de que ela herdava)
+    await garantir_formulario_da_rede(rede)
     await db.form_config.update_one(
-        {"type": "public_form"},
+        {"type": TIPO, CAMPO_REDE: rede},
         {"$set": {
-            "type": "public_form",
+            "type": TIPO,
             "fields": fields,
             "updated_at": now,
             "updated_by": user.get("id"),
@@ -219,8 +250,9 @@ async def run_activate_template(template_id: str, user: dict):
     return {"message": "Template ativado com sucesso", "field_count": len(fields)}
 
 
-async def run_duplicate_template(template_id: str, user: dict):
-    """Duplicar um template (sistema ou personalizado) como template personalizado."""
+async def run_duplicate_template(template_id: str, user: dict, request: Optional[Request] = None):
+    """Duplicar um template (sistema ou personalizado) como template personalizado da rede em contexto."""
+    rede = await rede_em_contexto(user, request)
     now = datetime.now(timezone.utc).isoformat()
     
     # Obter fields do template original
@@ -235,15 +267,14 @@ async def run_duplicate_template(template_id: str, user: dict):
         fields = template["fields"]
         original_name = template["name"]
     else:
-        tpl = await db.form_templates.find_one({"id": template_id}, {"_id": 0})
-        if not tpl:
-            raise HTTPException(status_code=404, detail="Template não encontrado")
+        tpl = await _template_da_rede(template_id, rede)
         fields = tpl.get("fields", [])
         original_name = tpl.get("name", "Template")
     
     new_id = f"tpl_{uuid.uuid4().hex[:8]}"
     new_doc = {
         "id": new_id,
+        CAMPO_REDE: rede,
         "name": f"{original_name} (cópia)",
         "description": f"Cópia de {original_name}",
         "fields": fields,

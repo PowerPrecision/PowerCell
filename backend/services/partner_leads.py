@@ -7,8 +7,11 @@ externo na base de dados, por isso nada do que ele escolhe decide onde o
 registo aterra nem de quem é.
 
 O QUE O SERVIDOR DECIDE (nunca o corpo do pedido)
-  * a rede e a empresa — das ligações activas do parceiro autenticado;
-    o corpo só pode ESCOLHER entre elas (e só quando há mais do que uma);
+  * a rede e a empresa — as da EMPRESA DE DESTINO que o parceiro escolheu entre as
+    que têm Index (marketplace B2B: o parceiro é um agente livre, não refém de uma
+    rede). O corpo só diz o `empresa_id`; a rede deriva dela no servidor. Uma rede
+    nova passa a ser uma ligação do parceiro (a visibilidade continua a ser
+    «relação ∧ ligação activa») e uma ligação SUSPENSA nunca é destino;
   * `submitted_by_partner_id/name` — o parceiro autenticado;
   * a fase e a triagem — `lead_status: "new"`, sem processo: o registo cai
     na Sala de Triagem como o do formulário público, e o processo só nasce
@@ -56,11 +59,11 @@ from services.encryption import (
     generate_email_hash,
     generate_nif_hash,
 )
-from services.partner_accounts import VERSAO_DOS_TERMOS
+from services.partner_accounts import VERSAO_DOS_TERMOS, acrescentar_ligacao_de_mercado
 from services.partner_drafts import ESTADO_PENDENTE
-from services.partner_security import redes_activas
+from services.partner_security import ESTADO_ACTIVO, redes_activas
 from services.partner_visibility import scope_do_parceiro
-from services.tenant_network import build_network_scope_condition
+from services.tenant_network import CAMPO_REDE, build_network_scope_condition, resolve_network_id
 from utils.input_sanitization import (
     sanitize_email,
     sanitize_name,
@@ -93,31 +96,86 @@ class PartnerLeadIn(BaseModel):
     process_type: Optional[str] = Field(None, max_length=40)
     has_property: bool = False
     notes: Optional[str] = Field(None, max_length=1000)
-    #: Só para escolher ENTRE as redes do próprio parceiro.
-    network_id: Optional[str] = Field(None, max_length=80)
+    #: A EMPRESA DE DESTINO, escolhida ANTES de tudo o resto (marketplace B2B): o parceiro
+    #: é um agente livre e escolhe entre as empresas com Index (`GET /partner/destinos`).
+    #: Obrigatória — sem destino não há lead, e portanto não há onde pedir o comprovativo.
+    empresa_id: str = Field(..., min_length=1, max_length=100)
     consent_confirmed: bool = False
 
 
 # ════════════════════════════════════════════════════════════════════
 #  PURAS
 # ════════════════════════════════════════════════════════════════════
-def escolher_ligacao(partner: dict, network_id: Optional[str]) -> dict:
-    """A ligação (rede + empresa) onde a lead aterra. 400 se ambígua.
+ERRO_DESTINO_INDISPONIVEL = "Empresa de destino indisponível."
 
-    Uma rede pedida que não é das suas ligações activas é um 404 igual ao
-    de «não existe»: o corpo não pode nomear a rede de outrem.
+
+async def _empresas_de_destino() -> list[dict]:
+    """As empresas activas das redes que TÊM Index: ``[{company_id, company_name, network_id}]``."""
+    from services.network_triage import redes_com_index
+
+    com_index = await redes_com_index()
+    if not com_index:
+        return []
+    empresas = await db.companies.find(
+        {}, {"_id": 0, "id": 1, "name": 1, CAMPO_REDE: 1, "is_active": 1},
+    ).to_list(1000)
+    saida = []
+    for e in empresas:
+        if e.get("is_active") is False or not str(e.get("id") or "").strip():
+            continue
+        rede = resolve_network_id(e, company_id=e.get("id"))
+        if rede and rede in com_index and str(e.get("name") or "").strip():
+            saida.append({"company_id": str(e["id"]).strip(), "company_name": str(e["name"]).strip(), "network_id": rede})
+    return sorted(saida, key=lambda d: d["company_name"].lower())
+
+
+def _redes_suspensas(partner: dict) -> set[str]:
+    """Redes onde a gestão suspendeu a ligação deste parceiro: nunca são destino."""
+    return {
+        str(r.get("network_id") or "").strip()
+        for r in (partner.get("redes") or [])
+        if isinstance(r, dict) and (r.get("status") or ESTADO_ACTIVO) != ESTADO_ACTIVO
+    }
+
+
+async def destinos_do_parceiro(partner: dict) -> list[dict]:
+    """O que o parceiro vê ao escolher a empresa de destino: ``[{company_id, company_name}]``.
+
+    Só empresas de redes com Index e sem a ligação dele suspensa. **Nunca** sai o
+    `network_id` — é uma chave interna, e o corpo da lead só diz a empresa.
     """
-    activas = redes_activas(partner)
-    if not activas:
-        raise HTTPException(status_code=403, detail="Conta indisponível. Contacte o seu consultor.")
-    if network_id:
-        escolhida = next((r for r in activas if str(r.get("network_id")) == network_id.strip()), None)
-        if not escolhida:
-            raise HTTPException(status_code=404, detail="Rede não encontrada.")
-        return escolhida
-    if len(activas) > 1:
-        raise HTTPException(status_code=400, detail="Indique a rede a que esta lead se destina.")
-    return activas[0]
+    suspensas = _redes_suspensas(partner)
+    return [
+        {"company_id": d["company_id"], "company_name": d["company_name"]}
+        for d in await _empresas_de_destino()
+        if d["network_id"] not in suspensas
+    ]
+
+
+async def resolver_destino(partner: dict, empresa_id: str) -> dict:
+    """A ligação (rede + empresa) para onde a lead vai, a partir da EMPRESA escolhida.
+
+    404 igual para tudo o que não serve (empresa que não existe, inactiva, de uma rede sem
+    Index, ou com a ligação suspensa): o corpo não descobre nada por tentativa. Uma rede a
+    que o parceiro ainda não estava ligado passa a estar (ver `acrescentar_ligacao_de_mercado`).
+    """
+    escolhida = str(empresa_id or "").strip()
+    alvo = next((d for d in await _empresas_de_destino() if d["company_id"] == escolhida), None)
+    if not alvo or alvo["network_id"] in _redes_suspensas(partner):
+        raise HTTPException(status_code=404, detail=ERRO_DESTINO_INDISPONIVEL)
+
+    ligacao = {
+        "network_id": alvo["network_id"],
+        "company_id": alvo["company_id"],
+        "company_name": alvo["company_name"],
+    }
+    ja_ligado = any(
+        isinstance(r, dict) and str(r.get("network_id") or "").strip() == alvo["network_id"]
+        for r in (partner.get("redes") or [])
+    )
+    if not ja_ligado:
+        await acrescentar_ligacao_de_mercado(partner["id"], ligacao)
+    return ligacao
 
 
 def montar_cliente(
@@ -241,7 +299,7 @@ async def run_submit_lead(partner: dict, data: PartnerLeadIn) -> dict:
         raise HTTPException(status_code=400, detail="Tipo de processo inválido.")
     notas = sanitize_string(data.notes, max_length=1000) if data.notes else None
 
-    ligacao = escolher_ligacao(partner, data.network_id)
+    ligacao = await resolver_destino(partner, data.empresa_id)
     agora_dt = datetime.now(timezone.utc)
     agora = agora_dt.isoformat()
 
@@ -365,7 +423,8 @@ __all__ = [
     "PartnerLeadIn",
     "TIPOS_DE_PROCESSO",
     "avisar_gestao_da_lead",
-    "escolher_ligacao",
+    "destinos_do_parceiro",
+    "resolver_destino",
     "montar_cliente",
     "pedir_checklist",
     "run_submit_lead",

@@ -173,20 +173,26 @@ describe("mensagemDeErro", () => {
 });
 
 describe("a lead", () => {
-  const boa = { ...LEAD_VAZIA, name: "Joana Cliente", email: "joana@cliente.pt", consent_confirmed: true };
+  const boa = { ...LEAD_VAZIA, empresa_id: "cmp-power", name: "Joana Cliente", email: "joana@cliente.pt", consent_confirmed: true };
 
   it("sem consentimento não há lead", () => {
     expect(validarLead({ ...boa, consent_confirmed: false }).consent_confirmed).toBeTruthy();
   });
+  it("sem empresa de destino não há lead — vem primeiro", () => {
+    expect(validarLead({ ...boa, empresa_id: "" }).empresa_id).toBeTruthy();
+    expect(validarLead({ ...boa, empresa_id: "   " }).empresa_id).toBeTruthy();
+    expect(Object.keys(LEAD_VAZIA)[0]).toBe("empresa_id");
+  });
   it("valida nome, email e NIF", () => {
     const erros = validarLead({ ...LEAD_VAZIA, name: "J", email: "não", nif: "12" });
-    expect(Object.keys(erros).sort()).toEqual(["consent_confirmed", "email", "name", "nif"]);
+    expect(Object.keys(erros).sort()).toEqual(["consent_confirmed", "email", "empresa_id", "name", "nif"]);
     expect(validarLead(boa)).toEqual({});
     expect(validarLead({ ...boa, nif: "501 964 843" })).toEqual({});
   });
 
   it("o corpo só leva os campos que o servidor aceita, sem opcionais vazios", () => {
     expect(construirPayloadDaLead(boa)).toEqual({
+      empresa_id: "cmp-power",
       name: "Joana Cliente",
       email: "joana@cliente.pt",
       process_type: "credito_habitacao",
@@ -204,9 +210,9 @@ describe("a lead", () => {
     expect(chaves).not.toContain("network_id");
   });
 
-  it("a rede só vai quando o parceiro a escolheu", () => {
-    expect(construirPayloadDaLead(boa, "rede-1").network_id).toBe("rede-1");
-    expect(construirPayloadDaLead(boa, undefined)).not.toHaveProperty("network_id");
+  it("o destino é a EMPRESA escolhida — nunca uma rede (chave interna, seria um 422)", () => {
+    expect(construirPayloadDaLead({ ...boa, empresa_id: " cmp-domus " }).empresa_id).toBe("cmp-domus");
+    expect(construirPayloadDaLead(boa)).not.toHaveProperty("network_id");
   });
 
   it("apara espaços e tira os do NIF", () => {

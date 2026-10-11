@@ -30,7 +30,7 @@
  * // No modo normal, submete para /api/public/client-registration
  */
 import { useState, useEffect, useCallback, useRef, useMemo, forwardRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -61,12 +61,14 @@ import {
 } from "../utils/formularioPublicoCampos";
 import { cn, safeDateStr } from "../lib/utils";
 import { validateNIF as validateNIFShared } from "../utils/validateNIF";
+import { empresaDoLink } from "../utils/formularioPorRede";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
 // Chave para localStorage
-const DRAFT_STORAGE_KEY = "public_client_form_draft";
-const DRAFT_TIMESTAMP_KEY = "public_client_form_draft_timestamp";
+// O formulário é POR EMPRESA: o rascunho também (campos diferentes não se misturam).
+const chaveDoRascunho = (empresa) => `public_client_form_draft${empresa ? `:${empresa}` : ""}`;
+const chaveDaHoraDoRascunho = (empresa) => `public_client_form_draft_timestamp${empresa ? `:${empresa}` : ""}`;
 
 // Helper component for field hints
 function FieldHint({ children }) {
@@ -318,6 +320,14 @@ const MOCK_DATA = {
 
 export default function PublicClientForm({ previewMode = false }) {
   const navigate = useNavigate();
+  // Identificador da empresa do link de registo (`/registo?empresa=<id>`).
+  const [searchParams] = useSearchParams();
+  const empresaId = empresaDoLink(searchParams);
+  const DRAFT_STORAGE_KEY = chaveDoRascunho(empresaId);
+  const DRAFT_TIMESTAMP_KEY = chaveDaHoraDoRascunho(empresaId);
+  // Link com uma empresa que não existe: não há formulário a mostrar (nunca o de outra).
+  const [linkInvalido, setLinkInvalido] = useState(false);
+  const [empresaDoFormulario, setEmpresaDoFormulario] = useState(null);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -368,7 +378,7 @@ export default function PublicClientForm({ previewMode = false }) {
       console.error("Erro ao carregar rascunho:", e);
     }
     return null;
-  }, []);
+  }, [DRAFT_STORAGE_KEY, DRAFT_TIMESTAMP_KEY]);
 
   // Guardar rascunho no localStorage
   const saveDraft = useCallback((data) => {
@@ -383,7 +393,7 @@ export default function PublicClientForm({ previewMode = false }) {
     } finally {
       setIsSaving(false);
     }
-  }, []);
+  }, [DRAFT_STORAGE_KEY, DRAFT_TIMESTAMP_KEY]);
 
   // Limpar rascunho
   const clearDraft = useCallback(() => {
@@ -391,7 +401,7 @@ export default function PublicClientForm({ previewMode = false }) {
     localStorage.removeItem(DRAFT_TIMESTAMP_KEY);
     setHasDraft(false);
     setLastSaved(null);
-  }, []);
+  }, [DRAFT_STORAGE_KEY, DRAFT_TIMESTAMP_KEY]);
 
   // Simular preenchimento completo do formulário (apenas para testes)
   // Preenche MOCK_DATA (campos hardcoded) + gera dados mock para campos dinâmicos
@@ -588,19 +598,25 @@ export default function PublicClientForm({ previewMode = false }) {
   useEffect(() => {
     const fetchFormConfig = async () => {
       try {
-        const res = await axios.get(`${API_URL}/public/form-config`);
+        const res = await axios.get(`${API_URL}/public/form-config`, {
+          params: empresaId ? { empresa: empresaId } : undefined,
+        });
+        setEmpresaDoFormulario(res.data.empresa || null);
         setCustomFields(res.data.custom_fields || []);
         setAllFieldsConfig(res.data.all_fields || []);
         setStepConfig(res.data.step_config || {});
         setStepLabels(res.data.step_labels || {});
-      } catch {
-        // Endpoint pode não existir em deployments mais antigos
+      } catch (err) {
+        // 404 = o link aponta para uma empresa que não existe/está inactiva: recusa-se
+        // (carregar os campos de outra empresa e registar nela seria o defeito que isto fecha).
+        // Qualquer outro erro: endpoint pode não existir em deployments mais antigos.
+        if (err?.response?.status === 404 && empresaId) setLinkInvalido(true);
       } finally {
         setConfigLoaded(true);
       }
     };
     fetchFormConfig();
-  }, []);
+  }, [empresaId]);
 
   // ─── Helper: check depends_on condition ─────────────
   // depends_on can be:
@@ -1676,6 +1692,7 @@ export default function PublicClientForm({ previewMode = false }) {
         email: formData.email,
         phone: formData.phone,
         process_type: "ambos",
+        empresa_id: empresaId || undefined,
         personal_data: {
           nif: formData.nif,
           niss: formData.niss,
@@ -2458,6 +2475,9 @@ export default function PublicClientForm({ previewMode = false }) {
         <Card className="max-w-4xl mx-auto border-blue-200 shadow-lg">
           <CardHeader className="text-center bg-gradient-to-r from-blue-900 to-blue-800 text-white rounded-t-lg">
             <CardTitle className="text-white text-2xl">Formulário de Registo</CardTitle>
+            {empresaDoFormulario?.nome && (
+              <p className="text-blue-100 text-sm" data-testid="registo-empresa">{empresaDoFormulario.nome}</p>
+            )}
             <CardDescription className="text-blue-100">
               Preencha os seus dados para iniciar o processo de análise de crédito habitação
             </CardDescription>
@@ -2470,7 +2490,16 @@ export default function PublicClientForm({ previewMode = false }) {
                 <p className="text-sm">A carregar configuração do formulário...</p>
               </div>
             )}
-            {configLoaded && (
+            {configLoaded && linkInvalido && (
+              <div role="alert" className="py-10 text-center space-y-2" data-testid="registo-link-invalido">
+                <AlertCircle className="h-8 w-8 mx-auto text-amber-500" />
+                <p className="font-medium">Este link de registo não é válido.</p>
+                <p className="text-sm text-muted-foreground">
+                  Peça à empresa que lhe enviou o link um novo endereço de registo.
+                </p>
+              </div>
+            )}
+            {configLoaded && !linkInvalido && (
             <>
             {/* Progress Bar com percentagem */}
             <FormProgressBar 

@@ -56,8 +56,11 @@ function AvisoDaLead({ caso }) {
         <p className="text-muted-foreground">
           {devolvida
             ? "Corrija o que for preciso e envie um novo Comprovativo de Pagamento."
-            : "Só segue para a nossa equipa depois de enviar o Comprovativo de Pagamento."}
+            : "Só segue para a fila da empresa de destino depois de enviar o Comprovativo de Pagamento."}
         </p>
+        {caso.empresa_destino ? (
+          <p className="text-muted-foreground" data-testid="empresa-destino">Empresa de destino: <strong>{caso.empresa_destino}</strong></p>
+        ) : null}
       </div>
     );
   }

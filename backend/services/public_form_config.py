@@ -5,14 +5,20 @@ Defaults from `services.form_config_defaults` (same source as routes.form_config
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from database import db
 from services.form_config_defaults import DEFAULT_FORM_CONFIG, DEFAULT_STEP_CONFIG
+from services.form_config_scope import ler_documento, rede_do_link_publico
 
-async def load_merged_form_fields() -> list:
-    """Campos do formulário interno, com os defaults já fundidos.
+
+async def load_merged_form_fields(rede: Optional[str] = None) -> list:
+    """Campos do formulário da `rede`, com os defaults já fundidos.
+
+    O formulário é POR REDE: quem chama diz de que rede é (a do cliente, a da
+    lead, a do link). Sem rede, é o modelo — só para chamadores sem contexto.
 
     Extraído de `run_get_public_form_config` para o Portal do Cliente
     poder derivar daqui o seu perfil (`portal_profile_schema`) em vez de
@@ -21,7 +27,7 @@ async def load_merged_form_fields() -> list:
     Returns:
         Todos os campos VISÍVEIS, ordenados por passo e ordem.
     """
-    config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
+    config = await ler_documento(rede)
     if not config:
         visiveis = [f for f in DEFAULT_FORM_CONFIG if f.get("is_visible")]
         visiveis.sort(key=lambda f: (f.get("step", 0), f.get("order", 0)))
@@ -56,19 +62,30 @@ async def load_merged_form_fields() -> list:
     return visiveis
 
 
-async def run_get_public_form_config(request: Request):
-    """Obter configuração do formulário público (todos os campos visíveis, ordenados).
+async def run_get_public_form_config(request: Request, empresa: Optional[str] = None):
+    """Obter configuração do formulário público DA EMPRESA do link (campos visíveis, ordenados).
+
+    `empresa` é o identificador da empresa no link de registo. Desconhecido ou
+    inactiva → 404 (nunca o formulário de outra empresa). Sem ele, o formulário da
+    rede de omissão (links anteriores a esta separação).
 
     Retorna dois conjuntos:
     - custom_fields: apenas campos personalizados (compatibilidade com versões anteriores)
     - all_fields: todos os campos visíveis ordenados por step + order (nativos + custom)
     """
-    config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
+    rede, empresa_doc = await rede_do_link_publico(empresa)
+    identificacao = (
+        {"id": empresa_doc.get("id"), "nome": empresa_doc.get("name")} if empresa_doc else None
+    )
+    config = await ler_documento(rede)
     if not config:
         # Sem config na DB — retornar defaults (all_fields para o frontend usar)
         visible_defaults = [f for f in DEFAULT_FORM_CONFIG if f.get("is_visible")]
         visible_defaults.sort(key=lambda f: (f.get("step", 0), f.get("order", 0)))
-        return JSONResponse(status_code=200, content={"custom_fields": [], "all_fields": visible_defaults, "step_config": DEFAULT_STEP_CONFIG})
+        return JSONResponse(status_code=200, content={
+            "custom_fields": [], "all_fields": visible_defaults,
+            "step_config": DEFAULT_STEP_CONFIG, "empresa": identificacao,
+        })
     
     saved_fields = config.get("fields", [])
     
@@ -150,7 +167,8 @@ async def run_get_public_form_config(request: Request):
         "custom_fields": custom_fields,
         "all_fields": all_fields,
         "step_config": merged_step_config,
-        "step_labels": step_labels
+        "step_labels": step_labels,
+        "empresa": identificacao,
     })
 
 

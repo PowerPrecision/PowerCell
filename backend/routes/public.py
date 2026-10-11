@@ -11,7 +11,9 @@ Form defaults come from `routes.form_config` (re-export of form_config_defaults)
 SEGURANÇA: Rate limiting preservado nos stubs.
 ====================================================================
 """
-from fastapi import APIRouter, Request, Response
+from typing import Optional
+
+from fastapi import APIRouter, Query, Request, Response
 
 from models.process import PublicClientRegistration
 from middleware.rate_limit import limiter
@@ -38,8 +40,11 @@ async def public_health(request: Request, response: Response):
 
 @router.get("/form-config")
 @limiter.limit("60/minute")
-async def get_public_form_config(request: Request, response: Response):
-    return await run_get_public_form_config(request)
+async def get_public_form_config(
+    request: Request, response: Response,
+    empresa: Optional[str] = Query(None, max_length=100, description="Identificador da empresa do link de registo"),
+):
+    return await run_get_public_form_config(request, empresa)
 
 
 @router.get("/euribor")

@@ -141,9 +141,25 @@ async def rede_do_workflow_em_contexto(
     raise HTTPException(status_code=400, detail=ERRO_SEM_REDE_EM_CONTEXTO)
 
 
+#: O mesmo contexto serve tudo o que é configuração POR REDE (workflow, formulários).
+#: O nome antigo fica porque o workflow foi o primeiro a usá-lo.
+rede_em_contexto = rede_do_workflow_em_contexto
+
+
 async def nomes_da_rede(rede: str) -> list[str]:
     """Os nomes das empresas de uma rede (para o ecrã dizer ONDE está a editar)."""
     return sorted((await redes_que_existem()).get(rede, []), key=str.lower)
+
+
+async def empresas_da_rede(rede: str) -> list[dict]:
+    """``[{id, name}]`` das empresas activas de uma rede (para o ecrã montar o link de registo de cada uma)."""
+    saida = []
+    for empresa in await _empresas():
+        if empresa.get("is_active") is False:
+            continue
+        if resolve_network_id(empresa, company_id=empresa.get("id")) == rede and _texto(empresa.get("id")):
+            saida.append({"id": _texto(empresa["id"]), "name": _texto(empresa.get("name"))})
+    return sorted(saida, key=lambda e: e["name"].lower())
 
 
 async def garantir_workflow_da_rede(rede: str) -> int:
@@ -192,11 +208,13 @@ def pode_editar_qualquer_rede(user: dict) -> bool:
 __all__ = [
     "ERRO_REDE_NAO_ENCONTRADA",
     "ERRO_SEM_REDE_EM_CONTEXTO",
+    "empresas_da_rede",
     "garantir_workflow_da_rede",
     "nomes_da_rede",
     "pode_editar_qualquer_rede",
     "rede_da_empresa_activa",
     "rede_do_workflow_em_contexto",
+    "rede_em_contexto",
     "redes_que_existem",
     "tem_workflow_proprio",
 ]
