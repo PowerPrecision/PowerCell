@@ -17,8 +17,9 @@ from pydantic import BaseModel, Field
 from models.auth import UserRole
 from services.auth import require_roles
 from services.document_vision_extract import run_extract_document_data
+from services.process_closed_guard import exigir_processo_editavel
 
-router = APIRouter(tags=["Document Extraction"])
+router = APIRouter(tags=["Document Extraction"], dependencies=[Depends(exigir_processo_editavel)])
 
 
 class DocumentExtractRequest(BaseModel):

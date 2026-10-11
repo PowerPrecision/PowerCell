@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
+from services.workflow_phases import fases_do_utilizador
 from models.client import (
     Client, ClientCreate, ClientUpdate,
     ClientContact, ClientPersonalData,
@@ -253,9 +254,7 @@ async def run_list_clients(
         ).to_list(length=None)
         matching_client_ids = [d["id"] for d in extra_client_docs if d.get("id")]
         if not matching_client_ids:
-            workflow_statuses = await db.workflow_statuses.find(
-                {}, {"_id": 0}
-            ).sort("order", 1).to_list(100)
+            workflow_statuses = await fases_do_utilizador(user)
             available_statuses = [
                 {"name": s["name"], "label": s.get("label", s["name"])}
                 for s in workflow_statuses
@@ -268,7 +267,7 @@ async def run_list_clients(
             }
     
     # Buscar workflow statuses para labels
-    workflow_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
+    workflow_statuses = await fases_do_utilizador(user)
     status_map = {s["name"]: s for s in workflow_statuses}
     
     # Se show_all=True OU é admin/ceo/diretor, mostrar todos

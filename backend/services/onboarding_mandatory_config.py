@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 from database import db
 from services.partner_attribution import aplicar_parceiro_do_cliente
-from services.hub_triage import aplicar_regime_de_indexacao
+from services.network_triage import aplicar_regime_de_indexacao
 from services.s3_document_root import (
     pasta_do_processo_sob_mapeamento_do_cliente,
     pasta_para_gravar,

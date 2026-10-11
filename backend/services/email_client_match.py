@@ -139,18 +139,30 @@ def motivo_do_processo(processo: dict, enderecos: Iterable[str]) -> str:
     return "endereço do processo"
 
 
-async def _estados_terminais() -> list[str]:
+async def _estados_terminais(network_id: Optional[str] = None) -> list[str]:
     """As fases fechadas, ditadas pelo motor.
 
     Estava escrito à mão como `["concluido", "cancelado", "arquivado"]` — uma
     lista que inclui o typo legado `arquivado` e **não** o valor canónico
     `arquivo` (a D-6 com outro nome). Uma fase nova fechada pelo
     administrador também não entrava.
+
+    Workflow POR REDE: com a rede da caixa, são as fases dela; sem rede (caixa
+    partilhada) a união das fechadas de qualquer workflow — a consulta exclui
+    «fechado em qualquer sítio», e o resultado é só candidatos a ligação.
     """
     try:
-        from services.workflow_phases import carregar_fases, nomes_terminais
+        from services.workflow_phases import (
+            carregar_fases,
+            nomes_terminais,
+            nomes_terminais_de_todas_as_redes,
+        )
 
-        return nomes_terminais(await carregar_fases()) + ["arquivado"]
+        if network_id:
+            nomes = nomes_terminais(await carregar_fases(rede=str(network_id)))
+        else:
+            nomes = await nomes_terminais_de_todas_as_redes()
+        return nomes + ["arquivado"]
     except Exception as exc:
         logger.warning(
             "[EMAIL-MATCH] Falha a carregar as fases terminais (%s); "
@@ -174,7 +186,7 @@ async def resolver_processo_por_endereco(
     if condicao is None:
         return Resolucao()
 
-    consulta: dict = {**condicao, "status": {"$nin": await _estados_terminais()}}
+    consulta: dict = {**condicao, "status": {"$nin": await _estados_terminais(network_id)}}
     if network_id:
         consulta["network_id"] = str(network_id)
 

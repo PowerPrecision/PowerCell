@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
+from services.workflow_phases import fases_do_utilizador
 from models.client import (
     Client, ClientCreate, ClientUpdate,
     ClientContact, ClientPersonalData,
@@ -124,7 +125,7 @@ async def run_get_my_assigned_clients(
     query = com_isolamento(tenant_condition, query)
 
     # Buscar ordem das fases do workflow para ordenação composta
-    workflow_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
+    workflow_statuses = await fases_do_utilizador(user)
     status_order = {s["name"]: idx for idx, s in enumerate(workflow_statuses)}
     status_map = {s["name"]: s for s in workflow_statuses}
     

@@ -249,12 +249,20 @@ def construir_tarefa(
 # COM BASE DE DADOS
 # ====================================================================
 
-async def _carregar_fase(nome: Optional[str]) -> Optional[dict]:
+async def _rede_do_processo(process_id: str) -> Optional[str]:
+    """A rede cujo workflow governa o processo (o plano da fase é DELA)."""
+    from services.workflow_phases import rede_do_processo
+
+    doc = await db.processes.find_one({"id": process_id}, {"_id": 0, "network_id": 1})
+    return rede_do_processo(doc)
+
+
+async def _carregar_fase(nome: Optional[str], rede: Optional[str] = None) -> Optional[dict]:
     if not nome:
         return None
     from services.workflow_phases import carregar_fases, resolver_nome
 
-    fases = await carregar_fases()
+    fases = await carregar_fases(rede=rede)
     resolucao = resolver_nome(nome, fases)
     alvo = resolucao.fase or nome
     return next((f for f in fases if f.get("name") == alvo), None)
@@ -309,14 +317,15 @@ async def ao_entrar_na_fase(
     from services.portal_estado import estado_e_terminal
     from services.workflow_phases import carregar_fases
 
-    fases = await carregar_fases()
+    rede = await _rede_do_processo(process_id)
+    fases = await carregar_fases(rede=rede)
     if estado_e_terminal(fase, fases):
         from services.portal_estado import cortar_sessoes_em_tempo_real
 
         resultado.sessoes_cortadas = await cortar_sessoes_em_tempo_real(process_id)
         return resultado  # uma fase terminal não atribui nem cria trabalho
 
-    plano = plano_da_fase(await _carregar_fase(fase), origem)
+    plano = plano_da_fase(await _carregar_fase(fase, rede), origem)
     if not plano.papeis and not plano.modelos:
         return resultado
 

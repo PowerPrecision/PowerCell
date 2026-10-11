@@ -43,7 +43,9 @@ async def run_restore_process(process_id: str, user: dict):
     # Se o previous_status era "eliminado" (caso de double-delete), resolver
     # dinamicamente a 1ª fase (nunca restaurar para "eliminado").
     if not previous_status or previous_status == "eliminado":
-        previous_status = await get_first_workflow_status()
+        from services.workflow_phases import rede_do_processo
+
+        previous_status = await get_first_workflow_status(rede_do_processo(process))
 
     restored_is_active = previous_status not in TERMINAL_STATUSES
 

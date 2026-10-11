@@ -24,12 +24,19 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { 
   Search, Eye, FileText, Phone, Mail, Filter,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield,
-  Flame, X, ClipboardCheck, CheckCircle2, Download, RotateCcw, Trash2
+  Flame, X, ClipboardCheck, CheckCircle2, Download, RotateCcw, Trash2, Banknote
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses, getMyProcesses, markProcessIndexed, restoreProcess ,
-  getProcessLabels, updateProcess,
+  getProcessLabels, updateProcess, markProcessFinancesPaid,
 } from "../services/api";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "../components/ui/alert-dialog";
+import {
+  aposMarcarComoPago, deveOferecerMarcarComoPago, textoDasComissoes,
+} from "../utils/marcarComoPago";
 // Ponto 16 — Edição Inline de Fases. A gravação usa `updateProcess`
 // (PUT /processes/{id}), o MESMO endpoint dos Detalhes: é ele que
 // escreve o histórico, o audit trail e dispara `process_status_changed`.
@@ -646,6 +653,30 @@ const ProcessesPage = () => {
     }
   };
 
+  // «Marcar como Pago» — o atalho de quem fecha as contas depois do processo
+  // concluído, sem o reabrir. O servidor só manda as chaves a quem pode.
+  const [processoAPagar, setProcessoAPagar] = useState(null);
+  const [aPagar, setAPagar] = useState(false);
+  const confirmarPagamento = async () => {
+    const alvo = processoAPagar;
+    if (!alvo) return;
+    setAPagar(true);
+    try {
+      const { data } = await markProcessFinancesPaid(alvo.id);
+      setProcesses(prev => prev.map(p => (p.id === alvo.id ? aposMarcarComoPago(p, data?.updated) : p)));
+      toast.success(
+        data?.updated
+          ? `${textoDasComissoes(data.updated)} marcada(s) como paga(s)`
+          : "Não havia comissões por pagar",
+      );
+      setProcessoAPagar(null);
+    } catch (error) {
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao marcar como pago"));
+    } finally {
+      setAPagar(false);
+    }
+  };
+
   // Debounced search — only updates URL param, main useEffect handles fetch
   const [searchInput, setSearchInput] = useState(searchTerm);
   const searchInputRef = useRef(null);
@@ -1192,6 +1223,20 @@ const ProcessesPage = () => {
                                   }
                                 </Button>
                               )}
+                              {deveOferecerMarcarComoPago(process) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 gap-1 px-2 text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300"
+                                  onClick={(e) => { e.stopPropagation(); setProcessoAPagar(process); }}
+                                  title={`Marcar ${textoDasComissoes(process.comissoes_pendentes)} como paga(s) — sem reabrir o processo`}
+                                  data-testid={`marcar-pago-${process.id}`}
+                                >
+                                  <Banknote className="h-4 w-4" aria-hidden="true" />
+                                  <span className="hidden xl:inline">Marcar como Pago</span>
+                                  <span className="sr-only xl:hidden">Marcar como Pago</span>
+                                </Button>
+                              )}
                               {canMarkIndexed && !process.is_indexed && (
                                 <Button
                                   variant="ghost"
@@ -1251,6 +1296,33 @@ const ProcessesPage = () => {
         onClose={() => setClientDetailsModal({ open: false, clientId: null })}
         onNavigateToProcess={(pid) => navigate(`/process/${pid}`)}
       />
+
+      {/* «Marcar como Pago» — confirmação: é uma escrita financeira num processo fechado */}
+      <AlertDialog
+        open={!!processoAPagar}
+        onOpenChange={(aberto) => { if (!aberto && !aPagar) setProcessoAPagar(null); }}
+      >
+        <AlertDialogContent data-testid="marcar-pago-dialogo">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Marcar como pago?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vai marcar {textoDasComissoes(processoAPagar?.comissoes_pendentes)} do processo{" "}
+              <strong>{processoAPagar?.process_number || processoAPagar?.client_name}</strong> como
+              paga(s). O processo continua fechado. Para desfazer é preciso reabri-lo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={aPagar}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="marcar-pago-confirmar"
+              disabled={aPagar}
+              onClick={(e) => { e.preventDefault(); confirmarPagamento(); }}
+            >
+              {aPagar ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : "Confirmar pagamento"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 };

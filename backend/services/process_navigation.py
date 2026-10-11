@@ -34,7 +34,7 @@ import logging
 from typing import Any, Optional, Sequence, Union
 
 from database import db
-from services.workflow_phases import carregar_fases, nomes_terminais
+from services.workflow_phases import fases_do_utilizador, nomes_terminais
 from services.process_list_enrichment import (
     load_workflow_status_order,
     sort_process_list,
@@ -164,10 +164,10 @@ async def run_get_process_neighbours(
         # processo que a lista filtrada não contém.
         sub35=sub35,
         partilha=partilha,
-        terminais=nomes_terminais(await carregar_fases()),
+        terminais=nomes_terminais(await fases_do_utilizador(user)),
     )
 
-    status_order = await load_workflow_status_order()
+    status_order = await load_workflow_status_order(user)
     processos = await db.processes.find(query, PROCESS_NAV_PROJECTION).to_list(5000)
 
     # A listagem desencripta ANTES de ordenar, e a ordenação por

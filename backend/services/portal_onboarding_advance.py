@@ -131,7 +131,8 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
     # ── 1. Verificar que o processo está em pre_registo/Lead ──
     process = await db.processes.find_one(
         {"id": process_id},
-        {"_id": 0, "status": 1, "client_name": 1, "skip_index": 1},
+        # `network_id`: o workflow que manda é o da rede DONA do processo.
+        {"_id": 0, "status": 1, "client_name": 1, "skip_index": 1, "network_id": 1},
     )
     if not process:
         logger.warning(f"[PACOTE-BO] Processo {process_id} não encontrado para auto-avanço.")
@@ -153,14 +154,14 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
     # `is_active`), não de uma lista. Antes vinham do `INACTIVE_STATUSES`,
     # que hoje é só o resíduo legado. Os três extras ao lado NÃO são fases
     # e por isso continuam à mão.
-    from services.workflow_phases import carregar_fases, nomes_terminais
+    from services.workflow_phases import carregar_fases, nomes_terminais, rede_do_processo
 
+    all_statuses = await carregar_fases(rede=rede_do_processo(process))
     EXCLUDED_FROM_KANBAN_START = set(
-        nomes_terminais(await carregar_fases())
+        nomes_terminais(all_statuses)
     ) | {
         "pre_registo", "fila_espera", "recusado",
     }
-    all_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
 
     target_status = None
     for s in all_statuses:

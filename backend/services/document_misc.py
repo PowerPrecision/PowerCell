@@ -193,9 +193,9 @@ async def run_check_employer_nif(nif: str, user: Optional[dict] = None) -> dict[
         },
     ).to_list(100)
 
-    workflow_statuses = await db.workflow_statuses.find(
-        {}, {"_id": 0, "name": 1, "label": 1, "color": 1}
-    ).to_list(100)
+    from services.workflow_phases import fases_do_utilizador
+
+    workflow_statuses = await fases_do_utilizador(user or {})
     status_map = {s["name"]: s for s in workflow_statuses}
 
     results = []

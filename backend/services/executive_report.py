@@ -651,9 +651,10 @@ async def gerar_relatorio(
     utilizadores = utilizadores[:LIMITE_DE_UTILIZADORES]
     ids = [u["id"] for u in utilizadores if u.get("id")]
 
-    from services.workflow_phases import carregar_fases
+    from services.workflow_phases import fases_do_ambito
 
-    fases = await carregar_fases()
+    # O workflow de quem olha: as redes do âmbito (o consolidado junta todas).
+    fases = await fases_do_ambito(ambito.scope)
     if not ids:
         relatorio = montar_relatorio(
             utilizadores=[], por_pessoa={}, por_fase_e_pessoa=[], concluidas={}, carga={},

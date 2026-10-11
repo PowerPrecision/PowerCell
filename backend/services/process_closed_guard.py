@@ -73,7 +73,7 @@ from services.tenant_network import (
     processo_no_ambito,
     resolve_tenant_scope,
 )
-from services.workflow_phases import carregar_fases
+from services.workflow_phases import carregar_fases, rede_do_processo
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,8 @@ ROTAS_QUE_FUNCIONAM_COM_O_PROCESSO_FECHADO: dict[tuple[str, str], str] = {
         "Eliminar não é editar — tem a sua permissão e o seu rasto.",
     ("DELETE", "/processes/{process_id}/partners/{company_id}"):
         "Revogar uma partilha é limpeza de acesso, não edição do processo.",
+    ("POST", "/emails/sync/{process_id}"):
+        "Só RECOLHE correio recebido do servidor; não altera o processo nem comunica com o cliente.",
 }
 
 PROJECCAO_DO_PROCESSO_FECHADO = {
@@ -108,7 +110,9 @@ async def processo_esta_fechado(processo: Optional[dict]) -> bool:
     """O processo está numa fase terminal? `None` ou sem fase → não."""
     if not processo or not processo.get("status"):
         return False
-    return estado_e_terminal(processo.get("status"), await carregar_fases())
+    return estado_e_terminal(
+        processo.get("status"), await carregar_fases(rede=rede_do_processo(processo)),
+    )
 
 
 async def exigir_processo_aberto(processo: Optional[dict]) -> None:

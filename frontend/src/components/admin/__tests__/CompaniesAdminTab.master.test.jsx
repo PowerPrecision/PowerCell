@@ -82,23 +82,19 @@ describe("CompaniesAdminTab — o que só o Master faz", () => {
 });
 
 
-describe("CompaniesAdminTab — o Hub (Hub & Spoke) é decisão do Master", () => {
+describe("CompaniesAdminTab — já não há «Hub» (multi-fornecedor)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("o Master vê o interruptor «Hub» ao editar; o Admin não", async () => {
-    const master = montar({ isMaster: true });
-    fireEvent.click(await screen.findByTestId("btn-edit-company-c1"));
-    expect(await screen.findByTestId("company-is-hub-switch")).toBeTruthy();
-    master.unmount();
-
-    montar({ isMaster: false });
+  it("nem o Master vê um interruptor de Hub: a capacidade de Index vem da equipa", async () => {
+    montar({ isMaster: true });
     fireEvent.click(await screen.findByTestId("btn-edit-company-c1"));
     await screen.findByTestId("company-name-input");
     expect(screen.queryByTestId("company-is-hub-switch")).toBeNull();
+    expect(screen.queryByText(/Hub \(tem a equipa de Index\)/)).toBeNull();
   });
 
-  it("o pedido de um Admin NÃO leva is_hub; o do Master leva", async () => {
-    for (const [isMaster, leva] of [[false, false], [true, true]]) {
+  it("o pedido de guardar não leva is_hub, seja quem for", async () => {
+    for (const isMaster of [false, true]) {
       vi.clearAllMocks();
       const { unmount } = montar({ isMaster });
       fireEvent.click(await screen.findByTestId("btn-edit-company-c1"));
@@ -106,22 +102,12 @@ describe("CompaniesAdminTab — o Hub (Hub & Spoke) é decisão do Master", () =
       fireEvent.change(nome, { target: { value: "Power SA" } });
       fireEvent.submit(nome.closest("form"));
       await waitFor(() => expect(api.updateCompany).toHaveBeenCalled());
-      expect("is_hub" in api.updateCompany.mock.calls[0][1], `isMaster=${isMaster}`).toBe(leva);
+      expect("is_hub" in api.updateCompany.mock.calls[0][1], `isMaster=${isMaster}`).toBe(false);
       unmount();
     }
   });
 
-  it("ligar o interruptor envia is_hub: true", async () => {
-    montar({ isMaster: true });
-    fireEvent.click(await screen.findByTestId("btn-edit-company-c1"));
-    const interruptor = await screen.findByTestId("company-is-hub-switch");
-    fireEvent.click(interruptor);
-    fireEvent.submit((await screen.findByTestId("company-name-input")).closest("form"));
-    await waitFor(() => expect(api.updateCompany).toHaveBeenCalled());
-    expect(api.updateCompany.mock.calls[0][1].is_hub).toBe(true);
-  });
-
-  it("uma empresa Hub mostra o selo «Hub» na lista", async () => {
+  it("uma empresa que ainda traga is_hub gravado não mostra selo nenhum", async () => {
     api.getCompanies.mockResolvedValue({ data: { companies: [{ ...EMPRESAS[0], is_hub: true }], total: 1 } });
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -129,6 +115,7 @@ describe("CompaniesAdminTab — o Hub (Hub & Spoke) é decisão do Master", () =
         <CompaniesAdminTab isMaster />
       </QueryClientProvider>,
     );
-    expect(await screen.findByTestId("company-hub-badge")).toHaveTextContent("Hub");
+    await screen.findByTestId("company-row-c1");
+    expect(screen.queryByTestId("company-hub-badge")).toBeNull();
   });
 });

@@ -75,7 +75,12 @@ from services.partner_drafts import (
 )
 from services.portal_doc_categories import DOCUMENT_CATEGORY_MAP
 from services.portal_status_helpers import nota_do_pedido, rotulo_do_pedido
-from services.workflow_phases import carregar_fases
+from services.workflow_phases import (
+    carregar_fases,
+    chave_da_rede,
+    fases_por_rede,
+    rede_do_processo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -196,11 +201,18 @@ async def _pedidos_pendentes_por_caso(processos: list[dict], leads: list[dict]) 
 
 async def _casos_com_dto(partner: dict) -> tuple[list[dict], list[dict], list[dict]]:
     """(dtos de todos os casos, processos crus, leads cruas)."""
-    processos, leads, fases = await _carregar_processos(partner), await _carregar_leads(partner), await carregar_fases()
+    processos, leads = await _carregar_processos(partner), await _carregar_leads(partner)
+    # Workflow POR REDE: a etapa de cada processo é a do workflow da rede DONA
+    # (o parceiro pode trabalhar com processos de várias redes).
+    fases_das_redes = await fases_por_rede(rede_do_processo(p) for p in processos)
     pendentes = await _pedidos_pendentes_por_caso(processos, leads)
 
     dtos = [
-        dto_do_processo(p, etapa_de_um_estado(p.get("status"), fases), pedidos_pendentes=pendentes.get(p["id"], 0))
+        dto_do_processo(
+            p,
+            etapa_de_um_estado(p.get("status"), fases_das_redes[chave_da_rede(rede_do_processo(p))]),
+            pedidos_pendentes=pendentes.get(p["id"], 0),
+        )
         for p in processos
     ]
     dtos += [dto_da_lead(c, pedidos_pendentes=pendentes.get(c["id"], 0)) for c in leads]
@@ -452,7 +464,9 @@ async def run_get_case(partner: dict, case_id: str) -> dict:
     documentos = await _documentos_do_caso(caso)
 
     if caso.e_processo:
-        etapa = etapa_de_um_estado(caso.process.get("status"), await carregar_fases())
+        etapa = etapa_de_um_estado(
+            caso.process.get("status"), await carregar_fases(rede=rede_do_processo(caso.process)),
+        )
         base = dto_do_processo(caso.process, etapa)
     else:
         base = dto_da_lead(caso.client)

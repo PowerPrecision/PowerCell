@@ -16,7 +16,7 @@ from services.process_sharing import (
 )
 from services.sub35 import aplicar_flag_a_processos as aplicar_flag_sub35
 from services.process_status import STATUS_VALUE_ALIASES
-from services.workflow_phases import carregar_fases, nomes_terminais
+from services.workflow_phases import fases_do_utilizador, nomes_terminais
 
 logger = logging.getLogger(__name__)
 
@@ -447,7 +447,7 @@ async def run_get_kanban_board(
     # fechadas (`is_active: False`), que o filtro de vista usa. Lê-las
     # depois deixaria a query a usar a lista legada enquanto as colunas
     # já vinham do motor — os dois dialectos outra vez.
-    statuses = await carregar_fases()
+    statuses = await fases_do_utilizador(user)
     terminais = nomes_terminais(statuses)
 
     query = build_kanban_query(

@@ -638,11 +638,11 @@ function App() {
             }
           />
           
-          {/* Workflow Statuses - Admin and CEO */}
+          {/* Workflow Statuses - POR REDE: Master, Admin e CEO editam o da rede em contexto */}
           <Route
             path="/workflow-estados"
             element={
-              <ProtectedRoute allowedRoles={["master"]}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
                 <RouteBoundary name="Estados de Workflow">
                   <WorkflowStatusesPage />
                 </RouteBoundary>

@@ -23,7 +23,7 @@ from fastapi import HTTPException
 from database import db
 from services.process_closed_guard import processo_esta_fechado
 from services.process_kanban_move import run_move_process_kanban
-from services.workflow_phases import carregar_fases, nomes_activos
+from services.workflow_phases import carregar_fases, nomes_activos, rede_do_processo
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,8 @@ async def run_reopen_process(
     if not await processo_esta_fechado(processo):
         raise HTTPException(status_code=400, detail="O processo já está aberto.")
 
-    activas = nomes_activos(await carregar_fases())
+    # As fases activas são as do workflow da rede DONA do processo.
+    activas = nomes_activos(await carregar_fases(rede=rede_do_processo(processo)))
     if new_status not in activas:
         raise HTTPException(
             status_code=400,

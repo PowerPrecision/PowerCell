@@ -47,7 +47,7 @@ import { toast } from 'sonner';
 import { createClientProcess, createClient, searchClients } from '../../services/api';
 import { PROCESS_TYPE_LABELS } from '../SmartClientSearch';
 import { Switch } from '../ui/switch';
-import ViaVerdeDoHub from '../shared/ViaVerdeDoHub';
+import ViaVerdeDaPartilha from '../shared/ViaVerdeDaPartilha';
 
 const INITIAL_FORM_STATE = {
   process_type: 'credito_habitacao',
@@ -73,7 +73,7 @@ const CreateClientModal = memo(({
   // PACOTE 5 (Fast-Track / Via Verde) — ignorar a fase de Indexação: o
   // processo salta a mesa do Indexador e é atribuído ao consultor.
   const [skipIndex, setSkipIndex] = useState(false);
-  // Hub & Spoke: ao partilhar com o Hub, salta a triagem (Index) do Hub.
+  // Ao partilhar com outra rede, salta a triagem (Index) dessa rede.
   const [viaVerde, setViaVerde] = useState(false);
 
   // ── Novo Cliente ──────────────────────────────────────────────────
@@ -610,7 +610,7 @@ const CreateClientModal = memo(({
             </div>
           )}
           {!clientOnly && (
-            <ViaVerdeDoHub id="via-verde-hub-switch" checked={viaVerde} onCheckedChange={setViaVerde} />
+            <ViaVerdeDaPartilha id="via-verde-partilha-switch" checked={viaVerde} onCheckedChange={setViaVerde} />
           )}
         </div>
         

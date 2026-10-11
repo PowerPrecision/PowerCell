@@ -95,6 +95,23 @@ def construir_query_do_perfil_trancado(process_ids: list, fases: list) -> dict:
     return {"$or": [por_fase, entregue]}
 
 
+
+async def _fases_dos_processos_do_cliente(process_ids) -> list[dict]:
+    """As fases dos workflows das redes DONAS dos processos do cliente (a junção, por nome).
+
+    O perfil tranca quando o processo passa da recolha de documentos; a
+    «recolha» é uma fase do workflow do dono. Um cliente tem, em regra, um
+    processo (uma rede); com mais, a junção.
+    """
+    from services.workflow_phases import carregar_fases, juntar_fases, rede_do_processo
+
+    docs = await db.processes.find(
+        {"id": {"$in": list(process_ids)}}, {"_id": 0, "network_id": 1},
+    ).to_list(50)
+    redes = list(dict.fromkeys(str(rede_do_processo(d) or "") for d in docs)) or [""]
+    return juntar_fases([await carregar_fases(rede=r or None) for r in redes])
+
+
 async def carregar_campos_editaveis() -> dict:
     """Campos que o Portal pode gravar, derivados do formulário interno.
 
@@ -361,7 +378,7 @@ async def run_get_client_profile(client_data: dict):
         # variações (singular/plural) de "eliminado" e "desistência".
         active_process = await db.processes.find_one(
             construir_query_do_perfil_trancado(
-                process_ids, await carregar_fases(),
+                process_ids, await _fases_dos_processos_do_cliente(process_ids),
             ),
             {"_id": 0, "id": 1, "is_data_confirmed": 1}
         )
@@ -467,7 +484,7 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
         # variações (singular/plural) de "eliminado" e "desistência".
         active_process = await db.processes.find_one(
             construir_query_do_perfil_trancado(
-                process_ids, await carregar_fases(),
+                process_ids, await _fases_dos_processos_do_cliente(process_ids),
             ),
             {"_id": 0, "id": 1}
         )

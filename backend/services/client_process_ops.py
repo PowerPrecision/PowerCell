@@ -42,7 +42,7 @@ from utils.input_sanitization import (
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 from services.partner_attribution import aplicar_parceiro_do_cliente
-from services.hub_triage import aplicar_regime_de_indexacao
+from services.network_triage import aplicar_regime_de_indexacao
 from services.process_closed_guard import exigir_processo_aberto_por_id
 
 logger = logging.getLogger(__name__)
@@ -67,6 +67,10 @@ async def run_link_process_to_client(
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
     
+    # D-34: ligar altera a relação cliente↔processo — como desligar, num
+    # processo fechado exige reabrir primeiro (sem excepção por cargo).
+    await exigir_processo_aberto_por_id(process_id, user)
+
     # Verificar se já está vinculado
     if process_id in client.get("process_ids", []):
         return {"success": True, "message": "Processo já vinculado a este cliente"}
@@ -230,8 +234,13 @@ async def run_create_process_for_client(
     if client_name and not personal_data.get("nome"):
         personal_data["nome"] = client_name
     
-    # Obter estado inicial do workflow
-    first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
+    # Obter estado inicial do workflow: a 1ª fase da REDE do utilizador.
+    from services.tenant_network import resolve_tenant_stamp
+    from services.workflow_phases import carregar_fases
+
+    carimbo_inicial = await resolve_tenant_stamp(user) or {}
+    fases_iniciais = await carregar_fases(rede=carimbo_inicial.get("network_id"))
+    first_status = fases_iniciais[0] if fases_iniciais else None
     initial_status = first_status["name"] if first_status else "clientes_espera"
     
     # Criar novo processo com dados do cliente

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from database import db
+from middleware.client_ip import ip_do_cliente
 from models.rgpd import (
     RGPDConsentData,
     RGPDPublicView,
@@ -60,7 +61,7 @@ async def run_validate_rgpd_token(token: str):
 
 async def run_sign_rgpd_form(token: str, consent_data: RGPDConsentData, request):
     """Assina digitalmente o consentimento RGPD usando um token temporário."""
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = ip_do_cliente(request)
     consent_data_dict = consent_data.model_dump()
     consent_data_dict["client_ip"] = client_ip
 

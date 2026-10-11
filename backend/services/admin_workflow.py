@@ -21,7 +21,25 @@ from services.auth import hash_password, require_roles, get_current_user
 from services.admin_helpers import _safe_float, _audit_log
 # A cache das fases é local ao processo: quem escreve uma fase tem de a
 # esquecer, senão o próprio admin continua a ver a versão antiga.
-from services.workflow_phases import invalidar_cache_de_fases
+from services.workflow_phases import (
+    carregar_fases,
+    fases_do_utilizador,
+    invalidar_cache_de_fases,
+    rede_do_processo,
+)
+# Workflow POR REDE: a rede em contexto de quem edita e a cópia própria
+# (copy-on-write). Ver `services/workflow_scope.py`.
+from services.workflow_scope import (
+    garantir_workflow_da_rede,
+    nomes_da_rede,
+    rede_do_workflow_em_contexto,
+    tem_workflow_proprio,
+)
+from services.tenant_network import (
+    TenantScope,
+    build_network_scope_condition,
+    rede_de_omissao,
+)
 from services.permissions import (
     get_default_permissions_for_role,
     get_all_available_permissions,
@@ -45,6 +63,11 @@ from models.permissions import (
 
 logger = logging.getLogger(__name__)
 
+#: Quem edita o workflow. O workflow é POR REDE: o Admin e o CEO editam o da sua
+#: rede em contexto (o Master o de qualquer uma, trocando de empresa). Antes era
+#: só-Master porque editar mudava a operação de todas as empresas.
+PAPEIS_QUE_EDITAM_O_WORKFLOW = [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]
+
 from services.s3_storage import s3_service
 
 
@@ -61,12 +84,20 @@ def _modelos_para_gravar(modelos):
     return garantir_ids_dos_modelos(m.model_dump() for m in modelos)
 
 
-async def run_get_workflow_statuses(user: dict):
-    """Lista todas as fases do workflow ordenadas pelo campo order.
+async def run_get_workflow_statuses(
+    user: dict,
+    request: Optional[Request] = None,
+    network_id: Optional[str] = None,
+):
+    """Lista as fases do workflow que quem pergunta VÊ, ordenadas por `order`.
 
     Porquê acessível a todos os roles: as fases do workflow são
     necessárias para renderizar o kanban e os filtros de estado em
     toda a aplicação, não apenas no painel de admin.
+
+    **Workflow por rede:** devolve o workflow da(s) rede(s) do utilizador
+    (a junção por nome quando tem mais do que uma), ou o da rede pedida em
+    `network_id` — validada: fora do âmbito é 404.
 
     Args:
         user: Utilizador autenticado com qualquer role válido (injetado).
@@ -74,21 +105,81 @@ async def run_get_workflow_statuses(user: dict):
     Returns:
         List[WorkflowStatusResponse]: Lista de fases ordenadas por order.
     """
-    statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
+    if network_id:
+        rede = await rede_do_workflow_em_contexto(user, request, rede_pedida=network_id)
+        statuses = await carregar_fases(rede=rede)
+    else:
+        statuses = await fases_do_utilizador(user)
     return [WorkflowStatusResponse(**s) for s in statuses]
 
 
-async def run_create_workflow_status(data: WorkflowStatusCreate, user: dict):
-    """Cria uma nova fase no workflow do pipeline de processos.
+async def run_get_workflow_editor(
+    user: dict,
+    request: Optional[Request] = None,
+    network_id: Optional[str] = None,
+):
+    """O workflow que ESTE utilizador edita: o da rede em contexto, e a dizê-lo.
 
-    Verifica que não existe outra fase com o mesmo nome antes de criar.
-    O campo ``internal_code`` é gerado automaticamente a partir do order
-    (ex: order=3 → internal_code="03").
+    O ecrã de administração mostra «Workflow da rede X (Power, Precision)»:
+    sem isso o administrador não sabe de quem é a operação que está a mudar.
+    `tem_workflow_proprio: false` quer dizer que a rede ainda usa o modelo —
+    a primeira escrita materializa a cópia dela.
+    """
+    rede = await rede_do_workflow_em_contexto(user, request, rede_pedida=network_id)
+    fases = await carregar_fases(rede=rede, usar_cache=False)
+    return {
+        "network_id": rede,
+        "empresas": await nomes_da_rede(rede),
+        "tem_workflow_proprio": await tem_workflow_proprio(rede),
+        "statuses": [WorkflowStatusResponse(**s) for s in fases],
+    }
+
+
+def _condicao_dos_processos_da_rede(rede: str) -> dict:
+    """Os processos que PERTENCEM a esta rede (e a pilha por carimbar, se for a de omissão)."""
+    return build_network_scope_condition(TenantScope(
+        network_ids=(rede,), inclui_rede_de_omissao=(rede == rede_de_omissao()),
+    ))
+
+
+async def _fase_da_rede(status_id: str, rede: str) -> dict:
+    """A fase `status_id` NA cópia da rede — materializando-a se for do modelo.
+
+    Aceita o id de uma fase da própria rede, ou o de uma fase do MODELO (o
+    ecrã mostra o modelo enquanto a rede não tem o seu): neste caso
+    materializa a cópia e devolve a fase de igual nome. Uma fase de OUTRA
+    rede é 404 — igual à que não existe.
+    """
+    doc = await db.workflow_statuses.find_one({"id": status_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Estado não encontrado")
+    dono = str(doc.get("network_id") or "").strip()
+    if dono == rede:
+        return doc
+    if dono:
+        raise HTTPException(status_code=404, detail="Estado não encontrado")
+    await garantir_workflow_da_rede(rede)
+    propria = await db.workflow_statuses.find_one(
+        {"network_id": rede, "name": doc.get("name")}, {"_id": 0},
+    )
+    if not propria:
+        raise HTTPException(status_code=404, detail="Estado não encontrado")
+    return propria
+
+
+async def run_create_workflow_status(
+    data: WorkflowStatusCreate, user: dict, request: Optional[Request] = None,
+):
+    """Cria uma nova fase no workflow da REDE EM CONTEXTO.
+
+    Verifica que não existe outra fase com o mesmo nome **nessa rede**
+    antes de criar. O campo ``internal_code`` é gerado automaticamente a
+    partir do order (ex: order=3 → internal_code="03").
 
     Args:
         data: Dados da fase (WorkflowStatusCreate com name, label, order,
             color, description).
-        user: Utilizador admin/CEO autenticado (injetado).
+        user: Utilizador admin/CEO/Master autenticado (injetado).
 
     Returns:
         WorkflowStatusResponse: Fase criada.
@@ -96,12 +187,18 @@ async def run_create_workflow_status(data: WorkflowStatusCreate, user: dict):
     Raises:
         HTTPException(400): Se já existe uma fase com o mesmo nome.
     """
-    existing = await db.workflow_statuses.find_one({"name": data.name})
+    rede = await rede_do_workflow_em_contexto(user, request)
+    # Antes de escrever: sem a cópia da rede, uma fase solta fazia o
+    # `carregar_fases` devolver SÓ ela (a rede deixava de herdar o modelo).
+    await garantir_workflow_da_rede(rede)
+
+    existing = await db.workflow_statuses.find_one({"name": data.name, "network_id": rede})
     if existing:
         raise HTTPException(status_code=400, detail="Estado já existe")
     
     status_doc = {
         "id": str(uuid.uuid4()),
+        "network_id": rede,
         "name": data.name,
         "label": data.label,
         "order": data.order,
@@ -135,8 +232,10 @@ async def run_create_workflow_status(data: WorkflowStatusCreate, user: dict):
     return WorkflowStatusResponse(**{k: v for k, v in status_doc.items() if k != "_id"})
 
 
-async def run_update_workflow_status(status_id: str, data: WorkflowStatusUpdate, user: dict):
-    """Atualiza os dados de uma fase do workflow existente.
+async def run_update_workflow_status(
+    status_id: str, data: WorkflowStatusUpdate, user: dict, request: Optional[Request] = None,
+):
+    """Atualiza os dados de uma fase do workflow da REDE EM CONTEXTO.
 
     Apenas os campos fornecidos no body são atualizados (atualização
     parcial). Se nenhum campo for enviado, não efetua qualquer alteração.
@@ -145,17 +244,17 @@ async def run_update_workflow_status(status_id: str, data: WorkflowStatusUpdate,
         status_id: ID da fase a atualizar.
         data: Campos a atualizar (WorkflowStatusUpdate com label, order,
             color, description — todos opcionais).
-        user: Utilizador admin/CEO autenticado (injetado).
+        user: Utilizador admin/CEO/Master autenticado (injetado).
 
     Returns:
         WorkflowStatusResponse: Fase atualizada com todos os campos.
 
     Raises:
-        HTTPException(404): Se fase não encontrada.
+        HTTPException(404): Se fase não encontrada (ou de outra rede).
     """
-    status = await db.workflow_statuses.find_one({"id": status_id}, {"_id": 0})
-    if not status:
-        raise HTTPException(status_code=404, detail="Estado não encontrado")
+    rede = await rede_do_workflow_em_contexto(user, request)
+    status = await _fase_da_rede(status_id, rede)
+    status_id = status["id"]
     
     update_data = {}
     if data.label is not None:
@@ -197,40 +296,46 @@ async def run_update_workflow_status(status_id: str, data: WorkflowStatusUpdate,
         update_data["task_templates"] = _modelos_para_gravar(data.task_templates)
 
     if update_data:
-        await db.workflow_statuses.update_one({"id": status_id}, {"$set": update_data})
+        await db.workflow_statuses.update_one(
+            {"id": status_id, "network_id": rede}, {"$set": update_data},
+        )
         invalidar_cache_de_fases()
 
     updated = await db.workflow_statuses.find_one({"id": status_id}, {"_id": 0})
     return WorkflowStatusResponse(**updated)
 
 
-async def run_delete_workflow_status(status_id: str, user: dict):
+async def run_delete_workflow_status(
+    status_id: str, user: dict, request: Optional[Request] = None,
+):
     """
-    Elimina uma fase do workflow.
+    Elimina uma fase do workflow da REDE EM CONTEXTO.
     
-    Se houver processos associados, são movidos para "Clientes em Espera" (ou a primeira fase disponível).
+    Se houver processos associados (DESSA rede), são movidos para "Clientes em Espera"
+    (ou a primeira fase disponível do workflow dessa rede).
     """
-    status = await db.workflow_statuses.find_one({"id": status_id})
-    if not status:
-        raise HTTPException(status_code=404, detail="Estado não encontrado")
+    rede = await rede_do_workflow_em_contexto(user, request)
+    status = await _fase_da_rede(status_id, rede)
+    status_id = status["id"]
     
     status_name = status["name"]
     target_name = None  # Inicializar
+    processos_da_rede = {"status": status_name, **_condicao_dos_processos_da_rede(rede)}
     
     # Verificar se há processos associados
-    process_count = await db.processes.count_documents({"status": status_name})
+    process_count = await db.processes.count_documents(processos_da_rede)
     
     if process_count > 0:
         # Encontrar a fase de destino (Clientes em Espera ou primeira fase)
         target_status = await db.workflow_statuses.find_one(
-            {"name": "clientes_espera"}, 
+            {"name": "clientes_espera", "network_id": rede}, 
             {"_id": 0, "name": 1, "label": 1}
         )
         
         if not target_status:
             # Se não encontrar "clientes_espera", usar a primeira fase por ordem
             target_status = await db.workflow_statuses.find_one(
-                {"name": {"$ne": status_name}},
+                {"name": {"$ne": status_name}, "network_id": rede},
                 {"_id": 0, "name": 1, "label": 1},
                 sort=[("order", 1)]
             )
@@ -257,8 +362,11 @@ async def run_delete_workflow_status(status_id: str, user: dict):
         # afirmar que este `update_many` não toca em `fase_desde` nem em
         # `macro_fase_desde` — é o género de decisão que alguém "corrige"
         # de boa fé daqui a seis meses.
+        #
+        # SÓ OS PROCESSOS DESTA REDE: o `status` é um nome do workflow do
+        # dono, e outra rede pode ter uma fase com o mesmo nome.
         result = await db.processes.update_many(
-            {"status": status_name},
+            processos_da_rede,
             {"$set": {"status": target_name, "updated_at": datetime.now(timezone.utc).isoformat()}}
         )
         
@@ -278,7 +386,7 @@ async def run_delete_workflow_status(status_id: str, user: dict):
             })
     
     # Eliminar a fase
-    await db.workflow_statuses.delete_one({"id": status_id})
+    await db.workflow_statuses.delete_one({"id": status_id, "network_id": rede})
     invalidar_cache_de_fases()
     
     return {
@@ -298,10 +406,11 @@ async def run_fix_duplicate_workflow_statuses(user: dict):
     # Buscar todos os workflow_statuses
     all_statuses = await db.workflow_statuses.find({}).to_list(length=None)
     
-    # Agrupar por nome
+    # Agrupar por (rede, nome): o mesmo nome em redes diferentes NÃO é duplicado —
+    # cada rede tem o seu workflow.
     by_name = defaultdict(list)
     for status in all_statuses:
-        by_name[status.get('name')].append(status)
+        by_name[(status.get('network_id') or '', status.get('name'))].append(status)
     
     # Identificar duplicados
     duplicates_found = False
@@ -315,7 +424,8 @@ async def run_fix_duplicate_workflow_statuses(user: dict):
             statuses.sort(key=lambda x: x.get('order', 999))
             
             duplicate_info = {
-                "name": name,
+                "name": name[1],
+                "network_id": name[0] or None,
                 "count": len(statuses),
                 "keeping": statuses[0].get('id'),
                 "removing": []

@@ -46,7 +46,7 @@ from services.stats_scope import AmbitoEstatistico, com_ambito
 from services.workflow_phases import (
     FASE_DESCONHECIDA,
     MACRO_FASES_VALIDAS,
-    carregar_fases,
+    fases_do_ambito,
     macro_da_fase,
     resolver_muitos,
 )
@@ -121,7 +121,7 @@ async def construir_ponte(ambito: AmbitoEstatistico) -> PonteDeMacros:
     diz "nada classificado".
     """
     try:
-        fases = await carregar_fases()
+        fases = await fases_do_ambito(ambito.scope)
     except Exception as exc:
         logger.warning("[STATS-PONTE] Falha a ler as fases (%s).", exc)
         fases = []

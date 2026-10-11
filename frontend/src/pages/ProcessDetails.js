@@ -145,7 +145,7 @@ import ProcessAssignDialog from "../components/processDetails/ProcessAssignDialo
 import ClientContextCard from "../components/processDetails/ClientContextCard";
 import AssignmentContextCard from "../components/processDetails/AssignmentContextCard";
 import PartilhaCard from "../components/processDetails/PartilhaCard";
-import { podeRevogarPartilha } from "../utils/partilhaProcesso";
+import { podePartilharProcesso, podeRevogarPartilha } from "../utils/partilhaProcesso";
 import OrigemFinanceiraCard from "../components/processDetails/OrigemFinanceiraCard";
 import ServicoDoParceiroCard from "../components/processDetails/ServicoDoParceiroCard";
 import { podeVerServicoDoParceiro, processoTemParceiro } from "../utils/servicoDoParceiro";
@@ -2523,8 +2523,12 @@ const ProcessDetails = () => {
                 size="sm"
                 className="text-teal-600 border-teal-200 hover:bg-teal-50 h-8 px-2 sm:px-3"
                 onClick={() => setShowSendDocsModal(true)}
-                disabled={isInactiveProcess}
-                title="Enviar documentação para balcões/bancos"
+                disabled={isInactiveProcess || isProcessLocked}
+                title={
+                  isProcessLocked
+                    ? "Processo fechado — reabra-o para enviar documentação"
+                    : "Enviar documentação para balcões/bancos"
+                }
               >
                 <Mail className="h-3.5 w-3.5 sm:mr-1" />
                 <span className="hidden sm:inline">Enviar Balcões</span>
@@ -3180,10 +3184,17 @@ const ProcessDetails = () => {
             <PartilhaCard
               process={process}
               podeRevogar={podeRevogarPartilha(effectiveRole)}
+              podePartilhar={podePartilharProcesso(effectiveRole)}
+              processoFechado={isProcessLocked}
               onRevoked={(restantes) => setProcess((prev) => ({
                 ...prev,
                 partner_companies: restantes,
                 partner_network_ids: restantes.map((p) => p.network_id).filter(Boolean),
+              }))}
+              onShared={(parceirosActuais) => setProcess((prev) => ({
+                ...prev,
+                partner_companies: parceirosActuais,
+                partner_network_ids: parceirosActuais.map((p) => p.network_id).filter(Boolean),
               }))}
             />
 

@@ -11762,3 +11762,21 @@ sintacticamente partida; refeita, matou 4 testes.
 **Dito:** o duplo de Mongo não implementa `$pull`, por isso o teste de
 `unlink` num processo aberto prova o `$unset` do processo e não o `$pull` do
 cliente. `link-process`, emails/modelos/`ai_analysis` continuam fora (D-34).
+
+---
+
+## Iteração `multi-fornecedor-e-workflow-por-rede` (Out 2026)
+
+Cinco directivas do dono do produto, sobre o fecho do D-34.
+
+**1. Multi-fornecedor (fim do Hub único).** `companies.is_hub` removida; `hub_triage.py` → `network_triage.py` (o campo `hub_triage` nos processos mantém-se). Quem tem Index deriva da equipa (utilizadores `indexacao` activos). `GET /processes/{id}/share-targets` e `POST /processes/{id}/share` (master/admin/ceo/diretor/administrativo da casa dona) escolhem a rede de destino; o processo entra na fila de Index dessa rede, ou salta-a com `via_verde`. Destino sem indexadores = partilha sem fila (dito). UI: `PartilharComRedeDialog`. Mutações medidas: destino == dono, papel no serviço.
+
+**2. Workflow por rede.** `workflow_statuses.network_id`; sem rede = modelo. Leitura por rede (cache por rede), semântica do processo pela rede dona e do ecrã pela de quem olha; escrita copy-on-write na rede em contexto (404 fora do âmbito, 400 sem rede). ~35 módulos convertidos, com inventário por AST. Migração `scripts/migrar_workflow_por_rede.py`, **verificada contra um `mongod` real**: 3 fases × 2 redes, segunda passagem escreve 0, índice único por `name` trocado por `(network_id, name)`, `is_hub` removido, e 5 chamadas concorrentes a `garantir_workflow_da_rede` criam 3 fases (não 15). Admin e CEO passam a editar o workflow da SUA rede (rota, separador e `WorkflowEditor` com o aviso «Está a editar o workflow da rede X»). **Não migrado:** `form_config` (D-37).
+
+**3. Excepção de pagamentos.** Confirmar um pagamento (pendente/faturado → pago) é permitido com o processo fechado; o resto das finanças continua fechado. O `administrativo` só marca como pago (um mutante revelou que o consultor passava — fechado). Lista de Processos: coluna com `comissoes_pendentes` (calculado ao servir) e botão «Marcar como Pago».
+
+**4. D-4.** `TRUSTED_PROXY_HOPS` (Render = 1): `ip_do_cliente` conta o `X-Forwarded-For` da direita. D-33 (tipificação de serviços) fora de âmbito.
+
+**5. D-34 fechado.** Emails/modelos, análise e geração por IA e `link-process` exigem processo aberto; excepção nova escrita: `POST /emails/sync/{id}` (só lê).
+
+**Deploy:** (1) `python -m scripts.migrar_workflow_por_rede` (ver) e depois `--aplicar [--limpar-is-hub]`; (2) confirmar `TRUSTED_PROXY_HOPS=1` e `TENANT_DEFAULT_NETWORK_ID`.

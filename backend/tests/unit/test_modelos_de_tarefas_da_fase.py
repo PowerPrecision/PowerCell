@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from unittest.mock import patch
+
 
 import pytest
 from pydantic import ValidationError
 
+from models.auth import UserRole
 from models.workflow import (
     MAXIMO_DE_MODELOS_POR_FASE,
     TarefaModelo,
@@ -20,6 +21,11 @@ from models.workflow import (
     WorkflowStatusUpdate,
 )
 from services import admin_workflow, workflow_phases
+from tests.unit.helpers_tenant import (  # noqa: F401  (rede_de_omissao_incumbente é fixture)
+    REDE_INCUMBENTE,
+    rede_de_omissao_incumbente,
+    tenant_db,
+)
 
 
 def _fase(**extra):
@@ -80,16 +86,21 @@ class TestAValidacaoDoModelo:
 
 
 @pytest.fixture
-async def mundo(fake_async_db):
+async def mundo(fake_async_db, rede_de_omissao_incumbente):
+    """Workflow POR REDE: a fase semeada é da rede em contexto (a de omissão,
+    porque os serviços são chamados sem `Request`)."""
+    import services.workflow_scope as ws
+
     await fake_async_db.workflow_statuses.insert_one(
-        {"id": "w-1", "name": "fase_x", "label": "Fase X", "order": 9, "color": "blue",
+        {"id": "w-1", "network_id": REDE_INCUMBENTE, "name": "fase_x", "label": "Fase X", "order": 9, "color": "blue",
          "is_default": False, "auto_assign_roles": ["consultor"],
          "task_templates": [{"id": "keep", "title": "Antiga", "priority": "Média",
                              "due_in_days": None, "assigned_role": "todos"}]}
     )
-    with patch.object(admin_workflow, "db", fake_async_db), \
-         patch.object(workflow_phases, "db", fake_async_db):
+    workflow_phases.invalidar_cache_de_fases()
+    with tenant_db(fake_async_db, admin_workflow, ws):
         yield fake_async_db
+    workflow_phases.invalidar_cache_de_fases()
 
 
 async def _gravada(db):
@@ -157,12 +168,12 @@ class TestGravarNaFase:
     async def test_gravar_invalida_a_cache_das_fases(self, mundo):
         """A automação lê as fases pela cache: sem invalidar, a nova
         configuração só valia daí a 30s (e noutro worker, mais)."""
-        await workflow_phases.carregar_fases()
-        assert workflow_phases._cache_de_fases is not None
+        await workflow_phases.carregar_fases(rede=REDE_INCUMBENTE)
+        assert workflow_phases._cache_de_fases  # uma entrada POR REDE
         await admin_workflow.run_update_workflow_status(
             "w-1", WorkflowStatusUpdate(auto_assign_roles=[]), {"id": "u"}
         )
-        assert workflow_phases._cache_de_fases is None
+        assert not workflow_phases._cache_de_fases
 
     async def test_criar_a_fase_sem_configuracao_grava_none_e_nao_lista_vazia(self, mundo):
         await admin_workflow.run_create_workflow_status(
@@ -202,15 +213,16 @@ class TestSoAdminECeoConfiguram:
         raise AssertionError(f"rota {funcao} não encontrada")
 
     @pytest.mark.parametrize("funcao", ["create_workflow_status", "update_workflow_status"])
-    def test_as_rotas_que_gravam_exigem_master(self, funcao):
-        """Adenda de RBAC (Out 2026): as fases são GLOBAIS (partilhadas por
-        todas as empresas), logo só o Master — o único perfil global — as
-        configura. Antes eram Admin/CEO, o que deixava o CEO de uma empresa
-        reescrever o fluxo de todas as outras."""
+    def test_as_rotas_que_gravam_exigem_master_admin_ou_ceo(self, funcao):
+        """Workflow POR REDE (Out 2026): as fases deixaram de ser globais, logo
+        o Admin e o CEO editam as da SUA rede em contexto (a rota resolve-a e
+        o serviço escreve só nela); o Master edita a de qualquer rede. Os
+        restantes perfis não configuram fases."""
         linha = self._roles_da_rota(funcao)
-        assert "UserRole.MASTER" in linha
-        for papel in ("ADMIN", "CEO", "DIRETOR", "CONSULTOR", "INTERMEDIARIO", "INDEXACAO", "ADMINISTRATIVO"):
-            assert f"UserRole.{papel}" not in linha, f"{papel} não pode configurar fases"
+        assert "PAPEIS_QUE_EDITAM_O_WORKFLOW" in linha
+        assert set(admin_workflow.PAPEIS_QUE_EDITAM_O_WORKFLOW) == {
+            UserRole.MASTER, UserRole.ADMIN, UserRole.CEO,
+        }
 
     def test_o_detector_le_mesmo_a_rota(self):
         assert "require_roles" in self._roles_da_rota("update_workflow_status")

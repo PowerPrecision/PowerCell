@@ -104,6 +104,9 @@ const SystemAdminPanel = () => {
   // sistema (workflow, contas de email do sistema, notificações, histórico)
   // são exclusivas dele — Admin e CEO são perfis LOCAIS (adenda de RBAC).
   const isMaster = hasRole(user, "master");
+  // O WORKFLOW é a exceção: é POR REDE (cada empresa tem a sua operação), logo
+  // o Admin e o CEO editam o da rede em contexto e o Master o de qualquer uma.
+  const podeEditarWorkflow = isMaster || hasRole(user, "admin") || hasRole(user, "ceo");
 
   const [activeTab, setActiveTab] = useState("users-mgmt");
 
@@ -293,10 +296,10 @@ const SystemAdminPanel = () => {
           {/* === TAB CUSTOMIZAÇÃO — Sub-tabs (emerald/green) === */}
           {/* ================================================================ */}
           <TabsContent value="customizacao" className="mt-6">
-            <Tabs defaultValue={isMaster ? "workflow-statuses" : "form-management"} className="w-full">
+            <Tabs defaultValue={podeEditarWorkflow ? "workflow-statuses" : "form-management"} className="w-full">
               <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">
                 <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
-                  {isMaster && (
+                  {podeEditarWorkflow && (
                     <TabsTrigger value="workflow-statuses" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
                       <GitBranch className="h-4 w-4" />
                       <span className="hidden sm:inline">Estados de Workflow</span>
@@ -316,7 +319,7 @@ const SystemAdminPanel = () => {
 
                 </TabsList>
               </div>
-              {isMaster && (
+              {podeEditarWorkflow && (
                 <TabsContent value="workflow-statuses" className="mt-4">
                   <Suspense fallback={<TabLoader />}><WorkflowStatusesPage embedded={true} /></Suspense>
                 </TabsContent>

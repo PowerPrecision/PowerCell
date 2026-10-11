@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from database import db
+from middleware.client_ip import ip_do_cliente
 
 logger = logging.getLogger(__name__)
 
@@ -94,11 +95,7 @@ async def log_audit_event(
         # Extrair IP do request (se configurado e disponível)
         ip_address = None
         if config.get("log_ip_address", True) and request:
-            ip_address = (
-                request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-                or request.headers.get("X-Real-IP")
-                or (request.client.host if request.client else None)
-            )
+            ip_address = ip_do_cliente(request)
 
         audit_doc = {
             "id": str(uuid.uuid4()),

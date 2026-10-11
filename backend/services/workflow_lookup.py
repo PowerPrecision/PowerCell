@@ -20,6 +20,10 @@ Funcões expostas:
   A semântica inicial fica registada NA BASE DE DADOS — a execução é
   100% dinâmica a partir daí, sem if/else com nomes de fases no fluxo.
 
+WORKFLOW POR REDE (Out 2026): as consultas levam `rede` — o workflow da rede
+DONA do processo. `rede=None` é o MODELO (as fases sem `network_id`). Uma rede
+sem fases próprias recebe as do modelo (ver `workflow_phases.carregar_fases`).
+
 Todas as funções degradam graciosamente (devolvem listas vazias / None)
 quando a colecção está vazia ou a BD falha — nunca levantam excepção.
 """
@@ -56,53 +60,52 @@ _BACKFILL_FLAG_DEFAULTS = {
 }
 
 
-async def get_first_workflow_status() -> Optional[str]:
-    """Nome da 1ª fase ACTIVA do workflow (menor ``order``).
+async def _fases_da_rede(rede: Optional[str]) -> list[dict]:
+    """O workflow da rede (ou o modelo), por `order`, sem cache.
+
+    Usa o `db` DESTE módulo (os testes patcham-no aqui) e a regra de
+    `workflow_phases.ler_fases_da_rede`, que é a única.
+    """
+    from services.workflow_phases import ler_fases_da_rede
+
+    return await ler_fases_da_rede(db, rede)
+
+
+async def get_first_workflow_status(rede: Optional[str] = None) -> Optional[str]:
+    """Nome da 1ª fase ACTIVA do workflow da rede (menor ``order``).
 
     Fallback: se não existir nenhuma fase com ``is_active`` definido,
-    devolve a 1ª fase existente por ``order``. ``None`` se a colecção
-    estiver vazia (ambiente sem seed) — os chamadores tratam o None.
+    devolve a 1ª fase existente por ``order``. ``None`` se o workflow
+    estiver vazio (ambiente sem seed) — os chamadores tratam o None.
     """
     try:
-        active = await db.workflow_statuses.find_one(
-            {"is_active": {"$ne": False}},
-            {"_id": 0},
-            sort=[("order", 1)],
-        )
-        if active and active.get("name"):
-            return active["name"]
-        any_status = await db.workflow_statuses.find_one(
-            {}, {"_id": 0}, sort=[("order", 1)]
-        )
-        return any_status.get("name") if any_status else None
+        fases = await _fases_da_rede(rede)
+        for fase in fases:
+            if fase.get("is_active") is not False and fase.get("name"):
+                return fase["name"]
+        return fases[0].get("name") if fases else None
     except Exception as e:  # pragma: no cover — degradação graciosa
-        logger.warning(f"[WORKFLOW-LOOKUP] Falha ao resolver 1ª fase: {e}")
+        logger.warning(f"[WORKFLOW-LOOKUP] Falha a resolver 1ª fase: {e}")
         return None
 
 
-async def get_flagged_workflow_status_names(flag: str) -> list[str]:
-    """Nomes das fases com a flag de propósito ``flag`` marcada True."""
+async def get_flagged_workflow_status_names(flag: str, rede: Optional[str] = None) -> list[str]:
+    """Nomes das fases da rede com a flag de propósito ``flag`` marcada True."""
     if flag not in WORKFLOW_PURPOSE_FLAGS and flag != "is_active":
         return []
     try:
-        docs = await db.workflow_statuses.find(
-            {flag: True}, {"_id": 0, "name": 1}
-        ).to_list(100)
-        return [d["name"] for d in docs if d.get("name")]
+        return [f["name"] for f in await _fases_da_rede(rede) if f.get(flag) is True and f.get("name")]
     except Exception as e:  # pragma: no cover — degradação graciosa
-        logger.warning(f"[WORKFLOW-LOOKUP] Falha ao resolver flag '{flag}': {e}")
+        logger.warning(f"[WORKFLOW-LOOKUP] Falha a resolver flag '{flag}': {e}")
         return []
 
 
-async def get_inactive_workflow_status_names() -> list[str]:
-    """Nomes das fases terminais (``is_active: False``)."""
+async def get_inactive_workflow_status_names(rede: Optional[str] = None) -> list[str]:
+    """Nomes das fases terminais da rede (``is_active: False``)."""
     try:
-        docs = await db.workflow_statuses.find(
-            {"is_active": False}, {"_id": 0, "name": 1}
-        ).to_list(100)
-        return [d["name"] for d in docs if d.get("name")]
+        return [f["name"] for f in await _fases_da_rede(rede) if f.get("is_active") is False and f.get("name")]
     except Exception as e:  # pragma: no cover — degradação graciosa
-        logger.warning(f"[WORKFLOW-LOOKUP] Falha ao resolver fases inactivas: {e}")
+        logger.warning(f"[WORKFLOW-LOOKUP] Falha a resolver fases inactivas: {e}")
         return []
 
 
@@ -117,7 +120,7 @@ async def ensure_workflow_purpose_flags_backfill() -> dict:
     updated = 0
     skipped = 0
     try:
-        docs = await db.workflow_statuses.find({}, {"_id": 0}).to_list(200)
+        docs = await db.workflow_statuses.find({}, {"_id": 0}).to_list(5000)
         for doc in docs:
             name = doc.get("name")
             if not name:

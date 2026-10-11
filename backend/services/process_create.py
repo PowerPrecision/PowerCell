@@ -19,7 +19,7 @@ from models.auth import UserRole
 from models.enums import ProcessStatus
 from services.encryption import decrypt_client_data
 from services.partner_attribution import aplicar_parceiro_do_cliente
-from services.hub_triage import aplicar_regime_de_indexacao
+from services.network_triage import aplicar_regime_de_indexacao
 from services.process_staff_assignment import (
     PAPEIS_COMO_CONSULTOR,
     PAPEIS_COMO_MEDIADOR,
@@ -30,7 +30,9 @@ from services.process_staff_assignment import (
 logger = logging.getLogger(__name__)
 
 
-async def resolve_initial_workflow_status(*, is_lead: bool) -> tuple[Optional[str], Optional[str]]:
+async def resolve_initial_workflow_status(
+    *, is_lead: bool, rede: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str]]:
     """
     Devolve (initial_status, default_status).
 
@@ -42,8 +44,13 @@ async def resolve_initial_workflow_status(*, is_lead: bool) -> tuple[Optional[st
     `LEAD_STATUS_VALUES` (excluído do Kanban) e necessário para que o
     Processo exista de facto (Portal do Cliente, reenvio de acesso e email
     de boas-vindas dependem de existir um Processo associado ao Cliente).
+
+    Workflow POR REDE: a 1ª fase é a do workflow da rede em que o processo nasce.
     """
-    first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
+    from services.workflow_phases import carregar_fases
+
+    fases = await carregar_fases(rede=rede)
+    first_status = fases[0] if fases else None
     default_status = first_status["name"] if first_status else None
 
     if is_lead:
@@ -567,18 +574,20 @@ async def assemble_staff_create_bundle(
     # processo; consultado na transição de workflow (auto-avanço do
     # pré-registo) e na auto-atribuição pós-criação.
     skip_index = bool(getattr(data, "skip_index", False))
-    initial_status, _ = await resolve_initial_workflow_status(is_lead=is_lead)
+    # Carimbo multi-tenant (Lote 4, ponto 10): o processo nasce a saber a
+    # que rede pertence. Sem isto, o filtro de isolamento das listagens
+    # não tem por onde pegar — foi exactamente essa a fuga. Resolve-se ANTES
+    # da fase inicial: o workflow é o da rede em que o processo nasce.
+    tenant = await resolve_tenant_stamp(user, active_company_id=active_company_id)
+    initial_status, _ = await resolve_initial_workflow_status(
+        is_lead=is_lead, rede=(tenant or {}).get("network_id"),
+    )
 
     process_id = str(uuid.uuid4())
     process_number = await get_next_process_number()
     now = datetime.now(timezone.utc).isoformat()
 
     client_fields = await load_existing_client_for_process(data.client_id)
-
-    # Carimbo multi-tenant (Lote 4, ponto 10): o processo nasce a saber a
-    # que rede pertence. Sem isto, o filtro de isolamento das listagens
-    # não tem por onde pegar — foi exactamente essa a fuga.
-    tenant = await resolve_tenant_stamp(user, active_company_id=active_company_id)
 
     process_doc = build_staff_process_doc(
         process_id=process_id,
@@ -799,7 +808,11 @@ async def persist_and_finalize_client_self_create(
     assert_is_cliente_role(user["role"])
 
     client_doc = await load_client_doc_or_404(data.client_id)
-    initial_status, _ = await resolve_initial_workflow_status(is_lead=False)
+    from services.workflow_phases import rede_do_processo
+
+    initial_status, _ = await resolve_initial_workflow_status(
+        is_lead=False, rede=rede_do_processo(client_doc),
+    )
 
     process_id = str(uuid.uuid4())
     process_number = await get_next_process_number()

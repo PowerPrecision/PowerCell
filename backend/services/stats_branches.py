@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 from database import db
 from services.workflow_phases import (
-    carregar_fases,
+    fases_do_ambito,
     nomes_activos,
     nomes_por_macro,
 )
@@ -99,7 +99,7 @@ async def run_get_branch_performance(user: dict):
     # As fases vêm do motor, não de listas cravadas. Um pedido, uma
     # leitura de 14 documentos — e as estatísticas param de medir fases
     # que não existem.
-    fases = await carregar_fases()
+    fases = await fases_do_ambito(ambito.scope)
     aprovados = nomes_por_macro(fases, "aprovado", "concluido")
     concluidos = nomes_por_macro(fases, "concluido")
     activos = nomes_activos(fases)

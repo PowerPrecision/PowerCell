@@ -321,9 +321,9 @@ async def transicao_de_fase(
 
     macro_anterior = macro_nova = None
     try:
-        from services.workflow_phases import carregar_fases
+        from services.workflow_phases import carregar_fases, rede_do_processo
 
-        fases = await carregar_fases()
+        fases = await carregar_fases(rede=rede_do_processo(doc))
         macro_anterior = await _macro_de(fase_anterior, fases)
         macro_nova = await _macro_de(nova_fase, fases)
     except Exception as exc:  # degradação graciosa

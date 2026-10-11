@@ -43,9 +43,10 @@ _EXTRA_INDEXADOR = {
 
 async def indexer_inactive_statuses() -> set[str]:
     """Estados que NÃO contam como carga do indexador."""
-    from services.workflow_phases import carregar_fases, nomes_terminais
+    from services.workflow_phases import nomes_terminais_de_todas_as_redes
 
-    return set(nomes_terminais(await carregar_fases())) | _EXTRA_INDEXADOR
+    # Carga de uma PESSOA: o que fecha em qualquer workflow não pesa.
+    return set(await nomes_terminais_de_todas_as_redes()) | _EXTRA_INDEXADOR
 
 
 # ==== BUGFIX (E2E, Set 2026 — transição dinâmica do workflow) ====
@@ -56,11 +57,11 @@ _EXTRA_FORA_DO_WORKFLOW = {
 }
 
 
-async def workflow_start_excluded() -> set[str]:
-    """Estados que não são fases reais de trabalho do Kanban."""
+async def workflow_start_excluded(rede: Optional[str] = None) -> set[str]:
+    """Estados que não são fases reais de trabalho do Kanban (workflow da `rede`)."""
     from services.workflow_phases import carregar_fases, nomes_terminais
 
-    return set(nomes_terminais(await carregar_fases())) | _EXTRA_FORA_DO_WORKFLOW
+    return set(nomes_terminais(await carregar_fases(rede=rede))) | _EXTRA_FORA_DO_WORKFLOW
 
 
 async def _resolve_dynamic_indexer_status(process: dict) -> Optional[str]:
@@ -91,8 +92,11 @@ async def _resolve_dynamic_indexer_status(process: dict) -> Optional[str]:
         load_workflow_status_pipeline,
     )
 
+    from services.workflow_phases import rede_do_processo
+
+    rede = rede_do_processo(process)
     current_status = process.get("status")
-    pipeline = await load_workflow_status_pipeline()
+    pipeline = await load_workflow_status_pipeline(rede)
     if not pipeline:
         logger.warning(
             "[ASSIGN-INDEXER][DW] workflow_statuses vazio — processo mantém "
@@ -102,7 +106,7 @@ async def _resolve_dynamic_indexer_status(process: dict) -> Optional[str]:
 
     # 1) Lead / pré-registo / sem status → 1ª fase real do Kanban
     if current_status in (None, "", "pre_registo", "lead"):
-        fora_do_workflow = await workflow_start_excluded()
+        fora_do_workflow = await workflow_start_excluded(rede)
         for name in pipeline:
             if name and name not in fora_do_workflow:
                 return name
@@ -545,10 +549,10 @@ async def assign_to_indexer(
     if not process:
         return False, {}, f"Processo {process_id} não encontrado"
 
-    # HUB & SPOKE — a satélite não tem Index (ver `hub_triage`).
-    from services import hub_triage
+    # Uma rede sem Index não tem a quem atribuir (ver `network_triage`).
+    from services import network_triage
 
-    if network_id is None and await hub_triage.processo_e_de_satelite(process):
+    if network_id is None and await network_triage.rede_do_processo_sem_index(process):
         return True, {
             "status": process.get("status"),
             "assigned": False,
@@ -565,8 +569,8 @@ async def assign_to_indexer(
     # ── 2. Encontrar todos os indexadores ativos ──
     query = build_deep_role_query({"is_active": True}, role="indexacao")
     # Pool = a equipa do processo (ou a rede pedida), nunca o mundo.
-    membros = await hub_triage.user_ids_da_rede(
-        network_id or hub_triage.rede_da_equipa(process)
+    membros = await network_triage.user_ids_da_rede(
+        network_id or network_triage.rede_da_equipa(process)
     )
     if membros is not None:
         query = {"$and": [query, {"id": {"$in": sorted(membros)}}]}
@@ -864,9 +868,10 @@ async def assign_to_indexer(
 # (todas as variações legadas singular/plural).
 async def consultant_inactive_statuses() -> set[str]:
     """Estados que NÃO contam como processos activos do consultor."""
-    from services.workflow_phases import carregar_fases, nomes_terminais
+    from services.workflow_phases import nomes_terminais_de_todas_as_redes
 
-    return set(nomes_terminais(await carregar_fases()))
+    # Carga de uma PESSOA: o que fecha em qualquer workflow não pesa.
+    return set(await nomes_terminais_de_todas_as_redes())
 
 # PACOTE 12 (Eixo 3 — least-busy ESTRITO): perfis de gestão EXCLUÍDOS da
 # auto-atribuição "menos ocupado". Um admin/ceo/diretor com
@@ -994,9 +999,9 @@ async def assign_to_least_busy_consultant(process_id: str) -> Tuple[bool, dict, 
     #   _find_least_busy_user("intermediario"));
     # - EXCLUÍDOS perfis de gestão (admin/ceo/diretor/… mesmo com
     #   additional_roles=["consultor"]) — ver _least_busy_candidate_query.
-    from services import hub_triage
+    from services import network_triage
 
-    consultor_query = await hub_triage.restringir_a_equipa(
+    consultor_query = await network_triage.restringir_a_equipa(
         _least_busy_candidate_query("consultor"), process,
     )
 
@@ -1362,9 +1367,9 @@ async def _find_least_busy_user(
     query = _least_busy_candidate_query(role)
     # Hub & Spoke (Bloco A): a equipa do processo, nunca o mundo.
     if network_id:
-        from services import hub_triage
+        from services import network_triage
 
-        membros = await hub_triage.user_ids_da_rede(network_id)
+        membros = await network_triage.user_ids_da_rede(network_id)
         if membros is not None:
             query = {"$and": [query, {"id": {"$in": sorted(membros)}}]}
 
@@ -1490,9 +1495,9 @@ async def dual_auto_assign_on_pre_registo_transition(
             f"[DUAL-AUTO] Consultor já atribuído: {result_data['consultant_name']} — mantendo"
         )
     else:
-        from services import hub_triage
+        from services import network_triage
 
-        equipa = hub_triage.rede_da_equipa(process)
+        equipa = network_triage.rede_da_equipa(process)
         consultor = await _find_least_busy_user("consultor", company_id, equipa)
         if consultor:
             # BUGFIX (reatividade do cartão de Atribuição) — escrever o
@@ -1532,10 +1537,10 @@ async def dual_auto_assign_on_pre_registo_transition(
             f"[DUAL-AUTO] Mediador já atribuído: {result_data['mediador_name']} — mantendo"
         )
     else:
-        from services import hub_triage
+        from services import network_triage
 
         intermediario = await _find_least_busy_user(
-            "intermediario", company_id, hub_triage.rede_da_equipa(process),
+            "intermediario", company_id, network_triage.rede_da_equipa(process),
         )
         if intermediario:
             # Simétrico do consultor — ver comentário acima.

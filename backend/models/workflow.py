@@ -108,6 +108,8 @@ class WorkflowStatusUpdate(BaseModel):
 
 class WorkflowStatusResponse(BaseModel):
     id: str
+    # Workflow POR REDE: a rede dona da fase; ``None`` = o MODELO.
+    network_id: Optional[str] = None
     name: str
     label: str
     order: int

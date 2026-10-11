@@ -47,6 +47,7 @@ def mundo(fake_async_db, rede_de_omissao_incumbente):
     import services.email_access as ea
     import services.email_draft_service as eds
     import services.email_templates_drafts as etd
+    import services.process_closed_guard as pcg
 
     semear(fake_async_db)
     fake_async_db.user_company_roles.docs.extend([
@@ -66,7 +67,7 @@ def mundo(fake_async_db, rede_de_omissao_incumbente):
         _rascunho("d-legado", "p-legado"),  # sem carimbo nenhum
     ])
     with contextlib.ExitStack() as pilha:
-        pilha.enter_context(tenant_db(fake_async_db, eds, etd, ea, dv))
+        pilha.enter_context(tenant_db(fake_async_db, eds, etd, ea, dv, pcg))
         yield fake_async_db, etd
 
 

@@ -9707,7 +9707,9 @@ tarefa de IA `executive_report_analysis` (modelo do painel); cabeçalho de respo
 
 **Isolamento.** Toda a listagem de processos/clientes pergunta a rede (`build_tenant_process_condition` + `com_isolamento`); `TestInventarioDasListagens` falha por omissão. «Os Meus Clientes» não tinha nenhuma (diretor/administrativo → `{}`).
 
-**Hub & Spoke.** `companies.is_hub` (Master). Satélite = rede que não é Hub quando há Hub: os processos nascem sem Index (`aplicar_regime_de_indexacao`); ao serem partilhados com o Hub entram na sua triagem (`hub_triage.entrar_na_triagem_do_hub`, `hub_triage` no processo) ou, com `via_verde`, saltam-na. Os pools de auto-atribuição são da equipa do processo (`rede_da_equipa`).
+**Triagem por rede (multi-fornecedor, substitui o Hub único).** Sem flag `is_hub`: uma rede «tem Index» quando tem utilizadores `indexacao` activos. Uma rede sem Index cria processos sem Index (`aplicar_regime_de_indexacao`); a acção «Partilhar com…» (`POST /processes/{id}/share`) escolhe a **rede de destino** e o processo entra na fila de Index dessa rede (`network_triage.entrar_na_triagem_da_rede`) ou, com `via_verde`, salta-a. Os pools de auto-atribuição são da equipa do processo (`rede_da_equipa`).
+
+**Workflow por rede.** `workflow_statuses.network_id`; documentos sem rede = modelo. Leitura por `carregar_fases(rede=…)`; o processo usa a rede dona, o ecrã a de quem olha; escrita copy-on-write na rede em contexto (`workflow_scope`). Migração: `scripts/migrar_workflow_por_rede.py`.
 
 **Parceiro.** Lead retida em `partner_drafts` → comprovativo → `db.clients` com `validacao_financeira` → Validar/Rejeitar (CEO, Diretor, Administrativo): aviso, nunca travão. Rejeitada volta ao parceiro (`devolvida`). 60 dias parada → `expirado` (job `scheduled_tasks`). Dados do cliente editáveis com a estrutura do registo público (`partner_client_form`).
 

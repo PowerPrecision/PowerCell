@@ -42,7 +42,7 @@ import { createClientProcess, createClient, searchClients } from "../services/ap
 import { toast } from "sonner";
 import { PROCESS_TYPE_LABELS } from "./SmartClientSearch";
 import { Switch } from "./ui/switch";
-import ViaVerdeDoHub from "./shared/ViaVerdeDoHub";
+import ViaVerdeDaPartilha from "./shared/ViaVerdeDaPartilha";
 import useConfirmarProcessosActivos from "../hooks/useConfirmarProcessosActivos";
 
 const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, isLead = false }) => {
@@ -61,7 +61,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
   // PACOTE 5 (Fast-Track / Via Verde) — ignorar a fase de Indexação: o
   // processo salta a mesa do Indexador e é atribuído ao consultor.
   const [skipIndex, setSkipIndex] = useState(false);
-  // Hub & Spoke: ao partilhar com o Hub, salta a triagem (Index) do Hub.
+  // Ao partilhar com outra rede, salta a triagem (Index) dessa rede.
   const [viaVerde, setViaVerde] = useState(false);
 
   // ── Novo Cliente (quando não há preSelectedClient) ───────────────
@@ -585,7 +585,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
             </div>
           </div>
 
-          <ViaVerdeDoHub id="cpm-via-verde-hub-switch" checked={viaVerde} onCheckedChange={setViaVerde} />
+          <ViaVerdeDaPartilha id="cpm-via-verde-partilha-switch" checked={viaVerde} onCheckedChange={setViaVerde} />
         </div>
 
         {/* `shrink-0` para o rodapé não ser comprimido pelo corpo, e

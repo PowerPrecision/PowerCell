@@ -85,25 +85,22 @@ pequeno (`resolve_tenant_stamp` no `public_registration`) e a Pool passa a
 
 ---
 
-### D-4 · Varrimento de limites de pedidos nos restantes routers
-**Onde:** `backend/routes/*.py`
+### D-4 · Duas políticas de força bruta para as duas portas do Portal (o resto fechou)
+**Onde:** `backend/services/portal_brute_force.py`, `backend/services/portal_security.py`
 
-Os três endpoints de upload do Portal não tinham `@limiter.limit` nenhum,
-ao lado de um `/public/client-registration` com `5/hour` desde sempre. O
-padrão foi encontrado no lote do Incidente P0 e corrigido **só** nesses três.
-Não houve inventário dos restantes.
+**Fechado (Out 2026):** o IP real do cliente deixou de ser escolhido por quem
+ataca. `middleware/client_ip.py::ip_do_cliente` lê o `X-Forwarded-For` **da
+direita**, saltando `TRUSTED_PROXY_HOPS` proxies de confiança (Render sozinho = 1,
+já no `render.yaml`; atrás de Cloudflare = 2) — antes lia o primeiro elemento,
+que é o que o cliente envia, e o limite por IP não mordia em lado nenhum. Sem a
+variável, ou com ela inválida, usa o peer do socket e di-lo no log; um
+`X-Forwarded-For` mais curto do que os saltos conhecidos cai no peer.
+Cobertura: `test_ip_do_cliente_atras_do_proxy.py`. **Operação:** confirmar o
+valor de `TRUSTED_PROXY_HOPS` em cada ambiente (com o número errado todos os
+clientes agrupam-se numa só chave e o limite tranca o sistema).
+O varrimento de `@limiter.limit` do Portal fechou no Lote 10 (abaixo).
 
-**Porque foi adiado:** o incidente P0 era um hotfix e alargá-lo a 60 ficheiros
-de rotas tornava-o irrevisável.
-
-**Quem é atingido:** qualquer endpoint autenticado mas sem limite é um vector
-de varrimento ou de esgotamento de recursos.
-
-**Para fechar:** inventário por AST de todos os `@router.<método>` sem
-`@limiter.limit`, triado por superfície (público > Portal > staff), com um
-teste-inventário como o de
-`test_portal_upload_path_traversal.py::TestOsEndpointsDoPortalTemLimiteDePedidos`.
-
+**Historial, para o contexto da metade que continua aberta:**
 
 **Medido no Lote 9 (Fase B):** o `/portal/visits/request` ganhou limite
 (fazia o servidor ir buscar um URL escolhido pelo cliente, sem tecto de
@@ -133,47 +130,7 @@ diz exactamente esses números. Inventariei um módulo e concluí da
 ausência; o travão que acrescentei era uma segunda política na mesma porta
 e foi retirado.
 
-**O que FICA ABERTO nesta dívida, e é o que importa agora**
-
-O `@limiter.limit` é uma parede com uma porta: a chave vem de
-`_get_rate_limit_key`, que nos endpoints **autenticados** resolve o `sub`
-do JWT (assinado, não falsificável — no Portal é o `process_id`), mas nos
-de **pré-autenticação** cai no IP. E o IP sai de `_get_client_ip`, que lê
-o **primeiro** elemento do `X-Forwarded-For`:
-
-```python
-forwarded_for = request.headers.get("X-Forwarded-For")
-if forwarded_for:
-    return forwarded_for.split(",")[0].strip()
-```
-
-O primeiro elemento é o que o CLIENTE envia — qualquer proxy acrescenta ao
-fim, não ao princípio. **Quem ataca muda-o a cada pedido e o limite por IP
-não morde em lado nenhum do sistema**, não só no Portal. É a forma do
-placebo do `build_company_scope_condition`: a verificação corre, parece
-fechada, e o valor que compara é escolhido por quem se quer verificar.
-
-É por isso que a força bruta do Portal foi fechada pelo eixo da
-IDENTIDADE e não pelo do IP, e por isso é que esta dívida não fecha com
-o Lote 10.
-
-**Porque não se corrigiu agora:** o valor de confiança é contado a partir
-da DIREITA, saltando o número de proxies conhecidos — e esse número
-depende do deploy (Render sozinho é 1; Render atrás de Cloudflare é 2). Com
-o número errado, todos os clientes colapsam numa só chave e o limite
-tranca o sistema inteiro a 10 pedidos/minuto. Mudar isto sem saber a
-topologia é trocar uma porta aberta por uma avaria.
-
-**Para fechar:** `TRUSTED_PROXY_HOPS` (inteiro, explícito, por ambiente) +
-`_get_client_ip` a contar da direita; sem a variável definida, usar o
-`request.client.host` (o peer do socket, não falsificável) e **dizer no
-log** que o limite por IP está a agrupar por proxy. Confirmar a topologia
-do Render antes, e medir numa pré-publicação: a asserção é que dois
-pedidos com `X-Forwarded-For` diferentes e o mesmo peer contam para a
-MESMA chave.
-
-**Segunda metade desta dívida, descoberta no Lote 10 — duas políticas de
-força bruta para as duas portas do mesmo Portal**
+**O que continua aberto — duas políticas de força bruta para as duas portas do mesmo Portal**
 
 | Porta | Onde | Tentativas | Bloqueio | Colecção |
 |---|---|---|---|---|
@@ -528,42 +485,67 @@ selectores falhados por execução (passo e selector, sem credenciais) e uma
 rotina de verificação mensal com uma conta de teste; só depois faz sentido
 partir o módulo.
 
-### D-34 · Superfícies que escrevem num processo fechado fora da guarda, e conteúdo global escrito por perfis locais
-**Onde:** `services/process_closed_guard.py` (`FORA_DA_GUARDA` em `tests/unit/test_processo_fechado_equipa.py`), `routes/clients.py` (`link-process`), `routes/emails.py`, `routes/templates.py`, `routes/ai_analysis.py`, `routes/changelog.py`
+### D-34 · Conteúdo global escrito por perfis locais (o fecho do processo fechado está concluído)
+**Onde:** `routes/changelog.py`; guarda em `services/process_closed_guard.py`
 
-**Fechado (Out 2026):** a equipa já não altera campos nem carrega ficheiros num
-processo em fase terminal (403), em `/processes`, `/documents`, `/onedrive`,
-`/storage` e nas notas de voz, mais o upload, a eliminação de ficheiros e o
-`PUT`; sem excepção por cargo. Reabre-se com `POST /processes/{id}/reopen`.
-**Segunda passagem (D-34):** também fecham — e exigem Reabrir primeiro — mover no
-Kanban (mesmo entre duas fases terminais), mensagens ao cliente, gerar/enviar o
-link do Portal, origem financeira, serviço pago pelo parceiro, os registos
-financeiros (`/finance/processes`) e `unlink-process`. As excepções ficaram
-três: reabrir, eliminar o processo e revogar uma partilha.
+**Fechado (Out 2026):** a equipa não altera nem escreve num processo em fase
+terminal (403) em nenhuma superfície: campos, ficheiros e notas; mover no
+Kanban (mesmo entre fases terminais), mensagens ao cliente, link do Portal,
+origem financeira, serviço do parceiro, registos financeiros, `unlink-process`
+e — na última passagem — **emails/modelos** (`routers emails e templates`,
+`send-documentation`, rascunhos), **análise e geração de documentos por IA**
+(`ai_analysis`, `document_extraction`) e **`link-process`**. Sem excepção por
+cargo: reabre-se com `POST /processes/{id}/reopen`.
 
-**O que continua aberto, de propósito e dito:** (1) os routers de **emails**
-(`send-documentation`, `sync`, `monitored`), **modelos** (`document-request`) e
-`ai_analysis` escrevem com `{process_id}` mas fora do que o produto chama
-«editar o processo» — cada um tem o motivo escrito no teste, e a decisão de os
-incluir é de produto; (2) `POST /clients/{id}/link-process` (o lado inverso do
-unlink) também altera a relação cliente↔processo e não passa pela guarda;
-(3) as **semanas já fechadas** do relatório executivo guardam os números com que
-foram registadas (ainda com Admin/Master nas linhas); (4) **o custo de negócio da
-regra:** marcar uma comissão como «paga» e «serviço pago pelo parceiro» são
-acontecimentos de DEPOIS do fecho — hoje obrigam a reabrir o processo. Se isso
-pesar na operação, a saída é uma excepção ESCRITA e nomeada para esses dois
-registos (nunca por cargo), não um bypass.
-Separadamente: `POST /system/changelog/generate-ai` e `/diagnose` aceitam
-**Admin e CEO**, que são perfis LOCAIS, para escrever conteúdo GLOBAL (todas
-as redes veem as novidades). Só o Master marca Premium (feito); a geração em si
-devia ser só-Master pela mesma razão — não se mudou porque a geração é um
-fluxo de trabalho existente da equipa e a decisão é de quem gere o produto.
-**O que fecha isto:** decidir (1) e (2) com o dono do produto e, para a geração,
-passar a lista de papéis a `[MASTER]` (o ecrã `ChangelogSection` já só é
-alcançável pelo Master).
+**As excepções são QUATRO, escritas e afirmadas por igualdade num teste:**
+reabrir, eliminar o processo, revogar uma partilha e `POST /emails/sync/{id}`
+(só lê do servidor de email — não decide nada sobre o processo). A excepção de
+**pagamentos** é a única de negócio e vive no estado financeiro, não na rota:
+confirmar um pagamento (pendente/faturado → pago) é permitido com o processo
+fechado, porque as comissões se pagam no fim; o resto das finanças continua
+fechado (ver AGENTS.md).
+
+**O que continua aberto, de propósito e dito:** (1) as **semanas já fechadas**
+do relatório executivo guardam os números com que foram registadas (ainda com
+Admin/Master nas linhas); (2) `POST /system/changelog/generate-ai` e `/diagnose`
+aceitam **Admin e CEO**, que são perfis LOCAIS, para escrever conteúdo GLOBAL
+(todas as redes veem as novidades). Só o Master marca Premium (feito); a geração
+devia ser só-Master pela mesma razão — não se mudou porque é um fluxo de
+trabalho existente e a decisão é de quem gere o produto.
+**O que fecha isto:** passar a lista de papéis da geração a `[MASTER]` (o ecrã
+`ChangelogSection` já só é alcançável pelo Master).
+
+### D-36 · Directório de redes no diálogo «Partilhar com…»
+**Onde:** `services/process_sharing_api.py::run_list_share_targets`, `PartilharComRedeDialog.jsx`
+
+Para escolher a rede de destino, quem pode partilhar (master/admin/ceo/diretor/
+administrativo da casa dona) vê o **nome das empresas das outras redes** que têm
+Index. Num modelo multi-fornecedor isso é necessário, mas significa que a
+existência e o nome de uma empresa-cliente do sistema é visível a outra. Se uma
+rede não quiser ser listada, falta um interruptor `listavel_para_partilha` na
+empresa (ou uma lista de fornecedores aprovados por rede). **Decisão de produto.**
+
+### D-37 · Formulários continuam globais; workflow por rede ainda sem «repor modelo»
+**Onde:** `services/form_config_*.py`, `services/workflow_scope.py`
+
+O pedido incluía «formulários» entre o que deixa de ser global. Migrou-se o
+**workflow** (fases, flags, macro-fases, modelos de tarefas); o `form_config`
+(registo público, passos e campos) **não** — é consumido pelo registo público,
+pelo Portal (`portal_profile_schema`) e pelo Portal do Parceiro
+(`partner_client_form`), três leitores a que falta saber de que rede é o pedido
+(o registo público é anónimo: a rede vem do link/empresa). Fazê-lo sem esse
+desenho cortava o registo público de quem não tem rede resolvida.
+Outros pormenores assumidos do workflow por rede: (a) um processo **convidado**
+(partilhado) mostra as colunas/rótulos com as fases de QUEM OLHA, e a semântica
+(fechado, portal) com as da rede dona; (b) os contadores de carga dos pools
+usam a união das fases terminais de todas as redes (aproximação); (c) não há
+ainda botão «repor ao modelo» — apagar a cópia de uma rede à mão repõe a leitura
+do modelo; (d) editar o MODELO (`network_id` ausente) só se faz por script.
+**Para fechar:** decidir a rede do registo público e migrar o `form_config` com
+o mesmo molde (`network_id`, modelo, copy-on-write).
 
 ### D-35 · Bloco A/B/C: o que ficou de fora, dito
-**Onde:** `services/hub_triage.py`, `services/partner_drafts.py`, `services/financial_validation.py`, `services/tenant_network.py`
+**Onde:** `services/network_triage.py` (ex-`hub_triage.py`; o Hub único acabou — ver AGENTS.md), `services/partner_drafts.py`, `services/financial_validation.py`, `services/tenant_network.py`
 
 **Fechado (Out 2026):** as listagens de «Os Meus Clientes» e mais seis superfícies passaram a perguntar a rede; o Hub & Spoke (triagem no Hub, Via Verde); o filtro de viabilidade do Parceiro; a validação financeira; a expiração aos 60 dias.
 
@@ -617,6 +599,8 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 
 | # | Dívida | Fechada em |
 |---|---|---|
+| — | Tipificação rígida do serviço partilhado entre empresas (o «D-33» da directiva de Out 2026) | **Fora de âmbito por decisão do dono do produto (Out 2026):** a empresa A partilha com a B sem tipificar o serviço contratado |
+| — | O Hub único (`is_hub`), parte da D-35 | Iteração `multi-fornecedor` — a flag global saiu; quem tem Index deriva da equipa e a partilha escolhe a rede de destino (`network_triage`). A migração `--limpar-is-hub` retira o resíduo |
 | D-26 | A guarda de documentos não conhecia redes | Iteração `partilha-e-documentos` — encontrada a medir a D-24 e **só podia fechar com a D-25**: a guarda certa É a resposta da partilha. `user_can_view_process_documents` tinha ZERO ocorrências de `network` e abria por duas linhas — o bypass ABSOLUTO de {admin, ceo, **diretor**, administrativo} verificado antes de tudo, e `if not is_document_visibility_restricted(process): return True`, que tornava um processo **já indexado** (o caso NORMAL) visível a qualquer sessão autenticada. Do outro lado estava a pasta documental do cliente: cartão de cidadão, IRS, recibos, extractos, alcançável sabendo só um `process_id`. A fronteira entra **antes** do bypass (um bypass de cargo que corra primeiro é um bypass de rede — a mutação que a move para depois mata quatro testes) e usa o `processo_no_ambito`, que conta a rede convidada. O `scope` é PARÂMETRO das puras e as guardas `async` resolvem-no sempre, falhando FECHADO. Corrigiu também uma afirmação minha: o custo não-óbvio da D-25 **não** era a parede do S3 — `build_s3_valid_prefixes` deriva do PROCESSO e não da rede |
 | D-25 | Um processo em PARTILHA entre duas redes não tinha modelo | Iteração `partilha-e-documentos` — `partner_network_ids` acrescenta quem VÊ sem mudar de quem É (`network_id` continua o carimbo de propriedade), e o âmbito é o PROCESSO e não a rede: é essa a diferença face ao atalho do UCR nas duas empresas, que abria a rede INTEIRA. `build_process_scope_condition` é função SEPARADA e DERIVADA da genérica — pôr o ramo no construtor comum fá-lo-ia viajar para 33 superfícies onde nenhum documento tem o campo — com inventário por AST que falha por OMISSÃO e excepções ESCRITAS (as agregações de estatísticas ficam de fora de propósito: **ver, sim; contar, não**). A sincronização DERIVA do documento gravado e não de um diff, porque são cinco os escritores de atribuições. Via Rápida com revogação MANUAL (decisão do dono do produto), e por isso **visível e auditada**: trilho, histórico e etiqueta, que é o único sítio onde uma abertura que ninguém aprovou se vê. Um defeito meu que o teste apanhou: a etiqueta nomeava a empresa POR OMISSÃO do utilizador, pelo que para quem trabalha em duas redes rotulava a partilha com a empresa errada |
 | D-23 | O mapeador do scraper descartava campos que a IA extrai | Iteração `motor-de-visitas` — eram **DOIS** mapeadores escritos à mão (o do CRM em `visit_helpers` e o do Portal em `portal_client_visits`) para os MESMOS campos, e **já divergiam**: o do Portal guardava `raw_data`, o do CRM não, pelo que uma visita criada no CRM perdia também quartos, casas de banho, certificado energético, ano de construção, descrição e referência. E a lista de ONZE chaves do `property_scraper`, sobre ~30 devolvidas, perdia o **`estado`** do imóvel — que o prompt da IA pede pelo nome desde sempre. Hoje `services/visit_property_extract.ficha_do_imovel` é o ponto único e o `raw_data` **DERIVA** do dicionário devolvido: um campo novo no prompt chega ao mesmo destino sem ninguém se lembrar. Ganhou um **terceiro veredicto** (`sem_dados`): um anúncio que responde 200 com tudo vazio contava como sucesso e a visita ficava sem um único dado, indistinguível de um imóvel sem informação |

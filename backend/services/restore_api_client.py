@@ -41,12 +41,14 @@ def _is_deleted_doc(doc: dict) -> bool:
     )
 
 
-async def _resolve_restored_status(previous_status) -> str | None:
-    """``previous_status`` quando válido; senão 1ª fase dinâmica do workflow."""
+async def _resolve_restored_status(previous_status, doc: dict | None = None) -> str | None:
+    """``previous_status`` quando válido; senão 1ª fase dinâmica do workflow da REDE de `doc`."""
     if previous_status and previous_status not in ("eliminado", "eliminados"):
         return previous_status
     from services.workflow_lookup import get_first_workflow_status
-    return await get_first_workflow_status()
+    from services.workflow_phases import rede_do_processo
+
+    return await get_first_workflow_status(rede_do_processo(doc))
 
 
 async def run_restore_client(client_id: str, user: dict) -> dict:
@@ -73,7 +75,7 @@ async def run_restore_client(client_id: str, user: dict) -> dict:
         )
 
     now = datetime.now(timezone.utc).isoformat()
-    restored_status = await _resolve_restored_status(doc.get("previous_status"))
+    restored_status = await _resolve_restored_status(doc.get("previous_status"), doc)
 
     # 1) Restaurar o próprio cliente
     restore_set = {
@@ -93,9 +95,9 @@ async def run_restore_client(client_id: str, user: dict) -> dict:
     # 2) Cascata — restaurar processos onde o cliente é 1º titular
     #    (soft-deletados junto com ele pelo client_delete.py).
     process_filter = {"client_id": client_id, "is_deleted": True}
-    async for proc in db.processes.find(process_filter, {"_id": 0, "id": 1}):
+    async for proc in db.processes.find(process_filter, {"_id": 0, "id": 1, "previous_status": 1, "network_id": 1}):
         proc_previous = proc.get("previous_status") if isinstance(proc, dict) else None
-        proc_status = await _resolve_restored_status(proc_previous)
+        proc_status = await _resolve_restored_status(proc_previous, proc)
         await db.processes.update_one(
             {"id": proc["id"]},
             {"$set": {
@@ -123,7 +125,7 @@ async def run_restore_client(client_id: str, user: dict) -> dict:
                 continue  # só restaurar processos do próprio cliente
             if legacy_proc:
                 proc_status = await _resolve_restored_status(
-                    legacy_proc.get("previous_status")
+                    legacy_proc.get("previous_status"), legacy_proc,
                 )
                 await db.processes.update_one(
                     {"id": legacy_pid},

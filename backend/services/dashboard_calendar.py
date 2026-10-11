@@ -177,7 +177,7 @@ async def _processos_do_mes(user: dict, request: Optional[Request], inicio: date
     from services.auth import get_all_user_roles, get_effective_role
     from services.process_list_filters import build_process_list_query
     from services.tenant_network import build_tenant_process_condition
-    from services.workflow_phases import carregar_fases, nomes_terminais
+    from services.workflow_phases import fases_do_utilizador, nomes_terminais
 
     papel = get_effective_role(request, user) if request is not None else (user.get("role") or "")
     consulta = build_process_list_query(
@@ -186,7 +186,7 @@ async def _processos_do_mes(user: dict, request: Optional[Request], inicio: date
         view_mode="active_only",
         show_all=False,
         all_roles=get_all_user_roles(user),
-        terminais=nomes_terminais(await carregar_fases()),
+        terminais=nomes_terminais(await fases_do_utilizador(user)),
     )
     desde, ate = inicio.isoformat(), fim_exclusivo.isoformat()
     janela = {"$or": [

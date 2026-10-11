@@ -151,12 +151,12 @@ describe("as rotas de infraestrutura são só do Master", () => {
   it.each([
     "/configuracoes/ia", "/configuracoes/treino-ia", "/admin/processos-background",
     "/configuracoes/notificacoes", "/admin/logs", "/admin/backups",
-    "/diagnosticos", "/contas-email", "/workflow-estados",
+    "/diagnosticos", "/contas-email",
   ])("%s", (rota) => {
     expect(papeisDaRota(rota)).toEqual(["master"]);
   });
 
-  it.each(["/admin", "/admin/organizacao", "/admin/desempenho", "/admin/relatorio-semanal"])(
+  it.each(["/admin", "/admin/organizacao", "/admin/desempenho", "/admin/relatorio-semanal", "/workflow-estados"])(
     "%s é de master, admin e ceo",
     (rota) => {
       const p = papeisDaRota(rota);
@@ -189,10 +189,13 @@ describe("a ligação do isMaster aos ecrãs de gestão", () => {
     expect(fonte).not.toMatch(/PRIMARY_ROLE_OPTIONS\.map/);
   });
 
-  it("o separador Técnico, o Histórico, as Comunicações e o Workflow usam o isMaster", () => {
+  it("o separador Técnico, o Histórico e as Comunicações usam o isMaster; o Workflow é por rede (Master, Admin e CEO)", () => {
     const fonte = ler("pages/SystemAdminPanel.jsx");
     expect(fonte).toMatch(/const isMaster = hasRole\(user, "master"\)/);
     expect(fonte).not.toMatch(/isAdmin/);
+    // O workflow é POR REDE: já não é infraestrutura global.
+    expect(fonte).toMatch(/const podeEditarWorkflow = isMaster \|\| hasRole\(user, "admin"\) \|\| hasRole\(user, "ceo"\)/);
+    expect(fonte).not.toMatch(/isMaster && \(\s*<TabsTrigger value="workflow-statuses"/);
   });
 
   it("a configuração global de sistema decide pelo Master", () => {

@@ -122,14 +122,11 @@ def assert_mark_indexed_permission(user_role: str, all_roles: list) -> None:
         )
 
 
-async def load_workflow_status_pipeline() -> list[str]:
-    """Nomes de workflow_statuses ordenados por `order`."""
-    from database import db
+async def load_workflow_status_pipeline(rede: Optional[str] = None) -> list[str]:
+    """Nomes das fases do workflow da `rede` ordenados por `order`."""
+    from services.workflow_phases import carregar_fases
 
-    all_statuses = await db.workflow_statuses.find(
-        {}, {"_id": 0}
-    ).sort("order", 1).to_list(100)
-    return [s["name"] for s in all_statuses]
+    return [s["name"] for s in await carregar_fases(rede=rede)]
 
 
 async def log_mark_indexed_history(
@@ -615,7 +612,9 @@ async def run_mark_process_indexed(
     # status, resolve-se a 1ª fase REAL do workflow (dinâmica da BD);
     # se o workflow estiver vazio, fica None (sem transição).
     current_status = process.get("status")
-    status_pipeline = await load_workflow_status_pipeline()
+    from services.workflow_phases import rede_do_processo
+
+    status_pipeline = await load_workflow_status_pipeline(rede_do_processo(process))
     if current_status is None and status_pipeline:
         current_status = status_pipeline[0]
     next_status = compute_next_workflow_status(current_status, status_pipeline)

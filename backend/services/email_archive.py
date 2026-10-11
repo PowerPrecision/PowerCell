@@ -50,7 +50,7 @@ from services.email_client_match import (
     normalizar_enderecos,
 )
 from services.tenant_network import build_tenant_process_condition, com_isolamento
-from services.workflow_phases import carregar_fases, nomes_terminais
+from services.workflow_phases import fases_do_utilizador, nomes_terminais
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ async def sugerir_processos(email: dict, user: dict) -> dict[str, Any]:
     proprios = set(normalizar_enderecos(await _enderecos_configurados(user)))
     enderecos = [e for e in enderecos_relevantes(email) if e not in proprios]
 
-    fases = await carregar_fases()
+    fases = await fases_do_utilizador(user)
     rotulos = {f["name"]: (f.get("label") or f["name"]) for f in fases if isinstance(f, dict) and f.get("name")}
 
     ligado = str(email.get("process_id") or "")

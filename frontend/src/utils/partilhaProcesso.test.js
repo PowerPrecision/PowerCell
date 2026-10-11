@@ -49,3 +49,51 @@ describe("parceirosDoProcesso", () => {
     expect(sePodeRevogar({ id: "", nome: "Só nome" })).toBe(false);
   });
 });
+
+// ====================================================================
+// Multi-fornecedor: quem envia um processo para outra rede
+// ====================================================================
+describe("podePartilharProcesso", () => {
+  it("é o MESMO conjunto do backend (PAPEIS_QUE_PARTILHAM)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { PAPEIS_QUE_PARTILHAM } = await import("./partilhaProcesso");
+    const fonte = fs.readFileSync(
+      path.resolve(process.cwd(), "../backend/services/process_sharing_api.py"),
+      "utf-8",
+    );
+    const bloco = fonte.match(/PAPEIS_QUE_PARTILHAM\s*=\s*\(([^)]*)\)/);
+    // Contraprova: um leitor que não leu nada também «passaria» a igualdade vazia.
+    expect(bloco).not.toBeNull();
+    const doBackend = [...bloco[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
+    expect(doBackend.length).toBeGreaterThanOrEqual(4);
+    expect([...PAPEIS_QUE_PARTILHAM].sort()).toEqual(doBackend);
+  });
+
+  it("o consultor e a indexação não partilham", async () => {
+    const { podePartilharProcesso } = await import("./partilhaProcesso");
+    expect(podePartilharProcesso("administrativo")).toBe(true);
+    expect(podePartilharProcesso(" Diretor ")).toBe(true);
+    expect(podePartilharProcesso("consultor")).toBe(false);
+    expect(podePartilharProcesso("indexacao")).toBe(false);
+    expect(podePartilharProcesso(undefined)).toBe(false);
+  });
+});
+
+describe("efeitoDaPartilha / nomeDoDestino", () => {
+  it("descreve o que vai acontecer em cada caso", async () => {
+    const { efeitoDaPartilha } = await import("./partilhaProcesso");
+    expect(efeitoDaPartilha(null, false)).toBe("");
+    expect(efeitoDaPartilha({ tem_index: true }, false)).toMatch(/fila de Index/i);
+    expect(efeitoDaPartilha({ tem_index: true }, true)).toMatch(/Via Verde/);
+    expect(efeitoDaPartilha({ tem_index: false }, true)).toMatch(/não tem equipa de Index/i);
+    expect(efeitoDaPartilha({ tem_index: true, ja_partilhado: true }, false)).toMatch(/já está partilhado/i);
+  });
+
+  it("o nome do destino são as empresas; sem empresas, o id", async () => {
+    const { nomeDoDestino } = await import("./partilhaProcesso");
+    expect(nomeDoDestino({ empresas: ["A", "B"], network_id: "x" })).toBe("A / B");
+    expect(nomeDoDestino({ empresas: {}, network_id: "x" })).toBe("x");
+    expect(nomeDoDestino(null)).toBe("");
+  });
+});

@@ -247,6 +247,22 @@ class TestBackfillIdempotente:
 # OS HANDLERS QUE GRAVAM
 # ====================================================================
 
+@pytest.fixture
+def rede_em_contexto(fake_async_db, monkeypatch):
+    """Workflow POR REDE: quem edita precisa de uma rede em contexto.
+
+    Estes testes chamam os serviços sem `Request`, logo a rede vem da rede
+    de omissão. Os documentos semeados levam esse `network_id` (uma fase sem
+    ele é o MODELO, e escrever nela é materializar a cópia da rede).
+    """
+    import services.workflow_scope as ws
+    from tests.unit.helpers_tenant import REDE_INCUMBENTE, tenant_db
+
+    monkeypatch.setenv("TENANT_DEFAULT_NETWORK_ID", REDE_INCUMBENTE)
+    with tenant_db(fake_async_db, ws):
+        yield REDE_INCUMBENTE
+
+
 class TestOAdminGrava:
     """Sobreviveram DUAS mutações aqui (N8 e N9).
 
@@ -257,7 +273,7 @@ class TestOAdminGrava:
     """
 
     async def test_criar_grava_a_str_e_nao_o_membro_do_enum(
-        self, fake_async_db, monkeypatch,
+        self, fake_async_db, monkeypatch, rede_em_contexto,
     ):
         """O que fica gravado tem de ser igual ao que vem da BD nos
         outros sítios. Um membro do Enum passa pelo `str` do mixin e
@@ -276,7 +292,7 @@ class TestOAdminGrava:
         assert doc["macro_fase"] == "aprovado"
         assert type(doc["macro_fase"]) is str
 
-    async def test_criar_sem_grupo_grava_none(self, fake_async_db, monkeypatch):
+    async def test_criar_sem_grupo_grava_none(self, fake_async_db, monkeypatch, rede_em_contexto):
         import services.admin_workflow as aw
 
         monkeypatch.setattr(aw, "db", fake_async_db)
@@ -288,7 +304,7 @@ class TestOAdminGrava:
         assert doc["macro_fase"] is None
 
     async def test_actualizar_grava_a_reclassificacao(
-        self, fake_async_db, monkeypatch,
+        self, fake_async_db, monkeypatch, rede_em_contexto,
     ):
         """Sem isto, o `<Select>` da UI era decorativo: o administrador
         escolhia, gravava, recebia 200 — e nada mudava."""
@@ -296,7 +312,7 @@ class TestOAdminGrava:
 
         monkeypatch.setattr(aw, "db", fake_async_db)
         await fake_async_db.workflow_statuses.insert_one(
-            fase("concluidos", macro_fase="concluido"),
+            fase("concluidos", macro_fase="concluido", network_id=rede_em_contexto),
         )
         await aw.run_update_workflow_status(
             "concluidos",
@@ -308,14 +324,14 @@ class TestOAdminGrava:
         assert type(doc["macro_fase"]) is str
 
     async def test_actualizar_sem_macro_fase_nao_apaga_a_que_la_esta(
-        self, fake_async_db, monkeypatch,
+        self, fake_async_db, monkeypatch, rede_em_contexto,
     ):
         """Actualização PARCIAL: mudar a cor não desclassifica a fase."""
         import services.admin_workflow as aw
 
         monkeypatch.setattr(aw, "db", fake_async_db)
         await fake_async_db.workflow_statuses.insert_one(
-            fase("concluidos", macro_fase="concluido"),
+            fase("concluidos", macro_fase="concluido", network_id=rede_em_contexto),
         )
         await aw.run_update_workflow_status(
             "concluidos",

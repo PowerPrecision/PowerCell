@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from database import db
+from middleware.client_ip import ip_do_cliente
 from utils.input_sanitization import sanitize_string
 from services.refresh_token_service import (
     create_access_token,
@@ -34,7 +35,7 @@ async def run_refresh_tokens(request, data: dict):
         raise HTTPException(status_code=400, detail="refresh_token é obrigatório")
 
     device_info = sanitize_string(request.headers.get("User-Agent", ""), max_length=200)
-    ip_address = sanitize_string(request.headers.get("X-Forwarded-For", request.client.host if request.client else ""), max_length=45)
+    ip_address = sanitize_string(ip_do_cliente(request), max_length=45)
 
     result = await rotate_refresh_token(
         refresh_token,

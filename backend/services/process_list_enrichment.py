@@ -14,7 +14,8 @@ from services.process_sharing import (
     aplicar_flag_a_processos as aplicar_flag_partilha,
 )
 from services.sub35 import aplicar_flag_a_processos as aplicar_flag_sub35
-from services.workflow_phases import carregar_fases, nomes_terminais
+from services.process_pending_commissions import enriquecer_comissoes_pendentes
+from services.workflow_phases import fases_do_utilizador, nomes_terminais
 from services.tenant_network import build_tenant_process_condition
 from services.process_my_clients import (
     fetch_unread_messages_map,
@@ -297,21 +298,15 @@ def build_process_cursor_list_response(
     }
 
 
-async def load_workflow_status_order() -> dict[str, int]:
-    """name → índice de ordem no workflow."""
-    from database import db
-    statuses = await db.workflow_statuses.find(
-        {}, {"_id": 0},
-    ).sort("order", 1).to_list(100)
+async def load_workflow_status_order(user: Optional[dict] = None) -> dict[str, int]:
+    """name → índice de ordem no workflow de quem olha (a rede do utilizador)."""
+    statuses = await fases_do_utilizador(user or {})
     return {s["name"]: idx for idx, s in enumerate(statuses)}
 
 
-async def load_workflow_status_map() -> dict[str, dict]:
-    """name → doc workflow_status completo."""
-    from database import db
-    statuses = await db.workflow_statuses.find(
-        {}, {"_id": 0},
-    ).sort("order", 1).to_list(100)
+async def load_workflow_status_map(user: Optional[dict] = None) -> dict[str, dict]:
+    """name → doc da fase, no workflow de quem olha (a rede do utilizador)."""
+    statuses = await fases_do_utilizador(user or {})
     return {s["name"]: s for s in statuses}
 
 
@@ -372,10 +367,10 @@ async def run_get_processes(
         labels_logic=labels_logic,
         sub35=sub35,
         partilha=partilha,
-        terminais=nomes_terminais(await carregar_fases()),
+        terminais=nomes_terminais(await fases_do_utilizador(user)),
     )
 
-    status_order = await load_workflow_status_order()
+    status_order = await load_workflow_status_order(user)
     processes = await db.processes.find(
         query,
         list_projection,
@@ -397,6 +392,7 @@ async def run_get_processes(
     page_items, total, pages = slice_page(processes, page, size)
     await enrich_processes_portal_flags(page_items)
     await enrich_processes_latest_notes(page_items)
+    await enriquecer_comissoes_pendentes(page_items, user, papel=role)
 
     return build_process_list_response(
         items=page_items,
@@ -452,7 +448,7 @@ async def run_get_processes_paginated(
         labels_logic=labels_logic,
         sub35=sub35,
         partilha=partilha,
-        terminais=nomes_terminais(await carregar_fases()),
+        terminais=nomes_terminais(await fases_do_utilizador(user)),
     )
 
     order = -1 if sort_order.lower() == "desc" else 1
@@ -480,5 +476,6 @@ async def run_get_processes_paginated(
     aplicar_flag_partilha(result["items"])
     await enrich_processes_portal_flags(result["items"])
     await enrich_processes_latest_notes(result["items"])
+    await enriquecer_comissoes_pendentes(result["items"], user, papel=role)
 
     return build_process_cursor_list_response(result=result, view_mode=view_mode)
