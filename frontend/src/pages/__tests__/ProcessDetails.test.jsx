@@ -597,6 +597,66 @@ describe("ProcessDetails — processo FECHADO: modo de leitura e Reabrir", () =>
     expect(screen.queryByTestId("documentos-processo-fechado")).toBeNull();
   });
 
+  // D-34 — as cinco áreas secundárias. O servidor recusa (403) a TODOS os
+  // perfis; o ecrã não pode oferecer o que vai ser recusado.
+  describe("D-34: acções secundárias desactivadas", () => {
+    // Fase fechada SÓ no motor (fora da lista legada): o menu do Portal não
+    // está desactivado à nascença, por isso a prova é a dos itens.
+    const soNoMotor = () =>
+      pacoteCompleto({
+        process: { ...PROCESSO, status: "renegociacao" },
+        workflowStatuses: [
+          ...FASES,
+          { id: "s4", name: "renegociacao", label: "Renegociação", order: 4, is_active: false },
+        ],
+      });
+
+    it.each(["consultor", "admin", "master"])(
+      "%s: Copiar Link e Enviar por Email do Portal ficam desactivados",
+      async (papel) => {
+        sessao.papel = papel;
+        pacote.valor = soNoMotor();
+        montar();
+        await screen.findByTestId("processo-fechado-banner");
+
+        await userEvent.click(screen.getByRole("button", { name: /portal do cliente/i }));
+        expect(await screen.findByRole("menuitem", { name: /copiar link/i })).toHaveAttribute("aria-disabled", "true");
+        expect(screen.getByRole("menuitem", { name: /enviar por email/i })).toHaveAttribute("aria-disabled", "true");
+      },
+    );
+
+    it("com o processo ABERTO os dois itens estão activos (contraprova)", async () => {
+      pacote.valor = pacoteCompleto({ workflowStatuses: FASES });
+      montar();
+      await screen.findByTestId("layout");
+      await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+
+      await userEvent.click(screen.getByRole("button", { name: /portal do cliente/i }));
+      expect(await screen.findByRole("menuitem", { name: /copiar link/i })).not.toHaveAttribute("aria-disabled", "true");
+      expect(screen.getByRole("menuitem", { name: /enviar por email/i })).not.toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("o separador Mensagens não deixa escrever ao cliente", async () => {
+      pacote.valor = soNoMotor();
+      montar();
+      await screen.findByTestId("processo-fechado-banner");
+      await userEvent.click(screen.getByRole("tab", { name: /mensagens/i }));
+
+      expect(await screen.findByTestId("mensagens-somente-leitura")).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText(/escreva uma mensagem para o cliente/i)).toBeNull();
+    });
+
+    it("num processo ABERTO o separador Mensagens deixa escrever (contraprova)", async () => {
+      pacote.valor = pacoteCompleto({ workflowStatuses: FASES });
+      montar();
+      await screen.findByTestId("layout");
+      await userEvent.click(await screen.findByRole("tab", { name: /mensagens/i }));
+
+      expect(await screen.findByPlaceholderText(/escreva uma mensagem para o cliente/i)).toBeInTheDocument();
+      expect(screen.queryByTestId("mensagens-somente-leitura")).toBeNull();
+    });
+  });
+
   it("Reabrir só oferece fases activas e chama o servidor com a escolhida", async () => {
     const api = await import("../../services/api");
     api.reopenProcess.mockClear();

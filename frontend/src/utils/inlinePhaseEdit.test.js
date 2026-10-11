@@ -46,16 +46,20 @@ describe("podeEditarFase", () => {
     expect(podeEditarFase({ role: " Consultor ", status: "cpcv" })).toBe(true);
   });
 
-  it("bloqueia estados terminais para quem não é admin/CEO", () => {
-    // Espelha `assert_process_editable_for_role`: o servidor devolve 403.
+  it("bloqueia estados terminais para TODOS os perfis (D-34)", () => {
+    // Espelha o servidor: sem excepção por cargo, reabre-se primeiro.
     for (const terminal of FASES_TERMINAIS) {
-      expect(podeEditarFase({ role: "consultor", status: terminal })).toBe(false);
+      for (const papel of ["master", "admin", "ceo", "diretor", "consultor"]) {
+        expect(podeEditarFase({ role: papel, status: terminal })).toBe(false);
+      }
     }
   });
 
-  it("deixa admin e CEO editar um estado terminal", () => {
-    expect(podeEditarFase({ role: "admin", status: "concluido" })).toBe(true);
-    expect(podeEditarFase({ role: "ceo", status: "cancelado" })).toBe(true);
+  it("já NÃO deixa master, admin nem CEO editar um estado terminal", () => {
+    // Era `true` (excepção por cargo) e o servidor respondia 403 ao clique.
+    expect(podeEditarFase({ role: "master", status: "concluido" })).toBe(false);
+    expect(podeEditarFase({ role: "admin", status: "concluido" })).toBe(false);
+    expect(podeEditarFase({ role: "ceo", status: "cancelado" })).toBe(false);
   });
 
   it("bloqueia um processo eliminado mesmo para admin", () => {
@@ -215,10 +219,10 @@ describe("podeEditarFase — um papel só: o perfil activo", () => {
     ).toBe(true);
   });
 
-  it("num estado terminal basta o perfil activo ser admin ou CEO", () => {
+  it("num estado terminal nenhum perfil activo edita a fase (D-34)", () => {
     expect(
       podeEditarFase({ role: "admin", baseRole: "consultor", status: "concluido" }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       podeEditarFase({ role: "consultor", baseRole: "admin", status: "concluido" }),
     ).toBe(false);

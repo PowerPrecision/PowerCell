@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Trash2, Loader2 } from "lucide-react";
+import { processoEstaFechado } from "../../utils/processoFechado";
 import {
   podeEditarFase,
   opcoesDeFase,
@@ -54,7 +55,9 @@ export default function ProcessPhaseCell({
     );
   }
 
-  const editavel = podeEditarFase({ role, status, isDeleted });
+  // D-34: fase terminal (a do motor OU a lista legada) = só leitura, para todos.
+  const editavel = podeEditarFase({ role, status, isDeleted })
+    && !processoEstaFechado({ status }, workflowStatuses);
   if (!editavel) {
     return (
       <StatusBadge

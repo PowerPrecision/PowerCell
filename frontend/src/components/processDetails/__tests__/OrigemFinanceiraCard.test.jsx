@@ -179,3 +179,21 @@ describe("guardar", () => {
     expect(api.setOrigemFinanceira).not.toHaveBeenCalled();
   });
 });
+
+
+describe("D-34 — processo fechado", () => {
+  it("não oferece Definir/Alterar e diz porquê", async () => {
+    api.getOrigemFinanceira.mockResolvedValue({ data: ANGARIADA });
+    montar({ processoFechado: true });
+    expect(await screen.findByTestId("resumo-origem-financeira")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /alterar|definir/i })).toBeNull();
+    expect(screen.getByTestId("origem-financeira-fechada")).toHaveTextContent(/reabra/i);
+  });
+
+  it("aberto continua a oferecer Alterar (contraprova)", async () => {
+    api.getOrigemFinanceira.mockResolvedValue({ data: ANGARIADA });
+    montar({ processoFechado: false });
+    expect(await screen.findByRole("button", { name: /alterar/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("origem-financeira-fechada")).toBeNull();
+  });
+});

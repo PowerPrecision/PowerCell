@@ -49,9 +49,6 @@ export const FASES_TERMINAIS = [
   "arquivo",
 ];
 
-/** Só estes dois passam por cima do bloqueio de estado terminal. */
-export const PAPEIS_ACIMA_DO_BLOQUEIO = ["master", "admin", "ceo"];
-
 function normalizar(valor) {
   return typeof valor === "string" ? valor.trim().toLowerCase() : "";
 }
@@ -83,11 +80,13 @@ export function podeEditarFase({ role, status, isDeleted } = {}) {
   // fase a partir da listagem ressuscitava-o sem restauro nem rasto.
   if (isDeleted) return false;
 
-  const estado = normalizar(status);
-  if (FASES_TERMINAIS.includes(estado)) {
-    // `assert_process_editable_for_role` lê o mesmo perfil activo.
-    return PAPEIS_ACIMA_DO_BLOQUEIO.includes(papel);
-  }
+  // D-34 — SEM excepção por cargo: um processo em fase terminal só muda de
+  // fase depois de REABERTO (`POST /processes/{id}/reopen`). Antes passavam
+  // master/admin/CEO e o servidor respondia 403 ao clique: o produto a
+  // contradizer-se. (As terminais que só o motor conhece apanha-as o
+  // `ProcessPhaseCell` com `processoEstaFechado`; importá-lo aqui fechava um
+  // ciclo com `processoFechado.js`.)
+  if (FASES_TERMINAIS.includes(normalizar(status))) return false;
   return true;
 }
 

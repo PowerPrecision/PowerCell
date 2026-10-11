@@ -36,11 +36,11 @@ import {
   CircleDollarSign,
   RefreshCw,
   Filter,
-  Pencil,
   Cog,
   Download,
   Printer,
 } from "lucide-react";
+import EstadoEditavelDoRegisto from "../components/finance/EstadoEditavelDoRegisto";
 import {
   Card,
   CardContent,
@@ -943,6 +943,7 @@ const ProcessFinancesTab = ({ companyId }) => {
       setSummary(sumRes.data || null);
     } catch (err) {
       console.error("Erro ao atualizar status:", err);
+      // O toast do 403 («Processo fechado», com o motivo) vem do interceptor.
     } finally {
       setUpdatingId(null);
     }
@@ -1113,14 +1114,14 @@ const ProcessFinancesTab = ({ companyId }) => {
                         {updatingId === f.id ? (
                           <Spinner size="sm" className="mx-auto text-primary" />
                         ) : (
-                          <button
-                            onClick={() => handleStatusChange(f.id, NEXT_STATUS[f.status])}
-                            title={`Clique para alterar para ${STATUS_MAP[NEXT_STATUS[f.status]]?.label}`}
-                            className="inline-flex items-center gap-1 cursor-pointer hover:scale-105 transition-transform"
+                          <EstadoEditavelDoRegisto
+                            id={f.id}
+                            processoFechado={f.processo_fechado === true}
+                            tituloDoBotao={`Clique para alterar para ${STATUS_MAP[NEXT_STATUS[f.status]]?.label}`}
+                            onAlterar={() => handleStatusChange(f.id, NEXT_STATUS[f.status])}
                           >
                             <StatusBadge status={f.status} />
-                            <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100" />
-                          </button>
+                          </EstadoEditavelDoRegisto>
                         )}
                       </td>
                     </tr>

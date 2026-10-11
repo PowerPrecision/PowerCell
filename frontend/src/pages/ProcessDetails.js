@@ -2568,6 +2568,8 @@ const ProcessDetails = () => {
                     </p>
                     <DropdownMenuItem
                       className="gap-2 cursor-pointer"
+                      disabled={isProcessLocked}
+                      title={isProcessLocked ? "Processo fechado — reabra-o para gerar links" : undefined}
                       onClick={async () => {
                         try {
                           const res = await generateMagicLink(id);
@@ -2594,6 +2596,8 @@ const ProcessDetails = () => {
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       className="gap-2 cursor-pointer"
+                      disabled={isProcessLocked}
+                      title={isProcessLocked ? "Processo fechado — reabra-o para enviar links" : undefined}
                       onClick={async () => {
                         try {
                           await sendMagicLinkEmail(id);
@@ -2970,6 +2974,7 @@ const ProcessDetails = () => {
                       sending={portal.sending}
                       onRefresh={portal.fetchMessages}
                       onSend={portal.sendMessage}
+                      somenteLeitura={isProcessLocked}
                     />
                   </TabsContent>
                 </Tabs>
@@ -3187,6 +3192,7 @@ const ProcessDetails = () => {
             <OrigemFinanceiraCard
               processId={id}
               podeGerir={podeGerirOrigemFinanceira(effectiveRole)}
+              processoFechado={isProcessLocked}
             />
 
             {/* Portal do Parceiro — «Serviço pago pelo parceiro» + observações.
@@ -3196,6 +3202,7 @@ const ProcessDetails = () => {
               <ServicoDoParceiroCard
                 processId={id}
                 podeVer={podeVerServicoDoParceiro(effectiveRole)}
+                processoFechado={isProcessLocked}
               />
             )}
 

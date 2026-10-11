@@ -44,8 +44,9 @@ import {
  * @param {Object} props
  * @param {string} props.processId
  * @param {boolean} props.podeGerir - Perfil efectivo admin/CEO/diretor.
+ * @param {boolean} [props.processoFechado] - D-34: fase terminal → só leitura (reabre-se primeiro).
  */
-export default function OrigemFinanceiraCard({ processId, podeGerir }) {
+export default function OrigemFinanceiraCard({ processId, podeGerir, processoFechado = false }) {
   const queryClient = useQueryClient();
   const [aEditar, setAEditar] = useState(false);
   const [tipo, setTipo] = useState("");
@@ -132,9 +133,15 @@ export default function OrigemFinanceiraCard({ processId, podeGerir }) {
                 Definida por {origem.data.definido_por}
               </p>
             )}
-            <Button type="button" variant="outline" size="sm" onClick={() => setAEditar(true)}>
-              {origem.data.definida ? "Alterar" : "Definir"}
-            </Button>
+            {processoFechado ? (
+              <p className="text-xs text-muted-foreground" data-testid="origem-financeira-fechada">
+                Processo fechado: reabra-o para alterar a origem.
+              </p>
+            ) : (
+              <Button type="button" variant="outline" size="sm" onClick={() => setAEditar(true)}>
+                {origem.data.definida ? "Alterar" : "Definir"}
+              </Button>
+            )}
             <p className="text-xs text-muted-foreground">
               Visível apenas à gestão. Base do cálculo de comissões.
             </p>

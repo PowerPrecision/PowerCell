@@ -106,3 +106,30 @@ describe("ServicoDoParceiroCard", () => {
     expect(screen.getByText(/O parceiro não vê este cartão/)).toBeInTheDocument();
   });
 });
+
+
+describe("ServicoDoParceiroCard — D-34 processo fechado", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.getServicoDoParceiro.mockResolvedValue({ data: servicoPorPagar });
+  });
+
+  it("a caixa e as observações ficam desactivadas e o cartão diz porquê", async () => {
+    montar({ processoFechado: true });
+    expect(await caixa()).toBeDisabled();
+    expect(screen.getByLabelText("Observações")).toBeDisabled();
+    expect(screen.getByTestId("servico-parceiro-fechado")).toHaveTextContent(/reabra/i);
+  });
+
+  it("clicar na caixa não chama o servidor", async () => {
+    montar({ processoFechado: true });
+    await userEvent.click(await caixa());
+    expect(api.setServicoDoParceiro).not.toHaveBeenCalled();
+  });
+
+  it("aberto a caixa está activa (contraprova)", async () => {
+    montar({ processoFechado: false });
+    expect(await caixa()).toBeEnabled();
+    expect(screen.queryByTestId("servico-parceiro-fechado")).toBeNull();
+  });
+});

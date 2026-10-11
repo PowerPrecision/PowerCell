@@ -203,6 +203,10 @@ def build_kanban_columns(
             "label": status.get("label") or status_name.replace("_", " ").title(),
             "color": status.get("color") or "#6B7280",
             "order": status.get("order", 0),
+            # D-34: o ecrã não deixa arrastar um cartão de uma fase FECHADA
+            # (a autoridade é o motor; `None` = fase sem a flag, o ecrã cai
+            # na lista legada como o servidor).
+            "is_active": status.get("is_active"),
             "processes": enriched_processes,
             "count": len(enriched_processes),
         })

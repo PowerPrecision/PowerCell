@@ -51,6 +51,7 @@ import {
 } from "./sessionExpiry";
 import { BACKEND_URL as RESOLVED_BACKEND_URL } from "../utils/apiBaseUrl";
 import { normalizarCabecalhosDeFormData } from "../utils/formDataTransport";
+import { eRecusaDeProcessoFechado } from "../utils/processoFechado";
 
 // ====================================================================
 // CONFIGURAÇÃO
@@ -403,9 +404,17 @@ api.interceptors.response.use(
       // processo continua navegável. Um toast global por cima disso diria
       // duas vezes a mesma coisa, a segunda sem contexto.
       if (!config?.skipErrorToast) {
-        toast.error("Acesso Negado", {
-          description: "Não tem permissão para realizar esta ação.",
-        });
+        // D-34: «processo fechado» não é falta de permissão — o servidor recusa
+        // a TODOS os perfis e diz como sair. Um «Acesso Negado» genérico
+        // mandava o utilizador pedir permissões que não resolvem nada.
+        const detalhe = error.response?.data?.detail;
+        if (eRecusaDeProcessoFechado(detalhe)) {
+          toast.error("Processo fechado", { description: detalhe });
+        } else {
+          toast.error("Acesso Negado", {
+            description: "Não tem permissão para realizar esta ação.",
+          });
+        }
       }
       return Promise.reject(error);
     }

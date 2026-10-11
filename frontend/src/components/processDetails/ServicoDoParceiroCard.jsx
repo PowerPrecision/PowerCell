@@ -34,8 +34,9 @@ import { Textarea } from "../ui/textarea";
  * @param {Object} props
  * @param {string} props.processId
  * @param {boolean} props.podeVer - Perfil efectivo que vê o controlo.
+ * @param {boolean} [props.processoFechado] - D-34: fase terminal → só leitura (reabre-se primeiro).
  */
-export default function ServicoDoParceiroCard({ processId, podeVer }) {
+export default function ServicoDoParceiroCard({ processId, podeVer, processoFechado = false }) {
   const queryClient = useQueryClient();
   const chave = queryKeys.processes.servicoDoParceiro(processId);
   const [texto, setTexto] = useState("");
@@ -70,7 +71,7 @@ export default function ServicoDoParceiroCard({ processId, podeVer }) {
   if (consulta.data && !consulta.data.aplicavel) return null;
 
   const dados = consulta.data;
-  const editavel = Boolean(dados?.podeAlterar) && !guardar.isPending;
+  const editavel = Boolean(dados?.podeAlterar) && !guardar.isPending && !processoFechado;
   const erroDeLeitura = consulta.isError
     ? extractErrorMessage(consulta.error?.response?.data?.detail, "Não foi possível ler o controlo do serviço")
     : "";
@@ -128,6 +129,11 @@ export default function ServicoDoParceiroCard({ processId, podeVer }) {
               <Button type="button" size="sm" onClick={() => guardar.mutate(corpoDasObservacoes(texto))}>
                 Guardar observações
               </Button>
+            )}
+            {processoFechado && (
+              <p className="text-xs text-muted-foreground" data-testid="servico-parceiro-fechado">
+                Processo fechado: reabra-o para alterar este controlo.
+              </p>
             )}
             {erro && <p className="text-sm text-destructive" role="alert">{erro}</p>}
             <p className="text-xs text-muted-foreground">

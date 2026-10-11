@@ -43,6 +43,7 @@ from utils.input_sanitization import (
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 from services.partner_attribution import aplicar_parceiro_do_cliente
 from services.hub_triage import aplicar_regime_de_indexacao
+from services.process_closed_guard import exigir_processo_aberto_por_id
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,11 @@ async def run_unlink_process_from_client(
     client = await db.clients.find_one({"id": client_id})
     if not client:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
-    
+
+    # D-34: desligar altera a relação cliente↔processo — num processo fechado
+    # tem de se reabrir primeiro (sem excepção por cargo).
+    await exigir_processo_aberto_por_id(process_id, user)
+
     now = datetime.now(timezone.utc).isoformat()
     
     # Remover processo do cliente

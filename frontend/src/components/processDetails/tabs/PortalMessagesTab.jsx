@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Loader2,
   Send,
+  Lock,
 } from "lucide-react";
 import { pt } from "date-fns/locale";
 import { safeString } from "../../../utils/safeString";
@@ -24,6 +25,7 @@ export default function PortalMessagesTab({
   sending = false,
   onRefresh,
   onSend,
+  somenteLeitura = false,
 }) {
   const endRef = useRef(null);
 
@@ -104,6 +106,19 @@ export default function PortalMessagesTab({
         </CardContent>
       </Card>
 
+      {somenteLeitura ? (
+        // D-34: um processo fechado não recebe mensagens novas da equipa —
+        // reabre-se primeiro. O histórico continua legível.
+        <Card data-testid="mensagens-somente-leitura">
+          <CardContent className="p-4 flex items-start gap-2 text-sm text-muted-foreground">
+            <Lock className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
+            <p>
+              Este processo está fechado: não é possível enviar novas mensagens ao cliente.
+              Reabra o processo para voltar a comunicar.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
       <Card>
         <CardContent className="p-4">
           <div className="flex gap-2">
@@ -138,6 +153,7 @@ export default function PortalMessagesTab({
           </p>
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }
