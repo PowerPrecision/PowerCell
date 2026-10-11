@@ -128,7 +128,9 @@ const AssignUsersModal = memo(({
             Gerir Atribuições
           </DialogTitle>
           <DialogDescription id="assign-users-description">
-            Atribua consultores e mediadores a este processo.
+            Atribua consultores e mediadores a este processo. Só aparecem
+            pessoas da sua rede; para passar o processo a outra empresa use
+            «Partilhar com Empresa…».
           </DialogDescription>
         </DialogHeader>
         

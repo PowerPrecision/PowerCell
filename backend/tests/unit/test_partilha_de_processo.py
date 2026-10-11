@@ -20,7 +20,9 @@ DECISÕES DE PRODUTO (dono do produto, 2026-10-09)
 =================================================
 * o lado convidado vê **a ficha inteira do processo** — e a fronteira
   continua fechada em todos os restantes;
-* **Via Rápida**: nasce da ATRIBUIÇÃO, sem aprovação manual;
+* ~~Via Rápida~~ (nasce da ATRIBUIÇÃO): **extinta em Out 2026** — a
+  partilha é só EXPLÍCITA («Partilhar com Empresa…») e a atribuição
+  directa só alcança a própria rede (`test_atribuicao_na_mesma_rede.py`);
 * a **revogação é MANUAL**: tirar a atribuição não revoga, porque o
   parceiro mantém o histórico e os documentos que ele próprio produziu e
   o registo de comissão continua coerente.
@@ -102,28 +104,22 @@ def casa(db_tenant):  # noqa: F811
     return db_tenant
 
 
-def _atribuir(fake_db, *ids, process_id="p-power") -> dict:
-    """Põe estes ids como consultores do processo e devolve o documento."""
-    doc = _doc(fake_db, process_id)
-    doc["assigned_consultor_ids"] = list(ids)
-    return doc
-
-
 def _modulos():
-    from services import process_sharing, tenant_access_context
+    from services import network_triage, process_sharing, tenant_access_context
 
-    return (process_sharing, tenant_access_context)
+    return (process_sharing, tenant_access_context, network_triage)
 
 
 def _patch(fake_db):
     return _tenant_db(fake_db, *_modulos())
 
 
-async def _sincronizar(fake_db, process_id, **kw):
-    from services.process_sharing import sincronizar_parceiros
+async def _partilhar(fake_db, process_id="p-power", rede=REDE_DOMUS, **kw):
+    """Abre a partilha EXPLÍCITA com a rede (o único caminho que resta)."""
+    from services.process_sharing import partilhar_com_rede
 
     with _patch(fake_db):
-        return await sincronizar_parceiros(process_id, **kw)
+        return await partilhar_com_rede(process_id, rede, **kw)
 
 
 def _doc(fake_db, process_id="p-power") -> dict:
@@ -133,25 +129,24 @@ def _doc(fake_db, process_id="p-power") -> dict:
 # ════════════════════════════════════════════════════════════════════
 #  A VIA RÁPIDA
 # ════════════════════════════════════════════════════════════════════
-class TestAViaRapida:
+class TestAPartilhaExplicita:
 
     @pytest.mark.asyncio
-    async def test_atribuir_a_alguem_de_OUTRA_rede_abre_a_partilha(self, casa):
-        _atribuir(casa, "u-nuno")
+    async def test_partilhar_com_uma_rede_regista_a_rede_convidada(self, casa):
+        resultado = await _partilhar(casa, por_ordem_de=ANA["id"])
 
-        novas = await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
-
-        assert [n["network_id"] for n in novas] == [REDE_DOMUS]
-        assert novas[0]["company_name"] == "Domus"
-        assert novas[0]["added_by"] == ANA["id"]
-
+        assert resultado["partilhado"] is True
+        assert resultado["rede"] == REDE_DOMUS
         doc = _doc(casa)
         assert doc[CAMPO_REDES_PARCEIRAS] == [REDE_DOMUS]
+        registo = doc[CAMPO_EMPRESAS_PARCEIRAS]
+        assert [r["network_id"] for r in registo] == [REDE_DOMUS]
+        assert "Domus" in registo[0]["company_name"]
+        assert registo[0]["added_by"] == ANA["id"]
 
     @pytest.mark.asyncio
     async def test_e_o_processo_passa_a_ser_VISIVEL_a_essa_rede(self, casa):
-        _atribuir(casa, "u-nuno")
-        await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
+        await _partilhar(casa, por_ordem_de=ANA["id"])
 
         doc = _doc(casa)
         ambito_da_domus = TenantScope(
@@ -168,8 +163,7 @@ class TestAViaRapida:
     async def test_a_PROPRIEDADE_nao_muda(self, casa):
         """Uma partilha acrescenta quem VÊ, nunca muda de quem É. O
         `network_id` é o carimbo de propriedade e é permanente."""
-        _atribuir(casa, "u-nuno")
-        await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
+        await _partilhar(casa, por_ordem_de=ANA["id"])
 
         assert _doc(casa)["network_id"] == REDE_INCUMBENTE
 
@@ -177,92 +171,21 @@ class TestAViaRapida:
     async def test_a_rede_do_DONO_nunca_entra_na_lista_de_convidados(self, casa):
         """Seria redundante hoje e, no dia em que o dono mudasse, deixava
         lá uma chave da rede antiga."""
-        _atribuir(casa, ANA["id"])
+        from services.process_sharing import DestinoInvalido
 
-        novas = await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
+        with pytest.raises(DestinoInvalido):
+            await _partilhar(casa, rede=REDE_INCUMBENTE, por_ordem_de=ANA["id"])
 
-        assert novas == []
         assert not _doc(casa).get(CAMPO_REDES_PARCEIRAS)
 
     @pytest.mark.asyncio
-    async def test_atribuir_dentro_da_MESMA_rede_nao_abre_nada(self, casa):
-        """A Precision é outra EMPRESA e a mesma REDE: não há partilha a
-        registar, porque já vê o processo.
-
-        O Pedro existe só para este teste: é consultor **apenas** na
-        Precision. A Carla não serve aqui — ela trabalha nas duas redes
-        (são os dois empregos dela), e foi a tentar usá-la que este
-        teste revelou o defeito da etiqueta.
-        """
-        casa.user_company_roles.docs.append({
-            "user_id": "u-pedro", "company_id": "cmp-precision",
-            "company_name": "Precision Crédito", "role": "consultor",
-            "is_default": True,
-        })
-        _atribuir(casa, "u-pedro")
-
-        novas = await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
-
-        assert novas == []
-
-    @pytest.mark.asyncio
-    async def test_a_etiqueta_nomeia_a_empresa_DA_REDE_que_abriu(self, casa):
-        """A Carla trabalha na Precision (mesma rede) **e** na Domus. Ao
-        atribuí-la, a partilha que se abre é com a **Domus** — e a
-        etiqueta tem de dizer Domus, não «Precision Crédito», que é a
-        empresa por omissão dela.
-
-        Uma etiqueta que mente sobre quem passou a ver o processo é pior
-        do que etiqueta nenhuma: é a única coisa que torna visível uma
-        abertura de fronteira que ninguém aprovou.
-        """
-        _atribuir(casa, "u-carla")
-
-        novas = await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
-
-        assert [(n["company_name"], n["network_id"]) for n in novas] == [
-            ("Domus", REDE_DOMUS)
-        ]
-
-    @pytest.mark.asyncio
-    async def test_um_atribuido_SEM_empresa_nao_abre_a_rede_de_OMISSAO(
-        self, casa, rede_de_omissao_incumbente,  # noqa: F811
-    ):
-        """`resolve_tenant_scope` dá a rede de OMISSÃO a um utilizador
-        órfão de empresa, para não cegar contas de administração antigas.
-        Usá-lo aqui abria o processo ao grupo incumbente por não se saber
-        a empresa de alguém — falha ABERTA, no sítio exactamente errado.
-        """
-        casa.users.docs.append({
-            "id": "u-orfao-2", "name": "Órfão", "role": "consultor",
-        })
-        _atribuir(casa, "u-orfao-2")
-
-        novas = await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
-
-        assert novas == []
-
-    @pytest.mark.asyncio
     async def test_e_IDEMPOTENTE(self, casa):
-        """Lê o documento já gravado e só acrescenta o que falta — é o que
-        permite chamá-la de cinco escritores sem contar diffs."""
-        _atribuir(casa, "u-nuno")
+        await _partilhar(casa, por_ordem_de=ANA["id"])
+        segunda = await _partilhar(casa, por_ordem_de=ANA["id"])
 
-        await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
-        segunda = await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
-
-        assert segunda == []
+        assert segunda["ja_partilhado"] is True
+        assert segunda["partilhado"] is False
         assert len(_doc(casa)[CAMPO_EMPRESAS_PARCEIRAS]) == 1
-
-    @pytest.mark.asyncio
-    async def test_um_atribuido_sem_rede_determinavel_NAO_abre_a_partilha(self, casa):
-        """**Falha fechada.** A partilha abre uma fronteira; abri-la por
-        não saber a rede de alguém é o pior sentido do erro."""
-        _atribuir(casa, "u-fantasma")
-
-        novas = await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
-
-        assert novas == []
 
     @pytest.mark.asyncio
     async def test_as_DUAS_listas_concordam_sempre(self, casa):
@@ -271,13 +194,32 @@ class TestAViaRapida:
         fontes de verdade divergem sem dar erro — e a que divergisse ou
         abria uma rede a mais, ou escondia um processo a quem o trabalha.
         """
-        _atribuir(casa, "u-nuno")
-        await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
+        await _partilhar(casa, por_ordem_de=ANA["id"])
 
         doc = _doc(casa)
         assert doc[CAMPO_REDES_PARCEIRAS] == redes_do_registo(
             parceiros_do_processo(doc)
         )
+
+
+# ════════════════════════════════════════════════════════════════════
+#  A VIA RÁPIDA FOI EXTINTA — apagada, não desligada
+# ════════════════════════════════════════════════════════════════════
+class TestAViaRapidaFoiExtinta:
+
+    def test_o_motor_da_partilha_implicita_ja_nao_existe(self):
+        """Código adormecido atrás de uma condição é um convite a religá-lo.
+        Se alguém reintroduzir a partilha por atribuição, isto fica vermelho
+        e obriga a ler a razão (quem atribuía escolhia o utilizador final
+        de outra rede e saltava a fila de triagem dela)."""
+        from services import process_sharing
+
+        for nome in (
+            "sincronizar_parceiros",
+            "sincronizar_parceiros_sem_falhar",
+            "calcular_parceiros_a_acrescentar",
+        ):
+            assert not hasattr(process_sharing, nome), nome
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -289,11 +231,10 @@ class TestOQueAPartilhaNAOAbre:
     async def test_a_partilha_de_UM_processo_nao_abre_os_OUTROS(self, casa):
         """É a razão de existir desta entrega. Com um UCR nas duas
         empresas, o convidado veria **toda** a outra rede."""
-        _atribuir(casa, "u-nuno")
         casa.processes.docs.append(
             _processo_da_power(id="p-power-2", client_name="Outro da Power")
         )
-        await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
+        await _partilhar(casa, por_ordem_de=ANA["id"])
 
         ambito_da_domus = TenantScope(
             network_ids=(REDE_DOMUS,), company_ids=("cmp-domus",),
@@ -343,12 +284,11 @@ class TestARevogacao:
         documentos que ele próprio produziu, e o registo de comissão
         continua coerente. Revogar em automático fazia desaparecer
         trabalho real sem ninguém decidir."""
-        _atribuir(casa, "u-nuno")
-        await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
+        await _partilhar(casa, por_ordem_de=ANA["id"])
 
         # O Nuno sai da equipa.
         _doc(casa)["assigned_consultor_ids"] = []
-        await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
+        await _partilhar(casa, por_ordem_de=ANA["id"])
 
         assert _doc(casa)[CAMPO_REDES_PARCEIRAS] == [REDE_DOMUS]
 
@@ -356,8 +296,7 @@ class TestARevogacao:
     async def test_revogar_a_MAO_retira_a_rede_e_a_lista_DERIVA(self, casa):
         from services.process_sharing import revogar_parceiro
 
-        _atribuir(casa, "u-nuno")
-        await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
+        await _partilhar(casa, por_ordem_de=ANA["id"])
 
         with _patch(casa):
             retiradas = await revogar_parceiro(
@@ -374,8 +313,7 @@ class TestARevogacao:
         """«Revogar tudo» não é uma operação que se ofereça por omissão."""
         from services.process_sharing import revogar_parceiro
 
-        _atribuir(casa, "u-nuno")
-        await _sincronizar(casa, "p-power", por_ordem_de=ANA["id"])
+        await _partilhar(casa, por_ordem_de=ANA["id"])
 
         with _patch(casa):
             retiradas = await revogar_parceiro("p-power", por_ordem_de=ANA["id"])
@@ -385,7 +323,7 @@ class TestARevogacao:
 
 
 # ════════════════════════════════════════════════════════════════════
-#  VISÍVEL E AUDITADA — a Via Rápida não tem aprovação
+#  VISÍVEL E AUDITADA — abrir uma fronteira deixa rasto
 # ════════════════════════════════════════════════════════════════════
 class TestORasto:
 
@@ -401,11 +339,10 @@ class TestORasto:
         async def _trilho(**kw):
             registos.append(kw)
 
-        _atribuir(casa, "u-nuno")
         with _patch(casa):
             with patch("services.audit_trail_service.log_audit_event", _trilho):
-                await process_sharing.sincronizar_parceiros(
-                    "p-power", por_ordem_de=ANA["id"],
+                await process_sharing.partilhar_com_rede(
+                    "p-power", REDE_DOMUS, por_ordem_de=ANA["id"],
                 )
 
         assert len(registos) == 1
@@ -418,15 +355,13 @@ class TestORasto:
     async def test_e_entrada_no_HISTORICO_do_processo(self, casa):
         """O trilho é para a conformidade; o histórico é onde a equipa do
         processo vê o que lhe aconteceu."""
-        _atribuir(casa, "u-nuno")
         escritos: list = []
 
         async def _historico(texto):
             escritos.append(texto)
 
-        await _sincronizar(
-            casa, "p-power", por_ordem_de=ANA["id"],
-            registar_historico=_historico,
+        await _partilhar(
+            casa, por_ordem_de=ANA["id"], registar_historico=_historico,
         )
 
         assert escritos and "Domus" in escritos[0]
@@ -441,19 +376,18 @@ class TestORasto:
         async def _rebenta(**_kw):
             raise RuntimeError("trilho em baixo")
 
-        _atribuir(casa, "u-nuno")
         with _patch(casa):
             with patch("services.audit_trail_service.log_audit_event", _rebenta):
-                novas = await process_sharing.sincronizar_parceiros(
-                    "p-power", por_ordem_de=ANA["id"],
+                resultado = await process_sharing.partilhar_com_rede(
+                    "p-power", REDE_DOMUS, por_ordem_de=ANA["id"],
                 )
 
-        assert [n["network_id"] for n in novas] == [REDE_DOMUS]
+        assert resultado["partilhado"] is True
         assert _doc(casa)[CAMPO_REDES_PARCEIRAS] == [REDE_DOMUS]
 
 
 # ════════════════════════════════════════════════════════════════════
-#  A ETIQUETA — o que torna a Via Rápida visível
+#  A ETIQUETA — o que torna a partilha visível
 # ════════════════════════════════════════════════════════════════════
 class TestAEtiqueta:
 
@@ -685,12 +619,13 @@ class TestAProjeccaoEAFlag:
 
 
 # ════════════════════════════════════════════════════════════════════
-#  OS ESCRITORES DE ATRIBUIÇÃO CHAMAM A SINCRONIZAÇÃO
+#  OS ESCRITORES DE ATRIBUIÇÃO: SEM PARTILHA IMPLÍCITA, COM A GUARDA DE REDE
 # ════════════════════════════════════════════════════════════════════
-#  A variante `_sem_falhar` engole excepções de propósito (uma partilha
-#  que rebenta não pode fazer falhar uma atribuição já gravada). O custo
-#  é que apagar a chamada não parte teste nenhum — por isso a LIGAÇÃO
-#  precisa de guarda própria.
+#  A Via Rápida foi extinta. Duas propriedades, afirmadas sobre o corpo
+#  REAL de cada escritor: nenhum sincroniza a partilha (apagar o motor
+#  não chega — um escritor podia continuar a chamar um nome que já não
+#  existe, e só rebentava em runtime), e os que deixam uma PESSOA
+#  escolher o atribuído passam pela guarda de rede.
 
 ESCRITORES = {
     "services/process_staff_assignment.py": (
@@ -702,12 +637,14 @@ ESCRITORES = {
     "services/client_assign.py": ("run_assign_client_to_user",),
 }
 
+#: Onde alguém ESCOLHE o atribuído — e por isso onde a fronteira vive.
+ESCRITORES_COM_ESCOLHA = {
+    "services/process_staff_assignment.py": ("run_staff_assign_process",),
+    "services/client_assign.py": ("run_assign_client_to_user",),
+}
 
-@pytest.mark.parametrize(
-    "caminho,funcao",
-    [(c, f) for c, fs in ESCRITORES.items() for f in fs],
-)
-def test_cada_escritor_de_atribuicao_sincroniza_a_partilha(caminho, funcao):
+
+def _fonte_da_funcao(caminho, funcao):
     import importlib
 
     from tests.unit.helpers_fonte import codigo_da_funcao_sem_comentarios
@@ -715,34 +652,30 @@ def test_cada_escritor_de_atribuicao_sincroniza_a_partilha(caminho, funcao):
     modulo = importlib.import_module(
         caminho.replace("/", ".").removesuffix(".py")
     )
-    fonte = codigo_da_funcao_sem_comentarios(getattr(modulo, funcao))
-    assert "sincronizar_parceiros_sem_falhar" in fonte, (
-        f"`{funcao}` atribui pessoas a um processo e não sincroniza a "
-        "partilha: uma atribuição a alguém de outra rede deixava de "
-        "abrir o processo a essa rede, sem erro nenhum"
+    return codigo_da_funcao_sem_comentarios(getattr(modulo, funcao))
+
+
+@pytest.mark.parametrize(
+    "caminho,funcao",
+    [(c, f) for c, fs in ESCRITORES.items() for f in fs],
+)
+def test_nenhum_escritor_de_atribuicao_abre_partilhas(caminho, funcao):
+    assert "sincronizar_parceiros" not in _fonte_da_funcao(caminho, funcao), (
+        f"`{funcao}` voltou a sincronizar a partilha por atribuição: a Via "
+        "Rápida foi extinta (a passagem entre redes é a Partilha Explícita)"
     )
 
 
-def test_a_sincronizacao_ESTRITA_propaga_e_a_outra_nao():
-    """Contraprova das duas variantes. Sem ela, embrulhar tudo num
-    `except` escondia um defeito meu atrás do mesmo bloco que protege a
-    produção."""
-    import asyncio
-
-    from services import process_sharing
-
-    async def _rebenta(*_a, **_k):
-        raise RuntimeError("Mongo em baixo")
-
-    with patch.object(process_sharing, "db") as falso:
-        falso.processes.find_one = _rebenta
-
-        with pytest.raises(RuntimeError):
-            asyncio.run(process_sharing.sincronizar_parceiros("p1"))
-
-        assert asyncio.run(
-            process_sharing.sincronizar_parceiros_sem_falhar("p1")
-        ) == []
+@pytest.mark.parametrize(
+    "caminho,funcao",
+    [(c, f) for c, fs in ESCRITORES_COM_ESCOLHA.items() for f in fs],
+)
+def test_os_escritores_com_escolha_passam_pela_guarda_de_rede(caminho, funcao):
+    assert "exigir_atribuidos_da_minha_rede" in _fonte_da_funcao(caminho, funcao), (
+        f"`{funcao}` deixa uma pessoa escolher o atribuído e não aplica a "
+        "fronteira de rede: dava de volta a Via Rápida, sem partilha mas com "
+        "o utilizador final de outra rede escolhido por quem remete"
+    )
 
 
 # ════════════════════════════════════════════════════════════════════

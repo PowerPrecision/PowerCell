@@ -51,7 +51,9 @@ export default function ProcessAssignDialog({
             Gerir Atribuições
           </DialogTitle>
           <DialogDescription>
-            Seleccione os utilizadores a atribuir a este processo.
+            Seleccione os utilizadores a atribuir a este processo. Só aparecem
+            pessoas da sua rede; para passar o processo a outra empresa use
+            «Partilhar com Empresa…».
           </DialogDescription>
         </DialogHeader>
 

@@ -374,47 +374,50 @@ class TestEntradaNaTriagemDaRede:
 
 
 # ════════════════════════════════════════════════════════════════════
-# A ligação: partilhar (por atribuição) dispara a triagem
+# A ligação: a partilha EXPLÍCITA dispara a triagem (a Via Rápida morreu)
 # ════════════════════════════════════════════════════════════════════
 class TestAPartilhaDisparaATriagem:
     @pytest.mark.asyncio
-    async def test_atribuir_alguem_de_uma_rede_com_index_a_um_processo_da_domus_entra_na_triagem(self, fake_async_db):
-        """Fim a fim: a Via Rápida abre a partilha e a partilha abre a triagem."""
+    async def test_partilhar_com_uma_rede_com_index_entra_na_triagem(self, fake_async_db):
+        """Fim a fim: «Partilhar com Empresa…» abre a partilha e a partilha
+        põe o processo na fila central da rede de destino."""
         import services.process_sharing as ps
 
         db = _mundo(fake_async_db)
-        p = _processo(db)
-        p["assigned_consultor_ids"] = ["u-cris"]  # alguém da Precision
-        p["assigned_consultor_id"] = "u-cris"
         with _ambiente(db):
-            novas = await ps.sincronizar_parceiros("p-domus", por_ordem_de="u-bruno")
+            resultado = await ps.partilhar_com_rede(
+                "p-domus", REDE_INCUMBENTE, por_ordem_de="u-bruno",
+            )
 
-        assert [n["network_id"] for n in novas] == [REDE_INCUMBENTE]
+        assert resultado["partilhado"] is True
         assert _processo(db)["hub_triage"]["state"] == "triagem"
+        assert _processo(db)["hub_triage"]["explicit"] is True
 
     @pytest.mark.asyncio
     async def test_com_via_verde_a_partilha_fica_a_cargo_da_consultoria(self, fake_async_db):
         import services.process_sharing as ps
 
         db = _mundo(fake_async_db)
-        p = _processo(db)
-        p.update({"assigned_consultor_ids": ["u-cris"], "assigned_consultor_id": "u-cris", "via_verde": True})
         with _ambiente(db):
-            await ps.sincronizar_parceiros("p-domus", por_ordem_de="u-bruno")
+            await ps.partilhar_com_rede(
+                "p-domus", REDE_INCUMBENTE, via_verde=True, por_ordem_de="u-bruno",
+            )
 
         assert _processo(db)["hub_triage"]["state"] == "via_verde"
         assert _processo(db)["skip_index"] is True
 
     @pytest.mark.asyncio
-    async def test_uma_atribuicao_dentro_da_domus_nao_toca_na_triagem(self, fake_async_db):
-        import services.process_sharing as ps
-
+    async def test_atribuir_alguem_da_precision_NAO_entra_na_triagem(self, fake_async_db):
+        """A antiga Via Rápida: um processo da Domus com um consultor da
+        Precision atribuído. Já não há partilha por atribuição, logo nada
+        entra na fila de ninguém."""
         db = _mundo(fake_async_db)
-        with _ambiente(db):
-            novas = await ps.sincronizar_parceiros("p-domus", por_ordem_de="u-bruno")
+        p = _processo(db)
+        p["assigned_consultor_ids"] = ["u-cris"]
+        p["assigned_consultor_id"] = "u-cris"
 
-        assert novas == []
         assert "hub_triage" not in _processo(db)
+        assert not _processo(db).get("partner_network_ids")
 
     def test_a_ligacao_existe_no_codigo(self):
         """Contraprova da ligação: sem ela a triagem é código morto."""
@@ -456,7 +459,7 @@ class TestAEquipaEDaRede:
             # (explícita: a Domus tem agora Index próprio, e uma partilha por
             # atribuição não desviava o trabalho — regra 4 do módulo.)
             await ht.entrar_na_triagem_da_rede(
-                "p-domus", [ENTRADA_DA_PRECISION], explicita=True)
+                "p-domus", [ENTRADA_DA_PRECISION])
 
         assert _processo(db)["assigned_indexacao_id"] == "u-ivo"
 
@@ -565,7 +568,7 @@ class TestMultiFornecedor:
         db = _com_a_omega(_mundo(fake_async_db))
         with _ambiente(db):
             registo = await ht.entrar_na_triagem_da_rede(
-                "p-domus", [ENTRADA_DA_OMEGA], explicita=True)
+                "p-domus", [ENTRADA_DA_OMEGA])
 
         p = _processo(db)
         assert registo["network_id"] == "rede:omega"
@@ -578,7 +581,7 @@ class TestMultiFornecedor:
 
         db = _com_a_omega(_mundo(fake_async_db))
         with _ambiente(db):
-            await ht.entrar_na_triagem_da_rede("p-domus", [ENTRADA_DA_PRECISION], explicita=True)
+            await ht.entrar_na_triagem_da_rede("p-domus", [ENTRADA_DA_PRECISION])
         assert _processo(db)["assigned_indexacao_id"] == "u-ivo"
 
     @pytest.mark.asyncio
@@ -587,7 +590,7 @@ class TestMultiFornecedor:
 
         db = _com_a_omega(_mundo(fake_async_db))
         with _ambiente(db):
-            await ht.entrar_na_triagem_da_rede("p-domus", [ENTRADA_DA_OMEGA], explicita=True)
+            await ht.entrar_na_triagem_da_rede("p-domus", [ENTRADA_DA_OMEGA])
         assert ht.rede_da_equipa(_processo(db)) == "rede:omega"
 
     @pytest.mark.asyncio
@@ -596,9 +599,9 @@ class TestMultiFornecedor:
 
         db = _com_a_omega(_mundo(fake_async_db))
         with _ambiente(db):
-            await ht.entrar_na_triagem_da_rede("p-domus", [ENTRADA_DA_OMEGA], explicita=True)
+            await ht.entrar_na_triagem_da_rede("p-domus", [ENTRADA_DA_OMEGA])
             segundo = await ht.entrar_na_triagem_da_rede(
-                "p-domus", [ENTRADA_DA_PRECISION], explicita=True)
+                "p-domus", [ENTRADA_DA_PRECISION])
         assert segundo is None
         assert _processo(db)["hub_triage"]["network_id"] == "rede:omega"
 
@@ -629,29 +632,16 @@ class TestOServicoNaoConfiaNaRota:
         })
         with _ambiente(db):
             assert await ht.entrar_na_triagem_da_rede(
-                "p-prec", [ENTRADA_DA_PRECISION], explicita=True) is None
+                "p-prec", [ENTRADA_DA_PRECISION]) is None
         assert "hub_triage" not in _processo(db, "p-prec")
 
 
-class TestImplicitaVersusExplicita:
-    """Regra 4: a Via Rápida não sabe o que o utilizador queria."""
+class TestSoHaPartilhaExplicita:
+    """A Via Rápida foi extinta: a partilha é sempre uma instrução («enviar
+    para a rede X»), nunca uma dedução tirada de quem foi atribuído."""
 
     @pytest.mark.asyncio
-    async def test_um_dono_com_index_proprio_nao_e_desviado_por_uma_atribuicao(self, fake_async_db):
-        import services.network_triage as ht
-
-        db = _com_a_omega(_mundo(fake_async_db))
-        # processo da Precision (que tem Index) com um consultor da Omega
-        db.processes.docs.append({
-            "id": "p-prec", "status": "novo", "network_id": REDE_INCUMBENTE,
-            "company_id": "cmp-precision", "skip_index": False,
-        })
-        with _ambiente(db):
-            assert await ht.entrar_na_triagem_da_rede("p-prec", [ENTRADA_DA_OMEGA]) is None
-        assert "hub_triage" not in _processo(db, "p-prec")
-
-    @pytest.mark.asyncio
-    async def test_mas_uma_partilha_explicita_e_uma_instrucao(self, fake_async_db):
+    async def test_uma_partilha_e_sempre_uma_instrucao(self, fake_async_db):
         import services.network_triage as ht
 
         db = _com_a_omega(_mundo(fake_async_db))
@@ -661,7 +651,7 @@ class TestImplicitaVersusExplicita:
         })
         with _ambiente(db):
             registo = await ht.entrar_na_triagem_da_rede(
-                "p-prec", [ENTRADA_DA_OMEGA], explicita=True)
+                "p-prec", [ENTRADA_DA_OMEGA])
         assert registo["state"] == "triagem" and registo["explicit"] is True
         assert _processo(db, "p-prec")["assigned_indexacao_id"] == "u-olga"
 

@@ -63,6 +63,7 @@ from utils.input_sanitization import (
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 from services.partner_attribution import aplicar_parceiro_do_cliente
 from services.network_triage import aplicar_regime_de_indexacao
+from services.assignment_network_guard import exigir_atribuidos_da_minha_rede
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,14 @@ async def run_assign_client_to_user(
     target_user = await db.users.find_one({"id": target_user_id})
     if not target_user:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+
+    # FRONTEIRA DE REDE (Out 2026): o processo nasce carimbado com a rede
+    # do utilizador de DESTINO (`resolve_tenant_stamp(target_user)`), logo
+    # atribuir a alguém de outra rede passava o cliente para essa rede por
+    # escolha de quem distribui. A passagem entre redes é a Partilha
+    # Explícita. Quem se atribui a si próprio passa sempre.
+    if target_user_id != user_id:
+        await exigir_atribuidos_da_minha_rede(user, [target_user_id])
     
     now = datetime.now(timezone.utc).isoformat()
     process_id = None
@@ -302,14 +311,6 @@ async def run_assign_client_to_user(
 
         # Inserir processo
         await db.processes.insert_one(process_doc)
-
-        # PARTILHA — Via Rápida (D-25): a Sala de Triagem atribui a
-        # qualquer pessoa da rede de quem distribui, e o processo nasce
-        # já com o atribuído. Corre DEPOIS do insert, porque é o
-        # documento gravado que decide.
-        from services.process_sharing import sincronizar_parceiros_sem_falhar
-
-        await sincronizar_parceiros_sem_falhar(process_id, por_ordem_de=user.get("id"))
 
         # ============================================================
         # PACOTE 9 — CRIAR ESTRUTURA S3 REAL NO MOMENTO DA CRIAÇÃO

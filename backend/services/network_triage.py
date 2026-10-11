@@ -15,8 +15,9 @@ O MODELO DO NEGÓCIO
   * **Dentro de uma rede sem Index** o processo nasce já a andar — não
     passa por nenhuma triagem (`aplicar_regime_de_indexacao`);
   * **Ao ser partilhado com uma rede de destino que TEM Index** (acção
-    explícita «Partilhar com…» ou, implicitamente, pela Via Rápida) o
-    processo **entra na fila de triagem dessa rede específica**;
+    explícita «Partilhar com Empresa…» — a Via Rápida, por atribuição,
+    foi extinta) o processo **entra na fila de triagem dessa rede
+    específica**; quem remete nunca escolhe o utilizador final;
   * **Via Verde (excepção):** se o processo tem `via_verde` ligada, a
     partilha salta o Index do destino e fica logo à guarda da consultoria
     (ex.: processos que só precisam de intermediação de crédito).
@@ -37,7 +38,7 @@ AS EQUIPAS SÃO DA REDE (e não do mundo)
   **equipa do processo** (`rede_da_equipa`): a rede do dono, ou a do
   destino depois de o processo entrar na sua triagem.
 
-QUATRO REGRAS QUE NÃO SE PODEM PERDER
+TRÊS REGRAS QUE NÃO SE PODEM PERDER
   1. A entrada é **idempotente**: o primeiro registo ganha. Uma segunda
      partilha, ou a repetição da sincronização, não repõe a triagem de
      um processo que o Index já tratou;
@@ -46,11 +47,7 @@ QUATRO REGRAS QUE NÃO SE PODEM PERDER
      destino com indexadores mas nenhum livre deixa o processo na fila
      sem indexador (o filtro «sem indexador» mostra-o);
   3. Tudo o que isto escreve deixa **rasto** (histórico + trilho) e
-     **nunca** faz a atribuição/partilha que o provocou falhar;
-  4. **Implícita ≠ explícita.** Uma partilha por ATRIBUIÇÃO (Via Rápida)
-     não sabe o que o utilizador queria: se a rede do dono tem Index
-     próprio, não o desvia. Uma partilha EXPLÍCITA («enviar para a rede
-     X») é uma instrução: entra na fila de X mesmo que o dono tenha Index.
+     **nunca** faz a partilha que o provocou falhar;
 
 O CAMPO GRAVADO NO PROCESSO
   `hub_triage` (com `state`, `network_id`, `motivo`…) mantém o nome do
@@ -286,15 +283,14 @@ async def entrar_na_triagem_da_rede(
     novas: list[dict],
     *,
     por_ordem_de: Any = None,
-    explicita: bool = False,
 ) -> Optional[dict]:
-    """Aplica a entrada na triagem da rede de destino a um processo recém-partilhado.
+    """Aplica a entrada na triagem da rede de destino a um processo partilhado.
 
     ``novas`` são as entradas que a partilha acabou de acrescentar. Só
-    interessa a que seja uma rede COM Index. ``explicita`` distingue «enviar
-    para a rede X» (uma instrução) de uma partilha por atribuição, que não
-    sabe o que o utilizador queria (regra 4 do módulo). Devolve o registo
-    gravado, ou ``None`` quando não havia nada a fazer.
+    interessa a que seja uma rede COM Index. A partilha é sempre
+    EXPLÍCITA («enviar para a rede X» é uma instrução): a partilha por
+    atribuição (Via Rápida) foi extinta. Devolve o registo gravado, ou
+    ``None`` quando não havia nada a fazer.
     """
     com_index = await redes_com_index()
     destinos = [
@@ -315,11 +311,6 @@ async def entrar_na_triagem_da_rede(
     destinos = [d for d in destinos if d != dono]
     if not destinos:
         return None
-    if not explicita and dono in com_index:
-        # Partilha por atribuição de um dono que já tem o seu Index: não se
-        # desvia o trabalho de Index sem ninguém o ter pedido.
-        return None
-
     decisao = decidir_entrada(processo, redes_de_destino=destinos)
     if not decisao:
         return None
@@ -329,7 +320,7 @@ async def entrar_na_triagem_da_rede(
         "entered_at": _agora(),
         "entered_by": _texto(por_ordem_de),
         "from_network": dono,
-        "explicit": bool(explicita),
+        "explicit": True,
     }
     atualizacao: dict[str, Any] = {CAMPO_TRIAGEM: registo, "updated_at": registo["entered_at"]}
     if decisao["state"] == ESTADO_EM_TRIAGEM:
@@ -342,7 +333,7 @@ async def entrar_na_triagem_da_rede(
 
     if decisao["state"] == ESTADO_EM_TRIAGEM:
         await _atribuir_indexador_da_rede(process_id, decisao[CAMPO_REDE])
-    elif explicita:
+    else:
         # Via Verde: salta o Index, mas o processo não pode ficar sem ninguém. Quem
         # remete NUNCA escolhe o utilizador final — o destino distribui pelas suas
         # regras de auto-atribuição (consultor e intermediário menos ocupados DA REDE
@@ -355,14 +346,12 @@ async def entrar_na_triagem_da_rede(
 
 async def entrar_na_triagem_da_rede_sem_falhar(
     process_id: str, novas: list[dict], *, por_ordem_de: Any = None,
-    explicita: bool = False,
 ) -> Optional[dict]:
-    """Versão que os escritores chamam: a partilha já está gravada, logo
-    um erro aqui não pode fazer falhar a atribuição (regra de
-    `sincronizar_parceiros_sem_falhar`). Falha **dita**, nunca calada."""
+    """Versão que a partilha chama: a partilha já está gravada, logo um
+    erro aqui não pode fazer falhar o pedido. Falha **dita**, nunca calada."""
     try:
         return await entrar_na_triagem_da_rede(
-            process_id, novas, por_ordem_de=por_ordem_de, explicita=explicita,
+            process_id, novas, por_ordem_de=por_ordem_de,
         )
     except Exception as exc:
         logger.warning(

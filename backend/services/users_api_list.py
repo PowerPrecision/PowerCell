@@ -34,6 +34,24 @@ async def run_get_users(
         query = build_deep_role_query(query, role=role)
     query = apply_assignment_staff_filter(query, for_assignment)
 
+    # FRONTEIRA DE REDE (Out 2026). Esta lista alimenta as dropdowns de
+    # atribuição, e não tinha filtro nenhum — só `/admin/users` o tinha.
+    # A regra é a da atribuição directa (`assignment_network_guard`): só
+    # se escolhe gente da própria rede; passar um processo a outra rede é
+    # a Partilha Explícita. A lista sai do SERVIDOR e não de um filtro no
+    # browser, para a regra não viver em dois sítios. O âmbito é o mesmo
+    # do painel de administração (rede → empresas → utilizadores).
+    from services.admin_users_scope import (
+        build_users_scope_query,
+        empresas_do_ambito,
+    )
+
+    scope_query = await build_users_scope_query(
+        await empresas_do_ambito(user or {})
+    )
+    if scope_query:
+        query = {"$and": [query, scope_query]} if query else scope_query
+
     users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(
         USERS_LIST_LIMIT
     )

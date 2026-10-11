@@ -233,8 +233,7 @@ async def mundo(fake_async_db):
          patch.object(workflow_phases, "db", fake_async_db), \
          patch.object(process_assignment, "_find_least_busy_user", AsyncMock(side_effect=_menos_ocupado)), \
          patch.object(process_assignment, "_notify_newly_assigned_users", AsyncMock()), \
-         patch("services.history.log_history", AsyncMock()), \
-         patch("services.process_sharing.sincronizar_parceiros_sem_falhar", AsyncMock()):
+         patch("services.history.log_history", AsyncMock()):
         yield fake_async_db
 
 

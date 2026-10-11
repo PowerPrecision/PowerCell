@@ -52,6 +52,7 @@ import {
 import { BACKEND_URL as RESOLVED_BACKEND_URL } from "../utils/apiBaseUrl";
 import { normalizarCabecalhosDeFormData } from "../utils/formDataTransport";
 import { eRecusaDeProcessoFechado } from "../utils/processoFechado";
+import { eRecusaDeAtribuicaoEntreRedes } from "../utils/atribuicaoEntreRedes";
 
 // ====================================================================
 // CONFIGURAÇÃO
@@ -410,6 +411,10 @@ api.interceptors.response.use(
         const detalhe = error.response?.data?.detail;
         if (eRecusaDeProcessoFechado(detalhe)) {
           toast.error("Processo fechado", { description: detalhe });
+        } else if (eRecusaDeAtribuicaoEntreRedes(detalhe)) {
+          // Via Rápida extinta: não é falta de permissão, é a regra de rede.
+          // A mensagem do servidor já diz para onde ir (Partilhar com Empresa…).
+          toast.error("Atribuição fora da sua rede", { description: detalhe });
         } else {
           toast.error("Acesso Negado", {
             description: "Não tem permissão para realizar esta ação.",
