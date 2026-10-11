@@ -42,6 +42,7 @@ from utils.input_sanitization import (
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 from services.partner_attribution import aplicar_parceiro_do_cliente
+from services.hub_triage import aplicar_regime_de_indexacao
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +264,17 @@ async def run_create_process_for_client(
         new_process["consultor_name"] = user["name"]
 
     aplicar_parceiro_do_cliente(new_process, client)
+
+    # Carimbo de rede (Bloco A): este escritor NUNCA carimbava — o processo
+    # criado a partir da ficha de um cliente da Domus caía na pilha por
+    # carimbar (a do grupo incumbente) e desaparecia da Domus. Sem rede
+    # determinável não se carimba (carimbar errado é permanente).
+    from services.tenant_network import resolve_tenant_stamp
+
+    carimbo = await resolve_tenant_stamp(user)
+    if carimbo:
+        new_process.update(carimbo)
+    await aplicar_regime_de_indexacao(new_process)
     await db.processes.insert_one(new_process)
     
     # Se temos um cliente real, actualizar a lista de processos

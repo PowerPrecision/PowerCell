@@ -133,6 +133,8 @@ def client_doc_to_list_item(doc: dict) -> dict:
         "dados_pessoais": doc.get("dados_pessoais") or {},
         "process_ids": doc.get("process_ids") or [],
         "fonte": doc.get("fonte"),
+        # Lead de parceiro: o nome de quem a trouxe (coluna «Parceiro»).
+        "parceiro_name": doc.get("submitted_by_partner_name"),
         "tipo_cliente": doc.get("tipo") or doc.get("tipo_cliente") or (
             "dois_titulares" if has_titular2 else "particular"
         ),

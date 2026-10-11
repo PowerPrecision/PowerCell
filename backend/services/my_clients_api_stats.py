@@ -8,6 +8,7 @@ from database import db
 from services.workflow_phases import carregar_fases, nomes_terminais
 from services.my_clients_api_helpers import build_my_clients_stats_query
 from services.process_list_filters import role_has_client_portfolio
+from services.tenant_network import build_tenant_process_condition, com_isolamento
 
 
 async def run_get_my_clients_stats(user: dict):
@@ -29,6 +30,9 @@ async def run_get_my_clients_stats(user: dict):
         role=role,
         terminais=nomes_terminais(await carregar_fases()),
     )
+    # Fronteira de rede (Bloco A): sem ela o diretor contava os processos
+    # de todas as redes.
+    query = com_isolamento(await build_tenant_process_condition(user), query)
 
     pipeline = [
         {"$match": query},

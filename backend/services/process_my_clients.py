@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from services.process_list_filters import role_has_client_portfolio
+from services.tenant_network import build_tenant_process_condition, com_isolamento
 
 
 LEAD_CLIENTS_PROJECTION = {
@@ -348,7 +349,14 @@ async def run_get_my_clients(
             leads_count=0,
         )
 
-    query = build_process_query_fn(user_id, user_email, role)
+    # FRONTEIRA DE REDE (Out 2026, Bloco A): para diretor/administrativo o
+    # construtor devolve `{}` — «os de toda a gente». Sem esta condição um
+    # utilizador de uma rede nova via os clientes de TODAS as outras.
+    # O âmbito de PROCESSOS inclui as redes convidadas (D-25).
+    query = com_isolamento(
+        await build_tenant_process_condition(user),
+        build_process_query_fn(user_id, user_email, role),
+    )
     processes = await db.processes.find(
         query,
         my_clients_projection,

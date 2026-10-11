@@ -175,8 +175,9 @@ class TestOSucessoPelaPilha:
         assert ok.status_code == 200, ok.text
         assert chave not in ok.text and "http" not in ok.text
 
+        # O que o próprio parceiro submeteu não se descarrega de volta (Bloco C).
         d = c.http.get(f"/api/partner/cases/a-novo/files/{ok.json()['id']}/download-url", headers=c.cab)
-        assert d.status_code == 200 and d.json()["url"] == "https://s3.exemplo/get"
+        assert d.status_code == 403
 
     def test_a_mudanca_de_palavra_passe_pela_pilha(self, sessao):
         c = sessao

@@ -117,8 +117,12 @@ async def run_add_nif_mapping_manual(folder_name: str, nif: str, user: dict):
 async def run_get_pending_reviews(user: dict):
     """Obter lista de processos com dados pendentes de revisão."""
     try:
+        from services.tenant_network import build_tenant_process_condition, com_isolamento
         processes = await db.processes.find(
-            {"ai_pending_review": {"$exists": True, "$ne": []}},
+            com_isolamento(
+                await build_tenant_process_condition(user),
+                {"ai_pending_review": {"$exists": True, "$ne": []}},
+            ),
             {"_id": 0, "id": 1, "client_name": 1, "status": 1, "ai_pending_review": 1},
         ).to_list(100)
 

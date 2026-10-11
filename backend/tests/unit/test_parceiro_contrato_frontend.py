@@ -99,6 +99,9 @@ def com_tudo(mundo):
     import services.partner_security as sec
     import services.partner_upload_ops as ops
     import services.portal_upload_ops as portal_ops
+    import services.partner_client_form as pcf
+    import services.partner_drafts as drafts
+    import services.public_form_config as pfc
     import services.servico_do_parceiro as svc
     import services.user_management_scope as ums
 
@@ -106,13 +109,19 @@ def com_tudo(mundo):
     veredicto = AsyncMock(return_value=SimpleNamespace(tamanho=48213, tipo_detectado="application/pdf"))
     with contextlib.ExitStack() as pilha:
         pilha.enter_context(tenant_db(mundo, acc, sec, ppr, leads, ops, intake, counts, history, portal_ops,
-                                      audit, scope_mod, ums, svc))
+                                      audit, scope_mod, ums, svc, pcf, drafts, pfc))
         pilha.enter_context(patch.object(ops, "s3_service", s3))
         pilha.enter_context(patch.object(portal_ops, "s3_service", s3))
         pilha.enter_context(patch.object(ops, "exigir_conteudo_valido", veredicto))
         pilha.enter_context(patch("services.background_tasks.spawn_background_task",
                                   lambda coro, name=None: (coro.close(), None)[1]))
         yield mundo
+
+
+async def ppr_run_get_case(case_id):
+    import services.partner_portal_read as ppr
+
+    return await ppr.run_get_case(PT1, case_id)
 
 
 @pytest.mark.asyncio
@@ -174,6 +183,44 @@ class TestOContratoComOFrontend:
         _escrever_ou_comparar("lead_criada", _fixar(lead, mapa))
         _escrever_ou_comparar("lead_repetida", _fixar(repetida, mapa))
 
+        # ── O filtro de viabilidade: a lead retida, o formulário e o comprovativo ──
+        import services.partner_client_form as pcf
+
+        _escrever_ou_comparar("caso_lead_pendente", _fixar(await ppr_run_get_case(lead["id"]), mapa))
+        formulario = await pcf.run_get_client_form(PT1, lead["id"])
+        _escrever_ou_comparar("formulario_cliente", _fixar(formulario, mapa))
+        guardado = await pcf.run_save_client_form(PT1, lead["id"], pcf.ClientFormIn(values={
+            "profissao": "Engenheira", "compra_tipo": "outra_pessoa", "titular2_name": "Rui Cliente",
+        }))
+        _escrever_ou_comparar("formulario_guardado", _fixar(guardado, mapa))
+        _escrever_ou_comparar("formulario_com_segundo_titular", _fixar(await pcf.run_get_client_form(PT1, lead["id"]), mapa))
+
+        devolvida = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(
+            name="Carla Devolvida", email="carla@cliente.pt", consent_confirmed=True,
+        ))
+        expirada = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(
+            name="Eva Expirada", email="eva@cliente.pt", consent_confirmed=True,
+        ))
+        for rascunho in m.partner_drafts.docs:
+            if rascunho["id"] == devolvida["id"]:
+                rascunho.update({"partner_stage": "devolvida", "devolucao": {
+                    "motivo": "Comprovativo ilegível", "em": "2026-10-09T10:00:00+00:00"}})
+            if rascunho["id"] == expirada["id"]:
+                rascunho["partner_stage"] = "expirado"
+        mapa2 = {devolvida["id"]: "lead-devolvida", expirada["id"]: "lead-expirada"}
+        _escrever_ou_comparar("caso_lead_devolvida", _fixar(await ppr_run_get_case(devolvida["id"]), mapa2))
+        _escrever_ou_comparar("caso_lead_expirada", _fixar(await ppr_run_get_case(expirada["id"]), mapa2))
+
+        comprovativo = await ops.run_partner_confirm_upload(
+            PT1, lead["id"], ops.PartnerConfirmUploadIn(
+                file_key=f"Documentação Clientes/{lead['id']}/Index/pagamento.pdf",
+                original_filename="pagamento.pdf", category="Comprovativo_Pagamento",
+            ),
+        )
+        _escrever_ou_comparar(
+            "confirmacao_comprovativo", _fixar(comprovativo, {**mapa, comprovativo["id"]: "ficheiro-novo"})
+        )
+
         url = await ops.run_partner_upload_url(PT1, "a-novo", ops.PartnerUploadUrlIn(filename="cc.pdf", category="Identificação"))
         _escrever_ou_comparar("url_de_envio", _fixar(url, {}))
         confirmacao = await ops.run_partner_confirm_upload(
@@ -181,7 +228,14 @@ class TestOContratoComOFrontend:
         )
         mapa_ficheiro = {confirmacao["id"]: "ficheiro-novo"}
         _escrever_ou_comparar("confirmacao_de_envio", _fixar(confirmacao, mapa_ficheiro))
-        descarga = await ops.run_partner_download_url(PT1, "a-novo", confirmacao["id"])
+        # O parceiro descarrega o que o CLIENTE enviou (o que ele próprio
+        # submeteu não se descarrega — Bloco C).
+        com_tudo.documents.docs.append({
+            "id": "do-cliente", "process_id": "a-novo", "status": "RECEIVED", "source": "client_portal",
+            "s3_path": "Documentação Clientes/cli-a-novo/Index/foto.jpg", "filename": "foto.jpg",
+            "uploaded_by": "portal_client",
+        })
+        descarga = await ops.run_partner_download_url(PT1, "a-novo", "do-cliente")
         _escrever_ou_comparar("descarga", _fixar(descarga, {}))
 
     async def test_servico_do_parceiro_lado_da_equipa(self, com_tudo):

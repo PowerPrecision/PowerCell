@@ -483,7 +483,12 @@ async def _count_active_processes_for_indexer(indexer_id: str) -> int:
     return count
 
 
-async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tuple[bool, dict, str]:
+async def assign_to_indexer(
+    process_id: str,
+    update_status: bool = True,
+    *,
+    network_id: Optional[str] = None,
+) -> Tuple[bool, dict, str]:
     """
     Atribui automaticamente um processo ao indexador com menor carga.
 
@@ -517,8 +522,15 @@ async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tupl
       quando o chamador já definiu o status correto (ex.: criação manual
       no CRM, auto-avanço do Portal).
 
+    HUB & SPOKE (Bloco A): o pool é o da EQUIPA do processo — a rede do dono,
+    ou a rede indicada em ``network_id`` (a do Hub, quando um processo de
+    uma satélite entra na triagem do Hub). Uma rede satélite sem Index não
+    tem indexador: o processo NÃO é atribuído (e o estado não muda), em vez
+    de ir para um indexador de outra rede.
+
     Args:
         process_id: ID do processo a atribuir
+        network_id: rede cujo pool de indexadores se usa (omissão: a do processo)
 
     Returns:
         Tuple com (sucesso, dados atualizados, mensagem)
@@ -533,6 +545,16 @@ async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tupl
     if not process:
         return False, {}, f"Processo {process_id} não encontrado"
 
+    # HUB & SPOKE — a satélite não tem Index (ver `hub_triage`).
+    from services import hub_triage
+
+    if network_id is None and await hub_triage.processo_e_de_satelite(process):
+        return True, {
+            "status": process.get("status"),
+            "assigned": False,
+            "reason": "network_without_index",
+        }, "A rede do processo não tem Index — não se atribui indexador"
+
     # Evitar re-atribuição se já tem indexador
     if process.get("assigned_indexacao_id"):
         existing_name = process.get("indexacao_name", "desconhecido")
@@ -542,6 +564,12 @@ async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tupl
 
     # ── 2. Encontrar todos os indexadores ativos ──
     query = build_deep_role_query({"is_active": True}, role="indexacao")
+    # Pool = a equipa do processo (ou a rede pedida), nunca o mundo.
+    membros = await hub_triage.user_ids_da_rede(
+        network_id or hub_triage.rede_da_equipa(process)
+    )
+    if membros is not None:
+        query = {"$and": [query, {"id": {"$in": sorted(membros)}}]}
     indexers_cursor = db.users.find(
         query,
         {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "additional_roles": 1}
@@ -966,7 +994,11 @@ async def assign_to_least_busy_consultant(process_id: str) -> Tuple[bool, dict, 
     #   _find_least_busy_user("intermediario"));
     # - EXCLUÍDOS perfis de gestão (admin/ceo/diretor/… mesmo com
     #   additional_roles=["consultor"]) — ver _least_busy_candidate_query.
-    consultor_query = _least_busy_candidate_query("consultor")
+    from services import hub_triage
+
+    consultor_query = await hub_triage.restringir_a_equipa(
+        _least_busy_candidate_query("consultor"), process,
+    )
 
     consultores_cursor = db.users.find(
         consultor_query,
@@ -1307,7 +1339,8 @@ async def check_waitlist_for_indexer(user_id: str) -> int:
 
 async def _find_least_busy_user(
     role: str,
-    company_id: Optional[str] = None
+    company_id: Optional[str] = None,
+    network_id: Optional[str] = None,
 ) -> Optional[Dict]:
     """
     Encontra o utilizador activo com menor carga para um dado role.
@@ -1327,7 +1360,14 @@ async def _find_least_busy_user(
     # regra do assign_to_least_busy_consultant a ambos os roles servidos
     # aqui (consultor + intermediario).
     query = _least_busy_candidate_query(role)
-    
+    # Hub & Spoke (Bloco A): a equipa do processo, nunca o mundo.
+    if network_id:
+        from services import hub_triage
+
+        membros = await hub_triage.user_ids_da_rede(network_id)
+        if membros is not None:
+            query = {"$and": [query, {"id": {"$in": sorted(membros)}}]}
+
     users = await db.users.find(
         query,
         {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}
@@ -1450,7 +1490,10 @@ async def dual_auto_assign_on_pre_registo_transition(
             f"[DUAL-AUTO] Consultor já atribuído: {result_data['consultant_name']} — mantendo"
         )
     else:
-        consultor = await _find_least_busy_user("consultor", company_id)
+        from services import hub_triage
+
+        equipa = hub_triage.rede_da_equipa(process)
+        consultor = await _find_least_busy_user("consultor", company_id, equipa)
         if consultor:
             # BUGFIX (reatividade do cartão de Atribuição) — escrever o
             # conjunto CANÓNICO de campos multi-assignee, o mesmo que o
@@ -1489,7 +1532,11 @@ async def dual_auto_assign_on_pre_registo_transition(
             f"[DUAL-AUTO] Mediador já atribuído: {result_data['mediador_name']} — mantendo"
         )
     else:
-        intermediario = await _find_least_busy_user("intermediario", company_id)
+        from services import hub_triage
+
+        intermediario = await _find_least_busy_user(
+            "intermediario", company_id, hub_triage.rede_da_equipa(process),
+        )
         if intermediario:
             # Simétrico do consultor — ver comentário acima.
             update_data.update(

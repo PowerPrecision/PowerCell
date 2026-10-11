@@ -1,0 +1,9 @@
+{
+  "campos_guardados": [
+    "compra_tipo",
+    "profissao",
+    "titular2_name"
+  ],
+  "segundo_titular": true,
+  "success": true
+}

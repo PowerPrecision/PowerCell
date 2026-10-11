@@ -429,6 +429,15 @@ async def sincronizar_parceiros(
         por_ordem_de=por_ordem_de,
         registar_historico=registar_historico,
     )
+
+    # HUB & SPOKE (Bloco A): partilhar com o Hub põe o processo na fila de
+    # triagem (Index) do Hub — salvo Via Verde. Corre DEPOIS de a partilha
+    # estar gravada e nunca a faz falhar.
+    from services.hub_triage import entrar_na_triagem_do_hub_sem_falhar
+
+    await entrar_na_triagem_do_hub_sem_falhar(
+        process_id, novas, por_ordem_de=por_ordem_de,
+    )
     return novas
 
 

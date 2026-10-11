@@ -71,6 +71,16 @@ import {
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { safeString } from "../utils/safeString";
+import { formatFonteLabel } from "../utils/fonteLabels";
+import ValidacaoFinanceira from "../components/validacao/ValidacaoFinanceira";
+
+/**
+ * As colunas da lista de registos (cabeçalho e linhas partilham-na: duas
+ * cópias divergem e as colunas deixam de alinhar). Em «fr» e não em
+ * `col-span-12`, porque a coluna «Parceiro» tornou o total 13.
+ */
+const COLUNAS_DA_LISTA =
+  "md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,2fr)_minmax(0,1fr)]";
 import CreateProcessModal from "../components/CreateProcessModal";
 import ProcessNavigator from "../components/processDetails/ProcessNavigator";
 import Sub35Badge from "../components/shared/Sub35Badge";
@@ -501,26 +511,27 @@ const ClientRegistrationsPage = () => {
             ) : (
               <div className="space-y-3">
                 {/* Table Header */}
-                <div className="hidden md:grid grid-cols-12 gap-3 px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-muted/30 rounded-lg border">
-                  <div className="col-span-3">Cliente</div>
-                  <div className="col-span-2">Contacto</div>
-                  <div className="col-span-2">NIF</div>
-                  <div className="col-span-2">Estado</div>
-                  <div className="col-span-2">Data Registo</div>
-                  <div className="col-span-1 text-right">Acções</div>
+                <div className={`hidden md:grid ${COLUNAS_DA_LISTA} gap-3 px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-muted/30 rounded-lg border`}>
+                  <div>Cliente</div>
+                  <div>Contacto</div>
+                  <div>NIF</div>
+                  <div>Parceiro</div>
+                  <div>Estado</div>
+                  <div>Data Registo</div>
+                  <div className="text-right">Acções</div>
                 </div>
 
                 {/* Rows - Design melhorado */}
                 {clients.map((client) => (
                   <div
                     key={client.id}
-                    className={`grid grid-cols-1 md:grid-cols-12 gap-3 px-4 py-4 items-center hover:bg-primary/5 rounded-xl border transition-all duration-200 ${
+                    className={`grid grid-cols-1 ${COLUNAS_DA_LISTA} gap-3 px-4 py-4 items-center hover:bg-primary/5 rounded-xl border transition-all duration-200 ${
                       client.has_process 
                         ? 'border-l-4 border-l-green-500 bg-green-50/30 dark:bg-green-900/10' 
                         : 'border-l-4 border-l-orange-500 bg-orange-50/30 dark:bg-orange-900/10'
                     }`}
                   >
-                    <div className="col-span-3">
+                    <div className="min-w-0">
                       <div className="flex items-center gap-3">
                         <div className={`h-10 w-10 rounded-full flex items-center justify-center font-semibold shrink-0 ${
                           client.has_process 
@@ -540,7 +551,7 @@ const ClientRegistrationsPage = () => {
                           <div className="flex items-center gap-1 mt-1">
                             {client.fonte && (
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                                {safeString(client.fonte)}
+                                {formatFonteLabel(client.fonte)}
                               </Badge>
                             )}
                             {/* Ponto 1 — na triagem, a elegibilidade
@@ -551,7 +562,7 @@ const ClientRegistrationsPage = () => {
                       </div>
                     </div>
                     
-                    <div className="col-span-2 space-y-1.5 min-w-0">
+                    <div className="space-y-1.5 min-w-0">
                       {client.contacto?.email && (
                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground min-w-0">
                           <Mail className="h-3.5 w-3.5 flex-shrink-0" />
@@ -566,7 +577,7 @@ const ClientRegistrationsPage = () => {
                       )}
                     </div>
                     
-                    <div className="col-span-2">
+                    <div>
                       {client.nif ? (
                         <div className="flex items-center gap-1.5 px-2 py-1 bg-muted/50 rounded-md w-fit">
                           <Hash className="h-3.5 w-3.5 text-muted-foreground" />
@@ -577,7 +588,29 @@ const ClientRegistrationsPage = () => {
                       )}
                     </div>
                     
-                    <div className="col-span-2">
+                    {/* Leads de parceiros: quem trouxe o cliente. */}
+                    <div className="min-w-0" data-testid={`registo-parceiro-${client.id}`}>
+                      {client.parceiro_name ? (
+                        <span className="block truncate text-sm" title={safeString(client.parceiro_name)}>
+                          {safeString(client.parceiro_name)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">—</span>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      {/* Lead de parceiro por validar: aviso + (CEO, Diretor,
+                          Administrativo) Validar/Rejeitar. Nunca bloqueia. */}
+                      {client.validacao_financeira && (
+                        <ValidacaoFinanceira
+                          registo={{ id: client.id, validacao_financeira: client.validacao_financeira }}
+                          tipo="lead"
+                          compacto
+                          papelEfectivo={papelActivo}
+                          onDecidido={fetchClients}
+                        />
+                      )}
                       {/* PACOTE BN — Badges de Sala de Triagem */}
                       {/* Prioridade: pre_registo > ready_for_indexing > Tem/Sem Processo */}
                       {client.triage_status === "pre_registo" ? (
@@ -630,7 +663,7 @@ const ClientRegistrationsPage = () => {
                       )}
                     </div>
                     
-                    <div className="col-span-2 text-sm">
+                    <div className="text-sm">
                       <div className="flex items-center gap-1.5 text-muted-foreground">
                         <Calendar className="h-3.5 w-3.5" />
                         <span>{formatDateTime(client.created_at)}</span>
@@ -643,7 +676,7 @@ const ClientRegistrationsPage = () => {
                       )}
                     </div>
                     
-                    <div className="col-span-1 flex justify-end gap-1">
+                    <div className="flex justify-end gap-1">
                       {client.has_process && client.processes?.length > 0 && (
                         <Button
                           variant="default"

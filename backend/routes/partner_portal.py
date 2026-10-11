@@ -28,6 +28,7 @@ from services.partner_accounts import (
     run_get_invite,
     run_partner_login,
 )
+from services.partner_client_form import ClientFormIn, run_get_client_form, run_save_client_form
 from services.partner_leads import PartnerLeadIn, run_submit_lead
 from services.partner_portal_read import (
     run_get_case,
@@ -146,6 +147,24 @@ async def partner_confirm_upload(
     partner: dict = Depends(get_current_partner),
 ):
     return await run_partner_confirm_upload(partner, case_id, data)
+
+
+# ── Dados do cliente: a estrutura do registo público, com 2.º titular ──
+@router.get("/cases/{case_id}/client-form")
+async def partner_get_client_form(case_id: str, partner: dict = Depends(get_current_partner)):
+    return await run_get_client_form(partner, case_id)
+
+
+@router.put("/cases/{case_id}/client-form")
+@limiter.limit("60/minute")
+async def partner_save_client_form(
+    request: Request,
+    response: Response,
+    case_id: str,
+    data: ClientFormIn,
+    partner: dict = Depends(get_current_partner),
+):
+    return await run_save_client_form(partner, case_id, data)
 
 
 @router.get("/cases/{case_id}/files/{file_id}/download-url")

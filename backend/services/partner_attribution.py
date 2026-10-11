@@ -37,7 +37,13 @@ def aplicar_parceiro_do_cliente(process_doc: dict, cliente: Optional[Mapping[str
 
     `cliente` pode ser o documento do cliente ou qualquer mapeamento que
     traga `submitted_by_partner_id` / `submitted_by_partner_name`.
+
+    Herda também a **validação financeira** (Out 2026): o processo que nasce
+    de uma lead ainda por validar leva o mesmo estado, e é ele que acende o
+    selo «Processo Não Validado». É um aviso — nada no processo o lê para
+    bloquear seja o que for.
     """
+    _herdar_validacao_financeira(process_doc, cliente)
     if not cliente or process_doc.get("assigned_parceiro_id"):
         return False
     partner_id = str(cliente.get("submitted_by_partner_id") or "").strip()
@@ -48,6 +54,12 @@ def aplicar_parceiro_do_cliente(process_doc: dict, cliente: Optional[Mapping[str
     if isinstance(nome, str) and nome.strip():
         process_doc["parceiro_name"] = nome.strip()
     return True
+
+
+def _herdar_validacao_financeira(process_doc: dict, cliente: Optional[Mapping[str, Any]]) -> None:
+    validacao = (cliente or {}).get("validacao_financeira")
+    if isinstance(validacao, Mapping) and not process_doc.get("validacao_financeira"):
+        process_doc["validacao_financeira"] = dict(validacao)
 
 
 __all__ = ["aplicar_parceiro_do_cliente"]

@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from database import db
 from services.partner_attribution import aplicar_parceiro_do_cliente
+from services.hub_triage import aplicar_regime_de_indexacao
 from services.s3_document_root import (
     pasta_do_processo_sob_mapeamento_do_cliente,
     pasta_para_gravar,
@@ -256,6 +257,7 @@ async def _criar_processo_do_onboarding(
     # Portal do Parceiro: a lead completa a checklist e o processo nasce já
     # atribuído a quem a trouxe.
     aplicar_parceiro_do_cliente(process_doc, client)
+    await aplicar_regime_de_indexacao(process_doc)
     await db.processes.insert_one(process_doc)
 
     # Ancorar docs órfãos + pedidos REQUESTED do cliente

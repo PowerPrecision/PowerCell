@@ -25,6 +25,12 @@ export const FONTE_LABELS = {
   onboarding_auto: "Onboarding Automático",
   migrated_from_process: "Migração de Processo",
   segundo_titular: "Segundo Titular",
+  // Portal do Parceiro (Out 2026): a lead trazida por um parceiro.
+  partner_portal: "Portal do Parceiro",
+  // Origens dos PROCESSOS (campo `source`): nunca snake_case no ecrã.
+  lead: "Registo (Lead)",
+  client_assignment: "Atribuição de Cliente",
+  client_portal: "Portal do Cliente",
   // Valores legados / manuais (seeds e formulários antigos)
   Manual: "Manual",
   Website: "Website",

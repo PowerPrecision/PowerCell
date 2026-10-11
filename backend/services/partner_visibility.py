@@ -62,14 +62,23 @@ ETAPA_APROVADO = "aprovado"
 ETAPA_CONCLUIDO = "concluido"
 ETAPA_PERDIDO = "perdido"
 ETAPA_EM_CURSO = "em_curso"
+# O filtro de viabilidade (Out 2026): leads RETIDAS do lado do parceiro até
+# haver um Comprovativo de Pagamento, e o que acontece depois.
+ETAPA_PENDENTE = "pendente"
+ETAPA_DEVOLVIDA = "devolvida"
+ETAPA_EXPIRADO = "expirado"
 
 #: Pela ordem em que o parceiro as vê.
 ETAPAS: tuple[str, ...] = (
+    ETAPA_PENDENTE, ETAPA_DEVOLVIDA,
     ETAPA_LEAD, ETAPA_NOVO, ETAPA_ANALISE, ETAPA_APROVADO,
-    ETAPA_CONCLUIDO, ETAPA_PERDIDO, ETAPA_EM_CURSO,
+    ETAPA_CONCLUIDO, ETAPA_PERDIDO, ETAPA_EM_CURSO, ETAPA_EXPIRADO,
 )
 
 ROTULOS_DAS_ETAPAS: dict[str, str] = {
+    ETAPA_PENDENTE: "Pendentes",
+    ETAPA_DEVOLVIDA: "Devolvidas",
+    ETAPA_EXPIRADO: "Expirados",
     ETAPA_LEAD: "Leads",
     ETAPA_NOVO: "Em preparação",
     ETAPA_ANALISE: "Em análise",
@@ -140,7 +149,24 @@ def condicao_de_leads(partner: dict) -> dict:
             build_network_scope_condition(scope_do_parceiro(partner)),
             {"is_deleted": {"$ne": True}},
             {"process_ids": {"$in": [None, []]}},
-            {"lead_status": {"$in": [None, "new"]}},
+            # «expired»: a lead parou 60 dias na triagem — continua a ser
+            # DELE (vê-a como Expirada), só deixou de ser trabalhável.
+            {"lead_status": {"$in": [None, "new", "expired"]}},
+        ]
+    }
+
+
+def condicao_de_rascunhos(partner: dict) -> dict:
+    """Os rascunhos RETIDOS deste parceiro (colecção `partner_drafts`).
+
+    Sem perna de rede: a colecção é só dele, e os rascunhos carimbam a
+    ligação que escolheu ao submeter. Mas a rede continua a contar — uma
+    ligação revogada deixa de mostrar os rascunhos dessa rede.
+    """
+    return {
+        "$and": [
+            {"submitted_by_partner_id": str((partner or {}).get("id") or "")},
+            build_network_scope_condition(scope_do_parceiro(partner)),
         ]
     }
 
@@ -200,6 +226,9 @@ PROJECCAO_DA_LEAD: dict[str, int] = {
     "submitted_by_partner_id": 1,
     "network_id": 1, "company_id": 1, "company_name": 1, "company": 1,
     "process_ids": 1, "lead_status": 1, "is_deleted": 1,
+    # Rascunhos (colecção do parceiro) e a validação financeira.
+    "partner_stage": 1, "devolucao": 1, "last_activity_at": 1,
+    "validacao_financeira": 1, "expired_at": 1,
 }
 
 
@@ -236,15 +265,34 @@ def dto_do_processo(proc: dict, etapa: str, *, pedidos_pendentes: int = 0) -> di
     }
 
 
+def etapa_de_uma_lead(client: dict) -> str:
+    """Pendente / devolvida / expirado / lead — a etapa de um registo sem processo."""
+    estagio = _texto(client.get("partner_stage"))
+    if estagio == ETAPA_PENDENTE:
+        return ETAPA_PENDENTE
+    if estagio == ETAPA_DEVOLVIDA:
+        return ETAPA_DEVOLVIDA
+    if estagio == ETAPA_EXPIRADO or _texto(client.get("lead_status")) == "expired":
+        return ETAPA_EXPIRADO
+    return ETAPA_LEAD
+
+
 def dto_da_lead(client: dict, *, pedidos_pendentes: int = 0) -> dict:
+    etapa = etapa_de_uma_lead(client)
+    devolucao = client.get("devolucao") if isinstance(client.get("devolucao"), dict) else None
     return {
         "kind": "lead",
         "id": client.get("id"),
         "process_number": None,
         "client_name": client.get("nome"),
         "process_type": _texto(client.get("pending_process_type")),
-        "etapa": ETAPA_LEAD,
-        "etapa_label": ROTULOS_DAS_ETAPAS[ETAPA_LEAD],
+        "etapa": etapa,
+        "etapa_label": ROTULOS_DAS_ETAPAS[etapa],
+        # O motivo é para o PARCEIRO (a equipa escreveu-o para ele).
+        "motivo_da_devolucao": devolucao.get("motivo") if devolucao else None,
+        # Falta o comprovativo: só enquanto a lead está retida.
+        "requer_comprovativo": etapa in (ETAPA_PENDENTE, ETAPA_DEVOLVIDA),
+        "editavel": etapa in (ETAPA_PENDENTE, ETAPA_DEVOLVIDA, ETAPA_LEAD),
         "consultor_name": None,
         "pedidos_pendentes": int(pedidos_pendentes),
         "created_at": client.get("created_at"),
@@ -293,7 +341,10 @@ __all__ = [
     "ETAPAS",
     "ETAPA_CONCLUIDO",
     "ETAPA_EM_CURSO",
+    "ETAPA_DEVOLVIDA",
+    "ETAPA_EXPIRADO",
     "ETAPA_LEAD",
+    "ETAPA_PENDENTE",
     "ETAPA_POR_MACRO_FASE",
     "ORIGEM_DO_PARCEIRO",
     "PREFIXO_DE_AUTORIA",
@@ -303,10 +354,12 @@ __all__ = [
     "autoria_do_parceiro",
     "condicao_de_leads",
     "condicao_de_processos",
+    "condicao_de_rascunhos",
     "contagem_do_funil",
     "dto_da_lead",
     "dto_do_processo",
     "etapa_de_um_estado",
+    "etapa_de_uma_lead",
     "ficheiro_e_visivel",
     "filtrar_casos",
     "ordenar_por_actividade",

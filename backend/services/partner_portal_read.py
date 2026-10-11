@@ -46,7 +46,10 @@ from services.document_portal_request import (
 from services.partner_visibility import (
     ESTADOS_PENDENTES,
     ETAPA_CONCLUIDO,
+    ETAPA_DEVOLVIDA,
+    ETAPA_EXPIRADO,
     ETAPA_LEAD,
+    ETAPA_PENDENTE,
     ETAPAS,
     ORIGEM_DO_PARCEIRO,
     PROJECCAO_DA_LEAD,
@@ -54,6 +57,7 @@ from services.partner_visibility import (
     ROTULOS_DAS_ETAPAS,
     condicao_de_leads,
     condicao_de_processos,
+    condicao_de_rascunhos,
     contagem_do_funil,
     dto_da_lead,
     dto_do_processo,
@@ -63,6 +67,11 @@ from services.partner_visibility import (
     ordenar_por_actividade,
     quem_enviou,
     taxa_de_conversao,
+)
+from services.partner_drafts import (
+    CATEGORIA_DO_COMPROVATIVO,
+    ROTULO_DO_COMPROVATIVO,
+    e_comprovativo_de_pagamento,
 )
 from services.portal_doc_categories import DOCUMENT_CATEGORY_MAP
 from services.portal_status_helpers import nota_do_pedido, rotulo_do_pedido
@@ -94,6 +103,17 @@ class Caso:
         return self.tipo == "process"
 
     @property
+    def e_rascunho(self) -> bool:
+        """Uma lead ainda RETIDA do lado do parceiro (nem sequer chegou à equipa)."""
+        return bool(self.client and self.client.get("partner_stage"))
+
+    @property
+    def esta_expirado(self) -> bool:
+        """Parou 60 dias: o parceiro vê-a, mas já não se trabalha."""
+        client = self.client or {}
+        return client.get("partner_stage") == "expirado" or client.get("lead_status") == "expired"
+
+    @property
     def client_id(self) -> Optional[str]:
         if self.client and self.client.get("id"):
             return self.client["id"]
@@ -113,9 +133,18 @@ async def _carregar_processos(partner: dict) -> list[dict]:
 
 
 async def _carregar_leads(partner: dict) -> list[dict]:
-    return await db.clients.find(
+    """As leads do parceiro: as que já chegaram à equipa (`db.clients`) e as
+    RETIDAS do seu lado, à espera do comprovativo (`partner_drafts`)."""
+    libertadas = await db.clients.find(
         condicao_de_leads(partner), PROJECCAO_DA_LEAD
     ).to_list(LIMITE_DE_CASOS)
+    retidas = await db.partner_drafts.find(
+        condicao_de_rascunhos(partner), PROJECCAO_DA_LEAD
+    ).to_list(LIMITE_DE_CASOS)
+    # Um id nunca está nas duas (a libertação é um movimento); se estiver,
+    # por uma libertação a meio, a da equipa é a que conta.
+    vistos = {c.get("id") for c in libertadas}
+    return libertadas + [r for r in retidas if r.get("id") not in vistos]
 
 
 def _sem_processo() -> list[dict]:
@@ -185,19 +214,24 @@ async def run_get_dashboard(partner: dict) -> dict:
     dtos, _, _ = await _casos_com_dto(partner)
     funil = contagem_do_funil(
         (d["etapa"] for d in dtos if d["kind"] == "process"),
-        sum(1 for d in dtos if d["kind"] == "lead"),
+        sum(1 for d in dtos if d["kind"] == "lead" and d["etapa"] == ETAPA_LEAD),
     )
+    for etapa in (ETAPA_PENDENTE, ETAPA_DEVOLVIDA, ETAPA_EXPIRADO):
+        funil[etapa] = sum(1 for d in dtos if d["kind"] == "lead" and d["etapa"] == etapa)
+    # Etapas que só existem quando têm casos: o resíduo («em curso») e os
+    # estados de saída (devolvidas, expirados). «Pendentes» mostra-se sempre
+    # — é a acção que o parceiro tem em mãos.
+    so_com_casos = ("em_curso", ETAPA_DEVOLVIDA, ETAPA_EXPIRADO)
     return {
         "funil": [
             {"etapa": e, "label": ROTULOS_DAS_ETAPAS[e], "total": funil[e]}
             for e in ETAPAS
-            # «Em curso» só aparece quando existe: é o resíduo, não uma etapa
-            # do negócio, e uma coluna a zero para sempre é ruído.
-            if e != "em_curso" or funil[e] > 0
+            if e not in so_com_casos or funil[e] > 0
         ],
         "total_de_casos": len(dtos),
         "escriturados": funil[ETAPA_CONCLUIDO],
         "leads": funil[ETAPA_LEAD],
+        "pendentes": funil[ETAPA_PENDENTE],
         "taxa_de_conversao": taxa_de_conversao(funil),
         "pedidos_pendentes": sum(d["pedidos_pendentes"] for d in dtos),
     }
@@ -253,6 +287,13 @@ async def resolver_caso(partner: dict, case_id: str) -> Caso:
         )
         if lead:
             return Caso("lead", lead["id"], None, lead)
+
+        # Um rascunho retido: ainda só existe do lado do parceiro.
+        rascunho = await db.partner_drafts.find_one(
+            {"$and": [{"id": case_id}, condicao_de_rascunhos(partner)]}, PROJECCAO_DA_LEAD
+        )
+        if rascunho:
+            return Caso("lead", rascunho["id"], None, rascunho)
     raise HTTPException(status_code=404, detail=ERRO_CASO_NAO_ENCONTRADO)
 
 
@@ -289,6 +330,45 @@ async def _documentos_do_caso(caso: Caso) -> list[dict]:
     return docs
 
 
+def _categoria_do_ficheiro(doc: dict) -> Optional[str]:
+    """A categoria que o parceiro ESCOLHEU (a gravada é a da pasta, que antes
+    da indexação é sempre `Index`); num pedido, a categoria do pedido."""
+    escolhida = doc.get("declared_category")
+    if isinstance(escolhida, str) and escolhida.strip():
+        return escolhida.strip()
+    return _categoria_em_texto(doc) if _e_pedido(doc) else None
+
+
+def _rotulo_da_categoria(categoria: Optional[str]) -> Optional[str]:
+    if not categoria:
+        return None
+    info = DOCUMENT_CATEGORY_MAP.get(categoria)
+    if isinstance(info, dict) and info.get("label"):
+        return info["label"]
+    if e_comprovativo_de_pagamento(categoria):
+        return ROTULO_DO_COMPROVATIVO
+    return categoria.replace("_", " ")
+
+
+def categorias_de_documentos(*, lead_retida: bool) -> list[dict]:
+    """As categorias que o parceiro pode escolher ao enviar — as MESMAS do
+    Portal do Cliente (`DOCUMENT_CATEGORY_MAP`) mais o Comprovativo de
+    Pagamento. Uma só fonte: uma lista paralela divergia na primeira
+    categoria nova.
+
+    ``obrigatorio`` marca a que liberta uma lead retida (só aí é obrigatório).
+    """
+    categorias = [
+        {"value": CATEGORIA_DO_COMPROVATIVO, "label": ROTULO_DO_COMPROVATIVO, "obrigatorio": bool(lead_retida)},
+    ]
+    categorias += [
+        {"value": chave, "label": info.get("label", chave), "obrigatorio": False}
+        for chave, info in DOCUMENT_CATEGORY_MAP.items()
+        if isinstance(info, dict)
+    ]
+    return categorias
+
+
 def _ficheiros_de(doc: dict, partner_id: str) -> list[dict]:
     """Os ficheiros VISÍVEIS de um documento (pedido ou envio solto)."""
     pedido = doc.get("id")
@@ -308,6 +388,7 @@ def _ficheiros_de(doc: dict, partner_id: str) -> list[dict]:
             "uploaded_by": entrada.get("uploaded_by"),
             "s3_path": entrada["s3_path"],
             "request_id": pedido if _e_pedido(doc) else None,
+            "category": _categoria_do_ficheiro(doc),
         })
     if not anexos and doc.get("s3_path") and ficheiro_e_visivel(doc.get("uploaded_by"), partner_id):
         encontrados.append({
@@ -319,6 +400,7 @@ def _ficheiros_de(doc: dict, partner_id: str) -> list[dict]:
             "uploaded_by": doc.get("uploaded_by"),
             "s3_path": doc["s3_path"],
             "request_id": pedido if _e_pedido(doc) else None,
+            "category": _categoria_do_ficheiro(doc),
         })
     return encontrados
 
@@ -334,6 +416,8 @@ async def ficheiros_internos(partner: dict, caso: Caso) -> list[dict]:
 def _dto_do_ficheiro(f: dict, partner_id: str) -> dict:
     return {
         "id": f["id"],
+        "category": f.get("category"),
+        "category_label": _rotulo_da_categoria(f.get("category")),
         "filename": f.get("filename"),
         "file_size": f.get("file_size"),
         "content_type": f.get("content_type"),
@@ -383,7 +467,13 @@ async def run_get_case(partner: dict, case_id: str) -> dict:
     soltos.sort(key=lambda f: str(f.get("uploaded_at") or ""), reverse=True)
 
     base["pedidos_pendentes"] = sum(1 for p in pedidos if p["estado"] == "pendente")
-    return {**base, "pedidos": pedidos, "ficheiros": soltos}
+    retida = (not caso.e_processo) and bool(base.get("requer_comprovativo"))
+    return {
+        **base,
+        "pedidos": pedidos,
+        "ficheiros": soltos,
+        "categorias": categorias_de_documentos(lead_retida=retida),
+    }
 
 
 __all__ = [

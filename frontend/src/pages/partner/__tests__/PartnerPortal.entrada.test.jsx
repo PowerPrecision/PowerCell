@@ -25,6 +25,8 @@ vi.mock("@/services/partnerApi", () => ({
   submeterLead: vi.fn(),
   obterUrlDeDescarga: vi.fn(),
   enviarFicheiro: vi.fn(),
+  obterFormularioDoCliente: vi.fn(),
+  guardarFormularioDoCliente: vi.fn(),
 }));
 
 import * as api from "@/services/partnerApi";

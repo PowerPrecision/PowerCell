@@ -360,6 +360,7 @@ export default function ClientsPage() {
         'Email Titular 2': c.titular2_data?.email || c.titular2_email || '',
         'Telefone Titular 2': c.titular2_data?.phone || c.titular2_phone || '',
         'Fonte': c.fonte ? formatFonteLabel(c.fonte) : '',
+        'Parceiro': c.parceiro_name || '',
         'Data de Registo': c.created_at || '',
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -708,6 +709,8 @@ export default function ClientsPage() {
                           <SortIcon field="nif" />
                         </span>
                       </TableHead>
+                      {/* Leads de parceiros: quem trouxe o cliente. */}
+                      <TableHead>Parceiro</TableHead>
                       {/* PACOTE DG — coluna "Fase" substituída por "Processos" (clientes não têm fase). */}
                       <TableHead className="text-center">Processos</TableHead>
                       <TableHead className="text-right">Acções</TableHead>
@@ -793,6 +796,13 @@ export default function ClientsPage() {
                           </div>
                         ) : (
                           <span className="text-muted-foreground text-sm">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell data-testid={`client-parceiro-${client.id}`}>
+                        {client.parceiro_name ? (
+                          <span className="text-sm">{client.parceiro_name}</span>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">—</span>
                         )}
                       </TableCell>
                       {/* PACOTE DG — cell "Fase" substituída por cell "Processos" com Badge secundário (token semântico). */}

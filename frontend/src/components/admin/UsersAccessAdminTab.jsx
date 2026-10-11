@@ -68,7 +68,6 @@ import Paginacao from "../shared/Paginacao";
 /** Ponto 11 — espelha a omissão do backend. */
 const TAMANHO_DA_PAGINA = 25;
 import { Label } from "../ui/label";
-import { ScrollArea } from "../ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -685,7 +684,10 @@ export default function UsersAccessAdminTab({ isMaster = false }) {
                   Ainda não tem nenhum acesso UCR.
                 </p>
               ) : (
-                <ScrollArea className="h-fit max-h-[240px] rounded-md border border-border">
+                <div
+                  className="max-h-64 overflow-y-auto rounded-md border border-border"
+                  data-testid="ucr-list-scroll"
+                >
                   <ul className="divide-y divide-border w-full">
                     {selectedRoles.map((role) => {
                       const roleId = role.id || role._id || role.role_id;
@@ -724,7 +726,7 @@ export default function UsersAccessAdminTab({ isMaster = false }) {
                       );
                     })}
                   </ul>
-                </ScrollArea>
+                </div>
               )}
             </div>
 

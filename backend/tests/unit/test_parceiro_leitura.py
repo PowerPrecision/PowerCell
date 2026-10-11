@@ -193,7 +193,9 @@ class TestFunil:
         _dono(com_bd)
         painel = await ppr.run_get_dashboard(PT1)
         totais = {e["etapa"]: e["total"] for e in painel["funil"]}
-        assert totais == {"lead": 2, "novo": 1, "analise": 1, "aprovado": 1, "concluido": 1, "perdido": 1}
+        # «Pendentes» mostra-se sempre (é a acção em mãos do parceiro); as
+        # devolvidas e os expirados só quando existem.
+        assert totais == {"pendente": 0, "lead": 2, "novo": 1, "analise": 1, "aprovado": 1, "concluido": 1, "perdido": 1}
         assert painel["total_de_casos"] == 7
         assert painel["escriturados"] == 1 and painel["leads"] == 2
         assert painel["taxa_de_conversao"] == round(100 * 1 / 7, 1)

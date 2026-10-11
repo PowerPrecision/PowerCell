@@ -114,7 +114,8 @@ JOBS_DECLARADOS: list[dict[str, Any]] = [
         "nome": "Alertas e limpezas",
         "descricao": (
             "Prazos a vencer, documentos a expirar, tarefas por concluir, "
-            "processos parados e limpeza de notificações antigas."
+            "processos parados, leads de parceiros sem actividade há 60 dias "
+            "(passam a Expirado) e limpeza de notificações antigas."
         ),
         "interval_seconds": 3600,
         "processo": "worker",

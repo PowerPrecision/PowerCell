@@ -122,17 +122,23 @@ def com_bd(mundo, s3, veredicto, tarefas):
     import services.document_intake as intake
     import services.document_portal_counts as counts
     import services.history as history
+    import services.partner_drafts as drafts
     import services.partner_leads as leads
     import services.partner_portal_read as ppr
     import services.partner_upload_ops as ops
     import services.portal_upload_ops as portal_ops
 
     with contextlib.ExitStack() as pilha:
-        pilha.enter_context(tenant_db(mundo, ppr, ops, leads, intake, counts, history, portal_ops))
+        pilha.enter_context(tenant_db(mundo, ppr, ops, leads, intake, counts, history, portal_ops, drafts))
         pilha.enter_context(patch.object(ops, "s3_service", s3))
         pilha.enter_context(patch.object(portal_ops, "s3_service", s3))
         pilha.enter_context(patch.object(ops, "exigir_conteudo_valido", veredicto))
         yield mundo
+
+
+def _rascunho(m, client_id):
+    """A lead RETIDA do lado do parceiro (colecção `partner_drafts`)."""
+    return next(c for c in m.partner_drafts.docs if c["id"] == client_id)
 
 
 def _mundo(m, *, indexado=False, skip_index=False):
@@ -160,10 +166,12 @@ class TestLeadCarimbosDoServidor:
         import services.partner_leads as pl
 
         resposta = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo(nif="501964843", notes="Quer rever o spread")))
-        lead = next(c for c in com_bd.clients.docs if c["id"] == resposta["id"])
+        lead = _rascunho(com_bd, resposta["id"])
         assert lead["submitted_by_partner_id"] == "pt-1" and lead["submitted_by_partner_name"] == "Rui"
         assert lead["network_id"] == REDE_INCUMBENTE and lead["company_id"] == "cmp-power"
-        assert lead["lead_status"] == "new" and lead["process_ids"] == []
+        # RETIDA do lado do parceiro até haver comprovativo: a equipa não a vê.
+        assert lead["partner_stage"] == "pendente" and lead["process_ids"] == []
+        assert not [c for c in com_bd.clients.docs if c.get("id") == resposta["id"]]
         assert lead["fonte"] == "partner_portal" and lead["assigned_to"] is None
         assert lead["partner_consent"]["confirmed"] is True and lead["partner_consent"]["partner_id"] == "pt-1"
         assert lead["notas_do_parceiro"] == "Quer rever o spread"
@@ -173,7 +181,7 @@ class TestLeadCarimbosDoServidor:
         import services.partner_leads as pl
 
         resposta = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo(nif="501964843")))
-        lead = next(c for c in com_bd.clients.docs if c["id"] == resposta["id"])
+        lead = _rascunho(com_bd, resposta["id"])
         assert lead["contacto"]["telefone"] != "912345678" and str(lead["contacto"]["telefone"]).startswith("ENC:")
         assert str(lead["dados_pessoais"]["nif"]).startswith("ENC:")
         assert "501964843" not in repr(lead) and "912345678" not in repr(lead)
@@ -195,7 +203,7 @@ class TestLeadCarimbosDoServidor:
         with pytest.raises(HTTPException) as erro:
             await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo(network_id=REDE_DOMUS)))
         assert erro.value.status_code == 404
-        assert com_bd.clients.docs == [c for c in com_bd.clients.docs if c.get("fonte") != "partner_portal"]
+        assert not [c for c in (*com_bd.clients.docs, *com_bd.partner_drafts.docs) if c.get("fonte") == "partner_portal"]
 
     async def test_com_duas_redes_e_preciso_escolher_e_so_entre_as_suas(self, com_bd):
         import services.partner_leads as pl
@@ -206,7 +214,7 @@ class TestLeadCarimbosDoServidor:
             await pl.run_submit_lead(duas, pl.PartnerLeadIn(**_corpo()))
         assert ambigua.value.status_code == 400
         r = await pl.run_submit_lead(duas, pl.PartnerLeadIn(**_corpo(network_id=REDE_DOMUS)))
-        lead = next(c for c in com_bd.clients.docs if c["id"] == r["id"])
+        lead = _rascunho(com_bd, r["id"])
         assert lead["network_id"] == REDE_DOMUS and lead["company_id"] == "cmp-domus"
 
     async def test_uma_ligacao_suspensa_nao_recebe_leads(self, com_bd):
@@ -226,7 +234,7 @@ class TestLeadCarimbosDoServidor:
         assert {c["id"] for c in (await ppr.run_list_cases(PT1))["items"]} == {r["id"]}
         assert (await ppr.run_list_cases(PT2))["items"] == []
         assert (await ppr.run_list_cases(PT3))["items"] == []
-        lead = next(c for c in com_bd.clients.docs if c["id"] == r["id"])
+        lead = _rascunho(com_bd, r["id"])
         assert documento_no_ambito(lead, TenantScope(network_ids=(REDE_INCUMBENTE,)))
         assert not documento_no_ambito(lead, TenantScope(network_ids=(REDE_DOMUS,)))
 
@@ -239,7 +247,7 @@ class TestLeadValidacao:
         with pytest.raises(HTTPException) as erro:
             await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo(consent_confirmed=False)))
         assert erro.value.status_code == 400
-        assert not [c for c in com_bd.clients.docs if c.get("fonte") == "partner_portal"]
+        assert not [c for c in (*com_bd.clients.docs, *com_bd.partner_drafts.docs) if c.get("fonte") == "partner_portal"]
 
     @pytest.mark.parametrize(
         "campo,valor",
@@ -252,7 +260,7 @@ class TestLeadValidacao:
         with pytest.raises(HTTPException) as erro:
             await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo(**{campo: valor})))
         assert erro.value.status_code == 400
-        assert not [c for c in com_bd.clients.docs if c.get("fonte") == "partner_portal"]
+        assert not [c for c in (*com_bd.clients.docs, *com_bd.partner_drafts.docs) if c.get("fonte") == "partner_portal"]
 
     async def test_o_tecto_diario(self, com_bd, monkeypatch):
         import services.partner_leads as pl
@@ -307,7 +315,7 @@ class TestLeadSemOraculoNemEscritaAlheia:
             {"id": "igual-outra-rede", "network_id": REDE_DOMUS, "contacto": {"email_hash": h}},
         ])
         r = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo()))
-        lead = next(c for c in com_bd.clients.docs if c["id"] == r["id"])
+        lead = _rascunho(com_bd, r["id"])
         assert lead["possible_duplicate_of"] == ["igual-mesma-rede"], "nunca se cruza a fronteira da rede"
 
     async def test_o_duplo_clique_do_proprio_parceiro_devolve_a_mesma_lead(self, com_bd):
@@ -316,7 +324,7 @@ class TestLeadSemOraculoNemEscritaAlheia:
         primeira = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo()))
         segunda = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo()))
         assert segunda["id"] == primeira["id"] and segunda["repetida"] is True
-        assert len([c for c in com_bd.clients.docs if c.get("fonte") == "partner_portal"]) == 1
+        assert len([c for c in com_bd.partner_drafts.docs if c.get("fonte") == "partner_portal"]) == 1
 
     async def test_o_mesmo_cliente_por_outro_parceiro_e_uma_lead_nova_e_nao_revela_a_primeira(self, com_bd):
         import services.partner_leads as pl
@@ -329,18 +337,21 @@ class TestLeadSemOraculoNemEscritaAlheia:
 
 @pytest.mark.asyncio
 class TestLeadEfeitosLaterais:
-    async def test_agenda_a_checklist_e_o_aviso_em_segundo_plano(self, com_bd, tarefas):
+    async def test_agenda_a_checklist_mas_nao_avisa_a_gestao(self, com_bd, tarefas):
+        """A lead está RETIDA: a equipa nem sabe que existe. O aviso sai na
+        libertação (quando o comprovativo chega), nunca na submissão."""
         import services.partner_leads as pl
 
         r = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo()))
-        assert f"partner-lead-checklist:{r['id']}" in tarefas and f"partner-lead-alert:{r['id']}" in tarefas
+        assert f"partner-lead-checklist:{r['id']}" in tarefas
+        assert f"partner-lead-alert:{r['id']}" not in tarefas
 
     async def test_a_checklist_liga_se_ao_cliente_sem_processo(self, com_bd):
         import services.partner_leads as pl
 
         cliente = {"id": "c-1", "company_id": "cmp-power"}
         with patch("services.portal_documents_notify.generate_mandatory_document_requests", new=AsyncMock()) as gerar:
-            await pl._pedir_checklist(PT1, cliente)
+            await pl.pedir_checklist(PT1, cliente)
         kw = gerar.await_args.kwargs
         assert kw["client_id"] == "c-1" and kw["process_id"] is None and kw["requested_by"] == "partner_portal"
 
@@ -350,7 +361,7 @@ class TestLeadEfeitosLaterais:
         cliente = {"id": "c-1", "nome": "Joana", "contacto": {"email": "j@c.pt", "telefone": "9"},
                    "pending_process_type": "credito_habitacao", "has_property": True}
         with patch("services.alerts.notify_new_client_registration", new=AsyncMock()) as avisar:
-            await pl._avisar_a_gestao(PT1, cliente, PT1["redes"][0])
+            await pl.avisar_gestao_da_lead(PT1, cliente, PT1["redes"][0])
         enviado = avisar.await_args.args[0]
         assert enviado["network_id"] == REDE_INCUMBENTE, "o carimbo escolhe a gestão destinatária"
         assert avisar.await_args.kwargs["origem"] == "Parceiro Rui"
@@ -360,7 +371,7 @@ class TestLeadEfeitosLaterais:
         import services.partner_leads as pl
 
         with patch("services.alerts.notify_new_client_registration", new=AsyncMock(side_effect=RuntimeError("smtp"))):
-            await pl._avisar_a_gestao(PT1, {"id": "c"}, PT1["redes"][0])  # não levanta
+            await pl.avisar_gestao_da_lead(PT1, {"id": "c"}, PT1["redes"][0])  # não levanta
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -412,7 +423,10 @@ class TestHerancaDoParceiro:
         r = await pl.run_submit_lead(PT1, pl.PartnerLeadIn(**_corpo()))
         assert [c["kind"] for c in (await ppr.run_list_cases(PT1))["items"]] == ["lead"]
 
-        cliente = next(c for c in com_bd.clients.docs if c["id"] == r["id"])
+        # Só depois do comprovativo a lead chega à equipa e pode ter processo.
+        cliente = _rascunho(com_bd, r["id"])
+        com_bd.partner_drafts.docs.remove(cliente)
+        com_bd.clients.docs.append(cliente)
         processo = {"id": "p-novo", "client_id": cliente["id"], "client_name": "Joana", "status": "fase_documental",
                     "network_id": REDE_INCUMBENTE, "company_id": "cmp-power"}
         aplicar_parceiro_do_cliente(processo, cliente)
@@ -818,22 +832,34 @@ def _ficheiros_para_descarga(m):
         {"id": "da-equipa", "process_id": "a-novo", "status": "RECEIVED", "source": "client_portal",
          "s3_path": "Documentação Clientes/cli-a-novo/Financeiros/interno.pdf", "filename": "interno.pdf",
          "uploaded_by": "u-consultora"},
-        {"id": "envenenado", "process_id": "a-novo", "status": "RECEIVED", "source": "partner_portal",
-         "s3_path": "backups/dump-2026-09-01.zip", "filename": "dump.zip", "uploaded_by": "partner:pt-1"},
+        # Do CLIENTE (visível ao parceiro), para que o teste exercite a posse
+        # da chave e não a recusa de descarregar os próprios ficheiros.
+        {"id": "envenenado", "process_id": "a-novo", "status": "RECEIVED", "source": "client_portal",
+         "s3_path": "backups/dump-2026-09-01.zip", "filename": "dump.zip", "uploaded_by": "portal_client"},
     ])
 
 
 @pytest.mark.asyncio
 class TestDescarga:
-    async def test_descarrega_o_que_enviei_e_o_que_o_cliente_enviou(self, com_bd, s3):
+    async def test_descarrega_o_que_o_cliente_enviou(self, com_bd, s3):
         import services.partner_upload_ops as ops
 
         _mundo(com_bd)
         _ficheiros_para_descarga(com_bd)
-        for fid in ("meu", "do-cliente"):
-            r = await ops.run_partner_download_url(PT1, "a-novo", fid)
-            assert r["url"] == "https://s3.exemplo/get" and r["expires_in"] == 900
-        assert [c[2] for c in s3.chamadas if c[0] == "presign_get"] == [900, 900], "15 minutos, não 1 hora"
+        r = await ops.run_partner_download_url(PT1, "a-novo", "do-cliente")
+        assert r["url"] == "https://s3.exemplo/get" and r["expires_in"] == 900
+        assert [c[2] for c in s3.chamadas if c[0] == "presign_get"] == [900], "15 minutos, não 1 hora"
+
+    async def test_o_que_o_proprio_parceiro_submeteu_nao_se_descarrega(self, com_bd, s3):
+        """Bloco C: o botão saiu do ecrã; a parede é o servidor."""
+        import services.partner_upload_ops as ops
+
+        _mundo(com_bd)
+        _ficheiros_para_descarga(com_bd)
+        with pytest.raises(HTTPException) as erro:
+            await ops.run_partner_download_url(PT1, "a-novo", "meu")
+        assert erro.value.status_code == 403
+        assert not [c for c in s3.chamadas if c[0] == "presign_get"]
 
     async def test_o_que_a_equipa_juntou_e_404(self, com_bd, s3):
         import services.partner_upload_ops as ops
@@ -885,7 +911,7 @@ class TestDescarga:
         _ficheiros_para_descarga(com_bd)
         s3.existe = False
         with pytest.raises(HTTPException) as erro:
-            await ops.run_partner_download_url(PT1, "a-novo", "meu")
+            await ops.run_partner_download_url(PT1, "a-novo", "do-cliente")
         assert erro.value.status_code == 404
 
 

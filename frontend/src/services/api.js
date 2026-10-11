@@ -647,6 +647,12 @@ export const moveProcessKanban = (processId, newStatus) =>
   });
 // Reabrir um processo FECHADO (fase terminal) para uma fase activa — a única
 // saída do modo de leitura. O servidor recusa edições e uploads até lá.
+// Validação financeira (lead de parceiro): um aviso, nunca um travão.
+export const decidirValidacaoFinanceira = (tipo, id, body) =>
+  api.post(`/financial-validation/${encodeURIComponent(tipo)}/${encodeURIComponent(id)}/decision`, body);
+export const obterComprovativoDaValidacao = (tipo, id) =>
+  api.get(`/financial-validation/${encodeURIComponent(tipo)}/${encodeURIComponent(id)}/proof-url`).then((r) => r.data);
+
 export const reopenProcess = (processId, newStatus) =>
   api.post(`/processes/${processId}/reopen`, { new_status: newStatus });
 export const getMyClients = (params = {}) => api.get("/processes/my-clients", { params });

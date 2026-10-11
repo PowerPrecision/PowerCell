@@ -114,7 +114,7 @@ async def _enrich_clients_fonte(clients: list) -> list:
         {"id": {"$in": ids}},
         {
             "_id": 0, "id": 1, "fonte": 1, "tipo": 1, "tipo_cliente": 1,
-            "titular2_data": 1, "titular2_name": 1,
+            "titular2_data": 1, "titular2_name": 1, "submitted_by_partner_name": 1,
         },
     ).to_list(length=None)
     by_id = {d["id"]: d for d in docs if d.get("id")}
@@ -124,6 +124,8 @@ async def _enrich_clients_fonte(clients: list) -> list:
             continue
         if extra.get("fonte") and not c.get("fonte"):
             c["fonte"] = extra["fonte"]
+        if extra.get("submitted_by_partner_name") and not c.get("parceiro_name"):
+            c["parceiro_name"] = extra["submitted_by_partner_name"]
         if not c.get("tipo_cliente"):
             c["tipo_cliente"] = client_doc_to_list_item(extra)["tipo_cliente"]
     return clients
@@ -246,6 +248,7 @@ async def run_list_clients(
                 "process_ids": 1, "fonte": 1, "created_at": 1, "updated_at": 1,
                 "is_active": 1, "is_deleted": 1, "prioridade": 1, "priority": 1,
                 "titular2_data": 1, "titular2_name": 1, "tipo": 1, "tipo_cliente": 1,
+                "submitted_by_partner_name": 1,
             },
         ).to_list(length=None)
         matching_client_ids = [d["id"] for d in extra_client_docs if d.get("id")]

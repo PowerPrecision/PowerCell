@@ -1,0 +1,95 @@
+{
+  "categorias": [
+    {
+      "label": "Comprovativo de Pagamento",
+      "obrigatorio": true,
+      "value": "Comprovativo_Pagamento"
+    },
+    {
+      "label": "Cartão de Cidadão",
+      "obrigatorio": false,
+      "value": "Cartao_Cidadao"
+    },
+    {
+      "label": "Declaração de IRS",
+      "obrigatorio": false,
+      "value": "IRS"
+    },
+    {
+      "label": "Documentos Financeiros",
+      "obrigatorio": false,
+      "value": "Financeiros"
+    },
+    {
+      "label": "Recibo de Vencimento",
+      "obrigatorio": false,
+      "value": "Recibo_Vencimento"
+    },
+    {
+      "label": "Comprovativo de IBAN",
+      "obrigatorio": false,
+      "value": "Comprovativo_IBAN"
+    },
+    {
+      "label": "Certidão de Nascimento",
+      "obrigatorio": false,
+      "value": "Certidao_Nascimento"
+    },
+    {
+      "label": "Atestado de Trabalho",
+      "obrigatorio": false,
+      "value": "Atestado_Trabalho"
+    },
+    {
+      "label": "Mapa de Créditos",
+      "obrigatorio": false,
+      "value": "Mapa_Creditos"
+    },
+    {
+      "label": "Declaração de Imposto de Renda",
+      "obrigatorio": false,
+      "value": "Declaracao_Imposto_Renda"
+    },
+    {
+      "label": "Certidão Permanente",
+      "obrigatorio": false,
+      "value": "Certidao_Permanente"
+    },
+    {
+      "label": "Contrato de Promessa",
+      "obrigatorio": false,
+      "value": "Contrato_Promessa"
+    },
+    {
+      "label": "Plantas da Casa",
+      "obrigatorio": false,
+      "value": "Plantas_Casa"
+    },
+    {
+      "label": "Certificado Energético",
+      "obrigatorio": false,
+      "value": "Certificado_Energetico"
+    },
+    {
+      "label": "Outro Documento",
+      "obrigatorio": false,
+      "value": "Outros"
+    }
+  ],
+  "client_name": "Joana Cliente",
+  "consultor_name": null,
+  "created_at": "2026-10-11T09:30:00+00:00",
+  "editavel": true,
+  "etapa": "pendente",
+  "etapa_label": "Pendentes",
+  "ficheiros": [],
+  "id": "lead-novo",
+  "kind": "lead",
+  "motivo_da_devolucao": null,
+  "pedidos": [],
+  "pedidos_pendentes": 0,
+  "process_number": null,
+  "process_type": "credito_habitacao",
+  "requer_comprovativo": true,
+  "updated_at": "2026-10-11T09:30:00+00:00"
+}

@@ -60,8 +60,9 @@ async def run_check_client_exists(
 
 async def run_get_clients_list(user: dict):
     """Obter lista de clientes para referência no upload."""
+    from services.tenant_network import build_tenant_process_condition
     clients = await db.processes.find(
-        {},
+        await build_tenant_process_condition(user),
         {"_id": 0, "id": 1, "client_name": 1, "process_number": 1}
     ).sort("client_name", 1).to_list(None)
     

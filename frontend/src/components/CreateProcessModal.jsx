@@ -42,6 +42,7 @@ import { createClientProcess, createClient, searchClients } from "../services/ap
 import { toast } from "sonner";
 import { PROCESS_TYPE_LABELS } from "./SmartClientSearch";
 import { Switch } from "./ui/switch";
+import ViaVerdeDoHub from "./shared/ViaVerdeDoHub";
 import useConfirmarProcessosActivos from "../hooks/useConfirmarProcessosActivos";
 
 const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, isLead = false }) => {
@@ -60,6 +61,8 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
   // PACOTE 5 (Fast-Track / Via Verde) — ignorar a fase de Indexação: o
   // processo salta a mesa do Indexador e é atribuído ao consultor.
   const [skipIndex, setSkipIndex] = useState(false);
+  // Hub & Spoke: ao partilhar com o Hub, salta a triagem (Index) do Hub.
+  const [viaVerde, setViaVerde] = useState(false);
 
   // ── Novo Cliente (quando não há preSelectedClient) ───────────────
   const [clientMode, setClientMode] = useState(null); // 'existing' | 'new' | null
@@ -87,6 +90,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
       setClientMode(preSelectedClient ? 'existing' : null);
       setNewClientData({ nome: '', email: '', telefone: '', nif: '' });
       setSkipIndex(false);
+      setViaVerde(false);
     }
   }, [open, preSelectedClient]);
 
@@ -220,6 +224,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
         process_type: processType,
         ...(isLead ? { is_lead: true } : {}),
         ...(skipIndex ? { skip_index: true } : {}),
+        ...(viaVerde ? { via_verde: true } : {}),
       };
 
       const res = await createClientProcess(payload);
@@ -579,6 +584,8 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
               </p>
             </div>
           </div>
+
+          <ViaVerdeDoHub id="cpm-via-verde-hub-switch" checked={viaVerde} onCheckedChange={setViaVerde} />
         </div>
 
         {/* `shrink-0` para o rodapé não ser comprimido pelo corpo, e

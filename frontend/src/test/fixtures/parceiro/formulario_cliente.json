@@ -1,0 +1,442 @@
+{
+  "editavel": true,
+  "ligar_segundo_titular": {
+    "field": "compra_tipo",
+    "value": "outra_pessoa"
+  },
+  "passos": [
+    {
+      "fields": [
+        {
+          "data_path": "root",
+          "depends_on": null,
+          "field_key": "name",
+          "field_type": "text",
+          "hint": null,
+          "is_required": true,
+          "label": "Nome completo",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "root",
+          "depends_on": null,
+          "field_key": "email",
+          "field_type": "email",
+          "hint": null,
+          "is_required": true,
+          "label": "Email",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "root",
+          "depends_on": null,
+          "field_key": "phone",
+          "field_type": "tel",
+          "hint": null,
+          "is_required": true,
+          "label": "Telemóvel",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "niss",
+          "field_type": "text",
+          "hint": "Número de Identificação na Segurança Social (11 dígitos)",
+          "is_required": false,
+          "label": "Nº Segurança Social (NISS)",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "nif",
+          "field_type": "text",
+          "hint": null,
+          "is_required": true,
+          "label": "NIF",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "documento_id",
+          "field_type": "text",
+          "hint": null,
+          "is_required": true,
+          "label": "Cartão de Cidadão/Passaporte",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "data_validade_cc",
+          "field_type": "date",
+          "hint": null,
+          "is_required": true,
+          "label": "Data Validade CC",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "naturalidade",
+          "field_type": "text",
+          "hint": null,
+          "is_required": true,
+          "label": "Naturalidade",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "nacionalidade",
+          "field_type": "text",
+          "hint": null,
+          "is_required": true,
+          "label": "Nacionalidade",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "morada_fiscal",
+          "field_type": "text",
+          "hint": null,
+          "is_required": true,
+          "label": "Morada Fiscal",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "birth_date",
+          "field_type": "date",
+          "hint": null,
+          "is_required": true,
+          "label": "Data de Nascimento",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "estado_civil",
+          "field_type": "select",
+          "hint": null,
+          "is_required": true,
+          "label": "Estado Civil",
+          "options": [
+            {
+              "label": "Solteiro(a)",
+              "value": "solteiro"
+            },
+            {
+              "label": "Casado(a)",
+              "value": "casado"
+            },
+            {
+              "label": "Casado(a) - Comunhão de Adquiridos",
+              "value": "casado_adquiridos"
+            },
+            {
+              "label": "Casado(a) - Comunhão Geral de Bens",
+              "value": "casado_geral"
+            },
+            {
+              "label": "Casado(a) - Separação de Bens",
+              "value": "casado_separacao"
+            },
+            {
+              "label": "Divorciado(a)",
+              "value": "divorciado"
+            },
+            {
+              "label": "Viúvo(a)",
+              "value": "viuvo"
+            },
+            {
+              "label": "União de Facto",
+              "value": "uniao_facto"
+            }
+          ],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "menor_35_anos",
+          "field_type": "checkbox",
+          "hint": null,
+          "is_required": false,
+          "label": "Menor de 35 anos",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "compra_tipo",
+          "field_type": "select",
+          "hint": null,
+          "is_required": false,
+          "label": "Tipo de compra",
+          "options": [
+            {
+              "label": "individual",
+              "value": "individual"
+            },
+            {
+              "label": "outra_pessoa",
+              "value": "outra_pessoa"
+            }
+          ],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "sexo",
+          "field_type": "radio",
+          "hint": null,
+          "is_required": false,
+          "label": "Sexo",
+          "options": [
+            {
+              "label": "Masculino",
+              "value": "M"
+            },
+            {
+              "label": "Feminino",
+              "value": "F"
+            },
+            {
+              "label": "Outro",
+              "value": "O"
+            }
+          ],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "codigo_postal",
+          "field_type": "text",
+          "hint": null,
+          "is_required": false,
+          "label": "Código Postal",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "personal_data",
+          "depends_on": null,
+          "field_key": "profissao",
+          "field_type": "text",
+          "hint": null,
+          "is_required": false,
+          "label": "Profissão",
+          "options": [],
+          "placeholder": null
+        }
+      ],
+      "label": "Dados do titular",
+      "step": 1
+    },
+    {
+      "fields": [
+        {
+          "data_path": "titular2_data",
+          "depends_on": {
+            "field": "compra_tipo",
+            "value": "outra_pessoa"
+          },
+          "field_key": "titular2_name",
+          "field_type": "text",
+          "hint": null,
+          "is_required": false,
+          "label": "Nome do 2º Titular",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "titular2_data",
+          "depends_on": {
+            "field": "compra_tipo",
+            "value": "outra_pessoa"
+          },
+          "field_key": "titular2_email",
+          "field_type": "email",
+          "hint": null,
+          "is_required": false,
+          "label": "Email (2º Titular)",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "titular2_data",
+          "depends_on": {
+            "field": "compra_tipo",
+            "value": "outra_pessoa"
+          },
+          "field_key": "titular2_phone",
+          "field_type": "tel",
+          "hint": null,
+          "is_required": false,
+          "label": "Telefone (2º Titular)",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "titular2_data",
+          "depends_on": {
+            "field": "compra_tipo",
+            "value": "outra_pessoa"
+          },
+          "field_key": "titular2_nif",
+          "field_type": "text",
+          "hint": null,
+          "is_required": false,
+          "label": "NIF (2º Titular)",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "titular2_data",
+          "depends_on": {
+            "field": "compra_tipo",
+            "value": "outra_pessoa"
+          },
+          "field_key": "titular2_documento_id",
+          "field_type": "text",
+          "hint": null,
+          "is_required": false,
+          "label": "Documento ID (2º Titular)",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "titular2_data",
+          "depends_on": {
+            "field": "compra_tipo",
+            "value": "outra_pessoa"
+          },
+          "field_key": "titular2_naturalidade",
+          "field_type": "text",
+          "hint": null,
+          "is_required": false,
+          "label": "Naturalidade (2º Titular)",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "titular2_data",
+          "depends_on": {
+            "field": "compra_tipo",
+            "value": "outra_pessoa"
+          },
+          "field_key": "titular2_nacionalidade",
+          "field_type": "text",
+          "hint": null,
+          "is_required": false,
+          "label": "Nacionalidade (2º Titular)",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "titular2_data",
+          "depends_on": {
+            "field": "compra_tipo",
+            "value": "outra_pessoa"
+          },
+          "field_key": "titular2_morada_fiscal",
+          "field_type": "text",
+          "hint": null,
+          "is_required": false,
+          "label": "Morada Fiscal (2º Titular)",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "titular2_data",
+          "depends_on": {
+            "field": "compra_tipo",
+            "value": "outra_pessoa"
+          },
+          "field_key": "titular2_birth_date",
+          "field_type": "date",
+          "hint": null,
+          "is_required": false,
+          "label": "Data Nascimento (2º Titular)",
+          "options": [],
+          "placeholder": null
+        },
+        {
+          "data_path": "titular2_data",
+          "depends_on": {
+            "field": "compra_tipo",
+            "value": "outra_pessoa"
+          },
+          "field_key": "titular2_estado_civil",
+          "field_type": "select",
+          "hint": null,
+          "is_required": false,
+          "label": "Estado Civil (2º Titular)",
+          "options": [
+            {
+              "label": "Solteiro(a)",
+              "value": "solteiro"
+            },
+            {
+              "label": "Casado(a)",
+              "value": "casado"
+            },
+            {
+              "label": "Casado(a) - Comunhão de Adquiridos",
+              "value": "casado_adquiridos"
+            },
+            {
+              "label": "Casado(a) - Comunhão Geral de Bens",
+              "value": "casado_geral"
+            },
+            {
+              "label": "Casado(a) - Separação de Bens",
+              "value": "casado_separacao"
+            },
+            {
+              "label": "Divorciado(a)",
+              "value": "divorciado"
+            },
+            {
+              "label": "Viúvo(a)",
+              "value": "viuvo"
+            },
+            {
+              "label": "União de Facto",
+              "value": "uniao_facto"
+            }
+          ],
+          "placeholder": null
+        }
+      ],
+      "label": "2.º titular",
+      "step": 2
+    }
+  ],
+  "segundo_titular": false,
+  "values": {
+    "email": "joana@cliente.pt",
+    "name": "Joana Cliente",
+    "phone": "912345678"
+  }
+}

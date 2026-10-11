@@ -1,4 +1,81 @@
 {
+  "categorias": [
+    {
+      "label": "Comprovativo de Pagamento",
+      "obrigatorio": false,
+      "value": "Comprovativo_Pagamento"
+    },
+    {
+      "label": "Cartão de Cidadão",
+      "obrigatorio": false,
+      "value": "Cartao_Cidadao"
+    },
+    {
+      "label": "Declaração de IRS",
+      "obrigatorio": false,
+      "value": "IRS"
+    },
+    {
+      "label": "Documentos Financeiros",
+      "obrigatorio": false,
+      "value": "Financeiros"
+    },
+    {
+      "label": "Recibo de Vencimento",
+      "obrigatorio": false,
+      "value": "Recibo_Vencimento"
+    },
+    {
+      "label": "Comprovativo de IBAN",
+      "obrigatorio": false,
+      "value": "Comprovativo_IBAN"
+    },
+    {
+      "label": "Certidão de Nascimento",
+      "obrigatorio": false,
+      "value": "Certidao_Nascimento"
+    },
+    {
+      "label": "Atestado de Trabalho",
+      "obrigatorio": false,
+      "value": "Atestado_Trabalho"
+    },
+    {
+      "label": "Mapa de Créditos",
+      "obrigatorio": false,
+      "value": "Mapa_Creditos"
+    },
+    {
+      "label": "Declaração de Imposto de Renda",
+      "obrigatorio": false,
+      "value": "Declaracao_Imposto_Renda"
+    },
+    {
+      "label": "Certidão Permanente",
+      "obrigatorio": false,
+      "value": "Certidao_Permanente"
+    },
+    {
+      "label": "Contrato de Promessa",
+      "obrigatorio": false,
+      "value": "Contrato_Promessa"
+    },
+    {
+      "label": "Plantas da Casa",
+      "obrigatorio": false,
+      "value": "Plantas_Casa"
+    },
+    {
+      "label": "Certificado Energético",
+      "obrigatorio": false,
+      "value": "Certificado_Energetico"
+    },
+    {
+      "label": "Outro Documento",
+      "obrigatorio": false,
+      "value": "Outros"
+    }
+  ],
   "client_name": "Cliente a-novo",
   "consultor_name": "Carla Consultora",
   "created_at": "2026-10-01T10:00:00+00:00",
@@ -7,6 +84,8 @@
   "ficheiros": [
     {
       "by": "cliente",
+      "category": null,
+      "category_label": null,
       "content_type": null,
       "file_size": null,
       "filename": "foto.jpg",
@@ -15,6 +94,8 @@
     },
     {
       "by": "eu",
+      "category": null,
+      "category_label": null,
       "content_type": null,
       "file_size": null,
       "filename": "extra.pdf",
@@ -45,6 +126,8 @@
       "ficheiros": [
         {
           "by": "cliente",
+          "category": "IRS",
+          "category_label": "Declaração de IRS",
           "content_type": null,
           "file_size": 10,
           "filename": "irs-cliente.pdf",
@@ -53,6 +136,8 @@
         },
         {
           "by": "eu",
+          "category": "IRS",
+          "category_label": "Declaração de IRS",
           "content_type": null,
           "file_size": 11,
           "filename": "irs-parceiro.pdf",

@@ -65,19 +65,24 @@ async def run_create_document_expiry(
 async def run_get_document_expiries(
     process_id: Optional[str], *, user: dict
 ) -> list[DocumentExpiryResponse]:
-    query: dict[str, Any] = {}
-    if process_id:
-        query["process_id"] = process_id
-    elif user["role"] == UserRole.CONSULTOR:
-        processes = await db.processes.find(
-            {"assigned_consultor_id": user["id"]}, {"id": 1}
-        ).to_list(1000)
-        query["process_id"] = {"$in": [p["id"] for p in processes]}
+    # Fronteira de rede (Bloco A): só os processos da rede do utilizador.
+    # Antes, com `process_id` na query string ou para os perfis de gestão,
+    # a consulta não perguntava a rede a ninguém.
+    from services.tenant_network import build_tenant_process_condition, com_isolamento
+    tenant = await build_tenant_process_condition(user)
+
+    papel: dict[str, Any] = {}
+    if user["role"] == UserRole.CONSULTOR:
+        papel = {"assigned_consultor_id": user["id"]}
     elif user["role"] == UserRole.INTERMEDIARIO:
-        processes = await db.processes.find(
-            {"assigned_mediador_id": user["id"]}, {"id": 1}
-        ).to_list(1000)
-        query["process_id"] = {"$in": [p["id"] for p in processes]}
+        papel = {"assigned_mediador_id": user["id"]}
+    if process_id:
+        papel = {"id": process_id}
+
+    visiveis = await db.processes.find(
+        com_isolamento(tenant, papel), {"id": 1}
+    ).to_list(5000)
+    query: dict[str, Any] = {"process_id": {"$in": [p["id"] for p in visiveis]}}
 
     docs = await db.document_expiries.find(query, {"_id": 0}).to_list(1000)
     return [DocumentExpiryResponse(**d) for d in docs]
@@ -93,17 +98,22 @@ async def run_get_upcoming_expiries(
     query: dict[str, Any] = {
         "expiry_date": {"$gte": today.isoformat(), "$lte": future_date.isoformat()}
     }
+    # Fronteira de rede (Bloco A) para TODOS os perfis; o consultor
+    # continua a ver só os seus dentro da sua rede.
+    from services.tenant_network import build_tenant_process_condition, com_isolamento
+    papel: dict[str, Any] = {}
     if user["role"] == UserRole.CONSULTOR:
-        procs = await db.processes.find(
-            {
-                "$or": [
-                    {"assigned_consultor_id": user["id"]},
-                    {"consultor_id": user["id"]},
-                ]
-            },
-            {"id": 1},
-        ).to_list(1000)
-        query["process_id"] = {"$in": [p["id"] for p in procs]} if procs else {"$in": []}
+        papel = {
+            "$or": [
+                {"assigned_consultor_id": user["id"]},
+                {"consultor_id": user["id"]},
+            ]
+        }
+    procs = await db.processes.find(
+        com_isolamento(await build_tenant_process_condition(user), papel),
+        {"id": 1},
+    ).to_list(5000)
+    query["process_id"] = {"$in": [p["id"] for p in procs]}
 
     docs = (
         await db.document_expiries.find(query, {"_id": 0})

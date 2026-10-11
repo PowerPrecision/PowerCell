@@ -629,7 +629,7 @@ async def get_dsti_high_risk_processes(
     user: dict = Depends(get_current_user)
 ):
     """Lista processos com DSTI acima do limiar configurado."""
-    return await run_get_dsti_high_risk_processes()
+    return await run_get_dsti_high_risk_processes(user)
 
 
 @router.get("/{process_id}", response_model=ProcessResponse)

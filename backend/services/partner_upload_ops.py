@@ -58,6 +58,11 @@ from services.partner_portal_read import (
     ficheiros_internos,
     resolver_caso,
 )
+from services.partner_drafts import (
+    e_comprovativo_de_pagamento,
+    libertar_se_tiver_comprovativo,
+    registar_actividade,
+)
 from services.partner_visibility import ORIGEM_DO_PARCEIRO, autoria_do_parceiro
 from services.portal_upload_ops import (
     assert_portal_file_key_e_do_cliente,
@@ -71,6 +76,13 @@ logger = logging.getLogger(__name__)
 VALIDADE_DO_URL_DE_DESCARGA_SEGUNDOS = 900
 ERRO_PEDIDO_NAO_ENCONTRADO = "Pedido não encontrado."
 ERRO_FICHEIRO_NAO_ENCONTRADO = "Ficheiro não encontrado."
+ERRO_LEAD_EXPIRADA = (
+    "Esta lead expirou por inactividade (60 dias). Submeta uma nova lead ou "
+    "contacte o seu consultor."
+)
+ERRO_DESCARGA_DO_PROPRIO = (
+    "Os ficheiros que submeteu não podem ser descarregados do portal."
+)
 
 
 class PartnerUploadUrlIn(BaseModel):
@@ -115,6 +127,8 @@ def _dados_para_o_portal(caso: Caso) -> dict:
 # ════════════════════════════════════════════════════════════════════
 async def run_partner_upload_url(partner: dict, case_id: str, data: PartnerUploadUrlIn) -> dict:
     caso = await resolver_caso(partner, case_id)
+    if caso.esta_expirado:
+        raise HTTPException(status_code=409, detail=ERRO_LEAD_EXPIRADA)
     if data.request_id:
         await _pedido_do_caso(caso, data.request_id)
 
@@ -145,8 +159,15 @@ async def _guardar_ficheiro(
     tipo: str,
     request_id: Optional[str],
     agora: str,
+    categoria_pedida: Optional[str] = None,
+    comprovativo: bool = False,
 ) -> str:
-    """Grava o registo do ficheiro. Devolve o id do ficheiro."""
+    """Grava o registo do ficheiro. Devolve o id do ficheiro.
+
+    ``comprovativo``: o ficheiro foi enviado COMO Comprovativo de Pagamento
+    (decidido pelo servidor a partir da categoria pedida). É uma marca do
+    ficheiro — a que liberta a lead retida —, não o nome dele.
+    """
     autoria = autoria_do_parceiro(partner["id"])
     file_id = str(uuid.uuid4())
     client_id = caso.client_id
@@ -179,6 +200,8 @@ async def _guardar_ficheiro(
             campos["client_id"] = client_id
         if process_id:
             campos["process_id"] = process_id
+        if comprovativo:
+            campos["comprovativo_de_pagamento"] = True
 
         consultas = [{"id": request_id, "process_id": process_id}] if process_id else [
             {"id": request_id, "client_id": client_id}
@@ -217,12 +240,19 @@ async def _guardar_ficheiro(
         "source": ORIGEM_DO_PARCEIRO,
         "reviewed_by": autoria,
         "reviewed_at": agora,
+        # A categoria que o parceiro ESCOLHEU (a gravada é a da pasta, que
+        # antes da indexação é sempre `Index`): é por ela que o ecrã separa
+        # o que foi submetido.
+        "declared_category": categoria_pedida or None,
+        **({"comprovativo_de_pagamento": True} if comprovativo else {}),
     })
     return file_id
 
 
 async def run_partner_confirm_upload(partner: dict, case_id: str, data: PartnerConfirmUploadIn) -> dict:
     caso = await resolver_caso(partner, case_id)
+    if caso.esta_expirado:
+        raise HTTPException(status_code=409, detail=ERRO_LEAD_EXPIRADA)
 
     # 1. POSSE ANTES DE TUDO (Incidente P0). Nem se sonda o objecto: um 403
     #    vs 400 sobre uma chave alheia seria um oráculo do bucket.
@@ -243,12 +273,26 @@ async def run_partner_confirm_upload(partner: dict, case_id: str, data: PartnerC
     plano = planear_entrada(caso.process, data.category)
     agora = datetime.now(timezone.utc).isoformat()
 
+    # O Comprovativo de Pagamento só tem efeito numa lead (um processo já
+    # passou o filtro de viabilidade).
+    comprovativo = (not caso.e_processo) and e_comprovativo_de_pagamento(data.category)
+
     file_id = await _guardar_ficheiro(
         caso, partner,
         file_key=data.file_key, filename=data.original_filename,
         categoria=plano.categoria,
         tamanho=tamanho, tipo=tipo, request_id=data.request_id, agora=agora,
+        categoria_pedida=_texto_ou_none(data.category),
+        comprovativo=comprovativo,
     )
+
+    # Actividade (adia a expiração) e, se era o comprovativo, a libertação:
+    # a lead passa a ser da equipa. Nunca faz falhar o envio.
+    libertada = None
+    if not caso.e_processo:
+        await registar_actividade(caso.id)
+        if comprovativo and caso.e_rascunho:
+            libertada = await _libertar_sem_falhar(caso, partner)
 
     # 5. Efeitos que NUNCA fazem falhar o envio (o ficheiro já está gravado).
     await _depois_de_guardar(caso, partner, plano, file_key=data.file_key, filename=data.original_filename)
@@ -268,7 +312,36 @@ async def run_partner_confirm_upload(partner: dict, case_id: str, data: PartnerC
         "filename": data.original_filename,
         "request_id": data.request_id,
         "destino": descricao_para_o_utilizador(plano),
+        # O ecrã diz ao parceiro que a lead seguiu para a equipa.
+        "lead_submetida": bool(libertada),
     }
+
+
+def _texto_ou_none(valor) -> Optional[str]:
+    texto = str(valor).strip() if valor not in (None, "") else ""
+    return texto or None
+
+
+async def _libertar_sem_falhar(caso: Caso, partner: dict) -> Optional[dict]:
+    """Passa a lead retida à equipa e avisa a gestão. Nunca propaga: o
+    ficheiro já está gravado, e a libertação repete-se no envio seguinte."""
+    try:
+        cliente = await libertar_se_tiver_comprovativo(caso.id)
+        if not cliente:
+            return None
+        from services.background_tasks import spawn_background_task
+        from services.partner_leads import avisar_gestao_da_lead
+
+        ligacao = {
+            "network_id": cliente.get("network_id"),
+            "company_id": cliente.get("company_id"),
+            "company_name": cliente.get("company_name"),
+        }
+        spawn_background_task(avisar_gestao_da_lead(partner, cliente, ligacao), name=f"partner-lead-alert:{caso.id}")
+        return cliente
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[PARCEIRO] Falha a libertar a lead %s: %s", caso.id, exc)
+        return None
 
 
 async def _depois_de_guardar(caso: Caso, partner: dict, plano, *, file_key: str, filename: str) -> None:
@@ -316,7 +389,7 @@ async def _depois_de_guardar(caso: Caso, partner: dict, plano, *, file_key: str,
         spawn_background_task(_avisar_a_equipa(caso, partner, filename), name=f"partner-upload-notify:{caso.id}")
 
     # A checklist pode ter ficado completa: o processo nasce (e herda o parceiro).
-    if caso.client_id:
+    if caso.client_id and not caso.e_rascunho:
         try:
             from services.portal_onboarding_advance import _trigger_onboarding_check
 
@@ -386,6 +459,13 @@ async def run_partner_download_url(partner: dict, case_id: str, file_id: str) ->
     # A posse também na LEITURA: neutraliza um registo com um `s3_path`
     # envenenado sem ser preciso limpar a colecção.
     assert_portal_file_key_e_do_cliente(ficheiro["s3_path"], process=caso.process, client=caso.client)
+
+    # O que o próprio parceiro submeteu não se descarrega de volta: o botão
+    # saiu do ecrã e a parede é esta (esconder um botão é cortesia). Depois
+    # da posse, não antes: a parede de segurança não pode ser mascarada por
+    # uma recusa que dá o mesmo código com outro motivo.
+    if str(ficheiro.get("uploaded_by") or "") == autoria_do_parceiro(partner["id"]):
+        raise HTTPException(status_code=403, detail=ERRO_DESCARGA_DO_PROPRIO)
 
     if not await asyncio.to_thread(s3_service.file_exists, ficheiro["s3_path"]):
         raise HTTPException(status_code=404, detail=ERRO_FICHEIRO_NAO_ENCONTRADO)

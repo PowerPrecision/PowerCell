@@ -47,6 +47,7 @@ import { toast } from 'sonner';
 import { createClientProcess, createClient, searchClients } from '../../services/api';
 import { PROCESS_TYPE_LABELS } from '../SmartClientSearch';
 import { Switch } from '../ui/switch';
+import ViaVerdeDoHub from '../shared/ViaVerdeDoHub';
 
 const INITIAL_FORM_STATE = {
   process_type: 'credito_habitacao',
@@ -72,6 +73,8 @@ const CreateClientModal = memo(({
   // PACOTE 5 (Fast-Track / Via Verde) — ignorar a fase de Indexação: o
   // processo salta a mesa do Indexador e é atribuído ao consultor.
   const [skipIndex, setSkipIndex] = useState(false);
+  // Hub & Spoke: ao partilhar com o Hub, salta a triagem (Index) do Hub.
+  const [viaVerde, setViaVerde] = useState(false);
 
   // ── Novo Cliente ──────────────────────────────────────────────────
   // Em modo `clientOnly`, salta-se sempre para o formulário de criação
@@ -106,6 +109,7 @@ const CreateClientModal = memo(({
     setSearchResults([]);
     setShowDropdown(false);
     setSkipIndex(false);
+    setViaVerde(false);
   }, [onOpenChange, clientOnly]);
 
   // ── Pesquisa de Clientes ──────────────────────────────────────────
@@ -182,6 +186,7 @@ const CreateClientModal = memo(({
       setSearchResults([]);
       setShowDropdown(false);
       setSkipIndex(false);
+      setViaVerde(false);
     }
   }, [open, clientOnly]);
 
@@ -304,6 +309,7 @@ const CreateClientModal = memo(({
         process_type: formData.process_type,
         // PACOTE 5 (Fast-Track / Via Verde) — ignora a fase de Indexação
         ...(skipIndex ? { skip_index: true } : {}),
+        ...(viaVerde ? { via_verde: true } : {}),
       };
 
       const processRes = await createClientProcess(payload);
@@ -319,7 +325,7 @@ const CreateClientModal = memo(({
     } finally {
       setIsCreating(false);
     }
-  }, [canSubmit, clientOnly, clientMode, selectedClient, newClientData, formData, skipIndex, handleClose, onSuccess]);
+  }, [canSubmit, clientOnly, clientMode, selectedClient, newClientData, formData, skipIndex, viaVerde, handleClose, onSuccess]);
 
   // ── Render ────────────────────────────────────────────────────────
   return (
@@ -602,6 +608,9 @@ const CreateClientModal = memo(({
                 </p>
               </div>
             </div>
+          )}
+          {!clientOnly && (
+            <ViaVerdeDoHub id="via-verde-hub-switch" checked={viaVerde} onCheckedChange={setViaVerde} />
           )}
         </div>
         

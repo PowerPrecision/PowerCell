@@ -2,6 +2,11 @@
   "escriturados": 1,
   "funil": [
     {
+      "etapa": "pendente",
+      "label": "Pendentes",
+      "total": 0
+    },
+    {
       "etapa": "lead",
       "label": "Leads",
       "total": 2
@@ -34,6 +39,7 @@
   ],
   "leads": 2,
   "pedidos_pendentes": 2,
+  "pendentes": 0,
   "taxa_de_conversao": 16.7,
   "total_de_casos": 6
 }

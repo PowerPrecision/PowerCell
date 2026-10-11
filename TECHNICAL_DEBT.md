@@ -556,6 +556,20 @@ fluxo de trabalho existente da equipa e a decisão é de quem gere o produto.
 passar a lista de papéis a `[MASTER]` (o ecrã `ChangelogSection` já só é
 alcançável pelo Master).
 
+### D-35 · Bloco A/B/C: o que ficou de fora, dito
+**Onde:** `services/hub_triage.py`, `services/partner_drafts.py`, `services/financial_validation.py`, `services/tenant_network.py`
+
+**Fechado (Out 2026):** as listagens de «Os Meus Clientes» e mais seis superfícies passaram a perguntar a rede; o Hub & Spoke (triagem no Hub, Via Verde); o filtro de viabilidade do Parceiro; a validação financeira; a expiração aos 60 dias.
+
+**O que continua aberto, de propósito:**
+1. **`TENANT_DEFAULT_NETWORK_ID` por definir em produção** deixa a pilha por carimbar visível a todas as redes (agora é `error` no log). Verificar o serviço de deploy. E uma conta **órfã** (sem empresa nenhuma, só possível em contas antigas) herda a rede de omissão — desenho do Lote 4, para não cegar contas antigas; novas contas nunca nascem órfãs.
+2. **`via_verde` é lida na altura da partilha.** Ligá-la depois de o processo ter entrado na triagem do Hub não o tira de lá (o primeiro registo ganha). Uma partilha revogada à mão e refeita NÃO repete a triagem. **A Via Verde não atribui um consultor do Hub**: a partilha nasce da atribuição de alguém do Hub, e assume-se que é essa pessoa quem trata da consultoria; se a pessoa atribuída for só mediador, o processo fica sem consultor do Hub até alguém o atribuir (acrescentar um segundo consultor automaticamente mexe nos campos canónicos de atribuição — a família do `assignment_drift`).
+3. **Rejeitar um PROCESSO fecha-o por escrita directa** (`transicao_de_fase` + `montar_update`), não pelo movimento do Kanban: não dispara as automações de entrada na fase. É deliberado (uma rejeição não é um avanço de negócio) mas é uma segunda via para fechar um processo.
+4. **Uma lead expirada não se revive**: o parceiro submete uma nova (o duplo clique dos 10 minutos não a apanha). Reactivar é uma decisão de produto.
+5. **O que existe em `db.clients` de parceiros ANTES desta mudança** não tem `validacao_financeira` (sem selo) — tratado como já aceite.
+6. **Inventário das superfícies que LISTAM:** fica com excepções escritas (`SEM_CONDICAO_DE_REDE_POR_DESENHO`); `GET /documents/client/{id}/*`, `/task-logs/{id}` e `/portal/{id}/verify` continuam na D-31.
+**O que fecha isto:** confirmar a variável em produção; decidir 2–4 com o dono do produto.
+
 ### D-31 · Rotas «por id» sem pergunta de rede: fechadas as de clientes, tarefas, restauro e rascunhos
 **Onde:** `services/by_id_scope.py`, `routes/clients.py`, `routes/tasks.py`, `routes/restore.py`, `services/email_templates_drafts.py`
 

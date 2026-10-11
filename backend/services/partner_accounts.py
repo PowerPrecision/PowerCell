@@ -410,6 +410,19 @@ async def parceiro_no_ambito(partner: Optional[dict], actor: dict) -> bool:
     )
 
 
+async def contacto_do_parceiro(partner_id: str) -> Optional[dict]:
+    """``{email, name}`` de um parceiro, para o avisar (ex.: lead devolvida).
+
+    Vive aqui porque `db.partners` só é acedida pelos módulos de identidade
+    (inventário em `test_parceiro_inventarios.py`). Devolve só o contacto —
+    nunca o hash nem o estado da conta.
+    """
+    if not partner_id:
+        return None
+    parceiro = await db.partners.find_one({"id": str(partner_id)}, {"_id": 0, "email": 1, "name": 1})
+    return parceiro if parceiro and parceiro.get("email") else None
+
+
 async def carregar_parceiro_gerivel(partner_id: str, actor: dict) -> dict:
     """O parceiro, se quem actua o pode gerir. **404** caso contrário —
     igual ao de «não existe» (nunca 403: seria um directório de contas)."""

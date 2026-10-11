@@ -40,6 +40,8 @@ async def run_create_company(data: CompanyCreate, *, actor: Optional[dict] = Non
         # administrador que a junta a um grupo. Herdar a rede de outra
         # empresa aqui seria abrir a fuga no acto da criação.
         "network_id": data.network_id,
+        # Hub & Spoke: quem tem a equipa de Index. Por omissão ninguém.
+        "is_hub": bool(data.is_hub),
         "nif": data.nif,
         "address": data.address,
         "phone": data.phone,
@@ -87,6 +89,12 @@ async def run_update_company(company_id: str, data: CompanyUpdate, *, actor: dic
         raise HTTPException(
             status_code=403,
             detail="Apenas o perfil Master pode alterar a rede de uma empresa.",
+        )
+
+    if data.is_hub is not None and not utilizador_e_global(actor):
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas o perfil Master pode marcar uma empresa como Hub.",
         )
 
     if data.name and data.name != existing.get("name"):
