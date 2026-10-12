@@ -597,8 +597,20 @@ def extract_client_updates_from_body(body: dict) -> dict:
             "telefone": "telefone",
         }
         for src_key, dst_key in field_map.items():
-            val = pd.get(src_key)
-            if val is not None:
+            if src_key not in pd:
+                continue
+            val = pd[src_key]
+            # Chave presente e VAZIA (`""`, `null`, espaços) = apagar o campo da
+            # ficha; chave ausente = «não alterei». Antes só `val is not None`
+            # passava e um `null` explícito era ignorado. O telefone fica de fora:
+            # `personal_data.telefone` é um espelho do contacto (o pedido explícito
+            # é `client_phone`), logo vazio ali nunca é um pedido para apagar.
+            if src_key in ("phone", "telefone"):
+                if val is not None:
+                    dp_updates[dst_key] = val
+            elif val is None or (isinstance(val, str) and not val.strip()):
+                dp_updates[dst_key] = ""
+            else:
                 dp_updates[dst_key] = val
 
         if dp_updates:

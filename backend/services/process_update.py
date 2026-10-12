@@ -28,6 +28,13 @@ from services.auth import get_effective_role, resolve_concrete_role
 from services.process_status import INACTIVE_STATUSES
 from services.process_labels import normalizar_etiquetas
 from services.financial_bank_sync import sincronizar_contas_bancarias
+from services.campos_limpaveis import (
+    aliases_a_limpar_no_cliente,
+    aliases_financeiros_a_remover,
+    campos_pessoais_limpos_em_updates,
+    espelhos_no_processo,
+    limpar_espelhos_nos_processos,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +117,17 @@ async def apply_client_personal_updates_from_process_put(
     """$set no cliente + cascade do nome para outros processos."""
     now_iso = datetime.now(timezone.utc).isoformat()
     client_updates = {**client_updates, "updated_at": now_iso}
+    # Campos pessoais APAGADOS: a ficha perde também os nomes alternativos do mesmo
+    # dado (`address` para a morada…), senão a leitura recompõe o valor a partir deles.
+    pessoais_limpos = campos_pessoais_limpos_em_updates(client_updates)
+    ids_da_ficha: list = []
+    if pessoais_limpos:
+        ficha = await db.clients.find_one(
+            {"id": client_id}, {"dados_pessoais": 1, "process_ids": 1},
+        ) or {}
+        ids_da_ficha = ficha.get("process_ids") or []
+        for alias in aliases_a_limpar_no_cliente(ficha.get("dados_pessoais"), pessoais_limpos):
+            client_updates.setdefault(f"dados_pessoais.{alias}", "")
     await db.clients.update_one({"id": client_id}, {"$set": client_updates})
     logger.info(
         f"Dados pessoais do cliente {client_id} atualizados via PUT processo: "
@@ -132,6 +150,13 @@ async def apply_client_personal_updates_from_process_put(
             await db.processes.update_many(
                 {"id": {"$in": outros}}, {"$set": sync_de_contactos_limpos(apagados)},
             )
+
+    # Idem para os campos pessoais: o NIF (valor, índice cego e cópia da raiz), a
+    # morada… saem dos OUTROS processos do cliente (o do pedido é do `seed_update_data`).
+    if pessoais_limpos:
+        await limpar_espelhos_nos_processos(
+            db, client_id, ids_da_ficha, pessoais_limpos, excluir=[process_id],
+        )
 
     updated_client_name = client_updates.get("nome")
     if not updated_client_name:
@@ -450,8 +475,14 @@ def seed_update_data(
     new_client_id: Optional[str],
     raw_client_email: Any,
     raw_client_phone: Any,
+    campos_pessoais_limpos: Optional[list] = None,
 ) -> dict:
-    """Monta o `$set` base: timestamp + contactos + campos de reatribuição."""
+    """Monta o `$set` base: timestamp + contactos + campos de reatribuição.
+
+    ``campos_pessoais_limpos`` são os campos de ``dados_pessoais`` que o pedido
+    apagou: as cópias deles NESTE processo (``client_nif``, ``personal_data.*``,
+    o índice cego) saem no mesmo ``$set`` — senão a leitura devolve o valor antigo.
+    """
     update_data: dict[str, Any] = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -475,6 +506,9 @@ def seed_update_data(
                 if chave in legado:
                     update_data[f"personal_data.{chave}"] = ""
 
+    if campos_pessoais_limpos:
+        update_data.update(espelhos_no_processo(process, campos_pessoais_limpos))
+
     if new_client_id and new_client_id != client_id_before:
         update_data["client_id"] = process["client_id"]
         update_data["client_name"] = process["client_name"]
@@ -482,6 +516,26 @@ def seed_update_data(
         update_data["client_phone"] = process["client_phone"]
         update_data["client_ids"] = process["client_ids"]
     return update_data
+
+
+def espelho_do_titular2(process: dict, client_id: Optional[str], raw_body: dict) -> Optional[dict]:
+    """A cópia do 2.º titular que o PROCESSO guarda, quando o pedido a edita.
+
+    O processo nasce com uma cópia de ``titular2_data`` (``client_assign``) e a
+    leitura (``populate_client_data``) PREFERE-a à da ficha do cliente. O PUT só
+    escrevia a ficha: editar — ou apagar — um campo do 2.º titular dava sucesso e
+    o ecrã continuava a receber a cópia antiga. Escreve-se a mesma secção nos dois
+    sítios (substituição, como na ficha: o que o formulário não envia deixa de
+    existir, e é assim que um campo apagado desaparece).
+
+    Com ``second_client_id`` a leitura recompõe o 2.º titular a partir do outro
+    cliente, logo não há cópia a manter. Devolve ``None`` quando não há nada a
+    escrever.
+    """
+    t2 = raw_body.get("titular2_data")
+    if not client_id or not isinstance(t2, dict) or process.get("second_client_id"):
+        return None
+    return {k: v for k, v in t2.items() if k != "nif_hash"}
 
 
 def maybe_copy_owner_to_vendedor(
@@ -665,6 +719,10 @@ async def apply_staff_business_updates(
             merged_fd = merge_nested_process_section(
                 existing_fd, incoming_fd, drop_empty_strings=True,
             )
+            # Campo canónico APAGADO: os nomes alternativos do mesmo dado saem com
+            # ele, senão o ecrã (que os usa como recurso) volta a mostrá-los.
+            for alias in aliases_financeiros_a_remover(incoming_fd):
+                merged_fd.pop(alias, None)
             # Créditos Ativos → Contas Bancárias (Lote 2, ponto 3). A regra
             # vivia no `executeSave` do ProcessDetails, logo só corria neste
             # ecrã; está agora na ESCRITA, onde a IA e os restantes
@@ -1029,8 +1087,10 @@ async def run_update_process(
     raw_client_email = contacto_do_pedido(raw_body, "client_email")
     raw_client_phone = contacto_do_pedido(raw_body, "client_phone")
 
+    pessoais_limpos: list = []
     if client_updates and client_id:
         client_updates = prepare_encrypted_client_updates(client_updates)
+        pessoais_limpos = campos_pessoais_limpos_em_updates(client_updates)
         await apply_client_personal_updates_from_process_put(
             client_id, client_updates, process_id,
         )
@@ -1053,7 +1113,12 @@ async def run_update_process(
         new_client_id=new_client_id,
         raw_client_email=raw_client_email,
         raw_client_phone=raw_client_phone,
+        campos_pessoais_limpos=pessoais_limpos,
     )
+
+    espelho_do_segundo_titular = espelho_do_titular2(process, client_id, raw_body)
+    if espelho_do_segundo_titular is not None:
+        update_data["titular2_data"] = espelho_do_segundo_titular
 
     valid_statuses = await load_valid_workflow_status_names(rede_do_processo(process))
     perms = build_role_update_permissions(role)

@@ -50,6 +50,12 @@ logger = logging.getLogger(__name__)
 
 from services.client_portal_email import _send_portal_welcome_email_safe
 from services.encryption import limpar_blind_indexes_de_campos_vazios
+from services.campos_limpaveis import (
+    aliases_a_limpar_no_cliente,
+    campos_pessoais_limpos,
+    exigir_nome,
+    limpar_espelhos_nos_processos,
+)
 
 async def run_get_client(
     client_id: str,
@@ -423,6 +429,11 @@ async def run_update_client(
             detail="Não tem permissão para editar dados do cliente. Apenas visualização."
         )
     
+    # O nome não se apaga: pedido com `nome` vazio é um erro (400) e recusa-se
+    # ANTES de gravar o que quer que seja no mesmo pedido. Ignorá-lo em silêncio
+    # seria o sintoma do bug que isto corrige (grava «com sucesso» e o valor volta).
+    exigir_nome(client_data.model_fields_set, client_data.nome)
+
     # Sanitizar inputs
     sanitized_nome = None
     if client_data.nome:
@@ -471,6 +482,7 @@ async def run_update_client(
         sanitized_contacto = {**existing_contacto, **contact_dump}
     
     sanitized_dados_pessoais = None
+    pessoais_limpos: list = []
     if client_data.dados_pessoais:
         pessoais_dump = client_data.dados_pessoais.model_dump(exclude_unset=True)
         if "nif" in pessoais_dump and pessoais_dump["nif"]:
@@ -483,10 +495,17 @@ async def run_update_client(
         for str_field in ["nome", "documento_id", "morada_fiscal", "phone", "telefone", "nacionalidade", "profissao"]:
             if str_field in pessoais_dump and pessoais_dump[str_field]:
                 pessoais_dump[str_field] = sanitize_string(str(pessoais_dump[str_field]), max_length=200)
+        # Campo ESCRITO vazio (`""`/`null`/espaços) = «apaga», como nos contactos:
+        # o valor, o índice cego (nif_hash) e os nomes alternativos do mesmo dado.
+        pessoais_limpos = campos_pessoais_limpos(pessoais_dump)
         limpar_blind_indexes_de_campos_vazios(dados_pessoais=pessoais_dump)
         # Merge with existing dados_pessoais to preserve fields not in this update
         existing_pessoais = _seccao_decifrada(client, "dados_pessoais")
-        sanitized_dados_pessoais = {**existing_pessoais, **pessoais_dump}
+        sanitized_dados_pessoais = {
+            **existing_pessoais,
+            **aliases_a_limpar_no_cliente(existing_pessoais, pessoais_limpos),
+            **pessoais_dump,
+        }
     
     sanitized_notas = sanitize_string(client_data.notas, max_length=500) if client_data.notas is not None else None
 
@@ -605,7 +624,13 @@ async def run_update_client(
                 {"$set": process_sync}
             )
             logger.info(f"Sincronizados dados para {len(process_ids)} processos do cliente {client_id}: {list(process_sync.keys())}")
-    
+
+    # Campos pessoais APAGADOS: o que o `process_sync` acima não cobre — o índice
+    # cego (`nif_hash`), a cópia da raiz (`client_nif`) e os nomes alternativos.
+    # Procura também por `client_id`: o `process_ids` da ficha nem sempre está
+    # mantido e um processo que escapasse guardava o NIF antigo para sempre.
+    await limpar_espelhos_nos_processos(db, client_id, process_ids, pessoais_limpos)
+
     logger.info(f"Cliente {client_id} actualizado por {user.get('email')}")
     
     return {"success": True, "message": "Cliente actualizado"}

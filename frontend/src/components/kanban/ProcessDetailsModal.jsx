@@ -47,6 +47,7 @@ import {
   KeyRound, Send
 } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
+import { payloadDoClienteDoModal, seccoesDoProcessoDoModal } from './processDetailsModalPayload';
 import { getClient, updateClient, updateProcess, markProcessIndexed, getVisits, sendMagicLinkEmail } from '../../services/api';
 import { toast } from 'sonner';
 import { notifyFinancialEngine } from '../../utils/financialEngineFeedback';
@@ -249,21 +250,15 @@ const ProcessDetailsModal = memo(({
 
       // ── 1. PUT /clients/{client_id} — se houver client_id e campos alterados ──
       if (process.client_id) {
-        const clientChanged = Object.keys(editClient).some(
-          key => editClient[key] !== originalClientRef.current?.[key]
+        const { payload: clientPayload, nomeEmFalta } = payloadDoClienteDoModal(
+          originalClientRef.current, editClient,
         );
-        if (clientChanged) {
-          const clientPayload = {
-            nome: editClient.nome || undefined,
-            contacto: {
-              email: editClient.email || undefined,
-              telefone: editClient.telefone || undefined,
-            },
-            dados_pessoais: {
-              nif: editClient.nif || undefined,
-              estado_civil: editClient.estado_civil || undefined,
-            },
-          };
+        if (nomeEmFalta) {
+          toast.error('O nome do cliente é obrigatório.');
+          setSaving(false);
+          return;
+        }
+        if (Object.keys(clientPayload).length > 0) {
           promises.push(updateClient(process.client_id, clientPayload));
         }
       }
@@ -274,21 +269,12 @@ const ProcessDetailsModal = memo(({
       );
       if (processChanged) {
         const processPayload = {};
-        // Mapear para a estrutura do backend
-        const realEstateData = {};
-        if (editProcess.property_type) realEstateData.tipo_imovel = editProcess.property_type;
-        if (editProcess.property_location) realEstateData.localizacao = editProcess.property_location;
-        if (editProcess.property_value) realEstateData.valor_imovel = Number(editProcess.property_value) || undefined;
-        if (editProcess.loan_amount) realEstateData.valor_financiado = Number(editProcess.loan_amount) || undefined;
+        // Só o que mudou; apagar um campo vai como `null` (ver o módulo do payload).
+        Object.assign(
+          processPayload,
+          seccoesDoProcessoDoModal(originalProcessRef.current, editProcess),
+        );
 
-        const creditData = {};
-        if (editProcess.spread) creditData.spread = editProcess.spread;
-        if (editProcess.taxa_esforco) creditData.taxa_esforco = editProcess.taxa_esforco;
-        if (editProcess.banco_avaliacao) creditData.valuation_bank = editProcess.banco_avaliacao;
-        if (editProcess.valor_avaliacao) creditData.valuation_value = Number(editProcess.valor_avaliacao) || undefined;
-
-        if (Object.keys(realEstateData).length > 0) processPayload.real_estate_data = realEstateData;
-        if (Object.keys(creditData).length > 0) processPayload.credit_data = creditData;
         if (editProcess.status && editProcess.status !== originalProcessRef.current?.status) {
           processPayload.status = editProcess.status;
         }

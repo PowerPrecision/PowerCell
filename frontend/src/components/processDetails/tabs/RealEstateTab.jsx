@@ -18,6 +18,7 @@ import { InlineAISuggestion } from "../../ui/InlineAISuggestion";
 // PACOTE DH — Badge necessário para a lista de características (localização)
 import { Badge } from "../../ui/badge";
 import { Building2, Search, MapPin, FileSignature, Users } from "lucide-react";
+import { numeroOuNulo, valorDoCampo } from "../../../utils/camposLimpos";
 
 export default function RealEstateTab({
   financialData, setFinancialData, realEstateData, setRealEstateData, editingCardId, canEditRealEstate, CardHeaderWithEdit, getFieldMetaFor, shouldCardBeCollapsed,
@@ -167,8 +168,8 @@ export default function RealEstateTab({
                                 </div>
                                 <Input
                                   type="number"
-                                  value={realEstateData.valor_imovel || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, valor_imovel: parseFloat(e.target.value) || null })}
+                                  value={valorDoCampo(realEstateData.valor_imovel)}
+                                  onChange={(e) => setRealEstateData({ ...realEstateData, valor_imovel: numeroOuNulo(e.target.value) })}
                                   disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0.00"
@@ -181,8 +182,8 @@ export default function RealEstateTab({
                                 </div>
                                 <Input
                                   type="number"
-                                  value={realEstateData.valor_patrimonial || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, valor_patrimonial: parseFloat(e.target.value) || null })}
+                                  value={valorDoCampo(realEstateData.valor_patrimonial)}
+                                  onChange={(e) => setRealEstateData({ ...realEstateData, valor_patrimonial: numeroOuNulo(e.target.value) })}
                                   disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0.00"
@@ -211,7 +212,7 @@ export default function RealEstateTab({
                                 </div>
                                 <Input
                                   type="number"
-                                  value={realEstateData.area_bruta || ""}
+                                  value={valorDoCampo(realEstateData.area_bruta)}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, area_bruta: e.target.value })}
                                   disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
                                   className="h-9"
@@ -222,7 +223,7 @@ export default function RealEstateTab({
                                 <Label className="text-xs text-muted-foreground">Área Útil (m²)</Label>
                                 <Input
                                   type="number"
-                                  value={realEstateData.area_util || ""}
+                                  value={valorDoCampo(realEstateData.area_util)}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, area_util: e.target.value })}
                                   disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
                                   className="h-9"
@@ -353,8 +354,8 @@ export default function RealEstateTab({
                                 <Label className="text-xs text-muted-foreground">Área Pretendida (m²)</Label>
                                 <Input
                                   type="number"
-                                  value={realEstateData.area_pretendida || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, area_pretendida: parseFloat(e.target.value) || null })}
+                                  value={valorDoCampo(realEstateData.area_pretendida)}
+                                  onChange={(e) => setRealEstateData({ ...realEstateData, area_pretendida: numeroOuNulo(e.target.value) })}
                                   disabled={editingCardId !== 'realestate_localizacao' || !canEditRealEstate}
                                   className="h-9"
                                 />
@@ -363,8 +364,8 @@ export default function RealEstateTab({
                                 <Label className="text-xs text-muted-foreground">Valor Máximo (€)</Label>
                                 <Input
                                   type="number"
-                                  value={realEstateData.valor_maximo_imovel || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, valor_maximo_imovel: parseFloat(e.target.value) || null })}
+                                  value={valorDoCampo(realEstateData.valor_maximo_imovel)}
+                                  onChange={(e) => setRealEstateData({ ...realEstateData, valor_maximo_imovel: numeroOuNulo(e.target.value) })}
                                   disabled={editingCardId !== 'realestate_localizacao' || !canEditRealEstate}
                                   className="h-9"
                                 />
@@ -471,8 +472,8 @@ export default function RealEstateTab({
                                 <Label className="text-xs text-muted-foreground">Sinal / Entrada (€)</Label>
                                 <Input
                                   type="number"
-                                  value={financialData.valor_entrada || ""}
-                                  onChange={(e) => setFinancialData({ ...financialData, valor_entrada: parseFloat(e.target.value) || null })}
+                                  value={valorDoCampo(financialData.valor_entrada)}
+                                  onChange={(e) => setFinancialData({ ...financialData, valor_entrada: numeroOuNulo(e.target.value) })}
                                   disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0.00"
@@ -492,8 +493,8 @@ export default function RealEstateTab({
                                 <Label className="text-xs text-muted-foreground">Reforço do Sinal (€)</Label>
                                 <Input
                                   type="number"
-                                  value={financialData.reforco_sinal || ""}
-                                  onChange={(e) => setFinancialData({ ...financialData, reforco_sinal: parseFloat(e.target.value) || null })}
+                                  value={valorDoCampo(financialData.reforco_sinal)}
+                                  onChange={(e) => setFinancialData({ ...financialData, reforco_sinal: numeroOuNulo(e.target.value) })}
                                   disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0.00"
@@ -503,8 +504,8 @@ export default function RealEstateTab({
                                 <Label className="text-xs text-muted-foreground">Comissão Mediação (€)</Label>
                                 <Input
                                   type="number"
-                                  value={financialData.comissao_mediacao || ""}
-                                  onChange={(e) => setFinancialData({ ...financialData, comissao_mediacao: parseFloat(e.target.value) || null })}
+                                  value={valorDoCampo(financialData.comissao_mediacao)}
+                                  onChange={(e) => setFinancialData({ ...financialData, comissao_mediacao: numeroOuNulo(e.target.value) })}
                                   disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0.00"
@@ -535,8 +536,8 @@ export default function RealEstateTab({
                                 <Input
                                   type="number"
                                   min="0"
-                                  value={realEstateData.prazo_escritura_dias || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, prazo_escritura_dias: parseInt(e.target.value) || null })}
+                                  value={valorDoCampo(realEstateData.prazo_escritura_dias)}
+                                  onChange={(e) => setRealEstateData({ ...realEstateData, prazo_escritura_dias: numeroOuNulo(e.target.value, { inteiro: true }) })}
                                   disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Ex: 90"
