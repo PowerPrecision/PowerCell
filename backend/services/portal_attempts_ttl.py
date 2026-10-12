@@ -1,8 +1,8 @@
-"""Data de expiração dos registos ANTIGOS de `portal_verify_attempts` (D-31).
+"""Data de expiração dos registos ANTIGOS de `portal_verify_attempts` e `portal_login_attempts` (D-31).
 
 Os registos novos nascem com `expire_at` (ver `portal_security._record_failed_attempt`);
 os que já existiam não o têm e o índice TTL ignora-os para sempre. Esta função
-PURA diz que data lhes dar, e é a que o `scripts/backfill_portal_verify_ttl.py`
+PURA diz que data lhes dar, e é a que o `scripts/backfill_portal_attempts_ttl.py`
 usa. Duas regras:
 
 * parte da última tentativa (`last_attempt_at`), não de «agora» — dar-lhes mais
@@ -17,7 +17,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from services.portal_security import expira_em
+from services.portal_brute_force import expira_em
+
+#: As duas colecções de tentativas do Portal. O backfill percorre as DUAS.
+COLECCOES_DE_TENTATIVAS = ("portal_verify_attempts", "portal_login_attempts")
 
 
 def _para_data(valor: Any) -> Optional[datetime]:

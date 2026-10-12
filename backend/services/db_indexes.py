@@ -209,6 +209,16 @@ TTL_INDEXES = [
         "name": "ttl_portal_verify_attempts",
         "description": "Purga tentativas de verificação do Portal na data de expiração do registo",
     },
+    {
+        # O login do Portal por EMAIL (`portal_brute_force`): a identidade é o
+        # email, também escolhido por quem pergunta. Mesmo campo e mesmo
+        # `seconds: 0` do `verify` — o prazo vive em `expira_em`.
+        "collection": "portal_login_attempts",
+        "field": "expire_at",
+        "seconds": 0,
+        "name": "ttl_portal_login_attempts",
+        "description": "Purga tentativas de login do Portal por email na data de expiração do registo",
+    },
 ]
 
 

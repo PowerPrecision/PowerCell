@@ -1,4 +1,4 @@
-"""D-31 (remate) — `portal_verify_attempts` deixa de crescer para sempre.
+"""D-31 (remate) — `portal_verify_attempts` e `portal_login_attempts` deixam de crescer para sempre.
 
 O DEFEITO
 =========
@@ -17,7 +17,9 @@ O QUE SE AFIRMA
   igual a **0** (zero é um valor: um `if valor:` descartava-o e criava um índice
   normal, sem purga) — afirmado ao nível da chamada ao driver;
 * os registos antigos têm uma data a gravar que nunca desbloqueia quem está
-  bloqueado agora.
+  bloqueado agora;
+* **as duas portas do Portal** (NIF e email) partilham o campo, o prazo e o
+  backfill — duas políticas no mesmo ecrã de entrada é a divergência da D-4.
 """
 from __future__ import annotations
 
@@ -27,11 +29,17 @@ from unittest.mock import patch
 
 import pytest
 
-from services import db_indexes, portal_security
-from services.portal_verify_ttl import expire_at_do_registo
+from services import db_indexes, portal_brute_force, portal_security
+from services.portal_attempts_ttl import COLECCOES_DE_TENTATIVAS, expire_at_do_registo
 
 AGORA = datetime(2026, 10, 11, 12, 0, 0, tzinfo=timezone.utc)
 CHAVE = "portal_verify:cli-inventado"
+
+
+def _indice_do_login() -> dict:
+    achados = [i for i in db_indexes.TTL_INDEXES if i["name"] == "ttl_portal_login_attempts"]
+    assert len(achados) == 1
+    return achados[0]
 
 
 def _indice() -> dict:
@@ -125,6 +133,21 @@ class TestOIndiceEstaDeclaradoEChegaAoDriver:
         assert indice["field"] == "expire_at"
         assert indice["seconds"] == 0
 
+    def test_o_login_por_email_tem_o_seu_indice_com_o_mesmo_campo(self):
+        indice = _indice_do_login()
+        assert indice["collection"] == "portal_login_attempts"
+        assert indice["field"] == "expire_at"
+        assert indice["seconds"] == 0
+
+    def test_o_backfill_cobre_exactamente_as_colecoes_com_este_ttl(self):
+        """Uma terceira colecção com TTL em `expire_at` e sem backfill deixava
+        os registos antigos para sempre; uma de mais no backfill escrevia onde
+        o TTL não actua."""
+        com_ttl = {
+            i["collection"] for i in db_indexes.TTL_INDEXES if i["field"] == "expire_at"
+        }
+        assert set(COLECCOES_DE_TENTATIVAS) == com_ttl
+
     @pytest.mark.asyncio
     async def test_o_zero_chega_ao_create_index_do_driver(self):
         """`expireAfterSeconds=0` tem de ser ENVIADO: um `if valor:` descartava-o
@@ -152,11 +175,12 @@ class TestOIndiceEstaDeclaradoEChegaAoDriver:
 
         await db_indexes.create_ttl_indexes(BD())
 
-        proprio = [c for c in chamadas if c[1].get("name") == "ttl_portal_verify_attempts"]
-        assert len(proprio) == 1
-        chaves, opcoes = proprio[0]
-        assert chaves == [("expire_at", 1)]
-        assert "expireAfterSeconds" in opcoes and opcoes["expireAfterSeconds"] == 0
+        for nome in ("ttl_portal_verify_attempts", "ttl_portal_login_attempts"):
+            proprio = [c for c in chamadas if c[1].get("name") == nome]
+            assert len(proprio) == 1, nome
+            chaves, opcoes = proprio[0]
+            assert chaves == [("expire_at", 1)]
+            assert "expireAfterSeconds" in opcoes and opcoes["expireAfterSeconds"] == 0
 
     def test_os_outros_ttl_nao_foram_tocados(self):
         por_nome = {i["name"]: i["seconds"] for i in db_indexes.TTL_INDEXES}
@@ -199,6 +223,14 @@ class TestOBackfillDosRegistosAntigos:
 class TestOScriptDeBackfill:
     @pytest.fixture
     def base(self, fake_async_db):
+        fake_async_db.portal_login_attempts.docs.extend([
+            {"_id": "portal_login:velho@x.pt", "attempts": 8,
+             "last_attempt_at": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat(),
+             "locked_until": (datetime.now(timezone.utc) - timedelta(days=3, minutes=-10)).isoformat()},
+            {"_id": "portal_login:agora@x.pt", "attempts": 8,
+             "last_attempt_at": datetime.now(timezone.utc).isoformat(),
+             "locked_until": (datetime.now(timezone.utc) + timedelta(minutes=9)).isoformat()},
+        ])
         fake_async_db.portal_verify_attempts.docs.extend([
             {"_id": "portal_verify:a", "attempts": 2,
              "last_attempt_at": (datetime.now(timezone.utc) - timedelta(days=9)).isoformat()},
@@ -213,8 +245,8 @@ class TestOScriptDeBackfill:
     async def _correr(self, base, *args):
         import importlib
 
-        sys.modules.pop("scripts.backfill_portal_verify_ttl", None)
-        modulo = importlib.import_module("scripts.backfill_portal_verify_ttl")
+        sys.modules.pop("scripts.backfill_portal_attempts_ttl", None)
+        modulo = importlib.import_module("scripts.backfill_portal_attempts_ttl")
         with patch("database.db", base), patch.object(sys, "argv", ["x", *args]):
             return await modulo.principal()
 
@@ -224,6 +256,7 @@ class TestOScriptDeBackfill:
         por_id = {d["_id"]: d for d in base.portal_verify_attempts.docs}
         assert "expire_at" not in por_id["portal_verify:a"]
         assert "expire_at" not in por_id["portal_verify:b"]
+        assert all("expire_at" not in d for d in base.portal_login_attempts.docs)
 
     @pytest.mark.asyncio
     async def test_aplicar_escreve_so_onde_falta_e_e_idempotente(self, base):
@@ -241,6 +274,17 @@ class TestOScriptDeBackfill:
         antes = [dict(d) for d in base.portal_verify_attempts.docs]
         await self._correr(base, "--aplicar")
         assert base.portal_verify_attempts.docs == antes
+
+    @pytest.mark.asyncio
+    async def test_cobre_tambem_o_login_por_email(self, base):
+        await self._correr(base, "--aplicar")
+        por_id = {d["_id"]: d for d in base.portal_login_attempts.docs}
+
+        assert por_id["portal_login:velho@x.pt"]["expire_at"].replace(tzinfo=timezone.utc) < \
+            datetime.now(timezone.utc)
+        # o bloqueio em curso do login também sobrevive à purga
+        assert por_id["portal_login:agora@x.pt"]["expire_at"].replace(tzinfo=timezone.utc) > \
+            datetime.fromisoformat(por_id["portal_login:agora@x.pt"]["locked_until"])
 
     @pytest.mark.asyncio
     async def test_uma_corrida_com_a_aplicacao_nao_pisa_a_data_que_ela_gravou(self, base):
@@ -269,3 +313,61 @@ class TestOScriptDeBackfill:
 
         gravado = next(d for d in colecao.docs if d["_id"] == "portal_verify:a")
         assert gravado["expire_at"] == fresco
+
+
+# ════════════════════════════════════════════════════════════════════
+class TestOLoginPorEmailTemOMesmoTTL:
+    AMBITO = portal_brute_force.AMBITO_DO_LOGIN
+    CHAVE_LOGIN = portal_brute_force.chave_do_travao(AMBITO, "alguem@x.pt")
+
+    @pytest.mark.asyncio
+    async def test_a_falha_grava_um_datetime_nativo_que_desliza(self, fake_async_db):
+        tentativas = fake_async_db.portal_login_attempts
+        await tentativas.insert_one({
+            "_id": self.CHAVE_LOGIN, "attempts": 1,
+            "expire_at": datetime(2020, 1, 1, tzinfo=timezone.utc),
+        })
+        antes = datetime.now(timezone.utc)
+        await portal_brute_force.registar_falha(fake_async_db, self.AMBITO, "alguem@x.pt")
+
+        doc = await tentativas.find_one({"_id": self.CHAVE_LOGIN})
+        assert isinstance(doc[_indice_do_login()["field"]], datetime)
+        expira = doc["expire_at"].replace(tzinfo=timezone.utc)
+        assert expira >= antes + timedelta(minutes=30)
+
+    @pytest.mark.asyncio
+    async def test_o_registo_sobrevive_ao_bloqueio_inteiro(self, fake_async_db):
+        for _ in range(portal_brute_force.MAX_TENTATIVAS):
+            await portal_brute_force.registar_falha(fake_async_db, self.AMBITO, "alguem@x.pt")
+
+        doc = await fake_async_db.portal_login_attempts.find_one({"_id": self.CHAVE_LOGIN})
+        bloqueado_ate = datetime.fromisoformat(doc["locked_until"])
+        assert doc["expire_at"].replace(tzinfo=timezone.utc) - bloqueado_ate >= timedelta(minutes=10)
+
+    @pytest.mark.asyncio
+    async def test_antes_da_purga_o_bloqueio_vale_e_depois_o_cliente_entra(self, fake_async_db):
+        """O defeito: com `attempts >= MAX` cada pedido renovava o bloqueio,
+        mesmo depois de o `locked_until` ter passado — trancado para sempre.
+        Só a purga do registo (o TTL) devolve o contador a zero."""
+        from fastapi import HTTPException
+
+        for _ in range(portal_brute_force.MAX_TENTATIVAS):
+            await portal_brute_force.registar_falha(fake_async_db, self.AMBITO, "alguem@x.pt")
+        colecao = fake_async_db.portal_login_attempts
+        # o bloqueio de 10 min já passou, o registo ainda não foi purgado
+        for d in colecao.docs:
+            d["locked_until"] = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+
+        with pytest.raises(HTTPException) as erro:
+            await portal_brute_force.exigir_sem_bloqueio(fake_async_db, self.AMBITO, "alguem@x.pt")
+        assert erro.value.status_code == 429          # a janela até à purga
+
+        await colecao.delete_one({"_id": self.CHAVE_LOGIN})   # o que o TTL faz
+        await portal_brute_force.exigir_sem_bloqueio(fake_async_db, self.AMBITO, "alguem@x.pt")
+
+    def test_as_duas_portas_partilham_o_mesmo_prazo(self):
+        assert portal_security.VERIFY_ATTEMPTS_TTL_MINUTES == portal_brute_force.MINUTOS_DE_VIDA_DO_REGISTO == 30
+        assert portal_brute_force.MINUTOS_DE_VIDA_DO_REGISTO > portal_brute_force.MINUTOS_DE_BLOQUEIO
+
+    def test_a_data_sai_da_mesma_funcao_nas_duas_portas(self):
+        assert portal_security.expira_em is portal_brute_force.expira_em

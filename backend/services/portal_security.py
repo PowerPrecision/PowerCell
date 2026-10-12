@@ -31,6 +31,7 @@ from services.portal_estado import (
     exigir_processo_activo,
 )
 from config import JWT_SECRET, JWT_ALGORITHM
+from services.portal_brute_force import MINUTOS_DE_VIDA_DO_REGISTO, expira_em
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +48,10 @@ MAX_VERIFY_ATTEMPTS = 5
 VERIFY_LOCKOUT_MINUTES = 15
 
 # Quanto tempo o registo de tentativas sobrevive depois da última escrita
-# (D-31, remate). O `client_id` do `verify` é escolhido por quem pergunta: cada
-# id inventado deixava um documento em `portal_verify_attempts` que nunca
-# expirava. O índice TTL (`db_indexes`, campo `expire_at`) purga-os.
-#
-# **Tem de ser MAIOR que o bloqueio**: um registo apagado a meio do bloqueio
-# desbloqueava o alvo antes do tempo. 30 minutos dão ao bloqueio (15) o seu
-# prazo inteiro e mais uma janela igual antes de o contador voltar a zero.
-VERIFY_ATTEMPTS_TTL_MINUTES = 30
+# (D-31, remate): a constante é a do `portal_brute_force` — as duas portas do
+# Portal partilham o prazo. **Tem de ser MAIOR que o bloqueio** (15 aqui):
+# um registo apagado a meio do bloqueio desbloqueava o alvo.
+VERIFY_ATTEMPTS_TTL_MINUTES = MINUTOS_DE_VIDA_DO_REGISTO
 assert VERIFY_ATTEMPTS_TTL_MINUTES > VERIFY_LOCKOUT_MINUTES
 
 # Security scheme (igual ao staff, mas validado separadamente)
@@ -360,11 +357,6 @@ async def verify_client_credentials(client_id: str, nif: str, process_number: in
         "client_name": client_name,
         "process_number": process_number_int,
     }
-
-
-def expira_em(agora: datetime) -> datetime:
-    """Quando o registo de tentativas deixa de interessar (BSON Date, UTC)."""
-    return agora + timedelta(minutes=VERIFY_ATTEMPTS_TTL_MINUTES)
 
 
 async def _record_failed_attempt(lockout_key: str) -> None:

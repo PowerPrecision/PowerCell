@@ -303,11 +303,6 @@ async def documento_no_ambito_por_id(doc_id: str, user: dict) -> Optional[bool]:
 ERRO_PROCESSO_NAO_ENCONTRADO = "Processo não encontrado"
 ERRO_PROCESS_ID_INVALIDO = "process_id inválido"
 
-#: Quantos processos do âmbito se enumeram para recortar uma pesquisa sem
-#: `process_id`. Cortar errado é FECHADO (vê-se menos, nunca mais): o mesmo
-#: tecto do `run_get_document_expiries`.
-LIMITE_DE_PROCESSOS_NO_AMBITO = 5000
-
 _METODOS_COM_CORPO = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
@@ -358,28 +353,6 @@ async def exigir_process_id_do_pedido_no_ambito(
                 (user or {}).get("id"), request.method, request.url.path, process_id,
             )
             raise HTTPException(status_code=404, detail=ERRO_PROCESSO_NAO_ENCONTRADO)
-
-
-async def ids_de_processos_no_ambito(user: dict) -> Optional[list[str]]:
-    """Os ids dos processos que `user` vê — ``None`` para o Master (sem fronteira).
-
-    Serve as pesquisas que não trazem `process_id`: sem este recorte
-    percorriam os metadados de documentos de TODAS as redes (e devolviam
-    URLs pré-assinados). Conta a rede convidada. Um utilizador sem âmbito
-    determinável recebe ``[]`` — nada, nunca «tudo».
-    """
-    if utilizador_e_global(user):
-        return None
-    scope = await resolve_tenant_scope(user)
-    visiveis = await db.processes.find(
-        build_process_scope_condition(scope), {"_id": 0, "id": 1},
-    ).to_list(LIMITE_DE_PROCESSOS_NO_AMBITO)
-    if len(visiveis) >= LIMITE_DE_PROCESSOS_NO_AMBITO:
-        logger.warning(
-            "[DOCUMENTOS] âmbito de %s cortado nos %d processos.",
-            (user or {}).get("id"), LIMITE_DE_PROCESSOS_NO_AMBITO,
-        )
-    return [p["id"] for p in visiveis if p.get("id")]
 
 
 def _aceita_convidado(request: Request) -> bool:

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections import Counter
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -137,7 +138,7 @@ async def run_get_document_metadata(process_id: str, user: Optional[dict] = None
 
 
 async def run_search_documents(request, *, user: dict) -> dict[str, Any]:
-    from services.by_id_scope import ids_de_processos_no_ambito
+    from services.document_visibility import ids_de_processos_com_documentos_visiveis
     from services.document_categorization import search_documents_by_content
 
     query: dict[str, Any] = {"is_categorized": True}
@@ -147,7 +148,7 @@ async def run_search_documents(request, *, user: dict) -> dict[str, Any]:
         # D-31: sem `process_id` a pesquisa percorria os metadados de TODAS as
         # redes (e devolvia URLs pré-assinados). Recorta-se aos processos do
         # âmbito; o Master (`None`) não tem fronteira.
-        visiveis = await ids_de_processos_no_ambito(user)
+        visiveis = await ids_de_processos_com_documentos_visiveis(user)
         if visiveis is not None:
             query["process_id"] = {"$in": visiveis}
     if request.categories:
@@ -173,25 +174,59 @@ async def run_search_documents(request, *, user: dict) -> dict[str, Any]:
     }
 
 
+#: Quantos documentos se contam, em memória, para quem não vê a pasta `Index`.
+#: Cortar errado é FECHADO: o número só pode ficar abaixo do real.
+LIMITE_DE_DOCUMENTOS_NAS_CATEGORIAS = 20000
+
+
 async def run_get_all_categories(
     process_id: Optional[str] = None, *, user: dict,
 ) -> dict[str, Any]:
-    from services.by_id_scope import ids_de_processos_no_ambito
+    from services.document_intake import pode_ver_o_index
+    from services.document_visibility import (
+        assert_can_view_process_documents_by_id,
+        ids_de_processos_com_documentos_visiveis,
+    )
 
     query: dict[str, Any] = {"ai_category": {"$ne": None}}
     if process_id:
+        # A mesma regra das restantes leituras de um processo (D-31): fora da
+        # rede é 404 (a dependência do router), por indexar e sem relação é 403.
+        await assert_can_view_process_documents_by_id(user, process_id)
         query["process_id"] = process_id
     else:
-        visiveis = await ids_de_processos_no_ambito(user)
+        # Sem `process_id` a regra FINA, processo a processo: um processo «Por
+        # Indexar» que o utilizador não poderia abrir não entra na contagem.
+        visiveis = await ids_de_processos_com_documentos_visiveis(user)
         if visiveis is not None:
             query["process_id"] = {"$in": visiveis}
 
-    pipeline = [
-        {"$match": query},
-        {"$group": {"_id": "$ai_category", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-    ]
-    category_counts = await db.document_metadata.aggregate(pipeline).to_list(100)
+    if pode_ver_o_index(user):
+        pipeline = [
+            {"$match": query},
+            {"$group": {"_id": "$ai_category", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+        ]
+        category_counts = await db.document_metadata.aggregate(pipeline).to_list(100)
+    else:
+        # Quem não vê a pasta `Index` também não a conta: a contagem por
+        # categoria é metadado dos mesmos ficheiros que a listagem esconde.
+        # O predicado da parede é Python (`chave_esta_na_index`), por isso
+        # conta-se aqui — uma segunda cópia dele num filtro Mongo divergia.
+        documentos = await db.document_metadata.find(
+            query, {"_id": 0, "ai_category": 1, "s3_path": 1, "in_index_queue": 1},
+        ).to_list(LIMITE_DE_DOCUMENTOS_NAS_CATEGORIAS)
+        if len(documentos) >= LIMITE_DE_DOCUMENTOS_NAS_CATEGORIAS:
+            logger.warning(
+                "[DOCS] contagem por categoria cortada nos %d documentos.",
+                LIMITE_DE_DOCUMENTOS_NAS_CATEGORIAS,
+            )
+        contagem = Counter(
+            d.get("ai_category") for d in retirar_documentos_da_index(documentos, user)
+        )
+        category_counts = [
+            {"_id": nome, "count": quantos} for nome, quantos in contagem.most_common()
+        ]
     return {
         "categories": [
             {"name": cat["_id"], "count": cat["count"]}

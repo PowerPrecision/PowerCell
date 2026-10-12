@@ -633,7 +633,7 @@ as atribuídas a mim ou criadas por mim. `POST /clients` passou a carimbar.
   o TTL ignora strings ISO) a cada falha, 30 min depois (`VERIFY_ATTEMPTS_TTL_MINUTES`,
   **maior que o bloqueio de 15** — um prazo menor desbloqueava o alvo a meio),
   e o índice `ttl_portal_verify_attempts` (`expireAfterSeconds: 0`) vive em
-  `db_indexes.TTL_INDEXES`. Registos antigos: `scripts/backfill_portal_verify_ttl.py`
+  `db_indexes.TTL_INDEXES`. Registos antigos: `scripts/backfill_portal_attempts_ttl.py`
   (omissão só lê; `--aplicar`; idempotente; nunca antes do fim de um bloqueio
   em curso) — **correr uma vez depois do deploy**.
   *Efeito colateral dito:* antes, quem esgotava as 5 tentativas ficava trancado
@@ -643,15 +643,37 @@ as atribuídas a mim ou criadas por mim. `POST /clients` passou a carimbar.
   30 min por `client_id` em vez de zero, mas o cliente legítimo deixa de ficar
   preso sem intervenção na base de dados.
 
+**Remate 2 (Out 2026) — as duas dívidas finais do remate:**
+
+* **TTL também no login por email** — `portal_login_attempts` (`portal_brute_force`)
+  leva `expire_at` (BSON Date, deslizante) e o índice `ttl_portal_login_attempts`
+  (`expireAfterSeconds: 0`). O prazo é **UMA constante para as duas portas**
+  (`portal_brute_force.MINUTOS_DE_VIDA_DO_REGISTO` = 30; o `verify` deriva dela),
+  maior que qualquer bloqueio (10 e 15). O bloqueio sem fim do login era o mesmo
+  do `verify` (`esgotou_as_tentativas` re-trancava depois de `locked_until`).
+  `scripts/backfill_portal_attempts_ttl.py` (ex-`backfill_portal_verify_ttl`)
+  percorre as DUAS colecções (`COLECCOES_DE_TENTATIVAS`, com teste a exigir que
+  coincida com as colecções que têm TTL em `expire_at`).
+* **Pesquisa e categorias globais com a regra fina** — `/documents/search` e
+  `/documents/categories` sem `process_id` já não recortam só por rede:
+  `document_visibility.ids_de_processos_com_documentos_visiveis` aplica, por
+  processo, a MESMA função pura da guarda individual
+  (`user_can_view_process_documents`: rede com a convidada, bypass da gestão,
+  pré-indexação, atribuição por todos os campos canónicos e relação com o cliente),
+  e há um teste de **concordância** com `assert_can_view_process_documents`.
+  As categorias passaram a aplicar também a guarda ao `?process_id=` (403 por
+  indexar, 404 se não existe — antes devolvia contagens de qualquer processo da
+  rede) e a parede da pasta `Index` a quem não a vê (contagem em memória; quem a
+  vê continua na agregação do Mongo). Verificado contra `mongod` real
+  (`tests/integration/test_pesquisa_pre_indexacao_mongo.py`): o duplo escondia
+  a projecção.
+
 **O que continua aberto (dito):**
 
-* `portal_login_attempts` (o login por **email** + código, `portal_brute_force`)
-  tem o mesmo desenho — registo por identidade escolhida por quem pergunta, sem
-  TTL, e o mesmo bloqueio sem fim. Não foi tocado: é outra porta, com outra
-  política (8/10).
-* O `/search` e o `/categories` sem `process_id` recortam por **rede**; a regra de
-  visibilidade documental de processos por indexar (a que o `process_id` explícito
-  aplica) não é aplicada por processo nesta listagem agregada.
+* O recorte por processo enumera até 5000 processos do âmbito (e as categorias
+  contam até 20000 documentos em memória para quem não vê a `Index`): ao cortar,
+  vê-se menos, nunca mais, e há `warning`. Uma rede maior que isso precisa de um
+  índice de visibilidade por documento.
 * `/task-logs/{id}`: «cancelar» por um gestor que não é o dono responde 400 (o
   serviço filtra por `user_id`) — comportamento anterior, agora só acessível
   dentro do âmbito. E a excepção de gestão lê o cargo da CONTA, não o perfil
