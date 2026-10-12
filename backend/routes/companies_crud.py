@@ -10,7 +10,9 @@ PREFIX: /admin/companies
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Query, Request, Response, UploadFile
+
+from middleware.rate_limit import limiter
 
 from models.company import (
     CompanyCreate,
@@ -20,6 +22,7 @@ from models.company import (
     CompanyEmailConnectionTest,
 )
 from services.auth import get_current_user, require_admin, require_master
+from services.reauth_password import ConfirmacaoPorPassword
 from services.companies_crud_api_list import (
     run_list_companies,
     run_list_available_companies,
@@ -90,10 +93,17 @@ async def update_company(
     return await run_update_company(company_id, data, actor=user)
 
 
-@router.delete("/{company_id}", dependencies=[Depends(require_master())])
-async def delete_company(company_id: str):
-    """Remove uma empresa e gere utilizadores associados."""
-    return await run_delete_company(company_id)
+@router.delete("/{company_id}")
+@limiter.limit("10/minute")
+async def delete_company(
+    request: Request,
+    response: Response,
+    company_id: str,
+    data: Optional[ConfirmacaoPorPassword] = Body(None),
+    user: dict = Depends(require_master()),
+):
+    """Remove uma empresa e gere utilizadores associados. Exige a password actual (corpo `{password}`)."""
+    return await run_delete_company(company_id, data.password if data else None, actor=user)
 
 
 @router.post("/{company_id}/logo")

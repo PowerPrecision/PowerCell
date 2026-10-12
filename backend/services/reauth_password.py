@@ -4,8 +4,13 @@ CONFIRMAR UMA ACÇÃO DESTRUTIVA COM A PASSWORD ACTUAL (reautenticação)
 ====================================================================
 Uma sessão aberta não prova que quem está ao teclado é o dono da conta — um
 portátil esquecido, um token roubado. Para as acções que não se desfazem
-(repor o workflow ou o formulário de uma rede ao modelo) o servidor exige a
-password ACTUAL do utilizador autenticado, e só executa se ela estiver certa.
+o servidor exige a password ACTUAL do utilizador autenticado, e só executa se
+ela estiver certa. Acções que a exigem (inventário por AST em
+`test_accoes_destrutivas_com_password.py`, que falha por OMISSÃO para uma nova):
+  * repor o workflow ou o formulário de uma rede ao modelo;
+  * eliminar uma empresa;
+  * alterar o `network_id` de uma empresa (só quando a rede MUDA);
+  * anonimizar dados em lote (excepto o ensaio, `dry_run`, que não altera nada).
 
 REGRAS QUE NÃO SE PODEM PERDER
   * **403 e nunca 401.** O interceptor do Axios trata um 401 como «sessão
@@ -31,6 +36,7 @@ import logging
 from typing import Optional
 
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 
 from database import db
 from services import portal_brute_force as travao
@@ -45,6 +51,17 @@ ERRO_PASSWORD_EM_FALTA = "Indique a sua password para confirmar esta acção."
 ERRO_PASSWORD_INCORRECTA = "Password incorrecta."
 ERRO_SEM_PASSWORD = "Esta conta não tem password definida: não é possível confirmar a acção."
 ERRO_PERSONIFICACAO = "Esta acção não pode ser confirmada durante uma personificação."
+
+
+class ConfirmacaoPorPassword(BaseModel):
+    """O corpo de uma acção destrutiva que só pede a confirmação (eliminar uma empresa, …).
+
+    `repr=False`: a password nunca aparece num log nem num traceback do Pydantic.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    password: str = Field(..., min_length=1, max_length=256, repr=False)
 
 
 def _esta_a_personificar(user: dict) -> bool:
@@ -77,6 +94,7 @@ async def exigir_password_actual(user: dict, password: Optional[str]) -> None:
 
 __all__ = [
     "AMBITO_DA_CONFIRMACAO",
+    "ConfirmacaoPorPassword",
     "ERRO_PASSWORD_EM_FALTA",
     "ERRO_PASSWORD_INCORRECTA",
     "ERRO_PERSONIFICACAO",

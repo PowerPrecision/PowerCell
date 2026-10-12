@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Loader2, Pencil, Plug, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { createCompany, getCompanies, testCompanyEmailConnection, updateCompany } from "../../services/api";
+import ConfirmarComPasswordDialog from "./ConfirmarComPasswordDialog";
 import { queryKeys } from "../../lib/queryClient";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import { validateNIF } from "../../utils/validateNIF";
@@ -93,6 +94,9 @@ function imapFieldsFromForm(form) {
  *   Por omissão `false`: um chamador que se esqueça de o passar perde botões
  *   (visível) em vez de os mostrar a quem não pode (enganador).
  */
+/** A rede mudou? Ausente, `null` e vazio são a mesma coisa (empresa isolada); o espaço final não conta. */
+const redeMudou = (antes, depois) => String(antes ?? "").trim() !== String(depois ?? "").trim();
+
 export default function CompaniesAdminTab({ isMaster = false }) {
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
@@ -101,6 +105,9 @@ export default function CompaniesAdminTab({ isMaster = false }) {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
+  // Alterar a REDE de uma empresa pede a password actual: o pedido fica aqui (sem a password)
+  // até o diálogo a recolher. `null` = nada pendente.
+  const [mudancaDeRede, setMudancaDeRede] = useState(null);
   const [testingConnection, setTestingConnection] = useState(false);
 
   // Ponto 11 — paginação server-side. O `.to_list(200)` do backend
@@ -213,6 +220,16 @@ export default function CompaniesAdminTab({ isMaster = false }) {
     }
   };
 
+  const confirmarMudancaDeRede = (password) =>
+    updateCompany(editing.id, mudancaDeRede.payload, { password });
+
+  const aposMudancaDeRede = () => {
+    toast.success("Empresa atualizada.");
+    setMudancaDeRede(null);
+    setDialogOpen(false);
+    queryClient.invalidateQueries({ queryKey: queryKeys.orgAdmin.companiesAll() });
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) {
@@ -248,6 +265,12 @@ export default function CompaniesAdminTab({ isMaster = false }) {
         delete payload.imap_password;
       }
       if (editing?.id) {
+        // A rede MUDOU? Reenviar a mesma não pede nada; mudá-la redesenha a fronteira de dados
+        // e exige a password actual — o pedido só sai do diálogo, nunca daqui.
+        if (isMaster && redeMudou(editing.network_id, form.network_id)) {
+          setMudancaDeRede({ payload, de: editing.network_id || "", para: form.network_id.trim(), nome: editing.name });
+          return;
+        }
         await updateCompany(editing.id, payload);
         toast.success("Empresa atualizada.");
       } else {
@@ -601,6 +624,30 @@ export default function CompaniesAdminTab({ isMaster = false }) {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Alterar a rede redefine quem vê os dados desta empresa: confirmação com a password actual. */}
+      <ConfirmarComPasswordDialog
+        open={Boolean(mudancaDeRede)}
+        onOpenChange={(aberto) => !aberto && setMudancaDeRede(null)}
+        titulo="Alterar a rede da empresa"
+        descricao={
+          <>
+            <p>
+              A rede de <strong>{mudancaDeRede?.nome}</strong> passa de{" "}
+              <strong>{mudancaDeRede?.de || "(sem rede — empresa isolada)"}</strong> para{" "}
+              <strong>{mudancaDeRede?.para || "(sem rede — empresa isolada)"}</strong>.
+            </p>
+            <p>
+              A rede define quem vê os dados de quem: as empresas da mesma rede partilham clientes,
+              processos e documentos. Confirme com a sua password actual.
+            </p>
+          </>
+        }
+        onConfirmar={confirmarMudancaDeRede}
+        onSucesso={aposMudancaDeRede}
+        rotuloConfirmar="Alterar a rede"
+        testIdBase="mudar-rede"
+      />
     </div>
   );
 }

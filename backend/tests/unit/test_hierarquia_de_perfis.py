@@ -20,7 +20,7 @@ O QUE ESTES TESTES FAZEM QUE UM TESTE DE UNIDADE NÃO FAZ
 from __future__ import annotations
 
 import ast
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import re
 from pathlib import Path
 
@@ -445,7 +445,9 @@ class TestInventarioDasRotas:
         fonte = (BACKEND / "routes" / "companies_crud.py").read_text(encoding="utf-8")
         for nome in ("create_company", "delete_company"):
             i = fonte.index(f"async def {nome}")
-            cabeca = fonte[fonte.rfind("@router", 0, i):i]
+            # Do decorador ao `return`: a guarda tanto pode estar em `dependencies=[…]` como na
+            # assinatura (`user: dict = Depends(require_master())`, quando o serviço precisa do actor).
+            cabeca = fonte[fonte.rfind("@router", 0, i):fonte.index("return await", i)]
             assert "require_master()" in cabeca, nome
 
     def test_a_migracao_de_ucr_e_so_master(self):
@@ -688,8 +690,14 @@ class TestAsEscritasDeUtilizadorEstaoLigadasAParede:
         import services.user_management_scope as ums
         from models.company import CompanyUpdate
 
-        with tenant_db(mundo, scope_mod, ums, mut):
-            await mut.run_update_company("cmp-domus", CompanyUpdate(network_id="outra"), actor=MASTER)
+        # Mudar a rede redesenha a fronteira de dados: o Master prova-se com a password ACTUAL
+        # (a validação em si prova-se em `test_accoes_destrutivas_com_password.py`).
+        reautenticar = AsyncMock()
+        with tenant_db(mundo, scope_mod, ums, mut), patch.object(mut, "exigir_password_actual", reautenticar):
+            await mut.run_update_company(
+                "cmp-domus", CompanyUpdate(network_id="outra", confirm_password="segredo"), actor=MASTER,
+            )
+        reautenticar.assert_awaited_once_with(MASTER, "segredo")
         assert next(c for c in mundo.companies.docs if c["id"] == "cmp-domus")["network_id"] == "outra"
 
 

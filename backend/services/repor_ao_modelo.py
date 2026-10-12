@@ -33,6 +33,10 @@ AS REGRAS
      que possa casar com o modelo (um `network_id` vazio apagaria o modelo).
   6. **Deixa rasto** (`audit_logs`), sem a password, e o rasto nunca faz a
      operação falhar.
+  7. **Avisa o Master** (`alerta_ao_master`) quando quem repõe é um perfil
+     LOCAL: notificação interna + email, com a rede e o utilizador. Só
+     depois de uma reposição que aconteceu (`reposto: true`): um pedido que
+     não fez nada, ou que falhou a password, não alerta.
 ====================================================================
 """
 from __future__ import annotations
@@ -45,6 +49,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from database import db
 from services.admin_helpers import _audit_log
+from services.alerta_ao_master import alertar_masters
 from services.form_config_scope import TIPO as TIPO_DO_FORMULARIO, tem_formulario_proprio
 from services.reauth_password import exigir_password_actual
 from services.tenant_network import CAMPO_REDE, build_network_scope_condition, com_isolamento, TenantScope, rede_de_omissao
@@ -83,11 +88,14 @@ async def _fases_em_uso_fora_do_modelo(rede: str, nomes_do_modelo: set[str]) -> 
     return saida
 
 
-async def _registar(user: dict, acao: str, rede: str, detalhes: dict) -> None:
+async def _registar(user: dict, acao: str, rede: str, detalhes: dict, *, alertar: bool = True) -> None:
     try:
         await _audit_log(acao, "network_config", rede, user, {"network_id": rede, **detalhes})
     except Exception as exc:  # noqa: BLE001 — o rasto nunca derruba a operação
         logger.warning("[REPOR_AO_MODELO] Falha a registar %s: %s", acao, exc)
+    # Complementa o rasto: o Master é avisado quando um perfil LOCAL repõe (nunca propaga).
+    if alertar:
+        await alertar_masters(user, acao, rede, detalhes)
 
 
 async def run_repor_workflow_ao_modelo(data: ReporAoModeloIn, user: dict, request: Optional[Request] = None) -> dict:
@@ -142,7 +150,9 @@ async def run_repor_formulario_ao_modelo(data: ReporAoModeloIn, user: dict, requ
     assert rede, "repor: rede vazia apagaria o modelo"
     resultado = await db.form_config.delete_one({"type": TIPO_DO_FORMULARIO, CAMPO_REDE: rede})
     removido = int(getattr(resultado, "deleted_count", 0) or 0)
-    await _registar(user, "formulario_reposto_ao_modelo", rede, {"removido": bool(removido)})
+    await _registar(
+        user, "formulario_reposto_ao_modelo", rede, {"removido": bool(removido)}, alertar=bool(removido),
+    )
     logger.info("[REPOR_AO_MODELO] Formulário da rede %s reposto ao modelo.", rede)
     return {
         "reposto": bool(removido),

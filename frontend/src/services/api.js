@@ -1525,7 +1525,12 @@ export const deleteProperty = (id) => api.delete(`/properties/${id}`);
 export const getGdprStatistics = () => api.get("/gdpr/statistics");
 export const getGdprEligible = (params = {}) => api.get("/gdpr/eligible", { params });
 export const anonymizeData = (data) => api.post("/gdpr/anonymize", data);
-export const runGdprBatch = (data) => api.post("/gdpr/batch", data);
+// Fora do ensaio (`dry_run: false`) a anonimização em lote não se desfaz: exige a password ACTUAL
+// (`data.password`); sem ela nem sai o pedido. O ensaio (`dry_run` por omissão) não a pede.
+export const runGdprBatch = (data) =>
+  data?.dry_run === false && !data?.password
+    ? Promise.reject(new Error("runGdprBatch: a password actual é obrigatória fora do ensaio."))
+    : api.post("/gdpr/batch", data, data?.dry_run === false ? { skipErrorToast: true } : undefined);
 export const exportGdprData = (processId) => api.get(`/gdpr/export/${processId}`);
 export const getGdprAudit = (params = {}) => api.get("/gdpr/audit", { params });
 
@@ -1901,9 +1906,18 @@ export const getCompanies = (search, { page, size } = {}) =>
   });
 export const getCompany = (id) => api.get(`/admin/companies/${id}`);
 export const createCompany = (data) => api.post("/admin/companies", data);
-export const updateCompany = (id, data) => api.put(`/admin/companies/${id}`, data);
+// Alterar o `network_id` exige a password ACTUAL (o servidor valida): `{ password }` junta-a ao corpo
+// e pede `skipErrorToast` — o erro (password errada, travão) diz-se no diálogo, não num toast.
+export const updateCompany = (id, data, { password } = {}) =>
+  password
+    ? api.put(`/admin/companies/${id}`, { ...data, confirm_password: password }, { skipErrorToast: true })
+    : api.put(`/admin/companies/${id}`, data);
 export const testCompanyEmailConnection = (data) => api.post("/admin/companies/test-email-connection", data);
-export const deleteCompany = (id) => api.delete(`/admin/companies/${id}`);
+// Eliminar uma empresa não se desfaz: sem password nem sai o pedido (o servidor também a exige).
+export const deleteCompany = (id, password) =>
+  password
+    ? api.delete(`/admin/companies/${id}`, { data: { password }, skipErrorToast: true })
+    : Promise.reject(new Error("deleteCompany: a password actual é obrigatória."));
 export const uploadCompanyLogo = (id, file) => {
   const formData = new FormData();
   formData.append("file", file);

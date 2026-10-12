@@ -11947,3 +11947,29 @@ Fecho da D-8 (caixas partilhadas por cargo), da D-32 (registo público) e da par
 
 ### 2. `CompanyEmailConfigSection.js` apagado (sem importadores)
 - Fecha o par com a `SharedEmailConfigSection.js` da iteração anterior. A UI real é `CompaniesAdminTab.jsx` e `EmailAccountsPage`/`SharedEmailCard`.
+
+
+---
+
+## Iteração `accoes-destrutivas-com-password` (Out 2026) — blindagem de acções destrutivas e alerta ao Master
+
+### 1. A reautenticação por password passa a cobrir mais três acções (e o «Repor ao Modelo» já a tinha)
+- **Eliminar uma empresa** (`DELETE /admin/companies/{id}`, só Master): corpo `{password}`; sem corpo responde **400** (e não 422 — o corpo é opcional de propósito para a mensagem ser a certa), password errada 403, travão 429. Ordem: Master → 404 → **password** → estado (utilizadores só desta empresa, 400). Sem a password o endpoint não diz nada sobre o estado da empresa, e a reatribuição de utilizadores (que corre ANTES de apagar) só acontece depois dela. Deixa rasto (`company_deleted`).
+- **Alterar o `network_id` de uma empresa** (`PUT /admin/companies/{id}`, só Master): campo `confirm_password` no corpo, exigido **apenas quando a rede MUDA** (compara com a gravada; `None`, ausente e vazio são a mesma coisa — empresa isolada; um espaço à direita não conta). Reenviar a mesma rede — o formulário manda o objecto inteiro — não pede nada, senão cada edição do nome pedia password. Deixar a rede (→ vazio) ou dar rede a uma empresa isolada **é** uma mudança. A password vem **antes** da renomeação (que mexe nos utilizadores) e antes de qualquer escrita. `confirm_password` tem `exclude=True` (nunca vai ao `$set`) e `repr=False`. Rasto `company_network_changed` com a rede antiga e a nova.
+- **Anonimização em lote** (`POST /gdpr/batch`, só Master): campo `password`, exigido quando `dry_run` é **falso**. O ensaio (`dry_run`, por omissão) não altera nada e não a pede — pedi-la ali ensinava a ignorá-la. Ganhou `@limiter.limit("10/minute")` + `response: Response` (e o corpo passou a chamar-se `data`: o slowapi só aceita o `Request` com o nome `request`).
+- `ConfirmacaoPorPassword` (em `reauth_password.py`) é o corpo genérico; o inventário por AST (`test_accoes_destrutivas_com_password.py::TestInventario`) lista as 5 funções destrutivas, exige a chamada a `exigir_password_actual` em cada uma **e que ela venha antes de qualquer escrita** (com contraprova de que o detector apanha uma escrita antes). Uma acção destrutiva nova entra na lista.
+
+### 2. Frontend
+- `ConfirmarComPasswordDialog` (genérico: rótulo, ícone, prefixo de `data-testid`, leitura de erros) e `utils/confirmarComPassword.js`; o `ReporAoModeloDialog` e `utils/reporAoModelo.js` passaram a invólucros (mesmos `data-testid`; os testes anteriores passam sem alterações).
+- **`CompaniesAdminTab`**: se o Master muda a rede, o pedido **não sai do formulário** — abre o diálogo («A rede de X passa de A para B…») e só o diálogo envia, com a password. Erro inline, o diálogo e o formulário não fecham com erro.
+- **`services/api.js`**: `deleteCompany(id, password)` e `runGdprBatch({dry_run:false,…})` **recusam sem password** (a promessa rejeita, nem sai o pedido) e usam `skipErrorToast`; `updateCompany(id, data, {password})` junta `confirm_password`.
+- **Dito:** hoje **não existe botão de «Eliminar empresa» nem ecrã de anonimização em lote** no frontend (`deleteCompany` e `runGdprBatch` não têm chamadores). O servidor exige a password na mesma e o cliente da API também; quem ligar esses ecrãs amanhã usa o `ConfirmarComPasswordDialog`. Não se criou UI nova (fora do pedido).
+
+### 3. Alerta ao Master quando um perfil LOCAL repõe ao modelo
+- `services/alerta_ao_master.py`: depois de uma reposição que **aconteceu** (`reposto: true`) feita por quem trabalha como perfil local (Admin/CEO — pelo perfil EFECTIVO), cria **uma notificação por Master activo** (`type: destructive_action_alert`, título com QUEM e EM QUE REDE — é o que o sino mostra —, `details` com o email, o papel, as empresas da rede e as fases removidas) e envia **email urgente** em segundo plano. Destinatários = `role ∈ PAPEIS_GLOBAIS` activos; nunca o autor (um Master com o chapéu de Admin avisa os OUTROS), nunca Admin/CEO/outra rede. **Nunca derruba a operação** (falha a gravar, falha a procurar os Master, email que falha: `warning` e segue); sem nenhum Master activo di-lo no log.
+- Não alerta: password errada, pedido sem efeito (a rede já usava o modelo), 409 por processos em curso, rede fora do âmbito, formulário que já não estava lá (corrida). Complementa o `audit_logs`, não o substitui.
+- Frontend: `destructive_action_alert` com ícone/cor/etiqueta no sino e na página de notificações.
+
+### Medição
+- 24 mutações no backend e 15 no frontend. **Frontend: 1 viva na 1.ª passagem** (`trim()` da comparação de redes — o `CompanyNetworkField` já apara no `onChange`, logo o teste do «espaço à direita» nunca exercitava a diferença; era um teste fraco, não uma mutação perdida) → teste novo com uma empresa gravada com o espaço (`"grupo_x "`) e o utilizador a escrever `grupo_x`; morta.
+- **Armadilha de ambiente:** o `mongod` local desapareceu quando a sessão foi retomada (a máquina reiniciou) e as suites passaram a levar 60 s só no arranque — a fixture de sessão espera pelo timeout da ligação. Antes de concluir que «os testes ficaram lentos», `pgrep mongod`.

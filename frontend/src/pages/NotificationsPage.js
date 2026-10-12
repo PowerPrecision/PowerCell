@@ -34,6 +34,7 @@ import {
   Check,
   Loader2,
   RefreshCw,
+  ShieldAlert,
 } from "lucide-react";
 import { getNotifications, markNotificationRead } from "../services/api";
 import { safeDateStr } from "../lib/utils";
@@ -42,6 +43,7 @@ import { safeDateStr } from "../lib/utils";
 // Ícones por tipo de notificação
 const notificationIcons = {
   new_registration: UserPlus,
+  destructive_action_alert: ShieldAlert,
   age_under_35: AlertTriangle,
   pre_approval_countdown: Clock,
   document_expiry: FileText,
@@ -60,6 +62,7 @@ const notificationIcons = {
 
 // Cores por tipo de notificação
 const notificationColors = {
+  destructive_action_alert: "text-destructive bg-destructive/10",
   new_registration: "text-blue-500 bg-blue-50 dark:bg-blue-950",
   age_under_35: "text-amber-500 bg-amber-50 dark:bg-amber-950",
   pre_approval_countdown: "text-orange-500 bg-orange-50 dark:bg-orange-950",
@@ -79,6 +82,7 @@ const notificationColors = {
 
 // Labels por tipo de notificação
 const notificationLabels = {
+  destructive_action_alert: "Acção destrutiva",
   new_registration: "Novo Registo",
   // Lote 4: o critério é menos de 36 (até aos 35, inclusive). "Idade
   // < 35" dizia, à letra, o que o `check_age_alert` fazia de errado.

@@ -381,6 +381,22 @@ em `db_indexes.py` (nunca num passo de operações). O `network_id` por carimbar
 (rede de omissão) e a rede da empresa sem carimbo têm de ser tratados no índice
 (ou backfill prévio), senão a pilha antiga escapa-lhe.
 
+### D-41 · Acções destrutivas que ainda não pedem a password
+**Onde:** `backend/services/gdpr_api_mutate.py::run_anonymize_single`, outras rotas só-Master/Admin destrutivas
+
+A reautenticação por password (`reauth_password`) cobre hoje: repor ao modelo,
+eliminar uma empresa, alterar o `network_id` e a anonimização em lote. Ficaram de
+fora, por não estarem no pedido: **`POST /gdpr/anonymize`** (anonimização de UM
+processo/utilizador — igualmente irreversível, aberta a Admin/CEO da rede), o
+restauro de backups e as migrações/resets de processos (só-Master). Além disso
+**não existe UI** para eliminar empresas nem para a anonimização em lote (os
+clientes da API recusam sem password, o servidor também).
+
+**Para fechar:** decidir quais destas acções merecem a mesma parede (a individual
+é a mais provável) e acrescentá-las ao inventário
+`test_accoes_destrutivas_com_password.py::TestInventario::COM_PASSWORD`; se se
+criar UI, usar o `ConfirmarComPasswordDialog`.
+
 ### D-18 · `co_buyers` tem dois significados
 **Onde:** `backend/services/ai_document.py::build_update_data_from_extraction`
 (mapeador do CPCV), `backend/services/process_clients_nm.py::build_add_client_update`.
