@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 #: Nome usado quando não se consegue determinar a empresa. Neutro de propósito.
 NOME_NEUTRO = "Portal do Cliente"
 
+#: Como se diz a empresa num TEXTO CORRIDO quando não se sabe qual é («…equipa da
+#: nossa empresa», «…escolher a nossa empresa»): nunca a marca de outra.
+EMPRESA_NEUTRA_NO_TEXTO = "nossa empresa"
+
 #: Origens possíveis do remetente (vão para o log e para os testes).
 ORIGEM_CAIXA_DA_EMPRESA = "caixa_geral_da_empresa"
 ORIGEM_CAIXA_DA_REDE = "caixa_geral_da_rede"
@@ -65,6 +69,15 @@ class ContextoDoEmailDoPortal:
     @property
     def nome(self) -> str:
         return self.company_name or NOME_NEUTRO
+
+    @property
+    def equipa(self) -> str:
+        """A assinatura de um email: «Equipa Domus», ou «A nossa equipa» sem empresa."""
+        return f"Equipa {self.company_name}" if self.company_name else "A nossa equipa"
+
+    def assunto(self, resto: str) -> str:
+        """«Domus - <resto>»; sem empresa só o resto (nunca «Portal do Cliente - …»)."""
+        return f"{self.company_name} - {resto}" if self.company_name else resto
 
 
 def _texto(valor: Any) -> str:
@@ -226,6 +239,10 @@ async def _caixa_geral_da_rede(
     """
     from services.tenant_network import rede_de_omissao
 
+    if not (company_id or rede):
+        # Nem empresa nem rede: não há de quem ser a caixa (e não se adivinha).
+        return None, ORIGEM_SISTEMA
+
     omissao = rede_de_omissao()
     e_rede_de_omissao = bool(rede and omissao and rede == omissao)
     global_cfg = await _email_do_documento("main")
@@ -273,6 +290,7 @@ async def resolver_contexto(
     user: Optional[dict] = None,
     frontend_url: Optional[str] = None,
     portal_url: Optional[str] = None,
+    incluir_link: bool = True,
 ) -> ContextoDoEmailDoPortal:
     """Resolve o contexto de rede de um email do Portal. **Nunca levanta.**
 
@@ -280,7 +298,9 @@ async def resolver_contexto(
     geral): é o degradado seguro — um email com um nome genérico incomoda,
     um email com o nome de outra empresa é uma fuga.
     """
-    link = url_do_portal(frontend_url, portal_url=portal_url)
+    # Um email sem botão (estado de uma recolha) não precisa de domínio nem deve
+    # gritar nos logs por não o ter.
+    link = url_do_portal(frontend_url, portal_url=portal_url) if incluir_link else ""
     try:
         empresa, rede = await _empresa_do_registo(
             company_id=company_id, company_name=company_name, network_id=network_id,
@@ -308,6 +328,30 @@ async def resolver_contexto(
             "A usar o contexto neutro.", client_id, exc,
         )
         return ContextoDoEmailDoPortal(portal_url=link, account_source=ORIGEM_NENHUMA)
+
+
+async def nome_da_empresa_do_registo(
+    *,
+    company_id: Optional[str] = None,
+    company_name: Optional[str] = None,
+    network_id: Optional[str] = None,
+    client_id: Optional[str] = None,
+) -> Optional[str]:
+    """O nome da empresa a que o registo pertence, ou ``None`` — **sem** procurar caixas.
+
+    Para texto que só precisa do nome (a mensagem de boas-vindas DENTRO do
+    Portal, lida a cada 15 s): o contexto completo faria leituras de
+    configuração que aqui não servem. Nunca levanta.
+    """
+    try:
+        empresa, _rede = await _empresa_do_registo(
+            company_id=company_id, company_name=company_name, network_id=network_id,
+            client_id=client_id, user=None,
+        )
+        return _texto((empresa or {}).get("name")) or None
+    except Exception as exc:  # noqa: BLE001 - degradação graciosa
+        logger.warning("[PORTAL-EMAIL] Falha a resolver o nome da empresa (%s): %s", client_id, exc)
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -352,6 +396,10 @@ async def enviar_email_do_portal(
     subject: str,
     body: str,
     body_html: Optional[str] = None,
+    attachments: Optional[list] = None,
+    process_id: Optional[str] = None,
+    created_by: Optional[str] = None,
+    system_purpose: str = "NOTIFICATIONS",
 ) -> dict:
     """Envia um email do Portal em nome da rede do cliente.
 
@@ -368,6 +416,12 @@ async def enviar_email_do_portal(
         to_emails=to_emails, subject=subject, body=body, body_html=body_html,
         from_name_override=contexto.nome, use_system_signature=False,
     )
+    if attachments:
+        comum["attachments"] = attachments
+    if process_id:
+        comum["process_id"] = process_id
+    if created_by:
+        comum["created_by"] = created_by
     if contexto.account is not None:
         return await send_email(
             account_name="caixa_geral_da_rede", account_override=contexto.account, **comum,
@@ -387,5 +441,5 @@ async def enviar_email_do_portal(
         }
     return await send_email(
         account_name="sistema", account_override=conta,
-        force_system=True, system_purpose="NOTIFICATIONS", **comum,
+        force_system=True, system_purpose=system_purpose, **comum,
     )

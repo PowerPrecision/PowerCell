@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import gc as _gc
 import os
+from typing import Optional
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -313,8 +314,12 @@ async def _executar_recolha(
     sobrescrevia um job `success` com `unexpected_error` — o cliente via
     «falhou» num processo onde os documentos já estavam arquivados.
     """
+    # A marca e o remetente dos emails de estado são os da REDE do cliente.
+    contexto = await _contexto_do_processo(process)
     try:
-        await _send_portal_fetch_email(client_email, client_name, fonte.chave, "started")
+        await _send_portal_fetch_email(
+            client_email, client_name, fonte.chave, "started", contexto=contexto,
+        )
     except Exception as exc:
         logger.warning("[PORTAL-BG] Erro ao enviar email de início (%s): %s", fonte.nome, exc)
 
@@ -329,14 +334,32 @@ async def _executar_recolha(
         del password  # a referência local; o `gov_scraper` já limpou as dele
 
     if resultado.get("success"):
-        await _concluir_com_sucesso(fonte, resultado, process_id, client_name, client_email, process, scraper_job_id)
+        await _concluir_com_sucesso(
+            fonte, resultado, process_id, client_name, client_email, process, scraper_job_id,
+            contexto=contexto,
+        )
     else:
-        await _concluir_com_erro(fonte, resultado, process_id, client_name, client_email, scraper_job_id)
+        await _concluir_com_erro(
+            fonte, resultado, process_id, client_name, client_email, scraper_job_id,
+            contexto=contexto,
+        )
     _gc.collect()
 
 
+async def _contexto_do_processo(process: Optional[dict]):
+    """Contexto de rede (empresa, remetente) do processo, sem link: nunca levanta."""
+    from services.portal_email_context import resolver_contexto
+
+    p = process or {}
+    return await resolver_contexto(
+        company_id=p.get("company_id"), company_name=p.get("company_name") or p.get("company"),
+        network_id=p.get("network_id"), client_id=p.get("client_id"), incluir_link=False,
+    )
+
+
 async def _concluir_com_sucesso(
-    fonte, resultado, process_id, client_name, client_email, process, scraper_job_id
+    fonte, resultado, process_id, client_name, client_email, process, scraper_job_id,
+    contexto=None,
 ) -> None:
     obtidos = resultado.get("documents_count", 0)
     em_falta = resultado.get("documents_missing", [])
@@ -354,7 +377,8 @@ async def _concluir_com_sucesso(
     anexos = resultado.get("documents") or None
     for passo, coro in (
         ("email de sucesso", lambda: _send_portal_fetch_email(
-            client_email, client_name, fonte.chave, "success", docs_count=obtidos, attachments=anexos)),
+            client_email, client_name, fonte.chave, "success", docs_count=obtidos,
+            attachments=anexos, contexto=contexto)),
         ("notificação da equipa", lambda: _notify_assigned_team_fetch(process, fonte.nome_da_equipa, obtidos)),
         ("notificação em tempo real", lambda: _notificar_recolha(process_id, fonte.ids_do_processo, docs_count=obtidos)),
     ):
@@ -365,7 +389,9 @@ async def _concluir_com_sucesso(
     resultado.pop("documents", None)
 
 
-async def _concluir_com_erro(fonte, resultado, process_id, client_name, client_email, scraper_job_id) -> None:
+async def _concluir_com_erro(
+    fonte, resultado, process_id, client_name, client_email, scraper_job_id, contexto=None,
+) -> None:
     detalhe = resultado.get("error", "erro_desconhecido")
     tipo, mensagem = classificar_falha(detalhe, fonte)
     logger.error("[PORTAL-BG] Recolha %s falhou: %s (passo: %s)", fonte.nome, detalhe, resultado.get("step_failed"))
@@ -374,7 +400,8 @@ async def _concluir_com_erro(fonte, resultado, process_id, client_name, client_e
         scraper_job_id, {"status": "error", "error_type": tipo, "message": mensagem}
     )
     for passo, coro in (
-        ("email de erro", lambda: _send_portal_fetch_email(client_email, client_name, fonte.chave, "error")),
+        ("email de erro", lambda: _send_portal_fetch_email(
+            client_email, client_name, fonte.chave, "error", contexto=contexto)),
         ("notificação em tempo real", lambda: _notificar_recolha(
             process_id, f"{fonte.ids_do_processo}_error", error_type=tipo)),
     ):
@@ -400,7 +427,10 @@ async def _run_seguranca_social_background(niss: str, password: str, process_id:
     )
 
 
-async def _send_portal_fetch_email(to_email: str, client_name: str, source: str, status: str, docs_count: int = 0, attachments: list = None):
+async def _send_portal_fetch_email(
+    to_email: str, client_name: str, source: str, status: str,
+    docs_count: int = 0, attachments: list = None, contexto=None,
+):
     """
     Envia email de estado ao cliente sobre a obtenção automática de documentos.
 
@@ -428,6 +458,13 @@ async def _send_portal_fetch_email(to_email: str, client_name: str, source: str,
     if not to_email:
         return
 
+    from services.portal_email_context import ContextoDoEmailDoPortal
+
+    # Sem contexto de rede o email sai NEUTRO — nunca com a marca de uma empresa.
+    contexto = contexto or ContextoDoEmailDoPortal()
+    empresa = contexto.nome
+    equipa = contexto.equipa
+
     source_label = {
         "financas": "Portal das Finanças",
         "seguranca_social": "Segurança Social",
@@ -440,7 +477,7 @@ async def _send_portal_fetch_email(to_email: str, client_name: str, source: str,
             f"O nosso sistema automático começou a reunir os seus documentos "
             f"junto do {source_label}.\n\n"
             f"Iremos notificá-lo(a) assim que o processo esteja concluído.\n\n"
-            f"Com os melhores cumprimentos,\nEquipa Power Precision"
+            f"Com os melhores cumprimentos,\n{equipa}"
         )
     elif status == "error":
         subject = f"Credenciais Incorretas — {source_label}"
@@ -449,7 +486,7 @@ async def _send_portal_fetch_email(to_email: str, client_name: str, source: str,
             f"As credenciais que introduziu estão incorretas para o {source_label}.\n\n"
             f"Por favor, verifique os seus dados e tente novamente no portal, "
             f"ou contacte o seu consultor para assistência.\n\n"
-            f"Com os melhores cumprimentos,\nEquipa Power Precision"
+            f"Com os melhores cumprimentos,\n{equipa}"
         )
     elif status == "success":
         subject = f"Documentos Obtidos com Sucesso — {source_label}"
@@ -458,7 +495,7 @@ async def _send_portal_fetch_email(to_email: str, client_name: str, source: str,
             f"Os documentos foram descarregados e anexados ao seu processo com sucesso "
             f"junto do {source_label} ({docs_count} documento{'s' if docs_count != 1 else ''} obtido{'s' if docs_count != 1 else ''}).\n\n"
             f"Não é necessário qualquer ação adicional da sua parte.\n\n"
-            f"Com os melhores cumprimentos,\nEquipa Power Precision"
+            f"Com os melhores cumprimentos,\n{equipa}"
         )
     else:
         return
@@ -467,7 +504,7 @@ async def _send_portal_fetch_email(to_email: str, client_name: str, source: str,
     <html><body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
     <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
         <div style="background: #0f766e; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
-            <h2 style="margin: 0;">Power Precision</h2>
+            <h2 style="margin: 0;">{empresa}</h2>
         </div>
         <div style="background: #f9f9f9; padding: 20px; border-radius: 0 0 8px 8px;">
             <p>{body_text.replace(chr(10), '<br>')}</p>
@@ -479,24 +516,36 @@ async def _send_portal_fetch_email(to_email: str, client_name: str, source: str,
     </body></html>
     """
 
-    # ── Enviar via serviço de email principal (Resend API ou SMTP) ──
+    # ── Enviar em nome da REDE do cliente (caixa geral da rede ou email de sistema) ──
     # Incluir anexos apenas no email de sucesso (quando há documentos para enviar)
     try:
-        from services.email_service import send_email
-        await send_email(
-            account_name="power",
+        from services.portal_email_context import enviar_email_do_portal
+
+        resultado = await enviar_email_do_portal(
+            contexto,
             to_emails=[to_email],
             subject=subject,
             body=body_text,
             body_html=html_content,
-            force_system=True,
-            system_purpose="NOTIFICATIONS",
             attachments=attachments if status == "success" and attachments else None,
         )
+        if not (resultado or {}).get("success"):
+            raise RuntimeError((resultado or {}).get("error") or "envio sem sucesso")
         att_info = f" com {len(attachments)} anexo(s)" if attachments and status == "success" else ""
         logger.info(f"[PORTAL] Email de estado '{status}' enviado para {to_email} ({source_label}{att_info})")
     except Exception as e:
-        # Fallback para SMTP directo se o serviço principal falhar
+        # Último recurso: SMTP directo com a conta GLOBAL do ambiente. É a conta do
+        # grupo incumbente, por isso só serve a rede de omissão — usá-la para o
+        # cliente de outra rede seria enviar-lhe um email em nome da Power.
+        from services.tenant_network import rede_de_omissao
+
+        omissao = rede_de_omissao()
+        if not (contexto.network_id and omissao and contexto.network_id == omissao):
+            logger.warning(
+                "[PORTAL] Email de estado '%s' não enviado (rede %s, sem recurso global): %s",
+                status, contexto.network_id, type(e).__name__,
+            )
+            return
         logger.warning(f"[PORTAL] Serviço de email principal falhou, a tentar SMTP directo: {type(e).__name__}")
         try:
             import smtplib

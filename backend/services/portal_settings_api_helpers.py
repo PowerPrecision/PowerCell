@@ -68,9 +68,13 @@ def render_welcome_message(
     template: str,
     client_name: str = "Cliente",
     consultor_name: str = "a sua equipa",
-    empresa_name: str = "Power Precision",
+    empresa_name: str = "nossa empresa",
 ) -> str:
-    """Faz a substituição das variáveis no template da mensagem."""
+    """Faz a substituição das variáveis no template da mensagem.
+
+    ``empresa_name`` é a empresa do cliente (chega do chamador); a omissão é
+    neutra — nunca a marca de uma empresa concreta.
+    """
     result = template
     result = result.replace("{{cliente}}", client_name)
     result = result.replace("{{consultor}}", consultor_name)

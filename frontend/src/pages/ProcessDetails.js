@@ -137,7 +137,10 @@ import {
   mensagemDeConclusao,
 } from "../utils/voiceNote";
 import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
-import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
+import {
+  contactosAGravar,
+  sanitizeProcessUpdatePayload,
+} from "./processDetails/processUpdatePayload";
 import ProcessAlerts from "../components/ProcessAlerts";
 import TasksPanel from "../components/TasksPanel";
 import ClientPropertyMatch from "../components/ClientPropertyMatch";
@@ -1346,23 +1349,18 @@ const ProcessDetails = () => {
       // O backend espera: { nome, contacto: { email, telefone }, dados_pessoais: {...} }
       if (cleanedPersonalData.nome_completo) clientUpdateData.nome = cleanedPersonalData.nome_completo;
       
-      // Mapear email e telefone para o objecto aninhado 'contacto'
-      // IMPORTANTE: Só incluímos os campos quando têm valor não-vazio.
-      // Enviar strings vazias faria com que o backend sobrescrevesse os
-      // contactos existentes do Cliente (merge {**existing, **incoming}),
-      // apagando dados válidos quando o utilizador apenas alterou outros
-      // campos do formulário.
-      const contactoData = {};
-      const emailVal = (process?.client_email || '').trim();
-      const phoneVal = (process?.client_phone || '').trim();
-      if (emailVal) {
-        contactoData.email = emailVal;
-      }
-      if (phoneVal) {
-        contactoData.telefone = phoneVal;
-      }
-      if (Object.keys(contactoData).length > 0) {
-        clientUpdateData.contacto = contactoData;
+      // Mapear email e telefone para o objecto aninhado 'contacto'.
+      // Um contacto vazio só se envia (como `""`) quando o utilizador o APAGOU
+      // no cartão de contactos; a gravação de qualquer outro cartão não o
+      // envia, para nunca apagar contactos por acidente (o backend faz merge
+      // {**existing, **incoming}). Ver `contactosAGravar`.
+      const contactos = contactosAGravar({
+        editingCardId,
+        email: process?.client_email,
+        telefone: process?.client_phone,
+      });
+      if (Object.keys(contactos.contacto).length > 0) {
+        clientUpdateData.contacto = contactos.contacto;
       }
       
       // Mapear dados pessoais — o backend espera 'dados_pessoais', não 'personal_data'
@@ -1450,8 +1448,7 @@ const ProcessDetails = () => {
       // Sanitize explícito aqui + de novo no hook (defense in depth contra
       // documents/onedrive_links/arrays vazios a esmagarem o backend).
       const safeProcessPayload = sanitizeProcessUpdatePayload(processUpdateData);
-      if (emailVal) safeProcessPayload.client_email = emailVal;
-      if (phoneVal) safeProcessPayload.client_phone = phoneVal;
+      Object.assign(safeProcessPayload, contactos.processo);
 
       const promises = [
         processMutations.updateProcess.mutateAsync(safeProcessPayload),
@@ -1462,6 +1459,7 @@ const ProcessDetails = () => {
           processMutations.updateClient.mutateAsync({
             clientId: process.client_id,
             data: clientUpdateData,
+            clearContactFields: contactos.limpar,
           })
         );
       }

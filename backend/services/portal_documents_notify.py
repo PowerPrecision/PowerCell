@@ -122,7 +122,6 @@ async def check_and_notify_documents_complete(
     """
     from services.encryption import encryption_service
     from services.email_config_resolver import resolve_email_config_for_sync
-    from services.email_service import send_email
     from services.history import log_history
 
     # ─── 1) Processo (dados frescos) + guarda de idempotência ───────────────
@@ -151,6 +150,17 @@ async def check_and_notify_documents_complete(
         return {"success": False, "reason": "no_client_email"}
 
     company = company_id or process.get("company") or process.get("company_id")
+
+    # Marca e remetente DA REDE do cliente (nunca uma marca fixa).
+    from services.portal_email_context import enviar_email_do_portal, resolver_contexto
+
+    contexto = await resolver_contexto(
+        company_id=process.get("company_id") or company_id,
+        company_name=process.get("company_name") or process.get("company"),
+        network_id=process.get("network_id"),
+        client_id=process.get("client_id"),
+        incluir_link=False,
+    )
 
     # ─── 3) Resolver SMTP do intermediário atribuído ───────────────────────
     #    resolve_email_config_for_sync já implementa a herança:
@@ -190,10 +200,9 @@ async def check_and_notify_documents_complete(
         f"{lista_em_texto}"
         "\nO seu processo entrou agora em fase de Análise de Crédito e entraremos em "
         "contacto brevemente para os próximos passos.\n\n"
-        # PACOTE DI — marca client-facing actualizada para Precision Crédito.
-        "Obrigado pela confiança,\nEquipa Precision Crédito"
+        f"Obrigado pela confiança,\n{contexto.equipa}"
     )
-    html_body = _build_documents_complete_html(client_name, nomes_recebidos)
+    html_body = _build_documents_complete_html(client_name, nomes_recebidos, equipa=contexto.equipa)
 
     sent = False
     source = None
@@ -224,17 +233,17 @@ async def check_and_notify_documents_complete(
     # ─── 4b) CAMINHO B — Fallback para o SMTP geral da empresa ─────────────
     if not sent:
         try:
-            fb = await send_email(
-                account_name="precision",
+            # Caixa geral DA REDE do cliente (ou email de sistema genérico): o recurso
+            # era a conta «precision» do ambiente, ou seja, a de uma empresa concreta.
+            fb = await enviar_email_do_portal(
+                contexto,
                 to_emails=[client_email],
                 subject=subject,
                 body=text_body,
                 body_html=html_body,
                 process_id=process_id,
                 created_by=chosen_intermediary,
-                force_system=True,            # nunca usa credenciais pessoais
-                system_purpose="DOCUMENTS",   # tenta transporter específico antes do fallback
-                active_company_id=company,
+                system_purpose="DOCUMENTS",
             )
             if fb.get("success"):
                 sent = True
@@ -336,7 +345,9 @@ def _lista_de_nomes_em_html(nomes: list[str]) -> str:
     )
 
 
-def _build_documents_complete_html(client_name: str, nomes_recebidos: Optional[list] = None) -> str:
+def _build_documents_complete_html(
+    client_name: str, nomes_recebidos: Optional[list] = None, equipa: str = "A nossa equipa",
+) -> str:
     lista = _lista_de_nomes_em_html(nomes_recebidos or [])
     return f"""
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;
@@ -357,7 +368,7 @@ def _build_documents_complete_html(client_name: str, nomes_recebidos: Optional[l
           Entraremos em contacto brevemente para os próximos passos.
         </div>
         <p style="margin:0 0 8px;">Obrigado pela confiança,</p>
-        <p style="margin:0;"><strong>Equipa Precision Crédito</strong></p>
+        <p style="margin:0;"><strong>{_escapar(equipa)}</strong></p>
       </div>
       <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:16px;">
         Este é um email automático — por favor não responda.

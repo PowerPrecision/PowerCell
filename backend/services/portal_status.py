@@ -418,7 +418,18 @@ async def run_get_portal_status(client_data: dict):
         template = settings_doc.get("welcome_message_template", "")
         if template:
             consultor_name = team_info["consultores"][0]["name"] if team_info["consultores"] else "a sua equipa"
-            empresa_name = process.get("company", "Power Precision")
+            # A empresa do PROCESSO (nunca uma marca fixa): sem ela, texto neutro.
+            from services.portal_email_context import (
+                EMPRESA_NEUTRA_NO_TEXTO,
+                nome_da_empresa_do_registo,
+            )
+
+            empresa_name = await nome_da_empresa_do_registo(
+                company_id=process.get("company_id"),
+                company_name=process.get("company_name") or process.get("company"),
+                network_id=process.get("network_id"),
+                client_id=process.get("client_id"),
+            ) or EMPRESA_NEUTRA_NO_TEXTO
             welcome_message = render_welcome_message(
                 template=template,
                 client_name=process.get("client_name", "Cliente"),

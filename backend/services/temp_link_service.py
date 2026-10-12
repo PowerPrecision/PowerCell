@@ -398,7 +398,20 @@ class TempLinkService:
             True se enviado com sucesso
         """
         try:
-            from services.email_service import send_email
+            from services.portal_email_context import (
+                enviar_email_do_portal,
+                resolver_contexto,
+            )
+
+            # Marca e remetente DA REDE do cliente (nunca uma marca fixa).
+            contexto = await resolver_contexto(
+                company_id=process.get("company_id"),
+                company_name=process.get("company_name") or process.get("company"),
+                network_id=process.get("network_id"),
+                client_id=process.get("client_id") or link_doc.get("client_id"),
+                incluir_link=False,
+            )
+            equipa = contexto.equipa
 
             client_name = link_doc["client_name"]
             client_email = link_doc["client_email"]
@@ -406,8 +419,7 @@ class TempLinkService:
             description = link_doc.get("description", "")
 
             if link_type == TempLinkType.UPLOAD.value:
-                # PACOTE DI — marca client-facing actualizada para Precision Crédito.
-                subject = "📎 Precision Crédito - Carregue a sua Documentação"
+                subject = "📎 " + contexto.assunto("Carregue a sua Documentação")
                 body_text = f"""Olá {client_name},
 
 Foi solicitado que carregue documentação para o seu processo.
@@ -420,7 +432,7 @@ Para carregar os documentos, aceda ao seguinte link:
 Este link expira em 72 horas. Se não conseguir aceder dentro deste prazo, contacte o seu consultor.
 
 Cumprimentos,
-Equipa Precision Crédito
+{equipa}
 """
                 body_html = f"""
                 <html>
@@ -448,7 +460,7 @@ Equipa Precision Crédito
                         
                         <p style="font-size: 14px; color: #64748b; margin-top: 30px;">
                             Cumprimentos,<br>
-                            <strong>Equipa Precision Crédito</strong>
+                            <strong>{equipa}</strong>
                         </p>
                     </div>
                 </body>
@@ -456,8 +468,7 @@ Equipa Precision Crédito
                 """
             else:
                 # Download link
-                # PACOTE DI — marca client-facing actualizada para Precision Crédito.
-                subject = "📥 Precision Crédito - Documentação Disponível"
+                subject = "📥 " + contexto.assunto("Documentação Disponível")
                 body_text = f"""Olá {client_name},
 
 Tem documentação disponível para download.
@@ -470,7 +481,7 @@ Para aceder aos documentos, clique no seguinte link:
 Este link expira em 72 horas.
 
 Cumprimentos,
-Equipa Precision Crédito
+{equipa}
 """
                 body_html = f"""
                 <html>
@@ -492,20 +503,19 @@ Equipa Precision Crédito
                         
                         <p style="font-size: 14px; color: #64748b; margin-top: 30px;">
                             Cumprimentos,<br>
-                            <strong>Equipa Precision Crédito</strong>
+                            <strong>{equipa}</strong>
                         </p>
                     </div>
                 </body>
                 </html>
                 """
 
-            result = await send_email(
-                account_name="power",
+            result = await enviar_email_do_portal(
+                contexto,
                 to_emails=[client_email],
                 subject=subject,
                 body=body_text,
                 body_html=body_html,
-                force_system=True,
                 system_purpose="DOCUMENTS",
             )
 

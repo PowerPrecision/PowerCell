@@ -719,3 +719,265 @@ class TestMarcaEstrita:
         )
         assert await self._marca(fake_async_db, None) == (None, None)
         assert await self._marca(fake_async_db, "inexistente") == (None, None)
+
+
+# ═════════════════════════════════════════════════════════════════════
+# 8. OS OUTROS TEXTOS QUE O CLIENTE LÊ (QA, Out 2026, limpeza final)
+# ═════════════════════════════════════════════════════════════════════
+#
+# Recolha no Estado, link de carregamento, confirmação de documentação
+# recebida e a mensagem de boas-vindas DENTRO do Portal tinham a marca escrita
+# no código («Power Precision», «Precision Crédito»). Regra: nenhuma comunicação
+# com o cliente leva a marca de uma empresa que não é a dele.
+
+
+class TestEmailsDeEstadoDaRecolhaNoEstado:
+    async def _enviar(self, status, contexto, **kw):
+        import services.portal_gov_fetch as pgf
+
+        envio = AsyncMock(return_value={"success": True})
+        with patch("services.portal_email_context.enviar_email_do_portal", envio):
+            await pgf._send_portal_fetch_email(
+                "cli@x.pt", "Maria", "financas", status, contexto=contexto, **kw,
+            )
+        return envio
+
+    @pytest.mark.parametrize("status", ["started", "error", "success"])
+    async def test_nada_da_power_no_email_da_domus(self, status):
+        envio = await self._enviar(status, _contexto_domus(), docs_count=2)
+        k = envio.await_args.kwargs
+        for texto in (k["subject"], k["body"], k["body_html"]):
+            assert "Power" not in texto and "Precision" not in texto
+        assert "Equipa Domus" in k["body"]
+        assert "<h2 style=\"margin: 0;\">Domus</h2>" in k["body_html"]
+        assert envio.await_args.args[0].company_name == "Domus"
+
+    @pytest.mark.parametrize("status", ["started", "error", "success"])
+    async def test_sem_contexto_o_email_e_neutro(self, status):
+        envio = await self._enviar(status, None, docs_count=1)
+        k = envio.await_args.kwargs
+        assert "A nossa equipa" in k["body"]
+        for texto in (k["subject"], k["body"], k["body_html"]):
+            assert "Power" not in texto and "Precision" not in texto
+
+    async def test_os_anexos_so_vao_no_email_de_sucesso(self):
+        anexos = [{"filename": "a.pdf", "content_bytes": b"%PDF", "content_type": "application/pdf"}]
+        com = await self._enviar("success", _contexto_domus(), docs_count=1, attachments=anexos)
+        sem = await self._enviar("error", _contexto_domus(), attachments=anexos)
+        assert com.await_args.kwargs["attachments"] == anexos
+        assert sem.await_args.kwargs["attachments"] is None
+
+    async def test_falha_de_envio_em_rede_alheia_nao_cai_na_conta_global(self, monkeypatch):
+        """O SMTP directo do ambiente é a conta do grupo incumbente: não serve a Domus."""
+        import services.portal_gov_fetch as pgf
+
+        monkeypatch.setenv("TENANT_DEFAULT_NETWORK_ID", REDE_INCUMBENTE)
+        monkeypatch.setenv("SMTP_SERVER", "smtp.global.pt")
+        monkeypatch.setenv("SMTP_EMAIL", "global@power.pt")
+        monkeypatch.setenv("SMTP_PASSWORD", "x")
+        smtp = MagicMock()
+        with patch("services.portal_email_context.enviar_email_do_portal",
+                   AsyncMock(return_value={"success": False, "error": "x"})), \
+                patch("smtplib.SMTP_SSL", smtp):
+            await pgf._send_portal_fetch_email(
+                "cli@x.pt", "Maria", "financas", "started", contexto=_contexto_domus(),
+            )
+        smtp.assert_not_called()
+
+    async def test_na_rede_de_omissao_o_recurso_ao_smtp_global_mantem_se(self, monkeypatch):
+        import services.portal_gov_fetch as pgf
+
+        monkeypatch.setenv("TENANT_DEFAULT_NETWORK_ID", REDE_INCUMBENTE)
+        monkeypatch.setenv("SMTP_SERVER", "smtp.global.pt")
+        monkeypatch.setenv("SMTP_EMAIL", "global@power.pt")
+        monkeypatch.setenv("SMTP_PASSWORD", "x")
+        smtp = MagicMock()
+        smtp.return_value.__enter__.return_value = smtp.return_value
+        contexto = _contexto_domus(network_id=REDE_INCUMBENTE, company_name="Power Real Estate")
+        with patch("services.portal_email_context.enviar_email_do_portal",
+                   AsyncMock(return_value={"success": False, "error": "x"})), \
+                patch("smtplib.SMTP_SSL", smtp):
+            await pgf._send_portal_fetch_email(
+                "cli@x.pt", "Maria", "financas", "started", contexto=contexto,
+            )
+        smtp.assert_called_once()
+
+    async def test_o_contexto_do_processo_vem_do_carimbo_do_processo(self, fake_async_db, monkeypatch):
+        import services.portal_email_context as ctx_mod
+        import services.portal_gov_fetch as pgf
+
+        _base(fake_async_db, domus_email=CAIXA_DOMUS)
+        with _ambiente(fake_async_db, monkeypatch), tenant_db(fake_async_db, ctx_mod):
+            contexto = await pgf._contexto_do_processo({"company_id": "cmp-domus", "client_id": "c1"})
+        assert contexto.company_name == "Domus"
+        assert contexto.account.email == "geral@domus.pt"
+        assert contexto.portal_url == "", "um email de estado não leva botão"
+
+    @pytest.mark.parametrize("resultado,estado", [
+        ({"success": True, "documents_count": 1, "documents_missing": [], "documents": []}, "success"),
+        ({"success": False, "error": "credenciais"}, "error"),
+    ])
+    async def test_o_pipeline_leva_o_contexto_aos_emails_de_inicio_e_de_fim(self, resultado, estado):
+        """Comportamento (não fonte): o email de INÍCIO e o FINAL, nos dois desfechos."""
+        import services.portal_gov_fetch as pgf
+
+        sentinela = _contexto_domus()
+        email = AsyncMock()
+        fonte = pgf.FINANCAS
+        with patch.object(pgf, "_contexto_do_processo", AsyncMock(return_value=sentinela)), \
+                patch.object(pgf, "_send_portal_fetch_email", email), \
+                patch.object(pgf, "_gravar_estado_do_job", AsyncMock()), \
+                patch.object(pgf, "_notify_assigned_team_fetch", AsyncMock()), \
+                patch.object(pgf, "_notificar_recolha", AsyncMock()):
+            await pgf._executar_recolha(
+                fonte, AsyncMock(return_value=dict(resultado)), "123456789", "pw", "p1",
+                "Maria", "m@x.pt", {"id": "p1", "company_id": "cmp-domus"}, "job-1",
+            )
+        estados = [c.args[3] for c in email.await_args_list]
+        assert estados == ["started", estado]
+        assert all(c.kwargs["contexto"] is sentinela for c in email.await_args_list)
+
+
+class TestLinkDeCarregamento:
+    async def _enviar(self, link_type, monkeypatch, fake):
+        import services.portal_email_context as ctx_mod
+        from services.temp_link_service import TempLinkService
+
+        envio = AsyncMock(return_value={"success": True})
+        link = {"client_name": "Maria", "client_email": "m@x.pt", "link_type": link_type,
+                "description": "Notas", "client_id": "c1"}
+        processo = {"company_id": "cmp-domus", "client_id": "c1"}
+        with _ambiente(fake, monkeypatch), tenant_db(fake, ctx_mod), \
+                patch("services.portal_email_context.enviar_email_do_portal", envio):
+            ok = await TempLinkService._send_notification_email(link, processo, "https://x/l/1")
+        return ok, envio
+
+    @pytest.mark.parametrize("tipo", ["upload", "download"])
+    async def test_o_email_e_da_empresa_do_cliente(self, tipo, fake_async_db, monkeypatch):
+        _base(fake_async_db, domus_email=CAIXA_DOMUS)
+        ok, envio = await self._enviar(tipo, monkeypatch, fake_async_db)
+        assert ok is True
+        k = envio.await_args.kwargs
+        for texto in (k["subject"], k["body"], k["body_html"]):
+            assert "Power" not in texto and "Precision" not in texto
+        assert k["subject"].startswith(("📎 Domus - ", "📥 Domus - "))
+        assert "Equipa Domus" in k["body"] and "Equipa Domus" in k["body_html"]
+        assert "https://x/l/1" in k["body_html"]
+        assert envio.await_args.args[0].account.email == "geral@domus.pt"
+        assert k["system_purpose"] == "DOCUMENTS"
+
+    async def test_sem_empresa_o_assunto_e_neutro(self, fake_async_db, monkeypatch):
+        from services.temp_link_service import TempLinkService
+
+        envio = AsyncMock(return_value={"success": True})
+        link = {"client_name": "M", "client_email": "m@x.pt", "link_type": "upload"}
+        with patch("services.portal_email_context.enviar_email_do_portal", envio):
+            await TempLinkService._send_notification_email(link, {}, "https://x/l/1")
+        k = envio.await_args.kwargs
+        assert k["subject"] == "📎 Carregue a sua Documentação"
+        assert "A nossa equipa" in k["body"]
+
+
+class TestConfirmacaoDeDocumentacaoRecebida:
+    async def test_o_email_e_da_empresa_do_cliente(self, fake_async_db, monkeypatch):
+        import services.portal_documents_notify as pdn
+        import services.portal_email_context as ctx_mod
+
+        _base(fake_async_db, domus_email=CAIXA_DOMUS)
+        fake_async_db.processes.docs.append({
+            "id": "p1", "client_id": "c1", "client_name": "Maria", "client_email": "m@x.pt",
+            "company_id": "cmp-domus", "network_id": REDE_DOMUS,
+        })
+        envio = AsyncMock(return_value={"success": True})
+        with _ambiente(fake_async_db, monkeypatch), tenant_db(fake_async_db, ctx_mod, pdn), \
+                patch.object(pdn, "nomes_dos_documentos_recebidos", AsyncMock(return_value=["IRS"])), \
+                patch("services.history.log_history", AsyncMock()), \
+                patch("services.portal_email_context.enviar_email_do_portal", envio):
+            r = await pdn.check_and_notify_documents_complete("p1")
+        assert r["success"] is True
+        k = envio.await_args.kwargs
+        for texto in (k["body"], k["body_html"]):
+            assert "Power" not in texto and "Precision" not in texto
+        assert "Equipa Domus" in k["body"] and "Equipa Domus" in k["body_html"]
+        assert envio.await_args.args[0].account.email == "geral@domus.pt"
+        assert k["process_id"] == "p1" and k["system_purpose"] == "DOCUMENTS"
+
+    def test_o_html_escapa_o_nome_da_equipa(self):
+        from services.portal_documents_notify import _build_documents_complete_html
+
+        html = _build_documents_complete_html("M", ["IRS"], equipa="Equipa <b>X</b>")
+        assert "&lt;b&gt;" in html and "<b>X</b>" not in html
+
+
+class TestMensagemDeBoasVindasDentroDoPortal:
+    def test_a_omissao_e_neutra(self):
+        from services.portal_settings_api_helpers import DEFAULT_WELCOME_TEMPLATE, render_welcome_message
+
+        texto = render_welcome_message(template=DEFAULT_WELCOME_TEMPLATE, client_name="Maria")
+        assert "nossa empresa" in texto
+        assert "Power" not in texto and "Precision" not in texto
+
+    def test_a_empresa_pedida_entra_no_texto(self):
+        from services.portal_settings_api_helpers import render_welcome_message
+
+        assert "Domus" in render_welcome_message(
+            template="Obrigado por escolher a {{empresa}}.", empresa_name="Domus",
+        )
+
+    async def test_a_pre_visualizacao_nao_mostra_uma_marca_real(self):
+        from services.portal_settings_api_helpers import PortalSettingsUpdate
+        from services.portal_settings_api_preview import run_preview_welcome_message
+
+        r = await run_preview_welcome_message(PortalSettingsUpdate(welcome_message_template="Da {{empresa}}"))
+        assert "Power" not in r["preview"] and "Precision" not in r["preview"]
+
+    async def test_o_nome_vem_da_empresa_do_processo(self, fake_async_db, monkeypatch):
+        import services.portal_email_context as ctx_mod
+        from services.portal_email_context import nome_da_empresa_do_registo
+
+        _base(fake_async_db)
+        with _ambiente(fake_async_db, monkeypatch), tenant_db(fake_async_db, ctx_mod):
+            assert await nome_da_empresa_do_registo(company_id="cmp-domus") == "Domus"
+            assert await nome_da_empresa_do_registo(company_name="Precision Crédito") == "Precision Crédito"
+            assert await nome_da_empresa_do_registo() is None
+            assert await nome_da_empresa_do_registo(company_id="inexistente") is None
+
+    async def test_uma_falha_nao_levanta(self):
+        import services.portal_email_context as ctx_mod
+
+        with patch.object(ctx_mod, "_empresa_do_registo", AsyncMock(side_effect=RuntimeError("x"))):
+            assert await ctx_mod.nome_da_empresa_do_registo(company_id="a") is None
+
+    async def test_o_estado_do_portal_usa_a_empresa_do_processo(self):
+        """A ligação: o `portal_status` já não tem «Power Precision» por omissão."""
+        import services.portal_status as ps
+        from tests.unit.helpers_fonte import codigo_sem_comentarios
+
+        codigo = codigo_sem_comentarios(open(ps.__file__, encoding="utf-8").read())
+        assert "nome_da_empresa_do_registo" in codigo and "EMPRESA_NEUTRA_NO_TEXTO" in codigo
+        assert "Power Precision" not in codigo
+
+
+class TestSemMarcaFixaNosOutrosEmails:
+    MODULOS = [
+        "services.portal_gov_fetch", "services.temp_link_service", "services.portal_documents_notify",
+        "services.portal_status", "services.portal_settings_api_helpers",
+        "services.portal_settings_api_preview",
+    ]
+
+    @pytest.mark.parametrize("modulo", MODULOS)
+    async def test_nem_marca_nem_conta_fixas(self, modulo):
+        import importlib
+
+        from tests.unit.helpers_fonte import codigo_sem_comentarios
+
+        codigo = codigo_sem_comentarios(open(importlib.import_module(modulo).__file__, encoding="utf-8").read())
+        for proibido in ("Power Precision", "Power Real Estate", "Precision Crédito", "precisioncredito",
+                         'account_name="power"', 'account_name="precision"'):
+            assert proibido not in codigo, f"{modulo}: «{proibido}» fixo no código"
+
+    async def test_contraprova_o_leitor_le_mesmo_estes_modulos(self):
+        import services.temp_link_service as tl
+        from tests.unit.helpers_fonte import codigo_sem_comentarios
+
+        assert "enviar_email_do_portal" in codigo_sem_comentarios(open(tl.__file__, encoding="utf-8").read())

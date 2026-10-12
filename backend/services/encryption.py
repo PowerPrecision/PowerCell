@@ -589,6 +589,45 @@ def _add_client_blind_indexes(data: dict) -> None:
                 data["titular2_data"]["nif_hash"] = generate_nif_hash(nif2_clean)
 
 
+#: (campo, índice cego) de cada secção do cliente que tem pesquisa por hash.
+_CAMPOS_COM_INDICE_CEGO = {
+    "contacto": (("email", "email_hash"), ("telefone", "telefone_hash")),
+    "dados_pessoais": (("nif", "nif_hash"),),
+}
+
+
+def campo_esta_vazio(valor) -> bool:
+    """``None``, ``""`` e só espaços: o campo foi limpo."""
+    return valor is None or not str(valor).strip()
+
+
+def limpar_blind_indexes_de_campos_vazios(
+    contacto: Optional[dict] = None,
+    dados_pessoais: Optional[dict] = None,
+) -> list:
+    """Quando um campo foi ESCRITO vazio, o índice cego do valor antigo vai com ele.
+
+    ``_add_client_blind_indexes`` só gera o hash quando há valor; ao limpar um
+    email, o ``email_hash`` do endereço antigo ficava para trás e a pesquisa e a
+    guarda de duplicados continuavam a achar o cliente por um email que ele já
+    não tem. Só mexe nos campos que a submissão TROUXE (a chave presente): um
+    campo ausente é «não alterei», não «apaguei».
+
+    Normaliza ``None`` para ``""`` e devolve os nomes dos campos limpos
+    (``["email"]``), para o chamador propagar a limpeza.
+    """
+    limpos: list = []
+    for seccao, dados in (("contacto", contacto), ("dados_pessoais", dados_pessoais)):
+        if not isinstance(dados, dict):
+            continue
+        for campo, indice in _CAMPOS_COM_INDICE_CEGO[seccao]:
+            if campo in dados and campo_esta_vazio(dados[campo]):
+                dados[campo] = ""
+                dados[indice] = ""
+                limpos.append(campo)
+    return limpos
+
+
 def decrypt_client_data(data: dict) -> dict:
     """
     Desencripta campos sensíveis de um cliente após ler da BD.

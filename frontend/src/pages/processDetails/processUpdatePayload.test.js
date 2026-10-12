@@ -7,6 +7,7 @@ import {
   sanitizeProcessUpdatePayload,
   sanitizeClientUpdatePayload,
   mergeProcessOptimistic,
+  contactosAGravar,
   FORBIDDEN_PROCESS_UPDATE_KEYS,
 } from './processUpdatePayload.js';
 
@@ -101,5 +102,89 @@ describe('mergeProcessOptimistic', () => {
     assert.deepStrictEqual(merged.personal_data, { nif: '222', nome: 'A' });
     assert.strictEqual(merged.status, 'x');
     assert.strictEqual(merged.notes, 'n');
+  });
+});
+
+
+describe('sanitizeClientUpdatePayload — apagar contactos de propósito', () => {
+  it('um contacto vazio SEM pedido explícito continua a ser descartado (a rede de segurança)', () => {
+    const out = sanitizeClientUpdatePayload({ contacto: { email: '', telefone: '' } });
+    assert.strictEqual(out.contacto, undefined);
+  });
+
+  it('com clearContactFields o email vazio segue como "" e o telefone não é tocado', () => {
+    const out = sanitizeClientUpdatePayload(
+      { contacto: { email: '  ', telefone: '912345678' } },
+      { clearContactFields: ['email'] },
+    );
+    assert.deepStrictEqual(out.contacto, { email: '', telefone: '912345678' });
+  });
+
+  it('um campo NÃO listado continua protegido mesmo com outro listado', () => {
+    const out = sanitizeClientUpdatePayload(
+      { contacto: { email: '', telefone: '' } },
+      { clearContactFields: ['telefone'] },
+    );
+    assert.deepStrictEqual(out.contacto, { telefone: '' });
+  });
+
+  it('ignora nomes que não são contactos limpáveis', () => {
+    const out = sanitizeClientUpdatePayload(
+      { nome: '', contacto: { email: 'a@b.pt' } },
+      { clearContactFields: ['nome', 'nif'] },
+    );
+    assert.strictEqual(out.nome, undefined);
+    assert.deepStrictEqual(out.contacto, { email: 'a@b.pt' });
+  });
+
+  it('um valor preenchido nunca é apagado por estar na lista', () => {
+    const out = sanitizeClientUpdatePayload(
+      { contacto: { email: ' novo@b.pt ' } },
+      { clearContactFields: ['email'] },
+    );
+    assert.deepStrictEqual(out.contacto, { email: 'novo@b.pt' });
+  });
+});
+
+describe('contactosAGravar', () => {
+  const base = { email: 'ana@x.pt', telefone: '912345678' };
+
+  it('com valores, envia-os ao cliente e ao processo e não limpa nada', () => {
+    const r = contactosAGravar({ editingCardId: 'personal_contactos', ...base });
+    assert.deepStrictEqual(r.contacto, { email: 'ana@x.pt', telefone: '912345678' });
+    assert.deepStrictEqual(r.processo, { client_email: 'ana@x.pt', client_phone: '912345678' });
+    assert.deepStrictEqual(r.limpar, []);
+  });
+
+  it('a editar o cartão de contactos, o email apagado vai como vazio explícito', () => {
+    const r = contactosAGravar({ editingCardId: 'personal_contactos', ...base, email: '' });
+    assert.strictEqual(r.contacto.email, '');
+    assert.strictEqual(r.processo.client_email, '');
+    assert.deepStrictEqual(r.limpar, ['email']);
+    assert.strictEqual(r.contacto.telefone, '912345678');
+  });
+
+  it('só espaços conta como apagado', () => {
+    const r = contactosAGravar({ editingCardId: 'personal_contactos', ...base, telefone: '   ' });
+    assert.deepStrictEqual(r.limpar, ['telefone']);
+  });
+
+  it('null/undefined contam como apagado (no cartão de contactos)', () => {
+    const r = contactosAGravar({ editingCardId: 'personal_contactos', email: null, telefone: undefined });
+    assert.deepStrictEqual(r.limpar, ['email', 'telefone']);
+  });
+
+  it('a gravar OUTRO cartão, um contacto vazio nunca é enviado', () => {
+    for (const cartao of ['personal_identificacao', 'financial_rendimentos', null, undefined]) {
+      const r = contactosAGravar({ editingCardId: cartao, email: '', telefone: '' });
+      assert.deepStrictEqual(r.contacto, {});
+      assert.deepStrictEqual(r.processo, {});
+      assert.deepStrictEqual(r.limpar, []);
+    }
+  });
+
+  it('a gravar outro cartão, os contactos preenchidos seguem como antes', () => {
+    const r = contactosAGravar({ editingCardId: 'personal_morada', ...base });
+    assert.deepStrictEqual(r.processo, { client_email: 'ana@x.pt', client_phone: '912345678' });
   });
 });
