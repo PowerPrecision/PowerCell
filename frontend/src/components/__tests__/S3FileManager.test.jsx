@@ -180,6 +180,23 @@ function montar(sessaoDoTeste = utilizador()) {
   );
 }
 
+/**
+ * Espera que o gestor TERMINE de carregar, não que apareça.
+ *
+ * O `data-testid="s3-file-manager"` existe desde o primeiro render: envolve também o cartão do
+ * «A carregar…». `findByTestId` resolvia nesse estado intermédio e a asserção que vinha a seguir
+ * corria contra o spinner — verde numa máquina rápida, vermelho no CI carregado (a espera é sobre
+ * o elemento que se AFIRMA, nunca sobre a moldura: FRONTEND_GUIDELINES § 27.52). Com a listagem
+ * carregada o spinner de ecrã inteiro desaparece.
+ */
+async function aguardarCarregado() {
+  const gestor = await screen.findByTestId("s3-file-manager");
+  await waitFor(() => {
+    expect(gestor.querySelector("svg.animate-spin.h-6.w-6")).toBeNull();
+  });
+  return gestor;
+}
+
 beforeEach(() => {
   axiosFalso.respostas.clear();
   axiosFalso.chamadas.length = 0;
@@ -211,7 +228,7 @@ describe("S3FileManager — monta e mostra os ficheiros", () => {
     // `data-testid` é o que a extracção tem de preservar — é por ele que
     // se agarra a pasta que também é alvo de "largar para mover".
     montar();
-    await screen.findByTestId("s3-file-manager");
+    await aguardarCarregado();
 
     expect(screen.getByTestId("folder-documentos-pessoais")).toBeInTheDocument();
     expect(screen.getByTestId("folder-financeiros")).toHaveAttribute(
@@ -229,7 +246,7 @@ describe("S3FileManager — indexação é SÓ LEITURA", () => {
 
   it("o consultor vê o botão de carregar ficheiros", async () => {
     montar();
-    await screen.findByTestId("s3-file-manager");
+    await aguardarCarregado();
 
     expect(screen.getByTestId("upload-file-btn")).toBeInTheDocument();
   });
@@ -238,7 +255,7 @@ describe("S3FileManager — indexação é SÓ LEITURA", () => {
     // Regressão: a indexação tem acesso de leitura ao arquivo do cliente.
     // Devolver-lhe o upload é dar-lhe escrita sobre documentos alheios.
     montar(indexacao);
-    await screen.findByTestId("s3-file-manager");
+    await aguardarCarregado();
 
     expect(screen.queryByTestId("upload-file-btn")).not.toBeInTheDocument();
   });
@@ -247,7 +264,7 @@ describe("S3FileManager — indexação é SÓ LEITURA", () => {
 describe("S3FileManager — ferramentas de IA são de gestão", () => {
   it("o consultor não vê Analisar IA", async () => {
     montar();
-    await screen.findByTestId("s3-file-manager");
+    await aguardarCarregado();
 
     expect(screen.queryByTestId("ai-analyze-btn")).not.toBeInTheDocument();
     expect(screen.queryByTestId("smart-rename-btn")).not.toBeInTheDocument();
@@ -260,7 +277,7 @@ describe("S3FileManager — ferramentas de IA são de gestão", () => {
         effectiveRole: "diretor",
       }),
     );
-    await screen.findByTestId("s3-file-manager");
+    await aguardarCarregado();
 
     expect(await screen.findByTestId("ai-analyze-btn")).toBeInTheDocument();
     expect(screen.getByTestId("smart-rename-btn")).toBeInTheDocument();
@@ -276,7 +293,7 @@ describe("S3FileManager — ferramentas de IA são de gestão", () => {
         effectiveRole: "consultor",
       }),
     );
-    await screen.findByTestId("s3-file-manager");
+    await aguardarCarregado();
 
     expect(screen.queryByTestId("ai-analyze-btn")).not.toBeInTheDocument();
   });
@@ -288,7 +305,7 @@ describe("S3FileManager — ferramentas de IA são de gestão", () => {
         effectiveRole: "ceo",
       }),
     );
-    await screen.findByTestId("s3-file-manager");
+    await aguardarCarregado();
 
     expect(await screen.findByTestId("ai-analyze-btn")).toBeInTheDocument();
   });
@@ -311,14 +328,14 @@ describe("S3FileManager — 403 dá aviso localizado", () => {
 describe("S3FileManager — pesquisa e vistas", () => {
   it("a caixa de pesquisa está presente", async () => {
     montar();
-    await screen.findByTestId("s3-file-manager");
+    await aguardarCarregado();
 
     expect(screen.getByPlaceholderText(/pesquisar/i)).toBeInTheDocument();
   });
 
   it("existe alternância entre lista e grelha", async () => {
     montar();
-    await screen.findByTestId("s3-file-manager");
+    await aguardarCarregado();
 
     // As duas vistas são blocos de ~600 e ~440 linhas que vão ser
     // extraídos: se a alternância se partir, o corte partiu algo.
