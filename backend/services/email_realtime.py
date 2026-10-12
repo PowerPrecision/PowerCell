@@ -180,10 +180,13 @@ async def notify_new_email_for_global_mailbox(email_doc: Dict[str, Any]) -> int:
         all_recipients = to_set | cc_set
         is_received = email_doc.get("direction") == "received"
 
+        from services.shared_mailbox_scope import email_no_ambito
+        from services.tenant_network import resolve_tenant_scope
+
         user_ids = []
         staff_cursor = db.users.find(
             {"is_active": {"$ne": False}},
-            {"_id": 0, "id": 1, "role": 1, "email": 1},
+            {"_id": 0, "id": 1, "role": 1, "email": 1, "company": 1},
         )
         async for user in staff_cursor:
             uid = user.get("id")
@@ -191,10 +194,23 @@ async def notify_new_email_for_global_mailbox(email_doc: Dict[str, Any]) -> int:
                 continue
             role = user.get("role")
             if role in ("master", "admin", "ceo", "diretor", "administrativo"):
-                user_ids.append(uid)
+                quer_avisar = True
             elif (user.get("email") or "").lower() in all_recipients:
-                user_ids.append(uid)
-            elif role == "indexacao" and is_received:
+                quer_avisar = True
+            else:
+                quer_avisar = role == "indexacao" and is_received
+            if not quer_avisar:
+                continue
+            # D-8: o cargo decide QUEM costuma receber; a rede decide se pode.
+            # Sem isto o aviso (assunto + remetente) ia ao staff de todas as redes.
+            try:
+                no_ambito = email_no_ambito(email_doc, await resolve_tenant_scope(user))
+            except Exception as scope_err:  # noqa: BLE001 — falha fechada
+                logger.warning(
+                    "[Email Realtime] Âmbito de %s indisponível (%s): sem aviso.", uid, scope_err,
+                )
+                no_ambito = False
+            if no_ambito:
                 user_ids.append(uid)
 
         return await notify_new_email(user_ids, email_doc, extra={"box": "general"})
@@ -204,21 +220,18 @@ async def notify_new_email_for_global_mailbox(email_doc: Dict[str, Any]) -> int:
 
 
 async def notify_new_email_for_shared_role(role: str, email_doc: Dict[str, Any]) -> int:
-    """Notify every connected user that holds the shared mailbox role."""
+    """Notify the users that hold the shared mailbox role **in the email's network**.
+
+    D-8: avisava todos os utilizadores com o cargo, de qualquer rede — o
+    evento leva assunto e remetente, ou seja, um aviso de «chegou email»
+    com dados de clientes de outra rede.
+    """
     if not role:
         return 0
     try:
-        from database import db
+        from services.shared_mailbox_scope import destinatarios_da_caixa
 
-        user_ids = []
-        cursor = db.users.find(
-            {"role": role, "is_active": {"$ne": False}},
-            {"_id": 0, "id": 1},
-        )
-        async for user in cursor:
-            uid = user.get("id")
-            if uid:
-                user_ids.append(uid)
+        user_ids = await destinatarios_da_caixa(role, email_doc)
         return await notify_new_email(
             user_ids,
             email_doc,

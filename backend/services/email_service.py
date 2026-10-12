@@ -31,6 +31,13 @@ import html as html_module
 
 from database import db
 from services.email_tenant_stamp import inserir_email
+from services.shared_mailbox_scope import (
+    caixas_a_sincronizar,
+    carimbo_da_caixa,
+    config_da_caixa,
+    duplicado_da_caixa,
+    e_a_pilha_antiga,
+)
 from services.email_threading import (
     build_reference_chain,
     domain_from_email,
@@ -2296,7 +2303,12 @@ async def sync_user_emails(
     }
 
 
-async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 200) -> Dict[str, Any]:
+async def sync_shared_role_emails(
+    role: str,
+    days: int = 3,
+    max_emails: int = 200,
+    network_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Sincronizar emails para um role partilhado (indexacao, suporte, etc.)
     usando a conta de email partilhada do departamento.
@@ -2308,6 +2320,8 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
         role: Nome do role (ex: 'indexacao')
         days: Dias para sincronizar
         max_emails: Máximo de emails por pasta
+        network_id: Rede da caixa (D-8) — a caixa é de (cargo, rede). Sem ela só
+            se alcança a caixa antiga (a da rede de omissão).
     
     Returns:
         Dict com resultado da sincronização
@@ -2321,13 +2335,11 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
 
     from services.encryption import encryption_service
     
-    shared_config = await db.shared_role_email_configs.find_one(
-        {"role": role, "is_configured": True},
-        {"_id": 0}
-    )
+    shared_config = await config_da_caixa(role, network_id, is_configured=True)
     
-    if not shared_config:
-        # Fallback: try system_webmail config from system_settings (Bloco C)
+    if not shared_config and e_a_pilha_antiga(network_id):
+        # Fallback: try system_webmail config from system_settings (Bloco C).
+        # É a caixa de SISTEMA do grupo incumbente: uma ilha nunca a herda (D-8).
         from services.system_config import get_system_config
         sys_config = await get_system_config()
         sys_webmail = sys_config.system_webmail
@@ -2343,12 +2355,15 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
             logger.info(f"[Shared Role Sync] Using system_webmail (Bloco C) fallback for role '{role}'")
         else:
             return {"success": False, "error": f"Configuração de email partilhada para '{role}' não encontrada. Configure no painel de Integrações (Bloco C)."}
+
+    if not shared_config:
+        return {"success": False, "error": f"Configuração de email partilhada para '{role}' não encontrada para esta rede."}
     
     # Prioridade 1: Gmail API (OAuth)
     if shared_config.get("google_refresh_token"):
         try:
             from services.gmail_api_service import gmail_api_sync_to_db
-            return await gmail_api_sync_to_db(role=role, days=days, max_emails=max_emails)
+            return await gmail_api_sync_to_db(role=role, days=days, max_emails=max_emails, network_id=network_id)
         except Exception as e:
             logger.error(f"[Shared Role Sync] Gmail API falhou para {role}: {e}", exc_info=True)
             # Fallback para IMAP abaixo
@@ -2395,7 +2410,7 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
                 msg_id = email_data.get("message_id", "")
                 if not msg_id:
                     continue
-                existing = await db.emails.find_one({"message_id": msg_id, "shared_role": role})
+                existing = await db.emails.find_one(duplicado_da_caixa(msg_id, role, shared_config))
                 if existing:
                     total_duplicates += 1
                     continue
@@ -2452,6 +2467,7 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
                     "account": "shared",
                     "message_id": msg_id,
                     "shared_role": role,
+                    **carimbo_da_caixa(shared_config),
                     "synced_for_user": None,
                     "is_read": email_data.get("direction") == "sent",
                     "is_starred": False,
@@ -2483,7 +2499,7 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
                 msg_id = email_data.get("message_id", "")
                 if not msg_id:
                     continue
-                existing = await db.emails.find_one({"message_id": msg_id, "shared_role": role})
+                existing = await db.emails.find_one(duplicado_da_caixa(msg_id, role, shared_config))
                 if existing:
                     total_duplicates += 1
                     continue
@@ -2537,6 +2553,7 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
                     "account": "shared",
                     "message_id": msg_id,
                     "shared_role": role,
+                    **carimbo_da_caixa(shared_config),
                     "synced_for_user": None,
                     "is_read": True,
                     "is_starred": False,
@@ -2610,11 +2627,14 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
 
     if not active_configs:
         # Sem configs pessoais — mas ainda pode haver roles partilhados a sincronizar
-        shared_roles = await db.users.distinct("role", {"role": {"$in": ["indexacao", "suporte"]}})
+        shared_roles = await caixas_a_sincronizar()
         if not shared_roles:
             return {"success": True, "message": "Nenhum utilizador com email configurado", "users_synced": 0}
-        # Só sincronizar roles partilhados
-        shared_tasks = [sync_shared_role_emails(role, days=days) for role in shared_roles]
+        # Só sincronizar as caixas partilhadas (cargo + rede, D-8)
+        shared_tasks = [
+            sync_shared_role_emails(role, days=days, network_id=rede)
+            for role, rede in shared_roles
+        ]
         shared_results = await asyncio.gather(*shared_tasks, return_exceptions=True)
         total_synced = 0
         total_errors = 0
@@ -2683,7 +2703,7 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
         )
 
     # Também sync roles partilhados (indexacao, suporte) — usam caixa partilhada
-    shared_roles = await db.users.distinct("role", {"role": {"$in": ["indexacao", "suporte"]}})
+    shared_roles = await caixas_a_sincronizar()
 
     # Criar tasks para cada par user+empresa (pessoal) + cada role partilhado
     tasks = [
@@ -2694,8 +2714,8 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
         )
         for job in sync_jobs
     ]
-    for role in shared_roles:
-        tasks.append(sync_shared_role_emails(role, days=days))
+    for role, rede in shared_roles:
+        tasks.append(sync_shared_role_emails(role, days=days, network_id=rede))
 
     # Executar concorrentemente
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -2720,14 +2740,15 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
 
     # Resultados dos roles partilhados (depois das configs pessoais)
     shared_synced = 0
-    for j, role in enumerate(shared_roles):
+    for j, (role, rede) in enumerate(shared_roles):
         result = results[len(sync_jobs) + j]
+        chave_da_caixa = f"shared:{role}:{rede}" if rede else f"shared:{role}"
         if isinstance(result, Exception):
-            logger.error(f"[All User Sync] shared role={role}: {result}")
-            user_results[f"shared:{role}"] = {"error": str(result)}
+            logger.error(f"[All User Sync] shared role={role} rede={rede}: {result}")
+            user_results[chave_da_caixa] = {"error": str(result)}
             total_errors += 1
         else:
-            user_results[f"shared:{role}"] = result
+            user_results[chave_da_caixa] = result
             shared_synced += result.get("total_synced", 0)
             total_errors += result.get("total_errors", 0)
     total_synced += shared_synced

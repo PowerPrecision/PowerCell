@@ -102,15 +102,30 @@ async def test_upsert_shared_email_config_persists_and_returns_imap_smtp_fields(
     CI (backend-fast, sem MongoDB): mock da camada `db` com coleções em
     memória (padrão de test_document_portal_fulfill.py) — nunca I/O real.
     """
-    from unittest.mock import patch
+    from unittest.mock import MagicMock, patch
 
     from models.shared_email_config import SharedEmailConfigCreate
     from services import shared_email_crud as crud
+    from tests.unit.helpers_tenant import REDE_INCUMBENTE, semear, tenant_db
 
     admin_user = {"id": "qa-admin", "role": "admin"}
     role = "suporte"
+    # D-8: a caixa é de (cargo, REDE). O administrador de teste pertence a uma empresa.
+    semear(fake_async_db)
+    fake_async_db.user_company_roles.docs.append(
+        {"user_id": "qa-admin", "company_id": "cmp-power", "company_name": "Power Real Estate",
+         "role": "admin", "is_default": True}
+    )
+    pedido = MagicMock(headers={}, state=MagicMock(spec=[]))
 
-    with patch.object(crud, "db", fake_async_db):
+    import services.shared_mailbox_scope as sms
+    import services.workflow_scope as ws
+
+    async def _sem_empresa_activa(request, user):
+        return ""
+
+    with tenant_db(fake_async_db, crud, sms, ws), \
+            patch("services.auth.get_active_company_id_async", _sem_empresa_activa):
         response = await crud.run_upsert_shared_email_config(
             role,
             SharedEmailConfigCreate(
@@ -124,6 +139,7 @@ async def test_upsert_shared_email_config_persists_and_returns_imap_smtp_fields(
                 encrypted_password="segredo123",
             ),
             admin_user,
+            pedido,
         )
         assert response.auth_method == "imap_smtp"
         assert response.has_imap_password is True
@@ -134,6 +150,7 @@ async def test_upsert_shared_email_config_persists_and_returns_imap_smtp_fields(
         stored = await fake_async_db.shared_role_email_configs.find_one({"role": role})
         assert stored is not None
         assert stored["smtp_server"] == "smtp.exemplo.pt"
+        assert stored["network_id"] == REDE_INCUMBENTE
         # Fernet aplicado (prefixo ENC:) e nunca em claro na BD
         assert stored["encrypted_password"].startswith("ENC:")
         assert stored["encrypted_password"] != "segredo123"
@@ -143,7 +160,7 @@ async def test_upsert_shared_email_config_persists_and_returns_imap_smtp_fields(
             {"action": "shared_email_config_updated", "user_id": "qa-admin"}
         ) == 1
 
-        fetched = await crud.run_get_shared_email_config(role, admin_user)
+        fetched = await crud.run_get_shared_email_config(role, admin_user, pedido)
         assert fetched.smtp_server == "smtp.exemplo.pt"
         assert fetched.smtp_port == 465
 

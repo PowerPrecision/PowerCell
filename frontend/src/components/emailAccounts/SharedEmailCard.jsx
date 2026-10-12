@@ -28,7 +28,7 @@ import {
   Plug,
 } from "lucide-react";
 import { API_URL } from "./emailAccountsApi";
-import { testCompanyEmailConnection } from "../../services/api";
+import { cabecalhosDeContexto, testCompanyEmailConnection } from "../../services/api";
 
 const SHARED_EMAIL_ROLES = [
   { role: "indexacao", label: "Indexação", description: "Email partilhado do departamento de indexação" },
@@ -49,7 +49,9 @@ const EMPTY_SHARED_MANUAL_FORM = {
 };
 
 export const SharedEmailCard = () => {
-  const { token } = useAuth();
+  // A caixa partilhada é de (cargo, REDE): a rede é a da empresa activa, por isso
+  // a empresa entra na chave — trocar de empresa não pode mostrar a caixa da outra.
+  const { token, effectiveCompanyId } = useAuth();
   const queryClient = useQueryClient();
   const [authenticating, setAuthenticating] = useState(null);
   const [syncing, setSyncing] = useState(null);
@@ -63,11 +65,11 @@ export const SharedEmailCard = () => {
     isLoading: loading,
     refetch: fetchConfigs,
   } = useQuery({
-    queryKey: ["shared-email"],
+    queryKey: ["shared-email", effectiveCompanyId || null],
     enabled: Boolean(token),
     queryFn: async () => {
       const res = await fetch(`${API_URL}/api/admin/shared-email`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() },
       });
       if (!res.ok) throw new Error("Erro ao carregar configs de email partilhado");
       const data = await res.json();
@@ -99,7 +101,7 @@ export const SharedEmailCard = () => {
       if (emailAddress) params.set("email_address", emailAddress);
 
       const res = await fetch(`${API_URL}/api/admin/shared-email/${role}/google/login?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() },
       });
       if (!res.ok) {
         const data = await res.json();
@@ -133,7 +135,7 @@ export const SharedEmailCard = () => {
     try {
       const res = await fetch(`${API_URL}/api/admin/shared-email/${role}/sync`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() },
       });
       if (res.ok) {
         const data = await res.json();
@@ -168,7 +170,7 @@ export const SharedEmailCard = () => {
     try {
       const res = await fetch(`${API_URL}/api/admin/shared-email/${role}/google`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() },
       });
       if (res.ok) {
         toast.success("Conta Google desconectada");
@@ -215,6 +217,7 @@ export const SharedEmailCard = () => {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
+          ...cabecalhosDeContexto(),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

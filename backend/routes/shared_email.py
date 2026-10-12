@@ -35,9 +35,10 @@ router = APIRouter(prefix="/admin/shared-email", tags=["Shared Email Config"])
 
 @router.get("", response_model=SharedEmailConfigListResponse)
 async def list_shared_email_configs(
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    return await run_list_shared_email_configs(current_user)
+    return await run_list_shared_email_configs(current_user, request)
 
 
 # Static /google/callback BEFORE /{role}
@@ -57,26 +58,29 @@ async def shared_email_google_callback(
 @router.get("/{role}", response_model=SharedEmailConfigResponse)
 async def get_shared_email_config(
     role: str,
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    return await run_get_shared_email_config(role, current_user)
+    return await run_get_shared_email_config(role, current_user, request)
 
 
 @router.put("/{role}", response_model=SharedEmailConfigResponse)
 async def upsert_shared_email_config(
     role: str,
     payload: SharedEmailConfigCreate,
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    return await run_upsert_shared_email_config(role, payload, current_user)
+    return await run_upsert_shared_email_config(role, payload, current_user, request)
 
 
 @router.delete("/{role}")
 async def delete_shared_email_config(
     role: str,
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    return await run_delete_shared_email_config(role, current_user)
+    return await run_delete_shared_email_config(role, current_user, request)
 
 
 @router.get("/{role}/google/login", response_model=SharedEmailOAuthLoginResponse)
@@ -94,15 +98,17 @@ async def shared_email_google_login(
 @router.delete("/{role}/google")
 async def shared_email_google_disconnect(
     role: str,
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    return await run_shared_email_google_disconnect(role, current_user)
+    return await run_shared_email_google_disconnect(role, current_user, request)
 
 
 @router.post("/{role}/sync")
 async def shared_email_manual_sync(
     role: str,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     days: int = Query(3, ge=1, le=30),
 ):
-    return await run_shared_email_manual_sync(role, current_user, days=days)
+    return await run_shared_email_manual_sync(role, current_user, request, days=days)

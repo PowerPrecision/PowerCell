@@ -339,31 +339,25 @@ do passo 2.
 
 ## Produto e âmbito
 
-### D-8 · `db.emails`: o carimbo de rede está fechado na ESCRITA; faltam as caixas partilhadas por cargo
-**Onde:** colecção `emails`, `services/email_tenant_stamp.py`, `scripts/backfill_email_network_id.py`
+### D-38 · O registo público actualiza, sem prova de posse, um cliente já existente da mesma rede
+**Onde:** `services/public_registration.py` (ramo `if existing_client:`)
 
-**Fechado (Out 2026, D-31/D-8):** os emails novos nascem com `network_id`. Os
-oito `db.emails.insert_one` (envio, sincronização pessoal, caixas partilhadas
-×3, Gmail API, registo manual, rascunhos) passam todos por
-`email_tenant_stamp.inserir_email` — inventário por AST, com contraprova. A
-rede vem do PROCESSO do email e/ou da EMPRESA gravada nele; duas candidatas
-diferentes **não se resolvem** (fica por carimbar, com aviso) e uma falha a
-resolver nunca derruba a escrita. O backfill
-(`python -m scripts.backfill_email_network_id [--aplicar]`) usa a MESMA função
-de produção; a omissão é só ler e contar, e a segunda passagem escreve 0.
-Verificado contra um `mongod` real.
+O D-32 confinou a procura de duplicados à rede do link, mas dentro da rede o
+formulário **anónimo** continua a encontrar o cliente por email e a
+**actualizá-lo**: telefone, `custom_fields`, `personal_data`, `titular2_data` e
+`lead_status` (volta a «novo»). Quem souber o email de um cliente de uma empresa
+pode, pelo formulário, alterar-lhe os dados pessoais — sem login nem prova de que
+o email é seu.
 
-**Passo operacional:** correr o backfill UMA vez depois do deploy
-(`--aplicar`), por esta ordem — código primeiro, base de dados depois.
+**Porque foi adiado:** muda o comportamento de produto (hoje um cliente que volta
+a registar-se vê os dados novos acrescentados) e a alternativa já existe no
+Portal do Parceiro (`partner_leads`): criar um registo novo com
+`possible_duplicate_of` para a triagem e **nunca** escrever num cliente
+existente. Decidir entre as duas é do dono do produto.
 
-**O que continua aberto:** os emails das caixas partilhadas por CARGO
-(`shared_role`) sem processo e sem empresa — a sincronização das contas
-partilhadas não tem utilizador nem empresa de onde derivar a rede, pelo que
-continuam por carimbar e a LEITURA continua a deduzir (`email_access`) como no
-Bloco 2. Fechar exige associar cada conta partilhada a uma empresa na
-configuração (`shared_email_config`), que hoje é só por cargo.
-
----
+**O que fecha isto:** passar o ramo existente ao desenho do `partner_leads`
+(registo novo + marca de duplicado + resposta igual nos dois casos) e deixar a
+actualização para o Portal, onde há credencial.
 
 ### D-14 · O formulário público pode criar um cliente com NIF repetido
 **Onde:** `backend/services/public_registration.py` (`db.clients.insert_one`)
@@ -505,15 +499,17 @@ confirmar um pagamento (pendente/faturado → pago) é permitido com o processo
 fechado, porque as comissões se pagam no fim; o resto das finanças continua
 fechado (ver AGENTS.md).
 
-**O que continua aberto, de propósito e dito:** (1) as **semanas já fechadas**
-do relatório executivo guardam os números com que foram registadas (ainda com
-Admin/Master nas linhas); (2) `POST /system/changelog/generate-ai` e `/diagnose`
-aceitam **Admin e CEO**, que são perfis LOCAIS, para escrever conteúdo GLOBAL
-(todas as redes veem as novidades). Só o Master marca Premium (feito); a geração
-devia ser só-Master pela mesma razão — não se mudou porque é um fluxo de
-trabalho existente e a decisão é de quem gere o produto.
-**O que fecha isto:** passar a lista de papéis da geração a `[MASTER]` (o ecrã
-`ChangelogSection` já só é alcançável pelo Master).
+**O que continua aberto, de propósito e dito:** as **semanas já fechadas** do
+relatório executivo guardam os números com que foram registadas (ainda com
+Admin/Master nas linhas) — um registo é um registo.
+
+**Fechado (Out 2026):** a geração por IA (`POST /system/changelog/generate-ai`),
+o diagnóstico (`/diagnose`) e a marca Premium são **só-Master**. Admin e CEO
+são perfis locais e o conteúdo é global (todas as redes veem as mesmas
+novidades). As três rotas partilham UMA constante,
+`PAPEIS_QUE_ESCREVEM_O_CHANGELOG`, em `services/changelog_api_premium.py`, e um
+inventário por AST falha se uma rota de escrita nova a esquecer. Ler continua a
+ser de toda a equipa.
 
 ### D-36 · Directório de redes no diálogo «Partilhar com…»
 **Onde:** `services/process_sharing_api.py::run_list_share_targets`, `PartilharComRedeDialog.jsx`
@@ -695,11 +691,14 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 
 | # | Dívida | Fechada em |
 |---|---|---|
+| D-8 | `db.emails`: faltavam as caixas partilhadas por cargo | Iteração `d8-caixas-partilhadas-por-rede` — o carimbo dos emails já estava fechado na escrita; faltava o que o impedia nas caixas partilhadas: a configuração era UMA por cargo para o sistema inteiro (o Admin da Domus editava, e ligava por OAuth, a Indexação da Power) e a regra «caixa partilhada do seu cargo» dava a todo o `indexacao` de todas as redes os emails de todas as redes. A caixa passa a identificar-se por **(cargo, rede)**: `shared_mailbox_scope` é o ponto único (administração pela rede da empresa activa; o email herda a rede da caixa; leitura só dentro do âmbito; o aviso em tempo real só a quem tem o email no âmbito, incluindo o da Caixa Geral). A pilha antiga (sem `network_id`) é da rede de omissão — nada se apaga nem se move. Backfill `scripts/backfill_shared_mailbox_network_id.py` (recusa-se sem rede) |
+| D-32 | O registo público procurava e actualizava clientes em todas as redes | Iteração `d8-caixas-partilhadas-por-rede` — `POST /public/client-registration` é anónimo e escreve: procurava o email em toda a base de dados e **actualizava** o cliente encontrado (de qualquer rede), re-marcava-o como lead novo e devolvia o `client_id` e `is_new_client` (um oráculo). A procura vive agora na rede do link (`ambito_do_registo`: a rede + as suas empresas; a pilha por carimbar só conta para a rede de omissão); a mesma pessoa em duas redes são dois clientes; o aviso à gestão (push + email com nome, email e telefone) ia ao «primeiro admin da base de dados» e passa a ir só à gestão da rede do link; `is_new_client` saiu |
+| D-34 (changelog) | Geração por IA e diagnóstico do changelog aceitavam Admin e CEO | Iteração `d8-caixas-partilhadas-por-rede` — só-Master, por uma constante única e inventário por AST |
 | — | A Via Rápida (partilha implícita ao atribuir alguém de outra rede), antes ponto (g) da D-37 | Iteração `via-rapida-extinta` — apagada, não desligada. `assignment_network_guard` recusa a atribuição directa fora da rede (403 que aponta «Partilhar com Empresa…»), a lista de atribuíveis sai do servidor já filtrada (`/users` e `/users/staff` não tinham filtro de rede) e a Partilha Explícita é o único caminho para outra rede, com distribuição pelas regras do destino |
 | — | `GET /users/{id}` devolvia o perfil de qualquer utilizador a qualquer staff que soubesse o id (ponto (h) da Via Rápida) | Iteração `users-fronteira-de-rede` — o pedido por id passa por `carregar_utilizador_gerivel` (o próprio, o Master, ou alguém das empresas da minha rede; perfil global invisível a um local). **404 e nunca 403**, igual ao de «não existe». Não havia chamadores no frontend. `tests/unit/test_users_fronteira_de_rede.py::TestAExploracao`. |
 | — | A dropdown de atribuição mostrava todos os utilizadores ao Master (ponto (j) da Via Rápida) | Iteração `users-fronteira-de-rede` — `GET /users` e `/users/staff` aceitam `?process_id=`; para o Master a lista sai limitada ao alcance do processo (dono + convidadas), mantendo quem já está na equipa; é a MESMA pergunta (`redes_permitidas` + `pode_atribuir`) que o servidor faz ao gravar, com teste de concordância. `ProcessDetails` e `AssignUsersModal` passam o id (o modal passou de `fetch` cru a Axios: o `fetch` não envia `X-Active-Role`, que decide se o Master tem fronteira). |
 | D-37 (formulários) | `form_config` global; registo público sem rede | Iteração `formularios-por-rede-e-mercado-b2b` — `form_config` tem `network_id` com o mesmo molde do workflow (modelo sem rede, copy-on-write, leitura própria → modelo → omissões) num ponto único, `form_config_scope`; o registo público carrega `?empresa=<company_id>` e abre estritamente o formulário dessa rede (empresa desconhecida/inactiva = 404, nada é criado); o Portal e o Portal do Parceiro derivam o esquema da rede do cliente/destino. A administração edita só a rede em contexto (Axios, não `fetch`). Migração: `scripts/migrar_formularios_por_rede.py` |
-| — | Tipificação rígida do serviço partilhado entre empresas (o «D-33» da directiva de Out 2026) | **Fora de âmbito por decisão do dono do produto (Out 2026):** a empresa A partilha com a B sem tipificar o serviço contratado |
+| — | Tipificação rígida do serviço partilhado entre empresas (o «D-33» da directiva de Out 2026; o registo público a que um pedido posterior chamou D-32/D-33 está na linha D-32) | **Fora de âmbito por decisão do dono do produto (Out 2026):** a empresa A partilha com a B sem tipificar o serviço contratado |
 | — | O Hub único (`is_hub`), parte da D-35 | Iteração `multi-fornecedor` — a flag global saiu; quem tem Index deriva da equipa e a partilha escolhe a rede de destino (`network_triage`). A migração `--limpar-is-hub` retira o resíduo |
 | D-26 | A guarda de documentos não conhecia redes | Iteração `partilha-e-documentos` — encontrada a medir a D-24 e **só podia fechar com a D-25**: a guarda certa É a resposta da partilha. `user_can_view_process_documents` tinha ZERO ocorrências de `network` e abria por duas linhas — o bypass ABSOLUTO de {admin, ceo, **diretor**, administrativo} verificado antes de tudo, e `if not is_document_visibility_restricted(process): return True`, que tornava um processo **já indexado** (o caso NORMAL) visível a qualquer sessão autenticada. Do outro lado estava a pasta documental do cliente: cartão de cidadão, IRS, recibos, extractos, alcançável sabendo só um `process_id`. A fronteira entra **antes** do bypass (um bypass de cargo que corra primeiro é um bypass de rede — a mutação que a move para depois mata quatro testes) e usa o `processo_no_ambito`, que conta a rede convidada. O `scope` é PARÂMETRO das puras e as guardas `async` resolvem-no sempre, falhando FECHADO. Corrigiu também uma afirmação minha: o custo não-óbvio da D-25 **não** era a parede do S3 — `build_s3_valid_prefixes` deriva do PROCESSO e não da rede |
 | D-25 | Um processo em PARTILHA entre duas redes não tinha modelo | Iteração `partilha-e-documentos` — `partner_network_ids` acrescenta quem VÊ sem mudar de quem É (`network_id` continua o carimbo de propriedade), e o âmbito é o PROCESSO e não a rede: é essa a diferença face ao atalho do UCR nas duas empresas, que abria a rede INTEIRA. `build_process_scope_condition` é função SEPARADA e DERIVADA da genérica — pôr o ramo no construtor comum fá-lo-ia viajar para 33 superfícies onde nenhum documento tem o campo — com inventário por AST que falha por OMISSÃO e excepções ESCRITAS (as agregações de estatísticas ficam de fora de propósito: **ver, sim; contar, não**). A sincronização DERIVA do documento gravado e não de um diff, porque são cinco os escritores de atribuições. Via Rápida com revogação MANUAL (decisão do dono do produto), e por isso **visível e auditada**: trilho, histórico e etiqueta, que é o único sítio onde uma abertura que ninguém aprovou se vê. Um defeito meu que o teste apanhou: a etiqueta nomeava a empresa POR OMISSÃO do utilizador, pelo que para quem trabalha em duas redes rotulava a partilha com a empresa errada |

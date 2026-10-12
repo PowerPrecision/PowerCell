@@ -21,6 +21,11 @@ from services.email_service import (
     get_email_accounts_async,
     sync_webmail_emails,
 )
+from services.shared_mailbox_scope import (
+    condicao_de_emails_da_caixa,
+    config_do_utilizador,
+    rede_da_config,
+)
 from services.webmail_scope import (
     conta_da_caixa_geral,
     contas_pessoais_da_empresa,
@@ -237,6 +242,28 @@ async def resolve_ucr_mailbox_filter(
     return build_ucr_mailbox_filter(active_company_id, mailbox_email)
 
 
+#: As caixas partilhadas por cargo ou gerais — as únicas em que o email NÃO
+#: pertence a uma pessoa e portanto só a rede o separa de outras redes (D-8).
+CAIXAS_PARTILHADAS = ("general", "shared_indexacao")
+
+
+async def condicao_de_rede_das_caixas(box: Optional[str], current_user: dict) -> Optional[dict]:
+    """A fronteira de rede de uma caixa partilhada; ``None`` nas pessoais.
+
+    Sem isto, `box=shared_indexacao` devolvia o `shared_role=indexacao` de
+    TODAS as redes a qualquer utilizador com o cargo (e a `general` sem
+    empresa, o mesmo). A caixa PESSOAL não leva a condição: pertence a uma
+    pessoa (`synced_for_user`), e um email dela sem carimbo não pode ficar
+    invisível ao dono por ele estar fora da rede de omissão.
+    """
+    if box not in CAIXAS_PARTILHADAS:
+        return None
+    from services.tenant_network import build_network_scope_condition, resolve_tenant_scope
+
+    condicao = build_network_scope_condition(await resolve_tenant_scope(current_user))
+    return condicao or None
+
+
 def _and_query(query: dict, extra: Optional[dict]) -> dict:
     """Combina um filtro extra sem esmagar um ``$or`` já presente."""
     if not extra:
@@ -439,6 +466,10 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     )
     if ucr_filter:
         and_conditions.append(ucr_filter)
+    # D-8: as caixas partilhadas só mostram o que está na rede de quem pergunta.
+    condicao_de_rede = await condicao_de_rede_das_caixas(box, current_user)
+    if condicao_de_rede:
+        and_conditions.append(condicao_de_rede)
     
     # === ISOLAMENTO POR UTILIZADOR ===
     # Quando box é fornecido, ele substitui a lógica de isolamento padrão.
@@ -549,9 +580,8 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
         # Verificar se o utilizador pertence a um role com email partilhado
         shared_role_config = None
         if user_role_isolation:
-            shared_role_config = await db.shared_role_email_configs.find_one(
-                {"role": user_role_isolation, "is_configured": True},
-                {"_id": 0, "role": 1},
+            shared_role_config = await config_do_utilizador(
+                user_role_isolation, current_user, {"_id": 0, "role": 1}, is_configured=True,
             )
 
         # Filtro de pertença: o email deve ter sido criado por este utilizador
@@ -567,7 +597,9 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
 
         # Se o utilizador tem um role com email partilhado, incluir emails do role
         if shared_role_config:
-            ownership_filter["$or"].append({"shared_role": user_role_isolation})
+            ownership_filter["$or"].append(
+                await condicao_de_emails_da_caixa(user_role_isolation, current_user)
+            )
 
         if folder == "inbox":
             # PACOTE 8 — conversa avaliada contra as contas CONFIGURADAS
@@ -716,6 +748,8 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
                     {"$or": _regex_any("to_emails", conversation_emails)},
                 ]
             })
+        if condicao_de_rede:
+            unread_and.append(condicao_de_rede)
         if account and box != "personal":
             unread_and.append({
                 "$or": [
@@ -786,6 +820,11 @@ async def run_webmail_stats(
         ucr_filter = await resolve_ucr_mailbox_filter(
             request, current_user, box=box, mailbox=mailbox,
         )
+    # D-8: contadores das caixas partilhadas só contam a rede de quem pergunta.
+    # `ucr_filter` entra em TODOS os contadores, por isso é o ponto único.
+    condicao_de_rede = await condicao_de_rede_das_caixas(box, current_user)
+    if condicao_de_rede:
+        ucr_filter = {"$and": [ucr_filter, condicao_de_rede]} if ucr_filter else condicao_de_rede
 
     # === BOX permission checks (exclusivo UCR) ===
     if box == "general":
@@ -1098,11 +1137,19 @@ async def run_webmail_sync_user(
     # === INDEXACAO / SUPORTE: usar conta partilhada do departamento ===
     if user_role in ("indexacao", "suporte"):
         # Tenta shared_role_email_configs primeiro, depois fallback para system_webmail (Bloco C)
-        shared_config = await db.shared_role_email_configs.find_one(
-            {"role": user_role, "is_configured": True},
-            {"_id": 0}
-        )
+        shared_config = await config_do_utilizador(user_role, current_user, is_configured=True)
+        rede_da_caixa = rede_da_config(shared_config) if shared_config else None
         if not shared_config:
+            # A caixa de SISTEMA (Integrações) é infra do grupo incumbente: quem
+            # não pertence à pilha antiga nunca a herda (D-8).
+            from services.tenant_network import resolve_tenant_scope
+
+            ambito = await resolve_tenant_scope(current_user)
+            if not (ambito.sem_fronteira or ambito.inclui_rede_de_omissao):
+                return {
+                    "success": False,
+                    "error": f"Configuração de email partilhada para {user_role} não encontrada para a sua rede. Contacte o administrador.",
+                }
             # Fallback: verificar system_webmail das Integrações (Bloco C)
             from services.system_config import get_system_config
             sys_config = await get_system_config()
@@ -1126,7 +1173,7 @@ async def run_webmail_sync_user(
             try:
                 from services.email_service import sync_shared_role_emails
                 await job_service.update_progress(job_id, 0, 1, f"A sincronizar emails partilhados ({user_role})...")
-                result = await sync_shared_role_emails(user_role)
+                result = await sync_shared_role_emails(user_role, network_id=rede_da_caixa)
                 if result.get("success") == False:
                     await job_service.fail_job(job_id, result.get("error", "Erro na sincronização"))
                 else:

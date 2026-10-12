@@ -23,6 +23,9 @@ from services.shared_email_helpers import (
     _get_google_config,
     _build_redirect_uri,
 )
+from services.shared_mailbox_scope import condicao_da_caixa, config_da_caixa
+from services.tenant_network import CAMPO_REDE
+from services.workflow_scope import rede_em_contexto
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,7 @@ async def run_shared_email_google_callback(
 
         # Verificar state
         shared_role = None
+        rede = None
         redirect_uri = None
         email_address = None
         admin_user_id = None
@@ -89,6 +93,11 @@ async def run_shared_email_google_callback(
             stored_state = await db.oauth_states.find_one({"state": state})
             if stored_state:
                 shared_role = stored_state.get("shared_role")
+                # A rede foi fixada no INÍCIO do fluxo, pelo administrador
+                # autenticado: o callback é anónimo (vem do Google) e nunca a
+                # decide. Um state sem rede (fluxo iniciado antes do D-8) cai na
+                # pilha antiga.
+                rede = stored_state.get(CAMPO_REDE)
                 admin_user_id = stored_state.get("user_id")
                 redirect_uri = stored_state.get("redirect_uri")
                 email_address = stored_state.get("email_address")
@@ -142,10 +151,11 @@ async def run_shared_email_google_callback(
         # Guardar na config partilhada do role
         now = datetime.now(timezone.utc).isoformat()
 
-        existing = await db.shared_role_email_configs.find_one({"role": shared_role}, {"_id": 0})
+        existing = await config_da_caixa(shared_role, rede)
 
         update_data = {
             "role": shared_role,
+            **({CAMPO_REDE: rede} if rede else {}),
             "email_address": email_address or google_email or (existing or {}).get("email_address", ""),
             "google_refresh_token": encrypted_refresh,
             "google_email": google_email or "",
@@ -156,7 +166,7 @@ async def run_shared_email_google_callback(
         }
 
         await db.shared_role_email_configs.update_one(
-            {"role": shared_role},
+            condicao_da_caixa(shared_role, rede),
             {"$set": update_data},
             upsert=True,
         )
@@ -167,6 +177,7 @@ async def run_shared_email_google_callback(
             "user_id": admin_user_id,
             "details": {
                 "role": shared_role,
+                "network_id": rede,
                 "email": google_email,
                 "has_refresh_token": bool(refresh_token),
             },
@@ -237,6 +248,10 @@ async def run_shared_email_google_login(
     if role not in ALLOWED_ROLES:
         raise HTTPException(status_code=400, detail=f"Role '{role}' não permitido. Roles: {ALLOWED_ROLES}")
 
+    # A rede em que se liga a caixa fixa-se AQUI, com o administrador
+    # autenticado, e viaja no `state`.
+    rede = await rede_em_contexto(current_user, request)
+
     try:
         google_cfg = _get_google_config()
 
@@ -265,6 +280,7 @@ async def run_shared_email_google_login(
             "state": state_token,
             "user_id": current_user["id"],
             "shared_role": role,  # Chave para identificar como shared email
+            CAMPO_REDE: rede,
             "redirect_uri": redirect_uri,
             "email_address": email_address,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -302,17 +318,20 @@ async def run_shared_email_google_login(
         raise HTTPException(status_code=500, detail=f"Erro ao gerar URL de autorização: {e}")
 
 
-async def run_shared_email_google_disconnect(role: str, current_user: dict) -> dict:
-    """Remove os tokens Google OAuth da config partilhada de um role."""
+async def run_shared_email_google_disconnect(role: str, current_user: dict, request: Request) -> dict:
+    """Remove os tokens Google OAuth da config partilhada de um role (na rede em contexto)."""
     _require_admin(current_user)
 
     if role not in ALLOWED_ROLES:
         raise HTTPException(status_code=400, detail=f"Role '{role}' não permitido")
 
+    rede = await rede_em_contexto(current_user, request)
+    filtro = condicao_da_caixa(role, rede)
+
     now = datetime.now(timezone.utc).isoformat()
 
     result = await db.shared_role_email_configs.update_one(
-        {"role": role},
+        filtro,
         {"$set": {
             "google_refresh_token": "",
             "google_email": "",
@@ -325,13 +344,13 @@ async def run_shared_email_google_disconnect(role: str, current_user: dict) -> d
         raise HTTPException(status_code=404, detail=f"Config para role '{role}' não encontrada")
 
     # Atualizar auth_method
-    existing = await db.shared_role_email_configs.find_one({"role": role}, {"_id": 0})
+    existing = await config_da_caixa(role, rede)
     if existing:
         has_imap = bool(existing.get("encrypted_password"))
         new_method = "imap_smtp" if has_imap else "none"
         new_configured = has_imap
         await db.shared_role_email_configs.update_one(
-            {"role": role},
+            filtro,
             {"$set": {"auth_method": new_method, "is_configured": new_configured}},
         )
 

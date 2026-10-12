@@ -1798,10 +1798,22 @@ class ScheduledTasksService:
             # 3. Sincronizar caixas partilhadas (indexação, etc.)
             try:
                 from services.email_service import sync_shared_role_emails
-                shared_result = await sync_shared_role_emails("indexacao", days=3, max_emails=50)
-                total_synced += shared_result.get("total_synced", 0)
+                from services.shared_mailbox_scope import caixas_a_sincronizar
+
+                # Uma caixa de Indexação POR REDE (D-8): cada uma sincroniza-se
+                # com a sua rede e os emails nascem com o carimbo dela. Sem
+                # nenhuma configurada, a pilha antiga mantém o comportamento de
+                # sempre (a caixa de sistema).
+                redes_da_indexacao = [r for cargo, r in await caixas_a_sincronizar() if cargo == "indexacao"]
+                synced_indexacao = 0
+                for rede in redes_da_indexacao or [None]:
+                    shared_result = await sync_shared_role_emails(
+                        "indexacao", days=3, max_emails=50, network_id=rede,
+                    )
+                    synced_indexacao += shared_result.get("total_synced", 0)
+                total_synced += synced_indexacao
                 results["shared_indexacao"] = {
-                    "synced": shared_result.get("total_synced", 0),
+                    "synced": synced_indexacao,
                 }
             except Exception as e:
                 error_str = str(e)
