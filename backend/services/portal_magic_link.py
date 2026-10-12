@@ -121,23 +121,30 @@ def build_magic_link_email_bodies(
     magic_link: str,
     portal_access_code: Optional[str],
     logo_html: str = "",
+    company_name: Optional[str] = None,
+    portal_login_url: Optional[str] = None,
 ) -> tuple[str, str]:
     """Constrói (text_body, html_body) do email de magic link ao cliente.
 
     PACOTE 11 (Eixo 2): ``logo_html`` (fragmento ``<img>`` do logo da
     empresa, resolvido pelo caller async via email_branding) é injectado
     no header. String vazia → header só com texto (comportamento antigo).
+
+    REDE: ``company_name`` e ``portal_login_url`` vêm do contexto da rede do
+    cliente (``portal_email_context``) — o nome da empresa e o endereço da
+    página de entrada do Portal. Já não há marca nem domínio fixos no texto.
     """
+    nome_da_empresa = (company_name or "").strip() or "Portal do Cliente"
+    destino_de_entrada = (portal_login_url or "").strip() or "ao Portal do Cliente"
     portal_credentials_html = f"""
             <div style="background: #f0fdfa; border: 1px solid #0d9488; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>www.precisioncredito.pt/portal</strong> e insira o seguinte Código de Acesso:</p>
+                <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>{destino_de_entrada}</strong> e insira o seguinte Código de Acesso:</p>
                 <h3 style="text-align: center; margin: 10px 0;"><strong style="font-family: 'Courier New', monospace; font-size: 22px; color: #0f766e; letter-spacing: 3px;">{portal_access_code or '—'}</strong></h3>
                 <p style="margin: 5px 0; color: #1e293b; font-size: 13px;"><strong>Email:</strong> {client_email}</p>
             </div>
     """
-    # PACOTE DI — URL client-facing actualizada para precisioncredito.pt.
     portal_credentials_text = (
-        f"\nSe o link não funcionar, aceda a www.precisioncredito.pt/portal e "
+        f"\nSe o link não funcionar, aceda a {destino_de_entrada} e "
         f"insira o seguinte Código de Acesso: {portal_access_code or '—'}\n"
         f"Email: {client_email}\n"
     )
@@ -145,7 +152,7 @@ def build_magic_link_email_bodies(
     html_body = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
         <div style="background: #0F766E; color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
-            {logo_html}<h1 style="margin: 0; font-size: 20px;">Power Precision · Crédito Habitação</h1>
+            {logo_html}<h1 style="margin: 0; font-size: 20px;">{nome_da_empresa} · Crédito Habitação</h1>
         </div>
         <div style="padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
             <p style="font-size: 16px; color: #1e293b;">Olá {client_name},</p>
@@ -176,7 +183,7 @@ def build_magic_link_email_bodies(
         f"{portal_credentials_text}\n"
         f"Este link é válido por 90 dias.\n"
         f"Se precisar de um novo link, contacte o seu consultor.\n\n"
-        f"Power Precision · Crédito Habitação"
+        f"{nome_da_empresa} · Crédito Habitação"
     )
     return text_body, html_body
 
@@ -239,7 +246,6 @@ async def send_magic_link_to_client(
     Raises HTTPException 400/500.
     """
     from fastapi import HTTPException
-    from services.email_service import send_email
 
     client_email = process.get("client_email", "")
     client_name = process.get("client_name", "Cliente")
@@ -269,36 +275,37 @@ async def send_magic_link_to_client(
         "portal_access", None, "email",
     )
 
-    # PACOTE 11 (Eixo 2) — logo da empresa no header do magic link.
-    try:
-        from services.email_branding import (
-            build_email_header_logo_html,
-            resolve_company_logo_url,
-        )
-        _magic_logo_html = build_email_header_logo_html(
-            await resolve_company_logo_url(), alt="Power Precision"
-        )
-    except Exception as _logo_err:  # pragma: no cover — degradação graciosa
-        logger.debug(f"Logo indisponível para o magic link: {_logo_err}")
-        _magic_logo_html = ""
+    # Contexto de REDE do cliente: nome, logótipo, remetente e endereço do
+    # Portal vêm do carimbo do processo/cliente, nunca de uma constante.
+    from services.email_branding import build_email_header_logo_html
+    from services.portal_email_context import enviar_email_do_portal, resolver_contexto
+
+    contexto = await resolver_contexto(
+        company_id=process.get("company_id"),
+        company_name=process.get("company_name"),
+        network_id=process.get("network_id"),
+        client_id=client_id or None,
+        user=user,
+        frontend_url=issued.get("frontend_url"),
+    )
 
     text_body, html_body = build_magic_link_email_bodies(
         client_name=client_name,
         client_email=client_email,
         magic_link=magic_link,
         portal_access_code=portal_access_code,
-        logo_html=_magic_logo_html,
+        logo_html=build_email_header_logo_html(contexto.logo_url, alt=contexto.nome),
+        company_name=contexto.nome,
+        portal_login_url=contexto.portal_url,
     )
 
     try:
-        send_result = await send_email(
-            account_name="power",
+        send_result = await enviar_email_do_portal(
+            contexto,
             to_emails=[client_email],
             subject=f"Portal do Cliente — Acompanhe o seu processo ({client_name})",
             body=text_body,
             body_html=html_body,
-            force_system=True,
-            system_purpose="NOTIFICATIONS",
         )
     except ValueError as e:
         # ValueError (ex: purpose inválido no transporter) é erro de

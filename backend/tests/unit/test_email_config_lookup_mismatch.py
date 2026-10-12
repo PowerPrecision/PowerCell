@@ -290,6 +290,8 @@ async def test_magic_link_500_quando_erro_de_envio():
     request = MagicMock()
 
     with patch.object(email_service, "send_email", _send_email_falha_envio), \
+         patch("services.portal_email_context._conta_de_sistema_generica",
+               AsyncMock(return_value=object())), \
          patch.object(portal_magic_link, "ensure_portal_access_code",
                       new=AsyncMock(return_value="CODE")), \
          patch.object(portal_magic_link, "issue_portal_magic_link",

@@ -405,6 +405,8 @@ class TestRegistrationConfirmationPortalUrl:
         portal_url = "https://portal.exemplo.pt/acesso?c=ABC123"
 
         with patch.object(email_mod, "resolve_base_template_logo", AsyncMock(return_value=None)), \
+             patch("services.portal_email_context._conta_de_sistema_generica",
+                   AsyncMock(return_value=object())), \
              patch("services.email_service.send_email", send_mock):
             ok = await send_registration_confirmation(
                 "cli@x.pt",
@@ -434,6 +436,8 @@ class TestRegistrationConfirmationPortalUrl:
         send_mock = AsyncMock(return_value={"success": True})
 
         with patch.object(email_mod, "resolve_base_template_logo", AsyncMock(return_value=None)), \
+             patch("services.portal_email_context._conta_de_sistema_generica",
+                   AsyncMock(return_value=object())), \
              patch("services.email_service.send_email", send_mock):
             ok = await send_registration_confirmation(
                 "cli@x.pt", "Cliente Exemplo", portal_access_code="987654",

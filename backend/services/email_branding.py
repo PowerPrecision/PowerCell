@@ -132,6 +132,36 @@ async def resolve_active_company_branding(
     return None, None
 
 
+async def resolve_company_branding_strict(
+    company_id: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    """``(nome, logo)`` DESTA empresa e de mais nenhuma — ou ``(None, None)``.
+
+    Ao contrário de ``resolve_active_company_branding``, **não há recurso
+    global**: sem o dado da empresa o chamador usa um texto neutro, nunca a
+    marca de outra (o email de boas-vindas da Domus a sair «Power Real
+    Estate»).
+
+    O documento da empresa (``db.companies``) é a fonte do nome e do logo. O
+    ``system_config`` da empresa só completa o que falta, e só se for
+    DIFERENTE do global: ``get_system_config(<empresa>)`` grava uma cópia da
+    configuração global para qualquer empresa que ainda não tenha a sua, pelo
+    que um valor igual ao global é a marca herdada de outra.
+    """
+    if not company_id:
+        return None, None
+    nome, logo = await _company_doc_branding({"id": company_id})
+    if nome and logo:
+        return nome, logo
+    proprio_nome, proprio_logo = await _system_config_branding(f"company:{company_id}")
+    global_nome, global_logo = await _system_config_branding("main")
+    if not nome and proprio_nome and proprio_nome != global_nome:
+        nome = proprio_nome
+    if not logo and proprio_logo and proprio_logo != global_logo:
+        logo = proprio_logo
+    return nome, logo
+
+
 async def resolve_company_logo_url(company_id: Optional[str] = None) -> Optional[str]:
     """URL absoluto (ou pré-assinado S3) do logo da empresa, ou None.
 

@@ -23,6 +23,7 @@ from email.mime.application import MIMEApplication
 from email import encoders as email_encoders
 import mimetypes
 from email.header import decode_header
+from email.utils import formataddr
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -679,6 +680,8 @@ async def send_email(
     account_override: Optional["EmailAccount"] = None,
     in_reply_to: Optional[str] = None,
     references: Optional[List[str]] = None,
+    from_name_override: Optional[str] = None,
+    use_system_signature: bool = True,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
@@ -730,6 +733,13 @@ async def send_email(
             do utilizador. Usa exclusivamente a conta global do sistema.
         account_override: Conta SMTP já resolvida (Pacote DO.4). Quando
             fornecida, ignora a resolução por account_name / system_purpose.
+        from_name_override: nome de exibição do remetente. Vence o
+            ``smtp_from_name`` GLOBAL do sistema: um email enviado em nome de
+            uma empresa concreta (boas-vindas do Portal) não pode sair com o
+            nome de outra só porque a conta de sistema é partilhada.
+        use_system_signature: ``False`` não anexa a assinatura GLOBAL do
+            sistema (``system_smtp.email_signature``) — é a identidade de uma
+            empresa e num email de outra rede seria uma fuga.
 
     Returns:
         dict: Resultado da operação:
@@ -945,6 +955,11 @@ async def send_email(
         from_name = company_name
         logger.info("[Send Email] From com o nome da empresa activa: %s", from_name)
 
+    # Um nome pedido explicitamente vence o global do sistema.
+    nome_remetente_pedido = (from_name_override or "").strip()
+    if nome_remetente_pedido:
+        from_name = nome_remetente_pedido
+
     # === RESOLVER ASSINATURA DE EMAIL ===
     # A assinatura é injetada no corpo ANTES da construção MIME para que
     # funcione tanto no caminho Resend como no SMTP directo.
@@ -963,7 +978,9 @@ async def send_email(
     resolved_signature, sig_source = await resolve_email_signature(
         created_by=created_by,
         active_company_id=active_company_id,
-        is_system_account=bool(account and account.name == "system_smtp"),
+        is_system_account=bool(
+            account and account.name == "system_smtp" and use_system_signature
+        ),
         system_email_signature=system_email_signature,
     )
 
@@ -1085,7 +1102,11 @@ async def send_email(
                     reply_to = from_email
 
         # Use formatted From header for system_smtp when from_name is available
-        if account.name == "system_smtp" and from_name:
+        if from_name and nome_remetente_pedido:
+            # Nome pedido pelo chamador: vale para qualquer conta, e o
+            # `formataddr` codifica os acentos (RFC 2047).
+            msg["From"] = formataddr((from_name, effective_from_email))
+        elif account.name == "system_smtp" and from_name:
             msg["From"] = f"{from_name} <{effective_from_email}>"
         else:
             msg["From"] = effective_from_email

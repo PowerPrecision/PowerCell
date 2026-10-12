@@ -168,7 +168,9 @@ async def run_get_client(
 
 async def run_create_client(
     client_data: ClientCreate,
-    user: dict
+    user: dict,
+    *,
+    frontend_url: Optional[str] = None,
 ):
     """Criar um novo cliente."""
     
@@ -358,6 +360,8 @@ async def run_create_client(
             portal_access_code=client.portal_access_code,
             client_id=client.id,
             user_id=user.get("id"),
+            frontend_url=frontend_url,
+            user=user,
         ), name=f"portal-welcome-email:{client.id}")
 
     # Desencriptar para a resposta

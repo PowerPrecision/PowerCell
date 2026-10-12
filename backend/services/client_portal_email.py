@@ -44,9 +44,22 @@ async def deliver_registration_email(
     client_id: str = None,
     user_id: str = None,
     process_id: str = None,
+    company_id: str = None,
+    frontend_url: str = None,
+    portal_url: str = None,
+    contexto=None,
+    user: dict = None,
 ) -> bool:
     """
     Entrega o email de boas-vindas/acesso ao Portal do Cliente.
+
+    REDE (QA, Out 2026): o email sai em nome da empresa/rede do CLIENTE —
+    nome, logótipo, remetente (email geral da rede ou email de sistema
+    genérico) e link do Portal vêm de ``portal_email_context``, resolvido a
+    partir do carimbo do cliente (ou de ``company_id`` / ``contexto`` quando o
+    chamador já os conhece, como o retry da fila, que corre sem ``client_id``).
+    ``frontend_url`` é o domínio de onde o utilizador está a trabalhar (o
+    Referer/Origin do pedido): sem ele, ``FRONTEND_URL``.
 
     Ordem canónica (PACOTE BH):
     1. Envio DIRECTO (`send_registration_confirmation`) — funciona mesmo
@@ -107,6 +120,14 @@ async def deliver_registration_email(
         client_id, client_email, user_id=user_id, process_id=process_id,
     )
 
+    if contexto is None:
+        from services.portal_email_context import resolver_contexto
+
+        contexto = await resolver_contexto(
+            company_id=company_id, client_id=client_id, user=user,
+            frontend_url=frontend_url, portal_url=portal_url,
+        )
+
     sent_direct = False
     direct_error = None
     try:
@@ -114,6 +135,7 @@ async def deliver_registration_email(
             client_email=client_email,
             client_name=client_name,
             portal_access_code=portal_access_code,
+            contexto=contexto,
         )
         if sent_direct:
             logger.info(
@@ -148,10 +170,14 @@ async def deliver_registration_email(
     try:
         from services.task_queue import task_queue
 
+        # O retry corre noutro processo e SEM `client_id`: leva consigo a
+        # empresa e o link, senão o email do retry sairia neutro.
         job_id = await task_queue.send_registration_email(
             client_email=client_email,
             client_name=client_name,
             portal_access_code=portal_access_code,
+            company_id=contexto.company_id,
+            portal_url=contexto.portal_url or None,
         )
         if job_id:
             retry_enqueued = True
@@ -186,6 +212,8 @@ async def _send_portal_welcome_email_safe(
     client_id: str = None,
     user_id: str = None,
     process_id: str = None,
+    frontend_url: str = None,
+    user: dict = None,
 ) -> None:
     """Envia email de boas-vindas do Portal em background, com logs de erro.
 
@@ -201,6 +229,8 @@ async def _send_portal_welcome_email_safe(
             client_id=client_id,
             user_id=user_id,
             process_id=process_id,
+            frontend_url=frontend_url,
+            user=user,
         )
     except Exception as e:
         logger.error(f"[PORTAL-EMAIL] Erro inesperado no envio do email de boas-vindas "
