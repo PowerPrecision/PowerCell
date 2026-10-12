@@ -265,6 +265,12 @@ def dto_do_processo(proc: dict, etapa: str, *, pedidos_pendentes: int = 0) -> di
     }
 
 
+def lead_fechada_ao_parceiro(client: Optional[dict]) -> bool:
+    """A lead foi associada a um cliente que já existia no destino (colisão B2B):
+    para o parceiro é uma lead submetida como as outras, mas já não a pode mexer."""
+    return _texto((client or {}).get("partner_stage")) == "associada"
+
+
 def etapa_de_uma_lead(client: dict) -> str:
     """Pendente / devolvida / expirado / lead — a etapa de um registo sem processo."""
     estagio = _texto(client.get("partner_stage"))
@@ -292,7 +298,7 @@ def dto_da_lead(client: dict, *, pedidos_pendentes: int = 0) -> dict:
         "motivo_da_devolucao": devolucao.get("motivo") if devolucao else None,
         # Falta o comprovativo: só enquanto a lead está retida.
         "requer_comprovativo": etapa in (ETAPA_PENDENTE, ETAPA_DEVOLVIDA),
-        "editavel": etapa in (ETAPA_PENDENTE, ETAPA_DEVOLVIDA, ETAPA_LEAD),
+        "editavel": etapa in (ETAPA_PENDENTE, ETAPA_DEVOLVIDA, ETAPA_LEAD) and not lead_fechada_ao_parceiro(client),
         # A empresa de destino que o PARCEIRO escolheu: é o que ele precisa de ver para
         # perceber a que fila segue o comprovativo (nunca a rede, chave interna).
         "empresa_destino": _texto(client.get("company_name")),

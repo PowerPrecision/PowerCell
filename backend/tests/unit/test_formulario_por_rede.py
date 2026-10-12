@@ -418,7 +418,9 @@ def registo(mundo):
     def _fechar(coro, **_k):
         coro.close()
 
-    with tenant_db(mundo, pr), \
+    import services.client_uniqueness as cu
+
+    with tenant_db(mundo, pr, cu), \
             patch.object(pr, "s3_service", s3), \
             patch.object(pr, "spawn_background_task", _fechar), \
             patch("services.portal_documents_notify.generate_mandatory_document_requests", AsyncMock()), \
@@ -454,36 +456,37 @@ class TestORegisto:
         assert len(bd.clients.docs) == antes
 
     @pytest.mark.asyncio
-    async def test_um_cliente_de_outra_rede_nao_e_recarimbado_nem_reutilizado_por_um_link(self, registo):
-        """Invertido (D-32): antes afirmava que a mesma pessoa, vinda de outro link,
-        reutilizava o cliente da OUTRA rede — era o defeito, escrito como regra."""
+    async def test_a_mesma_pessoa_noutra_rede_e_outro_cliente_nao_o_da_outra_rede(self, registo):
+        """D-32: o link de outra rede nunca reutiliza nem recarimba o cliente alheio."""
         pr, bd = registo
         r = await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))
         assert r.status_code == 200
         # a mesma pessoa regista-se agora pelo link da Power
-        await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-power"))
+        r = await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-power"))
+        assert r.status_code == 200
         clientes = [c for c in bd.clients.docs if c.get("fonte") == "public_form"]
         assert sorted(c["network_id"] for c in clientes) == sorted([REDE_DOMUS, REDE_INCUMBENTE])
 
     @pytest.mark.asyncio
-    async def test_um_cliente_da_pool_passa_a_ser_da_empresa_do_link_da_rede_de_omissao(self, registo):
+    async def test_o_mesmo_contacto_na_mesma_rede_e_recusado_com_409(self, registo):
+        """D-38: antes (D-32) reutilizava-se o cliente e actualizava-se em silêncio."""
         pr, bd = registo
-        r = await pr.run_public_client_registration(_pedido(), _dados())
-        assert r.status_code == 200
-        pool = next(c for c in bd.clients.docs if c.get("fonte") == "public_form")
-        assert "network_id" not in pool, "sem link de empresa, comporta-se como antes (Pool)"
-        await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-power"))
-        assert next(c for c in bd.clients.docs if c.get("fonte") == "public_form")["network_id"] == REDE_INCUMBENTE
+        assert (await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))).status_code == 200
+        r = await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))
+        assert r.status_code == 409
+        assert len([c for c in bd.clients.docs if c.get("fonte") == "public_form"]) == 1
 
     @pytest.mark.asyncio
-    async def test_um_cliente_da_pool_nao_passa_para_uma_ilha_por_um_link(self, registo):
-        """A pilha por carimbar pertence à rede de omissão; uma ilha cria o seu cliente."""
+    async def test_um_cliente_da_pool_e_do_grupo_incumbente_e_bloqueia_so_o_seu_link(self, registo):
+        """A pilha por carimbar pertence à rede de omissão: bloqueia o link dela, não o de uma ilha."""
         pr, bd = registo
-        await pr.run_public_client_registration(_pedido(), _dados())
-        await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))
+        assert (await pr.run_public_client_registration(_pedido(), _dados())).status_code == 200
+        assert "network_id" not in next(c for c in bd.clients.docs if c.get("fonte") == "public_form")
+        assert (await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-power"))).status_code == 409
+        assert (await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))).status_code == 200
         clientes = [c for c in bd.clients.docs if c.get("fonte") == "public_form"]
         assert len(clientes) == 2
-        assert sum(1 for c in clientes if "network_id" not in c) == 1
+        assert sum(1 for c in clientes if "network_id" not in c) == 1, "a pilha ficou intacta"
 
 
 # ====================================================================

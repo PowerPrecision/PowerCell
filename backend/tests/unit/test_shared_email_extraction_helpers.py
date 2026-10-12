@@ -73,8 +73,11 @@ def test_shared_email_router_is_thin_stubs_only():
 
 
 def test_shared_email_response_exposes_imap_smtp_server_fields():
-    """SharedEmailConfigSection.js — manual IMAP/SMTP config (Feat: Update
-    Config UIs for IMAP/Docs and implement auto-task generation)."""
+    """A resposta da caixa partilhada expõe os servidores IMAP/SMTP (pré-preenchimento
+    da configuração manual em `EmailAccountsPage` / `SharedEmailCard`).
+
+    A antiga `SharedEmailConfigSection.js` — código morto, nunca importada — foi
+    removida em Out 2026."""
     from models.shared_email_config import SharedEmailConfigResponse
 
     response = SharedEmailConfigResponse(

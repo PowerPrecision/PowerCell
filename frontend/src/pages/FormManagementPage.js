@@ -27,12 +27,13 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import {
-  getFormConfigAdmin, updateFormConfigAdmin, resetFormConfigAdmin,
+  getFormConfigAdmin, updateFormConfigAdmin, resetFormConfigAdmin, reporFormularioAoModelo,
   createFormCustomField, deleteFormCustomField,
   listFormTemplates, saveFormTemplate, previewFormTemplate,
   activateFormTemplate, duplicateFormTemplate, deleteFormTemplate,
 } from "../services/api";
 import { linkDeRegistoDaEmpresa } from "../utils/formularioPorRede";
+import ReporAoModeloDialog from "../components/admin/ReporAoModeloDialog";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -360,6 +361,8 @@ const CompactFieldCard = ({ field, isDragging, dragHandleProps }) => (
 const FormManagementPage = ({ embedded = false }) => {
   // Workflow/formulário POR REDE: de que rede é o que se está a editar.
   const [contextoDaRede, setContextoDaRede] = useState(null);
+  // «Repor ao Modelo» (acção destrutiva, pede a password).
+  const [reporAberto, setReporAberto] = useState(false);
 
   // ── Core state (single source of truth) ──
   const [fields, setFields] = useState([]);
@@ -963,6 +966,18 @@ const FormManagementPage = ({ embedded = false }) => {
             <Button variant="outline" onClick={() => setSaveTemplateDialog(true)} data-testid="save-as-template-btn">
               <Bookmark className="h-4 w-4 mr-2" /> Guardar como Template
             </Button>
+            {/* Só com cópia própria: sem ela a rede já usa o modelo. Pede a password. */}
+            {contextoDaRede?.temProprio && (
+              <Button
+                variant="outline"
+                onClick={() => setReporAberto(true)}
+                disabled={saving}
+                className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                data-testid="repor-formulario-modelo-btn"
+              >
+                <RotateCcw className="h-4 w-4 mr-2" /> Repor ao Modelo
+              </Button>
+            )}
             <Button variant="outline" onClick={handleReset} disabled={saving} data-testid="reset-form-config">
               <RotateCcw className="h-4 w-4 mr-2" /> Repor Padrão
             </Button>
@@ -972,6 +987,29 @@ const FormManagementPage = ({ embedded = false }) => {
             </Button>
           </div>
         </div>
+
+        <ReporAoModeloDialog
+          open={reporAberto}
+          onOpenChange={setReporAberto}
+          titulo="Repor o formulário ao modelo"
+          descricao={(
+            <>
+              <p>
+                O formulário de registo desta rede
+                {contextoDaRede?.empresas?.length ? ` (${contextoDaRede.empresas.join(", ")})` : ""} volta ao modelo base.
+                Os campos personalizados, os rótulos e a ordem que a rede definiu
+                <strong> perdem-se e não se recuperam</strong>.
+              </p>
+              <p>As outras redes não são afetadas. Para confirmar, escreva a sua password.</p>
+            </>
+          )}
+          onConfirmar={(password) => reporFormularioAoModelo(password)}
+          onSucesso={() => {
+            toast.success("Formulário reposto ao modelo");
+            setLoading(true);
+            fetchConfig();
+          }}
+        />
 
         {/* ── Rede em contexto: o formulário é POR REDE; cada empresa tem o seu link ── */}
         {contextoDaRede && (

@@ -49,7 +49,7 @@ const DuplicateClientAlert = ({ duplicate, onDismiss, onUseExisting }) => {
           {duplicate.message}
         </p>
         <p className="text-xs text-red-600/90 dark:text-red-400/90">
-          {`O ${fieldLabel} introduzido já pertence a um cliente activo. `}
+          {`O ${fieldLabel} introduzido já pertence a um cliente activo da sua rede. `}
           {onUseExisting
             ? "Pode usar o cliente existente ou alterar os dados para continuar."
             : "Altere os dados para continuar."}

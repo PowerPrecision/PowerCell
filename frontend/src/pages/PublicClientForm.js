@@ -62,6 +62,7 @@ import {
 import { cn, safeDateStr } from "../lib/utils";
 import { validateNIF as validateNIFShared } from "../utils/validateNIF";
 import { empresaDoLink } from "../utils/formularioPorRede";
+import { publicDuplicateMessage } from "../utils/duplicateClient";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
@@ -332,6 +333,8 @@ export default function PublicClientForm({ previewMode = false }) {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [blockedMessage, setBlockedMessage] = useState(null);
+  // D-38: o contacto já está registado nesta rede — fica no ecrã até o cliente corrigir.
+  const [duplicateMessage, setDuplicateMessage] = useState(null);
 
   // Estado para erros de validação por campo
   const [fieldErrors, setFieldErrors] = useState({});
@@ -887,6 +890,8 @@ export default function PublicClientForm({ previewMode = false }) {
 
   const updateField = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    // D-38: mexer num dos campos que colidiram retira o aviso (volta a aparecer, se persistir, ao submeter).
+    if (field === "email" || field === "phone" || field === "nif") setDuplicateMessage(null);
   };
 
   const toggleCaracteristica = (value) => {
@@ -1685,6 +1690,7 @@ export default function PublicClientForm({ previewMode = false }) {
 
     setLoading(true);
     setBlockedMessage(null);
+    setDuplicateMessage(null);
 
     try {
       const response = await axios.post(`${API_URL}/public/client-registration`, {
@@ -1805,6 +1811,15 @@ export default function PublicClientForm({ previewMode = false }) {
         toast.success("Registo enviado com sucesso!");
       }
     } catch (error) {
+      // D-38: NIF, Email ou Telemóvel já registados nesta rede. Não é uma avaria:
+      // diz-se com clareza e fica visível (um toast que desaparece deixava o
+      // cliente a voltar a carregar em "Submeter").
+      const duplicado = publicDuplicateMessage(error);
+      if (duplicado) {
+        setDuplicateMessage(duplicado);
+        toast.error(duplicado);
+        return;
+      }
       console.error("Error submitting form:", error);
       // Tratar diferentes formatos de erro do backend
       let errorMessage = "Erro ao enviar registo";
@@ -2535,6 +2550,22 @@ export default function PublicClientForm({ previewMode = false }) {
             {step === 5 && renderStep5()}
             {step === 6 && renderStep6()}
             {step > 6 && renderDynamicStep(step)}
+
+            {duplicateMessage && (
+              <div
+                role="alert"
+                data-testid="registo-duplicado"
+                className="mt-6 flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                <div>
+                  <p className="font-medium">{duplicateMessage}</p>
+                  <p className="mt-1 text-xs">
+                    Confirme o NIF, o email e o telemóvel indicados. Se já se registou antes, a nossa equipa entrará em contacto consigo.
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-between mt-8 pt-6 border-t border-border">
               <Button

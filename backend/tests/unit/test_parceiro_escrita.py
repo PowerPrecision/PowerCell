@@ -124,6 +124,7 @@ def com_bd(mundo, s3, veredicto, tarefas):
     import services.document_portal_counts as counts
     import services.history as history
     import services.network_triage as triagem
+    import services.client_uniqueness as unicidade
     import services.partner_accounts as contas
     import services.partner_drafts as drafts
     import services.partner_leads as leads
@@ -132,7 +133,7 @@ def com_bd(mundo, s3, veredicto, tarefas):
     import services.portal_upload_ops as portal_ops
 
     with contextlib.ExitStack() as pilha:
-        pilha.enter_context(tenant_db(mundo, ppr, ops, leads, intake, counts, history, portal_ops, drafts, triagem, contas))
+        pilha.enter_context(tenant_db(mundo, ppr, ops, leads, intake, counts, history, portal_ops, drafts, triagem, contas, unicidade))
         pilha.enter_context(patch.object(ops, "s3_service", s3))
         pilha.enter_context(patch.object(portal_ops, "s3_service", s3))
         pilha.enter_context(patch.object(ops, "exigir_conteudo_valido", veredicto))

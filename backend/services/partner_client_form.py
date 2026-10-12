@@ -46,7 +46,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from database import db
 from services.encryption import decrypt_client_data, encrypt_client_data
 from services.partner_portal_read import resolver_caso
-from services.partner_visibility import ETAPA_DEVOLVIDA, ETAPA_LEAD, ETAPA_PENDENTE, etapa_de_uma_lead
+from services.partner_visibility import (
+    ETAPA_DEVOLVIDA,
+    ETAPA_LEAD,
+    ETAPA_PENDENTE,
+    etapa_de_uma_lead,
+    lead_fechada_ao_parceiro,
+)
 from services.public_form_config import load_merged_form_fields
 from utils.input_sanitization import (
     sanitize_email,
@@ -269,7 +275,11 @@ async def _ficha(caso) -> tuple[Any, dict]:
 
 
 def _exigir_editavel(caso) -> None:
-    if caso.e_processo or etapa_de_uma_lead(caso.client or {}) not in ETAPAS_EDITAVEIS:
+    if (
+        caso.e_processo
+        or etapa_de_uma_lead(caso.client or {}) not in ETAPAS_EDITAVEIS
+        or lead_fechada_ao_parceiro(caso.client)
+    ):
         raise HTTPException(status_code=409, detail=ERRO_NAO_EDITAVEL)
 
 
@@ -306,7 +316,7 @@ async def run_get_client_form(partner: dict, case_id: str) -> dict:
         if not _vazio(valor):
             valores[campo["field_key"]] = valor
     return {
-        "editavel": etapa_de_uma_lead(caso.client or {}) in ETAPAS_EDITAVEIS,
+        "editavel": etapa_de_uma_lead(caso.client or {}) in ETAPAS_EDITAVEIS and not lead_fechada_ao_parceiro(caso.client),
         "passos": esquema,
         "values": valores,
         "segundo_titular": segundo_titular_ligado(cliente),

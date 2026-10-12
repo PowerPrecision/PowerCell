@@ -60,6 +60,7 @@ async def bd(monkeypatch):
 
 @pytest.fixture
 def cadeia(bd):
+    import services.client_uniqueness as cu
     import services.email_config_resolver as ecr
     import services.public_registration as pr
     import services.shared_email_crud as crud
@@ -69,7 +70,7 @@ def cadeia(bd):
     async def _empresa_activa(request, user):
         return request.headers.get("X-Company-Id") or ""
 
-    with tenant_db(bd, sms, crud, ws, ecr, pr), \
+    with tenant_db(bd, sms, crud, ws, ecr, pr, cu), \
             patch("services.auth.get_active_company_id_async", _empresa_activa):
         yield bd
 
@@ -208,11 +209,9 @@ class TestRegistoPublicoPorRede:
         return cadeia
 
     async def _procurar(self, rede, email):
-        import services.public_registration as pr
-        from services.tenant_network import build_network_scope_condition
+        from services.client_uniqueness import encontrar_cliente_duplicado
 
-        condicao = build_network_scope_condition(await pr.ambito_do_registo(rede))
-        achado = await pr._cliente_existente_na_rede(condicao, {"contacto.email": email})
+        achado = await encontrar_cliente_duplicado(None, email, rede=rede)
         return achado and achado["id"]
 
     @pytest.mark.asyncio

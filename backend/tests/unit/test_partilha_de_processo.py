@@ -690,6 +690,11 @@ def test_os_escritores_com_escolha_passam_pela_guarda_de_rede(caminho, funcao):
 #: ausentes, com o motivo — uma lista de exclusão sem motivo é a forma de
 #: isto se desligar sozinho.
 EXCEPCOES_ESCRITAS = {
+    "repor_ao_modelo": (
+        "conta os processos DA REDE que estão numa fase que o modelo não tem, para "
+        "recusar repor por cima deles; o `status` é um nome do workflow do dono, "
+        "logo a condição é a de propriedade de propósito (um convidado não é afectado)"
+    ),
     "admin_workflow": (
         "apagar uma fase move os processos DA REDE dona dessa fase (o `status` "
         "é um nome do workflow do dono): um convidado nunca é afectado, "

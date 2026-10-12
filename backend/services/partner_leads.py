@@ -411,7 +411,10 @@ async def avisar_gestao_da_lead(partner: dict, cliente: dict, ligacao: dict) -> 
                 "company_name": ligacao.get("company_name"),
             },
             has_property=bool(cliente.get("has_property")),
-            origem=f"Parceiro {partner.get('name') or ''}".strip(),
+            origem=(
+                f"Parceiro {partner.get('name') or ''}".strip()
+                + (" (associada a um cliente que já existia na rede)" if cliente.get("_associada") else "")
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[PARCEIRO] Falha a avisar a gestão da lead %s: %s", cliente.get("id"), exc)

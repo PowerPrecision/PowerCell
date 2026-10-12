@@ -941,6 +941,15 @@ export const getWorkflowStatuses = () => api.get("/admin/workflow-statuses");
 // e recebe também o nome das empresas dessa rede, para dizer onde está a editar.
 export const getWorkflowEditor = () => api.get("/admin/workflow-statuses/editor");
 
+// «Repor ao Modelo» — ACÇÃO DESTRUTIVA: descarta a cópia própria da rede. O servidor exige
+// a password ACTUAL de quem pede (o modal é só a cara). `skipErrorToast`: o diálogo mostra
+// o erro no sítio (password errada, bloqueio, processos em fases que o modelo não tem) —
+// um toast global por cima era ruído e escondia o motivo.
+export const reporWorkflowAoModelo = (password) =>
+  api.post("/admin/workflow-statuses/reset-to-model", { password }, { skipErrorToast: true });
+export const reporFormularioAoModelo = (password) =>
+  api.post("/admin/form-config/reset-to-model", { password }, { skipErrorToast: true });
+
 // ===== FORMULÁRIO PÚBLICO (admin) — POR REDE =====
 // Tudo por Axios, NUNCA `fetch`: a rede em contexto sai do `X-Company-Id` que só o
 // interceptor acrescenta. Um `fetch` cru editava sempre a rede por omissão.

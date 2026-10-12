@@ -87,7 +87,7 @@ class TestRegistoPublicoComEmailPendurado:
         resposta = await client.post("/public/client-registration", json={
             "name": "Teste SMTP Pendurado",
             "email": f"smtp_pendurado_{uuid.uuid4().hex[:8]}@email.pt",
-            "phone": "+351 999 000 222",
+            "phone": f"+351 9{uuid.uuid4().int % 90_000_000 + 10_000_000}",
             "process_type": "credito",
         })
         decorrido = time.monotonic() - inicio
@@ -105,7 +105,7 @@ class TestRegistoPublicoComEmailPendurado:
         resposta = await client.post("/public/client-registration", json={
             "name": "Teste Persistência",
             "email": email,
-            "phone": "+351 999 000 333",
+            "phone": f"+351 9{uuid.uuid4().int % 90_000_000 + 10_000_000}",
             "process_type": "credito",
         })
 

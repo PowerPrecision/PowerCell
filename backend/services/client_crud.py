@@ -35,11 +35,11 @@ from services.encryption import (
     generate_email_hash,
     generate_telefone_hash,
 )
-from services.client_uniqueness import assert_cliente_unico
+from services.client_uniqueness import assert_cliente_unico, rede_do_cliente, so_o_que_mudou
 from services.process_service import get_next_process_number
 from services.s3_document_root import pasta_para_gravar
 from services.s3_storage import s3_service
-from services.tenant_network import resolve_tenant_stamp
+from services.tenant_network import rede_de_omissao, resolve_tenant_stamp
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
     sanitize_string, sanitize_url, log_sanitization_rejection,
@@ -204,7 +204,18 @@ async def run_create_client(
     # A mesma regra corre agora na edição (`run_update_client`). Estava
     # escrita aqui à mão e NÃO existia lá — logo o bloco em linha saiu
     # para `client_uniqueness`, para as duas portas não poderem divergir.
-    await assert_cliente_unico(sanitized_nif, sanitized_email)
+    # D-38: a regra é por REDE — a de destino é a do carimbo que o cliente vai
+    # levar, por isso resolve-se ANTES da verificação (e não depois, como estava).
+    carimbo = await resolve_tenant_stamp(
+        user, active_company_id=user.get("active_company_id"),
+    )
+    # Sem carimbo o cliente nasce por carimbar — e a pilha por carimbar pertence
+    # à rede de omissão —, logo é nela (toda, não só a parte por carimbar) que
+    # se procura o duplicado.
+    await assert_cliente_unico(
+        sanitized_nif, sanitized_email, sanitized_telefone,
+        rede=(carimbo or {}).get("network_id") or rede_de_omissao(),
+    )
 
     now = datetime.now(timezone.utc).isoformat()
     
@@ -259,9 +270,6 @@ async def run_create_client(
     # rede, um cliente criado por um utilizador de outra rede deixava de ter
     # dono visível. `resolve_tenant_stamp` devolve `None` sem contexto de
     # empresa, e aí NÃO se carimba (uma rede errada é permanente).
-    carimbo = await resolve_tenant_stamp(
-        user, active_company_id=user.get("active_company_id"),
-    )
     if carimbo:
         client_dict.update(carimbo)
 
@@ -402,6 +410,7 @@ async def run_update_client(
     # hash que nunca casa — a guarda passaria sempre, calada.
     email_submetido: Optional[str] = None
     nif_submetido: Optional[str] = None
+    telefone_submetido: Optional[str] = None
 
     sanitized_contacto = None
     if client_data.contacto:
@@ -415,6 +424,7 @@ async def run_update_client(
             email_submetido = s_email
         if "telefone" in contact_dump and contact_dump["telefone"]:
             contact_dump["telefone"] = sanitize_phone(contact_dump["telefone"]) or contact_dump["telefone"]
+            telefone_submetido = contact_dump["telefone"]
         if "telefone_secundario" in contact_dump and contact_dump["telefone_secundario"]:
             contact_dump["telefone_secundario"] = sanitize_phone(contact_dump["telefone_secundario"]) or contact_dump["telefone_secundario"]
         # Merge with existing contacto to preserve fields not in this update
@@ -445,7 +455,15 @@ async def run_update_client(
     # bastava abrir um cliente e trocar o NIF para o de outro. A mesma
     # função das duas portas, com `excluir_id`: sem ele o cliente casava
     # CONSIGO PRÓPRIO e gravar sem mexer no NIF devolvia 409.
-    await assert_cliente_unico(nif_submetido, email_submetido, excluir_id=client_id)
+    # D-38: três campos, na rede DESTE cliente, e só o que mudou (um duplicado
+    # antigo em que não se tocou não pode travar a edição de outro campo).
+    nif_a_verificar, email_a_verificar, telefone_a_verificar = so_o_que_mudou(
+        client, nif_submetido, email_submetido, telefone_submetido,
+    )
+    await assert_cliente_unico(
+        nif_a_verificar, email_a_verificar, telefone_a_verificar,
+        rede=rede_do_cliente(client), excluir_id=client_id,
+    )
 
     update_dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
 

@@ -11901,3 +11901,32 @@ Fecho da D-8 (caixas partilhadas por cargo), da D-32 (registo público) e da par
 - Um utilizador `indexacao` em duas redes tem duas caixas: escolhe-se a primeira por ordem da rede e diz-se no log (não há seletor).
 - O Master deixou de receber o push/email de «novo cliente registado» (antes entrava no «primeiro admin»); vê os registos na página de Registos.
 
+
+---
+
+## Iteração `d38-duplicados-por-rede` (Out 2026) — D-38, D-14, colisão B2B (D-39), «Repor ao Modelo» e código morto
+
+### 1. D-38 / D-14 — NIF, Email e Telemóvel não se repetem dentro da REDE
+- **O que estava errado (três coisas):** o formulário público encontrava o cliente por email e **actualizava-o** (telefone, dados pessoais, `lead_status` outra vez «novo»); a criação do CRM procurava na base **inteira** e o 409 devolvia `id` e nome do cliente existente de qualquer rede; o telemóvel nunca foi verificado e a edição só olhava NIF e email.
+- **Fix:** `services/client_uniqueness.py` (ponto único) — três campos, procura na rede de destino (`ambito_de_unicidade`), `telefones_candidatos` (com/sem 351, `00351`), `so_o_que_mudou` na edição. Registo público: 409 genérico `DUPLICATE_CLIENT` (sem id/nome/campo) e **nada criado nem alterado**; ramo de upsert apagado.
+- **Achado durante os testes:** sem carimbo, a criação procurava só a «pilha por carimbar» (`rede=None`) e deixava passar duplicados na rede de omissão carimbada → procura agora a rede de omissão inteira. Os 4 primeiros ficheiros de teste do mundo do parceiro não patchavam `client_uniqueness` e falavam com o `db` real.
+- **Frontend:** aviso persistente no formulário público (`registo-duplicado`), `duplicateClient.js` com «telefone» e a mensagem «Já existe um registo associado a este NIF, Email ou Telemóvel.».
+- **Medição:** 14 mutações do backend (todas mortas), `test_d38_duplicados_por_rede.py` (39) + `tests/integration/test_duplicados_por_rede_mongo.py` (8, MongoDB real com blind indexes reais).
+
+### 2. Adenda — colisão B2B (cross-network)
+- Hierarquia: **NIF primeiro; email só sem NIF**; um NIF presente que não coincide não cai para o email. No match, a lead do parceiro **associa-se ao cliente existente e o destino não vê nada reescrito** (nem email, telemóvel, NIF, nome, `lead_status`); entrada `partner_leads` sem dados pessoais (só os NOMES dos campos divergentes). Rascunho → `associada` (parceiro vê «submetida», fechada, sem o id do cliente existente).
+- `services/b2b_client_match.py`, `partner_drafts._associar_a_cliente_existente`. 16 mutações medidas; **a primeira deixou vivo o gate do `upload-url`** (o teste só exercitava o `confirm-upload`).
+- **A Partilha Explícita de um processo não copia clientes** — não tem colisão. Dívida **D-39**: os ficheiros do parceiro ficam na pasta do registo dele.
+
+### 3. `SharedEmailConfigSection.js` apagado (514 linhas, sem importadores)
+
+### 4. «Repor ao Modelo» (workflow e `form_config` de uma rede) com password
+- `POST /admin/workflow-statuses/reset-to-model` e `POST /admin/form-config/reset-to-model`; `services/reauth_password.py` (403, travão por utilizador, não passa a personificar, password fora de logs e rasto) e `services/repor_ao_modelo.py` (apaga só a cópia da rede; 409 com as fases em uso; modelo vazio recusa; idempotente).
+- UI: `ReporAoModeloDialog` em `WorkflowEditor` e `FormManagementPage`, só com cópia própria.
+- Medição: 20 mutações no backend + 13 no frontend; 2 vivas na 1ª passagem (gate redundante contra duplo envio e o `skipErrorToast` do `api.js`) → testes novos, mortas; 1 viva no backend (modelo vazio) porque o 409 coincidia com o das fases em uso.
+
+### Fica dito
+- O registo público recusa um contacto já registado: um cliente que **volta** a registar-se pelo site já não vê os dados novos acrescentados (decisão do dono do produto).
+- A regra da unicidade vale para o CRM e o formulário público; o portal do parceiro (`partner_leads`) continua a aceitar (marca `possible_duplicate_of`) — a colisão B2B resolve-se na libertação.
+- Telemóveis de família passam a ser bloqueados na mesma rede (consequência literal da regra).
+- Há uma corrida residual (dois registos simultâneos com o mesmo contacto): sem índice único em `contacto.telefone_hash`/`email_hash`, a guarda é aplicacional.
