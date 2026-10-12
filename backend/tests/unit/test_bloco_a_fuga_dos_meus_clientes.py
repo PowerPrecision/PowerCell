@@ -372,6 +372,9 @@ class TestRedeDeOmissaoNaoSeHerda:
 #: MOTIVO. Uma entrada nova exige ler o código e escrever porquê — é a única
 #: forma de um módulo novo não ficar de fora sem ninguém reparar.
 SEM_CONDICAO_DE_REDE_POR_DESENHO = {
+    # Apagar campos: só toca nos processos DO cliente que o chamador já provou
+    # estar no âmbito (por ids/`client_id` do pedido autorizado), nunca lista.
+    "campos_limpaveis.py": "limpa cópias nos processos do cliente já autorizado pelo chamador",
     # Manutenção/migração: ferramentas de operação só-Master.
     "admin_dev_ops.py": "índices e sincronização de BD — só Master",
     "admin_encryption_api_status.py": "estado da encriptação — só Master",
