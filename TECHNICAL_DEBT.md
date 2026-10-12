@@ -362,6 +362,25 @@ mas com email/telemóvel iguais aos de OUTRO cliente da rede, a libertação dev
 mesmo criar o registo (hoje cria e marca `possible_duplicate_of`: o NIF diz que é
 outra pessoa, e perder uma lead paga por um email partilhado é pior).
 
+### D-40 · A unicidade de NIF/Email/Telemóvel é aplicacional (sem índice único)
+**Onde:** `backend/services/client_uniqueness.py`; medição em `scripts/diagnose_client_duplicates.py`
+
+A guarda do D-38 verifica antes de gravar. Dois pedidos simultâneos com o mesmo
+contacto podem passar os dois (corrida residual). Só um índice único parcial por
+rede sobre os blind indexes (`network_id` + `*_hash`, ignorando eliminados e
+vazios) a fecha — e esse índice **recusa-se a nascer** enquanto houver duplicados
+na base, porque a regra é nova e os dados são antigos.
+
+**Porque foi adiado:** antes de decidir é preciso saber quantos casos existem.
+O diagnóstico (só leitura) responde: corrê-lo em produção e ver «índice único
+viável» ou o nº de casos a resolver à mão.
+
+**Para fechar:** resolver os casos que o relatório listar (manter um cliente,
+passar-lhe os processos, eliminar o outro — decisão humana) e declarar o índice
+em `db_indexes.py` (nunca num passo de operações). O `network_id` por carimbar
+(rede de omissão) e a rede da empresa sem carimbo têm de ser tratados no índice
+(ou backfill prévio), senão a pilha antiga escapa-lhe.
+
 ### D-18 · `co_buyers` tem dois significados
 **Onde:** `backend/services/ai_document.py::build_update_data_from_extraction`
 (mapeador do CPCV), `backend/services/process_clients_nm.py::build_add_client_update`.

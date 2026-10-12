@@ -11930,3 +11930,20 @@ Fecho da D-8 (caixas partilhadas por cargo), da D-32 (registo público) e da par
 - A regra da unicidade vale para o CRM e o formulário público; o portal do parceiro (`partner_leads`) continua a aceitar (marca `possible_duplicate_of`) — a colisão B2B resolve-se na libertação.
 - Telemóveis de família passam a ser bloqueados na mesma rede (consequência literal da regra).
 - Há uma corrida residual (dois registos simultâneos com o mesmo contacto): sem índice único em `contacto.telefone_hash`/`email_hash`, a guarda é aplicacional.
+
+
+---
+
+## Iteração `diagnostico-de-duplicados` (Out 2026) — fecho do ciclo D-38 e código morto
+
+### 1. Diagnóstico de duplicados em produção (só leitura)
+- `scripts/diagnose_client_duplicates.py` + `services/client_duplicates_audit.py` (puro). Responde: quantos clientes violam «NIF, Email e Telemóvel não se repetem na rede», em que rede, por que campo — e portanto se um índice único por rede (a única coisa que fecha a corrida residual da D-38) é viável.
+- **Estritamente de leitura:** sem bandeira de escrita (só `--limite-exemplos`, `--csv`, `--dados-pessoais`), `maxTimeMS` nas leituras, guarda por AST sobre o script E o módulo puro (nenhuma chamada de escrita, nenhum operador `$set`/`$out`…), com contraprova de que o detector apanha uma escrita e de que o script lê mesmo `clients`/`companies`/`processes`. Corre contra produção de propósito (sem `require_non_production_db`). Código 2 se a base não responder.
+- **A identidade é a da guarda**, não uma segunda regra: NIF = 9 dígitos, email minúsculas, telemóvel por `telefones_candidatos` (`912…`, `+351 912…`, `00351912…` são o mesmo); teste de concordância contra a guarda em todas as combinações.
+- **Rede de cada cliente:** carimbo → rede da empresa (ilha implícita sem grupo) → rede de omissão. O mesmo valor em redes diferentes conta à parte como informação, não como violação (D-32). Eliminados não contam (como na guarda).
+- **Saída:** por rede (clientes e grupos por campo), «casos a decidir à mão» (a mesma pessoa inserida duas vezes repete 3 campos e é UM caso: componentes ligados), nº de processos por cliente em conflito (ajuda a escolher qual manter) e o veredicto «índice único viável / quantos casos o impedem». **Valores mascarados e sem nomes** por omissão (`*****0004`, `a***@x.pt`); `--dados-pessoais` mostra tudo. Zero clientes lidos NÃO é «sem duplicados» (aponta para DB_NAME errado). Valores que não se decifram comparam-se pelo índice cego e di-lo.
+- Cobertura: `tests/unit/test_diagnostico_de_duplicados.py` (31) e `tests/integration/test_diagnostico_de_duplicados_mongo.py` (5, MongoDB real com o cifrador de produção; **o oráculo é a guarda de produção**: o que o relatório diz repetido, a guarda recusa, e vice-versa; e a base fica byte a byte igual antes/depois). 9 mutações medidas, todas mortas.
+- **Uso:** `MONGO_URL=… DB_NAME=… TENANT_DEFAULT_NETWORK_ID=… python scripts/diagnose_client_duplicates.py [--csv f.csv]`. Resolver os casos é decisão humana (qual cliente fica, para onde vão os processos); nada aqui o automatiza.
+
+### 2. `CompanyEmailConfigSection.js` apagado (sem importadores)
+- Fecha o par com a `SharedEmailConfigSection.js` da iteração anterior. A UI real é `CompaniesAdminTab.jsx` e `EmailAccountsPage`/`SharedEmailCard`.
