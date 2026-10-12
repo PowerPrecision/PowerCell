@@ -47,13 +47,16 @@ import {
   Clock,
   CalendarClock,
   BarChart3,
+  RotateCcw,
 } from "lucide-react";
 import {
   getWorkflowEditor,
   createWorkflowStatus,
   updateWorkflowStatus,
   deleteWorkflowStatus,
+  reporWorkflowAoModelo,
 } from "../services/api";
+import ReporAoModeloDialog from "./admin/ReporAoModeloDialog";
 
 const statusColorOptions = [
   { value: "yellow", label: "Amarelo", class: "bg-yellow-500" },
@@ -73,6 +76,8 @@ const WorkflowEditor = () => {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  // «Repor ao Modelo» (acção destrutiva, pede a password).
+  const [reporAberto, setReporAberto] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState(null);
   const [formData, setFormData] = useState({
     name: "",
@@ -500,17 +505,31 @@ const WorkflowEditor = () => {
                 </span>
               </CardDescription>
             </div>
-            <Button
-              onClick={() => {
-                resetForm();
-                setIsCreateDialogOpen(true);
-              }}
-              className="bg-teal-600 hover:bg-teal-700"
-              data-testid="add-workflow-status-btn"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Novo Estado
-            </Button>
+            <div className="flex flex-wrap gap-2 justify-end">
+              {/* Só faz sentido quando a rede TEM cópia própria: sem ela já usa o modelo. */}
+              {rede?.temProprio && (
+                <Button
+                  variant="outline"
+                  onClick={() => setReporAberto(true)}
+                  className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                  data-testid="repor-workflow-modelo-btn"
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Repor ao Modelo
+                </Button>
+              )}
+              <Button
+                onClick={() => {
+                  resetForm();
+                  setIsCreateDialogOpen(true);
+                }}
+                className="bg-teal-600 hover:bg-teal-700"
+                data-testid="add-workflow-status-btn"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Novo Estado
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -607,6 +626,27 @@ const WorkflowEditor = () => {
           </div>
         </CardContent>
       </Card>
+
+      <ReporAoModeloDialog
+        open={reporAberto}
+        onOpenChange={setReporAberto}
+        titulo="Repor o workflow ao modelo"
+        descricao={(
+          <>
+            <p>
+              O workflow desta rede{rede?.empresas?.length ? ` (${rede.empresas.join(", ")})` : ""} volta ao modelo base.
+              As fases, as flags, os modelos de tarefas e as automações que a rede personalizou
+              <strong> perdem-se e não se recuperam</strong>.
+            </p>
+            <p>As outras redes não são afetadas. Para confirmar, escreva a sua password.</p>
+          </>
+        )}
+        onConfirmar={(password) => reporWorkflowAoModelo(password)}
+        onSucesso={() => {
+          toast.success("Workflow reposto ao modelo");
+          fetchStatuses();
+        }}
+      />
 
       {/* Dialog Criar Estado */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>

@@ -682,6 +682,7 @@ ACESSO_DIRECTO_PERMITIDO = {
     "admin_workflow.py": "A edição: tudo filtrado pela rede em contexto.",
     "process_kanban_diagnose.py": "Diagnóstico de infra (Master): olha para a colecção inteira de propósito.",
     "db_indexes.py": "Declara os índices da colecção; não lê fases.",
+    "repor_ao_modelo.py": "Lê os NOMES do MODELO (a regra é a dele, não a de uma rede) e apaga só a cópia da rede em contexto, depois de validada a password.",
 }
 
 

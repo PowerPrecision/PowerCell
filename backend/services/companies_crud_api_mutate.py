@@ -14,6 +14,8 @@ from database import db
 from typing import Optional
 
 from models.company import CompanyCreate, CompanyResponse, CompanyUpdate
+from services.admin_helpers import _audit_log
+from services.reauth_password import exigir_password_actual
 from services.role_scope import utilizador_e_global
 from services.user_management_scope import exigir_empresas_concediveis
 
@@ -67,13 +69,29 @@ async def run_create_company(data: CompanyCreate, *, actor: Optional[dict] = Non
     return CompanyResponse(**doc)
 
 
+def _rede_gravada(doc: Optional[dict]) -> str:
+    """O `network_id` normalizado: ausente, `None` e vazio são a mesma coisa (ilha)."""
+    return str((doc or {}).get("network_id") or "").strip()
+
+
+async def _registar_rasto(actor: dict, acao: str, empresa_id: str, detalhes: dict) -> None:
+    """Rasto em `audit_logs` (sem a password); nunca faz a operação falhar."""
+    try:
+        await _audit_log(acao, "company", empresa_id, actor, detalhes)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[COMPANIES] Falha a registar %s: %s", acao, exc)
+
+
 async def run_update_company(company_id: str, data: CompanyUpdate, *, actor: dict):
     """Atualiza os dados de uma empresa.
 
     Um perfil local só actualiza a SUA empresa e **nunca muda a rede**: o
     `network_id` define quem vê os dados de quem, e deixar o CEO de uma
     empresa pô-lo igual ao de outra dava-lhe, de graça, a leitura dos
-    clientes dessa outra. É decisão do Master.
+    clientes dessa outra. É decisão do Master — e exige a password ACTUAL dele
+    (`reauth_password`) quando a rede MUDA: um token roubado não redesenha a
+    fronteira de dados. Reenviar a mesma rede (o formulário manda o objecto
+    inteiro) não pede nada.
     """
     existing = await db.companies.find_one({"id": company_id})
     if not existing:
@@ -88,6 +106,12 @@ async def run_update_company(company_id: str, data: CompanyUpdate, *, actor: dic
             status_code=403,
             detail="Apenas o perfil Master pode alterar a rede de uma empresa.",
         )
+    rede_antiga = _rede_gravada(existing)
+    rede_nova = _rede_gravada({"network_id": data.network_id}) if data.network_id is not None else rede_antiga
+    mudou_a_rede = rede_nova != rede_antiga
+    if mudou_a_rede:
+        # ANTES de qualquer escrita (a renomeação abaixo já mexe nos utilizadores).
+        await exigir_password_actual(actor, data.confirm_password)
 
     if data.name and data.name != existing.get("name"):
         dup = await db.companies.find_one({"name": data.name})
@@ -108,6 +132,7 @@ async def run_update_company(company_id: str, data: CompanyUpdate, *, actor: dic
             )
 
     update_fields = data.model_dump(exclude_unset=True)
+    update_fields.pop("confirm_password", None)  # nunca chega à base de dados
     update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     await db.companies.update_one(
@@ -129,12 +154,22 @@ async def run_update_company(company_id: str, data: CompanyUpdate, *, actor: dic
         updated["name"] = company_id
     updated.pop("_id", None)
 
+    if mudou_a_rede:
+        await _registar_rasto(
+            actor, "company_network_changed", real_id,
+            {"company_name": existing.get("name"), "rede_antiga": rede_antiga, "rede_nova": rede_nova},
+        )
     logger.info(f"[COMPANIES] Empresa atualizada: {real_id}")
     return CompanyResponse(**updated)
 
 
-async def run_delete_company(company_id: str):
-    """Remove uma empresa e gere utilizadores associados."""
+async def run_delete_company(company_id: str, password: Optional[str], *, actor: dict):
+    """Remove uma empresa e gere utilizadores associados.
+
+    Acção que não se desfaz: exige a password ACTUAL de quem elimina. A ordem é
+    404 (a empresa existe?) → password (403/429) → estado (utilizadores só desta
+    empresa, 400): sem a password o endpoint não diz nada sobre o estado da empresa.
+    """
     company = await db.companies.find_one({"id": company_id})
     if not company:
         company = await db.companies.find_one({"name": company_id})
@@ -142,6 +177,8 @@ async def run_delete_company(company_id: str):
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     real_id = company.get("id", company_id)
     company_name = company.get("name", company_id)
+
+    await exigir_password_actual(actor, password)
 
     users_with_this_company = await db.users.find(
         {"company": company_name},
@@ -203,6 +240,11 @@ async def run_delete_company(company_id: str):
 
     await db.companies.delete_one({"id": real_id})
 
+    await _registar_rasto(
+        actor, "company_deleted", real_id,
+        {"company_name": company_name, "network_id": _rede_gravada(company) or None,
+         "ucrs_removed": deleted_ucrs.deleted_count, "affected_users": len(reassigned_users)},
+    )
     logger.info(
         f"[COMPANIES] Empresa eliminada: {company_name} ({real_id}). "
         f"UCRs removidos: {deleted_ucrs.deleted_count}. "

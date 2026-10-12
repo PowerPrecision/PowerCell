@@ -119,6 +119,11 @@ class Caso:
         return client.get("partner_stage") == "expirado" or client.get("lead_status") == "expired"
 
     @property
+    def esta_associada(self) -> bool:
+        """Já seguiu para a equipa, associada a um cliente existente no destino (colisão B2B)."""
+        return (self.client or {}).get("partner_stage") == "associada"
+
+    @property
     def client_id(self) -> Optional[str]:
         if self.client and self.client.get("id"):
             return self.client["id"]

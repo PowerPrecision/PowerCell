@@ -19,6 +19,14 @@ def _require_mongodb():
         pytest.skip(f"MongoDB não disponível no CI: {type(e).__name__}")
 
 
+def _telemovel_unico() -> str:
+    """Um telemóvel novo por registo: desde o D-38 o telemóvel também não se repete na rede,
+    e uma constante fazia o segundo registo (ou a segunda execução, na mesma base) dar 409."""
+    import random
+
+    return f"+351 9{random.randint(10_000_000, 99_999_999)}"
+
+
 @pytest.mark.asyncio
 async def test_public_client_registration(client):
     """Test public client registration creates user and process"""
@@ -29,7 +37,7 @@ async def test_public_client_registration(client):
         response = await client.post("/public/client-registration", json={
             "name": "Test Cliente Pytest",
             "email": unique_email,
-            "phone": "+351 999 000 111",
+            "phone": _telemovel_unico(),
             "process_type": "credito"
         })
         assert response.status_code == 200
@@ -88,7 +96,7 @@ async def test_public_registration_with_personal_data(client):
         response = await client.post("/public/client-registration", json={
             "name": "Test Cliente Full",
             "email": unique_email,
-            "phone": "+351 888 777 666",
+            "phone": _telemovel_unico(),
             "process_type": "ambos",
             "personal_data": {
                 "nif": unique_nif,
@@ -119,7 +127,7 @@ async def test_public_registration_all_process_types(client):
             response = await client.post("/public/client-registration", json={
                 "name": f"Test Tipo {process_type}",
                 "email": unique_email,
-                "phone": "+351 111 222 333",
+                "phone": _telemovel_unico(),
                 "process_type": process_type
             })
             assert response.status_code == 200, f"Failed for type: {process_type}"

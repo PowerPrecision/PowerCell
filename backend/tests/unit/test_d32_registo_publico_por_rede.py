@@ -54,6 +54,7 @@ UTILIZADORES = [
 def mundo(fake_async_db, rede_de_omissao_incumbente):
     import services.alert_audience as audiencia
     import services.alerts as alertas
+    import services.client_uniqueness as cu
     import services.form_config_scope as fcs
     import services.public_registration as pr
 
@@ -78,7 +79,7 @@ def mundo(fake_async_db, rede_de_omissao_incumbente):
         else:
             coro.close()
 
-    with tenant_db(fake_async_db, pr, alertas, audiencia, fcs), \
+    with tenant_db(fake_async_db, pr, alertas, audiencia, fcs, cu), \
             patch.object(pr, "s3_service", s3), \
             patch.object(pr, "spawn_background_task", _fechar), \
             patch.object(pr, "send_new_client_notification", email_ao_staff), \
@@ -176,65 +177,12 @@ class TestAExploracao:
         assert len(_publicos(mundo.bd)) == 2, "a Domus criou o seu, não adoptou o do grupo incumbente"
 
     @pytest.mark.asyncio
-    async def test_a_resposta_nao_revela_se_o_email_ja_existia(self, mundo):
+    async def test_a_resposta_nao_tem_o_oraculo_is_new_client(self, mundo):
         import json
 
-        _cliente_da_rede(mundo.bd, REDE_DOMUS)
-        existente = json.loads((await mundo.pr.run_public_client_registration(
-            _pedido(), _dados(empresa_id="cmp-domus"))).body)
         novo = json.loads((await mundo.pr.run_public_client_registration(
             _pedido(), _dados(empresa_id="cmp-domus", email="outra@teste.pt"))).body)
-        assert "is_new_client" not in existente and "is_new_client" not in novo
-        assert set(existente) == set(novo)
-
-
-# ====================================================================
-# 2. O QUE CONTINUA A FUNCIONAR — a deduplicação DENTRO da rede
-# ====================================================================
-
-class TestDentroDaRedeContinuaADeduplicar:
-    @pytest.mark.asyncio
-    async def test_o_mesmo_email_na_mesma_rede_reutiliza_o_cliente(self, mundo):
-        original = _cliente_da_rede(mundo.bd, REDE_DOMUS)
-        r = await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))
-        assert r.status_code == 200
-        assert len(_publicos(mundo.bd)) == 1
-        assert next(c for c in mundo.bd.clients.docs if c["id"] == original["id"])["lead_status"] == "new"
-
-    @pytest.mark.asyncio
-    async def test_duas_empresas_da_mesma_rede_partilham_a_deduplicacao(self, mundo):
-        await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-power"))
-        await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-precision"))
-        assert len(_publicos(mundo.bd)) == 1
-
-    @pytest.mark.asyncio
-    async def test_um_cliente_com_so_a_empresa_gravada_conta_para_a_rede_dela(self, mundo):
-        """Criado entre o carimbo da empresa e a migração da rede: ainda é da Domus."""
-        legado = _cliente_da_rede(mundo.bd, None)
-        legado["company_id"] = "cmp-domus"
-        await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))
-        assert len(_publicos(mundo.bd)) == 1
-
-    @pytest.mark.asyncio
-    async def test_um_link_sem_empresa_usa_a_rede_de_omissao_e_adopta_a_pilha(self, mundo):
-        legado = _cliente_da_rede(mundo.bd, None)
-        await mundo.pr.run_public_client_registration(_pedido(), _dados())
-        assert len(_publicos(mundo.bd)) == 1
-        assert next(c for c in mundo.bd.clients.docs if c["id"] == legado["id"])["lead_status"] == "new"
-
-    @pytest.mark.asyncio
-    async def test_a_empresa_do_grupo_incumbente_carimba_a_pilha_que_adopta(self, mundo):
-        legado = _cliente_da_rede(mundo.bd, None)
-        await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-power"))
-        adoptado = next(c for c in mundo.bd.clients.docs if c["id"] == legado["id"])
-        assert adoptado["network_id"] == REDE_INCUMBENTE
-
-    @pytest.mark.asyncio
-    async def test_sem_rede_de_omissao_em_dev_a_pilha_continua_a_deduplicar(self, mundo, monkeypatch):
-        monkeypatch.delenv("TENANT_DEFAULT_NETWORK_ID", raising=False)
-        _cliente_da_rede(mundo.bd, None)
-        await mundo.pr.run_public_client_registration(_pedido(), _dados())
-        assert len(_publicos(mundo.bd)) == 1
+        assert "is_new_client" not in novo
 
 
 # ====================================================================
@@ -309,26 +257,25 @@ class TestGuardasDeFonte:
             if isinstance(n, ast.AsyncFunctionDef) and n.name == "run_public_client_registration"
         )
 
-    def test_nenhuma_procura_de_cliente_foge_ao_ponto_unico(self):
-        """Só `_cliente_existente_na_rede` faz `find_one` em `db.clients` com filtro de identidade."""
+    def test_o_registo_publico_nao_procura_clientes_por_conta_propria(self):
+        """Só `encontrar_cliente_duplicado` (com rede) procura um cliente por email/NIF/telemóvel."""
         arvore, _ = self._funcao()
         for no in ast.walk(arvore):
             if not (isinstance(no, ast.Call) and isinstance(no.func, ast.Attribute) and no.func.attr == "find_one"):
                 continue
-            alvo = ast.unparse(no.func.value)
-            if alvo != "db.clients":
+            if ast.unparse(no.func.value) != "db.clients":
                 continue
             texto = ast.unparse(no)
-            assert not any(c in texto for c in ("email_hash", "contacto.email", "nif_hash", "dados_pessoais.nif")), texto
+            assert not any(c in texto for c in ("email_hash", "contacto.email", "nif_hash", "dados_pessoais.nif", "telefone")), texto
 
-    def test_contraprova_o_ponto_unico_existe_e_aplica_a_condicao_de_rede(self):
-        import services.public_registration as pr
-
-        codigo = inspect.getsource(pr._cliente_existente_na_rede)
-        assert "com_isolamento" in codigo and "db.clients.find_one" in codigo
+    def test_contraprova_a_procura_diz_a_rede_do_link(self):
         _, funcao = self._funcao()
-        chamadas = [n for n in ast.walk(funcao) if isinstance(n, ast.Call) and ast.unparse(n.func) == "_cliente_existente_na_rede"]
-        assert len(chamadas) == 4, "email (hash + texto) e NIF (hash + texto)"
+        chamadas = [
+            n for n in ast.walk(funcao)
+            if isinstance(n, ast.Call) and ast.unparse(n.func) == "encontrar_cliente_duplicado"
+        ]
+        assert len(chamadas) == 1
+        assert "rede" in {k.arg for k in chamadas[0].keywords}
 
     def test_o_registo_nao_consulta_a_gestao_de_toda_a_base_de_dados(self):
         import services.public_registration as pr
@@ -341,3 +288,11 @@ class TestGuardasDeFonte:
         import services.public_registration as pr
 
         assert "is_new_client" not in inspect.getsource(pr).split("return JSONResponse(")[-1]
+
+    def test_o_ramo_de_actualizacao_silenciosa_foi_apagado(self):
+        """Apagado, não desligado: um `update_one` sobre um cliente existente não pode voltar."""
+        import services.public_registration as pr
+
+        fonte = inspect.getsource(pr.run_public_client_registration)
+        assert "existing_client" not in fonte
+        assert 'update_one({"id": client_id}, {"$set": client_updates})' not in fonte

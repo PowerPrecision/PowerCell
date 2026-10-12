@@ -11901,3 +11901,75 @@ Fecho da D-8 (caixas partilhadas por cargo), da D-32 (registo público) e da par
 - Um utilizador `indexacao` em duas redes tem duas caixas: escolhe-se a primeira por ordem da rede e diz-se no log (não há seletor).
 - O Master deixou de receber o push/email de «novo cliente registado» (antes entrava no «primeiro admin»); vê os registos na página de Registos.
 
+
+---
+
+## Iteração `d38-duplicados-por-rede` (Out 2026) — D-38, D-14, colisão B2B (D-39), «Repor ao Modelo» e código morto
+
+### 1. D-38 / D-14 — NIF, Email e Telemóvel não se repetem dentro da REDE
+- **O que estava errado (três coisas):** o formulário público encontrava o cliente por email e **actualizava-o** (telefone, dados pessoais, `lead_status` outra vez «novo»); a criação do CRM procurava na base **inteira** e o 409 devolvia `id` e nome do cliente existente de qualquer rede; o telemóvel nunca foi verificado e a edição só olhava NIF e email.
+- **Fix:** `services/client_uniqueness.py` (ponto único) — três campos, procura na rede de destino (`ambito_de_unicidade`), `telefones_candidatos` (com/sem 351, `00351`), `so_o_que_mudou` na edição. Registo público: 409 genérico `DUPLICATE_CLIENT` (sem id/nome/campo) e **nada criado nem alterado**; ramo de upsert apagado.
+- **Achado durante os testes:** sem carimbo, a criação procurava só a «pilha por carimbar» (`rede=None`) e deixava passar duplicados na rede de omissão carimbada → procura agora a rede de omissão inteira. Os 4 primeiros ficheiros de teste do mundo do parceiro não patchavam `client_uniqueness` e falavam com o `db` real.
+- **Frontend:** aviso persistente no formulário público (`registo-duplicado`), `duplicateClient.js` com «telefone» e a mensagem «Já existe um registo associado a este NIF, Email ou Telemóvel.».
+- **Medição:** 14 mutações do backend (todas mortas), `test_d38_duplicados_por_rede.py` (39) + `tests/integration/test_duplicados_por_rede_mongo.py` (8, MongoDB real com blind indexes reais).
+
+### 2. Adenda — colisão B2B (cross-network)
+- Hierarquia: **NIF primeiro; email só sem NIF**; um NIF presente que não coincide não cai para o email. No match, a lead do parceiro **associa-se ao cliente existente e o destino não vê nada reescrito** (nem email, telemóvel, NIF, nome, `lead_status`); entrada `partner_leads` sem dados pessoais (só os NOMES dos campos divergentes). Rascunho → `associada` (parceiro vê «submetida», fechada, sem o id do cliente existente).
+- `services/b2b_client_match.py`, `partner_drafts._associar_a_cliente_existente`. 16 mutações medidas; **a primeira deixou vivo o gate do `upload-url`** (o teste só exercitava o `confirm-upload`).
+- **A Partilha Explícita de um processo não copia clientes** — não tem colisão. Dívida **D-39**: os ficheiros do parceiro ficam na pasta do registo dele.
+
+### 3. `SharedEmailConfigSection.js` apagado (514 linhas, sem importadores)
+
+### 4. «Repor ao Modelo» (workflow e `form_config` de uma rede) com password
+- `POST /admin/workflow-statuses/reset-to-model` e `POST /admin/form-config/reset-to-model`; `services/reauth_password.py` (403, travão por utilizador, não passa a personificar, password fora de logs e rasto) e `services/repor_ao_modelo.py` (apaga só a cópia da rede; 409 com as fases em uso; modelo vazio recusa; idempotente).
+- UI: `ReporAoModeloDialog` em `WorkflowEditor` e `FormManagementPage`, só com cópia própria.
+- Medição: 20 mutações no backend + 13 no frontend; 2 vivas na 1ª passagem (gate redundante contra duplo envio e o `skipErrorToast` do `api.js`) → testes novos, mortas; 1 viva no backend (modelo vazio) porque o 409 coincidia com o das fases em uso.
+
+### Fica dito
+- O registo público recusa um contacto já registado: um cliente que **volta** a registar-se pelo site já não vê os dados novos acrescentados (decisão do dono do produto).
+- A regra da unicidade vale para o CRM e o formulário público; o portal do parceiro (`partner_leads`) continua a aceitar (marca `possible_duplicate_of`) — a colisão B2B resolve-se na libertação.
+- Telemóveis de família passam a ser bloqueados na mesma rede (consequência literal da regra).
+- Há uma corrida residual (dois registos simultâneos com o mesmo contacto): sem índice único em `contacto.telefone_hash`/`email_hash`, a guarda é aplicacional.
+
+
+---
+
+## Iteração `diagnostico-de-duplicados` (Out 2026) — fecho do ciclo D-38 e código morto
+
+### 1. Diagnóstico de duplicados em produção (só leitura)
+- `scripts/diagnose_client_duplicates.py` + `services/client_duplicates_audit.py` (puro). Responde: quantos clientes violam «NIF, Email e Telemóvel não se repetem na rede», em que rede, por que campo — e portanto se um índice único por rede (a única coisa que fecha a corrida residual da D-38) é viável.
+- **Estritamente de leitura:** sem bandeira de escrita (só `--limite-exemplos`, `--csv`, `--dados-pessoais`), `maxTimeMS` nas leituras, guarda por AST sobre o script E o módulo puro (nenhuma chamada de escrita, nenhum operador `$set`/`$out`…), com contraprova de que o detector apanha uma escrita e de que o script lê mesmo `clients`/`companies`/`processes`. Corre contra produção de propósito (sem `require_non_production_db`). Código 2 se a base não responder.
+- **A identidade é a da guarda**, não uma segunda regra: NIF = 9 dígitos, email minúsculas, telemóvel por `telefones_candidatos` (`912…`, `+351 912…`, `00351912…` são o mesmo); teste de concordância contra a guarda em todas as combinações.
+- **Rede de cada cliente:** carimbo → rede da empresa (ilha implícita sem grupo) → rede de omissão. O mesmo valor em redes diferentes conta à parte como informação, não como violação (D-32). Eliminados não contam (como na guarda).
+- **Saída:** por rede (clientes e grupos por campo), «casos a decidir à mão» (a mesma pessoa inserida duas vezes repete 3 campos e é UM caso: componentes ligados), nº de processos por cliente em conflito (ajuda a escolher qual manter) e o veredicto «índice único viável / quantos casos o impedem». **Valores mascarados e sem nomes** por omissão (`*****0004`, `a***@x.pt`); `--dados-pessoais` mostra tudo. Zero clientes lidos NÃO é «sem duplicados» (aponta para DB_NAME errado). Valores que não se decifram comparam-se pelo índice cego e di-lo.
+- Cobertura: `tests/unit/test_diagnostico_de_duplicados.py` (31) e `tests/integration/test_diagnostico_de_duplicados_mongo.py` (5, MongoDB real com o cifrador de produção; **o oráculo é a guarda de produção**: o que o relatório diz repetido, a guarda recusa, e vice-versa; e a base fica byte a byte igual antes/depois). 9 mutações medidas, todas mortas.
+- **Uso:** `MONGO_URL=… DB_NAME=… TENANT_DEFAULT_NETWORK_ID=… python scripts/diagnose_client_duplicates.py [--csv f.csv]`. Resolver os casos é decisão humana (qual cliente fica, para onde vão os processos); nada aqui o automatiza.
+
+### 2. `CompanyEmailConfigSection.js` apagado (sem importadores)
+- Fecha o par com a `SharedEmailConfigSection.js` da iteração anterior. A UI real é `CompaniesAdminTab.jsx` e `EmailAccountsPage`/`SharedEmailCard`.
+
+
+---
+
+## Iteração `accoes-destrutivas-com-password` (Out 2026) — blindagem de acções destrutivas e alerta ao Master
+
+### 1. A reautenticação por password passa a cobrir mais três acções (e o «Repor ao Modelo» já a tinha)
+- **Eliminar uma empresa** (`DELETE /admin/companies/{id}`, só Master): corpo `{password}`; sem corpo responde **400** (e não 422 — o corpo é opcional de propósito para a mensagem ser a certa), password errada 403, travão 429. Ordem: Master → 404 → **password** → estado (utilizadores só desta empresa, 400). Sem a password o endpoint não diz nada sobre o estado da empresa, e a reatribuição de utilizadores (que corre ANTES de apagar) só acontece depois dela. Deixa rasto (`company_deleted`).
+- **Alterar o `network_id` de uma empresa** (`PUT /admin/companies/{id}`, só Master): campo `confirm_password` no corpo, exigido **apenas quando a rede MUDA** (compara com a gravada; `None`, ausente e vazio são a mesma coisa — empresa isolada; um espaço à direita não conta). Reenviar a mesma rede — o formulário manda o objecto inteiro — não pede nada, senão cada edição do nome pedia password. Deixar a rede (→ vazio) ou dar rede a uma empresa isolada **é** uma mudança. A password vem **antes** da renomeação (que mexe nos utilizadores) e antes de qualquer escrita. `confirm_password` tem `exclude=True` (nunca vai ao `$set`) e `repr=False`. Rasto `company_network_changed` com a rede antiga e a nova.
+- **Anonimização em lote** (`POST /gdpr/batch`, só Master): campo `password`, exigido quando `dry_run` é **falso**. O ensaio (`dry_run`, por omissão) não altera nada e não a pede — pedi-la ali ensinava a ignorá-la. Ganhou `@limiter.limit("10/minute")` + `response: Response` (e o corpo passou a chamar-se `data`: o slowapi só aceita o `Request` com o nome `request`).
+- `ConfirmacaoPorPassword` (em `reauth_password.py`) é o corpo genérico; o inventário por AST (`test_accoes_destrutivas_com_password.py::TestInventario`) lista as 5 funções destrutivas, exige a chamada a `exigir_password_actual` em cada uma **e que ela venha antes de qualquer escrita** (com contraprova de que o detector apanha uma escrita antes). Uma acção destrutiva nova entra na lista.
+
+### 2. Frontend
+- `ConfirmarComPasswordDialog` (genérico: rótulo, ícone, prefixo de `data-testid`, leitura de erros) e `utils/confirmarComPassword.js`; o `ReporAoModeloDialog` e `utils/reporAoModelo.js` passaram a invólucros (mesmos `data-testid`; os testes anteriores passam sem alterações).
+- **`CompaniesAdminTab`**: se o Master muda a rede, o pedido **não sai do formulário** — abre o diálogo («A rede de X passa de A para B…») e só o diálogo envia, com a password. Erro inline, o diálogo e o formulário não fecham com erro.
+- **`services/api.js`**: `deleteCompany(id, password)` e `runGdprBatch({dry_run:false,…})` **recusam sem password** (a promessa rejeita, nem sai o pedido) e usam `skipErrorToast`; `updateCompany(id, data, {password})` junta `confirm_password`.
+- **Dito:** hoje **não existe botão de «Eliminar empresa» nem ecrã de anonimização em lote** no frontend (`deleteCompany` e `runGdprBatch` não têm chamadores). O servidor exige a password na mesma e o cliente da API também; quem ligar esses ecrãs amanhã usa o `ConfirmarComPasswordDialog`. Não se criou UI nova (fora do pedido).
+
+### 3. Alerta ao Master quando um perfil LOCAL repõe ao modelo
+- `services/alerta_ao_master.py`: depois de uma reposição que **aconteceu** (`reposto: true`) feita por quem trabalha como perfil local (Admin/CEO — pelo perfil EFECTIVO), cria **uma notificação por Master activo** (`type: destructive_action_alert`, título com QUEM e EM QUE REDE — é o que o sino mostra —, `details` com o email, o papel, as empresas da rede e as fases removidas) e envia **email urgente** em segundo plano. Destinatários = `role ∈ PAPEIS_GLOBAIS` activos; nunca o autor (um Master com o chapéu de Admin avisa os OUTROS), nunca Admin/CEO/outra rede. **Nunca derruba a operação** (falha a gravar, falha a procurar os Master, email que falha: `warning` e segue); sem nenhum Master activo di-lo no log.
+- Não alerta: password errada, pedido sem efeito (a rede já usava o modelo), 409 por processos em curso, rede fora do âmbito, formulário que já não estava lá (corrida). Complementa o `audit_logs`, não o substitui.
+- Frontend: `destructive_action_alert` com ícone/cor/etiqueta no sino e na página de notificações.
+
+### Medição
+- 24 mutações no backend e 15 no frontend. **Frontend: 1 viva na 1.ª passagem** (`trim()` da comparação de redes — o `CompanyNetworkField` já apara no `onChange`, logo o teste do «espaço à direita» nunca exercitava a diferença; era um teste fraco, não uma mutação perdida) → teste novo com uma empresa gravada com o espaço (`"grupo_x "`) e o utilizador a escrever `grupo_x`; morta.
+- **Armadilha de ambiente:** o `mongod` local desapareceu quando a sessão foi retomada (a máquina reiniciou) e as suites passaram a levar 60 s só no arranque — a fixture de sessão espera pelo timeout da ligação. Antes de concluir que «os testes ficaram lentos», `pgrep mongod`.

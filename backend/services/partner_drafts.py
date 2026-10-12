@@ -62,6 +62,9 @@ COLECAO = "partner_drafts"
 ESTADO_PENDENTE = "pendente"
 ESTADO_EXPIRADO = "expirado"
 ESTADO_DEVOLVIDA = "devolvida"
+#: A lead chegou à equipa e foi ASSOCIADA a um cliente que já existia na rede de destino
+#: (colisão B2B, `b2b_client_match`). O parceiro vê-a como submetida; já não a pode mexer.
+ESTADO_ASSOCIADA = "associada"
 
 #: Estados em que o parceiro ainda pode mexer (editar, enviar ficheiros).
 ESTADOS_EDITAVEIS = (ESTADO_PENDENTE, ESTADO_DEVOLVIDA)
@@ -70,6 +73,7 @@ ROTULOS_DOS_ESTADOS = {
     ESTADO_PENDENTE: "Pendente — falta o comprovativo de pagamento",
     ESTADO_EXPIRADO: "Expirado",
     ESTADO_DEVOLVIDA: "Devolvida pela equipa",
+    ESTADO_ASSOCIADA: "Submetida à equipa",
 }
 
 #: A categoria que liberta a lead. O valor canónico (o que o ecrã envia).
@@ -224,6 +228,14 @@ async def libertar_se_tiver_comprovativo(client_id: str) -> Optional[dict]:
         await db.partner_drafts.delete_one({"id": client_id})
         return None
 
+    # COLISÃO B2B: o cliente pode já existir na rede de destino. Se existe, a lead
+    # associa-se a ele em vez de nascer outro (NIF primeiro, email só sem NIF) e o
+    # destino mantém os seus contactos intactos. Falhar a procura NUNCA perde a lead:
+    # segue o caminho de sempre (um registo novo, marcado como possível duplicado).
+    associado = await _associar_a_cliente_existente(rascunho, comprovativo, agora)
+    if associado:
+        return associado
+
     cliente = {k: v for k, v in rascunho.items() if k not in ("partner_stage", "last_activity_at", "devolucao")}
     cliente.update({
         "lead_status": "new",
@@ -248,6 +260,49 @@ async def libertar_se_tiver_comprovativo(client_id: str) -> Optional[dict]:
     await db.partner_drafts.delete_one({"id": client_id})
     logger.info("[PARCEIRO] Lead %s libertada para a equipa (comprovativo recebido).", client_id)
     return cliente
+
+
+async def _associar_a_cliente_existente(rascunho: dict, comprovativo: dict, agora: str) -> Optional[dict]:
+    """Colisão B2B: associa a lead ao cliente que já existe na rede de destino.
+
+    Devolve o cliente EXISTENTE (marcado com ``_associada``) ou ``None`` quando
+    não há correspondência — ou quando a procura falhou. A regra completa, e o
+    que se recusa fazer, está em `b2b_client_match`.
+    """
+    from services.b2b_client_match import encontrar_cliente_de_destino, entrada_de_associacao
+    from services.encryption import decrypt_client_data
+
+    try:
+        lead = decrypt_client_data(dict(rascunho))
+        existente, por = await encontrar_cliente_de_destino(lead, rede=rascunho.get("network_id"))
+        if not existente:
+            return None
+        entrada = entrada_de_associacao(
+            lead=lead, existente=existente, por=por, comprovativo=comprovativo, quando=agora,
+        )
+        # SÓ acrescenta: nenhum campo do cliente do destino é reescrito.
+        await db.clients.update_one({"id": existente["id"]}, {"$push": {"partner_leads": entrada}})
+        # O rascunho fica como registo do PARCEIRO (submetido, fechado), sem o id do
+        # cliente existente na superfície dele; `matched_client_id` é só da equipa.
+        await db.partner_drafts.update_one(
+            {"id": rascunho["id"]},
+            {"$set": {
+                "partner_stage": ESTADO_ASSOCIADA,
+                "matched_client_id": existente["id"],
+                "associada_em": agora,
+                "updated_at": agora,
+                "last_activity_at": agora,
+            }},
+        )
+        logger.info(
+            "[PARCEIRO] Lead %s associada ao cliente %s da rede de destino (por %s; contactos divergentes: %s).",
+            rascunho.get("id"), existente.get("id"), por, entrada["campos_divergentes"] or "nenhum",
+        )
+        visivel = decrypt_client_data({k: v for k, v in existente.items() if k != "_id"})
+        return {**visivel, "_associada": True}
+    except Exception as exc:  # noqa: BLE001 — a lead segue o caminho normal, nunca se perde
+        logger.warning("[PARCEIRO] Falha na colisão B2B da lead %s: %s", rascunho.get("id"), exc)
+        return None
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -344,6 +399,7 @@ __all__ = [
     "COLECAO",
     "DIAS_ATE_EXPIRAR",
     "ESTADOS_EDITAVEIS",
+    "ESTADO_ASSOCIADA",
     "ESTADO_DEVOLVIDA",
     "ESTADO_EXPIRADO",
     "ESTADO_PENDENTE",

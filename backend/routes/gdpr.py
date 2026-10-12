@@ -8,7 +8,9 @@ Do **not** overwrite services/gdpr.py (core compliance service).
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, Response
+
+from middleware.rate_limit import limiter
 
 from models.auth import UserRole
 from services.auth import require_roles
@@ -56,12 +58,18 @@ async def anonymize_single(
 
 
 @router.post("/batch")
+@limiter.limit("10/minute")
 async def anonymize_batch(
-    request: BatchAnonymizeRequest,
+    request: Request,
+    response: Response,
+    data: BatchAnonymizeRequest,
     current_user: dict = Depends(require_roles([UserRole.MASTER]))
 ):
-    """Executa anonimização em lote (operação GLOBAL sobre a base: só o Master)."""
-    return await run_anonymize_batch(request, current_user)
+    """Executa anonimização em lote (operação GLOBAL sobre a base: só o Master).
+
+    Fora do ensaio (`dry_run=false`) exige a password actual (`password` no corpo).
+    """
+    return await run_anonymize_batch(data, current_user)
 
 
 @router.get("/export/{process_id}")

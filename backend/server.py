@@ -109,6 +109,7 @@ from routes.restore import router as restore_router
 from routes.automation import router as automation_router
 from routes.automation import engine_router as automations_engine_router
 from routes.form_config import router as form_config_router
+from routes.repor_ao_modelo import router as repor_ao_modelo_router
 from routes.async_jobs import router as async_jobs_router
 from routes.audit import router as audit_router
 from routes.annotations import router as annotations_router
@@ -615,6 +616,7 @@ app.include_router(admin_encryption_router, prefix="/api")
 app.include_router(automation_router, prefix="/api")
 app.include_router(automations_engine_router, prefix="/api")
 app.include_router(form_config_router, prefix="/api")
+app.include_router(repor_ao_modelo_router, prefix="/api")
 app.include_router(restore_router, prefix="/api")
 app.include_router(async_jobs_router, prefix="/api")
 app.include_router(audit_router, prefix="/api")

@@ -76,6 +76,7 @@ logger = logging.getLogger(__name__)
 VALIDADE_DO_URL_DE_DESCARGA_SEGUNDOS = 900
 ERRO_PEDIDO_NAO_ENCONTRADO = "Pedido não encontrado."
 ERRO_FICHEIRO_NAO_ENCONTRADO = "Ficheiro não encontrado."
+ERRO_LEAD_ASSOCIADA = "Este registo já foi submetido à equipa e já não pode receber mais ficheiros por aqui."
 ERRO_LEAD_EXPIRADA = (
     "Esta lead expirou por inactividade (60 dias). Submeta uma nova lead ou "
     "contacte o seu consultor."
@@ -129,6 +130,8 @@ async def run_partner_upload_url(partner: dict, case_id: str, data: PartnerUploa
     caso = await resolver_caso(partner, case_id)
     if caso.esta_expirado:
         raise HTTPException(status_code=409, detail=ERRO_LEAD_EXPIRADA)
+    if caso.esta_associada:
+        raise HTTPException(status_code=409, detail=ERRO_LEAD_ASSOCIADA)
     if data.request_id:
         await _pedido_do_caso(caso, data.request_id)
 
@@ -253,6 +256,8 @@ async def run_partner_confirm_upload(partner: dict, case_id: str, data: PartnerC
     caso = await resolver_caso(partner, case_id)
     if caso.esta_expirado:
         raise HTTPException(status_code=409, detail=ERRO_LEAD_EXPIRADA)
+    if caso.esta_associada:
+        raise HTTPException(status_code=409, detail=ERRO_LEAD_ASSOCIADA)
 
     # 1. POSSE ANTES DE TUDO (Incidente P0). Nem se sonda o objecto: um 403
     #    vs 400 sobre uma chave alheia seria um oráculo do bucket.

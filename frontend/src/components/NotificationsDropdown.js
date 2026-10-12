@@ -34,7 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { ScrollArea } from "./ui/scroll-area";
-import { Bell, BellRing, UserPlus, Clock, FileText, Calendar, AlertTriangle, CheckCircle, Volume2, VolumeX, ArrowRight, Mail, Inbox, Send, MessageSquare } from "lucide-react";
+import { Bell, BellRing, UserPlus, Clock, FileText, Calendar, AlertTriangle, CheckCircle, Volume2, VolumeX, ArrowRight, Mail, Inbox, Send, MessageSquare, ShieldAlert } from "lucide-react";
 import { getNotifications, markNotificationRead } from "../services/api";
 import { toast } from "sonner";
 import { safeDateStr } from "../lib/utils";
@@ -49,6 +49,7 @@ import {
 
 const notificationIcons = {
   new_registration: UserPlus,
+  destructive_action_alert: ShieldAlert,
   age_under_35: AlertTriangle,
   pre_approval_countdown: Clock,
   document_expiry: FileText,
@@ -66,6 +67,7 @@ const notificationIcons = {
 };
 
 const notificationColors = {
+  destructive_action_alert: "text-destructive bg-destructive/10",
   new_registration: "text-blue-500 bg-blue-50",
   age_under_35: "text-amber-500 bg-amber-50",
   pre_approval_countdown: "text-orange-500 bg-orange-50",

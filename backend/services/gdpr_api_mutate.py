@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from database import db
+from services.reauth_password import exigir_password_actual
 from services.gdpr import (
     anonymize_process_data,
     anonymize_user_data,
@@ -86,6 +87,8 @@ async def run_anonymize_single(request: AnonymizeRequest, current_user: dict):
 
 async def run_anonymize_batch(request: BatchAnonymizeRequest, current_user: dict):
     if not request.dry_run:
+        # Irreversível: password ACTUAL antes de qualquer escrita. O ensaio (dry_run) não altera nada.
+        await exigir_password_actual(current_user, request.password)
         logger.warning(
             f"[GDPR] Anonimização em lote iniciada por {current_user.get('email')} "
             f"(batch_size={request.batch_size})"

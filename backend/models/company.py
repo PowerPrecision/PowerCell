@@ -82,6 +82,12 @@ class CompanyUpdate(BaseModel):
     imap_password: Optional[str] = Field(None, max_length=500, description="Password IMAP da empresa")
     imap_host: Optional[str] = Field(None, max_length=200, description="Servidor IMAP da empresa")
     imap_port: Optional[int] = Field(None, description="Porto IMAP da empresa")
+    # Reautenticação: só é exigida quando a REDE muda (decide o servidor). `exclude=True`
+    # tira-a de `model_dump`, logo nunca chega ao `$set`; `repr=False` tira-a dos logs.
+    confirm_password: Optional[str] = Field(
+        None, max_length=256, repr=False, exclude=True,
+        description="Password actual de quem altera o network_id (obrigatória nessa alteração).",
+    )
 
     @field_validator("nif")
     @classmethod

@@ -339,46 +339,63 @@ do passo 2.
 
 ## Produto e âmbito
 
-### D-38 · O registo público actualiza, sem prova de posse, um cliente já existente da mesma rede
-**Onde:** `services/public_registration.py` (ramo `if existing_client:`)
+### D-39 · Colisão B2B: os ficheiros do parceiro ficam na pasta do registo dele
+**Onde:** `services/b2b_client_match.py`, `services/partner_drafts.py::_associar_a_cliente_existente`
 
-O D-32 confinou a procura de duplicados à rede do link, mas dentro da rede o
-formulário **anónimo** continua a encontrar o cliente por email e a
-**actualizá-lo**: telefone, `custom_fields`, `personal_data`, `titular2_data` e
-`lead_status` (volta a «novo»). Quem souber o email de um cliente de uma empresa
-pode, pelo formulário, alterar-lhe os dados pessoais — sem login nem prova de que
-o email é seu.
+Quando a lead de um parceiro corresponde a um cliente que já existe na rede de
+destino (NIF primeiro, email só sem NIF), associa-se a ele em vez de nascer outro
+— sem tocar nos contactos do destino. O que **não** se fez: os ficheiros que o
+parceiro enviou antes da libertação ficam na pasta do **registo dele**
+(`Documentação Clientes/{lead_id}/…`), não na do cliente existente. A entrada
+`partner_leads` do cliente guarda `pasta_dos_documentos_do_lead` para a
+consolidação manual.
 
-**Porque foi adiado:** muda o comportamento de produto (hoje um cliente que volta
-a registar-se vê os dados novos acrescentados) e a alternativa já existe no
-Portal do Parceiro (`partner_leads`): criar um registo novo com
-`possible_duplicate_of` para a triagem e **nunca** escrever num cliente
-existente. Decidir entre as duas é do dono do produto.
+**Porque foi adiado:** mover objectos S3 é a operação que partiu 205 ligações no
+Épico 10; a pasta de posse deriva do id do cliente, logo re-apontar `db.documents`
+sem mover faria o proxy recusar a chave (403). Qualquer das duas é uma decisão
+sobre S3, não sobre a regra de identificação.
 
-**O que fecha isto:** passar o ramo existente ao desenho do `partner_leads`
-(registo novo + marca de duplicado + resposta igual nos dois casos) e deixar a
-actualização para o Portal, onde há credencial.
+**Para fechar:** um passo explícito da equipa (religar/consolidar com
+`s3_relink`) ou uma cópia controlada para a pasta do cliente, com `db.documents`
+re-apontado no mesmo acto. Fica também por decidir se, sem correspondência por NIF
+mas com email/telemóvel iguais aos de OUTRO cliente da rede, a libertação deve
+mesmo criar o registo (hoje cria e marca `possible_duplicate_of`: o NIF diz que é
+outra pessoa, e perder uma lead paga por um email partilhado é pior).
 
-### D-14 · O formulário público pode criar um cliente com NIF repetido
-**Onde:** `backend/services/public_registration.py` (`db.clients.insert_one`)
+### D-40 · A unicidade de NIF/Email/Telemóvel é aplicacional (sem índice único)
+**Onde:** `backend/services/client_uniqueness.py`; medição em `scripts/diagnose_client_duplicates.py`
 
-O Lote 2 (ponto 4) fechou a unicidade de NIF/Email nas duas portas do CRM —
-criação e edição — com o ponto único `services/client_uniqueness.py`. O
-formulário **público** continua a inserir sem essa guarda, pelo que a
-invariante não é uma invariante: um cliente que se registe duas vezes pelo
-site cria o duplicado que a edição já não deixa fabricar.
+A guarda do D-38 verifica antes de gravar. Dois pedidos simultâneos com o mesmo
+contacto podem passar os dois (corrida residual). Só um índice único parcial por
+rede sobre os blind indexes (`network_id` + `*_hash`, ignorando eliminados e
+vazios) a fecha — e esse índice **recusa-se a nascer** enquanto houver duplicados
+na base, porque a regra é nova e os dados são antigos.
 
-**Porque foi adiado:** não é esquecimento, é uma decisão de produto que não se
-toma dentro de uma correcção técnica. Um 409 numa porta EXTERNA perde a lead
-em vez de a tratar, e o que ali faz sentido é reaproveitar o cliente
-existente — o que muda o fluxo de negócio (a quem fica atribuído? o que
-acontece aos dados novos que ele submeteu? e aos documentos?).
+**Porque foi adiado:** antes de decidir é preciso saber quantos casos existem.
+O diagnóstico (só leitura) responde: corrê-lo em produção e ver «índice único
+viável» ou o nº de casos a resolver à mão.
 
-**Para fechar:** decidir entre (a) reaproveitar o cliente existente e anexar a
-submissão nova ao registo que já existe, (b) criar sempre e sinalizar para a
-Sala de Triagem fundir, ou (c) recusar com uma mensagem que mande o cliente
-usar o Portal. Qualquer das três reutiliza `encontrar_cliente_duplicado`, que
-já existe e é o que a criação e a edição usam.
+**Para fechar:** resolver os casos que o relatório listar (manter um cliente,
+passar-lhe os processos, eliminar o outro — decisão humana) e declarar o índice
+em `db_indexes.py` (nunca num passo de operações). O `network_id` por carimbar
+(rede de omissão) e a rede da empresa sem carimbo têm de ser tratados no índice
+(ou backfill prévio), senão a pilha antiga escapa-lhe.
+
+### D-41 · Acções destrutivas que ainda não pedem a password
+**Onde:** `backend/services/gdpr_api_mutate.py::run_anonymize_single`, outras rotas só-Master/Admin destrutivas
+
+A reautenticação por password (`reauth_password`) cobre hoje: repor ao modelo,
+eliminar uma empresa, alterar o `network_id` e a anonimização em lote. Ficaram de
+fora, por não estarem no pedido: **`POST /gdpr/anonymize`** (anonimização de UM
+processo/utilizador — igualmente irreversível, aberta a Admin/CEO da rede), o
+restauro de backups e as migrações/resets de processos (só-Master). Além disso
+**não existe UI** para eliminar empresas nem para a anonimização em lote (os
+clientes da API recusam sem password, o servidor também).
+
+**Para fechar:** decidir quais destas acções merecem a mesma parede (a individual
+é a mais provável) e acrescentá-las ao inventário
+`test_accoes_destrutivas_com_password.py::TestInventario::COM_PASSWORD`; se se
+criar UI, usar o `ConfirmarComPasswordDialog`.
 
 ### D-18 · `co_buyers` tem dois significados
 **Onde:** `backend/services/ai_document.py::build_update_data_from_extraction`
@@ -691,6 +708,8 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 
 | # | Dívida | Fechada em |
 |---|---|---|
+| D-38 | O registo público actualizava, sem prova de posse, um cliente já existente da mesma rede | Iteração `d38-duplicados-por-rede` — **NIF, Email e Telemóvel não se repetem dentro da rede**: o formulário público responde 409 genérico (`DUPLICATE_CLIENT`, sem id, nome nem campo — a porta é anónima) e não cria nem altera nada; o ramo de upsert foi apagado, não desligado. A criação e a edição do CRM passaram do âmbito GLOBAL para o da rede (o 409 devolvia o id e o nome de clientes de OUTRAS redes) e verificam também o telemóvel (com e sem indicativo, via blind index); na edição só se verifica o que MUDOU. `services/client_uniqueness.py` é o ponto único. Cobertura: `test_d38_duplicados_por_rede.py` (39), `tests/integration/test_duplicados_por_rede_mongo.py` (8, MongoDB real), `PublicClientForm.duplicado.test.jsx`. 14 mutações medidas, todas mortas |
+| D-14 | O formulário público podia criar um cliente com NIF repetido | Iteração `d38-duplicados-por-rede` — fechada pelo mesmo ponto: opção (c) (recusar com mensagem clara). Limite dito: o portal do parceiro (`partner_leads`) não recusa — marca `possible_duplicate_of` e a colisão B2B (D-39) resolve-se na libertação |
 | D-8 | `db.emails`: faltavam as caixas partilhadas por cargo | Iteração `d8-caixas-partilhadas-por-rede` — o carimbo dos emails já estava fechado na escrita; faltava o que o impedia nas caixas partilhadas: a configuração era UMA por cargo para o sistema inteiro (o Admin da Domus editava, e ligava por OAuth, a Indexação da Power) e a regra «caixa partilhada do seu cargo» dava a todo o `indexacao` de todas as redes os emails de todas as redes. A caixa passa a identificar-se por **(cargo, rede)**: `shared_mailbox_scope` é o ponto único (administração pela rede da empresa activa; o email herda a rede da caixa; leitura só dentro do âmbito; o aviso em tempo real só a quem tem o email no âmbito, incluindo o da Caixa Geral). A pilha antiga (sem `network_id`) é da rede de omissão — nada se apaga nem se move. Backfill `scripts/backfill_shared_mailbox_network_id.py` (recusa-se sem rede) |
 | D-32 | O registo público procurava e actualizava clientes em todas as redes | Iteração `d8-caixas-partilhadas-por-rede` — `POST /public/client-registration` é anónimo e escreve: procurava o email em toda a base de dados e **actualizava** o cliente encontrado (de qualquer rede), re-marcava-o como lead novo e devolvia o `client_id` e `is_new_client` (um oráculo). A procura vive agora na rede do link (`ambito_do_registo`: a rede + as suas empresas; a pilha por carimbar só conta para a rede de omissão); a mesma pessoa em duas redes são dois clientes; o aviso à gestão (push + email com nome, email e telefone) ia ao «primeiro admin da base de dados» e passa a ir só à gestão da rede do link; `is_new_client` saiu |
 | D-34 (changelog) | Geração por IA e diagnóstico do changelog aceitavam Admin e CEO | Iteração `d8-caixas-partilhadas-por-rede` — só-Master, por uma constante única e inventário por AST |
