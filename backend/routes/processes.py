@@ -12,6 +12,7 @@ Autor: PowerCell Development Team
 """
 import logging
 from typing import List, Optional
+from utils.frontend_url import get_frontend_url
 from fastapi import APIRouter, Body, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict
 
@@ -284,6 +285,7 @@ async def create_client_process(
         log_history_fn=log_history,
         broadcast_fn=broadcast_process_delta,
         response_cls=ProcessResponse,
+        frontend_url=get_frontend_url(request),
     )
 
 # ====================================================================

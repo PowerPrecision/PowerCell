@@ -65,6 +65,12 @@ services:
       - key: JWT_PARTNER_SECRET
         sync: false
 
+      # ── URL PÚBLICO DO FRONTEND ──
+      # Domínio do Portal do Cliente nos emails de boas-vindas quando o pedido não traz
+      # Referer/Origin (tarefas de fundo, retry da fila). Sem ele o email sai SEM o link.
+      - key: FRONTEND_URL
+        sync: false
+
       # ── CORS ──
       # Origens explícitas (o regex ALLOW_VERCEL_PREVIEWS cobre *.vercel.app)
       - key: CORS_ORIGINS

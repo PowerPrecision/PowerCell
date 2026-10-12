@@ -49,6 +49,7 @@ from utils.search_filters import create_accent_insensitive_regex, build_multiwor
 logger = logging.getLogger(__name__)
 
 from services.client_portal_email import _send_portal_welcome_email_safe
+from services.encryption import limpar_blind_indexes_de_campos_vazios
 
 async def run_get_client(
     client_id: str,
@@ -168,7 +169,9 @@ async def run_get_client(
 
 async def run_create_client(
     client_data: ClientCreate,
-    user: dict
+    user: dict,
+    *,
+    frontend_url: Optional[str] = None,
 ):
     """Criar um novo cliente."""
     
@@ -358,11 +361,35 @@ async def run_create_client(
             portal_access_code=client.portal_access_code,
             client_id=client.id,
             user_id=user.get("id"),
+            frontend_url=frontend_url,
+            user=user,
         ), name=f"portal-welcome-email:{client.id}")
 
     # Desencriptar para a resposta
     client_dict = decrypt_client_data(client_dict)
     return Client(**client_dict)
+
+def _seccao_decifrada(client: dict, seccao: str) -> dict:
+    """Uma secção do cliente (`contacto`/`dados_pessoais`) em claro, para fazer merge."""
+    from services.encryption import decrypt_client_data
+
+    return decrypt_client_data({seccao: client.get(seccao) or {}}).get(seccao) or {}
+
+
+def sync_de_contactos_limpos(campos_limpos) -> dict:
+    """`$set` que tira dos PROCESSOS os contactos que o cliente deixou de ter."""
+    sync: dict = {}
+    if "email" in campos_limpos:
+        sync.update({
+            "client_email": "", "personal_data.email": "", "personal_data.email_hash": "",
+        })
+    if "telefone" in campos_limpos:
+        sync.update({
+            "client_phone": "", "personal_data.telefone": "", "personal_data.phone": "",
+            "personal_data.telefone_hash": "",
+        })
+    return sync
+
 
 async def run_update_client(
     client_id: str,
@@ -413,8 +440,15 @@ async def run_update_client(
     telefone_submetido: Optional[str] = None
 
     sanitized_contacto = None
+    contactos_limpos: list = []
+    submetidos_contacto: set = set()
     if client_data.contacto:
         contact_dump = client_data.contacto.model_dump(exclude_unset=True)
+        # Campo ESCRITO vazio (`""`/`null`/só espaços) = «apaga». Resolve-se ANTES
+        # de sanitizar (um email em branco não é um email inválido) e leva o
+        # índice cego do valor antigo consigo, senão a pesquisa e a guarda de
+        # duplicados continuam a achar o cliente pelo email que ele já não tem.
+        contactos_limpos = limpar_blind_indexes_de_campos_vazios(contacto=contact_dump)
         if "email" in contact_dump and contact_dump["email"]:
             s_email = sanitize_email(contact_dump["email"])
             if not s_email:
@@ -427,8 +461,13 @@ async def run_update_client(
             telefone_submetido = contact_dump["telefone"]
         if "telefone_secundario" in contact_dump and contact_dump["telefone_secundario"]:
             contact_dump["telefone_secundario"] = sanitize_phone(contact_dump["telefone_secundario"]) or contact_dump["telefone_secundario"]
-        # Merge with existing contacto to preserve fields not in this update
-        existing_contacto = client.get("contacto") or {}
+        # Merge with existing contacto to preserve fields not in this update.
+        # O existente vem DECIFRADO: o merge passa por `encrypt_client_data`, que
+        # recalcula o índice cego a partir do valor que lhe dão — com o telefone
+        # ainda cifrado, calculava-o sobre o criptograma e o `telefone_hash` de um
+        # cliente deixava de casar com o número só por se editar o email.
+        existing_contacto = _seccao_decifrada(client, "contacto")
+        submetidos_contacto = set(contact_dump)
         sanitized_contacto = {**existing_contacto, **contact_dump}
     
     sanitized_dados_pessoais = None
@@ -444,8 +483,9 @@ async def run_update_client(
         for str_field in ["nome", "documento_id", "morada_fiscal", "phone", "telefone", "nacionalidade", "profissao"]:
             if str_field in pessoais_dump and pessoais_dump[str_field]:
                 pessoais_dump[str_field] = sanitize_string(str(pessoais_dump[str_field]), max_length=200)
+        limpar_blind_indexes_de_campos_vazios(dados_pessoais=pessoais_dump)
         # Merge with existing dados_pessoais to preserve fields not in this update
-        existing_pessoais = client.get("dados_pessoais") or {}
+        existing_pessoais = _seccao_decifrada(client, "dados_pessoais")
         sanitized_dados_pessoais = {**existing_pessoais, **pessoais_dump}
     
     sanitized_notas = sanitize_string(client_data.notas, max_length=500) if client_data.notas is not None else None
@@ -519,10 +559,17 @@ async def run_update_client(
                 process_sync["personal_data.email"] = new_email
                 from services.encryption import generate_email_hash
                 process_sync["personal_data.email_hash"] = generate_email_hash(new_email)
-            if new_phone:
+            # O telefone só segue quando ESTA submissão o trouxe: o do cliente é
+            # lido decifrado e os processos guardam o `client_phone` cifrado.
+            if new_phone and "telefone" in submetidos_contacto:
                 process_sync["client_phone"] = new_phone
                 process_sync["personal_data.telefone"] = new_phone
                 process_sync["personal_data.phone"] = new_phone
+
+            # Contacto APAGADO: tem de sair também dos processos, senão o ecrã
+            # do processo volta a mostrar o valor antigo (o email apagado
+            # «reaparecia» depois do toast de sucesso).
+            process_sync.update(sync_de_contactos_limpos(contactos_limpos))
 
         # 3. Sincronizar DADOS PESSOAIS (NIF, morada, etc.) para personal_data dos processos
         if sanitized_dados_pessoais:

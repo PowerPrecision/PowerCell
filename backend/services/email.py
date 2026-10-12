@@ -17,6 +17,7 @@ Templates disponíveis:
 5. Actualização de estado
 ====================================================================
 """
+import dataclasses
 import logging
 from typing import Optional, List
 
@@ -265,12 +266,19 @@ async def send_registration_confirmation(
     portal_access_code: str = None,
     portal_url: Optional[str] = None,
     company_name: Optional[str] = None,
+    contexto=None,
 ) -> bool:
     """
     Email de confirmação de registo para o cliente.
     Enviado imediatamente após submissão do formulário.
     
     Se portal_access_code for fornecido, inclui informações de acesso ao Portal.
+
+    REDE (QA, Out 2026): ``contexto`` (``ContextoDoEmailDoPortal``) diz de que
+    empresa/rede é o cliente — nome, logótipo, remetente (email geral da rede ou
+    email de sistema genérico) e URL do Portal. Sem ele o email sai NEUTRO
+    («Portal do Cliente», email de sistema): nunca com o nome nem a conta da
+    Power, que é o que acontecia quando isto era uma constante.
 
     PACOTE 12 (Eixo 2):
     - ``portal_url``: quando fornecido, o bloco do Portal ganha um botão
@@ -280,33 +288,53 @@ async def send_registration_confirmation(
     - ``company_name``: nome da empresa activa — substitui o dual-brand
       hardcoded no assunto, saudações e template base.
     """
-    # PACOTE 12 — nome efectivo: empresa activa (se fornecida) ou default
-    effective_company_name = company_name or COMPANY_NAME
+    from services.portal_email_context import (
+        ContextoDoEmailDoPortal,
+        enviar_email_do_portal,
+    )
+
+    if contexto is None:
+        # Chamadores sem contexto de rede (fallback da fila, scripts): neutro.
+        contexto = ContextoDoEmailDoPortal(
+            company_name=(company_name or "").strip() or None,
+            portal_url=(portal_url or "").strip(),
+        )
+    elif portal_url and not contexto.portal_url:
+        contexto = dataclasses.replace(contexto, portal_url=portal_url)
+    portal_url = contexto.portal_url or None
+
+    # O nome vem SEMPRE do contexto (empresa do registo) — nunca de uma constante.
+    effective_company_name = contexto.nome
     subject = f"Recebemos o seu pedido - {effective_company_name}"
     
-    # Bloco opcional com credenciais do portal
+    # Bloco do Portal: o link vai sempre que existir, com ou sem código de acesso.
     portal_section_text = ""
     portal_section_html = ""
-    if portal_access_code:
-        # PACOTE 12 — URL clicável do Portal (apenas quando fornecido)
+    if portal_access_code or portal_url:
         portal_url_text = f"Aceder ao Portal: {portal_url}\n" if portal_url else ""
         portal_cta_html = (
             f'<p style="text-align: center; margin: 15px 0 5px 0;">'
             f'<a href="{portal_url}" class="btn">Aceder ao Portal do Cliente</a></p>'
+            f'<p style="font-size: 12px; color: #64748b; text-align: center; margin: 5px 0;">'
+            f'Se o botão não funcionar, copie este endereço: <span>{portal_url}</span></p>'
         ) if portal_url else ""
+        codigo_text = f"- Código de Acesso: {portal_access_code}\n" if portal_access_code else ""
+        codigo_html = (
+            f'<p><strong>Código de Acesso:</strong> <span style="font-family: \'Courier New\', monospace; '
+            f'font-size: 18px; font-weight: bold; color: #0f766e; letter-spacing: 3px;">{portal_access_code}</span></p>'
+        ) if portal_access_code else ""
         portal_section_text = f"""
 
 Os seus dados de acesso ao Portal do Cliente:
 - Email: {client_email}
-- Código de Acesso: {portal_access_code}
-{portal_url_text}
+{codigo_text}{portal_url_text}
 Através do Portal poderá acompanhar o estado do seu processo e carregar documentação.
 """
         portal_section_html = f"""
 <div class="info-box" style="border-left-color: #0d9488; background: linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%);">
     <h3 style="color: #0f766e;">Acesso ao Portal do Cliente</h3>
     <p><strong>Email:</strong> {client_email}</p>
-    <p><strong>Código de Acesso:</strong> <span style="font-family: 'Courier New', monospace; font-size: 18px; font-weight: bold; color: #0f766e; letter-spacing: 3px;">{portal_access_code}</span></p>
+    {codigo_html}
     {portal_cta_html}
     <p style="font-size: 13px; color: #64748b; margin-top: 10px;">Através do Portal poderá acompanhar o estado do seu processo e carregar documentação.</p>
 </div>
@@ -370,31 +398,15 @@ Cumprimentos,
 <strong>Equipa {effective_company_name}</strong></p>
 """
     
-    # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
-    # PACOTE 12 — o nome da empresa activa (quando fornecido) substitui o
-    # dual-brand hardcoded no header/rodapé do template.
-    company_logo = await resolve_base_template_logo()
-
+    # Logótipo e nome DESTA empresa (sem recurso global: o logótipo de outra
+    # empresa no cabeçalho seria a mesma fuga que o nome).
     html_body = get_base_template(
-        content, "Pedido Recebido", logo_url=company_logo, company_name=company_name,
+        content, "Pedido Recebido", logo_url=contexto.logo_url,
+        company_name=effective_company_name,
     )
 
-    # BUGFIX (onboarding — Bug 3, Fev 2026): usar o serviço de email ligado
-    # ao SystemConfig (Resend/SMTP configurados em /contas-email), em vez de
-    # `send_email_notification` (email_v2.py) — que depende de variáveis de
-    # ambiente (EMAIL_PROVIDER/EMAIL_API_KEY/SMTP_*) nunca definidas neste
-    # ambiente, fazendo este email cair sempre em modo simulado (sem chegar
-    # ao cliente) e sem qualquer erro reportado.
-    from services.email_service import send_email as _send_system_email
-
-    result = await _send_system_email(
-        account_name="power",
-        to_emails=[client_email],
-        subject=subject,
-        body=body,
-        body_html=html_body,
-        force_system=True,
-        system_purpose="NOTIFICATIONS",
+    result = await enviar_email_do_portal(
+        contexto, to_emails=[client_email], subject=subject, body=body, body_html=html_body,
     )
     if not result.get("success"):
         logger.error(

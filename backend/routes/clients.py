@@ -41,6 +41,7 @@ from services.client_process_ops import (
 from services.client_active_processes import run_get_client_active_processes
 from services.client_portal_access import run_resend_portal_access
 from services.client_find_or_create import run_find_or_create_client
+from utils.frontend_url import get_frontend_url
 from services.client_delete import PAPEIS_QUE_PODEM_ELIMINAR_CLIENTES, run_delete_client
 
 # D-31: o PEDIDO POR ID também tem fronteira de rede. A dependência actua em
@@ -157,9 +158,13 @@ async def find_or_create_client(
 @router.post("", response_model=Client)
 async def create_client(
     client_data: ClientCreate,
+    request: Request,
     user: dict = Depends(get_current_user)
 ):
-    return await run_create_client(client_data, user)
+    # O domínio de onde o staff trabalha é o do link do Portal no email.
+    return await run_create_client(
+        client_data, user, frontend_url=get_frontend_url(request),
+    )
 
 
 @router.post("/{client_id}/assign")

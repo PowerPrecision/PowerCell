@@ -17,7 +17,7 @@ async def run_preview_welcome_message(payload: PortalSettingsUpdate):
         template=template,
         client_name="João Silva",
         consultor_name="Ana Rodrigues",
-        empresa_name="Power Precision",
+        empresa_name="Empresa Exemplo",
     )
     return {
         "template": template,

@@ -479,9 +479,16 @@ async def send_portal_welcome_email_from_process(
     client_name: str,
     user_id: str = None,
     process_id: str = None,
+    company_id: str = None,
+    frontend_url: str = None,
+    user: dict = None,
 ) -> None:
     """
     PACOTE CY — email de boas-vindas após create-client (fire-and-forget).
+
+    REDE: ``company_id`` é a empresa em que o processo foi criado (o carimbo do
+    processo) e ``frontend_url`` o domínio do staff — dão ao email o nome, o
+    remetente e o link do Portal desta rede (``portal_email_context``).
     Falhas são logadas, não propagadas.
 
     BUGFIX (E2E, Set 2026 — PACOTE BH): antes tentava PRIMEIRO enfileirar no
@@ -541,6 +548,9 @@ async def send_portal_welcome_email_from_process(
             client_id=client_id,
             user_id=user_id,
             process_id=process_id,
+            company_id=company_id,
+            frontend_url=frontend_url,
+            user=user,
         )
     except Exception as e:
         logger.error(
@@ -643,6 +653,7 @@ async def persist_and_finalize_staff_create(
     log_history_fn,
     broadcast_fn,
     response_cls,
+    frontend_url: Optional[str] = None,
 ):
     """
     Insert + side-effects pós-create (indexador, docs portal, links, email, WS).
@@ -758,6 +769,9 @@ async def persist_and_finalize_staff_create(
                 client_name=client_name,
                 user_id=user.get("id"),
                 process_id=process_id,
+                company_id=process_doc.get("company_id"),
+                frontend_url=frontend_url,
+                user=user,
             ),
             name=f"portal-welcome-email:{client_id}",
         )

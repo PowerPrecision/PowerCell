@@ -187,16 +187,19 @@ export function useUpdateProcessMutation(processId, options = {}) {
 
 /**
  * Hook para actualizar o cliente ligado ao processo.
- * mutateAsync({ clientId, data })
+ * mutateAsync({ clientId, data, clearContactFields })
+ *
+ * `clearContactFields` (["email"], ["telefone"]…) lista os contactos que o
+ * utilizador APAGOU: seguem como `""` em vez de serem descartados.
  */
 export function useUpdateClientMutation(options = {}) {
   const queryClient = useQueryClient();
   const { onSuccess, onError, onSettled, processId } = options;
 
   return useMutation({
-    mutationFn: async ({ clientId, data }) => {
+    mutationFn: async ({ clientId, data, clearContactFields }) => {
       if (!clientId) throw new Error('clientId em falta');
-      const safe = sanitizeClientUpdatePayload(data);
+      const safe = sanitizeClientUpdatePayload(data, { clearContactFields });
       if (Object.keys(safe).length === 0) {
         return { skipped: true };
       }

@@ -23,7 +23,7 @@ from services.process_phase_clock import (
     transicao_de_fase,
 )
 from models.auth import UserRole
-from services.encryption import generate_nif_hash, generate_email_hash
+from services.encryption import campo_esta_vazio, generate_nif_hash, generate_email_hash
 from services.auth import get_effective_role, resolve_concrete_role
 from services.process_status import INACTIVE_STATUSES
 from services.process_labels import normalizar_etiquetas
@@ -49,6 +49,15 @@ def prepare_encrypted_client_updates(client_updates: dict) -> dict:
         email_hash = generate_email_hash(email_val)
         if email_hash:
             client_updates["contacto.email_hash"] = email_hash
+    # Campo apagado: o índice cego do valor antigo vai com ele.
+    for campo, indice in (
+        ("contacto.email", "contacto.email_hash"),
+        ("contacto.telefone", "contacto.telefone_hash"),
+        ("dados_pessoais.nif", "dados_pessoais.nif_hash"),
+    ):
+        if campo in client_updates and campo_esta_vazio(client_updates[campo]):
+            client_updates[campo] = ""
+            client_updates[indice] = ""
 
     try:
         from services.encryption import encrypt_client_data
@@ -106,6 +115,23 @@ async def apply_client_personal_updates_from_process_put(
         f"Dados pessoais do cliente {client_id} atualizados via PUT processo: "
         f"{list(client_updates.keys())}"
     )
+
+    # Contacto APAGADO: sai também dos outros processos do cliente (o próprio
+    # processo é tratado pelo `seed_update_data`). Sem isto o valor antigo
+    # reaparecia nas fichas dos restantes processos.
+    apagados = [
+        c for c, chave in (("email", "contacto.email"), ("telefone", "contacto.telefone"))
+        if chave in client_updates and campo_esta_vazio(client_updates[chave])
+    ]
+    if apagados:
+        from services.client_crud import sync_de_contactos_limpos
+
+        cliente = await db.clients.find_one({"id": client_id}, {"process_ids": 1})
+        outros = [p for p in (cliente or {}).get("process_ids", []) if p != process_id]
+        if outros:
+            await db.processes.update_many(
+                {"id": {"$in": outros}}, {"$set": sync_de_contactos_limpos(apagados)},
+            )
 
     updated_client_name = client_updates.get("nome")
     if not updated_client_name:
@@ -402,6 +428,21 @@ def assert_process_editable_for_role(
         )
 
 
+def contacto_do_pedido(raw_body: dict, chave: str) -> Optional[str]:
+    """O contacto que o pedido traz: ``None`` se a chave não veio, ``""`` se veio vazia/``null``.
+
+    Antes era ``raw_body.get(chave)``: um ``null`` explícito e uma chave ausente
+    eram a mesma coisa, e «apagar» só funcionava se o cliente HTTP mandasse
+    exactamente ``""``.
+    """
+    if chave not in raw_body:
+        return None
+    valor = raw_body[chave]
+    if valor is None:
+        return ""
+    return valor if isinstance(valor, str) else None
+
+
 def seed_update_data(
     *,
     process: dict,
@@ -414,10 +455,25 @@ def seed_update_data(
     update_data: dict[str, Any] = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    # `raw_*` é o que o pedido TROUXE: `None` = chave ausente («não alterei»);
+    # texto (mesmo vazio) = valor a gravar. O pedido com `null` explícito já
+    # chega aqui normalizado para `""` (ver `contacto_do_pedido`).
     if raw_client_email is not None:
         update_data["client_email"] = raw_client_email
     if raw_client_phone is not None:
         update_data["client_phone"] = raw_client_phone
+    # Contacto apagado: o processo antigo guardava cópias em `personal_data`
+    # (legado) que a leitura prefere ao cliente. Limpam-se só se existirem.
+    legado = process.get("personal_data")
+    if isinstance(legado, dict):
+        if raw_client_email is not None and campo_esta_vazio(raw_client_email):
+            for chave in ("email", "email_hash"):
+                if chave in legado:
+                    update_data[f"personal_data.{chave}"] = ""
+        if raw_client_phone is not None and campo_esta_vazio(raw_client_phone):
+            for chave in ("telefone", "phone", "telefone_hash"):
+                if chave in legado:
+                    update_data[f"personal_data.{chave}"] = ""
 
     if new_client_id and new_client_id != client_id_before:
         update_data["client_id"] = process["client_id"]
@@ -970,8 +1026,8 @@ async def run_update_process(
 
     client_id = process.get("client_id")
     client_updates = extract_client_updates_fn(raw_body)
-    raw_client_email = raw_body.get("client_email")
-    raw_client_phone = raw_body.get("client_phone")
+    raw_client_email = contacto_do_pedido(raw_body, "client_email")
+    raw_client_phone = contacto_do_pedido(raw_body, "client_phone")
 
     if client_updates and client_id:
         client_updates = prepare_encrypted_client_updates(client_updates)

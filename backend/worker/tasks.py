@@ -435,6 +435,8 @@ async def send_registration_email_task(
     client_email: str,
     client_name: str,
     portal_access_code: Optional[str] = None,
+    company_id: Optional[str] = None,
+    portal_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Handler ARQ do email de boas-vindas/acesso ao Portal (retry de última
@@ -453,6 +455,8 @@ async def send_registration_email_task(
         client_name=client_name,
         portal_access_code=portal_access_code,
         client_id=None,
+        company_id=company_id,
+        portal_url=portal_url,
     )
     return {"sent": bool(sent)}
 

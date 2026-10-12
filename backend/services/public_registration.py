@@ -5,6 +5,7 @@ Preserva sanitização, encriptação RGPD, criação de processo + magic link.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import uuid
 import asyncio
@@ -26,6 +27,7 @@ from services.tenant_network import CAMPO_REDE
 from services.email import send_new_client_notification
 from services.alerts import notify_new_client_registration
 from services.background_tasks import spawn_background_task
+from utils.frontend_url import get_frontend_url
 from services.encryption import encrypt_client_data
 from models.client import generate_portal_access_code
 from utils.input_sanitization import (
@@ -199,9 +201,13 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
     # =========================================
     process_id = None
     magic_link_sent = False
+    # Contexto de REDE dos emails ao cliente (nome da empresa, remetente, link
+    # do Portal). Resolvido a partir do carimbo do LINK — a empresa a que o
+    # cliente se registou — e nunca de uma constante.
+    contexto_portal = None
+    id_da_empresa_do_link = (_empresa or {}).get("id")
     try:
         from services.portal_security import create_access_code_session_token
-        from services.email_service import send_email
         from services.portal_documents_notify import generate_mandatory_document_requests
 
         # Pedidos de docs obrigatórios ligados ao CLIENTE (sem process_id)
@@ -239,16 +245,23 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             upsert=True,
         )
 
-        from urllib.parse import urlparse
-        frontend_url = ""
-        referer = request.headers.get("referer") or request.headers.get("origin")
-        if referer:
-            parsed = urlparse(referer)
-            if parsed.scheme and parsed.netloc:
-                frontend_url = f"{parsed.scheme}://{parsed.netloc}"
-        if not frontend_url:
-            frontend_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
-        magic_link = f"{frontend_url}/portal/{short_id}"
+        # Referer/Origin do browser de quem se registou, depois FRONTEND_URL.
+        frontend_url = get_frontend_url(request)
+        magic_link = f"{frontend_url}/portal/{short_id}" if frontend_url else f"/portal/{short_id}"
+
+        from services.portal_email_context import (
+            enviar_email_do_portal,
+            resolver_contexto,
+        )
+
+        contexto_portal = await resolver_contexto(
+            company_id=id_da_empresa_do_link, network_id=_rede,
+            client_id=client_id, frontend_url=frontend_url,
+        )
+        # No email, o botão leva directo ao Portal (link mágico) e a página de
+        # entrada fica como alternativa para quem usa o código de acesso.
+        endereco_de_entrada = contexto_portal.portal_url
+        contexto_portal = dataclasses.replace(contexto_portal, portal_url=magic_link)
 
         _portal_access_code_dc = None
         try:
@@ -265,29 +278,22 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         if _portal_access_code_dc:
             _access_code_html_dc = f"""
                 <div style="background: #f0fdfa; border: 1px solid #0d9488; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                    <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>www.precisioncredito.pt/portal</strong> e insira o seguinte Código de Acesso:</p>
+                    <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>{endereco_de_entrada or "ao Portal do Cliente"}</strong> e insira o seguinte Código de Acesso:</p>
                     <h3 style="text-align: center; margin: 10px 0;"><strong style="font-family: 'Courier New', monospace; font-size: 22px; color: #0f766e; letter-spacing: 3px;">{_portal_access_code_dc}</strong></h3>
                 </div>
             """
-            # PACOTE DI — URL client-facing actualizada para precisioncredito.pt.
             _access_code_text_dc = (
-                f"\nSe o link não funcionar, aceda a www.precisioncredito.pt/portal e "
+                f"\nSe o link não funcionar, aceda a {endereco_de_entrada or 'ao Portal do Cliente'} e "
                 f"insira o seguinte Código de Acesso: {_portal_access_code_dc}\n"
             )
 
-        # PACOTE 11 (Eixo 2) — injectar o logo da empresa no header do
-        # email de convite do Portal (company.logo_url / system_config).
-        try:
-            from services.email_branding import (
-                build_email_header_logo_html,
-                resolve_company_logo_url,
-            )
-            _invite_logo_html = build_email_header_logo_html(
-                await resolve_company_logo_url(), alt="Power Precision"
-            )
-        except Exception as _logo_err:  # pragma: no cover — degradação graciosa
-            logger.debug(f"Logo indisponível para o convite do Portal: {_logo_err}")
-            _invite_logo_html = ""
+        # Logótipo DESTA empresa (sem recurso global: o da Power num convite
+        # da Domus seria a mesma fuga que o nome).
+        from services.email_branding import build_email_header_logo_html
+
+        _invite_logo_html = build_email_header_logo_html(
+            contexto_portal.logo_url, alt=contexto_portal.nome
+        )
 
         html_body = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -327,7 +333,7 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             f"{magic_link}\n"
             f"{_access_code_text_dc}\n"
             f"Este link é válido por 90 dias.\n\n"
-            f"Power Precision · Crédito Habitação"
+            f"{contexto_portal.nome}"
         )
         # BUGFIX (Set 2026): o envio era AWAITED aqui dentro. Um servidor de
         # email lento punha um formulário PÚBLICO a responder ao fim de 30s
@@ -337,15 +343,12 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         # com referência forte, como já se fazia em `process_create`.
         async def _enviar_convite_do_portal():
             try:
-                await send_email(
-                    account_name="power",
+                await enviar_email_do_portal(
+                    contexto_portal,
                     to_emails=[clean_email],
                     subject=f"Bem-vindo ao seu Portal do Cliente — {clean_name}",
                     body=text_body,
                     body_html=html_body,
-                    process_id=None,
-                    force_system=True,
-                    system_purpose="NOTIFICATIONS",
                 )
                 logger.info(
                     f"[PUBLIC FORM] Email de convite do Portal enviado para {clean_email} "
@@ -412,6 +415,9 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
                 client_name=clean_name,
                 portal_access_code=portal_access_code,
                 client_id=client_id,
+                company_id=id_da_empresa_do_link,
+                contexto=contexto_portal,
+                frontend_url=get_frontend_url(request),
             )
             logger.info(
                 f"[PUBLIC FORM] Email de registo para {clean_email} "

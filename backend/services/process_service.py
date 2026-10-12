@@ -545,6 +545,20 @@ async def populate_client_data(process: dict) -> dict:
     return result
 
 
+def contacto_pedido(valor, *, minusculas: bool = True):
+    """Valor de contacto a gravar: texto aparado, ``""`` para apagar, ``None`` se não é texto.
+
+    ``null`` e texto em branco significam o mesmo — «apaga» —, para o pedido
+    não depender de como o cliente HTTP serializa um campo limpo.
+    """
+    if valor is None:
+        return ""
+    if not isinstance(valor, str):
+        return None
+    limpo = valor.strip()
+    return limpo.lower() if (minusculas and limpo) else limpo
+
+
 def extract_client_updates_from_body(body: dict) -> dict:
     """
     Extrai campos de dados pessoais do body do update (PUT).
@@ -597,7 +611,9 @@ def extract_client_updates_from_body(body: dict) -> dict:
             client_updates["nome"] = nome
             client_updates["dados_pessoais.nome_completo"] = nome
 
-        # Email
+        # Email: `personal_data.email` é um ESPELHO que o formulário reenvia em
+        # todas as gravações (vazio incluído), logo vazio aqui NÃO é um pedido para
+        # apagar — o pedido explícito é `client_email` (abaixo).
         email = pd.get("email")
         if email:
             client_updates["contacto.email"] = email.lower().strip()
@@ -608,14 +624,19 @@ def extract_client_updates_from_body(body: dict) -> dict:
         client_updates["titular2_data"] = t2
 
     # client_email / client_phone do body — o Frontend envia estes campos
-    # directamente no update do processo quando o utilizador edita contactos
-    client_email = body.get("client_email")
-    if client_email:
-        client_updates["contacto.email"] = client_email.lower().strip()
+    # directamente no update do processo quando o utilizador edita contactos.
+    # A CHAVE presente com `""`/`null` é um pedido para apagar; a chave ausente
+    # é «não alterei». Antes só o valor truthy passava, e um contacto apagado
+    # nunca chegava ao cliente: o email antigo reaparecia depois de gravar.
+    if "client_email" in body:
+        client_email = contacto_pedido(body.get("client_email"))
+        if client_email is not None:
+            client_updates["contacto.email"] = client_email
 
-    client_phone = body.get("client_phone")
-    if client_phone:
-        client_updates["contacto.telefone"] = client_phone
+    if "client_phone" in body:
+        client_phone = contacto_pedido(body.get("client_phone"), minusculas=False)
+        if client_phone is not None:
+            client_updates["contacto.telefone"] = client_phone
 
     return client_updates
 

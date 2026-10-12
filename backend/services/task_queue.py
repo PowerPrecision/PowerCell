@@ -193,7 +193,9 @@ class TaskQueueService:
         self,
         client_email: str,
         client_name: str,
-        portal_access_code: str = None
+        portal_access_code: str = None,
+        company_id: str = None,
+        portal_url: str = None,
     ) -> Optional[str]:
         """Enfileira email de confirmação de registo."""
         kwargs = {
@@ -202,6 +204,11 @@ class TaskQueueService:
         }
         if portal_access_code:
             kwargs["portal_access_code"] = portal_access_code
+        # Contexto de rede: o worker não tem o cliente à mão.
+        if company_id:
+            kwargs["company_id"] = company_id
+        if portal_url:
+            kwargs["portal_url"] = portal_url
         return await self.enqueue(
             "send_registration_email_task",
             **kwargs
@@ -315,14 +322,21 @@ class DirectExecutionFallback:
         self,
         client_email: str,
         client_name: str,
-        portal_access_code: str = None
+        portal_access_code: str = None,
+        company_id: str = None,
+        portal_url: str = None,
     ) -> bool:
         """Envia email de registo directamente."""
         logger.warning("[FALLBACK] Enviando email de registo directamente")
         
         try:
             from services.email import send_registration_confirmation
-            return await send_registration_confirmation(client_email, client_name, portal_access_code)
+            from services.portal_email_context import resolver_contexto
+
+            contexto = await resolver_contexto(company_id=company_id, portal_url=portal_url)
+            return await send_registration_confirmation(
+                client_email, client_name, portal_access_code, contexto=contexto,
+            )
         except Exception as e:
             logger.error(f"[FALLBACK] Erro: {str(e)}")
             return False

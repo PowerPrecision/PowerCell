@@ -124,10 +124,65 @@ export function sanitizeProcessUpdatePayload(raw, options = {}) {
   return cleaned;
 }
 
+/** Cartão do separador «Dados pessoais» onde se editam os contactos. */
+export const CARTAO_DE_CONTACTOS = "personal_contactos";
+
+/** Contactos que se podem apagar enviando vazio. */
+export const CONTACTOS_LIMPAVEIS = Object.freeze(["email", "telefone"]);
+
+const textoAparado = (valor) => (valor == null ? "" : String(valor).trim());
+
+/**
+ * O que gravar dos contactos (email/telefone) e como.
+ *
+ * Um contacto VAZIO tem dois significados e o ecrã só sabe distinguir um deles:
+ * «o utilizador apagou-o» (estava a editar o cartão de contactos) ou «este
+ * formulário nunca o teve» (qualquer outro cartão). O primeiro tem de ser
+ * enviado como vazio EXPLÍCITO, senão o valor antigo fica no servidor e
+ * reaparece depois do toast de sucesso; o segundo não se envia, para uma
+ * gravação de outro cartão nunca apagar contactos.
+ *
+ * @returns {{contacto: object, processo: object, limpar: string[]}}
+ *   `contacto` vai no `PUT /clients/{id}`, `processo` no `PUT /processes/{id}`
+ *   e `limpar` diz ao sanitizador do cliente que esses campos vazios são
+ *   intencionais.
+ */
+export function contactosAGravar({ editingCardId, email, telefone }) {
+  const aEditar = editingCardId === CARTAO_DE_CONTACTOS;
+  const contacto = {};
+  const processo = {};
+  const limpar = [];
+  const campos = [
+    ["email", "client_email", textoAparado(email)],
+    ["telefone", "client_phone", textoAparado(telefone)],
+  ];
+  for (const [campo, campoDoProcesso, valor] of campos) {
+    if (valor) {
+      contacto[campo] = valor;
+      processo[campoDoProcesso] = valor;
+    } else if (aEditar) {
+      contacto[campo] = "";
+      processo[campoDoProcesso] = "";
+      limpar.push(campo);
+    }
+  }
+  return { contacto, processo, limpar };
+}
+
 /**
  * Sanitize client update body — drop empty strings that would wipe contactos.
+ *
+ * `options.clearContactFields` (subset de `CONTACTOS_LIMPAVEIS`) lista os
+ * contactos que o chamador APAGOU de propósito: esses vão como `""` em vez de
+ * serem descartados. Por omissão nada se apaga — a protecção continua.
+ *
+ * @param {object} raw
+ * @param {{clearContactFields?: string[]}} [options]
  */
-export function sanitizeClientUpdatePayload(raw) {
+export function sanitizeClientUpdatePayload(raw, options = {}) {
+  const aLimpar = new Set(
+    (options.clearContactFields || []).filter((c) => CONTACTOS_LIMPAVEIS.includes(c)),
+  );
   const cleaned = {};
   if (!raw || typeof raw !== "object") return cleaned;
 
@@ -135,11 +190,13 @@ export function sanitizeClientUpdatePayload(raw) {
     if (value === undefined) continue;
     if (key === "contacto" && value && typeof value === "object") {
       const contacto = {};
-      if (value.email && String(value.email).trim()) {
-        contacto.email = String(value.email).trim();
-      }
-      if (value.telefone && String(value.telefone).trim()) {
-        contacto.telefone = String(value.telefone).trim();
+      for (const campo of CONTACTOS_LIMPAVEIS) {
+        const aparado = textoAparado(value[campo]);
+        if (aparado) {
+          contacto[campo] = aparado;
+        } else if (aLimpar.has(campo)) {
+          contacto[campo] = "";
+        }
       }
       if (Object.keys(contacto).length > 0) cleaned.contacto = contacto;
       continue;
