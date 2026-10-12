@@ -17,11 +17,19 @@ from fastapi.responses import JSONResponse
 from database import db
 from services.s3_document_root import pasta_para_gravar
 from services.s3_storage import s3_service
-from models.auth import UserRole
 from models.process import PublicClientRegistration
 from fastapi import HTTPException
 from services.form_config_scope import rede_do_link_publico
-from services.tenant_network import CAMPO_REDE, documento_sem_marca_de_tenant
+from services.alert_audience import gestao_da_rede_do_processo
+from services.tenant_network import (
+    CAMPO_REDE,
+    TenantScope,
+    build_network_scope_condition,
+    com_isolamento,
+    documento_sem_marca_de_tenant,
+    empresas_das_minhas_redes,
+    rede_de_omissao,
+)
 from services.email import send_new_client_notification
 from services.alerts import notify_new_client_registration
 from services.background_tasks import spawn_background_task
@@ -39,12 +47,49 @@ from utils.input_sanitization import (
 
 logger = logging.getLogger(__name__)
 
+#: Quem recebe o aviso de um registo novo — a gestão DA REDE do link.
+PAPEIS_QUE_RECEBEM_O_AVISO_DE_REGISTO = ("admin", "ceo", "diretor")
+
+
+async def ambito_do_registo(rede: str | None) -> TenantScope:
+    """Onde a procura de duplicados (D-32) tem o direito de olhar.
+
+    Este endpoint é PÚBLICO e escreve: procurar o email «em toda a base de
+    dados» fazia de um formulário anónimo um sonda de todas as redes (quem
+    se registasse na Domus com o email de um cliente da Power actualizava,
+    re-marcava como lead novo e devolvia o `client_id` do cliente da Power).
+    O âmbito é a rede do LINK — a mesma rede que carimba o cliente novo.
+
+    * a rede e as empresas dela;
+    * a pilha por carimbar, mas **só** quando a rede do link é a de omissão
+      (é a ela que a pilha pertence por definição — `documento_no_ambito`);
+      sem `TENANT_DEFAULT_NETWORK_ID` (dev/CI) mantém-se o comportamento
+      anterior, e sem rede nenhuma só a pilha por carimbar.
+    """
+    omissao = rede_de_omissao()
+    if not rede:
+        return TenantScope(inclui_rede_de_omissao=True)
+    base = TenantScope(network_ids=(rede,))
+    empresas = await empresas_das_minhas_redes(base)
+    return TenantScope(
+        network_ids=(rede,),
+        company_ids=tuple(empresas),
+        inclui_rede_de_omissao=(not omissao) or rede == omissao,
+    )
+
+
+async def _cliente_existente_na_rede(condicao_de_rede: dict, filtro: dict) -> dict | None:
+    """O ÚNICO sítio onde o registo público procura um cliente por email/NIF."""
+    return await db.clients.find_one(com_isolamento(condicao_de_rede, filtro))
+
+
 async def run_public_client_registration(request: Request, data: PublicClientRegistration):
     """
     Endpoint público para registo de clientes - sem autenticação.
     
     FLUXO DE TRIAGEM MANUAL:
-    1. Anti-Duplicação: Procura cliente por email/NIF → upsert se existe, cria se não
+    1. Anti-Duplicação: Procura cliente por email/NIF **na rede do link** (D-32) →
+       upsert se existe, cria se não. Nunca olha para outra rede.
     2. Marcação: Cliente fica com lead_status="new" para triagem na página de Registos
     3. SEM CRIAÇÃO DE PROCESSO — o processo só é criado quando o staff aprova
     
@@ -88,22 +133,31 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
     
     email_hash = generate_email_hash(clean_email)
     existing_client = None
-    
+    condicao_de_rede = build_network_scope_condition(await ambito_do_registo(_rede))
+
     # Procurar por email (blind index para dados encriptados, fallback plain text)
     if email_hash:
-        existing_client = await db.clients.find_one({"contacto.email_hash": email_hash})
+        existing_client = await _cliente_existente_na_rede(
+            condicao_de_rede, {"contacto.email_hash": email_hash}
+        )
     if not existing_client:
-        existing_client = await db.clients.find_one({"contacto.email": clean_email.lower()})
-    
+        existing_client = await _cliente_existente_na_rede(
+            condicao_de_rede, {"contacto.email": clean_email.lower()}
+        )
+
     # Procurar por NIF (se disponível no payload — atualmente não vem no formulário público)
     clean_nif = None
     if not existing_client and clean_nif:
         nif_hash = generate_nif_hash(clean_nif)
         if nif_hash:
-            existing_client = await db.clients.find_one({"dados_pessoais.nif_hash": nif_hash})
+            existing_client = await _cliente_existente_na_rede(
+                condicao_de_rede, {"dados_pessoais.nif_hash": nif_hash}
+            )
         if not existing_client:
-            existing_client = await db.clients.find_one({"dados_pessoais.nif": clean_nif})
-    
+            existing_client = await _cliente_existente_na_rede(
+                condicao_de_rede, {"dados_pessoais.nif": clean_nif}
+            )
+
     if existing_client:
         # ── CLIENTE JÁ EXISTE: Atualizar dados novos (upsert parcial) ──
         client_id = existing_client["id"]
@@ -542,21 +596,30 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         "nome": clean_name,
         "contacto": {"email": clean_email, "telefone": clean_phone},
         "process_type": process_type,
+        # A gestão a avisar é a da rede do LINK. Sem o carimbo, o aviso caía
+        # sempre na rede de omissão: a Domus nunca sabia dos seus registos e a
+        # gestão da Power recebia os nomes dos clientes da Domus (D-32).
+        **({CAMPO_REDE: _rede} if _rede else {}),
+        **({"company_id": _empresa.get("id")} if _empresa else {}),
     }
     await notify_new_client_registration(client_notification_data, has_property)
-    
-    # Enviar push notifications para staff
+    ids_da_gestao = await gestao_da_rede_do_processo(
+        client_notification_data, PAPEIS_QUE_RECEBEM_O_AVISO_DE_REGISTO,
+    )
+    gestao = []
+    if ids_da_gestao:
+        gestao = await db.users.find(
+            {"id": {"$in": ids_da_gestao}, "is_active": {"$ne": False}},
+            {"_id": 0},
+        ).to_list(100)
+
+    # Enviar push notifications para a gestão DA REDE do registo (nunca a de todas).
     try:
         from services.push_notifications import send_push_notification
-        from services.role_query import deep_role_in_filter
-        staff_for_push = await db.users.find(
-            {"$and": [deep_role_in_filter([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]), {"is_active": True}]},
-            {"_id": 0, "id": 1}
-        ).to_list(20)
-        
-        for staff_member in staff_for_push:
+
+        for membro in gestao:
             await send_push_notification(
-                user_id=staff_member["id"],
+                user_id=membro["id"],
                 title="Novo Cliente Registado",
                 body=f"{clean_name} registou-se via formulário",
                 tag="new_client",
@@ -567,18 +630,16 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
                     "client_name": clean_name
                 }
             )
-        
-        logger.info(f"Push notifications enviadas para {len(staff_for_push)} membros do staff")
+
+        logger.info(f"Push notifications enviadas para {len(gestao)} membros da gestão da rede")
     except Exception as e:
         logger.warning(f"Erro ao enviar push notifications: {e}")
-    
-    # Email para o primeiro admin/CEO/diretor
-    from services.role_query import deep_role_in_filter
-    staff = await db.users.find(
-        deep_role_in_filter([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]),
-        {"_id": 0}
-    ).to_list(100)
-    
+
+    # Email para o primeiro da gestão DA REDE (antes: o primeiro admin/CEO/diretor
+    # da base de dados inteira, de qualquer rede, com o nome, o email e o
+    # telefone do cliente no corpo).
+    staff = gestao
+
     if staff:
         first_admin = staff[0]
         # PACOTE BH — envio DIRECTO primeiro; fila ARQ (`send_email_task`)
@@ -617,8 +678,9 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             name=f"staff-new-client-email:{client_id}",
         )
     
-    is_new_client = existing_client is None
-    
+    # Sem `is_new_client` na resposta: num endpoint público e anónimo era uma
+    # sonda de «este email já está registado nesta empresa?». Nenhum consumidor
+    # o lia (D-32).
     return JSONResponse(
         status_code=200,
         content={
@@ -628,7 +690,6 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             "process_id": process_id,  # None até docs obrigatórios (SystemConfig)
             "magic_link_sent": magic_link_sent,
             "lead_status": "new",
-            "is_new_client": is_new_client,
             "has_property": has_property,
             # Retrocompat: True quando o email de boas-vindas partiu
             # (envio directo — PACOTE BH; já não depende da fila ARQ).

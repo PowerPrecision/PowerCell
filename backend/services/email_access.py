@@ -31,7 +31,8 @@ email não toca na base de dados):
 2. **é seu** — criou-o, ou foi sincronizado para si (id ou endereço);
 3. **está na sua conversa** — um dos endereços que CONFIGUROU (e não o de
    login: Pacote 8) é remetente ou destinatário;
-4. **caixa partilhada do seu cargo** — `shared_role` igual ao perfil activo;
+4. **caixa partilhada do seu cargo, na sua rede** — `shared_role` igual ao perfil
+   activo **e** o email no âmbito de rede de quem pergunta (D-8);
 5. **Caixa Geral da empresa** — email geral, e o utilizador tem um cargo
    com direito à Caixa Geral NESSA empresa (diretor, CEO, administrativo,
    admin). Um cargo de gestão na Power não abre a Caixa Geral da Domus;
@@ -53,6 +54,7 @@ from fastapi import HTTPException
 
 from database import db
 from services.role_scope import PAPEIS_GLOBAIS
+from services.tenant_network import documento_no_ambito
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +162,10 @@ async def pode_ler_email(email: Optional[dict], user: dict, *, papel: Optional[s
         return True
     partilhada = _texto(email.get("shared_role")).lower()
     if partilhada and partilhada in papeis:
-        return True
+        # O cargo SÓ DENTRO da rede (D-8): sem isto, qualquer utilizador com o
+        # cargo `indexacao` lia a caixa partilhada de Indexação de TODAS as redes.
+        if documento_no_ambito(email, await _ambito(user)):
+            return True
 
     # 5. Caixa Geral da empresa do email.
     if e_email_geral(email):
@@ -179,8 +184,6 @@ async def pode_ler_email(email: Optional[dict], user: dict, *, papel: Optional[s
     scope = await _ambito(user)
 
     if e_diretor:
-        from services.tenant_network import documento_no_ambito
-
         if documento_no_ambito(email, scope):
             return True
 

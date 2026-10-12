@@ -153,6 +153,32 @@ export function syncAuthContextHeaders({ role, companyId } = {}) {
   };
 }
 
+/**
+ * Os cabeçalhos de CONTEXTO (perfil e empresa activos) — ponto único.
+ *
+ * O interceptor do Axios e qualquer chamada que, por excepção, ainda use
+ * `fetch` cru têm de ler a MESMA fonte: um `fetch` que leve só o
+ * `Authorization` perde o `X-Company-Id`, e o servidor cai noutra empresa/rede
+ * (incidente de 2026-09-21; D-8: a caixa partilhada de uma rede é a da empresa
+ * activa). Preferir sempre o Axios; isto existe para os `fetch` que ainda
+ * não migraram não divergirem.
+ */
+export function cabecalhosDeContexto() {
+  const cabecalhos = {};
+  // Prefer AuthContext (selected UCR role) over sessionStorage, which
+  // ProcessesPage used to overwrite with the sentinel "all".
+  const activeRole = authContextHeaders.role
+    || sessionStorage.getItem("activeRole")
+    || localStorage.getItem("activeRole");
+  if (activeRole) cabecalhos["X-Active-Role"] = activeRole;
+  // Ler de localStorage (persiste entre sessões) com fallback para sessionStorage.
+  const activeCompanyId = authContextHeaders.companyId
+    || localStorage.getItem("active_company_id")
+    || sessionStorage.getItem("activeCompanyId");
+  if (activeCompanyId) cabecalhos["X-Company-Id"] = activeCompanyId;
+  return cabecalhos;
+}
+
 // ====================================================================
 // INTERCEPTOR DE REQUEST
 // ====================================================================
@@ -180,9 +206,8 @@ api.interceptors.request.use(
     // (ex.: Área Pessoal a gravar no UCR de uma tab que não é a empresa activa).
     // Prefer AuthContext (selected UCR role) over sessionStorage, which
     // ProcessesPage used to overwrite with the sentinel "all".
-    const activeRole = authContextHeaders.role
-      || sessionStorage.getItem("activeRole")
-      || localStorage.getItem("activeRole");
+    const contexto = cabecalhosDeContexto();
+    const activeRole = contexto["X-Active-Role"];
     const existingRole = typeof config.headers.get === "function"
       ? config.headers.get("X-Active-Role")
       : config.headers["X-Active-Role"];
@@ -194,9 +219,7 @@ api.interceptors.request.use(
     // Ler de localStorage (persiste entre sessões) com fallback para
     // sessionStorage (retrocompatibilidade).
     // PACOTE DM: respeitar override por-pedido (ProfileRoleTab / EmailConfigForm).
-    const activeCompanyId = authContextHeaders.companyId
-      || localStorage.getItem("active_company_id")
-      || sessionStorage.getItem("activeCompanyId");
+    const activeCompanyId = contexto["X-Company-Id"];
     const existingCompany = typeof config.headers.get === "function"
       ? config.headers.get("X-Company-Id")
       : config.headers["X-Company-Id"];

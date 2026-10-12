@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from services import email_access, email_contacts as contactos
 from services import email_process_crud as crud
+from services import shared_mailbox_scope
 from services import webmail_scope
 from tests.unit.helpers_tenant import (  # noqa: F401
     ANA, BRUNO, CARLA, REDE_DOMUS, REDE_INCUMBENTE, rede_de_omissao_incumbente, semear, tenant_db,
@@ -246,7 +247,7 @@ def mundo(fake_async_db, rede_de_omissao_incumbente):
 @pytest.mark.asyncio
 class TestAssociarEPesquisarPorRede:
     async def test_o_diretor_de_uma_ilha_nao_associa_um_email_alheio(self, mundo):
-        with tenant_db(mundo, email_access, webmail_scope), patch.object(crud, "db", mundo), \
+        with tenant_db(mundo, email_access, webmail_scope, shared_mailbox_scope), patch.object(crud, "db", mundo), \
                 patch.object(email_access, "db", mundo), patch("services.document_visibility.db", mundo), \
                 patch("services.user_email_config_service.get_user_mailbox_addresses", AsyncMock(return_value=[])):
             with pytest.raises(HTTPException) as exc:
@@ -255,7 +256,7 @@ class TestAssociarEPesquisarPorRede:
 
     async def test_ler_o_email_nao_basta_o_processo_tambem_tem_de_ser_visivel(self, mundo):
         """A Ana lê o email da Power, mas o processo é da Domus."""
-        with tenant_db(mundo, email_access, webmail_scope), patch.object(crud, "db", mundo), \
+        with tenant_db(mundo, email_access, webmail_scope, shared_mailbox_scope), patch.object(crud, "db", mundo), \
                 patch.object(email_access, "db", mundo), patch("services.document_visibility.db", mundo), \
                 patch("services.user_email_config_service.get_user_mailbox_addresses", AsyncMock(return_value=[])):
             with pytest.raises(HTTPException) as exc:
@@ -264,21 +265,21 @@ class TestAssociarEPesquisarPorRede:
         assert "process_id" not in next(e for e in mundo.emails.docs if e["id"] == "e-power")
 
     async def test_o_diretor_da_casa_associa(self, mundo):
-        with tenant_db(mundo, email_access, webmail_scope), patch.object(crud, "db", mundo), \
+        with tenant_db(mundo, email_access, webmail_scope, shared_mailbox_scope), patch.object(crud, "db", mundo), \
                 patch.object(email_access, "db", mundo), patch("services.document_visibility.db", mundo), \
                 patch("services.user_email_config_service.get_user_mailbox_addresses", AsyncMock(return_value=[])):
             res = await crud.run_associate_email_to_client({"email_id": "e-power", "process_id": "p-ix"}, ANA)
         assert res["success"] is True
 
     async def test_a_pesquisa_do_diretor_de_uma_ilha_nao_traz_emails_de_outra_rede(self, mundo):
-        with tenant_db(mundo, email_access, webmail_scope), patch.object(crud, "db", mundo), \
+        with tenant_db(mundo, email_access, webmail_scope, shared_mailbox_scope), patch.object(crud, "db", mundo), \
                 patch.object(webmail_scope, "db", mundo), \
                 patch.object(crud, "enrich_emails", AsyncMock(side_effect=lambda e: e)):
             res = await crud.run_search_emails("contrato", BRUNO)
         assert res["emails"] == []
 
     async def test_a_pesquisa_do_diretor_da_casa_traz_os_da_sua_empresa(self, mundo):
-        with tenant_db(mundo, email_access, webmail_scope), patch.object(crud, "db", mundo), \
+        with tenant_db(mundo, email_access, webmail_scope, shared_mailbox_scope), patch.object(crud, "db", mundo), \
                 patch.object(webmail_scope, "db", mundo), \
                 patch.object(crud, "enrich_emails", AsyncMock(side_effect=lambda e: e)):
             res = await crud.run_search_emails("contrato", ANA)

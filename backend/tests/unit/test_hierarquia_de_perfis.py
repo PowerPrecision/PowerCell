@@ -282,6 +282,10 @@ EXCEPCOES_SEM_MASTER = {
     # Quem recebe alertas por CARGO: o Master é global e inundaria a caixa com
     # os alertas de todas as redes. Audiência de alertas é por rede.
     "services/alerts.py",
+    # Quem recebe o aviso de um REGISTO PÚBLICO: a gestão DA REDE do link (admin,
+    # ceo, diretor). Mesma regra dos alertas — a audiência por cargo é local e o
+    # Master, que é global, não é destinatário por cargo (D-32).
+    "services/public_registration.py",
     # Destinatários do relatório de IA / stale processes: o Master não é
     # destinatário por cargo (recebe o consolidado em separado).
     "services/scheduled_tasks.py",

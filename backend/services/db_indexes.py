@@ -999,6 +999,15 @@ async def create_ttl_indexes(db) -> dict:
     ]:
         await _create_index_safe(db.form_templates, idx, "form_templates", results)
 
+    # Caixas partilhadas por cargo (D-8): a identidade é (cargo, rede). NÃO é único
+    # de propósito: as configurações antigas não têm `network_id` e o upsert por
+    # (cargo, rede) já evita duplicados; o índice serve a consulta de cada
+    # leitor (cargo + âmbito de rede) e o backfill carimba as antigas.
+    for idx in [
+        {"keys": [("role", 1), ("network_id", 1)], "name": "idx_shared_role_configs_cargo_rede"},
+    ]:
+        await _create_index_safe(db.shared_role_email_configs, idx, "shared_role_email_configs", results)
+
     return results
 
 

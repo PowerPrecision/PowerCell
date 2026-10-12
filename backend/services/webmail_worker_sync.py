@@ -137,18 +137,22 @@ async def run_webmail_worker_sync() -> None:
 
     # 2. Sync de caixas partilhadas via Gmail API (ex: indexacao)
     from services.gmail_api_service import gmail_api_sync_to_db
+    from services.shared_mailbox_scope import rede_da_config
     shared_configs = await db.shared_role_email_configs.find(
         {
             "is_configured": True,
             "google_refresh_token": {"$ne": "", "$exists": True},
         },
-        {"role": 1, "email_address": 1},
-    ).to_list(10)
+        {"role": 1, "email_address": 1, "network_id": 1},
+    ).to_list(200)
     if shared_configs:
         for shared_cfg in shared_configs:
             role = shared_cfg.get("role")
+            # Cada caixa é de (cargo, rede): sincroniza-se com a SUA rede e
+            # os emails nascem com o carimbo dela (D-8).
+            rede = rede_da_config(shared_cfg)
             try:
-                result = await gmail_api_sync_to_db(role=role, days=3, max_emails=100)
+                result = await gmail_api_sync_to_db(role=role, days=3, max_emails=100, network_id=rede)
                 if result.get("success"):
                     synced = result.get("total_synced", 0)
                     if synced > 0:
@@ -157,7 +161,7 @@ async def run_webmail_worker_sync() -> None:
                     logger.warning(f"Gmail API sync role '{role}' falhou: {result.get('error')}")
             except Exception as shared_err:
                 logger.warning(f"Erro ao sincronizar Gmail API do role '{role}': {shared_err}")
-        logger.info(f"Sincronização Gmail API concluída ({len(shared_configs)} roles)")
+        logger.info(f"Sincronização Gmail API concluída ({len(shared_configs)} caixas)")
 
 
 async def bater_e_sincronizar_webmail() -> None:

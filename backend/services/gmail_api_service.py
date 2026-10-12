@@ -35,6 +35,12 @@ from email import encoders as email_encoders
 
 from database import db
 from services.email_tenant_stamp import inserir_email
+from services.shared_mailbox_scope import (
+    carimbo_da_caixa,
+    condicao_da_caixa,
+    config_da_caixa,
+    duplicado_da_caixa,
+)
 from services.encryption import encryption_service
 
 logger = logging.getLogger(__name__)
@@ -289,7 +295,7 @@ def _extract_body_from_payload(payload: Dict) -> tuple:
 # FUNÇÕES PÚBLICAS
 # ====================================================================
 
-async def get_shared_email_config(role: str) -> Optional[Dict]:
+async def get_shared_email_config(role: str, network_id: Optional[str] = None) -> Optional[Dict]:
     """
     Obtém a config de email partilhado para um role.
 
@@ -299,11 +305,8 @@ async def get_shared_email_config(role: str) -> Optional[Dict]:
     Returns:
         Dict com a config, ou None se não existir.
     """
-    config = await db.shared_role_email_configs.find_one(
-        {"role": role},
-        {"_id": 0},
-    )
-    return config
+    # (cargo, rede): sem rede só se alcança a pilha antiga (D-8).
+    return await config_da_caixa(role, network_id)
 
 
 async def gmail_api_list_messages(
@@ -311,6 +314,7 @@ async def gmail_api_list_messages(
     query: str = "",
     max_results: int = 50,
     page_token: Optional[str] = None,
+    network_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Lista mensagens da caixa Gmail via API.
@@ -327,7 +331,7 @@ async def gmail_api_list_messages(
     Raises:
         GmailAPIError: Se a config não existir ou OAuth falhar.
     """
-    config = await get_shared_email_config(role)
+    config = await get_shared_email_config(role, network_id)
     if not config:
         raise GmailAPIError(f"Config de email partilhado não encontrada para role '{role}'")
 
@@ -377,7 +381,7 @@ async def gmail_api_list_messages(
 
         # Atualizar last_sync_at
         await db.shared_role_email_configs.update_one(
-            {"role": role},
+            condicao_da_caixa(role, network_id),
             {"$set": {"last_sync_at": datetime.now(timezone.utc).isoformat()}},
         )
 
@@ -395,7 +399,9 @@ async def gmail_api_list_messages(
         raise GmailAPIError(f"Erro Gmail API: {e}")
 
 
-async def gmail_api_get_message(role: str, gmail_message_id: str) -> Dict[str, Any]:
+async def gmail_api_get_message(
+    role: str, gmail_message_id: str, network_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Obtém uma mensagem completa da Gmail API (incluindo corpo).
 
@@ -409,7 +415,7 @@ async def gmail_api_get_message(role: str, gmail_message_id: str) -> Dict[str, A
     Raises:
         GmailAPIError: Se a config não existir ou OAuth falhar.
     """
-    config = await get_shared_email_config(role)
+    config = await get_shared_email_config(role, network_id)
     if not config:
         raise GmailAPIError(f"Config não encontrada para role '{role}'")
 
@@ -451,6 +457,7 @@ async def gmail_api_send_message(
     cc_emails: Optional[List[str]] = None,
     bcc_emails: Optional[List[str]] = None,
     reply_to_message_id: Optional[str] = None,
+    network_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Envia um email via Gmail API.
@@ -471,7 +478,7 @@ async def gmail_api_send_message(
     Raises:
         GmailAPIError: Se a config não existir ou OAuth falhar.
     """
-    config = await get_shared_email_config(role)
+    config = await get_shared_email_config(role, network_id)
     if not config:
         raise GmailAPIError(f"Config não encontrada para role '{role}'")
 
@@ -544,6 +551,7 @@ async def gmail_api_sync_to_db(
     role: str,
     days: int = 3,
     max_emails: int = 100,
+    network_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Sincroniza emails da Gmail API para a coleção `emails` do CRM.
@@ -555,13 +563,14 @@ async def gmail_api_sync_to_db(
         role: Role do departamento.
         days: Dias para retroceder (default 3).
         max_emails: Máximo de emails a processar (default 100).
+        network_id: Rede da caixa (D-8). Sem ela só se alcança a caixa antiga.
 
     Returns:
         Dict com 'success', 'total_synced', 'total_duplicates', 'errors'.
     """
     import uuid
 
-    config = await get_shared_email_config(role)
+    config = await get_shared_email_config(role, network_id)
     if not config:
         return {"success": False, "error": f"Config não encontrada para role '{role}'"}
 
@@ -615,11 +624,9 @@ async def gmail_api_sync_to_db(
                     continue
 
                 # Verificar duplicado
-                existing = await db.emails.find_one({
-                    "message_id": internal_msg_id,
-                    "source": "gmail_api",
-                    "shared_role": role,
-                })
+                existing = await db.emails.find_one(
+                    duplicado_da_caixa(internal_msg_id, role, config, source="gmail_api")
+                )
 
                 if existing:
                     total_duplicates += 1
@@ -648,6 +655,9 @@ async def gmail_api_sync_to_db(
                     "message_id": internal_msg_id,
                     "gmail_message_id": parsed.get("gmail_message_id", ""),
                     "shared_role": role,
+                    # O email herda a rede da CAIXA (D-8): é o que o isola das
+                    # outras redes que têm o mesmo cargo.
+                    **carimbo_da_caixa(config),
                     "is_read": parsed.get("direction") == "sent",
                     "is_starred": False,
                     "is_archived": False,
@@ -668,7 +678,7 @@ async def gmail_api_sync_to_db(
 
         # Atualizar estatísticas
         await db.shared_role_email_configs.update_one(
-            {"role": role},
+            condicao_da_caixa(role, network_id),
             {
                 "$set": {
                     "last_sync_at": datetime.now(timezone.utc).isoformat(),

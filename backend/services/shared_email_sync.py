@@ -7,10 +7,11 @@ from __future__ import annotations
 import logging
 import traceback
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
-from database import db
 from services.shared_email_helpers import ALLOWED_ROLES, _require_admin
+from services.shared_mailbox_scope import config_da_caixa
+from services.workflow_scope import rede_em_contexto
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 async def run_shared_email_manual_sync(
     role: str,
     current_user: dict,
+    request: Request,
     days: int = 3,
 ) -> dict:
     """Sincronização manual via Gmail API para a caixa partilhada de um role.
@@ -34,7 +36,8 @@ async def run_shared_email_manual_sync(
         raise HTTPException(status_code=400, detail=f"Role '{role}' não permitido. Roles: {ALLOWED_ROLES}")
 
     # Pré-validar configuração antes de tentar sync (erros mais claros)
-    config = await db.shared_role_email_configs.find_one({"role": role}, {"_id": 0})
+    rede = await rede_em_contexto(current_user, request)
+    config = await config_da_caixa(role, rede)
     if not config:
         raise HTTPException(
             status_code=404,
@@ -68,7 +71,7 @@ async def run_shared_email_manual_sync(
         )
 
     try:
-        result = await gmail_api_sync_to_db(role=role, days=days, max_emails=200)
+        result = await gmail_api_sync_to_db(role=role, days=days, max_emails=200, network_id=rede)
     except Exception as e:
         logger.error(f"[Shared Email Sync] Erro inesperado para role '{role}': {e}\n{traceback.format_exc()}")
         raise HTTPException(

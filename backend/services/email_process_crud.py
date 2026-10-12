@@ -15,6 +15,7 @@ from typing import Optional, List
 from fastapi import HTTPException, BackgroundTasks, Request
 
 from database import db
+from services.shared_mailbox_scope import condicao_de_emails_da_caixa, config_do_utilizador
 from services.email_tenant_stamp import inserir_email
 from models.email import (
     EmailCreate, EmailUpdate, EmailResponse, EmailDirection, EmailStatus,
@@ -583,11 +584,12 @@ async def run_search_emails(q: str, current_user: dict, limit: int = 20):
             ]
         }
         # Incluir emails do role partilhado
-        shared_config = await db.shared_role_email_configs.find_one(
-            {"role": user_role, "is_configured": True}, {"_id": 0, "role": 1}
+        shared_config = await config_do_utilizador(
+            user_role, current_user, {"_id": 0, "role": 1}, is_configured=True,
         )
         if shared_config:
-            ownership_filter["$or"].append({"shared_role": user_role})
+            # O cargo SÓ DENTRO da rede de quem pesquisa (D-8).
+            ownership_filter["$or"].append(await condicao_de_emails_da_caixa(user_role, current_user))
         # O diretor vê também os emails das empresas onde tem cargo.
         if "diretor" in papeis:
             from services.webmail_scope import empresas_do_webmail
@@ -668,9 +670,9 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
 
     # === indexacao role: auto-use shared email account ===
     if user_role == UserRole.INDEXACAO:
-        shared_config = await db.shared_role_email_configs.find_one(
-            {"role": UserRole.INDEXACAO, "is_configured": True},
-            {"_id": 0, "email_address": 1, "email": 1},
+        shared_config = await config_do_utilizador(
+            UserRole.INDEXACAO, current_user, {"_id": 0, "email_address": 1, "email": 1},
+            is_configured=True,
         )
         if shared_config:
             shared_email_addr = shared_config.get("email_address") or shared_config.get("email", "")

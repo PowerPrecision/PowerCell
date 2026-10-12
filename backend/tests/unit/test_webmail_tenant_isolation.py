@@ -361,7 +361,12 @@ class TestAListagemNaoAtravessaEmpresas:
         async def sem_cargos(_request, _user):
             return {papel}
 
-        with patch.object(mod, "db", fake_db), \
+        # D-8: a lista das caixas partilhadas resolve o âmbito de rede de quem
+        # pergunta, que lê os UCRs — a cadeia de `db` do isolamento tem de estar
+        # patchada (`tenant_db`), senão o âmbito sai vazio e o teste mede o duplo.
+        from tests.unit.helpers_tenant import tenant_db
+
+        with tenant_db(fake_db, mod), \
              patch("services.webmail_scope.db", fake_db), \
              patch("services.auth.get_effective_role_async", papel_efectivo), \
              patch("services.email_config_resolver.load_caixa_geral_config", caixa_geral), \

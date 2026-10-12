@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from database import db
 from services.encryption import encryption_service
@@ -17,15 +17,32 @@ from models.shared_email_config import (
     SharedEmailConfigListResponse,
 )
 from services.shared_email_helpers import ALLOWED_ROLES, _require_admin
+from services.shared_mailbox_scope import (
+    condicao_da_caixa,
+    config_da_caixa,
+    configs_da_rede,
+)
+from services.tenant_network import CAMPO_REDE
+from services.workflow_scope import rede_em_contexto
 
 logger = logging.getLogger(__name__)
 
 
-async def run_list_shared_email_configs(current_user: dict) -> SharedEmailConfigListResponse:
-    """Listar todas as configurações de email partilhado."""
-    _require_admin(current_user)
+async def _rede_da_administracao(current_user: dict, request: Request) -> str:
+    """A rede cujas caixas partilhadas este administrador está a gerir (D-8).
 
-    configs = await db.shared_role_email_configs.find({}, {"_id": 0}).to_list(50)
+    É a da empresa activa — o mesmo contexto do workflow e dos formulários.
+    Fora do âmbito de quem pede é 404; sem contexto nenhum é 400.
+    """
+    return await rede_em_contexto(current_user, request)
+
+
+async def run_list_shared_email_configs(current_user: dict, request: Request) -> SharedEmailConfigListResponse:
+    """Listar as configurações de email partilhado DA REDE em contexto."""
+    _require_admin(current_user)
+    rede = await _rede_da_administracao(current_user, request)
+
+    configs = await configs_da_rede(rede)
 
     response_list = []
     for cfg in configs:
@@ -51,14 +68,15 @@ async def run_list_shared_email_configs(current_user: dict) -> SharedEmailConfig
     return SharedEmailConfigListResponse(configs=response_list, total=len(response_list))
 
 
-async def run_get_shared_email_config(role: str, current_user: dict) -> SharedEmailConfigResponse:
-    """Obter configuração de email partilhado para um role."""
+async def run_get_shared_email_config(role: str, current_user: dict, request: Request) -> SharedEmailConfigResponse:
+    """Obter configuração de email partilhado para um role (na rede em contexto)."""
     _require_admin(current_user)
 
     if role not in ALLOWED_ROLES:
         raise HTTPException(status_code=400, detail=f"Role '{role}' não permitido. Roles: {ALLOWED_ROLES}")
 
-    cfg = await db.shared_role_email_configs.find_one({"role": role}, {"_id": 0})
+    rede = await _rede_da_administracao(current_user, request)
+    cfg = await config_da_caixa(role, rede)
     if not cfg:
         return SharedEmailConfigResponse(role=role)
 
@@ -86,6 +104,7 @@ async def run_upsert_shared_email_config(
     role: str,
     payload: SharedEmailConfigCreate,
     current_user: dict,
+    request: Request,
 ) -> SharedEmailConfigResponse:
     """Criar ou atualizar configuração de email partilhado (IMAP/SMTP)."""
     _require_admin(current_user)
@@ -93,12 +112,17 @@ async def run_upsert_shared_email_config(
     if role not in ALLOWED_ROLES:
         raise HTTPException(status_code=400, detail=f"Role '{role}' não permitido. Roles: {ALLOWED_ROLES}")
 
-    existing = await db.shared_role_email_configs.find_one({"role": role}, {"_id": 0})
+    rede = await _rede_da_administracao(current_user, request)
+    existing = await config_da_caixa(role, rede)
 
     now = datetime.now(timezone.utc).isoformat()
 
     update_data = {
         "role": role,
+        # A caixa é de (cargo, rede). Gravar o carimbo também ao editar a
+        # configuração legada (sem rede) fá-la passar a ser, de facto, da rede
+        # a que sempre pertenceu.
+        CAMPO_REDE: rede,
         "email_address": payload.email_address,
         "display_name": payload.display_name or f"Email {role}",
         "imap_server": payload.imap_server,
@@ -133,7 +157,7 @@ async def run_upsert_shared_email_config(
         update_data["auth_method"] = "imap_smtp"
 
     await db.shared_role_email_configs.update_one(
-        {"role": role},
+        condicao_da_caixa(role, rede),
         {"$set": update_data},
         upsert=True,
     )
@@ -142,24 +166,25 @@ async def run_upsert_shared_email_config(
     await db.audit_logs.insert_one({
         "action": "shared_email_config_updated",
         "user_id": current_user["id"],
-        "details": {"role": role, "auth_method": update_data["auth_method"]},
+        "details": {"role": role, "network_id": rede, "auth_method": update_data["auth_method"]},
         "created_at": now,
     })
 
     logger.info(f"[Shared Email] Config atualizada para role '{role}' por {current_user['id']}")
 
     return SharedEmailConfigResponse(
-        **update_data,
+        **{k: v for k, v in update_data.items() if k != CAMPO_REDE},
         has_google_oauth=has_oauth,
         has_imap_password=has_imap,
     )
 
 
-async def run_delete_shared_email_config(role: str, current_user: dict) -> dict:
-    """Remover configuração de email partilhado."""
+async def run_delete_shared_email_config(role: str, current_user: dict, request: Request) -> dict:
+    """Remover configuração de email partilhado (só a da rede em contexto)."""
     _require_admin(current_user)
 
-    result = await db.shared_role_email_configs.delete_one({"role": role})
+    rede = await _rede_da_administracao(current_user, request)
+    result = await db.shared_role_email_configs.delete_one(condicao_da_caixa(role, rede))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail=f"Config para role '{role}' não encontrada")
 

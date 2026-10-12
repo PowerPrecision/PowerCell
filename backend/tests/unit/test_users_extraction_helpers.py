@@ -179,7 +179,10 @@ def test_forced_shared_uses_effective_role_not_primary():
             mock_users.find_one = AsyncMock(return_value=user_doc)
             load_shared.return_value = shared
             result = await resolve_email_config("u1", active_role="indexacao")
-            load_shared.assert_awaited_once_with("indexacao")
+            # D-8: a config partilhada pede-se com o UTILIZADOR (a caixa é de cargo + rede).
+            load_shared.assert_awaited_once()
+            assert load_shared.await_args.args[0] == "indexacao"
+            assert load_shared.await_args.args[1]["id"] == "u1"
             assert result["config_source"] == "shared_role"
 
             load_shared.reset_mock()

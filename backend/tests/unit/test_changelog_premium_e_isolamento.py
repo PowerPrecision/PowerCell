@@ -302,12 +302,13 @@ class TestIsPremium:
         cliente, _ = mundo
         gerar = AsyncMock(return_value={"changelog": {"id": "x"}, "tokens_used": 1})
         with patch("services.changelog_api_generate.generate_changelog_ai", gerar):
-            r = cliente.post("/system/changelog/generate-ai", json={}, headers=_bearer(_token_do_crm("u-adm")))
+            r = cliente.post("/system/changelog/generate-ai", json={}, headers=_bearer(_token_do_crm("u-master")))
         assert r.status_code == 200
         assert gerar.await_args.kwargs["is_premium"] is False
 
     @pytest.mark.parametrize("quem", ["u-adm", "u-ceo"])
     def test_pedir_premium_na_geracao_so_o_master(self, mundo, quem):
+        # D-34: já nem chega à regra do Premium — a porta é só-Master.
         cliente, _ = mundo
         gerar = AsyncMock()
         with patch("services.changelog_api_generate.generate_changelog_ai", gerar):
@@ -342,3 +343,93 @@ class TestIsPremium:
         fonte = (Path(__file__).resolve().parents[2] / "services" / "changelog_service.py").read_text(encoding="utf-8")
         trecho = fonte.split("doc = {")[-1].split("}")[0]
         assert '"is_premium": bool(is_premium)' in trecho
+
+
+# ====================================================================
+# 4. ESCREVER É SÓ DO MASTER (D-34 fechada)
+# ====================================================================
+
+class TestSoOMasterEscreveOChangelog:
+    """O conteúdo é GLOBAL e Admin/CEO são perfis LOCAIS: a geração por IA e o
+    diagnóstico não podem estar nas mãos de quem só governa uma rede."""
+
+    ROTAS = [
+        ("post", "/system/changelog/generate-ai", {}),
+        ("post", "/system/changelog/generate-ai", {"is_premium": True}),
+        ("get", "/system/changelog/diagnose", None),
+        ("patch", f"/system/changelog/{ID_NOVO}/premium", {"is_premium": True}),
+    ]
+
+    @pytest.mark.parametrize("quem", ["u-adm", "u-ceo", "u-ana", "u-cliente", "u-parceiro"])
+    @pytest.mark.parametrize("metodo,caminho,corpo", ROTAS)
+    def test_ninguem_que_nao_seja_master_escreve(self, mundo, quem, metodo, caminho, corpo):
+        cliente, bd = mundo
+        gerar = AsyncMock()
+        diagnosticar = AsyncMock()
+        marcar = AsyncMock()
+        with patch("services.changelog_api_generate.generate_changelog_ai", gerar), \
+                patch("routes.changelog.run_diagnose_changelog_generation", diagnosticar), \
+                patch("routes.changelog.run_set_changelog_premium", marcar):
+            kwargs = {"headers": _bearer(_token_do_crm(quem))}
+            if corpo is not None:
+                kwargs["json"] = corpo
+            r = getattr(cliente, metodo)(caminho, **kwargs)
+        assert r.status_code == 403
+        # Nem a IA se paga, nem o diagnóstico (que lê o estado das chaves) corre.
+        gerar.assert_not_awaited()
+        diagnosticar.assert_not_awaited()
+        marcar.assert_not_awaited()
+
+    def test_o_master_gera_e_diagnostica(self, mundo):
+        cliente, _ = mundo
+        gerar = AsyncMock(return_value={"changelog": {"id": "x"}, "tokens_used": 1})
+        diagnosticar = AsyncMock(return_value={"ok": True})
+        with patch("services.changelog_api_generate.generate_changelog_ai", gerar), \
+                patch("routes.changelog.run_diagnose_changelog_generation", diagnosticar):
+            cabecalho = _bearer(_token_do_crm("u-master"))
+            assert cliente.post("/system/changelog/generate-ai", json={}, headers=cabecalho).status_code == 200
+            assert cliente.get("/system/changelog/diagnose", headers=cabecalho).status_code == 200
+        gerar.assert_awaited_once()
+        diagnosticar.assert_awaited_once()
+
+    def test_ler_continua_a_ser_de_toda_a_equipa(self, mundo):
+        # Fechar a escrita não pode fechar a leitura (o Dashboard mostra as novidades).
+        cliente, _ = mundo
+        for quem in ("u-ana", "u-bruno", "u-adm", "u-ceo", "u-master"):
+            r = cliente.get("/system/changelog", headers=_bearer(_token_do_crm(quem)))
+            assert r.status_code == 200, quem
+
+    def test_inventario_toda_a_rota_de_escrita_usa_a_constante_unica(self):
+        """Por AST: cada rota que não seja a leitura tem de depender da MESMA lista.
+
+        Uma rota de escrita nova com `require_roles([ADMIN, CEO])` à mão volta a
+        pôr conteúdo global nas mãos de um perfil local, sem dar erro.
+        """
+        import ast
+        import inspect
+
+        import routes.changelog as rota
+
+        arvore = ast.parse(inspect.getsource(rota))
+        encontradas: dict[str, bool] = {}
+        for no in ast.walk(arvore):
+            if not isinstance(no, ast.AsyncFunctionDef):
+                continue
+            metodos = [
+                d.func.attr for d in no.decorator_list
+                if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                and isinstance(d.func.value, ast.Name) and d.func.value.id == "router"
+            ]
+            if not metodos or metodos == ["get"] and no.name == "list_changelogs":
+                continue
+            codigo = ast.unparse(no.args)
+            encontradas[no.name] = "PAPEIS_QUE_ESCREVEM_O_CHANGELOG" in codigo
+        # Contraprova: o leitor leu mesmo as três rotas que escrevem/diagnosticam.
+        assert set(encontradas) == {"diagnose_changelog_generation", "generate_changelog", "set_changelog_premium"}
+        assert all(encontradas.values()), encontradas
+
+    def test_a_constante_e_so_o_master(self):
+        from models.auth import UserRole
+        from services.changelog_api_premium import PAPEIS_QUE_ESCREVEM_O_CHANGELOG
+
+        assert list(PAPEIS_QUE_ESCREVEM_O_CHANGELOG) == [UserRole.MASTER]

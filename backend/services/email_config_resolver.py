@@ -24,6 +24,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 
 from database import db
+from services.shared_mailbox_scope import config_do_utilizador
 from services.encryption import encryption_service
 
 logger = logging.getLogger(__name__)
@@ -196,7 +197,10 @@ async def resolve_email_config(
     # REGRAS PARA ROLES COM FORÇA PARTILHADA (indexacao, suporte, etc.)
     # ==================================================================
     if effective_role in FORCED_SHARED_ROLES:
-        shared_config = await _load_shared_role_config(effective_role)
+        shared_config = await _load_shared_role_config(
+            effective_role,
+            {"id": user_id, "role": user_role, "company": user.get("company")},
+        )
         if shared_config:
             return shared_config
         # Se não tem config partilhada, retornar vazio (não fallback)
@@ -549,16 +553,17 @@ def _empty_response(source: str, reason: str = "", active_company_id: Optional[s
     return resp
 
 
-async def _load_shared_role_config(role: str) -> Optional[Dict[str, Any]]:
+async def _load_shared_role_config(role: str, user: dict) -> Optional[Dict[str, Any]]:
     """
-    Carrega a config partilhada do role (SharedRoleEmailConfig).
+    Carrega a config partilhada do role (SharedRoleEmailConfig) **da rede do utilizador**.
+
+    D-8: a caixa é de (cargo, rede). Sem o utilizador, a config de uma rede
+    (com o refresh token do Google dela) saía para quem tivesse o cargo
+    noutra rede.
 
     Returns dict com config resolvida, ou None se não existir.
     """
-    config = await db.shared_role_email_configs.find_one(
-        {"role": role},
-        {"_id": 0}
-    )
+    config = await config_do_utilizador(role, user)
 
     if not config:
         return None

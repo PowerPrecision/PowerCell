@@ -12,18 +12,17 @@ AS ATUALIZAÇÕES SÃO DO CRM, E GLOBAIS
     Cliente e do Parceiro nem chegam aqui: o `get_current_user` recusa-os (401).
   * Não têm fronteira de rede: são as MESMAS para todas as redes e empresas.
   * `is_premium` é um rótulo de venda posto pelo Master (upsell).
+  * ESCREVER é só do Master (D-34): conteúdo global, perfis Admin/CEO locais.
 ====================================================================
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from services.auth import require_roles, require_staff
-from services.role_scope import utilizador_e_global
-from models.auth import UserRole
 from models.changelog import ChangelogGenerateRequest, ChangelogPremiumRequest
 from services.changelog_api_list import run_list_changelogs
 from services.changelog_api_diagnose import run_diagnose_changelog_generation
 from services.changelog_api_generate import run_generate_changelog
-from services.changelog_api_premium import MENSAGEM_SO_MASTER, run_set_changelog_premium
+from services.changelog_api_premium import PAPEIS_QUE_ESCREVEM_O_CHANGELOG, run_set_changelog_premium
 
 router = APIRouter(prefix="/system", tags=["System Changelog"])
 
@@ -39,7 +38,7 @@ async def list_changelogs(
 
 @router.get("/changelog/diagnose")
 async def diagnose_changelog_generation(
-    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles(PAPEIS_QUE_ESCREVEM_O_CHANGELOG))
 ):
     """Diagnosticar problemas na geração de changelog por IA."""
     return await run_diagnose_changelog_generation()
@@ -48,12 +47,9 @@ async def diagnose_changelog_generation(
 @router.post("/changelog/generate-ai")
 async def generate_changelog(
     payload: ChangelogGenerateRequest = ChangelogGenerateRequest(),
-    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles(PAPEIS_QUE_ESCREVEM_O_CHANGELOG))
 ):
     """Gerar notas de atualização por IA a partir de logs técnicos."""
-    # Marcar como Premium é decisão comercial da plataforma: só o Master.
-    if payload.is_premium and not utilizador_e_global(user):
-        raise HTTPException(status_code=403, detail=MENSAGEM_SO_MASTER)
     return await run_generate_changelog(payload, user)
 
 
@@ -61,7 +57,7 @@ async def generate_changelog(
 async def set_changelog_premium(
     changelog_id: str,
     payload: ChangelogPremiumRequest,
-    user: dict = Depends(require_roles([UserRole.MASTER]))
+    user: dict = Depends(require_roles(PAPEIS_QUE_ESCREVEM_O_CHANGELOG))
 ):
     """Marcar/desmarcar uma atualização como Premium (só o Master)."""
     return await run_set_changelog_premium(changelog_id, payload, user)

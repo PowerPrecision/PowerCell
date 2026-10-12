@@ -11,12 +11,17 @@ import logging
 
 from fastapi import HTTPException
 
+from models.auth import UserRole
 from models.changelog import ChangelogPremiumRequest
 from services.changelog_service import set_changelog_premium
 
 logger = logging.getLogger(__name__)
 
-MENSAGEM_SO_MASTER = "Só o Master pode marcar uma novidade como Premium."
+#: Quem ESCREVE conteúdo global (gerar por IA, diagnosticar, marcar Premium) —
+#: D-34. Uma lista só com o Master é como o `require_roles` diz «isto não é da
+#: empresa de ninguém»: o Admin e o CEO, perfis locais, não passam. É UMA
+#: constante para as três rotas não divergirem sem dar erro.
+PAPEIS_QUE_ESCREVEM_O_CHANGELOG = [UserRole.MASTER]
 
 
 async def run_set_changelog_premium(changelog_id: str, payload: ChangelogPremiumRequest, user: dict) -> dict:
