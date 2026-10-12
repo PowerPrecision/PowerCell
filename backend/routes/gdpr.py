@@ -49,12 +49,18 @@ async def get_eligible_processes(
 
 
 @router.post("/anonymize")
+@limiter.limit("10/minute")
 async def anonymize_single(
-    request: AnonymizeRequest,
+    request: Request,
+    response: Response,
+    data: AnonymizeRequest,
     current_user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
-    """Anonimiza dados de um processo ou utilizador específico."""
-    return await run_anonymize_single(request, current_user)
+    """Anonimiza dados de um processo ou utilizador específico.
+
+    Fora da simulação (`dry_run=true`) exige a password actual (`password` no corpo) — D-41.
+    """
+    return await run_anonymize_single(data, current_user)
 
 
 @router.post("/batch")

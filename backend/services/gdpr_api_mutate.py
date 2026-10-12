@@ -56,6 +56,11 @@ async def run_anonymize_single(request: AnonymizeRequest, current_user: dict):
             request.user_id, current_user, projeccao={"_id": 0, "id": 1, "role": 1},
         )
 
+    # Irreversível: password ACTUAL depois da fronteira (404) e antes de qualquer escrita (D-41).
+    # A simulação (dry_run) não altera nada e não a pede.
+    if not request.dry_run:
+        await exigir_password_actual(current_user, request.password)
+
     if request.process_id:
         results["process"] = await anonymize_process_data(
             request.process_id,

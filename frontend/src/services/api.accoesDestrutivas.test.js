@@ -19,7 +19,7 @@ vi.mock("axios", () => {
   return { default: { create: () => instancia, ...instancia, isCancel: () => false }, create: () => instancia };
 });
 
-import { deleteCompany, runGdprBatch, updateCompany } from "./api";
+import { anonymizeData, deleteCompany, runGdprBatch, updateCompany } from "./api";
 
 describe("deleteCompany", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -83,5 +83,35 @@ describe("updateCompany", () => {
     const payload = { network_id: "nova" };
     await updateCompany("c1", payload, { password: "p" });
     expect(payload).toEqual({ network_id: "nova" });
+  });
+});
+
+describe("anonymizeData (anonimização individual, D-41)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each([
+    ["sem dry_run (no servidor o defeito é REAL)", { process_id: "p1" }],
+    ["dry_run falso", { process_id: "p1", dry_run: false }],
+    ["dry_run como texto", { process_id: "p1", dry_run: "true" }],
+  ])("%s e sem password: nem sai o pedido", async (_nome, corpo) => {
+    await expect(anonymizeData(corpo)).rejects.toThrow(/password/i);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("real com password: sai, com skipErrorToast", async () => {
+    post.mockResolvedValue({ data: {} });
+    await anonymizeData({ process_id: "p1", dry_run: false, password: "Segredo-1!" });
+    expect(post).toHaveBeenCalledWith(
+      "/gdpr/anonymize",
+      { process_id: "p1", dry_run: false, password: "Segredo-1!" },
+      { skipErrorToast: true },
+    );
+  });
+
+  it("só a simulação explícita dispensa a password", async () => {
+    post.mockResolvedValue({ data: {} });
+    await anonymizeData({ process_id: "p1", dry_run: true });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0][2]).toBeUndefined();
   });
 });
