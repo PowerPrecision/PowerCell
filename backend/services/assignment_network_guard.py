@@ -46,6 +46,7 @@ from fastapi import HTTPException
 from database import db
 from services.tenant_network import (
     CAMPO_REDE,
+    CAMPO_REDES_PARCEIRAS,
     TenantScope,
     redes_parceiras,
     resolve_tenant_scope,
@@ -159,21 +160,79 @@ async def exigir_atribuidos_da_minha_rede(
         raise HTTPException(status_code=403, detail=MENSAGEM_DE_RECUSA)
 
 
-async def ids_atribuiveis(ator: dict, utilizadores: list[dict]) -> list[dict]:
+async def ids_atribuiveis(
+    ator: dict,
+    utilizadores: list[dict],
+    *,
+    processo: Optional[dict] = None,
+    ja_atribuidos: Iterable[str] = (),
+) -> list[dict]:
     """Filtra uma lista de utilizadores para os que o ator pode atribuir.
 
     É o que a interface consome: a lista de «quem posso escolher» sai do
     servidor e não de um filtro no browser, para a regra não viver em
-    dois sítios.
+    dois sítios — e é a MESMA pergunta que o `exigir_atribuidos_da_minha_rede`
+    faz a quem grava (`redes_permitidas` + `pode_atribuir`).
+
+    Com `processo`, o Master vê só o que esse processo já alcança (dono +
+    convidadas): oferecer-lhe tudo para depois responder 403 era a
+    interface a contradizer o servidor. Os `ja_atribuidos` ficam sempre
+    na lista, mesmo de fora — regra 1: a Via Rápida antiga deixou gente
+    de duas redes e a interface devolve a lista inteira ao gravar; se o
+    nome desaparecesse da lista, desaparecia da equipa sem ninguém o pedir.
     """
-    permitidas = redes_permitidas(await resolve_tenant_scope(ator))
+    permitidas = redes_permitidas(await resolve_tenant_scope(ator), processo)
     if permitidas is None:
         return list(utilizadores)
+    mantidos = {_texto(i) for i in ja_atribuidos if _texto(i)}
     visiveis: list[dict] = []
     for u in utilizadores:
-        if pode_atribuir(permitidas, await redes_do_atribuido(u)):
+        if _texto(u.get("id")) in mantidos or pode_atribuir(
+            permitidas, await redes_do_atribuido(u)
+        ):
             visiveis.append(u)
     return visiveis
+
+
+async def utilizadores_atribuiveis_ao_processo(
+    ator: dict,
+    utilizadores: list[dict],
+    process_id: Optional[str],
+) -> list[dict]:
+    """A lista de atribuição quando a interface diz de que processo se trata.
+
+    Só muda alguma coisa para quem não tem fronteira de dados (o Master):
+    para todos os outros a lista já vem limitada às suas redes e o
+    processo nada acrescenta. Processo inexistente (ou sem id) = sem
+    processo, que é o caso da criação — vale o destino.
+    """
+    if not _texto(process_id):
+        return list(utilizadores)
+    if not (await resolve_tenant_scope(ator)).sem_fronteira:
+        return list(utilizadores)
+
+    from services.task_assignment_hygiene import (
+        CAMPOS_DE_ATRIBUICAO_DO_PROCESSO,
+        ids_atribuidos_do_processo,
+    )
+
+    # Só o que a pergunta precisa: o carimbo, as convidadas e a equipa.
+    # Um `find_one` sem projecção traria o documento inteiro, com os
+    # dados pessoais do cliente, para decidir uma dropdown.
+    projeccao = {
+        "_id": 0,
+        CAMPO_REDE: 1,
+        CAMPO_REDES_PARCEIRAS: 1,
+        **{campo: 1 for campo in CAMPOS_DE_ATRIBUICAO_DO_PROCESSO},
+    }
+    processo = await db.processes.find_one({"id": _texto(process_id)}, projeccao)
+    if not processo:
+        return list(utilizadores)
+    return await ids_atribuiveis(
+        ator, utilizadores,
+        processo=processo,
+        ja_atribuidos=ids_atribuidos_do_processo(processo),
+    )
 
 
 __all__ = [
@@ -183,4 +242,5 @@ __all__ = [
     "pode_atribuir",
     "redes_do_atribuido",
     "redes_permitidas",
+    "utilizadores_atribuiveis_ao_processo",
 ]

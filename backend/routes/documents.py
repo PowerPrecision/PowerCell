@@ -27,7 +27,12 @@ from database import db
 from models.auth import UserRole
 from models.document import DocumentExpiryCreate, DocumentExpiryResponse
 from services.auth import get_current_user, require_roles, require_staff
+from services.by_id_scope import (
+    exigir_alvo_do_documento_no_ambito,
+    exigir_process_id_do_pedido_no_ambito,
+)
 from services.process_closed_guard import exigir_processo_editavel
+from services.process_scope_guard import exigir_processo_no_ambito
 from middleware.rate_limit import limiter
 
 # Importar verificação de permissões de processo
@@ -44,7 +49,20 @@ from services.file_validation import validate_file_content, validate_and_extract
 from services.history import log_history
 from utils.input_sanitization import (sanitize_string, sanitize_name, sanitize_email, sanitize_phone, sanitize_url, sanitize_html, log_sanitization_rejection)
 
-router = APIRouter(prefix="/documents", tags=["Document Management"], dependencies=[Depends(exigir_processo_editavel)])
+# D-31: a fronteira de rede vem ANTES de tudo (404 igual ao de «não existe») —
+# `{process_id}`, `{client_id}` (id flexível), `{doc_id}` e o `process_id` do
+# CORPO/QUERY (search, confirm-upload, …) — e só depois a
+# guarda de processo fechado, que nunca pode ser um oráculo sobre outra rede.
+router = APIRouter(
+    prefix="/documents",
+    tags=["Document Management"],
+    dependencies=[
+        Depends(exigir_processo_no_ambito),
+        Depends(exigir_alvo_do_documento_no_ambito),
+        Depends(exigir_process_id_do_pedido_no_ambito),
+        Depends(exigir_processo_editavel),
+    ],
+)
 logger = logging.getLogger(__name__)
 
 from services.document_constants import (
@@ -541,7 +559,7 @@ async def get_download_url_by_path(
     aplicado em `run_get_download_url_by_path`) — evita servir chaves S3
     fora do âmbito de documentos (ex.: backups/*.zip).
     """
-    return await run_get_download_url_by_path(file_path)
+    return await run_get_download_url_by_path(file_path, user=user)
 
 
 
@@ -565,7 +583,7 @@ async def proxy_s3_file(
     Returns:
         StreamingResponse com o conteúdo do ficheiro
     """
-    return await run_proxy_s3_file(file_path)
+    return await run_proxy_s3_file(file_path, user=user)
 
 
 
@@ -635,7 +653,7 @@ async def check_move_conflict(
     - conflict_path: Caminho do ficheiro existente (se houver conflito)
     - suggested_names: Lista de nomes alternativos (se houver conflito)
     """
-    return await run_check_move_conflict(data)
+    return await run_check_move_conflict(data, user=user)
 
 
 @router.post("/move-file/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
@@ -831,7 +849,7 @@ async def get_all_categories(
     user: dict = Depends(get_current_user)
 ):
     """Obter todas as categorias de documentos."""
-    return await run_get_all_categories(process_id)
+    return await run_get_all_categories(process_id, user=user)
 
 
 

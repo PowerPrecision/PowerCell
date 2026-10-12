@@ -798,15 +798,22 @@ export const updateDeadline = (id, data) => api.put(`/deadlines/${id}`, data);
 export const deleteDeadline = (id) => api.delete(`/deadlines/${id}`);
 
 // Users (Admin)
-export const getUsers = (role, { forAssignment } = {}) =>
+// `processId`: a dropdown de atribuição diz de que processo se trata, e o
+// servidor devolve só quem esse processo alcança (muda a lista do Master —
+// o único sem fronteira de rede; a dos restantes já vem limitada).
+export const getUsers = (role, { forAssignment, processId } = {}) =>
   api.get("/users", {
     params: {
       ...(role ? { role } : {}),
       ...(forAssignment ? { for_assignment: true } : {}),
+      ...(processId ? { process_id: processId } : {}),
     },
   });
 /** Staff para dropdowns de atribuição (sem admin/indexação). Pacote DT. */
-export const getStaffUsers = () => api.get("/users/staff");
+export const getStaffUsers = ({ processId } = {}) =>
+  api.get("/users/staff", {
+    params: processId ? { process_id: processId } : {},
+  });
 export const createUser = (data) => api.post("/admin/users", data);
 export const updateUser = (id, data) => api.put(`/admin/users/${id}`, data);
 export const deleteUser = (id) => api.delete(`/admin/users/${id}`);

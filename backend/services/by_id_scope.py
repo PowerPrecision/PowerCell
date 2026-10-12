@@ -71,6 +71,7 @@ from database import db
 from services.auth import get_current_user
 from services.role_scope import utilizador_e_global
 from services.tenant_network import (
+    CAMPO_REDES_PARCEIRAS,
     PROJECCAO_DO_CARIMBO,
     TenantScope,
     build_network_scope_condition,
@@ -78,6 +79,7 @@ from services.tenant_network import (
     com_isolamento,
     documento_no_ambito,
     documento_sem_marca_de_tenant,
+    processo_no_ambito,
     resolve_tenant_scope,
 )
 
@@ -85,10 +87,17 @@ logger = logging.getLogger(__name__)
 
 ERRO_CLIENTE_NAO_ENCONTRADO = "Cliente não encontrado"
 ERRO_TAREFA_NAO_ENCONTRADA = "Tarefa não encontrada"
+ERRO_DOCUMENTO_NAO_ENCONTRADO = "Documento não encontrado"
 
 PROJECCAO_DO_CLIENTE = {
     "_id": 0, "id": 1, "process_ids": 1, "lead_status": 1, **PROJECCAO_DO_CARIMBO,
 }
+#: O que a pergunta «este processo é meu?» precisa de um processo — o
+#: carimbo, as redes convidadas e o `client_id` (para o id flexível).
+PROJECCAO_DO_PROCESSO_FLEXIVEL = {
+    "_id": 0, "id": 1, "client_id": 1, CAMPO_REDES_PARCEIRAS: 1, **PROJECCAO_DO_CARIMBO,
+}
+PROJECCAO_DO_DOCUMENTO = {"_id": 0, "id": 1, "process_id": 1, "client_id": 1}
 PROJECCAO_DA_TAREFA = {
     "_id": 0, "id": 1, "process_id": 1, "assigned_to": 1, "created_by": 1,
     **PROJECCAO_DO_CARIMBO,
@@ -204,6 +213,148 @@ async def tarefa_no_ambito(task_id: str, user: dict) -> Optional[bool]:
     return False
 
 
+# ════════════════════════════════════════════════════════════════════
+#  DOCUMENTOS: o `{client_id}` é «flexível» e o `{doc_id}` é um registo
+# ════════════════════════════════════════════════════════════════════
+async def id_flexivel_no_ambito(flexible_id: str, user: dict) -> Optional[bool]:
+    """O `{client_id}` de uma rota de documentos é da minha rede?
+
+    O id é «flexível» (`document_process_resolve.resolve_process_from_flexible_id`):
+    pode ser um PROCESSO, um CLIENTE ou o `client_id` de um processo. A ordem
+    é a do resolvedor, porque a pergunta é «o que é que o handler vai abrir?».
+    ``None`` se nada o identifica — o handler responde o seu 404.
+
+    A rede CONVIDADA conta, tal como na guarda de documentos (D-26): quem vê
+    o processo partilhado vê os documentos dele. O que o convidado pode FAZER
+    com eles é decidido pelos serviços (`assert_can_upload_to_process`, etc.).
+    """
+    if not flexible_id:
+        return None
+    processo = await db.processes.find_one({"id": flexible_id}, PROJECCAO_DO_PROCESSO_FLEXIVEL)
+    if processo:
+        if utilizador_e_global(user):
+            return True
+        scope = await resolve_tenant_scope(user)
+        return processo_no_ambito(processo, scope)
+
+    cliente = await db.clients.find_one(
+        {"id": flexible_id}, {**PROJECCAO_DO_CLIENTE, "process_ids": 1},
+    )
+    if cliente:
+        if utilizador_e_global(user):
+            return True
+        if await cliente_no_ambito(flexible_id, user, com_convidados=True) is False:
+            return False
+        # O cliente é meu, mas o handler abre o PROCESSO dele: se for de
+        # outra rede (homónimo, vínculo antigo) a resposta é a mesma.
+        scope = await resolve_tenant_scope(user)
+        ids = [i for i in (cliente.get("process_ids") or [])[:1] if i]
+        candidato = None
+        if ids:
+            candidato = await db.processes.find_one({"id": ids[0]}, PROJECCAO_DO_PROCESSO_FLEXIVEL)
+        if candidato is None:
+            candidato = await db.processes.find_one(
+                {"client_id": flexible_id}, PROJECCAO_DO_PROCESSO_FLEXIVEL,
+            )
+        return True if candidato is None else processo_no_ambito(candidato, scope)
+
+    por_cliente = await db.processes.find_one(
+        {"client_id": flexible_id}, PROJECCAO_DO_PROCESSO_FLEXIVEL,
+    )
+    if por_cliente:
+        if utilizador_e_global(user):
+            return True
+        return processo_no_ambito(por_cliente, await resolve_tenant_scope(user))
+    return None
+
+
+async def documento_no_ambito_por_id(doc_id: str, user: dict) -> Optional[bool]:
+    """O registo de documento `{doc_id}` é de um processo/cliente meu?
+
+    Os registos de revisão da IA vivem em `document_metadata` e as regras de
+    validade em `document_expiries`; ambos levam `process_id` e/ou
+    `client_id`. **Um registo que não aponta para dono nenhum não se prova
+    meu**: falha fechada para quem tem fronteira (o Master passa).
+    """
+    if not doc_id:
+        return None
+    registo = await db.document_metadata.find_one(
+        {"$or": [{"id": doc_id}, {"doc_id": doc_id}]}, PROJECCAO_DO_DOCUMENTO,
+    )
+    if registo is None:
+        registo = await db.document_expiries.find_one({"id": doc_id}, PROJECCAO_DO_DOCUMENTO)
+    if registo is None:
+        return None
+    if utilizador_e_global(user):
+        return True
+
+    for chave in ("process_id", "client_id"):
+        dono = registo.get(chave)
+        if dono:
+            resposta = await id_flexivel_no_ambito(str(dono), user)
+            if resposta is not None:
+                return resposta
+    return False
+
+
+# ════════════════════════════════════════════════════════════════════
+#  O `process_id` que NÃO vem no caminho: corpo JSON e query string
+# ════════════════════════════════════════════════════════════════════
+ERRO_PROCESSO_NAO_ENCONTRADO = "Processo não encontrado"
+ERRO_PROCESS_ID_INVALIDO = "process_id inválido"
+
+_METODOS_COM_CORPO = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+async def _process_id_do_corpo(request: Request):
+    """O `process_id` do corpo JSON, ou ``None`` se não há corpo JSON.
+
+    Só lê JSON: o upload multipart não pode ser carregado para memória por
+    uma guarda (o ficheiro inteiro ficava em RAM antes do handler). Um corpo
+    ilegível passa — o FastAPI responde o 422 dele.
+    """
+    if request.method not in _METODOS_COM_CORPO:
+        return None
+    if "json" not in (request.headers.get("content-type") or "").lower():
+        return None
+    try:
+        corpo = await request.json()
+    except Exception:  # noqa: BLE001 — corpo ilegível: o 422 é do FastAPI
+        return None
+    return corpo.get("process_id") if isinstance(corpo, dict) else None
+
+
+async def exigir_process_id_do_pedido_no_ambito(
+    request: Request, user: dict = Depends(get_current_user),
+) -> None:
+    """Dependência do router `/documents`: o `process_id` do CORPO ou da QUERY.
+
+    O `{process_id}` do caminho tem a sua (`exigir_processo_no_ambito`); estas
+    rotas — `search`, `confirm-upload`, `generate-upload-url`,
+    `check-move-conflict`, `check-upload-conflict`, `expiry`, `categories` —
+    levam o id noutro sítio e passavam por baixo de qualquer dependência de
+    caminho. 404 igual ao de «não existe»; id inexistente passa (o handler
+    responde o seu 404).
+
+    **Um `process_id` que não é texto é recusado (400)**, não ignorado: os
+    handlers fazem `find_one({"id": process_id})` e um `{"$ne": null}`
+    devolvia o primeiro processo de QUALQUER rede — a guarda a ignorar o
+    valor era a porta aberta para a contornar.
+    """
+    candidatos = [request.query_params.get("process_id"), await _process_id_do_corpo(request)]
+    for process_id in candidatos:
+        if process_id is None or process_id == "":
+            continue
+        if not isinstance(process_id, str):
+            raise HTTPException(status_code=400, detail=ERRO_PROCESS_ID_INVALIDO)
+        if await id_flexivel_no_ambito(process_id, user) is False:
+            logger.warning(
+                "[DOCUMENTOS] %s pediu %s %s (process_id %s no pedido), fora da sua rede.",
+                (user or {}).get("id"), request.method, request.url.path, process_id,
+            )
+            raise HTTPException(status_code=404, detail=ERRO_PROCESSO_NAO_ENCONTRADO)
+
+
 def _aceita_convidado(request: Request) -> bool:
     rota = request.scope.get("route")
     caminho = getattr(rota, "path", "") or ""
@@ -243,3 +394,31 @@ async def exigir_tarefa_no_ambito(
             (user or {}).get("id"), request.method, task_id,
         )
         raise HTTPException(status_code=404, detail=ERRO_TAREFA_NAO_ENCONTRADA)
+
+
+async def exigir_alvo_do_documento_no_ambito(
+    request: Request, user: dict = Depends(get_current_user),
+) -> None:
+    """Dependência do router `/documents`: 404 se o `{client_id}` ou o
+    `{doc_id}` do caminho é de outra rede.
+
+    O `{process_id}` do caminho tem a sua dependência (`exigir_processo_no_ambito`).
+    Um id que não existe passa: o handler responde o seu 404. A resposta é
+    sempre a de «não existe» — o 403 antigo das rotas de leitura confirmava
+    que o cliente existia.
+    """
+    client_id = request.path_params.get("client_id")
+    if client_id and await id_flexivel_no_ambito(client_id, user) is False:
+        logger.warning(
+            "[DOCUMENTOS] %s pediu %s %s (cliente/processo %s), fora da sua rede.",
+            (user or {}).get("id"), request.method, request.url.path, client_id,
+        )
+        raise HTTPException(status_code=404, detail=ERRO_CLIENTE_NAO_ENCONTRADO)
+
+    doc_id = request.path_params.get("doc_id")
+    if doc_id and await documento_no_ambito_por_id(doc_id, user) is False:
+        logger.warning(
+            "[DOCUMENTOS] %s pediu %s %s (documento %s), fora da sua rede.",
+            (user or {}).get("id"), request.method, request.url.path, doc_id,
+        )
+        raise HTTPException(status_code=404, detail=ERRO_DOCUMENTO_NAO_ENCONTRADO)

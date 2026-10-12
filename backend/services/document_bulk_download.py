@@ -22,9 +22,12 @@ from services.document_constants import (
     ERROR_S3_NOT_CONFIGURED,
 )
 from services.document_process_resolve import DOCUMENT_S3_ROOT_PREFIX
+from services.document_path_scope import ficheiro_no_ambito
 from services.document_s3_paths import s3_path_variations
 from services.history import log_history
+from services.role_scope import utilizador_e_global
 from services.s3_storage import s3_service
+from services.tenant_network import processo_no_ambito, resolve_tenant_scope
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +79,12 @@ async def run_bulk_download_documents(data: dict, *, user: dict) -> StreamingRes
         process = await db.processes.find_one({"id": process_id})
         if not process:
             raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+        # D-31: o `process_id` do corpo é um ALVO (o histórico de outro
+        # processo ganhava a linha «Download em massa»), tal como o do caminho.
+        if not utilizador_e_global(user) and not processo_no_ambito(
+            process, await resolve_tenant_scope(user)
+        ):
+            raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
 
     if not s3_service.is_configured():
         raise HTTPException(status_code=500, detail=ERROR_S3_NOT_CONFIGURED)
@@ -101,6 +110,16 @@ async def run_bulk_download_documents(data: dict, *, user: dict) -> StreamingRes
                     errors.append(
                         {"path": doc_path, "error": "Fora do âmbito de documentos"}
                     )
+                    continue
+
+                # D-31: dentro da raiz, só as pastas da rede de quem pede. A
+                # resposta é a de «não existe» — não confirma a chave.
+                if not await ficheiro_no_ambito(doc_path, user):
+                    logger.warning(
+                        "[SECURITY][BULK-DOWNLOAD] %s pediu uma chave fora da sua rede.",
+                        (user or {}).get("id"),
+                    )
+                    errors.append({"path": doc_path, "error": "Ficheiro não encontrado"})
                     continue
 
                 content = None

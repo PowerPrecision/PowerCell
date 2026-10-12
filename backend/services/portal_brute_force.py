@@ -72,6 +72,29 @@ MAX_TENTATIVAS = 8
 #: Minutos de bloqueio depois de esgotadas as tentativas.
 MINUTOS_DE_BLOQUEIO = 10
 
+#: Quanto tempo o registo de tentativas sobrevive depois da última escrita
+#: (D-31, remate). A identidade (o email) é escolhida por quem pergunta, logo
+#: cada email inventado deixava um documento que nunca expirava — e, com
+#: `attempts >= MAX`, cada pedido renovava o bloqueio antes de olhar para a
+#: credencial: quem esgotava as tentativas ficava trancado PARA SEMPRE.
+#: O índice TTL (`db_indexes`, campo `expire_at`) purga-os.
+#:
+#: É a constante de AMBAS as portas do Portal (o `verify` por NIF usa-a em
+#: `portal_security`): dois prazos diferentes para o mesmo ecrã de entrada é a
+#: divergência que a D-4 já registou. **Tem de ser MAIOR que qualquer
+#: bloqueio** — um registo apagado a meio do bloqueio desbloqueava o alvo.
+MINUTOS_DE_VIDA_DO_REGISTO = 30
+assert MINUTOS_DE_VIDA_DO_REGISTO > MINUTOS_DE_BLOQUEIO
+
+
+def expira_em(agora: datetime) -> datetime:
+    """Quando o registo de tentativas deixa de interessar (BSON Date, UTC).
+
+    Datetime NATIVO de propósito: o TTL do Mongo não actua sobre uma string
+    ISO (foi o que inutilizou o `idx_ttl` antigo).
+    """
+    return agora + timedelta(minutes=MINUTOS_DE_VIDA_DO_REGISTO)
+
 #: O prefixo de chave em uso. O âmbito é um PARÂMETRO (`chave_do_travao`
 #: recebe-o), para uma porta nova não gastar as tentativas de outra; mas
 #: só se declara a constante que tem chamador — declarei
@@ -198,7 +221,10 @@ async def registar_falha(db, ambito: str, identidade) -> None:
             {"_id": chave},
             {
                 "$inc": {"attempts": 1},
-                "$set": {"last_attempt_at": agora.isoformat()},
+                "$set": {
+                    "last_attempt_at": agora.isoformat(),
+                    "expire_at": expira_em(agora),
+                },
                 # `primeira_em` preservado: reescrevê-lo em cada falha
                 # fazia um ataque de três dias parecer começado agora (a
                 # regra do `desde` do `mailbox_health`).
@@ -246,9 +272,11 @@ __all__ = [
     "AMBITO_DO_LOGIN",
     "MAX_TENTATIVAS",
     "MINUTOS_DE_BLOQUEIO",
+    "MINUTOS_DE_VIDA_DO_REGISTO",
     "chave_do_travao",
     "esgotou_as_tentativas",
     "exigir_sem_bloqueio",
+    "expira_em",
     "limpar",
     "registar_falha",
     "segundos_de_bloqueio",

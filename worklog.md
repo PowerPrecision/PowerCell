@@ -11814,3 +11814,61 @@ Fecho da falha arquitectural identificada na iteração dos formulários.
 **Medição:** 4 mutações (guarda do `/assign`, guarda do `client_assign`, `pode_atribuir` sempre verdadeiro, lista sem âmbito) — todas mortas. A primeira versão do teste da lista passou com o defeito presente porque o fixture não dava `company` aos utilizadores (contam como órfãos, admitidos por desenho); o teste de «atribuir a si próprio» arrastava o fluxo todo e foi removido por não provar nada sobre a guarda.
 
 **Deploy:** correr `cd backend && python -m scripts.migrar_formularios_por_rede` (e depois `--aplicar`) na base de dados hospedada; confirmar `TENANT_DEFAULT_NETWORK_ID`; avisar a equipa de que atribuir fora da rede passa a pedir «Partilhar com Empresa…».
+
+---
+
+## Iteração `users-fronteira-de-rede` (Out 2026)
+
+Fecho das duas dívidas registadas na Via Rápida.
+
+**1. `GET /users/{id}`.** `require_staff` autorizava o verbo, não o objecto: bastava o id para ler o perfil de alguém de uma rede concorrente. `run_get_user` usa agora `carregar_utilizador_gerivel` (a mesma regra da gestão de utilizadores e da lista): o próprio, o Master, ou alguém das empresas da rede; um perfil global nunca é visível a um local. **404** e não 403, igual ao de «não existe». O frontend não tinha chamadores.
+
+**2. Dropdown do Master.** `GET /users` e `/users/staff` aceitam `?process_id=`; para o Master, a lista sai limitada ao alcance do processo (dono + convidadas) e mantém quem já está na equipa (regra 1 da guarda: a UI devolve a lista inteira ao gravar). Para os restantes nada muda e o processo nem é lido. `ProcessDetails` (3 listas) e `AssignUsersModal` passam o id; o modal passou de `fetch` cru a Axios e refaz o pedido ao mudar de processo.
+
+**Medição:** 9 mutações (5 backend, 4 frontend). Uma sobreviveu — tirar o desvio «só o Master precisa do processo» não muda a lista (já vem limitada), mas lê um processo alheio sem necessidade; passou a haver teste a afirmar que não é lido. O duplo de Mongo ignora a projecção em `find_one`, pelo que a palavra-passe e a projecção do processo se medem um nível abaixo (parâmetro que sai).
+
+**Dito:** o mesmo `GET /users/{id}` admite as contas «órfãs» (sem empresa) quando a rede de omissão está no âmbito — por desenho, igual à lista.
+
+---
+
+## Iteração `d31-documentos-tasklogs-portal` (Out 2026)
+
+Fecho da D-31 (rotas por id) nas três superfícies que ficaram nomeadas.
+
+**1. `/documents/client/{client_id}/*`.** Dependência de router que resolve o id flexível e segue o cliente até ao processo; o router ganhou também `exigir_processo_no_ambito` (todas as rotas `{process_id}`) e a de `{doc_id}`. 404 antes de qualquer 403. O `init-folders` não recebia o utilizador.
+
+**2. O mesmo ficheiro pela chave S3** (`proxy`, `download-url`, `bulk-download`): `services/document_path_scope.py`. Um teste apanhou um defeito meu: a variação `Documentação_Clientes/` era descartada e a pasta legada ficava «órfã».
+
+**3. `/task-logs/{id}`.** O CEO da Domus lia, cancelava e apagava os registos da Power; agora dono / Master / Admin-CEO do âmbito, 404 uniforme.
+
+**4. `/portal/{client_id}/verify`.** Sem guarda de rede possível (porta pública); fixou-se por teste que a resposta não é um oráculo entre redes.
+
+**Medição:** 21 mutações; 20 morreram à primeira. A P9 (tirar a rede convidada do ramo do processo) sobreviveu porque o caso de teste passava pelo ramo do cliente; acrescentei um processo partilhado sem ficha de cliente e morreu.
+
+**Dito:** `portal_verify_attempts` sem TTL; rotas com o id no corpo (`search`, `confirm-upload`, `generate-upload-url`, `check-*-conflict`) não varridas; sem alterações de frontend.
+
+---
+
+## Iteração `d31-id-no-corpo-e-ttl-do-verify` (Out 2026)
+
+**1. `process_id` no corpo/query dos documentos.** `exigir_process_id_do_pedido_no_ambito` (dependência de router, só JSON, 404 uniforme, 400 para valores que não são texto). Achados: `check-move-conflict` sem guarda e sem utilizador; `/search` sem `process_id` varria todas as redes e devolvia URLs pré-assinados; `/categories` idem nas contagens.
+
+**2. TTL em `portal_verify_attempts`.** `expire_at` (Date) deslizante, 30 min > bloqueio de 15; índice em `db_indexes`; backfill `scripts/backfill_portal_attempts_ttl.py`. Verificado contra `mongod` 7.0 real: índice com `expireAfterSeconds: 0`, script idempotente, purga observada em 45 s (o registo antigo saiu, o bloqueado ficou). Efeito: o bloqueio sem fim deixou de existir.
+
+**Medição:** 14 mutações na parte 1 e 12 na parte 2, todas mortas. Uma sobreviveu à primeira (o `update_one` do backfill sem a condição «ainda sem `expire_at`»): só uma corrida com a aplicação a distingue; acrescentei esse teste.
+
+**Dito:** `portal_login_attempts` tem o mesmo desenho e não foi tocada; a pesquisa sem `process_id` recorta por rede, não pela regra de pré-indexação.
+
+---
+
+## Iteração `d31-ttl-do-login-e-visibilidade-fina` (Out 2026)
+
+**1. TTL em `portal_login_attempts`.** Mesmo desenho do `verify`: `expire_at` (Date) deslizante, índice `ttl_portal_login_attempts`, prazo numa constante partilhada pelas duas portas (`portal_brute_force.MINUTOS_DE_VIDA_DO_REGISTO`, 30 > 10/15). O backfill passou a `backfill_portal_attempts_ttl.py` e cobre as duas colecções. O login por email tinha o mesmo bloqueio sem fim.
+
+**2. Pesquisa/categorias globais com a regra de pré-indexação.** `ids_de_processos_com_documentos_visiveis` reutiliza `user_can_view_process_documents` processo a processo (teste de concordância com a guarda individual); categorias aplicam a guarda ao `?process_id=` e a parede da `Index`.
+
+**Mongo real:** índices com `expireAfterSeconds: 0` nas duas colecções; backfill idempotente (2+2 gravados, 0 na 2.ª passagem); purga das duas colecções observada aos 25 s (o antigo saiu, o bloqueado ficou); `test_pesquisa_pre_indexacao_mongo.py` (9) cobre projecções, `$in`, `$or` e as duas vias de contagem.
+
+**Medição:** 21 mutações + 4 contra o Mongo real, todas mortas. Duas sobreviveram **por serem equivalentes** — tirar só a condição de rede da consulta, ou só o `scope` da função pura, porque cada uma cobre a outra (defesa em profundidade); a mutação das duas em conjunto morre.
+
+**Dito:** tectos de 5000 processos / 20000 documentos (cortam para o lado fechado).

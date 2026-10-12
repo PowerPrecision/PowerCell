@@ -35,6 +35,7 @@ import { Loader2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { filterByAnyRole, CONSULTOR_ASSIGNMENT_ROLES, INTERMEDIARIO_ASSIGNMENT_ROLES } from '../../utils/roleUtils';
 import { safeString } from '../../utils/safeString';
+import { getStaffUsers } from '../../services/api';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -49,6 +50,9 @@ const AssignUsersModal = memo(({
   const [selectedConsultor, setSelectedConsultor] = useState('');
   const [selectedMediador, setSelectedMediador] = useState('');
   const [appUsers, setAppUsers] = useState([]);
+  // A lista depende do processo (o Master só vê quem o processo alcança):
+  // reaproveitá-la para outro processo mostrava pessoas que o servidor recusa.
+  const [usersDoProcesso, setUsersDoProcesso] = useState(null);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -58,7 +62,7 @@ const AssignUsersModal = memo(({
       setSelectedConsultor(process.assigned_consultor_id || '');
       setSelectedMediador(process.assigned_mediador_id || '');
       
-      if (appUsers.length === 0) {
+      if (appUsers.length === 0 || usersDoProcesso !== process.id) {
         fetchUsers();
       }
     }
@@ -67,19 +71,17 @@ const AssignUsersModal = memo(({
   const fetchUsers = useCallback(async () => {
     setIsLoadingUsers(true);
     try {
-      const response = await fetch(`${API_URL}/api/users/staff`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const users = await response.json();
-        setAppUsers((Array.isArray(users) ? users : []).filter(u => u.is_active !== false));
-      }
+      // Axios e não `fetch`: o servidor decide a lista pelo perfil ACTIVO
+      // (X-Active-Role / X-Company-Id), que só o interceptor envia.
+      const { data: users } = await getStaffUsers({ processId: process?.id });
+      setAppUsers((Array.isArray(users) ? users : []).filter(u => u.is_active !== false));
+      setUsersDoProcesso(process?.id ?? null);
     } catch (error) {
       console.error('Erro ao buscar utilizadores:', error);
     } finally {
       setIsLoadingUsers(false);
     }
-  }, [token]);
+  }, [process?.id]);
 
   const handleSave = useCallback(async () => {
     if (!process) return;

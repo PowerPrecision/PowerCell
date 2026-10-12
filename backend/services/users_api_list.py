@@ -4,8 +4,6 @@ Extraído de `routes/users.py`.
 """
 from __future__ import annotations
 
-from fastapi import HTTPException
-
 from database import db
 from services.staff_assignment import (
     apply_assignment_staff_filter,
@@ -20,12 +18,18 @@ async def run_get_users(
     role: str | None,
     user: dict,
     for_assignment: bool = False,
+    process_id: str | None = None,
 ):
     """Listar utilizadores do sistema (filtro opcional por role).
 
     Pacote DT: `for_assignment=True` exclui admin das dropdowns.
     Pacote FL: inclui indexação nas dropdowns de atribuição.
     Pacote EB: por defeito devolve TODOS (admin, indexação, inativos).
+
+    `process_id` (Out 2026): a dropdown de atribuição diz de que processo
+    se trata. Só muda a lista do Master — o único sem fronteira de dados —,
+    que passa a ver apenas quem o processo já alcança (dono + convidadas),
+    ou seja, exactamente o que o servidor aceitaria ao gravar.
     """
     from services.role_query import build_deep_role_query
 
@@ -55,21 +59,37 @@ async def run_get_users(
     users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(
         USERS_LIST_LIMIT
     )
+    if process_id:
+        from services.assignment_network_guard import (
+            utilizadores_atribuiveis_ao_processo,
+        )
+
+        users = await utilizadores_atribuiveis_ao_processo(
+            user or {}, users, process_id
+        )
     if for_assignment:
         return filter_assignment_staff(users)
     return users
 
 
-async def run_get_staff_users(user: dict):
+async def run_get_staff_users(user: dict, process_id: str | None = None):
     """Staff elegível para atribuição (consultor/intermediario/diretor/ceo)."""
-    return await run_get_users(role=None, user=user, for_assignment=True)
+    return await run_get_users(
+        role=None, user=user, for_assignment=True, process_id=process_id,
+    )
 
 
 async def run_get_user(user_id: str, user: dict):
-    """Obter utilizador por ID."""
-    found_user = await db.users.find_one(
-        {"id": user_id}, {"_id": 0, "password": 0},
-    )
-    if not found_user:
-        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
-    return found_user
+    """Obter utilizador por ID — só se estiver no âmbito de quem pede.
+
+    `require_staff` autoriza o VERBO, não o OBJECTO: sem esta guarda
+    bastava conhecer um id para ler o perfil (email, telefone, empresas)
+    de alguém de uma rede concorrente. A regra é a da gestão de
+    utilizadores e a da lista (`carregar_utilizador_gerivel`): o próprio,
+    o Master (tudo) ou alguém das empresas da minha rede; um perfil
+    global nunca é visível a um local. **404 e nunca 403** — distinguir
+    «não existe» de «não é teu» faria do endpoint um directório de ids.
+    """
+    from services.user_management_scope import carregar_utilizador_gerivel
+
+    return await carregar_utilizador_gerivel(user_id, user or {})

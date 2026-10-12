@@ -542,7 +542,7 @@ carimbar (Pool) — mantém os links existentes a funcionar, mas é o que se dev
 substituir pelos links por empresa; (f) o directório «Empresa de Destino» do
 Portal do Parceiro expõe o nome das empresas das redes com Index a qualquer
 parceiro activo (o mesmo compromisso do D-36); (g) ~~a **Via Rápida**~~ — **extinta** (Out 2026, ver «Fechadas»).
-**Em aberto, da iteração da Via Rápida:** (h) `GET /users/{id}` devolve qualquer utilizador a qualquer staff — o mesmo defeito de `GET /users`, por id (a lista já respeita o âmbito); (i) os processos que a Via Rápida antiga já partilhou mantêm a partilha até alguém a revogar à mão — não se migra, por decisão de produto; (j) o Master a atribuir é limitado ao alcance do processo, mas a dropdown dele lista todos (recusa-se no servidor com a mensagem certa).
+**Em aberto, da iteração da Via Rápida:** (h) ~~`GET /users/{id}` devolvia qualquer utilizador a qualquer staff~~ — **fechada** (Out 2026): 404 fora do âmbito, ver «Fechadas»; (i) os processos que a Via Rápida antiga já partilhou mantêm a partilha até alguém a revogar à mão — não se migra, por decisão de produto; (j) ~~a dropdown do Master listava todos~~ — **fechada** (Out 2026): `?process_id=` limita-a ao alcance do processo, ver «Fechadas».
 
 ### D-35 · Bloco A/B/C: o que ficou de fora, dito
 **Onde:** `services/network_triage.py` (ex-`hub_triage.py`; o Hub único acabou — ver AGENTS.md), `services/partner_drafts.py`, `services/financial_validation.py`, `services/tenant_network.py`
@@ -558,8 +558,8 @@ parceiro activo (o mesmo compromisso do D-36); (g) ~~a **Via Rápida**~~ — **e
 6. **Inventário das superfícies que LISTAM:** fica com excepções escritas (`SEM_CONDICAO_DE_REDE_POR_DESENHO`); `GET /documents/client/{id}/*`, `/task-logs/{id}` e `/portal/{id}/verify` continuam na D-31.
 **O que fecha isto:** confirmar a variável em produção; decidir 2–4 com o dono do produto.
 
-### D-31 · Rotas «por id» sem pergunta de rede: fechadas as de clientes, tarefas, restauro e rascunhos
-**Onde:** `services/by_id_scope.py`, `routes/clients.py`, `routes/tasks.py`, `routes/restore.py`, `services/email_templates_drafts.py`
+### D-31 · Rotas «por id» sem pergunta de rede: fechadas as de clientes, tarefas, restauro, rascunhos, documentos e task-logs
+**Onde:** `services/by_id_scope.py`, `services/document_path_scope.py`, `routes/clients.py`, `routes/tasks.py`, `routes/restore.py`, `routes/documents.py`, `services/task_logs_api_actions.py`, `services/email_templates_drafts.py`
 
 **Fechado (Out 2026):** `GET/PUT/DELETE /clients/{id}` (e as restantes rotas
 com `{client_id}`), `GET/PUT/DELETE /tasks/{id}` (e `complete`/`reopen`), os
@@ -576,14 +576,110 @@ claim-based routing); o cliente que é titular de um processo MEU (porque
 ler/editar, nunca para eliminar, atribuir ou criar processo; e, nas tarefas,
 as atribuídas a mim ou criadas por mim. `POST /clients` passou a carimbar.
 
-**O que continua aberto:** as outras rotas por id que o serviço resolve à sua
-maneira e que ESTA varredura não percorreu —
-`/documents/client/{client_id}/*` (a guarda de documentos tem a sua fronteira,
-D-26, mas não passa por aqui), `/task-logs/{id}` (jobs do próprio
-utilizador), `/admin/migration/run-single/{client_id}` (só Master) e
-`/portal/{client_id}/verify` (pública, com travão). Cada uma precisa do mesmo
-inventário por AST das rotas com `{…_id}` no caminho que esta iteração fez
-para clientes e tarefas.
+**Fechado (Out 2026, fecho da varredura por caminho):** `/documents/**` e
+`/task-logs/{id}`, e a análise de `/portal/{client_id}/verify`.
+
+* **`/documents/client/{client_id}/*`** (files, upload, init-folders, download,
+  delete, bulk-delete) — o `{client_id}` é «flexível» (processo, cliente ou
+  `client_id` de um processo) e a dependência `exigir_alvo_do_documento_no_ambito`
+  resolve-o pela mesma ordem do handler, **incluindo o processo para onde o
+  cliente aponta** (um cliente meu com vínculo a um processo de outra rede
+  também fecha). O `init-folders` nem recebia o utilizador: escrevia
+  `s3_folder` no processo de outra rede sabendo só o id. O router passou a
+  levar `exigir_processo_no_ambito` + `exigir_alvo_do_documento_no_ambito`
+  **antes** da guarda de processo fechado, o que também cobre todas as rotas
+  com `{process_id}` (a guarda de visibilidade respondia **403**, que
+  confirmava o id) e `{doc_id}` (`/{doc_id}/ai-analyze-review`, `apply-ai-review`,
+  `reject-ai-review`: um registo sem dono não se prova meu — só o Master).
+* **Os mesmos ficheiros pela chave S3** — `/documents/proxy/{path}`,
+  `/documents/download-url/{path}` e `bulk-download` serviam qualquer chave
+  dentro de `Documentação Clientes/` (a parede da raiz impede o
+  `backups/*.zip`, não o cliente do vizinho). `services/document_path_scope.py`
+  resolve o dono da chave (pasta mapeada ou id no caminho) e decide como a
+  fronteira de documentos: rede convidada conta; sem dono → só o Master;
+  reclamada por duas redes → ninguém; 404. O `process_id` do corpo do
+  `bulk-download` também é um alvo (escrevia no histórico de outro processo).
+  A guarda corre antes de perguntar ao S3 se a chave existe (sem oráculo).
+* **`/task-logs/{id}`** — a excepção era `role in [master, admin, ceo]`, o
+  cargo da conta sem pergunta de rede: o CEO da Domus lia, cancelava e
+  apagava os registos da Power (que levam `process_name`). Hoje: o dono, o
+  Master, ou Admin/CEO só para donos do seu âmbito
+  (`carregar_utilizador_gerivel`); o resto é 404 (era 403).
+* **`/portal/{client_id}/verify`** — **não há guarda de rede a pôr**: é uma
+  porta pública, sem utilizador nem rede em contexto; a parede é a credencial
+  (NIF + nº do processo) e o travão 5/15. O que se pode afirmar, e agora tem
+  teste, é que a resposta **não distingue** «cliente de outra rede», «não
+  existe», «NIF errado» e «processo alheio» (todos 401 com a mesma mensagem) e
+  que o travão não distingue ids reais de inexistentes.
+
+**Remate (Out 2026) — fechados os dois pontos que ficaram em aberto:**
+
+* **Rotas com o `process_id` no corpo/query** — `services/by_id_scope.exigir_process_id_do_pedido_no_ambito`,
+  4.ª dependência do router `/documents` (antes da guarda de processo fechado).
+  Lê o `process_id` do **corpo JSON** e da **query** (nunca de multipart: o
+  ficheiro inteiro não pode ficar em RAM antes do handler) e responde 404 igual
+  ao de «não existe». Cobre `check-upload-conflict`, `generate-upload-url`,
+  `confirm-upload`, `check-move-conflict`, `search`, `POST/GET /expiry` e
+  `GET /categories`. Um `process_id` que não é texto (`{"$ne": null}`) é
+  **400**, não ignorado: os handlers fazem `find_one({"id": ...})` e o operador
+  devolvia o primeiro processo de qualquer rede. Achados ao varrer: o
+  `check-move-conflict` **não tinha guarda nenhuma nem recebia o utilizador**
+  (oráculo de «este ficheiro existe?»); e o `/search` **sem `process_id`
+  percorria os metadados de todas as redes e devolvia URLs pré-assinados** —
+  agora recortado aos processos do âmbito (`ids_de_processos_no_ambito`, rede
+  convidada incluída, tecto de 5000 que corta para FECHADO). O `GET /categories`
+  tinha o mesmo defeito (contagens de todas as redes).
+* **`portal_verify_attempts` com TTL** — o registo ganha `expire_at` (BSON Date;
+  o TTL ignora strings ISO) a cada falha, 30 min depois (`VERIFY_ATTEMPTS_TTL_MINUTES`,
+  **maior que o bloqueio de 15** — um prazo menor desbloqueava o alvo a meio),
+  e o índice `ttl_portal_verify_attempts` (`expireAfterSeconds: 0`) vive em
+  `db_indexes.TTL_INDEXES`. Registos antigos: `scripts/backfill_portal_attempts_ttl.py`
+  (omissão só lê; `--aplicar`; idempotente; nunca antes do fim de um bloqueio
+  em curso) — **correr uma vez depois do deploy**.
+  *Efeito colateral dito:* antes, quem esgotava as 5 tentativas ficava trancado
+  **para sempre** (com `attempts >= 5` cada pedido renovava o bloqueio antes de
+  olhar para a credencial); agora o contador volta a zero ≤ 30 min depois da
+  última falha. Troca assumida: um atacante persistente tem 5 tentativas por
+  30 min por `client_id` em vez de zero, mas o cliente legítimo deixa de ficar
+  preso sem intervenção na base de dados.
+
+**Remate 2 (Out 2026) — as duas dívidas finais do remate:**
+
+* **TTL também no login por email** — `portal_login_attempts` (`portal_brute_force`)
+  leva `expire_at` (BSON Date, deslizante) e o índice `ttl_portal_login_attempts`
+  (`expireAfterSeconds: 0`). O prazo é **UMA constante para as duas portas**
+  (`portal_brute_force.MINUTOS_DE_VIDA_DO_REGISTO` = 30; o `verify` deriva dela),
+  maior que qualquer bloqueio (10 e 15). O bloqueio sem fim do login era o mesmo
+  do `verify` (`esgotou_as_tentativas` re-trancava depois de `locked_until`).
+  `scripts/backfill_portal_attempts_ttl.py` (ex-`backfill_portal_verify_ttl`)
+  percorre as DUAS colecções (`COLECCOES_DE_TENTATIVAS`, com teste a exigir que
+  coincida com as colecções que têm TTL em `expire_at`).
+* **Pesquisa e categorias globais com a regra fina** — `/documents/search` e
+  `/documents/categories` sem `process_id` já não recortam só por rede:
+  `document_visibility.ids_de_processos_com_documentos_visiveis` aplica, por
+  processo, a MESMA função pura da guarda individual
+  (`user_can_view_process_documents`: rede com a convidada, bypass da gestão,
+  pré-indexação, atribuição por todos os campos canónicos e relação com o cliente),
+  e há um teste de **concordância** com `assert_can_view_process_documents`.
+  As categorias passaram a aplicar também a guarda ao `?process_id=` (403 por
+  indexar, 404 se não existe — antes devolvia contagens de qualquer processo da
+  rede) e a parede da pasta `Index` a quem não a vê (contagem em memória; quem a
+  vê continua na agregação do Mongo). Verificado contra `mongod` real
+  (`tests/integration/test_pesquisa_pre_indexacao_mongo.py`): o duplo escondia
+  a projecção.
+
+**O que continua aberto (dito):**
+
+* O recorte por processo enumera até 5000 processos do âmbito (e as categorias
+  contam até 20000 documentos em memória para quem não vê a `Index`): ao cortar,
+  vê-se menos, nunca mais, e há `warning`. Uma rede maior que isso precisa de um
+  índice de visibilidade por documento.
+* `/task-logs/{id}`: «cancelar» por um gestor que não é o dono responde 400 (o
+  serviço filtra por `user_id`) — comportamento anterior, agora só acessível
+  dentro do âmbito. E a excepção de gestão lê o cargo da CONTA, não o perfil
+  efectivo (a rota não tem `Request`).
+* `/admin/migration/run-single/{client_id}` é só-Master (sem fronteira de
+  dados): não é fuga.
 
 **Relacionado — fronteira de dados é a REDE, não a empresa.** Power e
 Precision partilham rede por decisão do Lote 4, logo um Admin da Power vê os
@@ -600,6 +696,8 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 | # | Dívida | Fechada em |
 |---|---|---|
 | — | A Via Rápida (partilha implícita ao atribuir alguém de outra rede), antes ponto (g) da D-37 | Iteração `via-rapida-extinta` — apagada, não desligada. `assignment_network_guard` recusa a atribuição directa fora da rede (403 que aponta «Partilhar com Empresa…»), a lista de atribuíveis sai do servidor já filtrada (`/users` e `/users/staff` não tinham filtro de rede) e a Partilha Explícita é o único caminho para outra rede, com distribuição pelas regras do destino |
+| — | `GET /users/{id}` devolvia o perfil de qualquer utilizador a qualquer staff que soubesse o id (ponto (h) da Via Rápida) | Iteração `users-fronteira-de-rede` — o pedido por id passa por `carregar_utilizador_gerivel` (o próprio, o Master, ou alguém das empresas da minha rede; perfil global invisível a um local). **404 e nunca 403**, igual ao de «não existe». Não havia chamadores no frontend. `tests/unit/test_users_fronteira_de_rede.py::TestAExploracao`. |
+| — | A dropdown de atribuição mostrava todos os utilizadores ao Master (ponto (j) da Via Rápida) | Iteração `users-fronteira-de-rede` — `GET /users` e `/users/staff` aceitam `?process_id=`; para o Master a lista sai limitada ao alcance do processo (dono + convidadas), mantendo quem já está na equipa; é a MESMA pergunta (`redes_permitidas` + `pode_atribuir`) que o servidor faz ao gravar, com teste de concordância. `ProcessDetails` e `AssignUsersModal` passam o id (o modal passou de `fetch` cru a Axios: o `fetch` não envia `X-Active-Role`, que decide se o Master tem fronteira). |
 | D-37 (formulários) | `form_config` global; registo público sem rede | Iteração `formularios-por-rede-e-mercado-b2b` — `form_config` tem `network_id` com o mesmo molde do workflow (modelo sem rede, copy-on-write, leitura própria → modelo → omissões) num ponto único, `form_config_scope`; o registo público carrega `?empresa=<company_id>` e abre estritamente o formulário dessa rede (empresa desconhecida/inactiva = 404, nada é criado); o Portal e o Portal do Parceiro derivam o esquema da rede do cliente/destino. A administração edita só a rede em contexto (Axios, não `fetch`). Migração: `scripts/migrar_formularios_por_rede.py` |
 | — | Tipificação rígida do serviço partilhado entre empresas (o «D-33» da directiva de Out 2026) | **Fora de âmbito por decisão do dono do produto (Out 2026):** a empresa A partilha com a B sem tipificar o serviço contratado |
 | — | O Hub único (`is_hub`), parte da D-35 | Iteração `multi-fornecedor` — a flag global saiu; quem tem Index deriva da equipa e a partilha escolhe a rede de destino (`network_triage`). A migração `--limpar-is-hub` retira o resíduo |

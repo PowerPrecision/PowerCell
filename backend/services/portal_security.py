@@ -31,6 +31,7 @@ from services.portal_estado import (
     exigir_processo_activo,
 )
 from config import JWT_SECRET, JWT_ALGORITHM
+from services.portal_brute_force import MINUTOS_DE_VIDA_DO_REGISTO, expira_em
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,13 @@ PORTAL_SESSION_VALIDITY_HOURS = 4  # Sessão verificada: 4 horas (mais curta que
 # Tentativas máximas de verificação por client_id (prevenção de brute-force)
 MAX_VERIFY_ATTEMPTS = 5
 VERIFY_LOCKOUT_MINUTES = 15
+
+# Quanto tempo o registo de tentativas sobrevive depois da última escrita
+# (D-31, remate): a constante é a do `portal_brute_force` — as duas portas do
+# Portal partilham o prazo. **Tem de ser MAIOR que o bloqueio** (15 aqui):
+# um registo apagado a meio do bloqueio desbloqueava o alvo.
+VERIFY_ATTEMPTS_TTL_MINUTES = MINUTOS_DE_VIDA_DO_REGISTO
+assert VERIFY_ATTEMPTS_TTL_MINUTES > VERIFY_LOCKOUT_MINUTES
 
 # Security scheme (igual ao staff, mas validado separadamente)
 _portal_security = HTTPBearer(auto_error=False)
@@ -357,13 +365,17 @@ async def _record_failed_attempt(lockout_key: str) -> None:
 
     Incrementa o contador de tentativas. Se atingir o limite, aplica lockout.
     """
-    now = datetime.now(timezone.utc).isoformat()
+    agora = datetime.now(timezone.utc)
+    now = agora.isoformat()
 
     result = await db.portal_verify_attempts.update_one(
         {"_id": lockout_key},
         {
             "$inc": {"attempts": 1},
-            "$set": {"last_attempt_at": now},
+            # `expire_at` é um datetime NATIVO de propósito: o TTL do Mongo
+            # não actua sobre uma string ISO (foi o que inutilizou o
+            # `idx_ttl` antigo). A `last_attempt_at` em texto fica como está.
+            "$set": {"last_attempt_at": now, "expire_at": expira_em(agora)},
         },
         upsert=True,
     )

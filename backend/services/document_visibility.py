@@ -450,3 +450,79 @@ async def assert_can_upload_to_process(user: dict, process: dict) -> None:
 
     await exigir_processo_aberto(process)
 
+
+# ====================================================================
+# LISTAGENS SEM `process_id`: A REGRA FINA, PROCESSO A PROCESSO (D-31)
+# ====================================================================
+# `GET /documents/categories` e `POST /documents/search` sem `process_id`
+# percorrem os metadados de VÁRIOS processos. Recortá-los à rede (o que a D-31
+# fez primeiro) esquece a regra de pré-indexação: um consultor não atribuído
+# deixa de poder abrir os documentos de um processo «Por Indexar» (403) mas via
+# o nome do ficheiro, o resumo da IA e o URL pré-assinado dele na pesquisa, e a
+# contagem por categoria na outra. A pergunta é a MESMA da guarda individual,
+# por isso a resposta sai da mesma função pura — nunca de uma segunda cópia da
+# regra num filtro Mongo.
+
+#: Quantos processos do âmbito se enumeram. Cortar errado é FECHADO (vê-se
+#: menos, nunca mais): o mesmo tecto do `run_get_document_expiries`.
+LIMITE_DE_PROCESSOS_NA_PESQUISA = 5000
+
+
+async def ids_de_processos_com_documentos_visiveis(user: dict) -> Optional[list[str]]:
+    """Os `process_id` cujos documentos `user` pode ver — ``None`` para o Master.
+
+    Aplica, por processo, `user_can_view_process_documents` (a fronteira de
+    rede com a rede convidada, o bypass da gestão e a regra de pré-indexação,
+    incluindo a relação directa com o cliente do PACOTE 12). Falha FECHADA:
+    sem âmbito resolvível não há processos, nunca «todos».
+    """
+    from services.role_scope import utilizador_e_global
+
+    if utilizador_e_global(user):
+        return None
+
+    from services.process_staff_assignment import ASSIGNMENT_ID_FIELDS
+    from services.tenant_network import (
+        CAMPO_REDES_PARCEIRAS,
+        PROJECCAO_DO_CARIMBO,
+        build_process_scope_condition,
+    )
+
+    scope = await _ambito_do_utilizador(user)
+    projeccao = {
+        "_id": 0, "id": 1, "is_indexed": 1, "client_id": 1,
+        CAMPO_REDES_PARCEIRAS: 1, **PROJECCAO_DO_CARIMBO,
+        **{campo: 1 for campo in ASSIGNMENT_ID_FIELDS},
+    }
+    processos = await db.processes.find(
+        build_process_scope_condition(scope), projeccao,
+    ).to_list(LIMITE_DE_PROCESSOS_NA_PESQUISA)
+    if len(processos) >= LIMITE_DE_PROCESSOS_NA_PESQUISA:
+        logger.warning(
+            "[DOCS-VISIBILITY] âmbito de %s cortado nos %d processos.",
+            (user or {}).get("id"), LIMITE_DE_PROCESSOS_NA_PESQUISA,
+        )
+
+    # A relação directa com o cliente (PACOTE 12) só conta para o que está
+    # por indexar e só vale a pena perguntá-la a quem não tem bypass.
+    meus_clientes: dict[str, dict] = {}
+    if not (_user_allows(user) & _ADMIN_BYPASS_ROLES):
+        ramos = []
+        if user.get("id"):
+            ramos.append({"assigned_to": user["id"]})
+        if user.get("email"):
+            ramos.append({"created_by": user["email"]})
+        if ramos:
+            clientes = await db.clients.find(
+                {"$or": ramos}, {"_id": 0, "id": 1, "assigned_to": 1, "created_by": 1},
+            ).to_list(LIMITE_DE_PROCESSOS_NA_PESQUISA)
+            meus_clientes = {c["id"]: c for c in clientes if c.get("id")}
+
+    visiveis: list[str] = []
+    for processo in processos:
+        if not processo.get("id"):
+            continue
+        cliente = meus_clientes.get(processo.get("client_id"))
+        if user_can_view_process_documents(user, processo, cliente, scope=scope):
+            visiveis.append(processo["id"])
+    return visiveis
