@@ -15,6 +15,9 @@ class AnonymizeRequest(BaseModel):
     process_id: Optional[str] = None
     user_id: Optional[str] = None
     dry_run: bool = False
+    #: Password ACTUAL de quem executa. Obrigatória quando `dry_run` é falso (a anonimização não se
+    #: desfaz); a simulação não altera nada e não a pede. `repr=False`: nunca num log.
+    password: Optional[str] = Field(None, max_length=256, repr=False)
 
 
 class BatchAnonymizeRequest(BaseModel):

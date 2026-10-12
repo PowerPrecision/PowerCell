@@ -65,6 +65,7 @@ import CompaniesAdminTab from "../components/admin/CompaniesAdminTab";
 import AutomationPage from "./AutomationPage";
 import PermissionsTab from "../components/admin/PermissionsTab";
 import HistoryTrackingPanel from "../components/admin/HistoryTrackingPanel";
+import RgpdAnonimizacaoPanel from "../components/admin/RgpdAnonimizacaoPanel";
 
 // PACOTE AZ: Lazy loading para páginas pesadas que causam TDZ
 // (Cannot access 'd' before initialization) devido a dependências
@@ -107,6 +108,9 @@ const SystemAdminPanel = () => {
   // O WORKFLOW é a exceção: é POR REDE (cada empresa tem a sua operação), logo
   // o Admin e o CEO editam o da rede em contexto e o Master o de qualquer uma.
   const podeEditarWorkflow = isMaster || hasRole(user, "admin") || hasRole(user, "ceo");
+  // A anonimização RGPD de UM processo é do Master, do Admin e do CEO (na sua rede); o LOTE é só do
+  // Master (o painel decide pelo `isMaster`, e o servidor responde 403 a quem não o for).
+  const podeAnonimizar = isMaster || hasRole(user, "admin") || hasRole(user, "ceo");
 
   const [activeTab, setActiveTab] = useState("users-mgmt");
 
@@ -385,6 +389,13 @@ const SystemAdminPanel = () => {
                   <span className="hidden sm:inline">Auditoria</span>
                   <span className="sm:hidden">Audit</span>
                 </TabsTrigger>
+                {podeAnonimizar && (
+                  <TabsTrigger value="anonimizacao" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap" data-testid="subtab-anonimizacao">
+                    <ShieldCheck className="h-4 w-4" />
+                    <span className="hidden sm:inline">Anonimização</span>
+                    <span className="sm:hidden">Anon.</span>
+                  </TabsTrigger>
+                )}
                 {/* Controlo de histórico (Bloco 1, ponto 4) — só o Master */}
                 {isMaster && (
                   <TabsTrigger value="history-tracking" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
@@ -400,6 +411,11 @@ const SystemAdminPanel = () => {
               <TabsContent value="audit" className="mt-4">
                 <Suspense fallback={<TabLoader />}><AuditTrailPage embedded={true} /></Suspense>
               </TabsContent>
+              {podeAnonimizar && (
+                <TabsContent value="anonimizacao" className="mt-4">
+                  <RgpdAnonimizacaoPanel isMaster={isMaster} />
+                </TabsContent>
+              )}
               {isMaster && (
                 <TabsContent value="history-tracking" className="mt-4">
                   <HistoryTrackingPanel />

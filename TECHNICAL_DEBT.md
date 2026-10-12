@@ -381,21 +381,18 @@ em `db_indexes.py` (nunca num passo de operações). O `network_id` por carimbar
 (rede de omissão) e a rede da empresa sem carimbo têm de ser tratados no índice
 (ou backfill prévio), senão a pilha antiga escapa-lhe.
 
-### D-41 · Acções destrutivas que ainda não pedem a password
-**Onde:** `backend/services/gdpr_api_mutate.py::run_anonymize_single`, outras rotas só-Master/Admin destrutivas
+### D-41 · Resto das acções destrutivas só-Master sem password
+**Onde:** restauro de backups (`/restore*`), migrações e resets de processos (`admin_migration`, `admin_process_migration`), reset de permissões
 
-A reautenticação por password (`reauth_password`) cobre hoje: repor ao modelo,
-eliminar uma empresa, alterar o `network_id` e a anonimização em lote. Ficaram de
-fora, por não estarem no pedido: **`POST /gdpr/anonymize`** (anonimização de UM
-processo/utilizador — igualmente irreversível, aberta a Admin/CEO da rede), o
-restauro de backups e as migrações/resets de processos (só-Master). Além disso
-**não existe UI** para eliminar empresas nem para a anonimização em lote (os
-clientes da API recusam sem password, o servidor também).
+A reautenticação por password (`reauth_password`) cobre hoje: repor ao modelo, eliminar uma
+empresa, alterar o `network_id`, a anonimização em lote **e a individual** (`/gdpr/anonymize`,
+fechada em Out 2026) — todas com UI (`ConfirmarComPasswordDialog`). Ficaram de fora, por não
+estarem no pedido, as operações de infraestrutura que só o Master alcança: restauro de backups,
+migrações/resets de processos e reset de permissões.
 
-**Para fechar:** decidir quais destas acções merecem a mesma parede (a individual
-é a mais provável) e acrescentá-las ao inventário
-`test_accoes_destrutivas_com_password.py::TestInventario::COM_PASSWORD`; se se
-criar UI, usar o `ConfirmarComPasswordDialog`.
+**Para fechar:** decidir quais merecem a mesma parede e acrescentá-las ao inventário
+`test_accoes_destrutivas_com_password.py::TestInventario::COM_PASSWORD`; quem criar UI usa o
+`ConfirmarComPasswordDialog`.
 
 ### D-18 · `co_buyers` tem dois significados
 **Onde:** `backend/services/ai_document.py::build_update_data_from_extraction`
@@ -709,6 +706,7 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 | # | Dívida | Fechada em |
 |---|---|---|
 | D-38 | O registo público actualizava, sem prova de posse, um cliente já existente da mesma rede | Iteração `d38-duplicados-por-rede` — **NIF, Email e Telemóvel não se repetem dentro da rede**: o formulário público responde 409 genérico (`DUPLICATE_CLIENT`, sem id, nome nem campo — a porta é anónima) e não cria nem altera nada; o ramo de upsert foi apagado, não desligado. A criação e a edição do CRM passaram do âmbito GLOBAL para o da rede (o 409 devolvia o id e o nome de clientes de OUTRAS redes) e verificam também o telemóvel (com e sem indicativo, via blind index); na edição só se verifica o que MUDOU. `services/client_uniqueness.py` é o ponto único. Cobertura: `test_d38_duplicados_por_rede.py` (39), `tests/integration/test_duplicados_por_rede_mongo.py` (8, MongoDB real), `PublicClientForm.duplicado.test.jsx`. 14 mutações medidas, todas mortas |
+| D-41 (parcial) | A anonimização individual (`/gdpr/anonymize`) era irreversível e não pedia password | Iteração `accoes-destrutivas-ui`: `AnonymizeRequest.password` exigida fora do `dry_run` (que é FALSO por omissão neste pedido, ao contrário do lote), depois da fronteira de rede (404 antes do 403) e antes de qualquer escrita; painel «Compliance › Anonimização» com diálogo. O resto das acções de infraestrutura continua em aberto (secção D-41) |
 | D-14 | O formulário público podia criar um cliente com NIF repetido | Iteração `d38-duplicados-por-rede` — fechada pelo mesmo ponto: opção (c) (recusar com mensagem clara). Limite dito: o portal do parceiro (`partner_leads`) não recusa — marca `possible_duplicate_of` e a colisão B2B (D-39) resolve-se na libertação |
 | D-8 | `db.emails`: faltavam as caixas partilhadas por cargo | Iteração `d8-caixas-partilhadas-por-rede` — o carimbo dos emails já estava fechado na escrita; faltava o que o impedia nas caixas partilhadas: a configuração era UMA por cargo para o sistema inteiro (o Admin da Domus editava, e ligava por OAuth, a Indexação da Power) e a regra «caixa partilhada do seu cargo» dava a todo o `indexacao` de todas as redes os emails de todas as redes. A caixa passa a identificar-se por **(cargo, rede)**: `shared_mailbox_scope` é o ponto único (administração pela rede da empresa activa; o email herda a rede da caixa; leitura só dentro do âmbito; o aviso em tempo real só a quem tem o email no âmbito, incluindo o da Caixa Geral). A pilha antiga (sem `network_id`) é da rede de omissão — nada se apaga nem se move. Backfill `scripts/backfill_shared_mailbox_network_id.py` (recusa-se sem rede) |
 | D-32 | O registo público procurava e actualizava clientes em todas as redes | Iteração `d8-caixas-partilhadas-por-rede` — `POST /public/client-registration` é anónimo e escreve: procurava o email em toda a base de dados e **actualizava** o cliente encontrado (de qualquer rede), re-marcava-o como lead novo e devolvia o `client_id` e `is_new_client` (um oráculo). A procura vive agora na rede do link (`ambito_do_registo`: a rede + as suas empresas; a pilha por carimbar só conta para a rede de omissão); a mesma pessoa em duas redes são dois clientes; o aviso à gestão (push + email com nome, email e telefone) ia ao «primeiro admin da base de dados» e passa a ir só à gestão da rede do link; `is_new_client` saiu |

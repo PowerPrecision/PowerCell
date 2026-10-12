@@ -1524,7 +1524,13 @@ export const deleteProperty = (id) => api.delete(`/properties/${id}`);
 // GDPR
 export const getGdprStatistics = () => api.get("/gdpr/statistics");
 export const getGdprEligible = (params = {}) => api.get("/gdpr/eligible", { params });
-export const anonymizeData = (data) => api.post("/gdpr/anonymize", data);
+// Anonimizar (um processo ou um utilizador) não se desfaz: fora da simulação (`dry_run: true`) exige a
+// password ACTUAL (`data.password`) — o servidor também a exige (D-41). Sem ela nem sai o pedido.
+// ATENÇÃO: no servidor `dry_run` é FALSO por omissão neste pedido, por isso só `true` dispensa a password.
+export const anonymizeData = (data) =>
+  data?.dry_run !== true && !data?.password
+    ? Promise.reject(new Error("anonymizeData: a password actual é obrigatória fora da simulação."))
+    : api.post("/gdpr/anonymize", data, data?.dry_run === true ? undefined : { skipErrorToast: true });
 // Fora do ensaio (`dry_run: false`) a anonimização em lote não se desfaz: exige a password ACTUAL
 // (`data.password`); sem ela nem sai o pedido. O ensaio (`dry_run` por omissão) não a pede.
 export const runGdprBatch = (data) =>

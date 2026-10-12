@@ -5,10 +5,11 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, Loader2, Pencil, Plug, Plus, Search } from "lucide-react";
+import { Building2, Loader2, Pencil, Plug, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { createCompany, getCompanies, testCompanyEmailConnection, updateCompany } from "../../services/api";
+import { createCompany, deleteCompany, getCompanies, testCompanyEmailConnection, updateCompany } from "../../services/api";
 import ConfirmarComPasswordDialog from "./ConfirmarComPasswordDialog";
+import { lerErroDeConfirmacao } from "../../utils/confirmarComPassword";
 import { queryKeys } from "../../lib/queryClient";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import { validateNIF } from "../../utils/validateNIF";
@@ -108,6 +109,9 @@ export default function CompaniesAdminTab({ isMaster = false }) {
   // Alterar a REDE de uma empresa pede a password actual: o pedido fica aqui (sem a password)
   // até o diálogo a recolher. `null` = nada pendente.
   const [mudancaDeRede, setMudancaDeRede] = useState(null);
+  // Eliminar uma empresa (só o Master) também pede a password actual: a empresa à espera
+  // de confirmação. `null` = nada pendente.
+  const [aEliminar, setAEliminar] = useState(null);
   const [testingConnection, setTestingConnection] = useState(false);
 
   // Ponto 11 — paginação server-side. O `.to_list(200)` do backend
@@ -227,6 +231,14 @@ export default function CompaniesAdminTab({ isMaster = false }) {
     toast.success("Empresa atualizada.");
     setMudancaDeRede(null);
     setDialogOpen(false);
+    queryClient.invalidateQueries({ queryKey: queryKeys.orgAdmin.companiesAll() });
+  };
+
+  const confirmarEliminacao = (password) => deleteCompany(aEliminar.id, password);
+
+  const aposEliminacao = () => {
+    toast.success(`Empresa "${aEliminar?.name}" eliminada.`);
+    setAEliminar(null);
     queryClient.invalidateQueries({ queryKey: queryKeys.orgAdmin.companiesAll() });
   };
 
@@ -382,6 +394,18 @@ export default function CompaniesAdminTab({ isMaster = false }) {
                         <Pencil className="h-4 w-4" />
                         Editar
                       </Button>
+                      {isMaster && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1.5 text-destructive hover:text-destructive"
+                          onClick={() => setAEliminar(company)}
+                          data-testid={`btn-delete-company-${company.id}`}
+                        >
+                          <Trash2 className="h-4 w-4" aria-hidden="true" />
+                          Eliminar
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 );
@@ -624,6 +648,37 @@ export default function CompaniesAdminTab({ isMaster = false }) {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Eliminar uma empresa não se desfaz: só o Master, e com a password actual. */}
+      {isMaster && (
+        <ConfirmarComPasswordDialog
+          open={Boolean(aEliminar)}
+          onOpenChange={(aberto) => !aberto && setAEliminar(null)}
+          titulo="Eliminar empresa"
+          descricao={
+            <>
+              <p>
+                Vai eliminar a empresa <strong>{aEliminar?.name}</strong>. Esta acção não se desfaz.
+              </p>
+              <p>
+                Os acessos (perfis por empresa) a esta empresa são removidos e as configurações de email
+                dela apagadas. Os utilizadores que tenham outra empresa passam a ela; se algum só tiver
+                esta, a eliminação é recusada e diz quem são.
+              </p>
+            </>
+          }
+          onConfirmar={confirmarEliminacao}
+          onSucesso={aposEliminacao}
+          rotuloConfirmar="Eliminar empresa"
+          Icone={Trash2}
+          testIdBase="eliminar-empresa"
+          lerErro={(err) => lerErroDeConfirmacao(err, {
+            naoEncontrado: "Esta empresa já não existe.",
+            recusado: "Não foi possível eliminar a empresa.",
+            erro: "Não foi possível eliminar a empresa. Tente novamente.",
+          })}
+        />
+      )}
 
       {/* Alterar a rede redefine quem vê os dados desta empresa: confirmação com a password actual. */}
       <ConfirmarComPasswordDialog

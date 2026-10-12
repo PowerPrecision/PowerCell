@@ -314,6 +314,108 @@ class TestAnonimizacaoEmLote:
 
 
 # ════════════════════════════════════════════════════════════════════
+#  Anonimização individual (D-41)
+# ════════════════════════════════════════════════════════════════════
+class TestAnonimizacaoIndividual:
+    @pytest.fixture
+    def individual(self, mundo):
+        bd, _, gdpr = mundo
+        proc = AsyncMock(return_value={"anonymized": True})
+        utilizador = AsyncMock(return_value={"anonymized": True})
+        with patch.object(gdpr, "anonymize_process_data", proc), patch.object(gdpr, "anonymize_user_data", utilizador):
+            yield gdpr, proc, utilizador, bd
+
+    async def test_real_sem_password_e_400_e_nao_executa(self, individual):
+        from services.gdpr_api_models import AnonymizeRequest
+
+        gdpr, proc, _, bd = individual
+        with pytest.raises(HTTPException) as erro:
+            await gdpr.run_anonymize_single(AnonymizeRequest(process_id="p-power", dry_run=False), MASTER)
+        assert erro.value.status_code == 400
+        proc.assert_not_awaited()
+        assert bd.gdpr_audit.docs == []
+
+    async def test_real_com_password_errada_e_403_e_nao_executa(self, individual):
+        from services.gdpr_api_models import AnonymizeRequest
+
+        gdpr, proc, _, _ = individual
+        with pytest.raises(HTTPException) as erro:
+            await gdpr.run_anonymize_single(
+                AnonymizeRequest(process_id="p-power", dry_run=False, password="errada"), MASTER,
+            )
+        assert erro.value.status_code == 403
+        proc.assert_not_awaited()
+
+    async def test_real_com_password_certa_executa_e_regista(self, individual):
+        from services.gdpr_api_models import AnonymizeRequest
+
+        gdpr, proc, _, bd = individual
+        r = await gdpr.run_anonymize_single(
+            AnonymizeRequest(process_id="p-power", dry_run=False, password=SENHA), MASTER,
+        )
+        assert r["success"] is True
+        proc.assert_awaited_once_with("p-power", False)
+        assert [a["action"] for a in bd.gdpr_audit.docs] == ["manual_anonymize"]
+        assert SENHA not in repr(bd.gdpr_audit.docs)
+
+    async def test_a_simulacao_nao_pede_password(self, individual):
+        from services.gdpr_api_models import AnonymizeRequest
+
+        gdpr, proc, _, bd = individual
+        r = await gdpr.run_anonymize_single(AnonymizeRequest(process_id="p-power", dry_run=True), MASTER)
+        assert r["dry_run"] is True
+        proc.assert_awaited_once_with("p-power", True)
+        assert bd.gdpr_audit.docs == []
+
+    async def test_o_defeito_do_pedido_e_real_e_por_isso_pede_password(self, individual):
+        """`dry_run` é FALSO por omissão neste pedido (ao contrário do lote): esquecer o campo não pode ser um passe."""
+        from services.gdpr_api_models import AnonymizeRequest
+
+        assert AnonymizeRequest(process_id="x").dry_run is False
+        gdpr, proc, _, _ = individual
+        with pytest.raises(HTTPException) as erro:
+            await gdpr.run_anonymize_single(AnonymizeRequest(process_id="p-power"), MASTER)
+        assert erro.value.status_code == 400
+        proc.assert_not_awaited()
+
+    async def test_a_fronteira_de_rede_vem_antes_da_password(self, individual):
+        """Um Admin de outra rede leva 404 MESMO com a password errada: a fronteira vem primeiro, logo o 403
+        nunca confirma que o processo existe (e a tentativa falhada não conta para o travão)."""
+        from services.gdpr_api_models import AnonymizeRequest
+
+        gdpr, proc, _, bd = individual
+        with pytest.raises(HTTPException) as erro:
+            await gdpr.run_anonymize_single(
+                AnonymizeRequest(process_id="p-domus", dry_run=False, password="errada"), ADMIN,
+            )
+        assert erro.value.status_code == 404
+        proc.assert_not_awaited()
+
+    async def test_sem_alvo_continua_a_ser_400_antes_de_tudo(self, individual):
+        from services.gdpr_api_models import AnonymizeRequest
+
+        gdpr, _, _, _ = individual
+        with pytest.raises(HTTPException) as erro:
+            await gdpr.run_anonymize_single(AnonymizeRequest(dry_run=False, password=SENHA), MASTER)
+        assert erro.value.status_code == 400 and "process_id" in erro.value.detail
+
+    async def test_o_anonimizar_utilizador_tambem_pede_password(self, individual):
+        from services.gdpr_api_models import AnonymizeRequest
+
+        gdpr, _, utilizador, _ = individual
+        with patch.object(gdpr, "carregar_utilizador_gerivel", AsyncMock()):
+            with pytest.raises(HTTPException) as erro:
+                await gdpr.run_anonymize_single(AnonymizeRequest(user_id="u-x", dry_run=False), MASTER)
+        assert erro.value.status_code == 400
+        utilizador.assert_not_awaited()
+
+    def test_a_password_nao_aparece_no_repr(self):
+        from services.gdpr_api_models import AnonymizeRequest
+
+        assert "segredo-xyz" not in repr(AnonymizeRequest(process_id="x", password="segredo-xyz"))
+
+
+# ════════════════════════════════════════════════════════════════════
 #  HTTP — o endpoint é chamável sem o ecrã
 # ════════════════════════════════════════════════════════════════════
 class TestRotas:
@@ -393,6 +495,20 @@ class TestRotas:
         c, _ = cliente
         assert c.post("/gdpr/batch", json={}).status_code == 200
 
+    def test_anonimizacao_individual_real_sem_password_400(self, cliente):
+        c, _ = cliente
+        r = c.post("/gdpr/anonymize", json={"process_id": "p-power", "dry_run": False})
+        assert r.status_code == 400, r.text
+
+    def test_anonimizacao_individual_pelo_admin_da_rede_com_password_certa(self, cliente):
+        """O Admin/CEO local continua a poder anonimizar na SUA rede — agora provando a password."""
+        c, _ = cliente
+        c.definir_utilizador(ADMIN)
+        with patch("services.gdpr_api_mutate.anonymize_process_data", AsyncMock(return_value={})):
+            errada = c.post("/gdpr/anonymize", json={"process_id": "p-power", "dry_run": False, "password": "errada"})
+            certa = c.post("/gdpr/anonymize", json={"process_id": "p-power", "dry_run": False, "password": SENHA})
+        assert errada.status_code == 403 and certa.status_code == 200, (errada.text, certa.text)
+
     def test_batch_so_o_master(self, cliente):
         c, _ = cliente
         c.definir_utilizador(ADMIN)
@@ -422,6 +538,7 @@ class TestInventario:
         ("services/companies_crud_api_mutate.py", "run_delete_company"),
         ("services/companies_crud_api_mutate.py", "run_update_company"),
         ("services/gdpr_api_mutate.py", "run_anonymize_batch"),
+        ("services/gdpr_api_mutate.py", "run_anonymize_single"),
     ]
 
     @pytest.mark.parametrize("ficheiro,funcao", COM_PASSWORD)
@@ -459,6 +576,6 @@ class TestInventario:
         import routes.companies_crud as rc
         import routes.gdpr as rg
 
-        for funcao in (rc.delete_company, rg.anonymize_batch):
+        for funcao in (rc.delete_company, rg.anonymize_batch, rg.anonymize_single):
             params = inspect.signature(funcao).parameters
             assert "request" in params and "response" in params, funcao.__name__

@@ -11977,3 +11977,20 @@ Fecho da D-8 (caixas partilhadas por cargo), da D-32 (registo público) e da par
 ### Correcção de CI — `S3FileManager.test.jsx` (Out 2026)
 - O CI do commit `5b232a0e` falhou num único teste (`as pastas de categoria estão disponíveis`; 3047 passed, 1 failed). **Não tinha a ver com as acções destrutivas**: era a armadilha da § 27.52 — `await screen.findByTestId("s3-file-manager")` resolve no cartão do «A carregar…» (o `data-testid` envolve também o estado de carregamento) e o `getByTestId` síncrono seguinte corria contra o spinner. Verde local, vermelho num CI carregado.
 - **Reproduzido antes de corrigir:** um atraso artificial de 40 ms nas respostas do Axios falso faz falhar **4** dos 15 testes do ficheiro (o CI só apanhou um). Corrigido com `aguardarCarregado()` (espera que o spinner de ecrã inteiro desapareça) nos 9 testes que afirmam depois de montar; com os mesmos 40 ms passam os 15. Era o único ficheiro com o padrão.
+
+
+---
+
+## Iteração `accoes-destrutivas-ui` (Out 2026) — UI das acções destrutivas e D-41
+
+### 1. D-41 fechada para a anonimização individual (`POST /gdpr/anonymize`)
+- `AnonymizeRequest.password` (`repr=False`), exigida **fora do `dry_run`**. Atenção ao defeito: neste pedido `dry_run` é **FALSO por omissão** (no lote é verdadeiro) — esquecer o campo não pode ser um passe, por isso um pedido sem `dry_run` e sem password responde 400 (há teste). Ordem: 400 sem alvo → fronteira de rede (404) → **password** → execução. A fronteira vem antes para o 403 nunca confirmar que um processo de outra rede existe nem gastar tentativas do travão; a mutação que a trocava sobreviveu à primeira medição porque o teste usava a password CERTA (a fronteira dava 404 de qualquer forma) — passou a usar a errada.
+- Rota com `@limiter.limit("10/minute")` + `response: Response`; o corpo chama-se `data` (o slowapi exige o `Request` com o nome `request`). Entra no inventário por AST.
+
+### 2. UI
+- **Eliminar empresa** (`CompaniesAdminTab`, só o Master): botão por linha → `ConfirmarComPasswordDialog` → `deleteCompany(id, password)`. A recusa do servidor (utilizadores que só têm esta empresa) lê-se no próprio diálogo, com quem são.
+- **Painel «Compliance › Anonimização»** (`RgpdAnonimizacaoPanel`, Master/Admin/CEO): estatísticas, lista de elegíveis (do âmbito de rede do utilizador) com «Anonimizar» por processo (diálogo + password); **lote só do Master**, sempre depois de uma SIMULAÇÃO (não altera nada, não pede password) com o mesmo tamanho — mudar o tamanho invalida a simulação e, depois de executar, também. `anonymizeData` e `runGdprBatch` recusam sem password no cliente da API. **Bug apanhado pelos testes:** o tamanho do lote lia-se com `parseInt`, que aceita «12abc» e «1e3» (→ 12 e 1): o lote executado seria diferente do que se leu; passou a exigir só dígitos.
+- Medição: 17 mutações no frontend e 6 no backend; 1 viva (a ordem fronteira/password, ver acima) → morta.
+
+### 3. Diagnóstico de duplicados
+- Já entregue em `d0a9ea78` (`scripts/diagnose_client_duplicates.py`, só leitura) — ver a iteração `diagnostico-de-duplicados`.
