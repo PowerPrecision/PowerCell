@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { payloadDoClienteDoModal, seccoesDoProcessoDoModal } from "./processDetailsModalPayload";
 
 const CLIENTE = { nome: "Ana", email: "a@b.pt", telefone: "912", nif: "123456789", estado_civil: "solteiro" };
@@ -73,7 +74,7 @@ describe("seccoesDoProcessoDoModal", () => {
 });
 
 describe("ligação ao modal (apagar o chamador não parte mais nenhum teste)", () => {
-  const fonte = readFileSync(resolve(__dirname, "ProcessDetailsModal.jsx"), "utf8")
+  const fonte = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "ProcessDetailsModal.jsx"), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 
