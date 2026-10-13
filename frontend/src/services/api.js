@@ -1303,7 +1303,11 @@ export const reopenTask = (id) => api.put(`/tasks/${id}/reopen`);
 export const deleteTask = (id) => api.delete(`/tasks/${id}`);
 export const getActiveBackgroundTasks = () => api.get("/tasks/active");
 export const acknowledgeBackgroundTask = (taskId) => api.post(`/tasks/${taskId}/acknowledge`);
-export const cancelBackgroundTask = (taskId) => api.delete(`/tasks/${taskId}/cancel`);
+// `skipErrorToast`: quem cancela mostra o MOTIVO da recusa (400 «já terminou», 404) e
+// ressincroniza a lista — ver `utils/cancelarTarefa.js`. Com o toast do interceptor
+// por cima, o 400 aparecia duas vezes e o 404 nenhuma.
+export const cancelBackgroundTask = (taskId) =>
+  api.delete(`/tasks/${taskId}/cancel`, { skipErrorToast: true });
 
 // Emails
 export const getProcessEmails = (processId, direction = null, options = {}) =>

@@ -277,9 +277,9 @@ async def test_magic_link_400_quando_smtp_nao_configurado():
             or "não tem e-mail configurado" in exc_info.value.detail)
 
 
-async def test_magic_link_500_quando_erro_de_envio():
-    """Falha de envio real (credenciais/rede — sem error_code) continua a ser
-    500 com a razão real (comportamento Bug 3, Fev 2026, preservado)."""
+async def test_magic_link_502_quando_erro_de_envio():
+    """Falha de envio real (rede — sem error_code) NÃO é um 500 nosso: é 502
+    (o serviço de email não entregou), com a razão real (Bug 3, Fev 2026)."""
     from fastapi import HTTPException
 
     import services.email_service as email_service
@@ -306,7 +306,7 @@ async def test_magic_link_500_quando_erro_de_envio():
                 request=request,
             )
 
-    assert exc_info.value.status_code == 500
+    assert exc_info.value.status_code == 502
     assert "Falha de autenticação SMTP" in exc_info.value.detail
 
 

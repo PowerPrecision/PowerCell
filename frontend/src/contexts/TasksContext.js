@@ -33,7 +33,8 @@
  */
 import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
 import { toast } from "sonner";
-import api from "../services/api";
+import api, { cancelBackgroundTask } from "../services/api";
+import { descreverRecusaDoCancelamento } from "../utils/cancelarTarefa";
 import { useAuth } from "./AuthContext";
 import {
   applyTaskEvent,
@@ -364,7 +365,7 @@ export function TasksProvider({ children }) {
    */
   const cancelTask = useCallback(async (taskId) => {
     try {
-      await api.delete(`/tasks/${taskId}/cancel`);
+      await cancelBackgroundTask(taskId);
       setTasks(prev => prev.filter(t => t.task_id !== taskId));
       setActiveCount(prev => Math.max(0, prev - 1));
       const id = toastIdFor(taskId);
@@ -373,9 +374,20 @@ export function TasksProvider({ children }) {
       toast.info("Tarefa cancelada");
     } catch (error) {
       console.error("[TasksContext] Erro ao cancelar tarefa:", error);
-      toast.error("Não foi possível cancelar a tarefa");
+      // O servidor recusa com 400 quando a tarefa já terminou/falhou e com 404 quando
+      // já não existe. Diz-se o MOTIVO e ressincroniza-se a lista: sem isto a tarefa
+      // ficava no painel e o botão parecia morto.
+      const recusa = descreverRecusaDoCancelamento(error);
+      if (recusa.mostrar) {
+        toast.error(recusa.titulo, { description: recusa.motivo });
+      }
+      if (recusa.ressincronizar) {
+        fetchActiveTasks();
+      }
+      return false;
     }
-  }, []);
+    return true;
+  }, [fetchActiveTasks]);
   
   /**
    * Obter detalhes de uma tarefa

@@ -440,7 +440,7 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Token inválido")
 
 
-def require_roles(allowed_roles: List[str]):
+def require_roles(allowed_roles: List[str], *, conta_master_passa: bool = False):
     """
     Dependency do FastAPI que verifica o cargo *efetivo* (UCR) do utilizador.
 
@@ -459,6 +459,13 @@ def require_roles(allowed_roles: List[str]):
     Args:
         allowed_roles: Lista de roles que têm permissão para aceder
             ao endpoint (ex: [UserRole.ADMIN, UserRole.CEO]).
+        conta_master_passa: a CONTA Master (``users.role == master``) passa mesmo
+            com outro perfil activo. Só para ecrãs de INFRAESTRUTURA/configuração
+            (``system-config``): o dono da plataforma não perde o acesso a ela
+            por ter escolhido, no seletor de contexto, trabalhar como Admin de uma
+            empresa — o 403 «exclusivo do perfil Master» a um Master era um
+            absurdo. NÃO altera o âmbito de DADOS, que continua a seguir o perfil
+            activo (um Master que veste o chapéu de Admin vê o que um Admin vê).
 
     Returns:
         Callable: Dependency function para uso com ``Depends()``.
@@ -470,6 +477,8 @@ def require_roles(allowed_roles: List[str]):
         request: Request,
         user: dict = Depends(get_current_user),
     ):
+        if conta_master_passa and _jwt_primary_role(user) == UserRole.MASTER:
+            return user
         effective = await get_effective_role_async(request, user)
         user_role = authorization_role(effective, user)
         if not effective_role_is_allowed(user_role, allowed_roles):

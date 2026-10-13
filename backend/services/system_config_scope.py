@@ -97,10 +97,14 @@ class AmbitoDeConfiguracao:
 
     papel: str
     scope: TenantScope
+    #: A CONTA é Master (``users.role``), qualquer que seja o perfil activo. A
+    #: configuração é infraestrutura, não dados de uma rede: o dono da plataforma
+    #: não a perde por trabalhar, no seletor de contexto, como Admin de uma empresa.
+    conta_master: bool = False
 
     @property
     def e_master(self) -> bool:
-        return _e_master(self.papel)
+        return _e_master(self.papel) or self.conta_master
 
     @property
     def pode_a_global(self) -> bool:
@@ -133,7 +137,9 @@ async def carregar_ambito_de_configuracao(
         user, request, traduzir_todos_os_perfis=_e_papel_de_configuracao,
     )
     scope = await resolve_tenant_scope(user)
-    return AmbitoDeConfiguracao(papel=papel, scope=scope)
+    return AmbitoDeConfiguracao(
+        papel=papel, scope=scope, conta_master=_e_master((user or {}).get("role")),
+    )
 
 
 async def _empresa_existe(company_id: str) -> bool:

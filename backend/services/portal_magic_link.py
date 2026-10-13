@@ -238,6 +238,19 @@ def build_send_magic_link_response(
     }
 
 
+#: O serviço de email não entregou (rede, timeout, relay recusado…).
+DETALHE_FALHA_DE_ENTREGA = (
+    "Não foi possível enviar o e-mail: o servidor de e-mail da empresa não respondeu ou "
+    "recusou o envio. Verifique as definições em Contas de Email ou copie o link manualmente."
+)
+
+#: Mensagem de uma falha NOSSA (não do serviço de email) antes ou depois do envio.
+DETALHE_FALHA_INTERNA = (
+    "Não foi possível preparar o envio do link de acesso. Tente de novo; se persistir, "
+    "gere o link e copie-o manualmente."
+)
+
+
 async def send_magic_link_to_client(
     *,
     process_id: str,
@@ -247,8 +260,39 @@ async def send_magic_link_to_client(
 ) -> dict[str, Any]:
     """
     Garante access code, emite link e envia email.
-    Raises HTTPException 400/500.
+
+    Raises HTTPException — e SÓ HTTPException:
+      400 configuração do remetente (sem caixa, credenciais, ValueError de config);
+      502 o serviço de email não entregou (rede, timeout, relay recusado, excepção);
+      500 falha interna nossa (base de dados, emissão do link), com detalhe.
+
+    Nenhuma excepção do serviço de email chega ao FastAPI sem tradução: o
+    `try/except` à volta do envio protegia só a chamada final, e a resolução do
+    remetente (que corre antes) estava fora dele.
     """
+    from fastapi import HTTPException
+
+    try:
+        return await _send_magic_link_to_client(
+            process_id=process_id, process=process, user=user, request=request,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - nada escapa sem tradução
+        logger.error(
+            "[MAGIC-LINK] Falha inesperada no envio (processo %s): %s: %s",
+            process_id, type(exc).__name__, exc, exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=DETALHE_FALHA_INTERNA)
+
+
+async def _send_magic_link_to_client(
+    *,
+    process_id: str,
+    process: dict,
+    user: dict,
+    request: Request,
+) -> dict[str, Any]:
     from fastapi import HTTPException
 
     client_email = process.get("client_email", "")
@@ -331,11 +375,10 @@ async def send_magic_link_to_client(
             detail=f"SMTP não está configurado: {e}",
         )
     except Exception as e:
+        # O serviço de email levantou algo que não é configuração: não entregou.
+        # 502 (o serviço a montante falhou), não um 500 nosso.
         logger.error(f"Erro ao enviar magic link email: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Erro ao enviar email. Tente copiar o link manualmente.",
-        )
+        raise HTTPException(status_code=502, detail=DETALHE_FALHA_DE_ENTREGA)
 
     # BUGFIX (onboarding — Bug 3, Fev 2026): `send_email` NÃO levanta excepção
     # quando o envio falha (ex: SMTP mal configurado, autenticação inválida) —
@@ -363,8 +406,8 @@ async def send_magic_link_to_client(
                 ),
             )
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao enviar email: {error_detail}",
+            status_code=502,
+            detail=f"{DETALHE_FALHA_DE_ENTREGA} ({error_detail})",
         )
 
     # Bloco 3 (ponto 21): enviar acesso ao Portal fica no histórico (sem o link)
@@ -372,10 +415,13 @@ async def send_magic_link_to_client(
     # descrever um envio que falhou.
     from services.history import log_history
 
-    await log_history(
-        process_id, user, "Enviou o link de acesso ao Portal ao cliente",
-        "portal_access", None, "email",
-    )
+    try:
+        await log_history(
+            process_id, user, "Enviou o link de acesso ao Portal ao cliente",
+            "portal_access", None, "email",
+        )
+    except Exception as exc:  # noqa: BLE001 - o email JÁ saiu; o rasto não o desfaz
+        logger.warning("[MAGIC-LINK] Email enviado mas o histórico falhou (processo %s): %s", process_id, exc)
 
     logger.info(
         f"Magic link enviado por email para {client_email} "
