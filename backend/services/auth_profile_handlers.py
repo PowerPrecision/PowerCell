@@ -90,9 +90,17 @@ async def run_get_me(request, user: dict):
                 email_configured = True
 
     # Para admin/ceo/diretor/administrativo, também verificar se existe config global (SystemConfigPage)
+    # Isolamento estrito: a global é da rede de omissão. Para uma rede satélite
+    # «configurada» é só o que ela própria configurou (webmail_heranca).
     if not email_configured and user.get("role") in ("master", "admin", "ceo", "diretor", "administrativo"):
         try:
-            config = await db.system_config.find_one({"_id": "main"}, {"_id": 0, "email": 1, "system_smtp": 1, "system_webmail": 1})
+            from services.webmail_heranca import pode_herdar_configuracao_global
+
+            herda_a_global = await pode_herdar_configuracao_global("default", user=user)
+            config = (
+                await db.system_config.find_one({"_id": "main"}, {"_id": 0, "email": 1, "system_smtp": 1, "system_webmail": 1})
+                if herda_a_global else None
+            )
             if config:
                 # Verificar Bloco A (system_smtp — Resend API ou SMTP legado)
                 system_smtp_block = config.get("system_smtp", {})

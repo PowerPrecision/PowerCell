@@ -276,7 +276,21 @@ async def resolve_email_config(
     # ==================================================================
     # CAMINHO 3: System Config (globals)
     # ==================================================================
-    system_config = await _load_system_config()
+    # Isolamento estrito: os servidores globais são da rede de omissão. Uma empresa
+    # de outra rede não os herda — sem servidores próprios a configuração fica por
+    # fazer (o utilizador indica-os), nunca preenchida com os da empresa-mãe.
+    from services.webmail_heranca import pode_herdar_configuracao_global
+
+    herda_a_global = await pode_herdar_configuracao_global(
+        active_company_id or user_company,
+        user={"id": user_id, "role": user_role, "company": user.get("company")},
+    )
+    system_config = await _load_system_config() if herda_a_global else None
+    if not herda_a_global:
+        logger.debug(
+            "[EmailConfigResolver] user=%s company=%s: rede satélite, sem herança da config global.",
+            user_id, active_company_id or user_company,
+        )
     if system_config:
         has_password = bool(user_email_config.get("encrypted_password"))
         has_oauth = bool(user_email_config.get("google_refresh_token"))
@@ -462,18 +476,51 @@ def publicize_caixa_geral_account(
 
 async def load_caixa_geral_config(
     company_id: Optional[str] = None,
+    *,
+    user: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Credenciais da Caixa Geral (system_config.email da empresa, depois contas globais).
 
     Inclui ``password`` já desencriptada para SMTP/IMAP interno.
+
+    ISOLAMENTO ESTRITO (``services/webmail_heranca.py``): a configuração global
+    — o recurso ``default`` e as contas de ambiente — é da rede de omissão. Uma
+    empresa de OUTRA rede só tem Caixa Geral se a configurou ela (lida sem criar
+    a cópia que o ``get_system_config`` grava por herança, e sem aceitar essa
+    cópia); sem caixa própria devolve ``None`` e o ecrã fica vazio. ``user``
+    serve para recusar uma empresa fora do âmbito de rede de quem pergunta e
+    para decidir o sentinel ``default``.
     """
     from services.system_config import get_system_config
+    from services.webmail_heranca import (
+        e_copia_da_global,
+        email_do_documento,
+        empresa_no_ambito_do_utilizador,
+        pode_herdar_configuracao_global,
+    )
+
+    cid = (company_id or "").strip()
+    if not await empresa_no_ambito_do_utilizador(cid, user):
+        logger.warning(
+            "[CaixaGeral] Empresa %s fora do âmbito de rede do utilizador %s: sem Caixa Geral.",
+            cid, (user or {}).get("id"),
+        )
+        return None
+
+    herda_a_global = await pode_herdar_configuracao_global(cid, user=user)
+    if not herda_a_global:
+        # Rede satélite: só a configuração PRÓPRIA da empresa. Nunca `default`,
+        # nunca contas de ambiente, nunca a cópia da global.
+        if not cid or cid == "default":
+            return None
+        if not await email_do_documento(f"company:{cid}") or await e_copia_da_global(cid):
+            return None
 
     candidates = []
-    cid = (company_id or "").strip()
     if cid and cid != "default":
         candidates.append(cid)
-    candidates.append("default")
+    if herda_a_global:
+        candidates.append("default")
 
     for cfg_id in candidates:
         try:
@@ -504,6 +551,9 @@ async def load_caixa_geral_config(
                 "[CaixaGeral] Falha a ler system_config company=%s: %s",
                 cfg_id, exc,
             )
+
+    if not herda_a_global:
+        return None
 
     try:
         from services.email_service import get_email_accounts_async
@@ -736,7 +786,7 @@ async def resolve_sending_account(
 
     if account is None:
         try:
-            caixa = await load_caixa_geral_config(active_company_id)
+            caixa = await load_caixa_geral_config(active_company_id, user=current_user)
             if (
                 caixa
                 and caixa.get("password")

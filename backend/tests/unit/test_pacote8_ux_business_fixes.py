@@ -163,7 +163,7 @@ class TestBug2UnifiedWebmail:
              "is_primary": True},
         ]
 
-        async def fake_load_caixa(cid):
+        async def fake_load_caixa(cid, user=None):
             if cid == "cB":
                 return {"email_address": "geral@b.pt"}
             return {}
@@ -266,7 +266,7 @@ class TestBug2UnifiedWebmail:
             {"user_id": "u1", "company_id": "cB", "role": "diretor"},
         ]
 
-        async def fake_load_caixa(cid):
+        async def fake_load_caixa(cid, user=None):
             if cid == "cB":
                 return {"email_address": "geral@b.pt"}
             return {}

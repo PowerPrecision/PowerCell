@@ -47,15 +47,25 @@ logger = logging.getLogger(__name__)
 
 
 async def _condicao_de_processos(user: dict) -> dict:
-    """Âmbito de PROCESSOS de quem pede (`{}` só para o Master).
+    """Âmbito de REGISTOS de quem pede (`{}` só para o Master).
 
     Os registos de clientes, as estatísticas e os processos parados são
     consultas ao `db.processes` inteiro; sem esta condição, o CEO/Admin de
     uma empresa listava (com dados pessoais) os clientes de todas as outras.
-    """
-    from services.tenant_network import build_tenant_process_condition
 
-    return await build_tenant_process_condition(user or {})
+    **É a condição do DONO, não a de processos (que acrescenta as redes
+    convidadas).** Estes ecrãs são os registos e os números DA CASA: um
+    processo que outra rede partilhou connosco é visível e trabalhável no
+    detalhe, mas não é um registo nosso — e este módulo também EDITA e
+    ELIMINA (soft delete), o que nunca deve alcançar o cliente do dono.
+    """
+    from services.tenant_network import build_tenant_condition
+
+    return await build_tenant_condition(user or {})
+
+
+#: Um registo eliminado (soft delete) continua na colecção; não é um registo.
+NAO_ELIMINADO: dict = {"is_deleted": {"$ne": True}}
 
 
 def _com_ambito(query: dict, condicao: dict) -> dict:
@@ -66,10 +76,10 @@ def _com_ambito(query: dict, condicao: dict) -> dict:
 
 async def _processo_gerivel(process_id: str, user: dict, projeccao: Optional[dict] = None) -> dict:
     """O processo, se estiver no âmbito de quem actua; **404** caso contrário."""
-    from services.tenant_network import processo_no_ambito, resolve_tenant_scope
+    from services.tenant_network import documento_no_ambito, resolve_tenant_scope
 
     processo = await db.processes.find_one({"id": process_id}, projeccao)
-    if not processo or not processo_no_ambito(processo, await resolve_tenant_scope(user or {})):
+    if not processo or not documento_no_ambito(processo, await resolve_tenant_scope(user or {})):
         raise HTTPException(status_code=404, detail="Registo não encontrado")
     return processo
 
@@ -369,7 +379,7 @@ async def run_list_client_registrations(user: dict, page: int = 1, limit: int = 
     
     skip = (page - 1) * limit
 
-    query = _com_ambito(query, await _condicao_de_processos(user))
+    query = _com_ambito({**query, **NAO_ELIMINADO}, await _condicao_de_processos(user))
     
     total = await db.processes.count_documents(query)
     
@@ -508,7 +518,7 @@ async def run_get_client_registrations_stats(user: dict):
     """
     Obtém estatísticas de registos de clientes.
     """
-    ambito = await _condicao_de_processos(user)
+    ambito = _com_ambito(dict(NAO_ELIMINADO), await _condicao_de_processos(user))
 
     # Total de registos
     total = await db.processes.count_documents(ambito)
@@ -592,6 +602,7 @@ async def run_get_stale_processes(user: dict, days: int = 14):
     cutoff = (now - timedelta(days=days)).isoformat()
     
     stale = await db.processes.find(_com_ambito({
+        **NAO_ELIMINADO,
         "status": {"$nin": final_statuses},
         "$or": [
             {"updated_at": {"$lte": cutoff}},

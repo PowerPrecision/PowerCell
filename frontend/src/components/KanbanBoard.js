@@ -51,7 +51,7 @@ import { safeDateStr } from '../lib/utils';
 
 // React Query hooks
 import { useKanbanQuery } from '../hooks/queries/useKanbanQuery';
-import { contarCartoes, fundirColunasDeConcluidos } from '../utils/kanbanColunas';
+import { contarCartoes, fundirColunasDeConcluidos, planearAutoRecolha } from '../utils/kanbanColunas';
 import { useKanbanCompletedQuery } from '../hooks/queries/useKanbanCompletedQuery';
 import { useKanbanRealtime } from '../hooks/queries/useKanbanRealtime';
 import { useCompletedDaysFilter } from '../hooks/queries/useCompletedDaysFilter';
@@ -226,6 +226,7 @@ const KanbanBoard = ({
   const {
     columns: completedColumns,
     isFetching: isFetchingCompleted,
+    isSuccess: concluidosProntos,
   } = useKanbanCompletedQuery({
     token,
     ...filters,
@@ -286,19 +287,19 @@ const KanbanBoard = ({
   });
 
   // === AUTO-COLLAPSE EMPTY COLUMNS ===
-  // Este efeito é local, não precisa de React Query
-  // Never auto-collapse completed/desistencia columns — users need to see them
+  // Local, não precisa de React Query. A regra (uma decisão por coluna; as de
+  // concluídos esperam pela sua consulta) vive em `planearAutoRecolha`.
+  const colunasDecididasRef = useRef(new Set());
   useEffect(() => {
-    if (columns.length > 0 && collapsedColumns.size === 0) {
-      const PRESERVED_COLUMN_NAMES = new Set(['concluidos', 'desistencias']);
-      const emptyColumnIds = columns
-        .filter(col => col.count === 0 && !PRESERVED_COLUMN_NAMES.has(col.name))
-        .map(col => col.id);
-      if (emptyColumnIds.length > 0) {
-        setCollapsedColumns(new Set(emptyColumnIds));
-      }
+    const { recolher, decididas } = planearAutoRecolha(columns, {
+      jaDecididas: colunasDecididasRef.current,
+      concluidosProntos,
+    });
+    decididas.forEach((id) => colunasDecididasRef.current.add(id));
+    if (recolher.length > 0) {
+      setCollapsedColumns((prev) => new Set([...prev, ...recolher]));
     }
-  }, [columns]);
+  }, [columns, concluidosProntos]);
 
   // === DRAG & DROP HANDLERS ===
   const handleDragStart = useCallback((e, process, columnName) => {

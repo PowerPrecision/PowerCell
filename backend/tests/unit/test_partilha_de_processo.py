@@ -770,6 +770,12 @@ EXCEPCOES_ESCRITAS = {
         "audiência de WebSocket: decide a quem se difunde um evento, "
         "não o que uma listagem devolve"
     ),
+    "admin_observability": (
+        "os registos de clientes, as estatísticas e os processos parados são "
+        "os da CASA, e o módulo também edita e elimina (soft delete): um processo "
+        "que outra rede partilhou connosco não é um registo nosso e nunca pode "
+        "ser editado nem apagado por aqui — a condição é a do dono de propósito"
+    ),
     "visit_list_create": "a colecção é `db.visits` (fronteira própria, D-21)",
     "visit_kanban_get": "a colecção é `db.visits` (fronteira própria, D-21)",
     "deadlines_api_list": "a colecção é `db.deadlines` (fronteira própria)",
