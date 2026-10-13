@@ -15,6 +15,7 @@ import {
   chaveDeFiltros,
   normalizarFiltros,
   parametrosDoKanban,
+  saoOMesmoPedido,
 } from "./kanbanFiltros";
 
 const BASE = normalizarFiltros({});
@@ -172,5 +173,36 @@ describe("a chave de cache e os parâmetros não podem divergir", () => {
     expect(new Set(Object.keys(VARIACOES))).toEqual(
       new Set(CAMPOS_DE_FILTRO.filter((c) => c !== "viewMode")),
     );
+  });
+});
+
+describe("saoOMesmoPedido — a consulta de Concluídos só existe quando difere da do quadro", () => {
+  it("o quadro (sem período) e Concluídos com o período por omissão são o MESMO pedido", () => {
+    expect(saoOMesmoPedido({ completedDays: undefined }, { completedDays: 30 })).toBe(true);
+    expect(saoOMesmoPedido({}, { completedDays: 30, consultorFilter: "all" })).toBe(true);
+  });
+
+  it("outro período é outro pedido (inclui 0 = sem limite)", () => {
+    for (const dias of [7, 15, 90, 0]) {
+      expect(saoOMesmoPedido({ completedDays: undefined }, { completedDays: dias })).toBe(false);
+    }
+  });
+
+  it("derivado dos parâmetros: qualquer filtro que mude o pedido torna-os diferentes", () => {
+    // Se um filtro novo entrar nos parâmetros mas o comparador o ignorasse, o
+    // quadro deixaria de pedir Concluídos e mostraria dados do filtro errado.
+    const opcoes = {
+      consultorFilter: "user-123",
+      mediadorFilter: "user-456",
+      indexacaoFilter: "user-789",
+      parceiroFilter: "user-abc",
+      completedDays: 0,
+      labels: ["urgente"],
+      sub35: true,
+      partilha: "partilhados",
+    };
+    for (const [campo, valor] of Object.entries(opcoes)) {
+      expect(saoOMesmoPedido({}, { [campo]: valor })).toBe(false);
+    }
   });
 });
