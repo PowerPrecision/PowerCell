@@ -55,6 +55,16 @@ async def varrer_jobs_bloqueados(
 
     await _tratar_jobs_bloqueados(bloqueados, horas)
 
+    # Tarefas de «email de acesso ao Portal» presas em «retry agendado» (QA, Out 2026):
+    # o consumidor da fila nem sempre corre, e sem prazo a tarefa — e o toast — ficavam
+    # para sempre. Nunca derruba o varrimento.
+    try:
+        from services.email_delivery_status import fechar_envios_presos
+
+        await fechar_envios_presos()
+    except Exception as exc:
+        logger.warning("[PORTAL-EMAIL-DELIVERY] Varrimento das tarefas presas falhou: %s", exc)
+
     # Higiene do ZSET de presença: boleia neste ciclo, e nunca o derruba.
     try:
         from services.presenca import limpar_expirados

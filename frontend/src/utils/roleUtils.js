@@ -381,6 +381,36 @@ export const canAccessByEffectiveRole = (effectiveRole, allowedRoles) => {
 };
 
 /**
+ * A lista de uma guarda de rota é SÓ `master`? (a forma de dizer «infraestrutura global»).
+ * Espelha `lista_e_so_master` do servidor (`services/auth.py`).
+ */
+export const eListaSoMaster = (allowedRoles) =>
+  Array.isArray(allowedRoles) &&
+  allowedRoles.length > 0 &&
+  allowedRoles.every((r) => typeof r === "string" && r.toLowerCase() === "master");
+
+/**
+ * Guarda de ROTA: o perfil activo decide, excepto nas rotas só-Master, onde passa a CONTA Master
+ * com qualquer chapéu (decisão do dono do produto, Out 2026 — «o Master não deve encontrar
+ * barreiras, independentemente do perfil activo no seletor de contexto»). É o espelho do que o
+ * servidor faz em `require_roles`: sem ele o ecrã redirecionava um Master com o chapéu de Admin
+ * para fora de uma página que a API já lhe abria. Os DADOS continuam a seguir o perfil activo.
+ *
+ * @param {Object} p
+ * @param {string} [p.effectiveRole] perfil activo.
+ * @param {string} [p.accountRole] cargo da CONTA (`user.role`).
+ * @param {string[]} [p.allowedRoles]
+ */
+export const canAccessRoute = ({ effectiveRole, accountRole, allowedRoles } = {}) => {
+  if (canAccessByEffectiveRole(effectiveRole, allowedRoles)) return true;
+  return (
+    eListaSoMaster(allowedRoles) &&
+    typeof accountRole === "string" &&
+    accountRole.toLowerCase() === "master"
+  );
+};
+
+/**
  * True se o perfil activo (admin / ceo / indexacao) não tem carteira
  * de clientes em "Os Meus Clientes".
  */

@@ -43,6 +43,13 @@ import {
   useTaskEvents,
 } from "../hooks/useTaskEvents";
 
+import {
+  eTarefaDeEmailDeAcesso,
+  esquecerToastDeEmail,
+  registarToastDeEmail,
+  toastDeEmailFoiSubstituido,
+} from "../utils/falhaNoEnvioDeEmail";
+
 const TasksContext = createContext(null);
 
 // Intervalo base de polling (5 segundos)
@@ -143,6 +150,14 @@ export function TasksProvider({ children }) {
     const id = toastIdFor(task.task_id);
     const queue = loadingToastIdsRef.current;
 
+    // O email de acesso ao Portal que falhou e que o utilizador já viu falhar: o toast é de
+    // ERRO (trocado por `mostrarFalhaDoEnvioDeEmail`) e o polling não o pode voltar a pôr
+    // «a carregar» enquanto a tarefa não terminar.
+    if (eTarefaDeEmailDeAcesso(task)) {
+      if (toastDeEmailFoiSubstituido(id)) return;
+      registarToastDeEmail(id);
+    }
+
     if (!queue.includes(id)) {
       // Cap: dismiss oldest loading toast if at limit
       while (queue.length >= MAX_LOADING_TOASTS) {
@@ -166,6 +181,7 @@ export function TasksProvider({ children }) {
   const finalizeToast = useCallback((task, kind) => {
     const id = toastIdFor(task.task_id);
     loadingToastIdsRef.current = loadingToastIdsRef.current.filter((x) => x !== id);
+    esquecerToastDeEmail(id);
 
     if (kind === "success") {
       toast.success(`${task.title} concluída!`, {

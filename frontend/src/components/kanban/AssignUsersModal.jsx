@@ -34,6 +34,7 @@ import {
 import { Loader2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { filterByAnyRole, CONSULTOR_ASSIGNMENT_ROLES, INTERMEDIARIO_ASSIGNMENT_ROLES } from '../../utils/roleUtils';
+import { textoDaOpcaoDeUtilizador } from '../../utils/empresaDoUtilizador';
 import { safeString } from '../../utils/safeString';
 import { getStaffUsers } from '../../services/api';
 
@@ -165,7 +166,7 @@ const AssignUsersModal = memo(({
                       .filter(u => filterByAnyRole(u, CONSULTOR_ASSIGNMENT_ROLES))
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
-                          {u.name} ({u.role})
+                          {textoDaOpcaoDeUtilizador(u)}
                         </SelectItem>
                       ))
                     }
@@ -188,7 +189,7 @@ const AssignUsersModal = memo(({
                       .filter(u => filterByAnyRole(u, INTERMEDIARIO_ASSIGNMENT_ROLES))
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
-                          {u.name} ({u.role})
+                          {textoDaOpcaoDeUtilizador(u)}
                         </SelectItem>
                       ))
                     }

@@ -196,8 +196,14 @@ class TaskQueueService:
         portal_access_code: str = None,
         company_id: str = None,
         portal_url: str = None,
+        client_id: str = None,
+        task_id: str = None,
     ) -> Optional[str]:
-        """Enfileira email de confirmação de registo."""
+        """Enfileira email de confirmação de registo.
+
+        ``client_id`` / ``task_id`` levam consigo a tarefa do monitor que o envio
+        directo abriu: é o retry que a fecha (concluída ou falhada).
+        """
         kwargs = {
             "client_email": client_email,
             "client_name": client_name,
@@ -209,6 +215,10 @@ class TaskQueueService:
             kwargs["company_id"] = company_id
         if portal_url:
             kwargs["portal_url"] = portal_url
+        if client_id:
+            kwargs["client_id"] = client_id
+        if task_id:
+            kwargs["task_id"] = task_id
         return await self.enqueue(
             "send_registration_email_task",
             **kwargs
@@ -325,8 +335,9 @@ class DirectExecutionFallback:
         portal_access_code: str = None,
         company_id: str = None,
         portal_url: str = None,
+        **_ignorado,
     ) -> bool:
-        """Envia email de registo directamente."""
+        """Envia email de registo directamente (aceita, e ignora, os ids da tarefa do monitor)."""
         logger.warning("[FALLBACK] Enviando email de registo directamente")
         
         try:

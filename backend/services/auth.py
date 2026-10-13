@@ -440,6 +440,19 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Token inválido")
 
 
+def lista_e_so_master(allowed_roles) -> bool:
+    """A lista de papéis de uma guarda é SÓ `master`?
+
+    É a forma de declarar «isto não é da empresa de ninguém» (infraestrutura global): ver
+    `effective_role_is_allowed`, onde o Admin deixa de passar por causa disto.
+    """
+    papeis = [
+        (r or "").strip().lower() if isinstance(r, str) else r
+        for r in (allowed_roles or [])
+    ]
+    return bool(papeis) and all(r == UserRole.MASTER for r in papeis)
+
+
 def require_roles(allowed_roles: List[str], *, conta_master_passa: bool = False):
     """
     Dependency do FastAPI que verifica o cargo *efetivo* (UCR) do utilizador.
@@ -460,11 +473,13 @@ def require_roles(allowed_roles: List[str], *, conta_master_passa: bool = False)
         allowed_roles: Lista de roles que têm permissão para aceder
             ao endpoint (ex: [UserRole.ADMIN, UserRole.CEO]).
         conta_master_passa: a CONTA Master (``users.role == master``) passa mesmo
-            com outro perfil activo. Só para ecrãs de INFRAESTRUTURA/configuração
-            (``system-config``): o dono da plataforma não perde o acesso a ela
-            por ter escolhido, no seletor de contexto, trabalhar como Admin de uma
-            empresa — o 403 «exclusivo do perfil Master» a um Master era um
-            absurdo. NÃO altera o âmbito de DADOS, que continua a seguir o perfil
+            com outro perfil activo. É IMPLÍCITO nas guardas declaradas só-Master
+            (``[UserRole.MASTER]``): o dono da plataforma nunca encontra um 403 em
+            infraestrutura por ter escolhido, no seletor de contexto, trabalhar como
+            Admin de uma empresa (decisão do dono do produto, Out 2026). Só é preciso
+            pedi-lo explicitamente numa guarda MISTA (ex.: ``[MASTER, ADMIN, CEO]`` do
+            ``system-config``), onde o Admin e o CEO também passam mas só dentro do
+            seu âmbito. NÃO altera o âmbito de DADOS, que continua a seguir o perfil
             activo (um Master que veste o chapéu de Admin vê o que um Admin vê).
 
     Returns:
@@ -473,6 +488,8 @@ def require_roles(allowed_roles: List[str], *, conta_master_passa: bool = False)
     Raises:
         HTTPException: 403 se o cargo efetivo não tiver permissão.
     """
+    conta_master_passa = bool(conta_master_passa) or lista_e_so_master(allowed_roles)
+
     async def role_checker(
         request: Request,
         user: dict = Depends(get_current_user),
@@ -484,6 +501,10 @@ def require_roles(allowed_roles: List[str], *, conta_master_passa: bool = False)
         if not effective_role_is_allowed(user_role, allowed_roles):
             raise HTTPException(status_code=403, detail="Permissão negada")
         return user
+
+    # Para inventários: o que a guarda declara, sem ter de a executar.
+    role_checker.allowed_roles = tuple(allowed_roles or ())
+    role_checker.conta_master_passa = conta_master_passa
     return role_checker
 
 

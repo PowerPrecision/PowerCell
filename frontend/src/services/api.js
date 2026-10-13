@@ -1634,7 +1634,11 @@ export const getRGPDTemplateVersion = (versionId) => api.get(`/rgpd/admin/templa
 
 // ===== MAGIC LINK (Client Portal) =====
 export const generateMagicLink = (processId) => api.post(`/processes/${processId}/generate-magic-link`);
-export const sendMagicLinkEmail = (processId) => api.post(`/processes/${processId}/generate-magic-link/send`);
+// `skipErrorToast`: a falha do envio (400 sem remetente, 502 serviço de email, 500) é mostrada por
+// `mostrarFalhaDoEnvioDeEmail`, que também troca o toast «retry agendado» por um de erro — com o
+// toast do interceptor por cima ficavam dois avisos para o mesmo desfecho.
+export const sendMagicLinkEmail = (processId) =>
+  api.post(`/processes/${processId}/generate-magic-link/send`, null, { skipErrorToast: true });
 // PACOTE DC — Reenviar acesso ao Portal por client_id (resolve o process_id ativo internamente)
 export const resendPortalAccess = (clientId) => api.post(`/clients/${clientId}/resend-portal-access`);
 

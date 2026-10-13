@@ -50,9 +50,8 @@ async def run_get_users(
         empresas_do_ambito,
     )
 
-    scope_query = await build_users_scope_query(
-        await empresas_do_ambito(user or {})
-    )
+    ambito = await empresas_do_ambito(user or {})
+    scope_query = await build_users_scope_query(ambito)
     if scope_query:
         query = {"$and": [query, scope_query]} if query else scope_query
 
@@ -68,8 +67,13 @@ async def run_get_users(
             user or {}, users, process_id
         )
     if for_assignment:
-        return filter_assignment_staff(users)
-    return users
+        users = filter_assignment_staff(users)
+
+    # A empresa de cada pessoa, para quem escolhe saber a quem atribui. Calculada
+    # ao servir, restrita às empresas do ÂMBITO de quem pede.
+    from services.user_company_labels import anexar_empresas
+
+    return await anexar_empresas(users, ambito=ambito)
 
 
 async def run_get_staff_users(user: dict, process_id: str | None = None):

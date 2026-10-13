@@ -407,41 +407,79 @@ async def _conta_de_sistema_generica(rede: Optional[str]):
         return None
 
 
+#: Nome da empresa que, na plataforma, é a «dona» da infraestrutura. O Master que escolhe
+#: trabalhar como «Sistema» no seletor de contexto edita a configuração desta empresa (e não a
+#: do documento global); o «Email do Sistema (Transacional)» pode lá ter ficado gravado.
+NOME_DA_EMPRESA_DO_SISTEMA = "Sistema"
+
+
+def _conta_do_bloco(bloco):
+    """`EmailAccount` a partir de um bloco `system_smtp` em bruto (ou `None`)."""
+    from models.system_config import SystemSMTPConfig
+    from services.email_service import EmailAccount
+
+    if not isinstance(bloco, dict) or not bloco:
+        return None
+    cfg = SystemSMTPConfig(**bloco)
+    if cfg.resend_api_key:
+        return EmailAccount(
+            name="system_smtp", imap_server="resend", imap_port=0,
+            smtp_server="resend", smtp_port=0,
+            email=cfg.smtp_from_email or "", password=cfg.resend_api_key,
+        )
+    if cfg.smtp_host and cfg.smtp_username:
+        return EmailAccount(
+            name="system_smtp", imap_server=cfg.smtp_host, imap_port=int(cfg.smtp_port or 587),
+            smtp_server=cfg.smtp_host, smtp_port=int(cfg.smtp_port or 587),
+            email=cfg.smtp_from_email or cfg.smtp_username, password=cfg.smtp_password or "",
+        )
+    return None
+
+
 async def _conta_do_bloco_a_em_bruto():
-    """O «Email do Sistema (Transacional)» lido do documento GLOBAL, sem validar o resto.
+    """O «Email do Sistema (Transacional)», lido SEM validar o resto do documento.
 
     ``get_system_config`` valida o documento INTEIRO e, se um campo qualquer (de
     qualquer secção) não validar, devolve a configuração por omissão do ambiente —
     ou seja, SEM o Bloco A, ainda que ele esteja gravado e certo. Para um email
     transacional (o link do Portal, as boas-vindas) isso era «a empresa não tem
     e-mail» por causa de um campo que nada tem a ver com o envio. Aqui lê-se só o
-    bloco ``system_smtp``. Mesma fonte, mesma regra, menos acoplamento. Nunca levanta.
-    """
-    try:
-        from models.system_config import SystemSMTPConfig
-        from services.email_service import EmailAccount
+    bloco ``system_smtp``. Mesma fonte, mesma regra, menos acoplamento.
 
-        doc = await db.system_config.find_one({"_id": "main"}, {"_id": 0, "system_smtp": 1})
-        bloco = (doc or {}).get("system_smtp")
-        if not isinstance(bloco, dict) or not bloco:
-            return None
-        cfg = SystemSMTPConfig(**bloco)
-        if cfg.resend_api_key:
-            return EmailAccount(
-                name="system_smtp", imap_server="resend", imap_port=0,
-                smtp_server="resend", smtp_port=0,
-                email=cfg.smtp_from_email or "", password=cfg.resend_api_key,
-            )
-        if cfg.smtp_host and cfg.smtp_username:
-            return EmailAccount(
-                name="system_smtp", imap_server=cfg.smtp_host, imap_port=int(cfg.smtp_port or 587),
-                smtp_server=cfg.smtp_host, smtp_port=int(cfg.smtp_port or 587),
-                email=cfg.smtp_from_email or cfg.smtp_username, password=cfg.smtp_password or "",
-            )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[PORTAL-EMAIL] Leitura em bruto do Email do Sistema falhou: %s: %s",
-                       type(exc).__name__, exc)
+    Ordem: o documento GLOBAL e, se ali não houver conta utilizável, o da empresa
+    «Sistema» (o Master que configurou o cartão com esse perfil activo grava lá).
+    Nunca levanta.
+    """
+    for obter_bloco in (_bloco_do_documento_global, _bloco_do_documento_da_empresa_sistema):
+        try:
+            conta = _conta_do_bloco(await obter_bloco())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[PORTAL-EMAIL] Leitura em bruto do Email do Sistema falhou: %s: %s",
+                           type(exc).__name__, exc)
+            continue
+        if conta is not None:
+            return conta
     return None
+
+
+async def _bloco_do_documento_global():
+    doc = await db.system_config.find_one({"_id": "main"}, {"_id": 0, "system_smtp": 1})
+    return (doc or {}).get("system_smtp")
+
+
+async def _bloco_do_documento_da_empresa_sistema():
+    from utils.input_sanitization import escape_regex
+
+    empresa = await db.companies.find_one(
+        {"name": {"$regex": f"^{escape_regex(NOME_DA_EMPRESA_DO_SISTEMA)}$", "$options": "i"}},
+        {"_id": 0, "id": 1},
+    )
+    if not empresa or not empresa.get("id"):
+        return None
+    doc = await db.system_config.find_one(
+        {"_id": f"company:{empresa['id']}"}, {"_id": 0, "system_smtp": 1}
+    )
+    return (doc or {}).get("system_smtp")
 
 
 def mensagem_sem_remetente(contexto: "ContextoDoEmailDoPortal") -> str:

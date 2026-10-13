@@ -49,9 +49,18 @@ async def deliver_registration_email(
     portal_url: str = None,
     contexto=None,
     user: dict = None,
+    task_id: str = None,
+    retry: bool = False,
 ) -> bool:
     """
     Entrega o email de boas-vindas/acesso ao Portal do Cliente.
+
+    ``task_id`` / ``retry`` (QA, Out 2026): o RETRY da fila corre noutro processo e
+    recebe o ``task_id`` da tarefa que o envio directo abriu — sem ele a tarefa
+    «Email de acesso ao Portal» ficava em «retry agendado» PARA SEMPRE (o retry criava
+    outra, sem utilizador, e nunca fechava a original), e o toast do ecrã nunca saía.
+    No retry uma falha é DEFINITIVA: nunca se volta a enfileirar (enfileirar a partir
+    do retry era um ciclo sem fim, com a tarefa sempre «a tentar»).
 
     REDE (QA, Out 2026): o email sai em nome da empresa/rede do CLIENTE —
     nome, logótipo, remetente (email geral da rede ou email de sistema
@@ -114,11 +123,16 @@ async def deliver_registration_email(
                 f"(client_id={client_id}) já foi entregue — envio "
                 f"duplicado ignorado."
             )
+            # Um retry que chega depois da entrega: a tarefa que ele traz fecha-se
+            # (senão ficava a «tentar» para sempre ao lado de um email já entregue).
+            if task_id:
+                await complete_portal_email_task(task_id, client_id)
             return True
 
-    task_id = await begin_portal_email_task(
-        client_id, client_email, user_id=user_id, process_id=process_id,
-    )
+    if not task_id:
+        task_id = await begin_portal_email_task(
+            client_id, client_email, user_id=user_id, process_id=process_id,
+        )
 
     if contexto is None:
         from services.portal_email_context import resolver_contexto
@@ -182,6 +196,13 @@ async def deliver_registration_email(
     # activo, o retry será processado; sem Redis, o enqueue devolve None
     # e a falha fica DEFINITIVA (registada como tal — PACOTE 10).
     retry_enqueued = False
+    if retry:
+        # Já SOMOS o retry: falhar aqui é definitivo (ver a docstring).
+        await fail_portal_email_task(
+            task_id, client_id,
+            direct_error or "O reenvio também falhou.",
+        )
+        return False
     try:
         from services.task_queue import task_queue
 
@@ -193,6 +214,8 @@ async def deliver_registration_email(
             portal_access_code=portal_access_code,
             company_id=contexto.company_id,
             portal_url=contexto.portal_url or None,
+            client_id=client_id,
+            task_id=task_id,
         )
         if job_id:
             retry_enqueued = True

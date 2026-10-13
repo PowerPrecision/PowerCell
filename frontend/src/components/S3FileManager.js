@@ -98,7 +98,8 @@ import { extractErrorMessage } from "../utils/extractErrorMessage";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
 // PACOTE DJ — Modal de revisão Human-in-the-Loop de sugestões IA por documento
 import DocumentReviewModal from "./DocumentReviewModal";
-import { hasRole, MANAGEMENT_ROLES, canAccessByEffectiveRole } from "../utils/roleUtils";
+import { hasRole, canAccessByEffectiveRole } from "../utils/roleUtils";
+import { podeUsarFerramentasDeIA } from "../utils/permissaoDeIA";
 import {
   FileText,
   ScanText,
@@ -247,6 +248,9 @@ const S3FileManager = ({
   // O servidor recusa na mesma (403) — isto é a interface a dizer a verdade
   // antes de o utilizador tentar.
   readOnly = false,
+  // `process.pode_usar_ia_documentos`: a resposta do servidor a «posso usar a IA
+  // neste processo?» (gestão OU atribuído, dentro da fronteira de rede).
+  podeUsarIA,
 }) => {
   const { token, user, effectiveRole } = useAuth();
   const queryClient = useQueryClient();
@@ -375,9 +379,14 @@ const S3FileManager = ({
   // conjunto de botões, por isso há UMA condição e não duas.
   const somenteLeitura = isIndexacao || readOnly;
 
-  // Analisar / Renomear com IA — apenas cargos superiores (admin, CEO, diretor/"gestor")
-  // Usa effectiveRole (perfil activo), não hasRole, para multi-perfil.
-  const canUseAIDocumentTools = MANAGEMENT_ROLES.includes(effectiveRole) && !readOnly;
+  // Analisar / Renomear com IA — gestão (admin, CEO, diretor/"gestor") OU atribuído ao
+  // processo. Usa effectiveRole (perfil activo), não hasRole, para multi-perfil; o
+  // «atribuído» vem do servidor (`podeUsarIA`) — ver utils/permissaoDeIA.js.
+  const canUseAIDocumentTools = podeUsarFerramentasDeIA({
+    effectiveRole,
+    permissaoDoServidor: podeUsarIA,
+    somenteLeitura: readOnly,
+  });
 
   // PACOTE BL — Bloqueio de segurança: categoria "Index" (pasta cofre)
   // Apenas admin/CEO/diretor/indexacao vêem documentos da categoria "Index".

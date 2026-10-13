@@ -142,6 +142,7 @@ export default function DocumentsTab({
             onAIDataExtracted={handleAIDataExtractedFromDocs}
             onDocumentDataExtracted={handleDocumentDataExtracted}
             readOnly={processoFechado}
+            podeUsarIA={process?.pode_usar_ia_documentos}
           />
         </CardContent>
       </Card>

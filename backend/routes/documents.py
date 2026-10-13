@@ -885,12 +885,14 @@ async def ai_analyze_documents(
     process_id: str,
     files: List[UploadFile] = File(...),
     file_paths: Optional[str] = Form(None),
-    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
+    user: dict = Depends(require_staff()),
 ):
     """
     Analisa documentos com IA para extração de dados.
 
-    Restrito a cargos de gestão (admin, CEO, diretor / "gestor").
+    Gestão (admin, CEO, diretor / "gestor") OU atribuído ao processo, dentro
+    da fronteira de rede (rede dona ou convidada) — a decisão vive em
+    `services/document_ai_access` porque o `require_roles` não vê o processo.
     Documentos já marcados com ai_analyzed são saltados.
     
     Funcionalidades:
@@ -919,7 +921,7 @@ async def ai_analyze_documents(
         except (TypeError, ValueError) as e:
             logger.warning(f"file_paths inválido no ai-analyze: {e}")
     return await run_ai_analyze_documents(
-        process_id, files, user=user, file_paths=parsed_paths
+        process_id, files, user=user, file_paths=parsed_paths, request=request
     )
 
 
@@ -1006,13 +1008,15 @@ async def rename_document_smart(
 
 @router.post("/rename-all-smart/{process_id}", responses={403: {"description": "Forbidden"}, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def rename_all_documents_smart(
+    request: Request,
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
+    user: dict = Depends(require_staff()),
 ):
     """
     Renomeia TODOS os documentos de um processo usando nomes inteligentes IA.
     Apenas documentos já categorizados são renomeados.
-    Restrito a cargos de gestão (admin, CEO, diretor / "gestor").
+    Gestão (admin, CEO, diretor / "gestor") OU atribuído ao processo
+    (`services/document_ai_access`).
     
     Returns:
     - total: Total de documentos
@@ -1021,7 +1025,7 @@ async def rename_all_documents_smart(
     - errors: Número de erros
     - details: Lista de operações
     """
-    return await run_rename_all_documents_smart(process_id, user=user)
+    return await run_rename_all_documents_smart(process_id, user=user, request=request)
 
 
 

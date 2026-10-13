@@ -200,6 +200,7 @@ import { hasRole, hasAnyRole, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { mostrarFalhaDoEnvioDeEmail } from "../utils/falhaNoEnvioDeEmail";
 import { safeParseISO } from "../lib/utils";
 import { applyProcessDelta } from "../utils/processDelta";
 import { notifyFinancialEngine } from "../utils/financialEngineFeedback";
@@ -2633,12 +2634,10 @@ const ProcessDetails = () => {
                           await sendMagicLinkEmail(id);
                           toast.success("Email enviado com o link do portal!");
                         } catch (error) {
-                          // Mesma lógica do Copiar Link: o interceptor é
-                          // silencioso para 404, por isso mostramos o detail
-                          // do backend (ex.: "processo eliminado") aqui.
-                          if (error?.response?.status === 404) {
-                            toast.error(error?.response?.data?.detail || "Processo não encontrado");
-                          }
+                          // 404 («processo eliminado»), 400 (sem remetente), 502 e 500: um
+                          // só aviso, com o motivo do servidor — e o toast «retry agendado»
+                          // de uma tentativa anterior sai (ver utils/falhaNoEnvioDeEmail).
+                          mostrarFalhaDoEnvioDeEmail(error);
                         }
                       }}
                     >

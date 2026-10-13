@@ -168,14 +168,14 @@ function ligarRede({ estadoDaListagem = 200, carga = RESPOSTA_FICHEIROS } = {}) 
   });
 }
 
-function montar(sessaoDoTeste = utilizador()) {
+function montar(sessaoDoTeste = utilizador(), propsDoGestor = {}) {
   sessao.valor = sessaoDoTeste;
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <S3FileManager processId="proc-1" clientName="Ana Martins" />
+      <S3FileManager processId="proc-1" clientName="Ana Martins" {...propsDoGestor} />
     </QueryClientProvider>,
   );
 }
@@ -308,6 +308,47 @@ describe("S3FileManager — ferramentas de IA são de gestão", () => {
     await aguardarCarregado();
 
     expect(await screen.findByTestId("ai-analyze-btn")).toBeInTheDocument();
+  });
+});
+
+describe("S3FileManager — IA para quem trata do processo (rede satélite)", () => {
+  // Processo da Power partilhado com a Precision: o consultor atribuído na rede de destino
+  // não é «gestão», mas o servidor diz que pode (`pode_usar_ia_documentos`). Antes o botão
+  // não aparecia a ninguém que não fosse admin/CEO/diretor.
+  it("o consultor ATRIBUÍDO (o servidor diz que pode) vê Analisar e Renomear IA", async () => {
+    montar(utilizador(), { podeUsarIA: true });
+    await aguardarCarregado();
+
+    expect(await screen.findByTestId("ai-analyze-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("smart-rename-btn")).toBeInTheDocument();
+  });
+
+  it("o consultor NÃO atribuído (servidor diz false) continua sem as ferramentas", async () => {
+    montar(utilizador(), { podeUsarIA: false });
+    await aguardarCarregado();
+
+    expect(screen.queryByTestId("ai-analyze-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("smart-rename-btn")).not.toBeInTheDocument();
+  });
+
+  it("o servidor não responder NÃO tira o botão à gestão (nunca pior do que antes)", async () => {
+    montar(
+      utilizador({
+        user: { id: "u-3", name: "Diana", role: "diretor" },
+        effectiveRole: "diretor",
+      }),
+      { podeUsarIA: false },
+    );
+    await aguardarCarregado();
+
+    expect(await screen.findByTestId("ai-analyze-btn")).toBeInTheDocument();
+  });
+
+  it("num processo FECHADO nem o atribuído tem as ferramentas", async () => {
+    montar(utilizador(), { podeUsarIA: true, readOnly: true });
+    await aguardarCarregado();
+
+    expect(screen.queryByTestId("ai-analyze-btn")).not.toBeInTheDocument();
   });
 });
 

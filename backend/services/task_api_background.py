@@ -243,8 +243,12 @@ async def _merge_task_logs_into_tasks(
     origem. Best-effort: falhas são logadas e não afectam os jobs.
     """
     try:
+        from services.email_delivery_status import fechar_envios_presos
         from services.task_log_service import task_log_service
 
+        # Um «retry agendado» que ninguém processou fecha-se aqui, antes de listar:
+        # o toast do ecrã é eterno e só sai quando a tarefa termina.
+        await fechar_envios_presos(user_id=current_user.get("id") or "")
         log_tasks = await task_log_service.get_active_tasks(
             current_user.get("id") or ""
         )
@@ -274,6 +278,9 @@ async def _merge_task_logs_into_tasks(
         tasks.append({
             "task_id": lt.task_id,
             "task_type": task_type,
+            # `kind` distingue tarefas do mesmo tipo (ex.: o email de acesso ao Portal):
+            # o ecrã troca o toast «a tentar» pelo de erro quando o envio falha.
+            "kind": (lt.metadata or {}).get("kind"),
             "title": lt.title,
             "description": lt.description,
             "status": status,

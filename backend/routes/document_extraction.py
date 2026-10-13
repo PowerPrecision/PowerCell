@@ -11,11 +11,10 @@ A IA não escreve nada aqui. Este endpoint LÊ; quem grava continua a ser
 consultor confirmar no diálogo de revisão.
 ====================================================================
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from models.auth import UserRole
-from services.auth import require_roles
+from services.auth import require_staff
 from services.document_vision_extract import run_extract_document_data
 from services.process_closed_guard import exigir_processo_editavel
 
@@ -30,17 +29,17 @@ class DocumentExtractRequest(BaseModel):
 
 @router.post("/processes/{process_id}/documents/extract")
 async def extract_document_data(
+    request: Request,
     process_id: str,
     payload: DocumentExtractRequest,
-    user: dict = Depends(
-        require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])
-    ),
+    user: dict = Depends(require_staff()),
 ):
     """Lê um documento arquivado no S3 e devolve os dados para revisão.
 
-    Restrito a cargos de gestão, como as restantes ferramentas de IA sobre
-    documentos (`/documents/ai-analyze`, `/rename-smart`).
+    Gestão OU atribuído ao processo, como as restantes ferramentas de IA sobre
+    documentos (`/documents/ai-analyze`, `/rename-all-smart`) — a decisão vive em
+    `services/document_ai_access`.
     """
     return await run_extract_document_data(
-        process_id, payload.s3_path, user=user
+        process_id, payload.s3_path, user=user, request=request
     )

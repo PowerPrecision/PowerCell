@@ -33,11 +33,12 @@ tags [PORTAL-EMAIL-DELIVERY], sem hardcode de config externa.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from database import db
 from models.task_log import TaskType
-from services.task_log_service import task_log_service
+from services.task_log_service import TASK_LOG_COLLECTION, task_log_service
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ async def begin_portal_email_task(
                 else PORTAL_EMAIL_TASK_DESCRIPTION
             ),
             process_id=process_id,
-            metadata={"client_id": client_id, "kind": "portal_access_email"},
+            metadata={"client_id": client_id, "kind": TIPO_DA_TAREFA},
         )
         return task.task_id if task else None
     except Exception as exc:  # pragma: no cover — degradação graciosa
@@ -218,3 +219,77 @@ async def fail_portal_email_task(
         progress_message="Email de acesso não entregue.",
     )
     await _set_client_delivery_status(client_id, DELIVERY_FAILED, error=error)
+
+
+# ====================================================================
+# TAREFAS PRESAS — o retry agendado que nunca chega
+# ====================================================================
+# O envio directo falhou, o retry foi enfileirado (ARQ) e a tarefa ficou em
+# «retry agendado». Quem a fecha é o consumidor da fila: se ele não corre (o
+# worker ARQ nem sempre está activo), a tarefa fica «a tentar» PARA SEMPRE e o
+# toast do ecrã (`duration: Infinity`) nunca sai — QA, Out 2026. Um estado
+# intermédio sem prazo é uma promessa sem data: depois deste tempo a tarefa
+# fecha-se como FALHADA, com o motivo e a acção possível.
+MINUTOS_ATE_O_RETRY_SER_DADO_POR_PERDIDO = 10
+
+#: Marca das tarefas deste módulo (`metadata.kind`).
+TIPO_DA_TAREFA = "portal_access_email"
+
+MOTIVO_RETRY_NAO_PROCESSADO = (
+    "O reenvio agendado não foi processado a tempo — o cliente pode não ter recebido o "
+    "email de acesso. Use «Reenviar acesso ao Portal»."
+)
+
+
+async def fechar_envios_presos(
+    *,
+    user_id: Optional[str] = None,
+    minutos: int = MINUTOS_ATE_O_RETRY_SER_DADO_POR_PERDIDO,
+) -> int:
+    """Fecha como FALHADAS as tarefas de email de acesso que ficaram a meio.
+
+    ``user_id`` restringe ao dono (a listagem de tarefas activas); sem ele varre todos (o
+    ciclo do monitor). Se entretanto o cliente tem o estado ``sent`` (o retry entregou mas
+    não conseguiu fechar a tarefa), a tarefa fecha-se como CONCLUÍDA — mentir «falhou»
+    sobre um email entregue seria o erro oposto. Nunca levanta; devolve quantas fechou.
+    """
+    try:
+        limite = (datetime.now(timezone.utc) - timedelta(minutes=minutos)).isoformat()
+        consulta = {
+            "metadata.kind": TIPO_DA_TAREFA,
+            "status": {"$in": ["pending", "processing"]},
+            "created_at": {"$lt": limite},
+        }
+        if user_id:
+            consulta["user_id"] = user_id
+        presas = await db[TASK_LOG_COLLECTION].find(consulta, {"_id": 0}).to_list(200)
+    except Exception as exc:  # pragma: no cover — degradação graciosa
+        logger.warning("[PORTAL-EMAIL-DELIVERY] Não foi possível procurar tarefas presas: %s", exc)
+        return 0
+
+    fechadas = 0
+    for tarefa in presas:
+        task_id = tarefa.get("task_id") or tarefa.get("id")
+        client_id = (tarefa.get("metadata") or {}).get("client_id")
+        try:
+            ja_entregue = False
+            if client_id:
+                cliente = await db.clients.find_one(
+                    {"id": client_id}, {"_id": 0, "portal_email_delivery": 1}
+                )
+                ja_entregue = (
+                    ((cliente or {}).get("portal_email_delivery") or {}).get("status")
+                    == DELIVERY_SENT
+                )
+            if ja_entregue:
+                await complete_portal_email_task(task_id, client_id)
+            else:
+                await fail_portal_email_task(task_id, client_id, MOTIVO_RETRY_NAO_PROCESSADO)
+            fechadas += 1
+        except Exception as exc:  # pragma: no cover — uma presa não impede as outras
+            logger.warning(
+                "[PORTAL-EMAIL-DELIVERY] Falha a fechar a tarefa presa %s: %s", task_id, exc
+            )
+    if fechadas:
+        logger.info("[PORTAL-EMAIL-DELIVERY] %s tarefa(s) de email de acesso fechada(s) por prazo", fechadas)
+    return fechadas
