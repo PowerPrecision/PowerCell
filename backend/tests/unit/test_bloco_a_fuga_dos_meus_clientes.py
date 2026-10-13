@@ -399,6 +399,7 @@ SEM_CONDICAO_DE_REDE_POR_DESENHO = {
     "portal_auth.py": "autenticação do cliente do Portal (id próprio)",
     "portal_security.py": "autenticação do cliente do Portal (id próprio)",
     "portal_profile.py": "Portal: os ids são os dos processos do PRÓPRIO cliente autenticado (lê só a rede dona, para escolher o workflow)",
+    "portal_profile_sections.py": "Portal: espelha a escrita do perfil nos processos do PRÓPRIO cliente autenticado (ids da sua ficha; perfil trancado quando saem da recolha)",
     "process_assignment.py": "escritas por id guardadas por process_scope_guard",
     "process_clients_nm.py": "escritas por id guardadas por process_scope_guard",
     "process_service.py": "núcleo de criação/leitura por id (guardas a montante)",
