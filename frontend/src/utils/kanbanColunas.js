@@ -70,3 +70,51 @@ export function contarCartoes(colunas) {
     0,
   );
 }
+
+/**
+ * As colunas que vêm da consulta SEPARADA de concluídos (ver
+ * `fundirColunasDeConcluidos`). Até essa consulta responder, o `count` delas
+ * é o da consulta activa — que não as carrega — e «zero» não quer dizer
+ * «vazia».
+ */
+export const COLUNAS_DE_CONCLUIDOS = Object.freeze(["concluidos", "desistencias"]);
+
+/**
+ * Que colunas se recolhem sozinhas ao primeiro olhar (uma coluna vazia ocupa
+ * 320 px para nada).
+ *
+ * POR QUE «DECIDIR UMA VEZ POR COLUNA» E NÃO «SE NINGUÉM RECOLHEU AINDA»
+ *   O efeito anterior só corria com `collapsedColumns.size === 0` e excluía
+ *   `concluidos`/`desistencias` por nome («os utilizadores precisam de as
+ *   ver»). A exclusão fazia todo o sentido enquanto o quadro mostrava
+ *   cartões de OUTRAS redes (cartões-fantasma que o detalhe recusa): uma
+ *   coluna «com conteúdo» que na verdade não tinha nada. Com as listagens
+ *   limpas, uma coluna vazia é vazia — também estas duas.
+ *
+ *   A decisão é por coluna e uma só vez: o utilizador que reabrir uma coluna
+ *   vazia não a vê voltar a fechar-se, e uma coluna que fique vazia a meio de
+ *   um arrasto não desaparece debaixo do rato.
+ *
+ * AS DE CONCLUÍDOS ESPERAM PELA SUA CONSULTA
+ *   Sem `concluidosProntos` o `count` 0 é só «ainda não carregou»: recolhê-las
+ *   aí fechava Concluídos para sempre (a decisão não se repete) com cartões
+ *   por chegar.
+ *
+ * @param {Array} colunas - as colunas já fundidas
+ * @param {{jaDecididas?: Set<string>, concluidosProntos?: boolean}} [opcoes]
+ * @returns {{recolher: string[], decididas: string[]}}
+ */
+export function planearAutoRecolha(
+  colunas,
+  { jaDecididas = new Set(), concluidosProntos = false } = {},
+) {
+  const recolher = [];
+  const decididas = [];
+  for (const coluna of normalizarColunas(colunas)) {
+    if (jaDecididas.has(coluna.id)) continue;
+    if (COLUNAS_DE_CONCLUIDOS.includes(coluna.name) && !concluidosProntos) continue;
+    decididas.push(coluna.id);
+    if (coluna.processes.length === 0) recolher.push(coluna.id);
+  }
+  return { recolher, decididas };
+}

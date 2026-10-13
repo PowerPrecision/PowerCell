@@ -11,6 +11,7 @@ import {
   fundirColunasDeConcluidos,
   normalizarColuna,
   normalizarColunas,
+  planearAutoRecolha,
 } from "./kanbanColunas";
 
 describe("normalizarColuna", () => {
@@ -121,5 +122,71 @@ describe("contarCartoes", () => {
 
   it("uma coluna sem `processes` conta zero e não rebenta", () => {
     expect(contarCartoes([{ name: "a" }, { name: "b", processes: [{ id: 1 }] }])).toBe(1);
+  });
+});
+
+describe("planearAutoRecolha", () => {
+  const COLUNAS = [
+    { id: "c1", name: "analise", processes: [] },
+    { id: "c2", name: "propostas", processes: [{ id: "p1" }] },
+    { id: "c3", name: "concluidos", processes: [] },
+    { id: "c4", name: "desistencias", processes: [] },
+  ];
+
+  it("recolhe as colunas vazias — também Concluídos e Desistência — quando a consulta delas respondeu", () => {
+    const { recolher } = planearAutoRecolha(COLUNAS, { concluidosProntos: true });
+    expect(recolher).toEqual(["c1", "c3", "c4"]);
+  });
+
+  it("não recolhe uma coluna com cartões", () => {
+    const { recolher, decididas } = planearAutoRecolha(COLUNAS, { concluidosProntos: true });
+    expect(recolher).not.toContain("c2");
+    expect(decididas).toContain("c2"); // decidida: não se recolhe
+  });
+
+  it("enquanto a consulta de concluídos não respondeu, essas duas NÃO se decidem", () => {
+    // `count` 0 aqui é «ainda não carregou»: recolhê-las fechava-as para sempre.
+    const { recolher, decididas } = planearAutoRecolha(COLUNAS, { concluidosProntos: false });
+    expect(recolher).toEqual(["c1"]);
+    expect(decididas).toEqual(["c1", "c2"]);
+  });
+
+  it("quando a consulta responde, decide-as nessa altura (e só elas)", () => {
+    const antes = planearAutoRecolha(COLUNAS, { concluidosProntos: false });
+    const depois = planearAutoRecolha(COLUNAS, {
+      concluidosProntos: true,
+      jaDecididas: new Set(antes.decididas),
+    });
+    expect(depois.recolher).toEqual(["c3", "c4"]);
+    expect(depois.decididas).toEqual(["c3", "c4"]);
+  });
+
+  it("concluídos COM cartões fica aberta", () => {
+    const { recolher } = planearAutoRecolha(
+      [{ id: "c3", name: "concluidos", processes: [{ id: "p9" }] }],
+      { concluidosProntos: true },
+    );
+    expect(recolher).toEqual([]);
+  });
+
+  it("uma coluna já decidida não volta a ser tocada (o utilizador que a reabriu)", () => {
+    const { recolher, decididas } = planearAutoRecolha(COLUNAS, {
+      concluidosProntos: true,
+      jaDecididas: new Set(["c1", "c2", "c3", "c4"]),
+    });
+    expect(recolher).toEqual([]);
+    expect(decididas).toEqual([]);
+  });
+
+  it("o count do servidor não conta: decide pela lista (cartões-fantasma já filtrados)", () => {
+    const { recolher } = planearAutoRecolha(
+      [{ id: "c3", name: "concluidos", count: 7, processes: [] }],
+      { concluidosProntos: true },
+    );
+    expect(recolher).toEqual(["c3"]);
+  });
+
+  it("sem colunas (a carregar) não decide nada", () => {
+    expect(planearAutoRecolha([], { concluidosProntos: true })).toEqual({ recolher: [], decididas: [] });
   });
 });
