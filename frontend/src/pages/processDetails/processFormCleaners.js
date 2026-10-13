@@ -1,7 +1,20 @@
 /**
  * Helpers de limpeza/formatação de formulários antes de submeter o processo.
- * Extraídos de ProcessDetails.js — comportamento idêntico.
+ * Extraídos de ProcessDetails.js.
+ *
+ * APAGAR UM CAMPO: estes helpers descartavam os vazios, e o servidor nunca
+ * recebia o pedido de limpeza (o valor antigo voltava no refetch). Os que
+ * recebem `{ base }` — o que foi carregado do servidor — enviam o vazio
+ * EXPLÍCITO para os campos que tinham valor e o utilizador apagou; um campo que
+ * já nasceu vazio continua omitido. Ver `utils/camposLimpos.js`.
  */
+import {
+  ALIASES_FINANCEIROS,
+  ALIASES_PESSOAIS,
+  FORA_DA_LIMPEZA_PESSOAL,
+  camposLimpos,
+  limparAliasesDosCampos,
+} from "../../utils/camposLimpos";
 
 /** Converte data em formato português para ISO (yyyy-MM-dd). */
 export const convertPortugueseDateToISO = (dateStr) => {
@@ -49,15 +62,23 @@ export const formatDateForInput = (dateStr) => {
   return iso || "";
 };
 
-/** Limpa dados pessoais antes de enviar. */
-export const cleanPersonalDataForSubmit = (data) => {
+/**
+ * Limpa dados pessoais antes de enviar.
+ *
+ * Com `base`, os campos que tinham valor e foram apagados vão como `""` (e
+ * levam os nomes alternativos do mesmo dado). Sem `base` descartam-se os vazios,
+ * como sempre.
+ */
+export const cleanPersonalDataForSubmit = (data, { base } = {}) => {
   const cleaned = { ...data };
 
+  // Uma data que não se consegue ler NÃO é um pedido para apagar: omite-se.
+  // (Antes ia `null`, que no servidor sobrepunha o valor guardado.)
   if (cleaned.data_nascimento) {
-    cleaned.data_nascimento = convertPortugueseDateToISO(cleaned.data_nascimento);
+    cleaned.data_nascimento = convertPortugueseDateToISO(cleaned.data_nascimento) || undefined;
   }
   if (cleaned.data_validade_cc) {
-    cleaned.data_validade_cc = convertPortugueseDateToISO(cleaned.data_validade_cc);
+    cleaned.data_validade_cc = convertPortugueseDateToISO(cleaned.data_validade_cc) || undefined;
   }
 
   delete cleaned.nif_hash;
@@ -89,14 +110,28 @@ export const cleanPersonalDataForSubmit = (data) => {
     }
   });
 
+  // Campos APAGADOS: vazio explícito. Calcula-se sobre `data` (antes da limpeza
+  // acima): um NIF a meio de escrever (`"123"`) é descartado, não apagado.
+  const limpos = camposLimpos(base, data, { ignorar: FORA_DA_LIMPEZA_PESSOAL });
+  for (const campo of limpos) cleaned[campo] = "";
+  limparAliasesDosCampos(cleaned, limpos, ALIASES_PESSOAIS, "", base);
+
   return cleaned;
 };
 
-/** Limpa dados do 2º titular antes de enviar. */
+/**
+ * Limpa dados do 2º titular antes de enviar.
+ *
+ * Aqui os vazios descartam-se de propósito: o servidor SUBSTITUI a secção
+ * `titular2_data` (ficha do cliente e cópia do processo), por isso um campo que
+ * não vai no pedido deixa de existir. Um NIF que não tem 9 dígitos é omitido
+ * pela mesma regra — quem chama valida-o ANTES (`handleSave`), senão uma gralha
+ * apagava o NIF guardado.
+ */
 export const cleanTitular2DataForSubmit = (data) => {
   const cleaned = { ...data };
   if (cleaned.birth_date) {
-    cleaned.birth_date = convertPortugueseDateToISO(cleaned.birth_date);
+    cleaned.birth_date = convertPortugueseDateToISO(cleaned.birth_date) || undefined;
   }
   delete cleaned.nif_hash;
 
@@ -148,8 +183,15 @@ export const cleanCreditDataForSubmit = (data) => {
   return cleaned;
 };
 
-/** Limpa dados financeiros para envio (apenas campos válidos do modelo). */
-export const cleanFinancialDataForSubmit = (data) => {
+/**
+ * Limpa dados financeiros para envio (apenas campos válidos do modelo).
+ *
+ * Um campo vazio vai como `null` (o servidor retira-o da secção). Com `base`, um
+ * campo canónico apagado leva também os nomes alternativos que o servidor tinha
+ * (`salario_liquido` para `monthly_income`…): sem isso a hidratação seguinte
+ * promovia o alternativo e o valor «voltava».
+ */
+export const cleanFinancialDataForSubmit = (data, { base } = {}) => {
   const validFields = [
     "acesso_portal_financas", "chave_movel_digital", "renda_habitacao_atual",
     "precisa_vender_casa", "efetivo", "fiador", "bancos_creditos",
@@ -181,5 +223,9 @@ export const cleanFinancialDataForSubmit = (data) => {
       }
     }
   }
+
+  const limpos = camposLimpos(base, data).filter((c) => validFields.includes(c));
+  for (const campo of limpos) cleaned[campo] = null;
+  limparAliasesDosCampos(cleaned, limpos, ALIASES_FINANCEIROS, null, base);
   return cleaned;
 };

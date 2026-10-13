@@ -319,6 +319,11 @@ const ProcessDetails = () => {
   // Guardar os dados originais do processo (da BD) para componentes
   // que precisam dos valores guardados (ex: email para notificações)
   const savedProcessRef = useRef(null);
+  // O que foi CARREGADO do servidor para os formulários (pessoais, financeiro,
+  // 2.º titular). É a base para saber que campos o utilizador APAGOU: um campo
+  // que tinha valor aqui e agora está vazio tem de ir ao servidor como vazio
+  // explícito — omiti-lo é pedir «não alterei» e o valor antigo volta.
+  const baselineDoFormularioRef = useRef({ personalData: null, financialData: null });
   const lastHydratedAtRef = useRef(0);
   const wasEditingRef = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -1216,6 +1221,10 @@ const ProcessDetails = () => {
     const vm = deriveProcessDetailsViewModel(processData, processBundle.client);
     setProcess(vm.process);
     savedProcessRef.current = vm.process;
+    baselineDoFormularioRef.current = {
+      personalData: vm.personalData,
+      financialData: vm.financialData,
+    };
     setClientId(vm.clientId);
     setClientData(vm.clientData);
     setPersonalData(vm.personalData);
@@ -1342,8 +1351,13 @@ const ProcessDetails = () => {
       // que o fazia chegar ao payload).
 
       // 1. LIMPAR DADOS
-      const cleanedPersonalData = cleanPersonalDataForSubmit(personalData);
-      const cleanedFinancialData = cleanFinancialDataForSubmit(financialData);
+      const baseline = baselineDoFormularioRef.current;
+      const cleanedPersonalData = cleanPersonalDataForSubmit(personalData, {
+        base: baseline.personalData,
+      });
+      const cleanedFinancialData = cleanFinancialDataForSubmit(financialData, {
+        base: baseline.financialData,
+      });
 
       // 2. PREPARAR DADOS DO CLIENTE (mapear para o schema ClientUpdate do backend)
       // O backend espera: { nome, contacto: { email, telefone }, dados_pessoais: {...} }
@@ -1590,7 +1604,19 @@ const ProcessDetails = () => {
         return;
       }
     }
-    
+
+    // O NIF do 2.º titular também: o servidor SUBSTITUI esta secção, e o limpador
+    // omite um NIF que não tenha 9 dígitos — uma gralha apagava o NIF guardado.
+    // Só se recusa o que seria apagado (comprimento); a validade do dígito de
+    // controlo fica como estava, para não bloquear fichas antigas já gravadas.
+    if (titular2Data?.nif) {
+      const digitos = String(titular2Data.nif).replace(/[^\d]/g, "");
+      if (digitos.length !== 9) {
+        toast.error(`NIF do 2.º titular deve ter 9 dígitos (tem ${digitos.length})`);
+        return;
+      }
+    }
+
     await executeSave(status);
   };
 

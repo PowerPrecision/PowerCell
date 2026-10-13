@@ -11,6 +11,7 @@ import { AIBadge } from "../../ui/AIBadge";
 import { AlertTriangle, CreditCard, Building2, Shield } from "lucide-react";
 import { formatDateForInput } from "../../../pages/processDetails/processFormCleaners";
 import { safeNumber } from "../../dashboard/DashboardShared";
+import { numeroOuNulo, valorDoCampo } from "../../../utils/camposLimpos";
 
 export default function CreditTab({
   realEstateData, creditData, setCreditData, editingCardId, canEditCredit, CardHeaderWithEdit, getFieldMetaFor, shouldCardBeCollapsed,
@@ -31,8 +32,8 @@ export default function CreditTab({
                           </div>
                           <Input
                             type="number"
-                            value={creditData.requested_amount || ""}
-                            onChange={(e) => setCreditData({ ...creditData, requested_amount: parseFloat(e.target.value) || null })}
+                            value={valorDoCampo(creditData.requested_amount)}
+                            onChange={(e) => setCreditData({ ...creditData, requested_amount: numeroOuNulo(e.target.value) })}
                             disabled={editingCardId !== 'credit_dados' || !canEditCredit}
                           />
                         </div>
@@ -40,8 +41,8 @@ export default function CreditTab({
                           <Label>Prazo (anos)</Label>
                           <Input
                             type="number"
-                            value={creditData.loan_term_years || ""}
-                            onChange={(e) => setCreditData({ ...creditData, loan_term_years: parseInt(e.target.value) || null })}
+                            value={valorDoCampo(creditData.loan_term_years)}
+                            onChange={(e) => setCreditData({ ...creditData, loan_term_years: numeroOuNulo(e.target.value, { inteiro: true }) })}
                             disabled={editingCardId !== 'credit_dados' || !canEditCredit}
                           />
                         </div>
@@ -53,8 +54,8 @@ export default function CreditTab({
                           <Input
                             type="number"
                             step="0.01"
-                            value={creditData.interest_rate || ""}
-                            onChange={(e) => setCreditData({ ...creditData, interest_rate: parseFloat(e.target.value) || null })}
+                            value={valorDoCampo(creditData.interest_rate)}
+                            onChange={(e) => setCreditData({ ...creditData, interest_rate: numeroOuNulo(e.target.value) })}
                             disabled={editingCardId !== 'credit_dados' || !canEditCredit}
                           />
                         </div>
@@ -65,8 +66,8 @@ export default function CreditTab({
                           </div>
                           <Input
                             type="number"
-                            value={creditData.monthly_payment || ""}
-                            onChange={(e) => setCreditData({ ...creditData, monthly_payment: parseFloat(e.target.value) || null })}
+                            value={valorDoCampo(creditData.monthly_payment)}
+                            onChange={(e) => setCreditData({ ...creditData, monthly_payment: numeroOuNulo(e.target.value) })}
                             disabled={editingCardId !== 'credit_dados' || !canEditCredit}
                           />
                         </div>
@@ -112,8 +113,8 @@ export default function CreditTab({
                               <Label className="text-xs text-muted-foreground">Valor da Avaliação (€)</Label>
                               <Input
                                 type="number"
-                                value={creditData.valuation_value || ""}
-                                onChange={(e) => setCreditData({ ...creditData, valuation_value: parseFloat(e.target.value) || null })}
+                                value={valorDoCampo(creditData.valuation_value)}
+                                onChange={(e) => setCreditData({ ...creditData, valuation_value: numeroOuNulo(e.target.value) })}
                                 disabled={editingCardId !== 'credit_avaliacao' || !canEditCredit}
                                 className="h-9"
                                 placeholder="0.00"
@@ -180,8 +181,8 @@ export default function CreditTab({
                                 type="number"
                                 min="1950"
                                 max="2099"
-                                value={creditData.admission_year || ""}
-                                onChange={(e) => setCreditData({ ...creditData, admission_year: parseInt(e.target.value) || null })}
+                                value={valorDoCampo(creditData.admission_year)}
+                                onChange={(e) => setCreditData({ ...creditData, admission_year: numeroOuNulo(e.target.value, { inteiro: true }) })}
                                 disabled={editingCardId !== 'credit_compliance' || !canEditCredit}
                                 className="h-9"
                                 placeholder="Ex: 2020"

@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { BANK_LIST, getBankColor } from "../../../pages/processDetails/processDetailsConstants";
 import { safeString } from "../../../utils/safeString";
+import { numeroOuNulo, valorDoCampo } from "../../../utils/camposLimpos";
 
 export default function FinancialTab({
   titular2Data, setTitular2Data, financialData, setFinancialData, process, editingCardId, editingCreditField, setEditingCreditField, showPortalSenha, setShowPortalSenha, showSegSocialSenha, setShowSegSocialSenha, canEditFinancial, CardHeaderWithEdit, getFieldMetaFor, token, id, shouldCardBeCollapsed,
@@ -55,8 +56,8 @@ export default function FinancialTab({
                               </div>
                               <Input
                                 type="number"
-                                value={financialData.monthly_income || financialData.salario_liquido || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, monthly_income: parseFloat(e.target.value) || null })}
+                                value={valorDoCampo(financialData.monthly_income)}
+                                onChange={(e) => setFinancialData({ ...financialData, monthly_income: numeroOuNulo(e.target.value) })}
                                 disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
                                 className="h-9"
                               />
@@ -75,8 +76,8 @@ export default function FinancialTab({
                               </div>
                               <Input
                                 type="number"
-                                value={financialData.rendimento_bruto || financialData.salario_bruto || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, rendimento_bruto: parseFloat(e.target.value) || null })}
+                                value={valorDoCampo(financialData.rendimento_bruto)}
+                                onChange={(e) => setFinancialData({ ...financialData, rendimento_bruto: numeroOuNulo(e.target.value) })}
                                 disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
                                 className="h-9"
                               />
@@ -85,8 +86,8 @@ export default function FinancialTab({
                               <Label className="text-xs text-muted-foreground">Rendimento Anual (€)</Label>
                               <Input
                                 type="number"
-                                value={financialData.rendimento_anual || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, rendimento_anual: parseFloat(e.target.value) || null })}
+                                value={valorDoCampo(financialData.rendimento_anual)}
+                                onChange={(e) => setFinancialData({ ...financialData, rendimento_anual: numeroOuNulo(e.target.value) })}
                                 disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
                                 className="h-9"
                               />
@@ -95,8 +96,8 @@ export default function FinancialTab({
                               <Label className="text-xs text-muted-foreground">Capital Próprio (€)</Label>
                               <Input
                                 type="number"
-                                value={financialData.capital_proprio || financialData.other_income || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, capital_proprio: parseFloat(e.target.value) || null })}
+                                value={valorDoCampo(financialData.capital_proprio)}
+                                onChange={(e) => setFinancialData({ ...financialData, capital_proprio: numeroOuNulo(e.target.value) })}
                                 disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
                                 className="h-9"
                               />
@@ -118,8 +119,8 @@ export default function FinancialTab({
                               <Label className="text-xs text-muted-foreground">Renda Habitação Atual (€)</Label>
                               <Input
                                 type="number"
-                                value={financialData.renda_habitacao_atual || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, renda_habitacao_atual: parseFloat(e.target.value) || null })}
+                                value={valorDoCampo(financialData.renda_habitacao_atual)}
+                                onChange={(e) => setFinancialData({ ...financialData, renda_habitacao_atual: numeroOuNulo(e.target.value) })}
                                 disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
                                 className="h-9"
                               />
@@ -128,8 +129,8 @@ export default function FinancialTab({
                               <Label className="text-xs text-muted-foreground">Rendimento Co-Titular (€)</Label>
                               <Input
                                 type="number"
-                                value={financialData.rendimento_co_titular || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, rendimento_co_titular: parseFloat(e.target.value) || null })}
+                                value={valorDoCampo(financialData.rendimento_co_titular)}
+                                onChange={(e) => setFinancialData({ ...financialData, rendimento_co_titular: numeroOuNulo(e.target.value) })}
                                 disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="Rendimento do 2º titular"
@@ -140,8 +141,8 @@ export default function FinancialTab({
                               <Input
                                 type="number"
                                 min="0"
-                                value={financialData.nr_dependentes || financialData.number_of_dependents || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, nr_dependentes: parseInt(e.target.value) || null })}
+                                value={valorDoCampo(financialData.nr_dependentes)}
+                                onChange={(e) => setFinancialData({ ...financialData, nr_dependentes: numeroOuNulo(e.target.value, { inteiro: true }) })}
                                 disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="0"
@@ -205,8 +206,8 @@ export default function FinancialTab({
                               <Label className="text-xs text-muted-foreground">Créditos Existentes (€)</Label>
                               <Input
                                 type="number"
-                                value={financialData.creditos_existentes || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, creditos_existentes: parseFloat(e.target.value) || null })}
+                                value={valorDoCampo(financialData.creditos_existentes)}
+                                onChange={(e) => setFinancialData({ ...financialData, creditos_existentes: numeroOuNulo(e.target.value) })}
                                 disabled={editingCardId !== 'financial_situacao' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="Valor total em dívida"
@@ -216,8 +217,8 @@ export default function FinancialTab({
                               <Label className="text-xs text-muted-foreground">Prestação Créditos Mensal (€)</Label>
                               <Input
                                 type="number"
-                                value={financialData.prestacao_creditos_mensal || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, prestacao_creditos_mensal: parseFloat(e.target.value) || null })}
+                                value={valorDoCampo(financialData.prestacao_creditos_mensal)}
+                                onChange={(e) => setFinancialData({ ...financialData, prestacao_creditos_mensal: numeroOuNulo(e.target.value) })}
                                 disabled={editingCardId !== 'financial_situacao' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="Total prestações mensais"
@@ -802,8 +803,8 @@ export default function FinancialTab({
                               <Label className="text-xs text-muted-foreground">Subsídio Alimentação (€)</Label>
                               <Input
                                 type="number"
-                                value={financialData.subsidiario_alimentacao || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, subsidiario_alimentacao: parseFloat(e.target.value) || null })}
+                                value={valorDoCampo(financialData.subsidiario_alimentacao)}
+                                onChange={(e) => setFinancialData({ ...financialData, subsidiario_alimentacao: numeroOuNulo(e.target.value) })}
                                 disabled={editingCardId !== 'financial_profissional' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="0.00"

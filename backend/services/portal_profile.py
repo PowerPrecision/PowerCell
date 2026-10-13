@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from database import db
+from services.campos_limpaveis import campos_pessoais_limpos, esta_vazio, limpar_espelhos_nos_processos
 from services.process_status import DELETED_STATUS_VALUES, LEAD_STATUS_VALUES
 from services.workflow_phases import carregar_fases
 
@@ -276,6 +277,13 @@ def build_portal_profile_mongo_update(
                     contacto_updates[key] = str(value).strip().lower()
             else:
                 contacto_updates[key] = value
+        # Contacto APAGADO (`null`/`""`/espaços): grava-se vazio e o índice cego do
+        # valor antigo vai com ele — senão a pesquisa e a guarda de duplicados
+        # continuavam a achar o cliente por um email/telefone que ele já não tem.
+        for campo, indice in (("email", "email_hash"), ("telefone", "telefone_hash")):
+            if campo in contacto_updates and esta_vazio(contacto_updates[campo]):
+                contacto_updates[campo] = ""
+                contacto_updates[indice] = ""
         if contacto_updates:
             update_fields["contacto"] = contacto_updates
 
@@ -288,6 +296,9 @@ def build_portal_profile_mongo_update(
                 # O NIF cai aqui de propósito: está trancado por regra de
                 # negócio e nunca é gravado pelo Portal.
                 fora.append(key)
+        # Campo APAGADO: `""` (uniforme com o CRM) e não `null` — é com `""` que
+        # a leitura e o espelho nos processos reconhecem «apagado».
+        campos_pessoais_limpos(dp_updates)
         if dp_updates:
             update_fields["dados_pessoais"] = dp_updates
 
@@ -552,6 +563,29 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
     logger.info(
         f"[PORTAL PROFILE] Cliente {client_id} atualizou perfil: {updated_fields}"
     )
+
+    # O que o cliente APAGOU sai também das cópias que os seus processos guardam
+    # (`client_email`, `personal_data.*`…): a ficha do CRM recompõe-se a partir
+    # delas, e o valor antigo voltava a aparecer à equipa.
+    contactos_apagados = [
+        c for c in ("email", "telefone")
+        if mongo_update.get(f"contacto.{c}") == "" and f"contacto.{c}_hash" in mongo_update
+    ]
+    pessoais_apagados = [
+        chave.split(".", 1)[1] for chave, valor in mongo_update.items()
+        if chave.startswith("dados_pessoais.") and valor == ""
+    ]
+    if (contactos_apagados or pessoais_apagados) and client.get("process_ids"):
+        if contactos_apagados:
+            from services.client_crud import sync_de_contactos_limpos
+
+            await db.processes.update_many(
+                {"id": {"$in": client["process_ids"]}},
+                {"$set": sync_de_contactos_limpos(contactos_apagados)},
+            )
+        await limpar_espelhos_nos_processos(
+            db, client_id, client["process_ids"], pessoais_apagados,
+        )
 
     # Bloco 3 (ponto 21): uma acção do CLIENTE também é uma acção. Só os NOMES
     # dos campos (os valores são dados pessoais). O autor é o cliente — nunca

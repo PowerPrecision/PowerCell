@@ -3,6 +3,12 @@
  * Extraído de ProcessDetails.js — comportamento idêntico (FASE 3 + UNIFICAÇÃO).
  */
 
+import {
+  ALIASES_FINANCEIROS,
+  ALIASES_PESSOAIS,
+  preencherCanonicosComAliases,
+} from "../../utils/camposLimpos";
+
 const ESTADO_CIVIL_MAP = {
   "Solteiro(a)": "solteiro", Solteiro: "solteiro",
   "Casado(a)": "casado", Casado: "casado",
@@ -101,31 +107,17 @@ export function normalizeFormSlices(processData, personalData, financialData, re
   let processPatch = {};
 
   const pd = processData.personal_data || {};
-  const fd = processData.financial_data || {};
   const rd = processData.real_estate_data || {};
   const t2 = processData.titular2_data || {};
 
-  if ((pd.morada || pd.address) && !pd.morada_fiscal) {
-    personal = { ...personal, morada_fiscal: personal.morada || personal.address || "" };
-  }
-  if ((fd.rendimento_mensal || fd.salario_liquido) && !fd.monthly_income) {
-    financial = {
-      ...financial,
-      monthly_income: financial.rendimento_mensal || financial.salario_liquido,
-    };
-  }
-  if ((fd.empresa || fd.entidade_patronal) && !fd.employer_name) {
-    financial = {
-      ...financial,
-      employer_name: financial.empresa || financial.entidade_patronal,
-    };
-  }
-  if (fd.tipo_contrato && !fd.employment_type) {
-    financial = { ...financial, employment_type: financial.tipo_contrato };
-  }
-  if (fd.antiguidade_emprego && !fd.employment_duration) {
-    financial = { ...financial, employment_duration: financial.antiguidade_emprego };
-  }
+  // O campo canónico promove o primeiro nome alternativo que tenha valor
+  // (monthly_income ← salario_liquido, morada_fiscal ← morada/address…). Faz-se
+  // UMA vez, aqui, e os inputs leem só o canónico: com `value={a || b || ""}` no
+  // JSX, apagar o canónico fazia o alternativo voltar a aparecer no próprio input
+  // (e o campo parecia impossível de esvaziar). O servidor apaga os dois nomes
+  // quando o canónico é apagado (`services/campos_limpaveis.py`).
+  personal = preencherCanonicosComAliases(personal, ALIASES_PESSOAIS);
+  financial = preencherCanonicosComAliases(financial, ALIASES_FINANCEIROS);
   if (personal.sexo === "Masculino") {
     personal = { ...personal, sexo: "M" };
   } else if (personal.sexo === "Feminino") {

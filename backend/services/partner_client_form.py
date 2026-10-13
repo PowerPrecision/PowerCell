@@ -44,7 +44,11 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from database import db
-from services.encryption import decrypt_client_data, encrypt_client_data
+from services.encryption import (
+    decrypt_client_data,
+    encrypt_client_data,
+    limpar_blind_indexes_de_campos_vazios,
+)
 from services.partner_portal_read import resolver_caso
 from services.partner_visibility import (
     ETAPA_DEVOLVIDA,
@@ -378,6 +382,12 @@ async def run_save_client_form(partner: dict, case_id: str, data: ClientFormIn) 
             raise HTTPException(status_code=400, detail=f"«{campos[chave]['label']}» é obrigatório.")
 
     # 4. Cifra, recalcula os blind indexes e grava só as secções tocadas.
+    # Um campo APAGADO leva o índice cego do valor antigo consigo: o hash só é
+    # gerado quando há valor, e a secção inteira é regravada — o do NIF/telefone
+    # antigo ficava na lead e a deteção de duplicados continuava a achá-la por ele.
+    limpar_blind_indexes_de_campos_vazios(
+        contacto=cliente.get("contacto"), dados_pessoais=cliente.get("dados_pessoais"),
+    )
     agora = datetime.now(timezone.utc).isoformat()
     cliente["updated_at"] = agora
     if caso.e_rascunho:

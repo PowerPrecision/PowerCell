@@ -147,6 +147,34 @@ class TestGuardar:
         assert str(ficha["dados_pessoais"]["nif"]).startswith("ENC:") and "232119867" not in repr(ficha)
         assert ficha["dados_pessoais"]["nif_hash"] == generate_nif_hash("232119867") != antes
 
+    async def test_apagar_o_nif_ou_o_telefone_leva_o_indice_cego_consigo(self, com_form):
+        """O hash só se gera quando há valor e a secção é regravada: sem isto o do
+        NIF antigo ficava na lead e a deteção de duplicados achava-a por ele."""
+        import services.partner_client_form as pcf
+        from services.encryption import decrypt_client_data, generate_nif_hash
+
+        cid = await _rascunho(com_form)
+        await pcf.run_save_client_form(PT1, cid, _guardar({"nif": "232119867", "phone": "913333333"}))
+        ficha = _doc(com_form, cid)
+        assert ficha["dados_pessoais"]["nif_hash"] == generate_nif_hash("232119867")
+        assert ficha["contacto"]["telefone_hash"]
+
+        await pcf.run_save_client_form(PT1, cid, _guardar({"nif": "", "phone": ""}))
+        ficha = _doc(com_form, cid)
+        assert ficha["dados_pessoais"]["nif_hash"] == ""
+        assert ficha["contacto"]["telefone_hash"] == ""
+        limpa = decrypt_client_data(ficha)
+        assert not limpa["dados_pessoais"]["nif"] and not limpa["contacto"]["telefone"]
+
+    async def test_editar_outro_campo_nao_estraga_os_indices(self, com_form):
+        import services.partner_client_form as pcf
+        from services.encryption import generate_nif_hash
+
+        cid = await _rascunho(com_form)
+        await pcf.run_save_client_form(PT1, cid, _guardar({"nif": "232119867"}))
+        await pcf.run_save_client_form(PT1, cid, _guardar({"profissao": "Médica"}))
+        assert _doc(com_form, cid)["dados_pessoais"]["nif_hash"] == generate_nif_hash("232119867")
+
     async def test_edita_tambem_a_lead_ja_libertada_para_a_equipa(self, com_form):
         import services.partner_client_form as pcf
         from tests.unit.test_parceiro_filtro_de_viabilidade import COMPROVATIVO, _enviar

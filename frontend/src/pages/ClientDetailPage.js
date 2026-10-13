@@ -22,6 +22,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { AIBadge, getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
+import { alteracoesDeTexto, estaVazio } from "../utils/camposLimpos";
 import {
   ArrowLeft,
   User,
@@ -317,30 +318,33 @@ export default function ClientDetailPage() {
       const payload = {};
       // Pacote CT: recolher caminhos de campos alterados para marcar proveniência manual
       const changedPaths = [];
-      if (editForm.nome && editForm.nome !== client?.nome) {
-        payload.nome = editForm.nome;
-        changedPaths.push("nome");
-      }
       const currentContato = client?.contacto || {};
       const currentDadosPessoais = client?.dados_pessoais || {};
-      const emailChanged = editForm.email !== currentContato.email;
-      const telefoneChanged = editForm.telefone !== currentContato.telefone;
-      const contatoChanged = emailChanged || telefoneChanged;
-      if (contatoChanged) {
-        payload.contacto = {
-          ...currentContato,
-          email: editForm.email || currentContato.email,
-          telefone: editForm.telefone || currentContato.telefone,
-        };
-        if (emailChanged) changedPaths.push("contacto.email");
-        if (telefoneChanged) changedPaths.push("contacto.telefone");
+
+      // Nome: obrigatório. Apagá-lo não é «sem alterações» — é um erro, e di-se
+      // (ignorá-lo em silêncio dava «sucesso» e o nome antigo ficava).
+      if (editForm.nome !== client?.nome) {
+        if (estaVazio(editForm.nome)) {
+          toast.error("O nome do cliente é obrigatório.");
+          return;
+        }
+        payload.nome = editForm.nome.trim();
+        changedPaths.push("nome");
       }
-      const nifChanged = editForm.nif !== currentDadosPessoais.nif;
-      if (nifChanged) {
-        payload.dados_pessoais = {
-          ...currentDadosPessoais,
-          nif: editForm.nif,
-        };
+
+      // Email / telefone / NIF: só os que MUDARAM, e apagar é um vazio explícito
+      // (`""`). Antes era `editForm.email || currentContato.email`: apagar o email
+      // reenviava o antigo e o toast de sucesso mentia.
+      const contacto = alteracoesDeTexto(currentContato, editForm, ["email", "telefone"]);
+      if (Object.keys(contacto.definidos).length > 0) {
+        payload.contacto = contacto.definidos;
+        for (const campo of Object.keys(contacto.definidos)) {
+          changedPaths.push(`contacto.${campo}`);
+        }
+      }
+      const pessoais = alteracoesDeTexto(currentDadosPessoais, editForm, ["nif"]);
+      if (Object.keys(pessoais.definidos).length > 0) {
+        payload.dados_pessoais = pessoais.definidos;
         changedPaths.push("dados_pessoais.nif");
       }
 
@@ -358,8 +362,11 @@ export default function ClientDetailPage() {
         setClient((prev) => ({
           ...prev,
           ...(payload.nome && { nome: payload.nome }),
-          ...(payload.contacto && { contacto: payload.contacto }),
-          ...(payload.dados_pessoais && { dados_pessoais: payload.dados_pessoais }),
+          // O payload só leva o que mudou: funde-se, não substitui a secção.
+          ...(payload.contacto && { contacto: { ...(prev.contacto || {}), ...payload.contacto } }),
+          ...(payload.dados_pessoais && {
+            dados_pessoais: { ...(prev.dados_pessoais || {}), ...payload.dados_pessoais },
+          }),
           ...(manualMeta && {
             field_metadata: { ...(prev.field_metadata || {}), ...manualMeta },
           }),
@@ -600,7 +607,7 @@ export default function ClientDetailPage() {
                             "contacto.email": { source: "manual", updated_at: new Date().toISOString() },
                           },
                         }));
-                        toast.success("Email atualizado com sucesso");
+                        toast.success(value.trim() ? "Email atualizado com sucesso" : "Email removido com sucesso");
                       } catch (err) {
                         toast.error(extractErrorMessage(err.response?.data?.detail, "Erro ao guardar email"));
                       } finally {
@@ -641,7 +648,7 @@ export default function ClientDetailPage() {
                             "contacto.telefone": { source: "manual", updated_at: new Date().toISOString() },
                           },
                         }));
-                        toast.success("Telefone atualizado com sucesso");
+                        toast.success(value.trim() ? "Telefone atualizado com sucesso" : "Telefone removido com sucesso");
                       } catch (err) {
                         toast.error(extractErrorMessage(err.response?.data?.detail, "Erro ao guardar telefone"));
                       } finally {

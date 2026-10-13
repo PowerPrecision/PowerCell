@@ -20,6 +20,7 @@ from models.email_config import EmailConfigCreate, EmailConfigResponse
 from services.auth import hash_password, require_roles, get_current_user
 from services.process_status import INACTIVE_STATUSES
 from services.admin_helpers import _safe_float, _audit_log
+from services.encryption import campo_esta_vazio
 from services.history import log_history
 from services.permissions import (
     get_default_permissions_for_role,
@@ -425,6 +426,14 @@ async def run_update_client_registration(process_id: str, data: dict, user: dict
         # Manter dados existentes e actualizar apenas os fornecidos
         existing_personal = process.get("personal_data", {})
         existing_personal.update(data["personal_data"])
+        # NIF APAGADO (chave presente e vazia): o índice cego e a cópia da raiz
+        # saem com ele — o processo continuava «encontrável» pelo NIF antigo.
+        # Escreve-se no próprio dicionário (um `$set` pontuado em `personal_data.*`
+        # chocava com o `$set` da secção inteira).
+        if "nif" in data["personal_data"] and campo_esta_vazio(data["personal_data"]["nif"]):
+            existing_personal["nif"] = ""
+            existing_personal["nif_hash"] = ""
+            update_data["client_nif"] = ""
         update_data["personal_data"] = existing_personal
     
     if "titular2_data" in data:

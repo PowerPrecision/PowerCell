@@ -222,7 +222,7 @@ export default function PersonalInfoTab({
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Estado Civil</Label>
                               <Select
-                                value={personalData.estado_civil || personalData.marital_status || ""}
+                                value={personalData.estado_civil || ""}
                                 onValueChange={(value) => setPersonalData({ ...personalData, estado_civil: value })}
                                 disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
                               >
@@ -265,7 +265,7 @@ export default function PersonalInfoTab({
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Nacionalidade</Label>
                               <Input
-                                value={personalData.nacionalidade || personalData.nationality || ""}
+                                value={personalData.nacionalidade || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, nacionalidade: e.target.value })}
                                 disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
                                 className="h-9"
@@ -347,7 +347,7 @@ export default function PersonalInfoTab({
                             <div className="space-y-1 sm:col-span-2">
                               <Label className="text-xs text-muted-foreground">Morada Fiscal</Label>
                               <Input
-                                value={personalData.morada_fiscal || personalData.address || ""}
+                                value={personalData.morada_fiscal || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, morada_fiscal: e.target.value })}
                                 disabled={editingCardId !== 'personal_morada' || !canEditPersonal}
                                 className="h-9"
