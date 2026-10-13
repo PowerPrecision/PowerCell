@@ -89,13 +89,16 @@ async def send_stuck_job_email(stuck_jobs: list):
         
         admin_emails = config.get("admin_emails", [])
         if not admin_emails:
-            # Buscar emails de admins
-            from services.role_query import deep_role_filter
-            admins = await db.users.find(deep_role_filter("admin"), {"email": 1}).to_list(10)
-            admin_emails = [a["email"] for a in admins if a.get("email")]
-        
+            # Jobs bloqueados são infraestrutura, não pertencem a rede nenhuma: sem
+            # endereços configurados avisam-se os MASTER (o único perfil global). Antes
+            # eram os Admin de qualquer rede — perfis locais que agora não operam a
+            # infra (Lote 3, Out 2026).
+            from services.alert_audience import emails_dos_master
+
+            admin_emails = await emails_dos_master()
+
         if not admin_emails:
-            logger.warning("Nenhum email de admin configurado para notificações")
+            logger.warning("Nenhum email de Master/administração configurado para notificações")
             return
         
         # Construir mensagem
@@ -123,16 +126,27 @@ Esta é uma notificação automática do CRM.
         from services.email_service import send_email
         for email in admin_emails[:3]:  # Máximo 3 destinatários
             try:
-                await send_email(
-                    to_email=email,
+                # A chamada antiga (`to_email=`) não existe na assinatura do `send_email`:
+                # dava `TypeError`, que nenhum `except` daqui apanhava, e o erro rebentava o
+                # varrimento INTEIRO sempre que havia jobs bloqueados (Lote 3, Out 2026).
+                resultado = await send_email(
+                    account_name="sistema",
+                    to_emails=[email],
                     subject=subject,
-                    body=body
+                    body=body,
+                    force_system=True,
+                    system_purpose="NOTIFICATIONS",
                 )
-                logger.info(f"Email de jobs stuck enviado para {email}")
-            except (IOError, OSError, ValueError, ConnectionError) as email_err:
+                if (resultado or {}).get("success"):
+                    logger.info(f"Email de jobs stuck enviado para {email}")
+                else:
+                    logger.warning(
+                        f"Email de jobs stuck para {email} não saiu: {(resultado or {}).get('error')}"
+                    )
+            except Exception as email_err:  # noqa: BLE001 — aviso melhor-esforço
                 logger.warning(f"Falha ao enviar email para {email}: {email_err}")
-                
-    except (IOError, OSError, ValueError, ConnectionError, KeyError) as email_global_err:
+
+    except Exception as email_global_err:  # noqa: BLE001 — nunca derruba o varrimento
         logger.error(f"Erro ao enviar emails de jobs stuck: {email_global_err}")
 
 

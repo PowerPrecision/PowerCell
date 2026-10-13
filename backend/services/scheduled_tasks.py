@@ -58,6 +58,7 @@ from services.email_sync_cadence import (  # noqa: F401
     get_email_auto_sync_interval_seconds,
     jitter_do_auto_sync,
 )
+from services.tenant_network import PROJECCAO_DO_CARIMBO
 
 
 class ScheduledTasksService:
@@ -770,9 +771,12 @@ class ScheduledTasksService:
             "status": {"$in": active_statuses}
         }, {"_id": 0}).to_list(1000)
         processes = await so_processos_com_fase_activa(processes)
-        
+
         notifications_created = 0
-        
+        #: Contexto de email por (rede, empresa): resolvê-lo é ler configuração, e a maioria
+        #: dos processos partilha a mesma empresa.
+        contextos_por_rede: dict = {}
+
         for process in processes:
             users_to_notify = []
             
@@ -801,15 +805,29 @@ class ScheduledTasksService:
                 )
                 notifications_created += 1
             
-            # Enviar email ao cliente
+            # Enviar email ao cliente — em nome da rede do PROCESSO dele (Lote 3).
             client_email = process.get("client_email")
             if client_email:
                 try:
+                    chave_do_contexto = (
+                        process.get("network_id"), process.get("company_id"), process.get("company_name"),
+                    )
+                    if chave_do_contexto not in contextos_por_rede:
+                        from services.portal_email_context import resolver_contexto
+
+                        contextos_por_rede[chave_do_contexto] = await resolver_contexto(
+                            company_id=process.get("company_id"),
+                            company_name=process.get("company_name"),
+                            network_id=process.get("network_id"),
+                            client_id=process.get("client_id"),
+                            incluir_link=False,
+                        )
                     await self.send_monthly_reminder_email(
                         to_email=client_email,
                         client_name=client_name,
                         month_name=prev_month_name,
-                        year=prev_year
+                        year=prev_year,
+                        contexto=contextos_por_rede[chave_do_contexto],
                     )
                 except Exception as e:
                     logger.error(f"Erro ao enviar email para {client_email}: {e}")
@@ -817,50 +835,30 @@ class ScheduledTasksService:
         logger.info(f"Lembretes mensais: {notifications_created} notificações criadas")
         return notifications_created
     
-    async def _resolve_email_company_name(self) -> str:
-        """PACOTE 12 (Eixo 2) — nome da empresa para os emails agendados.
-
-        Best-effort: branding global (system_config ``main`` → primeira
-        empresa activa, via ``services.email_branding``); falha ou ausência
-        → constante efectiva (env ``COMPANY_NAME``, default dual-brand).
-        Nunca lança excepção — o envio do email nunca é bloqueado.
-        """
-        try:
-            from services.email_branding import resolve_active_company_branding
-            company_name, _logo = await resolve_active_company_branding(None)
-            if company_name:
-                return company_name
-        except Exception as e:
-            logger.debug(f"[SCHEDULED] Falha ao resolver nome da empresa: {e}")
-        from services.email_v2 import COMPANY_NAME
-        return COMPANY_NAME
-
     async def send_monthly_reminder_email(
         self, 
         to_email: str, 
         client_name: str, 
-        month_name: str, 
-        year: int
+        month_name: str,
+        year: int,
+        contexto=None,
     ):
-        """Enviar email ao cliente a pedir documentos mensais."""
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-        
-        smtp_server = os.environ.get('SMTP_SERVER')
-        smtp_port = int(os.environ.get('SMTP_PORT', 465))
-        smtp_email = os.environ.get('SMTP_EMAIL')
-        smtp_password = os.environ.get('SMTP_PASSWORD')
-        
-        if not all([smtp_server, smtp_email, smtp_password]):
-            logger.warning("SMTP não configurado - email não enviado")
-            return
-        
-        # PACOTE 12 (Eixo 2): nome da empresa (branding global) em vez do
-        # dual-brand hardcoded no header e na assinatura do email mensal.
-        company_name = await self._resolve_email_company_name()
-        
-        subject = f"Documentação Mensal - {month_name} {year}"
+        """Enviar email ao cliente a pedir documentos mensais — em nome da REDE dele.
+
+        Lote 3 (Out 2026): saía sempre pela conta SMTP de ambiente (`SMTP_EMAIL`) e com o
+        nome da empresa do branding GLOBAL — um cliente da Domus recebia o pedido de
+        documentos assinado pela empresa do grupo incumbente. Hoje passa pelo mesmo
+        contexto que as outras comunicações com o cliente (`portal_email_context`): caixa
+        geral da rede, ou o email de sistema com o NOME da empresa dele; sem nenhum dos
+        dois numa rede que não é a de omissão, não envia (e di-lo no log).
+        """
+        from services.portal_email_context import enviar_email_do_portal, resolver_contexto
+
+        if contexto is None:
+            contexto = await resolver_contexto(incluir_link=False)
+        company_name = contexto.nome
+
+        subject = contexto.assunto(f"Documentação Mensal - {month_name} {year}")
         
         html_content = f"""
         <!DOCTYPE html>
@@ -899,7 +897,7 @@ class ScheduledTasksService:
                     <p>Pode enviar os documentos em resposta a este email ou através do seu consultor/intermediário.</p>
                     
                     <p>Com os melhores cumprimentos,<br>
-                    <strong>Equipa {company_name}</strong></p>
+                    <strong>{contexto.equipa}</strong></p>
                 </div>
                 <div class="footer">
                     <p>Este email foi enviado automaticamente. Por favor não responda diretamente.</p>
@@ -910,17 +908,26 @@ class ScheduledTasksService:
         </html>
         """
         
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = smtp_email
-        msg['To'] = to_email
-        msg.attach(MIMEText(html_content, 'html'))
-        
-        with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30) as server:
-            server.login(smtp_email, smtp_password)
-            server.sendmail(smtp_email, to_email, msg.as_string())
-        
-        logger.info(f"Email mensal enviado para {to_email}")
+        texto = (
+            f"Exmo(a). Sr(a). {client_name},\n\n"
+            f"Para manter o seu processo de crédito atualizado, solicitamos o envio do "
+            f"Recibo de Vencimento e do Extrato Bancário referentes ao mês de {month_name} de {year}.\n\n"
+            f"{contexto.equipa}"
+        )
+        resultado = await enviar_email_do_portal(
+            contexto,
+            to_emails=[to_email],
+            subject=subject,
+            body=texto,
+            body_html=html_content,
+        )
+        if (resultado or {}).get("success"):
+            logger.info(f"Email mensal enviado para {to_email}")
+        else:
+            logger.warning(
+                "Email mensal para %s não saiu (rede %s): %s",
+                to_email, contexto.network_id, (resultado or {}).get("error"),
+            )
     
     async def cleanup_temp_files(self, max_age_hours: int = 24) -> int:
         """
@@ -1082,28 +1089,96 @@ class ScheduledTasksService:
         # escolhido, e não havia marca de "já enviei". A marca é por
         # PERÍODO (dia/semana/mês) e não por semana: num relatório diário,
         # uma marca semanal trocava 24 emails a mais por 6 a menos.
-        from services.relatorio_semanal_agenda import (
-            ja_enviado_no_periodo,
-            marcar_enviado_no_periodo,
+        from services.relatorio_semanal_agenda import ja_enviado_no_periodo
+        from services.relatorio_semanal_destinos import (
+            chave_do_relatorio_ia,
+            montar_destinos,
         )
 
-        CHAVE_DA_AGENDA = "relatorio_ia"
-        if await ja_enviado_no_periodo(CHAVE_DA_AGENDA, frequency, today):
-            logger.info("Relatório de IA já saiu neste período — a ignorar")
+        # Lote 3 (Out 2026): UM relatório por REDE, sobre os processos dessa rede e para a
+        # gente dessa rede, e o consolidado só para os Master — a mesma regra do relatório
+        # de segunda-feira. Antes somava as extracções de todas as redes e enviava-as a
+        # todos os Admin/CEO (perfis locais), a toda a equipa ou a ids escolhidos, de
+        # qualquer rede. Uma rede sem CEO/Admin não tem relatório (como o de segunda).
+        try:
+            destinos = await montar_destinos(self.db)
+        except Exception as e:
+            logger.error(f"[Relatório IA] Erro a determinar os destinos: {e}")
             return False
 
-        logger.info(f"A gerar e enviar relatório de IA ({frequency})...")
-        
+        if not destinos:
+            logger.warning("[Relatório IA] Nenhum destino: nenhuma rede tem CEO/Admin com email e não há Master.")
+            return False
+
+        enviados = 0
+        for destino in destinos:
+            chave_da_agenda = chave_do_relatorio_ia(destino)
+            if await ja_enviado_no_periodo(chave_da_agenda, frequency, today):
+                logger.info(f"Relatório de IA de {destino.rotulo} já saiu neste período — a ignorar")
+                continue
+            try:
+                if await self._enviar_relatorio_ia_de(
+                    destino,
+                    chave_da_agenda=chave_da_agenda,
+                    today=today,
+                    frequency=frequency,
+                    period_days=period_days,
+                    recipients_type=recipients_type,
+                    custom_recipients=custom_recipients,
+                    include_insights=include_insights,
+                    include_charts=include_charts,
+                ):
+                    enviados += 1
+            except Exception as e:
+                logger.error(f"[Relatório IA] Erro a gerar/enviar o relatório de {destino.rotulo}: {e}")
+
+        return enviados > 0
+
+    async def _enviar_relatorio_ia_de(
+        self,
+        destino,
+        *,
+        chave_da_agenda: str,
+        today: datetime,
+        frequency: str,
+        period_days: int,
+        recipients_type: str,
+        custom_recipients: list,
+        include_insights: bool,
+        include_charts: bool,
+    ) -> bool:
+        """Gera e envia o relatório de IA de UM destino (uma rede, ou o consolidado dos Master)."""
+        from services.relatorio_semanal_agenda import marcar_enviado_no_periodo
+        from services.relatorio_semanal_destinos import destinatarios_do_relatorio_de_ia
+        from services.tenant_network import CONDICAO_IMPOSSIVEL, build_network_scope_condition
+
+        # Os destinatários decidem-se ANTES de gastar tempo a calcular o relatório.
+        recipient_emails = await destinatarios_do_relatorio_de_ia(
+            destino, recipients_type, custom_recipients or [], self.db,
+        )
+        if not recipient_emails:
+            logger.warning(f"Nenhum destinatário encontrado para o relatório de IA de {destino.rotulo}")
+            return False
+
+        logger.info(f"A gerar e enviar relatório de IA ({frequency}) de {destino.rotulo}...")
+
         # Gerar dados do relatório
         period_start = today - timedelta(days=period_days)
         prev_period_start = today - timedelta(days=period_days * 2)
-        
-        # Buscar extracções
+
+        # Buscar extracções — só dos processos DESTA rede (o consolidado não tem fronteira)
+        condicao_de_rede = (
+            build_network_scope_condition(destino.scope) if destino.scope is not None
+            else CONDICAO_IMPOSSIVEL
+        )
         processes = await self.db.processes.find(
-            {"ai_extraction_history": {"$exists": True, "$ne": []}},
+            {"$and": [
+                {"ai_extraction_history": {"$exists": True, "$ne": []}},
+                condicao_de_rede,
+            ]},
             {"_id": 0, "ai_extraction_history": 1}
         ).to_list(None)
-        
+
         this_period_extractions = []
         prev_period_extractions = []
         
@@ -1177,9 +1252,9 @@ class ScheduledTasksService:
             "client_email": "Email",
         }
         
-        # PACOTE 12 (Eixo 2): nome da empresa (branding global) para o
-        # rodapé do relatório — em vez do dual-brand hardcoded.
-        company_name = await self._resolve_email_company_name()
+        # O rodapé diz de QUE rede é o relatório (Lote 3): o branding global seria o
+        # nome de outra empresa num relatório que é só desta.
+        company_name = destino.rotulo
         
         # Gerar HTML do email
         html_content = f"""
@@ -1283,56 +1358,34 @@ class ScheduledTasksService:
         </html>
         """
         
-        # Obter lista de destinatários baseado na configuração
-        recipient_emails = []
-        
-        if recipients_type == "admins":
-            # Apenas administradores e CEOs
-            from services.role_query import deep_role_in_filter
-            users = await self.db.users.find(
-                {"$and": [deep_role_in_filter(["admin", "ceo"]), {"is_active": {"$ne": False}}]},
-                {"_id": 0, "email": 1, "name": 1}
-            ).to_list(50)
-            recipient_emails = [u["email"] for u in users if u.get("email")]
-            
-        elif recipients_type == "all_staff":
-            # Toda a equipa activa
-            users = await self.db.users.find(
-                {"is_active": {"$ne": False}, "email": {"$exists": True, "$ne": None}},
-                {"_id": 0, "email": 1}
-            ).to_list(100)
-            recipient_emails = [u["email"] for u in users if u.get("email")]
-            
-        elif recipients_type == "custom":
-            # Lista personalizada de utilizadores
-            if custom_recipients:
-                users = await self.db.users.find(
-                    {"id": {"$in": custom_recipients}, "is_active": {"$ne": False}},
-                    {"_id": 0, "email": 1}
-                ).to_list(50)
-                recipient_emails = [u["email"] for u in users if u.get("email")]
-        
-        if not recipient_emails:
-            logger.warning("Nenhum destinatário encontrado para o relatório de IA")
-            return False
-        
-        # Enviar email usando o serviço de email existente
+        # Enviar email usando o serviço de email existente (os destinatários já foram
+        # decididos no início, confinados ao destino).
         try:
             from services.email_service import send_email
-            
+
             result = await send_email(
                 account_name="precision",  # Usar conta principal
                 to_emails=recipient_emails,
-                subject=f"Relatório {period_label} IA - {period_start.strftime('%d/%m')} a {today.strftime('%d/%m/%Y')}",
-                body=f"Relatório {period_label.lower()} de extracções de IA.\n\nDocumentos analisados: {total_this_period}\nTaxa de sucesso: {success_rate:.1f}%",
+                subject=(
+                    f"Relatório {period_label} IA - {destino.rotulo} - "
+                    f"{period_start.strftime('%d/%m')} a {today.strftime('%d/%m/%Y')}"
+                ),
+                body=(
+                    f"Relatório {period_label.lower()} de extracções de IA — {destino.rotulo}.\n\n"
+                    f"Documentos analisados: {total_this_period}\nTaxa de sucesso: {success_rate:.1f}%"
+                ),
                 body_html=html_content
             )
-            
+
             if result.get("success"):
                 # Marca DEPOIS do envio confirmado: marcar antes perdia o
-                # período inteiro se o SMTP falhasse.
-                await marcar_enviado_no_periodo(CHAVE_DA_AGENDA, frequency, today)
-                logger.info(f"Relatório {period_label.lower()} de IA enviado para {len(recipient_emails)} destinatário(s)")
+                # período inteiro se o SMTP falhasse. É por destino: a falha de uma
+                # rede não repete as outras.
+                await marcar_enviado_no_periodo(chave_da_agenda, frequency, today)
+                logger.info(
+                    f"Relatório {period_label.lower()} de IA de {destino.rotulo} enviado para "
+                    f"{len(recipient_emails)} destinatário(s)"
+                )
                 return True
             else:
                 logger.error(f"Falha ao enviar relatório: {result.get('error')}")
@@ -1511,10 +1564,10 @@ class ScheduledTasksService:
                 {"updated_at": {"$lte": stale_cutoff}},
                 {"updated_at": {"$exists": False}, "created_at": {"$lte": stale_cutoff}}
             ]
-        }, {"_id": 0, "id": 1, "client_name": 1, "status": 1, "consultor_id": 1, 
+        }, {"_id": 0, "id": 1, "client_name": 1, "status": 1, "consultor_id": 1,
             "mediador_id": 1, "assigned_consultor_id": 1, "assigned_mediador_id": 1,
-            "updated_at": 1, "created_at": 1}).to_list(500)
-        
+            "updated_at": 1, "created_at": 1, **PROJECCAO_DO_CARIMBO}).to_list(500)
+
         urgent_processes = await self.db.processes.find({
             "status": {"$nin": final_statuses},
             "$or": [
@@ -1546,15 +1599,14 @@ class ScheduledTasksService:
             if process.get("assigned_mediador_id"):
                 users_to_notify.add(process["assigned_mediador_id"])
             
-            # Também notificar diretores para processos muito atrasados
+            # Também notificar a direcção para processos muito atrasados — a da REDE do
+            # processo (Lote 3, Out 2026): antes eram os diretores/CEO de TODAS as redes,
+            # com o nome do cliente na mensagem. Sem rede determinável não avisa ninguém.
             if days_since > 21:
-                from services.role_query import deep_role_in_filter
-                directors = await self.db.users.find(
-                    {"$and": [deep_role_in_filter(["diretor", "ceo"]), {"is_active": {"$ne": False}}]},
-                    {"_id": 0, "id": 1}
-                ).to_list(10)
-                for d in directors:
-                    users_to_notify.add(d["id"])
+                from services.alert_audience import gestao_da_rede_do_processo
+
+                for gestor_id in await gestao_da_rede_do_processo(process, ["diretor", "ceo"]):
+                    users_to_notify.add(gestor_id)
             
             client_name = process.get("client_name", "Cliente")
             

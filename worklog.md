@@ -12161,3 +12161,19 @@ Work Log:
 4. NOTIFICAÇÕES. Automações `target_role` e «clientes em espera» passaram a ser por rede; `broadcast_notification` apagada.
 5. ALTERAR EMPRESA. `POST /clients/{id}/transfer-company` (Master + password), sem tocar no S3; botão na ficha.
 - **NÃO verificado / a confirmar:** (a) o 404 do caso `42e1451a-ab14-43c4-a9af-01f6b338e89c` NÃO foi reproduzido (a guarda abre para o Master com o perfil `master`; com chapéu de Admin estava a fechar — corrigido); falta o log de produção `[DOCS] Nenhum processo ou cliente encontrado` para confirmar se o id simplesmente não existe; (b) a estreitação do Master pela empresa escolhida afecta TODAS as listagens que usam `build_tenant_condition`/`build_tenant_process_condition` (clientes, tarefas, processos, Kanban, pesquisa) — confirmar que é isso o pretendido para o Kanban; (c) emails agendados `admins/all_staff` não foram auditados; (d) nada foi testado contra produção nem com SMTP real.
+
+---
+Task ID: lote3-emails-agendados-por-rede
+Agent: Cloud Agent
+Task: Lote 3 — auditoria dos emails agendados (`admins/all_staff`) e dos varrimentos: nada atravessa redes.
+
+Date: 2026-10-13
+
+Work Log:
+1. INVENTÁRIO. Percorridos `scheduled_tasks` (todos os métodos), `background_job_sweep`, `worker.py`, `worker/tasks.py`, `notification_service`, `push_notifications` e os `send_email` em `services/`. Os que avisam por id atribuído ficam como estão; seis atravessavam redes ou estavam partidos.
+2. RELATÓRIO DE IA. Um por rede (mesmos destinos do relatório de segunda), métricas só da rede, configuração `admins/all_staff/custom` aplicada dentro do destino, consolidado só Master, marca por destino.
+3. PROCESSOS PARADOS (>21 dias) e AVISO DE NOVO PROCESSO. Gestão da rede do processo; `send_to_admins` sem processo vai só aos Master. O processo criado pelo cliente passa a herdar o carimbo da ficha.
+4. JOBS BLOQUEADOS. Fallback para Master. **Bug real achado:** `send_email(to_email=…)` dava `TypeError` e rebentava o varrimento todo; corrigido e tornado melhor-esforço.
+5. LEMBRETE MENSAL AO CLIENTE. Em nome da rede do processo (`portal_email_context`), sem SMTP de ambiente nem branding global.
+- **Testes:** `test_lote3_emails_agendados_por_rede.py` (35) + ajuste de `test_relatorio_semanal_agenda.py`; 15 mutações medidas e mortas.
+- **NÃO verificado / a confirmar:** (a) nada foi corrido contra SMTP real nem produção; (b) no 1.º ciclo depois do deploy o relatório de IA do período corrente pode repetir-se uma vez (chaves novas); (c) uma rede sem CEO/Admin não recebe relatório de IA; (d) `broadcast_push_notification(roles=…)` continua sem confinamento por rede (sem chamadores).

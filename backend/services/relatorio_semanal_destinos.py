@@ -226,6 +226,132 @@ def destino_global(
     )
 
 
+# ─────────────────────────────────────────────────────────────────────
+# RELATÓRIO DE IA (Lote 3, Out 2026)
+# ─────────────────────────────────────────────────────────────────────
+# O relatório de extracções de IA tinha a mesma forma do consolidado de segunda-feira
+# que a adenda de RBAC fechou: somava os processos de TODAS as redes e enviava-os a
+# «admins» (todos os Admin/CEO de todas as redes — perfis locais), «all_staff» (todos
+# os utilizadores activos, de todas as redes) ou a uma lista de ids sem confinar. Passa a
+# usar os MESMOS destinos: um relatório por rede, calculado sobre os processos dessa
+# rede, para quem a configuração diz DENTRO dessa rede; o consolidado só vai aos Master.
+
+CHAVE_RELATORIO_IA = "relatorio_ia"
+
+TIPOS_DE_DESTINATARIOS_IA = ("admins", "all_staff", "custom")
+
+#: Contas que não são equipa: nunca entram em «toda a equipa».
+PAPEIS_QUE_NAO_SAO_EQUIPA = ("cliente", "parceiro")
+
+
+def chave_do_relatorio_ia(destino: DestinoDoRelatorio) -> str:
+    """A marca de «já enviei neste período», por destino (como a do relatório de segunda)."""
+    sufixo = destino.chave.split(":", 1)[1] if ":" in destino.chave else "global"
+    return f"{CHAVE_RELATORIO_IA}:{sufixo}"
+
+
+def _consolidado(destino: DestinoDoRelatorio) -> bool:
+    return destino.scope is None or bool(destino.scope.sem_fronteira)
+
+
+async def _emails_da_equipa(destino: DestinoDoRelatorio, base) -> set[str]:
+    """Os emails da equipa activa de uma REDE (UCR numa das suas empresas, ou conta antiga).
+
+    Master, clientes e parceiros nunca contam como «equipa» da rede. A conta antiga
+    (só `users.company`, o NOME) só conta se não tiver NENHUM UCR — quem tem UCR já foi
+    colocado pelos acessos.
+    """
+    scope = destino.scope
+    if scope is None:
+        return set()
+    ids = list(scope.company_ids)
+    nomes = list(scope.company_names)
+    if not ids and not nomes:
+        return set()
+
+    ucrs = await base.user_company_roles.find(
+        {
+            "$or": [{"company_id": {"$in": ids + nomes}}, {"company_name": {"$in": nomes + ids}}],
+            "is_deleted": {"$ne": True},
+            "is_active": {"$ne": False},
+        },
+        {"_id": 0, "user_id": 1},
+    ).to_list(20000)
+    com_acesso_aqui = {_texto(u.get("user_id")) for u in ucrs if _texto(u.get("user_id"))}
+
+    candidatos = await base.users.find(
+        {
+            "is_active": {"$ne": False},
+            "$or": [{"id": {"$in": sorted(com_acesso_aqui)}}, {"company": {"$in": nomes}}],
+        },
+        {"_id": 0, "id": 1, "email": 1, "role": 1, "company": 1},
+    ).to_list(5000)
+
+    so_legados = [
+        _texto(u.get("id")) for u in candidatos
+        if _texto(u.get("id")) not in com_acesso_aqui
+    ]
+    com_ucr_noutro_lado: set[str] = set()
+    if so_legados:
+        outros = await base.user_company_roles.find(
+            {"user_id": {"$in": so_legados}, "is_deleted": {"$ne": True}},
+            {"_id": 0, "user_id": 1},
+        ).to_list(20000)
+        com_ucr_noutro_lado = {_texto(o.get("user_id")) for o in outros}
+
+    emails: set[str] = set()
+    for utilizador in candidatos:
+        uid = _texto(utilizador.get("id"))
+        if uid not in com_acesso_aqui and uid in com_ucr_noutro_lado:
+            continue
+        papel = _texto(utilizador.get("role")).lower()
+        if e_papel_global(papel) or papel in PAPEIS_QUE_NAO_SAO_EQUIPA:
+            continue
+        if _email_valido(utilizador.get("email")):
+            emails.add(_texto(utilizador["email"]).lower())
+    return emails
+
+
+async def destinatarios_do_relatorio_de_ia(
+    destino: DestinoDoRelatorio,
+    tipo: str,
+    custom_ids: Iterable[str] = (),
+    base=None,
+) -> list[str]:
+    """Os emails que recebem o relatório de IA deste destino, segundo a configuração.
+
+    * `admins` — a gestão do destino (CEO/Admin da rede; Master no consolidado).
+    * `all_staff` — toda a equipa DA REDE; o consolidado, por atravessar redes, só os Master.
+    * `custom` — os ids escolhidos que pertencem ao destino: da rede, ou Master no
+      consolidado. Um id de outra rede NÃO recebe o relatório desta.
+
+    Um tipo desconhecido cai no mais estreito (`admins`). Nunca devolve emails fora do
+    destino, qualquer que seja o tipo configurado.
+    """
+    base = base if base is not None else db
+    tipo = (_texto(tipo) or "admins").lower()
+    if tipo not in TIPOS_DE_DESTINATARIOS_IA:
+        tipo = "admins"
+
+    if tipo == "admins":
+        return sorted(set(destino.emails))
+
+    permitidos = set(destino.emails) if _consolidado(destino) else await _emails_da_equipa(destino, base)
+    if tipo == "all_staff":
+        return sorted(permitidos)
+
+    ids = [i for i in dict.fromkeys(_texto(i) for i in custom_ids) if i]
+    if not ids:
+        return []
+    escolhidos = await base.users.find(
+        {"id": {"$in": ids}, "is_active": {"$ne": False}}, {"_id": 0, "email": 1},
+    ).to_list(len(ids))
+    emails = {
+        _texto(u["email"]).lower() for u in escolhidos if _email_valido(u.get("email"))
+    }
+    return sorted(emails & permitidos)
+
+
 async def montar_destinos(base=None) -> list[DestinoDoRelatorio]:
     """Lê os dados e devolve os relatórios a enviar (um por rede + o global)."""
     base = base if base is not None else db

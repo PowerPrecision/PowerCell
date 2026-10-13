@@ -224,7 +224,11 @@ class TestOsDoisRelatoriosEstaoLigadosAAgenda:
             ScheduledTasksService.send_weekly_ai_report
         )
         assert "ja_enviado_no_periodo" in fonte
-        assert "marcar_enviado_no_periodo" in fonte
+        # Lote 3: a marca é por destino (rede) e vive no envio de cada relatório.
+        envio = codigo_da_funcao_sem_comentarios(
+            ScheduledTasksService._enviar_relatorio_ia_de
+        )
+        assert "marcar_enviado_no_periodo" in envio
 
     def test_a_marca_e_gravada_DEPOIS_do_envio_confirmado(self):
         """Marcar antes perdia a semana inteira se o SMTP falhasse."""

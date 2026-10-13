@@ -844,6 +844,11 @@ async def persist_and_finalize_client_self_create(
         now=now,
     )
     aplicar_parceiro_do_cliente(process_doc, client_doc)
+    # O processo herda o carimbo da ficha do cliente (Lote 3): sem ele nascia por
+    # carimbar, caía na rede de omissão e os avisos da criação iam à gestão errada.
+    for campo in ("network_id", "company_id", "company_name"):
+        if client_doc.get(campo):
+            process_doc[campo] = client_doc[campo]
     await aplicar_regime_de_indexacao(process_doc)
     process_doc = encrypt_fn(process_doc)
     await db.processes.insert_one(process_doc)
@@ -869,6 +874,9 @@ async def persist_and_finalize_client_self_create(
         "Novo Processo Criado",
         f"O cliente {client_name} criou um novo processo de {data.process_type}.",
         notification_type="new_process",
+        # A rede do processo decide quem é avisado (Lote 3): sem isto o aviso
+        # ia só aos Master e a gestão da rede não sabia do processo novo.
+        processo=process_doc,
     )
 
     response_doc = decrypt_fn(process_doc)

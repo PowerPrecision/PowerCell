@@ -233,6 +233,72 @@ async def gestao_da_rede_do_processo(
     return vistos
 
 
+def _email_utilizavel(valor: Any) -> bool:
+    texto = _texto(valor)
+    return "@" in texto and "placeholder.internal" not in texto
+
+
+async def emails_dos_utilizadores(ids: Sequence[str]) -> list[str]:
+    """Os emails (minúsculas, sem repetidos) dos utilizadores activos com esses ids."""
+    ids_limpos = [i for i in dict.fromkeys(_texto(i) for i in ids) if i]
+    if not ids_limpos:
+        return []
+    try:
+        utilizadores = await db.users.find(
+            {"id": {"$in": ids_limpos}, "is_active": {"$ne": False}},
+            {"_id": 0, "email": 1},
+        ).to_list(MAX_UTILIZADORES)
+    except Exception as exc:
+        logger.warning("[alert_audience] Falha a ler os emails dos utilizadores (%s).", exc)
+        return []
+    return list(dict.fromkeys(
+        _texto(u["email"]).lower() for u in utilizadores if _email_utilizavel(u.get("email"))
+    ))
+
+
+async def emails_dos_master() -> list[str]:
+    """Os emails dos utilizadores Master activos.
+
+    O Master é o único perfil global, logo é o destinatário certo do que não
+    pertence a rede nenhuma (infraestrutura) e pode ser copiado do que
+    pertence a uma — vê tudo por desenho.
+    """
+    from services.role_query import deep_role_filter
+
+    try:
+        masters = await db.users.find(
+            {"$and": [deep_role_filter("master"), {"is_active": {"$ne": False}}]},
+            {"_id": 0, "email": 1},
+        ).to_list(MAX_UTILIZADORES)
+    except Exception as exc:
+        logger.warning("[alert_audience] Falha a ler os Master (%s).", exc)
+        return []
+    return list(dict.fromkeys(
+        _texto(u["email"]).lower() for u in masters if _email_utilizavel(u.get("email"))
+    ))
+
+
+async def emails_da_gestao_da_rede_do_processo(
+    processo: Optional[dict],
+    papeis: Sequence[str],
+    *,
+    incluir_master: bool = True,
+) -> list[str]:
+    """Emails da gestão da rede do processo (e dos Master, que vêem tudo).
+
+    A versão por EMAIL de `gestao_da_rede_do_processo`: mesma falha fechada
+    (sem rede determinável não há gestão), com os Master a continuarem a
+    receber — não têm fronteira de dados e não são «outra rede».
+    """
+    ids = await gestao_da_rede_do_processo(processo, papeis)
+    emails = await emails_dos_utilizadores(ids)
+    if incluir_master:
+        for email in await emails_dos_master():
+            if email not in emails:
+                emails.append(email)
+    return emails
+
+
 async def destinatarios_do_alerta(
     processo: Optional[dict],
     *,

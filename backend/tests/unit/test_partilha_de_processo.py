@@ -695,6 +695,11 @@ EXCEPCOES_ESCRITAS = {
         "recusar repor por cima deles; o `status` é um nome do workflow do dono, "
         "logo a condição é a de propriedade de propósito (um convidado não é afectado)"
     ),
+    "scheduled_tasks": (
+        "o relatório de IA SOMA as extracções dos processos DA REDE (uma estatística da "
+        "produção da casa: ver, sim; contar, não — a mesma excepção das agregações de "
+        "stats); os avisos por processo vêm do `alert_audience`, não de uma listagem"
+    ),
     "admin_workflow": (
         "apagar uma fase move os processos DA REDE dona dessa fase (o `status` "
         "é um nome do workflow do dono): um convidado nunca é afectado, "
