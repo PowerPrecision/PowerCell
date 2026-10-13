@@ -60,6 +60,9 @@ async def aguardar_tarefas_pendentes() -> None:
 
     Nunca levanta: o resultado/excepção de cada tarefa é assunto dela.
     """
-    pendentes = list(_background_tasks)
+    # Só as do loop corrente: uma task que sobrou de outro loop (já fechado) não se pode
+    # esperar daqui — `gather` levanta «future belongs to a different loop».
+    loop = asyncio.get_running_loop()
+    pendentes = [t for t in _background_tasks if t.get_loop() is loop and not t.done()]
     if pendentes:
         await asyncio.gather(*pendentes, return_exceptions=True)

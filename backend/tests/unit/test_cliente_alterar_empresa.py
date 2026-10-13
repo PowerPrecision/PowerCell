@@ -166,7 +166,7 @@ class TestRecusas:
 
 class TestSoOMasterEPeloServidor:
     def test_a_rota_exige_apenas_o_master(self):
-        from routes.clients import router
+        from routes.clients_company_transfer import router
 
         rota = next(r for r in router.routes if getattr(r, "path", "").endswith("/transfer-company"))
         guardas = [

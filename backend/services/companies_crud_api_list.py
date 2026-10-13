@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from database import db
 from models.company import CompanyListResponse, CompanyResponse
 from services.companies_crud_api_helpers import resolve_logo_url
-from services.tenant_network import build_tenant_condition
+from services.tenant_network import build_tenant_condition, sem_vista
 from services.user_management_scope import exigir_empresas_concediveis
 from utils.input_sanitization import escape_regex
 
@@ -116,7 +116,7 @@ async def run_list_companies(
     dentro do âmbito, nunca na colecção inteira: um total global diria à
     Domus quantas empresas a Power tem.
     """
-    condicoes: list[dict] = [await build_tenant_condition(user or {}, vista=False)]
+    condicoes: list[dict] = [await build_tenant_condition(sem_vista(user))]
 
     if search:
         escaped = escape_regex(search)
@@ -158,7 +158,7 @@ async def run_list_available_companies(*, actor: dict):
     de todas as empresas do sistema é um directório dos outros inquilinos.
     """
     cursor = db.companies.find(
-        await build_tenant_condition(actor or {}, vista=False), {"_id": 0, "id": 1, "name": 1}
+        await build_tenant_condition(sem_vista(actor)), {"_id": 0, "id": 1, "name": 1}
     ).sort("name", 1)
     return await cursor.to_list(200)
 

@@ -461,16 +461,20 @@ async def resolve_vista_scope(user: dict) -> TenantScope:
     return await resolve_tenant_scope(user)
 
 
-async def build_tenant_condition(user: dict, *, vista: bool = True) -> dict:
+async def build_tenant_condition(user: dict) -> dict:
     """Atalho: âmbito do utilizador já convertido em condição Mongo (LISTAGENS).
 
-    `vista=True` (por omissão): a empresa que o Master escolheu no cabeçalho estreita a
-    listagem à rede dela. `vista=False` para as superfícies de ADMINISTRAÇÃO DO PRÓPRIO
-    SISTEMA (a lista de empresas): o Master tem de poder escolher uma empresa de outra
-    rede, por exemplo como destino de uma transferência de cliente.
+    Inclui a VISTA do Master (a empresa que escolheu no cabeçalho estreita a listagem à rede
+    dela). As superfícies de ADMINISTRAÇÃO DO PRÓPRIO SISTEMA (a lista de empresas) passam o
+    utilizador por `sem_vista`: o Master tem de poder escolher uma empresa de outra rede, por
+    exemplo como destino de uma transferência de cliente.
     """
-    scope = await (resolve_vista_scope(user) if vista else resolve_tenant_scope(user))
-    return build_network_scope_condition(scope)
+    return build_network_scope_condition(await resolve_vista_scope(user))
+
+
+def sem_vista(user: Optional[dict]) -> dict:
+    """Cópia do utilizador sem a vista da empresa escolhida (âmbito normal, sem estreitar)."""
+    return {k: v for k, v in (user or {}).items() if k != CAMPO_VISTA}
 
 
 def com_isolamento(tenant_condition: dict, query: Optional[dict]) -> dict:

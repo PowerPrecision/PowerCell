@@ -39,7 +39,6 @@ from services.client_process_ops import (
     run_get_client_processes,
 )
 from services.client_active_processes import run_get_client_active_processes
-from services.client_company_transfer import TransferirClienteIn, run_transfer_client_company
 from services.client_portal_access import run_resend_portal_access
 from services.client_find_or_create import run_find_or_create_client
 from utils.frontend_url import get_frontend_url
@@ -219,19 +218,6 @@ async def unlink_process_from_client(
     user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO]))
 ):
     return await run_unlink_process_from_client(client_id, process_id, user)
-
-
-@router.post("/{client_id}/transfer-company")
-async def transfer_client_company(
-    client_id: str,
-    data: TransferirClienteIn,
-    user: dict = Depends(require_roles([UserRole.MASTER])),
-):
-    """Alterar a empresa de um cliente registado na errada (só Master, com password).
-
-    Muda o carimbo do cliente e dos processos dele; **não** move nada no S3.
-    """
-    return await run_transfer_client_company(client_id, data, user)
 
 
 @router.post("/{client_id}/create-process")
