@@ -385,6 +385,33 @@ describe("ProcessDetails — cartão de partilha (D-25)", () => {
   });
 });
 
+describe("ProcessDetails — empresa dona no cabeçalho", () => {
+  it("mostra a empresa dona e o selo de partilhado — a ligação página ↔ etiqueta", async () => {
+    pacote.valor = pacoteCompleto({
+      process: {
+        ...PROCESSO,
+        empresa_dona: {
+          company_id: "cmp-power", company_name: "Power Real Estate",
+          network_id: "grupo_power", e_de_outra_rede: true,
+        },
+      },
+    });
+    montar();
+    await screen.findByTestId("layout");
+
+    const tag = await screen.findByTestId("empresa-dona-tag");
+    expect(tag).toHaveTextContent("Power Real Estate");
+    expect(tag).toHaveTextContent("Partilhado");
+  });
+
+  it("sem empresa_dona (servidor antigo) o cabeçalho não muda (contraprova)", async () => {
+    montar();
+    await screen.findByTestId("layout");
+    await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("empresa-dona-tag")).toBeNull();
+  });
+});
+
 describe("ProcessDetails — serviço pago pelo parceiro (Portal do Parceiro)", () => {
   afterEach(() => { sessao.papel = "consultor"; });
 
