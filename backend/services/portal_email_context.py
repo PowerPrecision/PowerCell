@@ -37,6 +37,9 @@ from database import db
 
 logger = logging.getLogger(__name__)
 
+#: Falhas de CONFIGURAÇÃO do remetente: acontecem antes de qualquer entrega.
+CODIGOS_ANTES_DA_ENTREGA = frozenset({"smtp_auth", "smtp_password_unreadable", "SMTP_NOT_CONFIGURED"})
+
 #: Nome usado quando não se consegue determinar a empresa. Neutro de propósito.
 NOME_NEUTRO = "Portal do Cliente"
 
@@ -384,6 +387,8 @@ async def _conta_de_sistema_generica(rede: Optional[str]):
             "%s: %s. Tratada como não configurada.", type(exc).__name__, exc,
         )
         conta = None
+    if conta is None:
+        conta = await _conta_do_bloco_a_em_bruto()
     if conta is not None:
         return conta
     try:
@@ -402,14 +407,51 @@ async def _conta_de_sistema_generica(rede: Optional[str]):
         return None
 
 
+async def _conta_do_bloco_a_em_bruto():
+    """O «Email do Sistema (Transacional)» lido do documento GLOBAL, sem validar o resto.
+
+    ``get_system_config`` valida o documento INTEIRO e, se um campo qualquer (de
+    qualquer secção) não validar, devolve a configuração por omissão do ambiente —
+    ou seja, SEM o Bloco A, ainda que ele esteja gravado e certo. Para um email
+    transacional (o link do Portal, as boas-vindas) isso era «a empresa não tem
+    e-mail» por causa de um campo que nada tem a ver com o envio. Aqui lê-se só o
+    bloco ``system_smtp``. Mesma fonte, mesma regra, menos acoplamento. Nunca levanta.
+    """
+    try:
+        from models.system_config import SystemSMTPConfig
+        from services.email_service import EmailAccount
+
+        doc = await db.system_config.find_one({"_id": "main"}, {"_id": 0, "system_smtp": 1})
+        bloco = (doc or {}).get("system_smtp")
+        if not isinstance(bloco, dict) or not bloco:
+            return None
+        cfg = SystemSMTPConfig(**bloco)
+        if cfg.resend_api_key:
+            return EmailAccount(
+                name="system_smtp", imap_server="resend", imap_port=0,
+                smtp_server="resend", smtp_port=0,
+                email=cfg.smtp_from_email or "", password=cfg.resend_api_key,
+            )
+        if cfg.smtp_host and cfg.smtp_username:
+            return EmailAccount(
+                name="system_smtp", imap_server=cfg.smtp_host, imap_port=int(cfg.smtp_port or 587),
+                smtp_server=cfg.smtp_host, smtp_port=int(cfg.smtp_port or 587),
+                email=cfg.smtp_from_email or cfg.smtp_username, password=cfg.smtp_password or "",
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[PORTAL-EMAIL] Leitura em bruto do Email do Sistema falhou: %s: %s",
+                       type(exc).__name__, exc)
+    return None
+
+
 def mensagem_sem_remetente(contexto: "ContextoDoEmailDoPortal") -> str:
     """O que se diz a quem tenta enviar numa rede sem email configurado."""
     return (
         f"A empresa «{contexto.nome}» não tem e-mail configurado. Configure o email "
-        "geral da empresa (Contas de Email) ou o email de sistema e tente novamente."
+        "geral da empresa ou o «Email do Sistema (Transacional)» (Contas de Email) e tente novamente."
         if contexto.company_name else
         "A empresa não tem e-mail configurado. Configure o email geral da empresa "
-        "(Contas de Email) ou o email de sistema e tente novamente."
+        "ou o «Email do Sistema (Transacional)» (Contas de Email) e tente novamente."
     )
 
 
@@ -478,8 +520,28 @@ async def enviar_email_do_portal(
     if created_by:
         comum["created_by"] = created_by
     if contexto.account is not None:
+        try:
+            resultado = await send_email(
+                account_name="caixa_geral_da_rede", account_override=contexto.account, **comum,
+            )
+        except ValueError as exc:  # configuração da caixa (não infraestrutura)
+            resultado = {"success": False, "error": str(exc), "error_code": "SMTP_NOT_CONFIGURED"}
+        if (resultado or {}).get("success") or (resultado or {}).get("error_code") not in CODIGOS_ANTES_DA_ENTREGA:
+            return resultado
+        # Um email TRANSACIONAL não pode ficar refém de uma caixa da rede com a password
+        # expirada: o «Email do Sistema (Transacional)» existe para isto. Só se recua
+        # para falhas de CONFIGURAÇÃO (acontecem antes de qualquer entrega — repetir não
+        # duplica); uma falha genérica pode ter acontecido depois de enviar.
+        conta_do_sistema = await _conta_de_sistema_generica(contexto.network_id)
+        if conta_do_sistema is None:
+            return resultado
+        logger.warning(
+            "[PORTAL-EMAIL] A caixa geral da rede %s falhou (%s): a enviar pelo Email do Sistema "
+            "(Transacional).", contexto.network_id, resultado.get("error_code"),
+        )
         return await send_email(
-            account_name="caixa_geral_da_rede", account_override=contexto.account, **comum,
+            account_name="sistema", account_override=conta_do_sistema,
+            force_system=True, system_purpose=system_purpose, **comum,
         )
 
     conta = await _conta_de_sistema_generica(contexto.network_id)
