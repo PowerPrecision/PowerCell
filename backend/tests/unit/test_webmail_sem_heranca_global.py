@@ -20,13 +20,13 @@ import pytest
 
 import services.email_config_resolver as resolver
 import services.system_config as system_config_mod
+import services.user_email_config_service as user_email_config_mod
 import services.users_api_email_config as users_api
 import services.webmail_heranca as heranca
 from tests.unit.helpers_tenant import (
     ANA,
     BRUNO,
     CARLA,
-    REDE_DOMUS,
     REDE_INCUMBENTE,
     semear,
     tenant_db,
@@ -57,7 +57,7 @@ def base(fake_async_db, monkeypatch):
 
 
 def _ctx(db):
-    return tenant_db(db, resolver, heranca, system_config_mod, users_api)
+    return tenant_db(db, resolver, heranca, system_config_mod, users_api, user_email_config_mod)
 
 
 def _contas_de_ambiente():
