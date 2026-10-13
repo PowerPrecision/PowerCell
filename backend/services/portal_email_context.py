@@ -389,6 +389,40 @@ async def _conta_de_sistema_generica(rede: Optional[str]):
     )
 
 
+def mensagem_sem_remetente(contexto: "ContextoDoEmailDoPortal") -> str:
+    """O que se diz a quem tenta enviar numa rede sem email configurado."""
+    return (
+        f"A empresa «{contexto.nome}» não tem e-mail configurado. Configure o email "
+        "geral da empresa (Contas de Email) ou o email de sistema e tente novamente."
+        if contexto.company_name else
+        "A empresa não tem e-mail configurado. Configure o email geral da empresa "
+        "(Contas de Email) ou o email de sistema e tente novamente."
+    )
+
+
+async def verificar_remetente(contexto: "ContextoDoEmailDoPortal") -> Optional[str]:
+    """``None`` se há de onde enviar; senão a mensagem para o utilizador (FAIL FAST).
+
+    É a MESMA decisão que o ``enviar_email_do_portal`` toma ao enviar, feita
+    ANTES de qualquer efeito (emitir o link, gravar o histórico, enfileirar um
+    retry): uma rede sem email geral nem email de sistema não envia — e não
+    tem de gastar um token, escrever «enviou o link» no histórico nem entrar
+    num ciclo de retries que nunca poderá ter sucesso. Só a rede de omissão
+    pode ainda contar com o último recurso do ``send_email`` (as contas de
+    ambiente), por isso não se lhe antecipa uma recusa.
+    """
+    from services.tenant_network import rede_de_omissao
+
+    if contexto.account is not None:
+        return None
+    if await _conta_de_sistema_generica(contexto.network_id) is not None:
+        return None
+    omissao = rede_de_omissao()
+    if contexto.network_id and omissao and contexto.network_id == omissao:
+        return None
+    return mensagem_sem_remetente(contexto)
+
+
 async def enviar_email_do_portal(
     contexto: ContextoDoEmailDoPortal,
     *,

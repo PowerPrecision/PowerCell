@@ -21,6 +21,10 @@ from utils.frontend_url import get_frontend_url
 
 logger = logging.getLogger(__name__)
 
+#: Códigos de falha do ``send_email`` que são CONFIGURAÇÃO da conta (e não
+#: infraestrutura): quem os recebe tem de os corrigir, repetir não adianta.
+CODIGOS_DE_CONFIGURACAO_DO_REMETENTE = frozenset({"smtp_auth", "smtp_password_unreadable"})
+
 
 async def ensure_portal_access_code(client_id: str) -> Optional[str]:
     """
@@ -257,6 +261,36 @@ async def send_magic_link_to_client(
             detail="Cliente não tem email associado",
         )
 
+    # Contexto de REDE do cliente: nome, logótipo, remetente e endereço do
+    # Portal vêm do carimbo do processo/cliente, nunca de uma constante.
+    from services.email_branding import build_email_header_logo_html
+    from services.portal_email_context import (
+        enviar_email_do_portal,
+        mensagem_sem_remetente,
+        resolver_contexto,
+        verificar_remetente,
+    )
+    from utils.frontend_url import get_frontend_url
+
+    contexto = await resolver_contexto(
+        company_id=process.get("company_id"),
+        company_name=process.get("company_name"),
+        network_id=process.get("network_id"),
+        client_id=client_id or None,
+        user=user,
+        frontend_url=get_frontend_url(request),
+    )
+
+    # FAIL FAST: sem remetente não há o que emitir, gravar ou repetir. Antes de
+    # emitir o link (um token novo por tentativa) e de escrever «Enviou o link»
+    # no histórico de um email que nunca sairá.
+    sem_remetente = await verificar_remetente(contexto)
+    if sem_remetente:
+        logger.warning(
+            "[MAGIC-LINK] Processo %s (rede %s): %s", process_id, contexto.network_id, sem_remetente,
+        )
+        raise HTTPException(status_code=400, detail=sem_remetente)
+
     portal_access_code = await ensure_portal_access_code(client_id)
     issued = await issue_portal_magic_link(
         process_id=process_id,
@@ -266,28 +300,6 @@ async def send_magic_link_to_client(
     )
     magic_link = issued["magic_link"]
     short_id = issued["short_id"]
-
-    # Bloco 3 (ponto 21): enviar acesso ao Portal fica no histórico (sem o link).
-    from services.history import log_history
-
-    await log_history(
-        process_id, user, "Enviou o link de acesso ao Portal ao cliente",
-        "portal_access", None, "email",
-    )
-
-    # Contexto de REDE do cliente: nome, logótipo, remetente e endereço do
-    # Portal vêm do carimbo do processo/cliente, nunca de uma constante.
-    from services.email_branding import build_email_header_logo_html
-    from services.portal_email_context import enviar_email_do_portal, resolver_contexto
-
-    contexto = await resolver_contexto(
-        company_id=process.get("company_id"),
-        company_name=process.get("company_name"),
-        network_id=process.get("network_id"),
-        client_id=client_id or None,
-        user=user,
-        frontend_url=issued.get("frontend_url"),
-    )
 
     text_body, html_body = build_magic_link_email_bodies(
         client_name=client_name,
@@ -316,7 +328,7 @@ async def send_magic_link_to_client(
             detail=f"SMTP não está configurado: {e}",
         )
     except Exception as e:
-        logger.error(f"Erro ao enviar magic link email: {e}")
+        logger.error(f"Erro ao enviar magic link email: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Erro ao enviar email. Tente copiar o link manualmente.",
@@ -336,14 +348,31 @@ async def send_magic_link_to_client(
         # Internal Server Error. O frontend exibe um erro tratado e o admin
         # sabe exactamente onde configurar.
         if error_code == "SMTP_NOT_CONFIGURED":
+            raise HTTPException(status_code=400, detail=mensagem_sem_remetente(contexto))
+        if error_code in CODIGOS_DE_CONFIGURACAO_DO_REMETENTE:
+            # A conta existe mas não serve (credenciais recusadas / password
+            # ilegível): é configuração, não infraestrutura — 400 e não 500.
             raise HTTPException(
                 status_code=400,
-                detail="SMTP não está configurado. Configure o Email do Sistema (Bloco A) em Contas de Email e tente novamente.",
+                detail=(
+                    f"A conta de e-mail da empresa não está a funcionar ({error_detail}). "
+                    "Verifique as credenciais em Contas de Email e tente novamente."
+                ),
             )
         raise HTTPException(
             status_code=500,
             detail=f"Erro ao enviar email: {error_detail}",
         )
+
+    # Bloco 3 (ponto 21): enviar acesso ao Portal fica no histórico (sem o link)
+    # — só DEPOIS de o email ter saído: um registo de «enviou» não pode
+    # descrever um envio que falhou.
+    from services.history import log_history
+
+    await log_history(
+        process_id, user, "Enviou o link de acesso ao Portal ao cliente",
+        "portal_access", None, "email",
+    )
 
     logger.info(
         f"Magic link enviado por email para {client_email} "

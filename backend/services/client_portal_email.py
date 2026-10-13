@@ -128,6 +128,21 @@ async def deliver_registration_email(
             frontend_url=frontend_url, portal_url=portal_url,
         )
 
+    # FAIL FAST: uma rede sem email geral nem email de sistema nunca vai poder
+    # enviar — nem agora, nem num retry. Falha DEFINITIVA e visível (monitor +
+    # estado «falhou» do cliente), sem enfileirar um job que repetiria o mesmo
+    # erro até esgotar as tentativas e deixaria a tarefa «a tentar» para sempre.
+    from services.portal_email_context import verificar_remetente
+
+    sem_remetente = await verificar_remetente(contexto)
+    if sem_remetente:
+        logger.error(
+            "[PORTAL-EMAIL] %s (cliente %s, rede %s): sem remetente — falha definitiva, "
+            "sem retry.", client_email, client_id, contexto.network_id,
+        )
+        await fail_portal_email_task(task_id, client_id, sem_remetente)
+        return False
+
     sent_direct = False
     direct_error = None
     try:
