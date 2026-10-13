@@ -11,7 +11,7 @@ import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { eErroDeChunk, urlDeRecarregamento } from "./utils/chunkErrors";
-import { hasPermission, STAFF_ROLES, canAccessByEffectiveRole, canAccessOrgAdmin } from "./utils/roleUtils";
+import { hasPermission, STAFF_ROLES, canAccessRoute, canAccessOrgAdmin } from "./utils/roleUtils";
 import React, { Suspense, Component } from "react";
 import * as Sentry from "@sentry/react";
 import { FullPageSkeleton } from "./components/ui/skeletons";
@@ -243,7 +243,8 @@ function ProtectedRoute({ children, allowedRoles, requiredCapability }) {
   }
 
   // Pacote FH / C3: gate pelo cargo efetivo (UCR), não por additional_roles do JWT.
-  if (allowedRoles && !canAccessByEffectiveRole(effectiveRole, allowedRoles)) {
+  // Nas rotas só-Master passa a CONTA Master com qualquer chapéu (utils/roleUtils.canAccessRoute).
+  if (allowedRoles && !canAccessRoute({ effectiveRole, accountRole: user?.role, allowedRoles })) {
     return <Navigate to="/staff" replace />;
   }
 

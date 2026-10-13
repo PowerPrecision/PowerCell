@@ -51,3 +51,21 @@ describe("AssignUsersModal — a lista é a do processo", () => {
     await waitFor(() => expect(api.getStaffUsers).toHaveBeenCalledTimes(1));
   });
 });
+
+describe("AssignUsersModal — empresa de cada pessoa", () => {
+  it("as opções dizem a empresa (o <Select> só aceita texto)", async () => {
+    api.getStaffUsers.mockResolvedValue({ data: [
+      { id: "u-1", name: "Ana", role: "consultor", is_active: true, empresa_etiqueta: "Precision" },
+      { id: "u-2", name: "Rui", role: "consultor", is_active: true },
+    ] });
+    const { default: userEvent } = await import("@testing-library/user-event");
+    render(montar(processo("proc-9")));
+    await waitFor(() => expect(api.getStaffUsers).toHaveBeenCalled());
+
+    const gatilhos = await screen.findAllByRole("combobox");
+    await userEvent.click(gatilhos[0]);
+
+    expect(await screen.findByRole("option", { name: "Ana (consultor) — Precision" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Rui (consultor)" })).toBeInTheDocument();
+  });
+});

@@ -171,6 +171,7 @@ async def run_extract_document_data(
     s3_path: str,
     *,
     user: dict,
+    request=None,
 ) -> dict[str, Any]:
     """Lê UM ficheiro do S3 e devolve os dados extraídos, sem gravar nada.
 
@@ -178,7 +179,9 @@ async def run_extract_document_data(
         process_id: Processo a que o ficheiro pertence.
         s3_path: Caminho S3 completo do ficheiro (vem da listagem do
             `S3FileManager`).
-        user: Utilizador autenticado, já validado pelo gate de papéis da rota.
+        user: Utilizador autenticado (staff).
+        request: o pedido, para resolver o perfil activo — a permissão é
+            «gestão OU atribuído» (`document_ai_access`).
 
     Returns:
         O mesmo contrato de `/documents/ai-analyze` (`extracted_data`,
@@ -196,6 +199,10 @@ async def run_extract_document_data(
     processo = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not processo:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+
+    from services.document_ai_access import exigir_ia_no_processo
+
+    await exigir_ia_no_processo(request, user, processo)
 
     # Duas guardas, não uma: a primeira impede sair da árvore de documentos
     # (backups, logótipos — vivem no MESMO bucket); a segunda impede ler o

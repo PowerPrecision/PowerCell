@@ -173,6 +173,78 @@ class TestBlocoAResisteAoResto:
 
 
 @pytest.mark.asyncio
+class TestEmailDoSistemaGravadoNaEmpresaSistema:
+    """«…cartão Email do Sistema (Transacional) (ou da empresa Sistema)» (QA, Out 2026).
+
+    Um Master que escolhe trabalhar como «Sistema» no seletor de contexto edita o documento
+    `company:<id>` dessa empresa, não o global. Se o cartão ficou lá, as redes satélite não o
+    achavam (só o `main` era lido) e o envio falhava com «a empresa não tem e-mail».
+    """
+
+    def _empresa_sistema(self, db, nome="Sistema"):
+        db.companies.docs.append({"id": "cmp-sistema", "name": nome, "network_id": "rede-sistema",
+                                  "is_active": True})
+
+    def _bloco_da_empresa(self):
+        return {"_id": "company:cmp-sistema", "company_id": "cmp-sistema",
+                "system_smtp": {"resend_api_key": "re_DA_EMPRESA_SISTEMA",
+                                "smtp_from_email": "no-reply@sistema.pt"}}
+
+    async def test_sem_bloco_no_global_usa_o_da_empresa_sistema(self, mundo):
+        self._empresa_sistema(mundo)
+        mundo.system_config.docs.append(self._bloco_da_empresa())
+        with _contexto_de_producao(mundo):
+            conta = await pec._conta_do_bloco_a_em_bruto()
+        assert conta is not None and conta.password == "re_DA_EMPRESA_SISTEMA"
+
+    async def test_uma_rede_satelite_envia_o_link_por_ele(self, mundo):
+        self._empresa_sistema(mundo)
+        mundo.system_config.docs.append(self._bloco_da_empresa())
+        resposta, transporte = await _enviar_link(mundo, PROCESSO_DOMUS)
+        assert resposta["success"] is True
+        transporte.assert_called_once()
+
+    async def test_o_global_vence_quando_os_dois_existem(self, mundo):
+        self._empresa_sistema(mundo)
+        mundo.system_config.docs.extend([_bloco_a(), self._bloco_da_empresa()])
+        with _contexto_de_producao(mundo):
+            conta = await pec._conta_do_bloco_a_em_bruto()
+        assert conta.password == "re_CHAVE_DO_SISTEMA"
+
+    async def test_o_global_vazio_nao_esconde_o_da_empresa_sistema(self, mundo):
+        self._empresa_sistema(mundo)
+        mundo.system_config.docs.extend([
+            {"_id": "main", "company_id": "default", "system_smtp": {}}, self._bloco_da_empresa(),
+        ])
+        with _contexto_de_producao(mundo):
+            assert (await pec._conta_do_bloco_a_em_bruto()).password == "re_DA_EMPRESA_SISTEMA"
+
+    async def test_o_nome_casa_sem_distinguir_maiusculas(self, mundo):
+        self._empresa_sistema(mundo, nome="SISTEMA")
+        mundo.system_config.docs.append(self._bloco_da_empresa())
+        with _contexto_de_producao(mundo):
+            assert await pec._conta_do_bloco_a_em_bruto() is not None
+
+    async def test_uma_empresa_com_nome_parecido_NAO_serve(self, mundo):
+        # «Sistema Antigo» não é a empresa do sistema: exacto, nunca por prefixo.
+        self._empresa_sistema(mundo, nome="Sistema Antigo")
+        mundo.system_config.docs.append(self._bloco_da_empresa())
+        with _contexto_de_producao(mundo):
+            assert await pec._conta_do_bloco_a_em_bruto() is None
+
+    async def test_sem_empresa_sistema_nem_global_continua_sem_conta(self, mundo):
+        with _contexto_de_producao(mundo):
+            assert await pec._conta_do_bloco_a_em_bruto() is None
+
+    async def test_a_empresa_sistema_com_bloco_ilegivel_nao_levanta(self, mundo):
+        self._empresa_sistema(mundo)
+        mundo.system_config.docs.append({"_id": "company:cmp-sistema",
+                                         "system_smtp": {"smtp_host": "h", "smtp_username": "u", "smtp_port": "SSL"}})
+        with _contexto_de_producao(mundo):
+            assert await pec._conta_do_bloco_a_em_bruto() is None
+
+
+@pytest.mark.asyncio
 class TestCaixaDaRedeAvariadaRecuaParaOEmailDoSistema:
     async def _enviar(self, db, resultado_da_caixa, *, com_bloco_a=True):
         if com_bloco_a:

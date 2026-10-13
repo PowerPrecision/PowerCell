@@ -12115,3 +12115,19 @@ Work Log:
 2. MASTER E A CONFIGURAÇÃO. Reproduzido: Master com UCR de Admin e `X-Active-Role: admin` → `get_config` 403 «exclusiva do perfil Master». Sem UCRs nunca reproduzia (a razão de o primeiro teste de integração ter passado). Correcção: `require_roles(conta_master_passa=True)` nas 13 guardas de `routes/system_config.py` + `conta_master` no `AmbitoDeConfiguracao`. **Decisão assumida:** configuração/infraestrutura segue a CONTA; os DADOS continuam a seguir o perfil activo (teste existente `test_um_master_que_veste_o_chapeu_de_admin_fica_limitado` intacto). Fora de `system_config`, as rotas só-Master NÃO mudaram — se o Master também deve passá-las com chapéu, é acrescentar a flag, mas não o fiz sem decisão (altera ~100 rotas).
 3. CANCELAR TAREFA — já estava feito e empurrado no commit anterior (`utils/cancelarTarefa.js`, `TasksPanel`, `TasksContext`). Não há botão no `DashboardLayout`: o caminho é `TasksDropdown`/`TasksPanel`.
 4. Também corrigido: o inventário `test_historico_de_todas_as_accoes` apontava para `send_magic_link_to_client`, que passou a ser só o invólucro (o corpo é `_send_magic_link_to_client`).
+
+---
+Task ID: qa4-ia-satelite-empresa-email-master
+Agent: Cloud Agent
+Task: QA — (1) Magic Link/boas-vindas: toast «retry agendado» eterno + fallback do Email do Sistema; (2) botão de IA oculto às redes satélite; (3) empresa nas listas de atribuição; (4) Master sem barreiras em todas as rotas só-Master
+
+Date: 2026-10-13
+
+Work Log:
+1. TOAST ETERNO. Causa: a tarefa «Email de acesso ao Portal» ficava em `processing` («retry agendado») para sempre — o retry da fila arrancava SEM o `task_id`/`client_id` da tarefa original (criava outra e nunca fechava a primeira) e o consumidor ARQ nem sempre corre. Corrigido nas três pontas: o retry transporta e fecha a tarefa e, se falha, é definitivo (nunca re-enfileira); `fechar_envios_presos` fecha por prazo (10 min) na listagem de tarefas e no ciclo do monitor; o frontend troca o toast por «Falha ao enviar e-mail» (mesmo id) quando o pedido de envio devolve 400/502/500, sem o deixar voltar a «a carregar». O fallback do Email do Sistema passou a ler também o documento da empresa «Sistema».
+2. IA NAS REDES SATÉLITE. **Não encontrei nenhuma condição «só a rede primária»** — nem no ecrã nem no servidor. A causa era o cargo: `require_roles([MASTER, ADMIN, CEO, DIRETOR])` não vê o processo, e o botão tinha o mesmo gate. A equipa atribuída na rede de destino (consultor/intermediário) nunca podia usar a ferramenta. Regra nova (a do `rename-smart`): gestão OU atribuído, dentro da fronteira de rede (dono ou rede convidada). Servidor calcula `pode_usar_ia_documentos` no detalhe do processo; o ecrã faz OU com o cargo.
+3. EMPRESA NAS LISTAS. `/users` e `/users/staff` devolvem `empresas`/`empresa_etiqueta` (UCRs, restritos ao âmbito de quem pede); `ProcessAssignDialog` e `AssignUsersModal` mostram-na.
+4. MASTER SEM BARREIRAS. 129 guardas só-Master nas rotas reais; o bypass da conta passou a implícito em `require_roles` (lista só `master`) e o `ProtectedRoute` espelha-o. Âmbito de dados inalterado.
+- **Decisões a confirmar:** (a) IA aberta a quem está atribuído (não a todo o staff); (b) a empresa nas listas mostra só as empresas do âmbito de quem pede.
+- **NÃO verificado:** nada foi testado contra produção nem contra um worker ARQ real; o 500 do Magic Link em redes satélite continua sem reprodução literal — se persistir, o 400/502 devolvido já nomeia a causa (cartão «Email do Sistema (Transacional)» vazio no global e na empresa «Sistema»).
+

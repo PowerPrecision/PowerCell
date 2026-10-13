@@ -13,8 +13,10 @@ A REGRA
   * **Dados seguem o PERFIL ACTIVO** (inalterado, `test_hierarquia_de_perfis`): com o
     chapéu de Admin o Master vê o que um Admin vê.
   * Admin e CEO continuam sem a global (contraprova).
-  * A flag é EXPLÍCITA e só está nas rotas de `system_config`; as outras ~100 rotas
-    só-Master continuam a seguir o perfil activo.
+  * A flag é IMPLÍCITA nas guardas declaradas só-Master (`require_roles([MASTER])`, ~120
+    rotas — decisão do dono do produto) e EXPLÍCITA nas mistas de `system_config`
+    (`[MASTER, ADMIN, CEO]`), onde o Admin e o CEO também passam dentro do seu âmbito.
+    A cobertura das ~120 está em `test_master_passa_em_todas_as_rotas_so_master.py`.
 """
 from __future__ import annotations
 
@@ -129,13 +131,21 @@ class TestContraprovas:
             )
         assert erro.value.status_code == 403
 
-    async def test_a_guarda_de_papel_sem_a_flag_continua_a_seguir_o_perfil_activo(self, mundo):
-        """As outras rotas só-Master NÃO mudaram: com o chapéu de Admin, 403."""
+    async def test_uma_guarda_MISTA_sem_a_flag_continua_a_seguir_o_perfil_activo(self, mundo):
+        """O bypass implícito é só para listas SÓ-Master. Numa mista (`[DIRETOR]`) sem a flag
+        explícita, o chapéu de Admin manda — e o `[MASTER]` sozinho passa (ver o ficheiro irmão)."""
         from models.auth import UserRole
         from services.auth import require_roles
 
+        mundo.user_company_roles.docs.append({
+            "user_id": "u-master", "company_id": "cmp-precision", "company_name": "Precision",
+            "role": "consultor", "is_default": False,
+        })
         with pytest.raises(HTTPException) as erro:
-            await require_roles([UserRole.MASTER])(request=Pedido(CHAPEU_DE_ADMIN), user=MASTER)
+            await require_roles([UserRole.DIRETOR])(
+                request=Pedido({"X-Active-Role": "consultor", "X-Company-Id": "cmp-precision"}),
+                user={**MASTER, "role": "master"},
+            )
         assert erro.value.status_code == 403
 
     async def test_a_flag_nao_deixa_passar_quem_nao_e_conta_master(self, mundo):

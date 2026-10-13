@@ -285,6 +285,22 @@ class TestResolucaoDoModelo:
 # ====================================================================
 
 
+# A rota deixou de filtrar por cargo: a decisão «gestão OU atribuído» vive no serviço
+# (`document_ai_access`). Estes testes são sobre o CAMINHO e o ficheiro, não sobre
+# quem pede — usam um gestor e deixam a fronteira de rede de fora (é provada em
+# `test_ia_nos_documentos_do_processo.py`).
+GESTOR = {"id": "u-gestor", "role": "admin"}
+
+
+@pytest.fixture(autouse=True)
+def _sem_fronteira_de_rede():
+    with patch(
+        "services.document_ai_access._ambito_do_utilizador",
+        AsyncMock(return_value=None),
+    ):
+        yield
+
+
 def _mock_db(processo=PROCESSO):
     fake = MagicMock()
     fake.processes.find_one = AsyncMock(return_value=processo)
@@ -295,7 +311,7 @@ class TestGuardasDeCaminho:
     @pytest.mark.asyncio
     async def test_caminho_vazio_e_recusado(self):
         with pytest.raises(HTTPException) as erro:
-            await run_extract_document_data("proc-1", "   ", user={})
+            await run_extract_document_data("proc-1", "   ", user=GESTOR)
         assert erro.value.status_code == 400
         assert erro.value.detail == ERRO_CAMINHO_VAZIO
 
@@ -307,7 +323,7 @@ class TestGuardasDeCaminho:
                 await run_extract_document_data(
                     "proc-1",
                     "Documentação Clientes/Maria Silva/contrato.docx",
-                    user={},
+                    user=GESTOR,
                 )
         assert erro.value.status_code == 400
         assert erro.value.detail == ERRO_FORMATO
@@ -320,7 +336,7 @@ class TestGuardasDeCaminho:
         fake.processes.find_one = AsyncMock(return_value=None)
         with patch.object(document_vision_extract, "db", fake):
             with pytest.raises(HTTPException) as erro:
-                await run_extract_document_data("proc-x", CAMINHO, user={})
+                await run_extract_document_data("proc-x", CAMINHO, user=GESTOR)
         assert erro.value.status_code == 404
 
     @pytest.mark.asyncio
@@ -330,7 +346,7 @@ class TestGuardasDeCaminho:
         with patch.object(document_vision_extract, "db", _mock_db()):
             with pytest.raises(HTTPException) as erro:
                 await run_extract_document_data(
-                    "proc-1", "backups/dump-2026.pdf", user={}
+                    "proc-1", "backups/dump-2026.pdf", user=GESTOR
                 )
         assert erro.value.status_code == 403
 
@@ -343,7 +359,7 @@ class TestGuardasDeCaminho:
                 await run_extract_document_data(
                     "proc-1",
                     "Documentação Clientes/João Costa/Identificação/cc.jpg",
-                    user={},
+                    user=GESTOR,
                 )
         assert erro.value.status_code == 403
 
@@ -354,7 +370,7 @@ class TestGuardasDeCaminho:
         with patch.object(document_vision_extract, "db", _mock_db()), \
              patch.object(document_vision_extract, "s3_service", s3):
             with pytest.raises(HTTPException) as erro:
-                await run_extract_document_data("proc-1", CAMINHO, user={})
+                await run_extract_document_data("proc-1", CAMINHO, user=GESTOR)
         assert erro.value.status_code == 500
 
 
@@ -429,7 +445,7 @@ class TestExtraccaoComMotorSimulado:
         with patch.object(document_vision_extract, "db", _mock_db()), \
              patch.object(document_vision_extract, "s3_service", _s3_com()), \
              patch.object(document_vision_extract, "run_analysis_on_documents", motor):
-            resultado = await run_extract_document_data("proc-1", CAMINHO, user={})
+            resultado = await run_extract_document_data("proc-1", CAMINHO, user=GESTOR)
 
         assert resultado["extracted_data"]["nif"] == "123456789"
         # O diálogo precisa de dizer DE QUE ficheiro vieram os dados.
@@ -444,7 +460,7 @@ class TestExtraccaoComMotorSimulado:
         with patch.object(document_vision_extract, "db", _mock_db()), \
              patch.object(document_vision_extract, "s3_service", _s3_com()), \
              patch.object(document_vision_extract, "run_analysis_on_documents", motor):
-            resultado = await run_extract_document_data("proc-1", caminho, user={})
+            resultado = await run_extract_document_data("proc-1", caminho, user=GESTOR)
 
         assert len(resultado["conflicts"]) == 1
         assert resultado["conflicts"][0]["field"] == "rendimento_anual"
@@ -458,7 +474,7 @@ class TestExtraccaoComMotorSimulado:
         with patch.object(document_vision_extract, "db", _mock_db()), \
              patch.object(document_vision_extract, "s3_service", _s3_com()), \
              patch.object(document_vision_extract, "run_analysis_on_documents", motor):
-            await run_extract_document_data("proc-1", CAMINHO, user={})
+            await run_extract_document_data("proc-1", CAMINHO, user=GESTOR)
 
         assert motor.chamadas[0]["skip_analyzed"] is False
 
@@ -468,7 +484,7 @@ class TestExtraccaoComMotorSimulado:
         with patch.object(document_vision_extract, "db", _mock_db()), \
              patch.object(document_vision_extract, "s3_service", _s3_com()), \
              patch.object(document_vision_extract, "run_analysis_on_documents", motor):
-            await run_extract_document_data("proc-1", CAMINHO, user={})
+            await run_extract_document_data("proc-1", CAMINHO, user=GESTOR)
 
         documentos = motor.chamadas[0]["documents"]
         assert len(documentos) == 1
@@ -485,7 +501,7 @@ class TestExtraccaoComMotorSimulado:
                  FakeVLMService(FakeVLMService.CC),
              ):
             with pytest.raises(HTTPException) as erro:
-                await run_extract_document_data("proc-1", CAMINHO, user={})
+                await run_extract_document_data("proc-1", CAMINHO, user=GESTOR)
         assert erro.value.status_code == 400
 
     @pytest.mark.asyncio
@@ -496,7 +512,7 @@ class TestExtraccaoComMotorSimulado:
              patch.object(document_vision_extract, "s3_service", _s3_com(grande)), \
              patch.object(document_vision_extract, "run_analysis_on_documents", motor):
             with pytest.raises(HTTPException) as erro:
-                await run_extract_document_data("proc-1", CAMINHO, user={})
+                await run_extract_document_data("proc-1", CAMINHO, user=GESTOR)
         assert erro.value.status_code == 400
         # Uma chamada paga sobre 20 MB que o motor ia recusar na mesma.
         assert motor.chamadas == []
@@ -513,7 +529,7 @@ class TestExtraccaoComMotorSimulado:
         with patch.object(document_vision_extract, "db", _mock_db()), \
              patch.object(document_vision_extract, "s3_service", s3):
             with pytest.raises(HTTPException) as erro:
-                await run_extract_document_data("proc-1", CAMINHO, user={})
+                await run_extract_document_data("proc-1", CAMINHO, user=GESTOR)
         assert erro.value.status_code == 404
 
 
@@ -536,6 +552,6 @@ class TestNenhumaChamadaReal:
                  FakeVLMService(FakeVLMService.CC),
              ), \
              patch.object(ai_document, "get_openai_client", construtor):
-            await run_extract_document_data("proc-1", CAMINHO, user={})
+            await run_extract_document_data("proc-1", CAMINHO, user=GESTOR)
 
         construtor.assert_not_called()

@@ -639,7 +639,9 @@ async def get_dsti_high_risk_processes(
 
 
 @router.get("/{process_id}", response_model=ProcessResponse)
-async def get_process(process_id: str, user: dict = Depends(get_current_user)):
+async def get_process(
+    request: Request, process_id: str, user: dict = Depends(get_current_user)
+):
     """Detalhe do processo (desencriptado + cliente + portal_access)."""
     return await run_get_process_detail(
         process_id,
@@ -647,6 +649,7 @@ async def get_process(process_id: str, user: dict = Depends(get_current_user)):
         can_view_fn=can_view_process,
         decrypt_fn=decrypt_sensitive_data,
         populate_fn=populate_client_data,
+        request=request,
     )
 
 

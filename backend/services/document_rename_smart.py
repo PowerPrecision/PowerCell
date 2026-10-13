@@ -160,12 +160,19 @@ async def run_rename_document_smart(
 
 
 async def run_rename_all_documents_smart(
-    process_id: str, *, user: dict | None = None,
+    process_id: str, *, user: dict | None = None, request=None,
 ) -> dict[str, Any]:
-    """Renomeia todos os docs já categorizados do processo."""
+    """Renomeia todos os docs já categorizados do processo.
+
+    Gestão OU atribuído ao processo (`document_ai_access`) — a mesma regra
+    do botão «Analisar» e a do `rename-smart` de um ficheiro.
+    """
+    from services.document_ai_access import exigir_ia_no_processo
+
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    await exigir_ia_no_processo(request, user or {}, process)
 
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     documents = await db.document_metadata.find(

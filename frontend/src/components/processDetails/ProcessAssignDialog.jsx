@@ -23,6 +23,8 @@ import {
 import { Users, Loader2 } from "lucide-react";
 import { filterByAnyRole, filterByRole, CONSULTOR_ASSIGNMENT_ROLES, INTERMEDIARIO_ASSIGNMENT_ROLES, INDEXACAO_ASSIGNMENT_ROLES } from "../../utils/roleUtils";
 import { safeString } from "../dashboard/DashboardShared";
+import EmpresaDoUtilizador from "../shared/EmpresaDoUtilizador";
+import { textoDaOpcaoDeUtilizador } from "../../utils/empresaDoUtilizador";
 
 export default function ProcessAssignDialog({
   open,
@@ -93,6 +95,7 @@ export default function ProcessAssignDialog({
                         className="rounded border-gray-300"
                       />
                       <span className="text-sm">{u.name}</span>
+                      <EmpresaDoUtilizador utilizador={u} />
                       <Badge variant="outline" className="text-xs ml-auto">
                         {u.role}
                       </Badge>
@@ -112,6 +115,7 @@ export default function ProcessAssignDialog({
                       return u ? (
                         <Badge key={cid} variant="secondary" className="flex items-center gap-1">
                           {u.name}
+                          <EmpresaDoUtilizador utilizador={u} className="bg-transparent px-0" />
                           <button
                             type="button"
                             onClick={() =>
@@ -149,6 +153,7 @@ export default function ProcessAssignDialog({
                         className="rounded border-gray-300"
                       />
                       <span className="text-sm">{u.name}</span>
+                      <EmpresaDoUtilizador utilizador={u} />
                       <Badge variant="outline" className="text-xs ml-auto">
                         {u.role}
                       </Badge>
@@ -167,6 +172,7 @@ export default function ProcessAssignDialog({
                       return u ? (
                         <Badge key={mid} variant="secondary" className="flex items-center gap-1">
                           {u.name}
+                          <EmpresaDoUtilizador utilizador={u} className="bg-transparent px-0" />
                           <button
                             type="button"
                             onClick={() =>
@@ -197,7 +203,7 @@ export default function ProcessAssignDialog({
                     {filterByAnyRole(appUsers, INDEXACAO_ASSIGNMENT_ROLES).map(
                       (u) => (
                         <SelectItem key={u.id} value={u.id}>
-                          {u.name} ({u.role})
+                          {textoDaOpcaoDeUtilizador(u)}
                         </SelectItem>
                       )
                     )}
@@ -223,7 +229,7 @@ export default function ProcessAssignDialog({
                     <SelectItem value="none">Nenhum</SelectItem>
                     {filterByRole(appUsers, "parceiro").map((u) => (
                       <SelectItem key={u.id} value={u.id}>
-                        {u.name}
+                        {textoDaOpcaoDeUtilizador(u, { comPapel: false })}
                       </SelectItem>
                     ))}
                   </SelectContent>

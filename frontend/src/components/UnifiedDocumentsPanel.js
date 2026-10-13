@@ -22,7 +22,7 @@ import { useAuth } from "../contexts/AuthContext";
 import S3FileManager from "./S3FileManager";
 import DriveLinks from "./DriveLinks";
 
-const UnifiedDocumentsPanel = ({ processId, clientName, onAIDataExtracted, onDocumentDataExtracted, readOnly = false }) => {
+const UnifiedDocumentsPanel = ({ processId, clientName, onAIDataExtracted, onDocumentDataExtracted, readOnly = false, podeUsarIA }) => {
   const [activeTab, setActiveTab] = useState("files");
   const { effectiveRole, user } = useAuth();
 
@@ -74,6 +74,7 @@ const UnifiedDocumentsPanel = ({ processId, clientName, onAIDataExtracted, onDoc
             onAIDataExtracted={onAIDataExtracted}
             onDocumentDataExtracted={onDocumentDataExtracted}
             readOnly={readOnly}
+            podeUsarIA={podeUsarIA}
           />
         </TabsContent>
 

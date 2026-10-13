@@ -483,8 +483,21 @@ async def run_ai_analyze_documents(
     *,
     user: dict,
     file_paths: list[str] | None = None,
+    request=None,
 ) -> dict[str, Any]:
-    """Analisa múltiplos documentos com IA e devolve comparação/sugestões."""
+    """Analisa múltiplos documentos com IA e devolve comparação/sugestões.
+
+    Gestão OU atribuído ao processo (`document_ai_access`). A guarda corre
+    ANTES de ler os ficheiros enviados: recusar depois de os ter lido para
+    memória gasta o trabalho todo em quem não tem direito a ele.
+    """
+    from services.document_ai_access import exigir_ia_no_processo
+
+    processo = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not processo:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+    await exigir_ia_no_processo(request, user, processo)
+
     documents = await _read_upload_files(files, file_paths=file_paths)
     return await run_analysis_on_documents(process_id, documents, user=user)
 

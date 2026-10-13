@@ -14,8 +14,12 @@ const authSource = readFileSync(join(dir, "contexts/AuthContext.js"), "utf8");
 const webmailSource = readFileSync(join(dir, "pages/WebmailPage.jsx"), "utf8");
 
 describe("Pacote FH frontend UCR gates", () => {
-  it("ProtectedRoute gates on effectiveRole via canAccessByEffectiveRole", () => {
-    assert.match(appSource, /canAccessByEffectiveRole\(effectiveRole, allowedRoles\)/);
+  it("ProtectedRoute gates on effectiveRole via canAccessRoute (que delega em canAccessByEffectiveRole)", () => {
+    assert.match(appSource, /canAccessRoute\(\{ effectiveRole, accountRole: user\?\.role, allowedRoles \}\)/);
+    assert.match(
+      readFileSync(join(dir, "utils/roleUtils.js"), "utf8"),
+      /canAccessByEffectiveRole\(effectiveRole, allowedRoles\)/,
+    );
     assert.doesNotMatch(
       appSource,
       /allowedRoles\.some\(r => hasRole\(user, r\)\)/,

@@ -117,6 +117,26 @@ def build_portal_access_payload(
     }
 
 
+async def anexar_permissao_de_ia(process: dict, user: dict, request) -> None:
+    """`pode_usar_ia_documentos`: a resposta do SERVIDOR à pergunta «este utilizador
+    pode usar a IA sobre os documentos deste processo?», calculada ao servir.
+
+    É a MESMA função que as rotas de IA aplicam (`document_ai_access`), para o
+    botão e o 403 nunca divergirem — o ecrã não tem cópia da lista de campos de
+    atribuição. Nunca levanta: sem resposta o ecrã esconde o botão (e o servidor
+    continua a ser a parede).
+    """
+    try:
+        from services.document_ai_access import pode_usar_ia_no_processo
+
+        process["pode_usar_ia_documentos"] = await pode_usar_ia_no_processo(
+            request, user, process
+        )
+    except Exception as exc:  # pragma: no cover — degradação graciosa
+        logger.warning("[DOCS-IA] Não foi possível calcular a permissão de IA: %s", exc)
+        process["pode_usar_ia_documentos"] = False
+
+
 async def run_get_process_detail(
     process_id: str,
     user: dict,
@@ -124,6 +144,7 @@ async def run_get_process_detail(
     can_view_fn,
     decrypt_fn,
     populate_fn,
+    request=None,
 ) -> Any:
     """Orquestra GET /processes/{id}."""
     process = await load_process_doc_or_404(process_id)
@@ -137,6 +158,7 @@ async def run_get_process_detail(
     from services.process_owner import anexar_empresa_dona
 
     await anexar_empresa_dona(process, user)
+    await anexar_permissao_de_ia(process, user, request)
     return serialize_process_detail_response(process, process_id)
 
 

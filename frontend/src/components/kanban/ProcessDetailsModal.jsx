@@ -49,6 +49,7 @@ import {
 import { safeString } from '../../utils/safeString';
 import { payloadDoClienteDoModal, seccoesDoProcessoDoModal } from './processDetailsModalPayload';
 import { getClient, updateClient, updateProcess, markProcessIndexed, getVisits, sendMagicLinkEmail } from '../../services/api';
+import { mostrarFalhaDoEnvioDeEmail } from '../../utils/falhaNoEnvioDeEmail';
 import { toast } from 'sonner';
 import { notifyFinancialEngine } from '../../utils/financialEngineFeedback';
 import { useAuth } from '../../contexts/AuthContext';
@@ -1229,8 +1230,9 @@ const ProcessDetailsModal = memo(({
                       });
                     }
                   } catch (err) {
-                    const msg = err?.response?.data?.detail || err?.message || 'Erro ao reenviar email.';
-                    toast.error(msg, { duration: 6000 });
+                    // Um só aviso, com o motivo do servidor — e o toast «retry agendado» de
+                    // uma tentativa anterior sai (utils/falhaNoEnvioDeEmail).
+                    mostrarFalhaDoEnvioDeEmail(err);
                   } finally {
                     setResendingPortal(false);
                   }
