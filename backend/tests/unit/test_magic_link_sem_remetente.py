@@ -12,8 +12,9 @@ O QUE SE AFIRMA
     efeito: nenhum token emitido, nenhum código de acesso gravado, nenhum
     «Enviou o link» no histórico;
   * o email de acesso (boas-vindas) falha DEFINITIVAMENTE e não enfileira retry;
-  * falhas de CONFIGURAÇÃO da conta (credenciais) são 400; uma falha inesperada
-    continua a ser 500 (contraprova: o 400 não engoliu tudo);
+  * falhas de CONFIGURAÇÃO da conta (credenciais) são 400; o serviço de email que
+    não entrega (rede, timeout, excepção) é 502; só uma falha NOSSA é 500 — e
+    sempre como HTTPException com detalhe (contraprova: o 400 não engoliu tudo);
   * contraprova: com remetente tudo continua a funcionar.
 """
 from __future__ import annotations
@@ -148,7 +149,7 @@ class TestRedeSemRemetente:
         efeitos.enviar.return_value = {"success": False, "error": "boom", "error_code": "outro"}
         with pytest.raises(HTTPException) as erro:
             await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
-        assert erro.value.status_code == 500
+        assert erro.value.status_code == 502
         efeitos.historico.assert_not_awaited(), "«Enviou o link» não descreve um envio que falhou"
 
 
@@ -171,12 +172,14 @@ class TestFalhasDeConfiguracaoDaConta:
             await _enviar(ambiente, efeitos, processo=processo)
         assert erro.value.status_code == 400
 
-    async def test_contraprova_uma_falha_inesperada_continua_a_ser_500(self, ambiente):
+    async def test_uma_excepcao_do_servico_de_email_e_502_nao_500(self, ambiente):
         efeitos = _Efeitos()
         efeitos.enviar.side_effect = RuntimeError("rede em baixo")
         with pytest.raises(HTTPException) as erro:
             await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
-        assert erro.value.status_code == 500
+        assert erro.value.status_code == 502
+        assert "Contas de Email" in erro.value.detail
+        efeitos.historico.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -224,3 +227,84 @@ class TestEmailDeAcessoNaoFicaEmLoop:
         assert resultado is True
         fila.assert_not_awaited()
         falhou.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+class TestNenhumaExcepcaoDoServicoDeEmailFura:
+    """QA, Out 2026: o 500 continuava em produção apesar do fail fast.
+
+    Os testes anteriores substituíam `_conta_de_sistema_generica` por um duplo que
+    devolvia sempre bem, e por isso nunca viam a metade que estava FORA do
+    `try/except`: `_resolve_system_smtp_account` faz `int(smtp_port)` e uma
+    porta gravada como texto («587 », «SSL») levantava `ValueError` dentro do
+    `verificar_remetente`, que corre antes do bloco que traduz erros. Aqui
+    patcha-se UM NÍVEL ABAIXO (a leitura da configuração).
+    """
+
+    async def _enviar_sem_duplo_da_conta(self, db, efeitos, *, processo=None):
+        with patch.object(pec, "db", db), patch.object(pml, "db", db), \
+             patch.object(pml, "ensure_portal_access_code", efeitos.codigo), \
+             patch.object(pml, "issue_portal_magic_link", efeitos.emitir), \
+             patch("services.history.log_history", efeitos.historico), \
+             patch("services.email_service.send_email", efeitos.enviar):
+            return await pml.send_magic_link_to_client(
+                process_id="p1", process=processo or PROCESSO_DOMUS, user=UTILIZADOR, request=_Pedido(),
+            )
+
+    async def test_porta_smtp_ilegivel_na_config_de_sistema_e_400_nao_excepcao(self, ambiente):
+        efeitos = _Efeitos()
+        with patch("services.email_service._resolve_system_smtp_account",
+                   AsyncMock(side_effect=ValueError("invalid literal for int() with base 10: 'SSL'"))), \
+             patch("services.email.get_system_transporter", AsyncMock(side_effect=RuntimeError("sem db"))):
+            with pytest.raises(HTTPException) as erro:
+                await self._enviar_sem_duplo_da_conta(ambiente, efeitos)
+        assert erro.value.status_code == 400
+        assert "não tem e-mail configurado" in erro.value.detail
+        efeitos.emitir.assert_not_awaited()
+        efeitos.enviar.assert_not_awaited()
+
+    async def test_a_conta_de_sistema_generica_nunca_levanta(self, ambiente):
+        for falha in (ValueError("porta"), TypeError("x"), RuntimeError("db"), KeyError("host")):
+            with patch("services.email_service._resolve_system_smtp_account", AsyncMock(side_effect=falha)), \
+                 patch("services.email.get_system_transporter", AsyncMock(side_effect=falha)):
+                assert await pec._conta_de_sistema_generica(REDE_DOMUS) is None
+
+    async def test_transporte_de_sistema_com_campos_em_falta_nao_levanta(self, ambiente):
+        # `transporte["host"]` num dicionário incompleto era um KeyError fora do try.
+        with patch("services.email_service._resolve_system_smtp_account", AsyncMock(return_value=None)), \
+             patch("services.email.get_system_transporter",
+                   AsyncMock(return_value={"source": "db"})):
+            assert await pec._conta_de_sistema_generica(REDE_DOMUS) is None
+
+    async def test_contraprova_a_conta_de_sistema_valida_continua_a_servir(self, ambiente):
+        with patch("services.email_service._resolve_system_smtp_account",
+                   AsyncMock(return_value=_conta("no-reply@sistema.pt"))):
+            assert (await pec._conta_de_sistema_generica(REDE_DOMUS)).email == "no-reply@sistema.pt"
+
+    async def test_falha_interna_antes_do_envio_e_um_500_com_detalhe(self, ambiente):
+        efeitos = _Efeitos()
+        efeitos.codigo.side_effect = RuntimeError("mongo em baixo")
+        with pytest.raises(HTTPException) as erro:
+            await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
+        assert erro.value.status_code == 500
+        assert erro.value.detail == pml.DETALHE_FALHA_INTERNA
+        efeitos.enviar.assert_not_awaited()
+
+    async def test_so_HTTPException_sai_da_funcao_publica(self, ambiente):
+        """Qualquer excepção — de qualquer camada — sai traduzida."""
+        for ponto in ("codigo", "emitir", "enviar"):
+            efeitos = _Efeitos()
+            getattr(efeitos, ponto).side_effect = Exception("qualquer coisa")
+            try:
+                await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
+            except HTTPException:
+                continue
+            except Exception as exc:  # noqa: BLE001
+                pytest.fail(f"{ponto}: escapou {type(exc).__name__} sem tradução")
+
+    async def test_o_historico_falhar_depois_de_enviar_nao_transforma_o_sucesso_em_erro(self, ambiente):
+        efeitos = _Efeitos()
+        efeitos.historico.side_effect = RuntimeError("history em baixo")
+        resposta = await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
+        assert resposta["success"] is True
+        efeitos.enviar.assert_awaited_once()

@@ -370,23 +370,36 @@ async def _conta_de_sistema_generica(rede: Optional[str]):
     from services.email import get_system_transporter
     from services.email_service import EmailAccount, _resolve_system_smtp_account
 
-    conta = await _resolve_system_smtp_account()
+    # **Nunca levanta.** Uma configuração de email de sistema que não se consegue
+    # ler (porta gravada como texto, campo em falta, base de dados com um soluço)
+    # é, para quem vai enviar, uma conta que não existe. Antes só a segunda
+    # metade estava protegida: a primeira (`_resolve_system_smtp_account` faz
+    # `int(smtp_port)` fora de qualquer `try`) furava o `verificar_remetente`,
+    # que corre ANTES do bloco que traduz erros — e o utilizador via um 500 nu.
+    try:
+        conta = await _resolve_system_smtp_account()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[PORTAL-EMAIL] A configuração do email de sistema (Bloco A) não é utilizável: "
+            "%s: %s. Tratada como não configurada.", type(exc).__name__, exc,
+        )
+        conta = None
     if conta is not None:
         return conta
     try:
         transporte = await get_system_transporter("NOTIFICATIONS")
+        if transporte.get("error") or transporte.get("source") != "db":
+            return None
+        return EmailAccount(
+            name="system_notifications",
+            imap_server=transporte["host"], imap_port=transporte["port"],
+            smtp_server=transporte["host"], smtp_port=transporte["port"],
+            email=transporte.get("from_email") or transporte["user"],
+            password=transporte["password"],
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[PORTAL-EMAIL] Sem email de sistema para NOTIFICATIONS: %s", exc)
         return None
-    if transporte.get("error") or transporte.get("source") != "db":
-        return None
-    return EmailAccount(
-        name="system_notifications",
-        imap_server=transporte["host"], imap_port=transporte["port"],
-        smtp_server=transporte["host"], smtp_port=transporte["port"],
-        email=transporte.get("from_email") or transporte["user"],
-        password=transporte["password"],
-    )
 
 
 def mensagem_sem_remetente(contexto: "ContextoDoEmailDoPortal") -> str:
@@ -415,6 +428,9 @@ async def verificar_remetente(contexto: "ContextoDoEmailDoPortal") -> Optional[s
 
     if contexto.account is not None:
         return None
+    # `_conta_de_sistema_generica` não levanta; o `rede_de_omissao` é uma leitura
+    # de ambiente. Esta verificação corre antes do bloco que traduz erros e por
+    # isso não pode, ela própria, ser uma fonte de excepções.
     if await _conta_de_sistema_generica(contexto.network_id) is not None:
         return None
     omissao = rede_de_omissao()

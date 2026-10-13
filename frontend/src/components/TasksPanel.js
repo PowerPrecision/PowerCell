@@ -4,6 +4,7 @@
  */
 import { Fragment, useState, useEffect, useCallback } from "react";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { descreverRecusaDoCancelamento } from "../utils/cancelarTarefa";
 import TaskAssigneeDialog from "./tasks/TaskAssigneeDialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -126,6 +127,24 @@ const TasksPanel = ({
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasksRealtime, hasRunningBackgroundJobs, processId, showCompleted, showOnlyMyTasks, showCreatedByMe]);
+
+  // Cancelar uma tarefa em background. A recusa (400 «já terminou», 404) diz-se com o
+  // motivo e a lista ressincroniza-se: o `.catch(() => {})` que aqui estava deixava a
+  // tarefa no painel e o botão parecia morto.
+  const handleCancelarTarefaEmBackground = async (taskId) => {
+    try {
+      await cancelBackgroundTask(taskId);
+      setBackgroundJobs(prev => prev.filter(j => j.task_id !== taskId));
+    } catch (error) {
+      const recusa = descreverRecusaDoCancelamento(error);
+      if (recusa.mostrar) {
+        toast.error(recusa.titulo, { description: recusa.motivo });
+      }
+      if (recusa.ressincronizar) {
+        fetchData();
+      }
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -750,9 +769,7 @@ const TasksPanel = ({
                                   className="h-6 px-2 text-xs text-muted-foreground hover:text-red-600"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    cancelBackgroundTask(job.task_id).then(() => {
-                                      setBackgroundJobs(prev => prev.filter(j => j.task_id !== job.task_id));
-                                    }).catch(() => {});
+                                    handleCancelarTarefaEmBackground(job.task_id);
                                   }}
                                 >
                                   <XCircle className="h-3 w-3 mr-1" />
