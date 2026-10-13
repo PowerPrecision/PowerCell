@@ -12177,3 +12177,23 @@ Work Log:
 5. LEMBRETE MENSAL AO CLIENTE. Em nome da rede do processo (`portal_email_context`), sem SMTP de ambiente nem branding global.
 - **Testes:** `test_lote3_emails_agendados_por_rede.py` (35) + ajuste de `test_relatorio_semanal_agenda.py`; 15 mutações medidas e mortas.
 - **NÃO verificado / a confirmar:** (a) nada foi corrido contra SMTP real nem produção; (b) no 1.º ciclo depois do deploy o relatório de IA do período corrente pode repetir-se uma vez (chaves novas); (c) uma rede sem CEO/Admin não recebe relatório de IA; (d) `broadcast_push_notification(roles=…)` continua sem confinamento por rede (sem chamadores).
+
+---
+Task ID: lote4-vista-master-historico-drawer-ambitos
+Agent: Cloud Agent
+Task: Mega Lote 4 — (1) tenant bleed do Master em 9 páginas; (2) Clientes Registados Ativos/Histórico; (3) dropdown «A LER EMAILS DE»; (4) Drawer «Rever Sugestões IA»; (5) Alterar Empresa (422 + processos cruzados); (6) painel de administração em dois âmbitos; (7) toasts/gatilhos; (8) Parceiros/Domus.
+
+Date: 2026-10-13
+
+Work Log:
+1. TENANT BLEED. Estatísticas, relatório/desempenho, pool, Explorador (só listar) e Validades usam `resolve_vista_scope`; quatro páginas passaram a mandar `X-Company-Id` (`cabecalhosDeContexto()`); Rascunhos com chave por utilizador+empresa.
+2. HISTÓRICO. `historico=true` / `total_historico` em `GET /clients`; separadores Ativos/Histórico.
+3. WEBMAIL. `scope=all` só inclui a Caixa Geral da empresa da vista do Master.
+4. DRAWER IA. `SugestoesIADrawer` (segunda vista das sugestões em linha, mesmos handlers, sem gravar); botão «Rever Sugestões IA» na barra.
+5. ALTERAR EMPRESA. `getAllCompanies` pagina em 100 (o 422 era `size=200`); cliente com processo activo noutra empresa bloqueia (409 após password) com pré-visualização; multi-empresa rejeitado (D-38).
+6. PAINEL ADMIN. Dois âmbitos (Empresa / Sistema) com registo positivo e aviso do âmbito.
+7. GATILHOS. RGPD `existing`/`email_sent`; convite do Portal em todos os escritores de processo; job de sync fechado em `finally` + tipo `EMAIL_SYNC`; remover conta IMAP de Indexação; `broadcast_push_notification` apagada.
+8. PARCEIROS. `aceita_parceiros` tri-estado (só Master); atalho «Acesso a Parceiros» no login.
+- **Testes:** backend `test_lote4_*` (85) + frontend (Drawer 8, âmbitos 9, ClientsPage 5, rascunhos 5, …). **Mutações:** 16 backend + 13 frontend, 28 mortas e 1 equivalente (`isMaster &&` no separador Técnico: defesa em profundidade atrás de `ambitoEmVigor`).
+- **NÃO verificado / a confirmar:** (a) nada corrido em produção nem com SMTP real; (b) a Domus só aparece como destino de parceiros se tiver indexador activo OU o Master puser `aceita_parceiros=true` na empresa; (c) o Histórico esconde por omissão os clientes só com processos terminados; (d) a política do toast de sync (tecto 90 s, sucesso 5 s) é uma escolha minha; (e) o Drawer NÃO tem «reabrir» (decidida é decidida, como nas sugestões em linha).
+

@@ -160,6 +160,7 @@ export function BarraDeSugestoes({
   onAprovarTodas,
   onRejeitarTodas,
   onFechar,
+  onRever,
 }) {
   const pendentes = contagem?.[PENDENTE] || 0;
   const aprovadas = contagem?.[APROVADA] || 0;
@@ -185,6 +186,11 @@ export function BarraDeSugestoes({
           <span className="text-amber-700 dark:text-amber-300"> — {sourceDocument}</span>
         ) : null}
       </span>
+      {pendentes > 0 && onRever && (
+        <Button type="button" variant="default" size="sm" className="h-7" onClick={onRever}>
+          Rever Sugestões IA
+        </Button>
+      )}
       {pendentes > 0 && (
         <>
           <Button type="button" variant="outline" size="sm" className="h-7" onClick={onAprovarTodas}>

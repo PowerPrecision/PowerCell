@@ -290,6 +290,19 @@ async def run_create_process_for_client(
         new_process.update(carimbo)
     await aplicar_regime_de_indexacao(new_process)
     await db.processes.insert_one(new_process)
+
+    # O convite do Portal nasce com o processo (Lote 4) — idempotente por cliente.
+    from services.client_portal_email import agendar_convite_do_portal
+
+    _titular = decrypt_client_data(dict(client))
+    agendar_convite_do_portal(
+        client_id=client_id,
+        client_email=((_titular.get("contacto") or {}).get("email") or ""),
+        client_name=_titular.get("nome") or "",
+        process_id=process_id,
+        company_id=new_process.get("company_id"),
+        user=user,
+    )
     
     # Se temos um cliente real, actualizar a lista de processos
     if not source_process:

@@ -58,7 +58,7 @@ from services.tenant_network import (
     build_process_scope_condition,
     TenantScope,
     build_network_scope_condition,
-    resolve_tenant_scope,
+    resolve_vista_scope,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,8 +117,12 @@ class AmbitoEstatistico:
 
 
 async def resolver_ambito(user: Optional[dict]) -> AmbitoEstatistico:
-    """Âmbito de quem pede, pelo ponto único do `tenant_network`."""
-    scope = await resolve_tenant_scope(user or {})
+    """Âmbito de quem pede, pelo ponto único do `tenant_network`.
+
+    Estatísticas LISTAM/AGREGAM, logo levam a VISTA do Master (Lote 4): com a Domus escolhida
+    no cabeçalho os números são os da rede dela, e o sufixo de cache muda com o âmbito.
+    """
+    scope = await resolve_vista_scope(user or {})
     return AmbitoEstatistico(
         scope=scope,
         condicao=build_network_scope_condition(scope),

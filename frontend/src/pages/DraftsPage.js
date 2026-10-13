@@ -42,6 +42,8 @@ import {
   AlertDialogTrigger,
 } from "../components/ui/alert-dialog";
 import { toast } from "sonner";
+import { useAuth } from "../contexts/AuthContext";
+import { carregarRascunhos, chaveDosRascunhos, guardarRascunhos } from "../utils/rascunhosGuardados";
 import { formatDate } from "../lib/utils";
 import {
   Plus,
@@ -67,25 +69,6 @@ const CATEGORIAS = [
   { id: "outro", label: "Outros", color: "bg-gray-500" },
 ];
 
-const DRAFTS_STORAGE_KEY = "powercell_drafts";
-
-const loadDraftsFromStorage = () => {
-  try {
-    const stored = localStorage.getItem(DRAFTS_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveDraftsToStorage = (drafts) => {
-  try {
-    localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
-  } catch {
-    // localStorage may be full or unavailable
-  }
-};
-
 const generateId = () => `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 const DraftsPage = () => {
@@ -104,10 +87,14 @@ const DraftsPage = () => {
     tags: "",
   });
 
-  // Load drafts from localStorage on mount (no backend API call)
+  // Os rascunhos são do utilizador E da empresa activa (Lote 4): a chave leva os dois.
+  const { user, activeCompanyId } = useAuth();
+  const chave = chaveDosRascunhos(user?.id, activeCompanyId);
+
+  // Load drafts from localStorage (no backend API call)
   useEffect(() => {
-    setDrafts(loadDraftsFromStorage());
-  }, []);
+    setDrafts(carregarRascunhos(chave));
+  }, [chave]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -132,7 +119,7 @@ const DraftsPage = () => {
     }
 
     setDrafts(updated);
-    saveDraftsToStorage(updated);
+    guardarRascunhos(chave, updated);
     setDialogOpen(false);
     resetForm();
   };
@@ -140,7 +127,7 @@ const DraftsPage = () => {
   const handleDelete = (id) => {
     const updated = drafts.filter(d => d.id !== id);
     setDrafts(updated);
-    saveDraftsToStorage(updated);
+    guardarRascunhos(chave, updated);
     toast.success("Rascunho eliminado");
   };
 

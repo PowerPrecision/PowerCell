@@ -55,6 +55,8 @@ const EMPTY_FORM = {
   nif: "",
   email: "",
   is_active: true,
+  // «auto» = só se a rede tiver Index; «sim» = sempre destino; «nao» = nunca (Portal do Parceiro).
+  aceita_parceiros: "auto",
   smtp_email: "",
   smtp_password: "",
   smtp_host: "",
@@ -64,6 +66,14 @@ const EMPTY_FORM = {
   imap_host: "",
   imap_port: "",
 };
+
+const ACEITA_PARCEIROS_PARA_API = { auto: null, sim: true, nao: false };
+
+export function aceitaParceirosParaFormulario(valor) {
+  if (valor === true) return "sim";
+  if (valor === false) return "nao";
+  return "auto";
+}
 
 function parseOptionalSmtpPort(value) {
   if (value === "" || value == null) return null;
@@ -182,6 +192,7 @@ export default function CompaniesAdminTab({ isMaster = false }) {
       nif: company.nif || "",
       email: company.email || company.contact_email || "",
       is_active: isCompanyActive(company),
+      aceita_parceiros: aceitaParceirosParaFormulario(company.aceita_parceiros),
       smtp_email: company.smtp_email || "",
       smtp_password: "",
       smtp_host: company.smtp_host || "",
@@ -267,6 +278,7 @@ export default function CompaniesAdminTab({ isMaster = false }) {
         nif: form.nif.trim() || null,
         email: form.email.trim() || null,
         is_active: form.is_active,
+        ...(isMaster ? { aceita_parceiros: ACEITA_PARCEIROS_PARA_API[form.aceita_parceiros] ?? null } : {}),
         ...smtpFieldsFromForm(form),
         ...imapFieldsFromForm(form),
       };
@@ -617,6 +629,28 @@ export default function CompaniesAdminTab({ isMaster = false }) {
                   />
                 </div>
               </div>
+              {isMaster && (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="company-aceita-parceiros">Receber leads de parceiros</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Automático: a empresa aparece como destino no Portal do Parceiro só se a sua rede tiver
+                    Index. «Sim» abre-a aos parceiros mesmo sem Index; «Não» esconde-a sempre.
+                  </p>
+                </div>
+                <select
+                  id="company-aceita-parceiros"
+                  value={form.aceita_parceiros}
+                  onChange={(e) => setForm((p) => ({ ...p, aceita_parceiros: e.target.value }))}
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                  data-testid="company-aceita-parceiros-select"
+                >
+                  <option value="auto">Automático</option>
+                  <option value="sim">Sim</option>
+                  <option value="nao">Não</option>
+                </select>
+              </div>
+              )}
             </div>
             <DialogFooter>
               <Button

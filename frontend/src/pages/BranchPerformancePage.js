@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
+import { cabecalhosDeContexto } from "../services/api";
 import { useQuery } from "@tanstack/react-query";
 import {
   Building2,
@@ -131,7 +132,7 @@ export default function BranchPerformancePage() {
     queryFn: async () => {
       const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/stats/branches`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() },
       });
       if (!res.ok) throw new Error(`Erro ${res.status}: ${res.statusText}`);
       return res.json();

@@ -106,6 +106,14 @@ async def run_update_company(company_id: str, data: CompanyUpdate, *, actor: dic
             status_code=403,
             detail="Apenas o perfil Master pode alterar a rede de uma empresa.",
         )
+    # Abrir (ou fechar) uma empresa ao mercado de parceiros é decisão do Master, como a rede: um
+    # Admin local não escolhe quem lhe manda leads. `model_fields_set` apanha o `null` explícito
+    # (voltar ao automático), que `is not None` deixaria passar.
+    if "aceita_parceiros" in data.model_fields_set and not utilizador_e_global(actor):
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas o perfil Master pode definir se a empresa recebe leads de parceiros.",
+        )
     rede_antiga = _rede_gravada(existing)
     rede_nova = _rede_gravada({"network_id": data.network_id}) if data.network_id is not None else rede_antiga
     mudou_a_rede = rede_nova != rede_antiga

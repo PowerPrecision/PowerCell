@@ -312,6 +312,15 @@ async def run_assign_client_to_user(
         # Inserir processo
         await db.processes.insert_one(process_doc)
 
+        # O convite do Portal nasce com o processo (Lote 4): sem isto o cliente criado pelo CRM
+        # com `skip_welcome_email` ficava sem convite quando o processo vinha daqui.
+        from services.client_portal_email import agendar_convite_do_portal
+
+        agendar_convite_do_portal(
+            client_id=client_id, client_email=client_email, client_name=client_name,
+            process_id=process_id, company_id=process_doc.get("company_id"), user=user,
+        )
+
         # ============================================================
         # PACOTE 9 — CRIAR ESTRUTURA S3 REAL NO MOMENTO DA CRIAÇÃO
         # ============================================================

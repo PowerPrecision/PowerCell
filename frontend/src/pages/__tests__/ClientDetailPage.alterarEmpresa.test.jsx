@@ -22,7 +22,8 @@ const api = vi.hoisted(() => ({
   getClientFiles: vi.fn(() => Promise.resolve({ data: { files: [] } })),
   updateClient: vi.fn(),
   restoreClient: vi.fn(),
-  getCompanies: vi.fn(),
+  getAllCompanies: vi.fn(),
+  previewTransferClientCompany: vi.fn(),
   transferClientCompany: vi.fn(),
 }));
 vi.mock("../../services/api", async (original) => ({ ...(await original()), ...api }));
@@ -62,7 +63,10 @@ beforeEach(() => {
   Object.values(api).forEach((f) => f.mockReset?.());
   api.getClient.mockResolvedValue({ data: CLIENTE });
   api.getClientFiles.mockResolvedValue({ data: { files: [] } });
-  api.getCompanies.mockResolvedValue({ data: { companies: EMPRESAS, total: 3 } });
+  api.getAllCompanies.mockResolvedValue(EMPRESAS);
+  api.previewTransferClientCompany.mockResolvedValue({
+    data: { processos_a_mover: 1, processos_mantidos: [], processos_que_impedem: [], bloqueado: false },
+  });
   toast.success.mockClear();
 });
 
@@ -139,5 +143,53 @@ describe("ClientDetailPage — Alterar Empresa", () => {
     expect(await within(dialogo).findByTestId("transferir-cliente-erro")).toHaveTextContent("Password incorrecta.");
     expect(screen.getByTestId("transferir-cliente-dialog")).toBeInTheDocument();
     expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("mostra a prévia do que acompanha o cliente e do que fica onde está", async () => {
+    api.previewTransferClientCompany.mockResolvedValue({
+      data: {
+        processos_a_mover: 2,
+        processos_mantidos: [{ id: "p9", process_number: 9, company_name: "Precision Crédito" }],
+        processos_que_impedem: [], bloqueado: false,
+      },
+    });
+    const u = userEvent.setup();
+    montar();
+    const dialogo = await abrirDialogo(u);
+    await u.selectOptions(await within(dialogo).findByTestId("transferir-cliente-empresa"), "cmp-domus");
+
+    expect(await within(dialogo).findByTestId("transferir-cliente-previa")).toHaveTextContent("2");
+    expect(within(dialogo).getByTestId("transferir-cliente-previa-mantidos")).toHaveTextContent(/#9.*Precision/);
+    expect(api.previewTransferClientCompany).toHaveBeenCalledWith("cli-1", "cmp-domus");
+  });
+
+  it("um processo activo noutra empresa BLOQUEIA: diz-se e não se pode confirmar", async () => {
+    api.previewTransferClientCompany.mockResolvedValue({
+      data: {
+        processos_a_mover: 1, processos_mantidos: [],
+        processos_que_impedem: [{ id: "p7", process_number: 77, company_name: "Precision Crédito" }],
+        bloqueado: true,
+      },
+    });
+    const u = userEvent.setup();
+    montar();
+    const dialogo = await abrirDialogo(u);
+    await u.selectOptions(await within(dialogo).findByTestId("transferir-cliente-empresa"), "cmp-domus");
+
+    expect(await within(dialogo).findByTestId("transferir-cliente-previa-bloqueio")).toHaveTextContent(/#77/);
+    await u.type(within(dialogo).getByTestId("transferir-cliente-password"), "Segredo-Certo-9!");
+    expect(within(dialogo).getByRole("button", { name: /Transferir cliente/i })).toBeDisabled();
+    expect(api.transferClientCompany).not.toHaveBeenCalled();
+  });
+
+  it("sem prévia (falhou) não bloqueia: o servidor é quem recusa", async () => {
+    api.previewTransferClientCompany.mockRejectedValue(new Error("rede"));
+    const u = userEvent.setup();
+    montar();
+    const dialogo = await abrirDialogo(u);
+    await u.selectOptions(await within(dialogo).findByTestId("transferir-cliente-empresa"), "cmp-domus");
+    await u.type(within(dialogo).getByTestId("transferir-cliente-password"), "x");
+    await waitFor(() =>
+      expect(within(dialogo).getByRole("button", { name: /Transferir cliente/i })).toBeEnabled());
   });
 });

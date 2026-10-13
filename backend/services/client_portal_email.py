@@ -273,3 +273,46 @@ async def _send_portal_welcome_email_safe(
     except Exception as e:
         logger.error(f"[PORTAL-EMAIL] Erro inesperado no envio do email de boas-vindas "
                      f"para {client_email} (client_id={client_id}): {e}", exc_info=True)
+
+
+def agendar_convite_do_portal(
+    *,
+    client_id: str,
+    client_email: str,
+    client_name: str,
+    process_id: str = None,
+    company_id: str = None,
+    user: dict = None,
+    frontend_url: str = None,
+) -> bool:
+    """Agenda, em segundo plano, o convite do Portal do Cliente para o titular de um processo novo.
+
+    **Ponto único dos escritores de processo** (Lote 4, Out 2026). Os formulários do CRM criam o
+    cliente com `skip_welcome_email: true` — «o email dispara na criação do processo» — mas só
+    `POST /processes/create-client` o disparava: um processo criado a partir da ficha do cliente
+    (`create-process`) ou pela atribuição na Sala de Triagem (`assign`) deixava o cliente sem
+    convite, sem erro nenhum, e o RGPD e o link mágico (que o staff pede à mão) saíam.
+
+    É IDEMPOTENTE por cliente (`deliver_registration_email` salta quem já tem o estado «sent»):
+    chamar de mais é seguro, chamar de menos é o defeito. Sem email não há convite (devolve
+    ``False``); nunca levanta.
+    """
+    if not (client_email or "").strip():
+        return False
+    from services.background_tasks import spawn_background_task
+    from services.process_create import send_portal_welcome_email_from_process
+
+    spawn_background_task(
+        send_portal_welcome_email_from_process(
+            client_id=client_id,
+            client_email=client_email.strip(),
+            client_name=client_name or "",
+            user_id=(user or {}).get("id"),
+            process_id=process_id,
+            company_id=company_id,
+            frontend_url=frontend_url,
+            user=user,
+        ),
+        name=f"portal-welcome-email:{client_id}",
+    )
+    return True

@@ -458,6 +458,28 @@ def _assert_not_caixa_geral(account_id: str):
         )
 
 
+async def _empresa_da_vista_do_master(user: dict) -> Optional[dict]:
+    """``{id, name}`` da empresa que a CONTA Master escolheu no cabeçalho, ou ``None``.
+
+    ``None`` para qualquer outro utilizador (a chave `vista_empresa_id` só é posta pelo
+    `get_current_user` na conta Master), sem empresa escolhida, ou com uma empresa que não
+    existe (cabeçalho velho): nesses casos mantém-se a vista consolidada.
+    """
+    from services.role_scope import conta_e_master
+
+    vista = str((user or {}).get("vista_empresa_id") or "").strip()
+    if not vista or not conta_e_master(user):
+        return None
+    try:
+        empresa = await db.companies.find_one({"id": vista}, {"_id": 0, "id": 1, "name": 1})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[email-accounts] Falha a ler a empresa da vista %s: %s", vista, exc)
+        return None
+    if not empresa:
+        return None
+    return {"id": empresa["id"], "name": empresa.get("name") or empresa["id"]}
+
+
 async def run_list_my_email_accounts(
     request: Request,
     company_id: Optional[str],
@@ -526,6 +548,15 @@ async def run_list_my_email_accounts(
             if role:
                 user_ucr_roles.add(role)
 
+        # A VISTA do Master (Lote 4): com uma empresa escolhida no cabeçalho, as caixas são as
+        # DESSA empresa. O Master não tem UCR em todas, logo a vista consolidada mostrava-lhe a
+        # Caixa Geral da empresa errada (a da Power com a Precision escolhida) e nenhuma da certa.
+        vista_do_master = await _empresa_da_vista_do_master(current_user)
+        if vista_do_master:
+            caixa_empresas = {vista_do_master["id"]: vista_do_master["name"]}
+        else:
+            caixa_empresas = company_names
+
         # Todas as configs do utilizador (todas as empresas)
         docs = await list_user_email_configs_all_companies(current_user["id"])
         accounts = []
@@ -533,6 +564,8 @@ async def run_list_my_email_accounts(
         for doc in docs:
             account = publicize_email_account(doc)
             cid = account.get("company_id") or "default"
+            if vista_do_master and cid not in ("default", vista_do_master["id"]):
+                continue
             if account.get("email_address"):
                 account["company_name"] = company_names.get(cid) or ""
                 accounts.append(account)
@@ -540,8 +573,8 @@ async def run_list_my_email_accounts(
 
         # Caixa Geral de cada empresa onde o cargo (em qualquer UCR) permite
         caixa_injected = False
-        if user_ucr_roles & set(CAIXA_GERAL_INJECT_ROLES):
-            for cid, cname in company_names.items():
+        if vista_do_master or user_ucr_roles & set(CAIXA_GERAL_INJECT_ROLES):
+            for cid, cname in caixa_empresas.items():
                 try:
                     caixa = await load_caixa_geral_config(cid, user=current_user)
                 except Exception as exc:

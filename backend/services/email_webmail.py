@@ -985,6 +985,31 @@ async def run_webmail_stats(
     }
 
 
+async def _fechar_job_se_ficou_aberto(job_service, job_id: str, rotulo: str) -> None:
+    """Um job de sincronização NUNCA fica «a correr» depois de a tarefa que o servia acabar.
+
+    O toast persistente do ecrã («Sincronização de Email», `duration: Infinity`) vive enquanto
+    o job estiver activo: se `complete_job`/`fail_job` levantar dentro do `except` (a base de
+    dados com um soluço) ou a tarefa for cancelada, o job ficava `processing` até o monitor o
+    apanhar horas depois — e o toast ficava até lá (Lote 4). Nunca levanta.
+    """
+    try:
+        job = await job_service.get_job(job_id)
+        estado = str((job or {}).get("status") or "").lower()
+        if job and estado in ("pending", "processing", "running"):
+            await job_service.fail_job(job_id, f"Sincronização ({rotulo}) interrompida antes de terminar.")
+    except Exception as exc:  # noqa: BLE001 - o fecho é o último recurso
+        logger.warning("[email-sync] Não consegui fechar o job %s (%s): %s", job_id, rotulo, exc)
+
+
+async def _correr_job_de_sync(job_service, job_id: str, rotulo: str, corpo) -> None:
+    """Corre `corpo()` e garante, num `finally`, que o job fica terminado."""
+    try:
+        await corpo()
+    finally:
+        await _fechar_job_se_ficou_aberto(job_service, job_id, rotulo)
+
+
 async def run_webmail_sync(
     current_user: dict,
     account: Optional[str] = None,
@@ -1071,7 +1096,7 @@ async def run_webmail_sync(
     
     from services.background_tasks import spawn_background_task
 
-    spawn_background_task(run_sync())
+    spawn_background_task(_correr_job_de_sync(job_service, job_id, "webmail", run_sync))
     
     return {
         "success": True,
@@ -1185,7 +1210,7 @@ async def run_webmail_sync_user(
         
         from services.background_tasks import spawn_background_task
 
-        spawn_background_task(run_shared_sync())
+        spawn_background_task(_correr_job_de_sync(job_service, job_id, "partilhada", run_shared_sync))
         
         return {
             "success": True,
@@ -1264,7 +1289,7 @@ async def run_webmail_sync_user(
     # servidor de email quando a causa é o garbage collector.
     from services.background_tasks import spawn_background_task
 
-    spawn_background_task(run_user_sync())
+    spawn_background_task(_correr_job_de_sync(job_service, job_id, "pessoal", run_user_sync))
     
     return {
         "success": True,

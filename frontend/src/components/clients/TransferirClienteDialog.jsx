@@ -17,13 +17,16 @@ import { ArrowRightLeft } from "lucide-react";
 
 import ConfirmarComPasswordDialog from "../admin/ConfirmarComPasswordDialog";
 import { Label } from "../ui/label";
-import { getCompanies, transferClientCompany } from "../../services/api";
+import { getAllCompanies, previewTransferClientCompany, transferClientCompany } from "../../services/api";
 import { lerErroDeConfirmacao } from "../../utils/confirmarComPassword";
 
 const TEXTOS_DE_ERRO = {
   naoEncontrado: "O cliente ou a empresa de destino já não existe.",
   recusado: "Não foi possível transferir o cliente para esta empresa.",
 };
+
+const MENSAGEM_BLOQUEADO =
+  "O cliente é titular de processos activos noutra empresa. Resolva-os antes de o transferir.";
 
 const lerErro = (err) => lerErroDeConfirmacao(err, TEXTOS_DE_ERRO);
 
@@ -38,6 +41,32 @@ export default function TransferirClienteDialog({
   const [destino, setDestino] = useState("");
   const [aCarregar, setACarregar] = useState(false);
   const [falhaAoCarregar, setFalhaAoCarregar] = useState(false);
+  // O que a transferência faria para o destino escolhido (processos a mover / mantidos / que impedem).
+  const [previa, setPrevia] = useState(null);
+  const [aCalcularPrevia, setACalcularPrevia] = useState(false);
+
+  useEffect(() => {
+    if (!destino || !open) {
+      setPrevia(null);
+      return undefined;
+    }
+    let cancelado = false;
+    setACalcularPrevia(true);
+    previewTransferClientCompany(clientId, destino)
+      .then((res) => {
+        if (!cancelado) setPrevia(res?.data ?? null);
+      })
+      .catch(() => {
+        // Sem prévia não se bloqueia aqui: o servidor recusa o que não puder fazer.
+        if (!cancelado) setPrevia(null);
+      })
+      .finally(() => {
+        if (!cancelado) setACalcularPrevia(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [destino, open, clientId]);
 
   useEffect(() => {
     if (!open) {
@@ -47,10 +76,10 @@ export default function TransferirClienteDialog({
     let cancelado = false;
     setACarregar(true);
     setFalhaAoCarregar(false);
-    getCompanies(undefined, { page: 1, size: 200 })
-      .then((res) => {
+    // Todas as páginas: a API limita `size` a 100 e pedir 200 dava 422 (Lote 4).
+    getAllCompanies()
+      .then((lista) => {
         if (cancelado) return;
-        const lista = res?.data?.empresas ?? res?.data?.companies ?? res?.data;
         setEmpresas(Array.isArray(lista) ? lista : []);
       })
       .catch(() => {
@@ -75,8 +104,12 @@ export default function TransferirClienteDialog({
       rotuloConfirmar="Transferir cliente"
       Icone={ArrowRightLeft}
       testIdBase="transferir-cliente"
+      confirmarDesactivado={Boolean(previa?.bloqueado)}
       lerErro={lerErro}
       onConfirmar={(password) => {
+        if (previa?.bloqueado) {
+          return Promise.reject({ response: { status: 409, data: { detail: MENSAGEM_BLOQUEADO } } });
+        }
         if (!destino) {
           return Promise.reject({ response: { status: 400, data: { detail: "Escolha a empresa de destino." } } });
         }
@@ -110,6 +143,12 @@ export default function TransferirClienteDialog({
                 </option>
               ))}
             </select>
+            {destino && aCalcularPrevia && (
+              <p className="text-xs text-muted-foreground" data-testid="transferir-cliente-previa-a-carregar">
+                A calcular o que será movido…
+              </p>
+            )}
+            {previa && !aCalcularPrevia && <PreviaDaTransferencia previa={previa} />}
             {falhaAoCarregar && (
               <p role="alert" className="text-xs text-destructive">
                 Não foi possível carregar as empresas. Feche e volte a abrir.
@@ -119,5 +158,35 @@ export default function TransferirClienteDialog({
         </>
       }
     />
+  );
+}
+
+
+function etiqueta(p) {
+  const numero = p?.process_number ? `#${p.process_number}` : p?.id;
+  return `${numero}${p?.company_name ? ` · ${p.company_name}` : ""}`;
+}
+
+/** O que vai acontecer aos processos do cliente — dito antes de pedir a password. */
+function PreviaDaTransferencia({ previa }) {
+  const impedem = previa.processos_que_impedem || [];
+  const mantidos = previa.processos_mantidos || [];
+  return (
+    <div className="space-y-1 pt-1 text-xs" data-testid="transferir-cliente-previa">
+      <p>
+        <strong>{previa.processos_a_mover}</strong> processo(s) acompanham o cliente.
+      </p>
+      {mantidos.length > 0 && (
+        <p className="text-muted-foreground" data-testid="transferir-cliente-previa-mantidos">
+          Ficam na empresa onde estão (já terminados): {mantidos.map(etiqueta).join("; ")}.
+        </p>
+      )}
+      {impedem.length > 0 && (
+        <p role="alert" className="text-destructive" data-testid="transferir-cliente-previa-bloqueio">
+          Não é possível transferir: o cliente é titular de processo(s) activo(s) noutra empresa —{" "}
+          {impedem.map(etiqueta).join("; ")}. Resolva-os primeiro.
+        </p>
+      )}
+    </div>
   );
 }

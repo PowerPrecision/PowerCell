@@ -4,7 +4,7 @@
  * Mantém exatamente a mesma lógica e gestão de estado (React Query/hooks).
  */
 import { useState, useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { Button } from "../ui/button";
@@ -13,7 +13,17 @@ import { Label } from "../ui/label";
 import { Badge } from "../ui/badge";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
-import { Globe, Save, Loader2, Plug } from "lucide-react";
+import { Globe, Save, Loader2, Plug, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { API_URL, fetchSystemConfig } from "./emailAccountsApi";
 import { testCompanyEmailConnection } from "../../services/api";
 
@@ -27,7 +37,10 @@ export const IndexationImapCard = () => {
   });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [confirmarRemocao, setConfirmarRemocao] = useState(false);
   const hydratedRef = useRef(false);
+  const queryClient = useQueryClient();
 
   const { data: systemConfig, isLoading: loading } = useQuery({
     queryKey: ["system-config"],
@@ -68,6 +81,37 @@ export const IndexationImapCard = () => {
       toast.error("Erro ao guardar configuração IMAP");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Remover a conta (Lote 4): limpa os quatro campos do `system_webmail`. O PATCH só ignora o valor
+  // MASCARADO da password; uma string vazia é uma escrita como outra qualquer e apaga-a. Depois
+  // disto a sincronização partilhada de Indexação diz «configuração não encontrada» em vez de
+  // continuar a ligar-se a uma caixa que já ninguém quer.
+  const handleRemove = async () => {
+    setRemoving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/system-config/system_webmail`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ imap_host: "", imap_port: 993, email_user: "", app_password: "" }),
+      });
+      if (res.ok) {
+        setSystemWebmail({ imap_host: "", imap_port: "993", email_user: "", app_password: "" });
+        queryClient.invalidateQueries({ queryKey: ["system-config"] });
+        toast.success("Conta de Indexação (IMAP) removida");
+        setConfirmarRemocao(false);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(extractErrorMessage(data.detail, "Erro ao remover a conta IMAP"));
+      }
+    } catch {
+      toast.error("Erro ao remover a conta IMAP");
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -165,8 +209,46 @@ export const IndexationImapCard = () => {
             {testing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plug className="h-4 w-4 mr-2" />}
             Testar Ligação
           </Button>
+          {systemWebmail.imap_host && (
+            <Button
+              variant="ghost"
+              className="text-destructive hover:text-destructive ml-auto"
+              onClick={() => setConfirmarRemocao(true)}
+              disabled={removing}
+              data-testid="indexation-imap-remove-btn"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Remover conta
+            </Button>
+          )}
         </div>
       </CardContent>
+
+      <AlertDialog open={confirmarRemocao} onOpenChange={(aberto) => !removing && setConfirmarRemocao(aberto)}>
+        <AlertDialogContent data-testid="indexation-imap-remove-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover a Conta de Indexação?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A configuração IMAP ({systemWebmail.email_user || systemWebmail.imap_host}) e a respetiva
+              password são apagadas. Os emails já sincronizados ficam; deixam de chegar novos por esta conta.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removing}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleRemove();
+              }}
+              disabled={removing}
+              data-testid="indexation-imap-remove-confirm"
+            >
+              {removing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Remover
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 };
