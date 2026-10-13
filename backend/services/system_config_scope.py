@@ -34,8 +34,9 @@ global, que não é segredo nenhum e à qual a mensagem explica o motivo.
 
 UM `company_id` INVENTADO NÃO CRIA NADA
 =======================================
-`get_system_config(company_id)` CRIA e grava uma cópia da global para
-qualquer id que não exista. Por isso a validação vem ANTES da leitura:
+`get_system_config(company_id)` CRIAVA e gravava uma cópia da global para
+qualquer id que não exista (hoje é copy-on-write: só a escrita grava). A
+validação continua ANTES da leitura, que é a parede de acesso:
 sem ela, qualquer pedido com um id novo escrevia um documento na base de
 dados — e o do CEO escrevia-o para uma empresa que nem é dele.
 """

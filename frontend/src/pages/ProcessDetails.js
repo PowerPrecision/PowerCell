@@ -239,6 +239,7 @@ import VoiceNoteRecorder from "../components/processDetails/VoiceNoteRecorder";
 import ProcessLabelsEditor from "../components/processDetails/ProcessLabelsEditor";
 import ProcessSummaryTimeline from "../components/processDetails/ProcessSummaryTimeline";
 import { PageHeader } from "../components/shared/PageHeader";
+import EmpresaDonaTag from "../components/processDetails/EmpresaDonaTag";
 // Ponto 17 — Navegação Contígua. O hook resolve os vizinhos a partir do
 // contexto que a listagem trouxe (zero pedidos) e só pergunta ao
 // servidor na fronteira da página.
@@ -2432,6 +2433,7 @@ const ProcessDetails = () => {
                     </a>
                   ) : null}
                   {headerConsultor ? <span>Consultor: {headerConsultor}</span> : null}
+                  <EmpresaDonaTag empresaDona={process?.empresa_dona} />
                   {/* Ponto 15 — as etiquetas deixam de ser só crachás.
                       O PACOTE DD removeu o cartão de Etiquetas e prometeu
                       um Dialog no botão "+" que nunca foi construído: o

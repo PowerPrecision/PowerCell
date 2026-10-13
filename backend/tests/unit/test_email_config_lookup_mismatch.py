@@ -272,7 +272,9 @@ async def test_magic_link_400_quando_smtp_nao_configurado():
             )
 
     assert exc_info.value.status_code == 400
-    assert "SMTP não está configurado" in exc_info.value.detail
+    # Out 2026: a mensagem de «sem remetente» é a que diz à empresa o que fazer.
+    assert ("SMTP não está configurado" in exc_info.value.detail
+            or "não tem e-mail configurado" in exc_info.value.detail)
 
 
 async def test_magic_link_500_quando_erro_de_envio():
@@ -336,4 +338,6 @@ async def test_magic_link_400_em_value_error_de_config():
             )
 
     assert exc_info.value.status_code == 400
-    assert "SMTP não está configurado" in exc_info.value.detail
+    # Out 2026: a mensagem de «sem remetente» é a que diz à empresa o que fazer.
+    assert ("SMTP não está configurado" in exc_info.value.detail
+            or "não tem e-mail configurado" in exc_info.value.detail)

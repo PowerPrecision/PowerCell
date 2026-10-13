@@ -51,7 +51,14 @@ import { safeDateStr } from '../lib/utils';
 
 // React Query hooks
 import { useKanbanQuery } from '../hooks/queries/useKanbanQuery';
-import { contarCartoes, fundirColunasDeConcluidos, planearAutoRecolha } from '../utils/kanbanColunas';
+import {
+  COLUNAS_DE_CONCLUIDOS,
+  contarCartoes,
+  fundirColunasDeConcluidos,
+  normalizarColunas,
+  planearAutoRecolha,
+} from '../utils/kanbanColunas';
+import { saoOMesmoPedido } from '../utils/kanbanFiltros';
 import { useKanbanCompletedQuery } from '../hooks/queries/useKanbanCompletedQuery';
 import { useKanbanRealtime } from '../hooks/queries/useKanbanRealtime';
 import { useCompletedDaysFilter } from '../hooks/queries/useCompletedDaysFilter';
@@ -209,29 +216,48 @@ const KanbanBoard = ({
   // Memoize filters to prevent infinite re-renders in dependent hooks
   const filters = useMemo(() => ({ consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labels: labelsFilter, labelsLogic, sub35, partilha }), [consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labelsFilter, labelsLogic, sub35, partilha]);
 
-  // QUERY 1: Colunas ACTIVAS (sem completedDays — não re-fetch quando o filtro muda)
+  // QUERY 1: o quadro. Não envia `completedDays`: assume o período por omissão
+  // (30 dias, o mesmo do servidor), pelo que já traz as colunas de concluídos.
   const {
     columns: activeColumns,
     totalProcesses,
     isLoading,
     isFetching,
+    isSuccess: quadroPronto,
     refetch,
   } = useKanbanQuery({
     token,
     ...filters,
-    completedDays: undefined, // NÃO enviar completedDays — a query activa não precisa deste filtro
+    completedDays: undefined,
   });
 
-  // QUERY 2: Colunas CONCLUÍDOS (cache key INDEPENDENTE — re-fetch apenas quando completedDays muda)
+  // QUERY 2: Concluídos, com chave independente (re-fetch só quando `completedDays`
+  // muda). Com o período por omissão o pedido seria IDÊNTICO ao da query 1 —
+  // o servidor respondia duas vezes à mesma pergunta em toda a primeira carga —,
+  // por isso nesse caso não se faz: as colunas saem da resposta do quadro.
+  const concluidosJaNoQuadro = useMemo(
+    () => saoOMesmoPedido({ ...filters, completedDays: undefined }, { ...filters, completedDays }),
+    [filters, completedDays],
+  );
   const {
-    columns: completedColumns,
-    isFetching: isFetchingCompleted,
-    isSuccess: concluidosProntos,
+    columns: completedQueryColumns,
+    isFetching: isFetchingCompletedQuery,
+    isSuccess: concluidosProntosQuery,
   } = useKanbanCompletedQuery({
     token,
     ...filters,
     completedDays,
+    enabled: !concluidosJaNoQuadro,
   });
+
+  const completedColumns = useMemo(
+    () => (concluidosJaNoQuadro
+      ? normalizarColunas(activeColumns).filter((c) => COLUNAS_DE_CONCLUIDOS.includes(c.name))
+      : completedQueryColumns),
+    [concluidosJaNoQuadro, activeColumns, completedQueryColumns],
+  );
+  const concluidosProntos = concluidosJaNoQuadro ? quadroPronto : concluidosProntosQuery;
+  const isFetchingCompleted = concluidosJaNoQuadro ? isLoading : isFetchingCompletedQuery;
 
   // === MERGE: Colunas activas + concluídos ===
   // Substituir as colunas concluidos/desistencias da query activa pelos dados
@@ -290,6 +316,24 @@ const KanbanBoard = ({
   // Local, não precisa de React Query. A regra (uma decisão por coluna; as de
   // concluídos esperam pela sua consulta) vive em `planearAutoRecolha`.
   const colunasDecididasRef = useRef(new Set());
+
+  // Mudar o período de Concluídos é pedir OUTRO conjunto de cartões: a decisão
+  // tomada sobre o anterior (recolher «porque estava vazia») já não vale — com
+  // 90 dias a coluna pode ter cartões, e ficar fechada esconderia a resposta ao
+  // filtro que o utilizador acabou de escolher. Esquecem-se as decisões destas
+  // colunas e reabrem-se; decidem-se de novo quando a consulta responder.
+  const periodoAnteriorRef = useRef(completedDays);
+  useEffect(() => {
+    if (periodoAnteriorRef.current === completedDays) return;
+    periodoAnteriorRef.current = completedDays;
+    COLUNAS_DE_CONCLUIDOS.forEach((id) => colunasDecididasRef.current.delete(id));
+    setCollapsedColumns((prev) => {
+      const seguinte = new Set(prev);
+      COLUNAS_DE_CONCLUIDOS.forEach((id) => seguinte.delete(id));
+      return seguinte;
+    });
+  }, [completedDays]);
+
   useEffect(() => {
     const { recolher, decididas } = planearAutoRecolha(columns, {
       jaDecididas: colunasDecididasRef.current,

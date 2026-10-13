@@ -133,6 +133,10 @@ async def run_get_process_detail(
     ensure_client_id_default(process)
     await attach_latest_activity(process, process_id)
     await attach_portal_access(process, process_id)
+    # A empresa dona, para a etiqueta do cabeçalho (processos partilhados B2B).
+    from services.process_owner import anexar_empresa_dona
+
+    await anexar_empresa_dona(process, user)
     return serialize_process_detail_response(process, process_id)
 
 

@@ -136,6 +136,30 @@ export function parametrosDoKanban(filtros) {
 }
 
 /**
+ * Os dois pedidos do quadro são o MESMO pedido?
+ *
+ * O quadro faz duas consultas: a principal (`view_mode=all`, que já traz as
+ * colunas Concluído/Desistência dos últimos 30 dias) e a de Concluídos, isolada
+ * para que mudar o período não recarregue o quadro todo. Com o período por
+ * omissão — o caso de TODA a primeira carga — os dois pedidos têm exactamente
+ * os mesmos parâmetros e o servidor respondia duas vezes à mesma pergunta.
+ *
+ * A comparação é sobre os PARÂMETROS que saem (`parametrosDoKanban`) e não
+ * sobre um par de campos escolhido à mão: se um dia um filtro novo fizer os
+ * pedidos divergirem, passam a ser dois sem ninguém se lembrar de actualizar
+ * esta função.
+ *
+ * @param {object} opcoesA opções como as do hook (`consultorFilter`, `completedDays`…)
+ * @param {object} opcoesB idem
+ */
+export function saoOMesmoPedido(opcoesA, opcoesB) {
+  return (
+    parametrosDoKanban(normalizarFiltros(opcoesA)).toString() ===
+    parametrosDoKanban(normalizarFiltros(opcoesB)).toString()
+  );
+}
+
+/**
  * A chave de cache — DERIVADA dos mesmos filtros.
  *
  * Não é um alias inútil: é o ponto onde se garante que a chave e os

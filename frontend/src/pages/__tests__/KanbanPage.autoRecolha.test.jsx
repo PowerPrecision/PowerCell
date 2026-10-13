@@ -12,9 +12,9 @@
  * consulta própria não responde. Recolher aí fechava-a para sempre com
  * cartões por chegar, por isso estas duas só se decidem depois dela.
  *
- * As duas consultas (activa e concluídos) pedem o MESMO `GET /processes/kanban`
- * e não se distinguem pelos parâmetros; distinguem-se pela ORDEM em que o
- * quadro as arranca (a activa primeiro) — daí o `pedido` ser por ordem.
+ * Com o período por omissão (30 dias) há UM só pedido: o quadro já traz as
+ * colunas de concluídos. Ao mudar o período faz-se um segundo pedido, só para
+ * essas colunas — distinguem-se pela ORDEM (o do quadro é sempre o primeiro).
  */
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -161,38 +161,94 @@ describe("Kanban — auto-recolher colunas vazias", () => {
     await waitFor(() => expect(recolhidas()).toHaveLength(1));
   });
 
-  it("enquanto a consulta de concluídos não respondeu, Concluídos NÃO se recolhe", async () => {
-    // A consulta activa devolve Concluídos com count 0 («ainda não carregou»).
+  it("com o período por omissão o quadro basta: UM só pedido ao servidor", async () => {
+    // Dívida técnica: a consulta de Concluídos (30 dias) era IDÊNTICA à do quadro
+    // e o servidor respondia duas vezes à mesma pergunta em toda a primeira carga.
+    servir(quadro(ANALISE, CONCLUIDOS_VAZIO, DESISTENCIAS_VAZIO));
+    montar();
+
+    expect(await screen.findByText("Rui Pereira")).toBeInTheDocument();
+    await waitFor(() => expect(recolhidas()).toHaveLength(2));
+    expect(api.getKanbanBoard).toHaveBeenCalledTimes(1);
+    expect(api.getKanbanBoard.mock.calls[0][0].get("completed_days")).toBe("30");
+  });
+
+  it("os cartões de Concluídos vêm da resposta do quadro quando só há um pedido", async () => {
+    const comCartao = col("concluidos", "Concluídos", 8, [cartao("9", "Maria Concluída", "concluidos")]);
+    servir(quadro(ANALISE, comCartao, DESISTENCIAS_VAZIO));
+    montar();
+
+    expect(await screen.findByText("Maria Concluída")).toBeInTheDocument();
+    expect(api.getKanbanBoard).toHaveBeenCalledTimes(1);
+  });
+
+  it("mudar o período faz o SEGUNDO pedido (só o de Concluídos) e mostra o que ele traz", async () => {
     let responderConcluidos;
     servir(
       quadro(ANALISE, CONCLUIDOS_VAZIO, DESISTENCIAS_VAZIO),
       () => new Promise((resolve) => { responderConcluidos = resolve; }),
     );
     montar();
-
     expect(await screen.findByText("Rui Pereira")).toBeInTheDocument();
-    await waitFor(() => expect(responderConcluidos).toBeTypeOf("function"));
-    expect(recolhidas()).toHaveLength(0);
+    expect(api.getKanbanBoard).toHaveBeenCalledTimes(1);
 
-    // Quando responde com cartões, Concluídos chega aberta com eles.
+    const utilizador = userEvent.setup();
+    await utilizador.click(screen.getByTestId("kanban-completed-filter"));
+    await utilizador.click(await screen.findByRole("option", { name: "Últimos 90 dias" }));
+
+    await waitFor(() => expect(api.getKanbanBoard).toHaveBeenCalledTimes(2));
+    expect(api.getKanbanBoard.mock.calls[1][0].get("completed_days")).toBe("90");
+
     responderConcluidos(quadro(
       ANALISE,
       col("concluidos", "Concluídos", 8, [cartao("9", "Maria Concluída", "concluidos")]),
       DESISTENCIAS_VAZIO,
     ));
     expect(await screen.findByText("Maria Concluída")).toBeInTheDocument();
-    await waitFor(() => expect(recolhidas()).toHaveLength(1)); // só Desistências
   });
 
-  it("se a consulta de concluídos falha, Concluídos fica aberta (não se esconde o que não se sabe)", async () => {
+  it("mudar o período reabre Concluídos e volta a decidir: continua vazia → recolhe-se outra vez", async () => {
+    let responderConcluidos;
+    servir(
+      quadro(ANALISE, CONCLUIDOS_VAZIO, DESISTENCIAS_VAZIO),
+      () => new Promise((resolve) => { responderConcluidos = resolve; }),
+    );
+    montar();
+    await waitFor(() => expect(recolhidas()).toHaveLength(2));
+
+    const utilizador = userEvent.setup();
+    await utilizador.click(screen.getByTestId("kanban-completed-filter"));
+    await utilizador.click(await screen.findByRole("option", { name: "Últimos 90 dias" }));
+    await waitFor(() => expect(api.getKanbanBoard).toHaveBeenCalledTimes(2));
+
+    // Enquanto o novo período não responde, nada está recolhido (não se decide às cegas).
+    await waitFor(() => expect(recolhidas()).toHaveLength(0));
+
+    responderConcluidos(quadro(ANALISE, CONCLUIDOS_VAZIO, DESISTENCIAS_VAZIO));
+    await waitFor(() => expect(recolhidas()).toHaveLength(2));
+  });
+
+  it("se o pedido do período falha, o quadro mantém o que já tinha", async () => {
     servir(
       quadro(ANALISE, CONCLUIDOS_VAZIO, DESISTENCIAS_VAZIO),
       () => Promise.reject({ response: { status: 500, data: { detail: "boom" } } }),
     );
     montar();
-
     expect(await screen.findByText("Rui Pereira")).toBeInTheDocument();
+
+    const utilizador = userEvent.setup();
+    await utilizador.click(screen.getByTestId("kanban-completed-filter"));
+    await utilizador.click(await screen.findByRole("option", { name: "Últimos 7 dias" }));
+
     await waitFor(() => expect(api.getKanbanBoard).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Rui Pereira")).toBeInTheDocument();
+  });
+
+  it("se o quadro falha, nada se recolhe (não se esconde o que não se sabe)", async () => {
+    servir(() => Promise.reject({ response: { status: 500, data: { detail: "boom" } } }));
+    montar();
+
+    await waitFor(() => expect(api.getKanbanBoard).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 50));
     expect(recolhidas()).toHaveLength(0);
   });

@@ -41,8 +41,9 @@ async def get_system_config(company_id: str = "default") -> SystemConfig:
     MULTI-EMPRESA:
       - company_id="default" → config global (retrocompatível, _id="main")
       - company_id="power_real_estate" → config específica dessa empresa
-      - Se não existir config para a empresa, cria uma cópia da global
-        com o company_id preenchido.
+      - Se não existir config para a empresa, devolve uma cópia da global
+        com o company_id preenchido, SEM a gravar (copy-on-write: o documento
+        da empresa só nasce na primeira escrita).
     """
     cache_key = company_id or "default"
 
@@ -72,14 +73,20 @@ async def get_system_config(company_id: str = "default") -> SystemConfig:
             config = _build_default_config(cache_key)
             await save_system_config(config)
         else:
-            # Empresa sem config própria → herdar da global e criar cópia
+            # Empresa sem config própria → herda a da global EM MEMÓRIA.
+            #
+            # COPY-ON-WRITE (Out 2026): antes, LER gravava uma cópia da
+            # global em `company:<id>` — com as credenciais dela em claro — só
+            # porque alguém abriu o ecrã, enviou um email ou gerou uma proposta.
+            # Essas cópias faziam o Webmail de uma rede satélite mostrar a
+            # caixa da rede-mãe e eram lixo permanente na base de dados. O
+            # documento da empresa passa a nascer na primeira ESCRITA
+            # (`update_config_section` → `save_system_config`).
             global_config = await get_system_config("default")
             config_data = global_config.model_dump(mode='json')
             config_data["company_id"] = cache_key
             config_data.pop("setup_completed", None)  # Não copiar flag de setup
             config = SystemConfig(**config_data)
-            await save_system_config(config)
-            logger.info(f"Criada config para empresa '{cache_key}' (herdada da global)")
 
     # Actualizar cache
     _config_cache[cache_key] = (config, datetime.now(timezone.utc))
