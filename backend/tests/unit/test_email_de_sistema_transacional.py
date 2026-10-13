@@ -81,6 +81,8 @@ async def _enviar_link(db, processo):
         resposta = await pml.send_magic_link_to_client(
             process_id=processo["id"], process=processo, user=UTILIZADOR, request=_Pedido(),
         )
+        from services.background_tasks import aguardar_tarefas_pendentes
+        await aguardar_tarefas_pendentes()  # a entrega corre em segundo plano
     return resposta, transporte
 
 

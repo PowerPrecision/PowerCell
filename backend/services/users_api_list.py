@@ -50,7 +50,9 @@ async def run_get_users(
         empresas_do_ambito,
     )
 
-    ambito = await empresas_do_ambito(user or {})
+    # Com um processo manda o que o processo alcança (abaixo); sem ele, a equipa que o
+    # Master vê é a da EMPRESA que tem seleccionada (`X-Company-Id`).
+    ambito = await empresas_do_ambito(user or {}, vista=not process_id)
     scope_query = await build_users_scope_query(ambito)
     if scope_query:
         query = {"$and": [query, scope_query]} if query else scope_query

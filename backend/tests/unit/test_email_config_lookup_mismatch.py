@@ -240,58 +240,18 @@ async def test_sem_config_devolve_error_code():
     assert fake_resend.Emails.send.call_count == 0
 
 
-async def test_magic_link_400_quando_smtp_nao_configurado():
-    """portal_magic_link mapeia SMTP_NOT_CONFIGURED → HTTP 400 com detalhe
-    'SMTP não está configurado' (antes: 500 Internal Server Error)."""
-    from fastapi import HTTPException
-
+async def _enviar_link_e_esperar(send_email_falso):
+    """Corre o envio do magic link (entrega em segundo plano — Lote 2) e devolve as
+    notificações de falha gravadas para quem pediu."""
     import services.email_service as email_service
     import services.portal_magic_link as portal_magic_link
+    from services.background_tasks import aguardar_tarefas_pendentes
 
-    async def _send_email_falha_config(**kwargs):
-        return {
-            "success": False,
-            "error": "SMTP não está configurado. Configure o Email do Sistema...",
-            "error_code": "SMTP_NOT_CONFIGURED",
-        }
-
+    bd = FakeAsyncDatabase()
     process = {"client_email": "cliente@exemplo.pt", "client_name": "Cliente", "client_id": "cli-1"}
-    request = MagicMock()
 
-    with patch.object(email_service, "send_email", _send_email_falha_config), \
-         patch.object(portal_magic_link, "ensure_portal_access_code",
-                      new=AsyncMock(return_value="CODE")), \
-         patch.object(portal_magic_link, "issue_portal_magic_link",
-                      new=AsyncMock(return_value={"magic_link": "https://x/portal/ABC12345", "short_id": "ABC12345"})), \
-         patch.object(portal_magic_link, "build_magic_link_email_bodies",
-                      return_value=("texto", "<p>html</p>")):
-        with pytest.raises(HTTPException) as exc_info:
-            await portal_magic_link.send_magic_link_to_client(
-                process_id="proc-1", process=process, user={"email": "admin@x.pt"},
-                request=request,
-            )
-
-    assert exc_info.value.status_code == 400
-    # Out 2026: a mensagem de «sem remetente» é a que diz à empresa o que fazer.
-    assert ("SMTP não está configurado" in exc_info.value.detail
-            or "não tem e-mail configurado" in exc_info.value.detail)
-
-
-async def test_magic_link_502_quando_erro_de_envio():
-    """Falha de envio real (rede — sem error_code) NÃO é um 500 nosso: é 502
-    (o serviço de email não entregou), com a razão real (Bug 3, Fev 2026)."""
-    from fastapi import HTTPException
-
-    import services.email_service as email_service
-    import services.portal_magic_link as portal_magic_link
-
-    async def _send_email_falha_envio(**kwargs):
-        return {"success": False, "error": "Falha de autenticação SMTP."}
-
-    process = {"client_email": "cliente@exemplo.pt", "client_name": "Cliente", "client_id": "cli-1"}
-    request = MagicMock()
-
-    with patch.object(email_service, "send_email", _send_email_falha_envio), \
+    with patch.object(portal_magic_link, "db", bd), \
+         patch.object(email_service, "send_email", send_email_falso), \
          patch("services.portal_email_context._conta_de_sistema_generica",
                AsyncMock(return_value=object())), \
          patch.object(portal_magic_link, "ensure_portal_access_code",
@@ -300,44 +260,51 @@ async def test_magic_link_502_quando_erro_de_envio():
                       new=AsyncMock(return_value={"magic_link": "https://x/portal/ABC12345", "short_id": "ABC12345"})), \
          patch.object(portal_magic_link, "build_magic_link_email_bodies",
                       return_value=("texto", "<p>html</p>")):
-        with pytest.raises(HTTPException) as exc_info:
-            await portal_magic_link.send_magic_link_to_client(
-                process_id="proc-1", process=process, user={"email": "admin@x.pt"},
-                request=request,
-            )
-
-    assert exc_info.value.status_code == 502
-    assert "Falha de autenticação SMTP" in exc_info.value.detail
+        resposta = await portal_magic_link.send_magic_link_to_client(
+            process_id="proc-1", process=process, user={"id": "u1", "email": "admin@x.pt"},
+            request=MagicMock(),
+        )
+        await aguardar_tarefas_pendentes()
+    return resposta, [n for n in bd.notifications.docs if n.get("type") == "email_failed"]
 
 
-async def test_magic_link_400_em_value_error_de_config():
-    """ValueError (ex: purpose inválido no transporter) → 400, não 500
-    (excepção de configuração é erro do lado do cliente)."""
-    from fastapi import HTTPException
+async def test_magic_link_smtp_nao_configurado_avisa_quem_pediu():
+    """SMTP_NOT_CONFIGURED devolvido pelo envio: o pedido já respondeu (entrega em
+    segundo plano, Lote 2) e a causa chega por notificação, com a mensagem que diz
+    à empresa o que fazer (antes: HTTP 400 síncrono; antes disso, 500)."""
+    async def _send_email_falha_config(**kwargs):
+        return {
+            "success": False,
+            "error": "SMTP não está configurado. Configure o Email do Sistema...",
+            "error_code": "SMTP_NOT_CONFIGURED",
+        }
 
-    import services.email_service as email_service
-    import services.portal_magic_link as portal_magic_link
+    resposta, avisos = await _enviar_link_e_esperar(_send_email_falha_config)
 
+    assert resposta["queued"] is True
+    assert len(avisos) == 1 and avisos[0]["user_id"] == "u1"
+    assert ("SMTP não está configurado" in avisos[0]["message"]
+            or "não tem e-mail configurado" in avisos[0]["message"])
+
+
+async def test_magic_link_erro_de_envio_avisa_com_a_razao_real():
+    """Falha de envio real (rede — sem error_code): a razão real vai na notificação."""
+    async def _send_email_falha_envio(**kwargs):
+        return {"success": False, "error": "Falha de autenticação SMTP."}
+
+    _, avisos = await _enviar_link_e_esperar(_send_email_falha_envio)
+
+    assert len(avisos) == 1
+    assert "Falha de autenticação SMTP" in avisos[0]["message"]
+
+
+async def test_magic_link_value_error_de_config_avisa_como_configuracao():
+    """ValueError (ex: purpose inválido no transporter) é erro de configuração: a
+    notificação di-lo, e o pedido não rebenta."""
     async def _send_email_value_error(**kwargs):
         raise ValueError("Purpose inválido: 'X'")
 
-    process = {"client_email": "cliente@exemplo.pt", "client_name": "Cliente", "client_id": "cli-1"}
-    request = MagicMock()
+    resposta, avisos = await _enviar_link_e_esperar(_send_email_value_error)
 
-    with patch.object(email_service, "send_email", _send_email_value_error), \
-         patch.object(portal_magic_link, "ensure_portal_access_code",
-                      new=AsyncMock(return_value="CODE")), \
-         patch.object(portal_magic_link, "issue_portal_magic_link",
-                      new=AsyncMock(return_value={"magic_link": "https://x/portal/ABC12345", "short_id": "ABC12345"})), \
-         patch.object(portal_magic_link, "build_magic_link_email_bodies",
-                      return_value=("texto", "<p>html</p>")):
-        with pytest.raises(HTTPException) as exc_info:
-            await portal_magic_link.send_magic_link_to_client(
-                process_id="proc-1", process=process, user={"email": "admin@x.pt"},
-                request=request,
-            )
-
-    assert exc_info.value.status_code == 400
-    # Out 2026: a mensagem de «sem remetente» é a que diz à empresa o que fazer.
-    assert ("SMTP não está configurado" in exc_info.value.detail
-            or "não tem e-mail configurado" in exc_info.value.detail)
+    assert resposta["queued"] is True
+    assert len(avisos) == 1 and "SMTP não está configurado" in avisos[0]["message"]

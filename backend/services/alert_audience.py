@@ -160,6 +160,10 @@ async def _rede_resolvida(processo: Optional[dict]) -> Optional[str]:
     return rede_de_omissao()
 
 
+#: A rede de um processo, lendo o grupo real da empresa (para quem agrupa por rede).
+rede_resolvida_do_processo = _rede_resolvida
+
+
 async def gestao_da_rede_do_processo(
     processo: Optional[dict],
     papeis: Sequence[str],

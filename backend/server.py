@@ -86,6 +86,7 @@ from routes.match import router as match_router
 from routes.system_config import router as system_config_router
 from routes.properties import router as properties_router
 from routes.clients import router as clients_router
+from routes.clients_company_transfer import router as clients_company_transfer_router
 from routes.visits import router as visits_router
 from routes.gdpr import router as gdpr_router
 from routes.backup import router as backup_router
@@ -595,6 +596,7 @@ app.include_router(system_config_router, prefix="/api")
 app.include_router(properties_router, prefix="/api")
 app.include_router(visits_router, prefix="/api")
 app.include_router(clients_router, prefix="/api")
+app.include_router(clients_company_transfer_router, prefix="/api")
 app.include_router(gdpr_router, prefix="/api")
 app.include_router(backup_router, prefix="/api")
 app.include_router(scraper_router, prefix="/api")

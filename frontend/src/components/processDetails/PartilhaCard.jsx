@@ -9,6 +9,10 @@
  * escolhida («Partilhar com…»), a quem pode (`podePartilhar`, perfil efectivo) e
  * enquanto o processo não está fechado (o servidor recusa partilhar um fechado).
  *
+ * CADEIA (Out 2026): quem VÊ o processo — a casa dona ou uma convidada — pode passá-lo à
+ * frente, e cada elo diz de quem veio. Revogar um elo revoga os que dele derivam; uma
+ * convidada só retira os elos que abriu (o servidor diz-o em `pode_revogar`).
+ *
  * Só aparece quando há parceiros OU quando se pode partilhar: um cartão vazio
  * em todos os processos seria ruído. Quem pode revogar vem por `podeRevogar`;
  * a decisão final é do servidor, e a mensagem dele é mostrada tal e qual.
@@ -99,7 +103,15 @@ export default function PartilhaCard({
         {parceiros.length > 0 && <ul className="divide-y rounded-md border text-sm">
           {parceiros.map((parceiro) => (
             <li key={parceiro.id || parceiro.nome} className="flex items-center justify-between gap-2 px-3 py-2">
-              <span className="min-w-0 truncate font-medium">{parceiro.nome}</span>
+              <span className="min-w-0">
+                <span className="block truncate font-medium">{parceiro.nome}</span>
+                {parceiro.partilhadoPor && (
+                  // Cadeia: de quem veio este elo (a linhagem completa está no cabeçalho).
+                  <span className="block truncate text-xs text-muted-foreground" data-testid="partilhado-por">
+                    Partilhado por {parceiro.partilhadoPor}
+                  </span>
+                )}
+              </span>
               {podeRevogar && sePodeRevogar(parceiro) && (
                 <Button
                   type="button"

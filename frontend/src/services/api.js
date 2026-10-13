@@ -1932,6 +1932,17 @@ export const deleteCompany = (id, password) =>
   password
     ? api.delete(`/admin/companies/${id}`, { data: { password }, skipErrorToast: true })
     : Promise.reject(new Error("deleteCompany: a password actual é obrigatória."));
+// Alterar a empresa de um cliente (só Master): muda o carimbo do cliente e dos processos dele e NUNCA
+// mexe no S3. Exige a password ACTUAL (o servidor valida) — sem ela nem sai o pedido; o erro diz-se
+// no diálogo de confirmação e não num toast (`skipErrorToast`).
+export const transferClientCompany = (clientId, companyId, password) =>
+  password
+    ? api.post(
+        `/clients/${encodeURIComponent(clientId)}/transfer-company`,
+        { company_id: companyId, password },
+        { skipErrorToast: true },
+      )
+    : Promise.reject(new Error("transferClientCompany: a password actual é obrigatória."));
 export const uploadCompanyLogo = (id, file) => {
   const formData = new FormData();
   formData.append("file", file);

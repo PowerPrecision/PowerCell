@@ -637,6 +637,8 @@ class TestLinkMagicoEnviadoPeloStaff:
                 process_id="p1", process=processo, user={"id": "u", "email": "a@b.pt"},
                 request=MagicMock(),
             )
+            from services.background_tasks import aguardar_tarefas_pendentes
+            await aguardar_tarefas_pendentes()  # a entrega corre em segundo plano
         k = envio.await_args.kwargs
         assert envio.await_args.args[0].company_name == "Domus"
         texto = f'{k["body"]}\n{k["body_html"]}'

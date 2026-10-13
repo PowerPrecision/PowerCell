@@ -379,9 +379,9 @@ const S3FileManager = ({
   // conjunto de botões, por isso há UMA condição e não duas.
   const somenteLeitura = isIndexacao || readOnly;
 
-  // Analisar / Renomear com IA — gestão (admin, CEO, diretor/"gestor") OU atribuído ao
-  // processo. Usa effectiveRole (perfil activo), não hasRole, para multi-perfil; o
-  // «atribuído» vem do servidor (`podeUsarIA`) — ver utils/permissaoDeIA.js.
+  // Analisar / Renomear com IA — SÓ Master/Admin/CEO/Diretor (controlo de custos da API;
+  // estar atribuído ao processo não chega). Usa effectiveRole (perfil activo), não hasRole,
+  // para multi-perfil; o servidor (`podeUsarIA`) só pode estreitar — ver utils/permissaoDeIA.js.
   const canUseAIDocumentTools = podeUsarFerramentasDeIA({
     effectiveRole,
     permissaoDoServidor: podeUsarIA,

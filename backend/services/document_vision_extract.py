@@ -181,7 +181,7 @@ async def run_extract_document_data(
             `S3FileManager`).
         user: Utilizador autenticado (staff).
         request: o pedido, para resolver o perfil activo — a permissão é
-            «gestão OU atribuído» (`document_ai_access`).
+            reservada aos altos perfis (`document_ai_access`).
 
     Returns:
         O mesmo contrato de `/documents/ai-analyze` (`extracted_data`,

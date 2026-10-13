@@ -235,7 +235,7 @@ async def build_tenant_process_condition(user: dict) -> dict:
     que listam ou resolvem PROCESSOS usam. Há um inventário por AST que
     falha por OMISSÃO para uma superfície nova que use a genérica.
     """
-    return build_process_scope_condition(await resolve_tenant_scope(user))
+    return build_process_scope_condition(await resolve_vista_scope(user))
 
 
 def redes_parceiras(doc: Optional[dict]) -> set[str]:
@@ -421,9 +421,60 @@ def _avisar_omissao_por_definir() -> None:
     )
 
 
+#: Chave que o `get_current_user` põe no utilizador: a empresa que o Master
+#: tem seleccionada (`X-Company-Id`). Só existe para a conta Master.
+CAMPO_VISTA = "vista_empresa_id"
+
+
+async def resolve_vista_scope(user: dict) -> TenantScope:
+    """O âmbito para LISTAR: o do utilizador, estreitado à empresa que o Master escolheu.
+
+    O Master não tem fronteira (`resolve_tenant_scope` devolve «tudo»), e por
+    isso a empresa que escolhe no cabeçalho não mudava nada nas listagens:
+    com a Domus seleccionada via os clientes da Precision. A empresa activa é
+    uma VISTA — para o Master, a vista é a REDE dessa empresa.
+
+    **Só para listar.** Abrir por id continua a ser global para o Master
+    (`by_id_scope`): estreitar também aí faria um link para um processo de
+    outra empresa dar 404 a quem pode tudo. Sem empresa escolhida (vista
+    «Sistema»/global), ou uma empresa que não existe, devolve o âmbito normal.
+    """
+    from services.role_scope import conta_e_master
+
+    empresa = _texto((user or {}).get(CAMPO_VISTA))
+    if empresa and conta_e_master(user) and empresa not in VALORES_SEM_EMPRESA:
+        try:
+            existe = await db.companies.find_one({"id": empresa}, {"_id": 0, "id": 1})
+        except Exception as exc:  # noqa: BLE001 - sem a lista de empresas, sem vista
+            logger.warning("[tenant_network] Falha a validar a vista %s (%s).", empresa, exc)
+            existe = None
+        # Uma empresa que não existe (cabeçalho velho) NÃO estreita: `_redes_das_empresas`
+        # trata-a como ilha própria e o Master ficava com a lista vazia.
+        rede = (await _redes_das_empresas([empresa])).get(empresa) if existe else None
+        if rede:
+            omissao = rede_de_omissao()
+            return TenantScope(
+                network_ids=(rede,),
+                company_ids=(empresa,),
+                inclui_rede_de_omissao=(rede == omissao) if omissao else True,
+            )
+    return await resolve_tenant_scope(user)
+
+
 async def build_tenant_condition(user: dict) -> dict:
-    """Atalho: âmbito do utilizador já convertido em condição Mongo."""
-    return build_network_scope_condition(await resolve_tenant_scope(user))
+    """Atalho: âmbito do utilizador já convertido em condição Mongo (LISTAGENS).
+
+    Inclui a VISTA do Master (a empresa que escolheu no cabeçalho estreita a listagem à rede
+    dela). As superfícies de ADMINISTRAÇÃO DO PRÓPRIO SISTEMA (a lista de empresas) passam o
+    utilizador por `sem_vista`: o Master tem de poder escolher uma empresa de outra rede, por
+    exemplo como destino de uma transferência de cliente.
+    """
+    return build_network_scope_condition(await resolve_vista_scope(user))
+
+
+def sem_vista(user: Optional[dict]) -> dict:
+    """Cópia do utilizador sem a vista da empresa escolhida (âmbito normal, sem estreitar)."""
+    return {k: v for k, v in (user or {}).items() if k != CAMPO_VISTA}
 
 
 def com_isolamento(tenant_condition: dict, query: Optional[dict]) -> dict:

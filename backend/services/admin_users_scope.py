@@ -82,14 +82,21 @@ class EmpresasDoAmbito:
     sem_fronteira: bool = False
 
 
-async def empresas_do_ambito(user: dict) -> EmpresasDoAmbito:
+async def empresas_do_ambito(user: dict, *, vista: bool = False) -> EmpresasDoAmbito:
     """Empresas da rede de quem pede.
 
     Usa a MESMA condição de tenant das listagens de processos — o ponto
     único de `services/tenant_network.py`. Duplicar a cadeia aqui daria
     dois sítios a divergir, que é a raiz do incidente de 2026-09-21.
+
+    `vista=True` (dropdowns de atribuição, Lote 2): para o Master, a empresa que escolheu
+    no cabeçalho estreita a equipa à rede dela. O painel de administração fica com
+    `vista=False` — o Master gere utilizadores de todas as redes.
     """
-    return await empresas_do_scope(await resolve_tenant_scope(user or {}))
+    from services.tenant_network import resolve_vista_scope
+
+    scope = await (resolve_vista_scope(user or {}) if vista else resolve_tenant_scope(user or {}))
+    return await empresas_do_scope(scope)
 
 
 async def empresas_do_scope(scope) -> EmpresasDoAmbito:

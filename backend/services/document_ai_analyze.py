@@ -487,7 +487,7 @@ async def run_ai_analyze_documents(
 ) -> dict[str, Any]:
     """Analisa múltiplos documentos com IA e devolve comparação/sugestões.
 
-    Gestão OU atribuído ao processo (`document_ai_access`). A guarda corre
+    Só os altos perfis (`document_ai_access`). A guarda corre
     ANTES de ler os ficheiros enviados: recusar depois de os ter lido para
     memória gasta o trabalho todo em quem não tem direito a ele.
     """

@@ -842,14 +842,22 @@ class TestARotaDePartilha:
         r = c.post("/processes/p-omega/partners", json={"network_id": REDE_INCUMBENTE})
         assert r.status_code == 404
 
-    def test_so_a_casa_dona_partilha_a_convidada_nao(self, cliente_http):
-        """A Precision vê o processo partilhado mas não o pode passar adiante."""
+    def test_a_convidada_passa_adiante_em_cadeia_e_o_elo_fica_marcado(self, cliente_http):
+        """Partilha em cadeia (Out 2026): quem VÊ o processo pode passá-lo à frente.
+
+        Antes só a casa dona partilhava (403 à convidada); a direcção pediu a cadeia
+        Parceiro → Y → Z sem fricção. O elo guarda DE QUEM veio e a que distância está.
+        """
         c, db = cliente_http
         c.post("/processes/p-domus/partners", json={"network_id": REDE_INCUMBENTE})
         c.definir_utilizador(CRIS)
         r = c.post("/processes/p-domus/partners", json={"network_id": "rede:omega"})
-        assert r.status_code == 403, r.text
-        assert "dona" in r.json()["detail"]
+        assert r.status_code == 200, r.text
+        elo = next(e for e in _processo(db)["partner_companies"] if e["network_id"] == "rede:omega")
+        assert elo["shared_from_network"] == REDE_INCUMBENTE
+        assert elo["depth"] == 2
+        # A casa dona (Domus) mantém-se a dona: a cadeia só acrescenta quem VÊ.
+        assert _processo(db)["network_id"] == REDE_DOMUS
 
     def test_destino_invalido_e_400(self, cliente_http):
         c, _db = cliente_http

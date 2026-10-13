@@ -21,7 +21,11 @@ describe("parceirosDoProcesso", () => {
         { company_id: "cmp-domus", company_name: "Domus", network_id: "grupo_domus", added_at: "2026-10-09T10:00:00Z", added_by: "u1" },
       ],
     });
-    expect(res).toEqual([{ id: "cmp-domus", nome: "Domus", desde: "2026-10-09T10:00:00Z" }]);
+    expect(res).toEqual([{
+      id: "cmp-domus", nome: "Domus", desde: "2026-10-09T10:00:00Z",
+      // Sem linhagem (servidor antigo) não se sabe de quem veio nem se se pode retirar.
+      partilhadoPor: null, podeRevogar: null,
+    }]);
   });
 
   it.each([undefined, null, {}, { partner_companies: null }, { partner_companies: {} }, { partner_companies: [] }])(
@@ -97,5 +101,55 @@ describe("efeitoDaPartilha / nomeDoDestino", () => {
     expect(nomeDoDestino({ empresas: ["A", "B"], network_id: "x" })).toBe("A / B");
     expect(nomeDoDestino({ empresas: {}, network_id: "x" })).toBe("x");
     expect(nomeDoDestino(null)).toBe("");
+  });
+});
+
+
+describe("parceirosDoProcesso com a cadeia (linhagem do servidor)", () => {
+  const processo = {
+    partner_companies: [
+      { company_id: "cmp-z", company_name: "Empresa Z", added_at: "2026-10-01T10:00:00Z" },
+      { company_id: "cmp-w", company_name: "Empresa W", added_at: "2026-10-02T10:00:00Z" },
+    ],
+    linhagem: {
+      partilhas: [
+        { company_id: "cmp-z", nome: "Empresa Z", partilhado_por: "Empresa Y", nivel: 2, pode_revogar: false },
+        { company_id: "cmp-w", nome: "Empresa W", partilhado_por: "Empresa Z", nivel: 3, pode_revogar: true },
+      ],
+    },
+  };
+
+  it("cada elo traz de quem veio e se o utilizador o pode retirar", () => {
+    const [z, w] = parceirosDoProcesso(processo);
+    expect(z).toMatchObject({ nome: "Empresa Z", partilhadoPor: "Empresa Y", podeRevogar: false });
+    expect(w).toMatchObject({ nome: "Empresa W", partilhadoPor: "Empresa Z", podeRevogar: true });
+  });
+
+  it("o botão não se desenha para o elo que o servidor diz que não é meu", () => {
+    const [z, w] = parceirosDoProcesso(processo);
+    expect(sePodeRevogar(z)).toBe(false);
+    expect(sePodeRevogar(w)).toBe(true);
+  });
+
+  it("sem a informação do servidor o botão continua a depender só de haver id", () => {
+    const [semInfo] = parceirosDoProcesso({ partner_companies: processo.partner_companies });
+    expect(sePodeRevogar(semInfo)).toBe(true);
+  });
+
+  it("só o booleano estrito do servidor conta; texto vira «não sei»", () => {
+    const [p] = parceirosDoProcesso({
+      partner_companies: [{ company_id: "cmp-z", company_name: "Z" }],
+      linhagem: { partilhas: [{ company_id: "cmp-z", pode_revogar: "false", partilhado_por: "  " }] },
+    });
+    expect(p.podeRevogar).toBeNull();
+    expect(p.partilhadoPor).toBeNull();
+    expect(sePodeRevogar(p)).toBe(true);
+  });
+
+  it("uma linhagem com a forma errada não rebenta (Array.isArray)", () => {
+    expect(() => parceirosDoProcesso({
+      partner_companies: [{ company_id: "a", company_name: "A" }],
+      linhagem: { partilhas: { 0: {} } },
+    })).not.toThrow();
   });
 });

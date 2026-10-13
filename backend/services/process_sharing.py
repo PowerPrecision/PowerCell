@@ -41,6 +41,27 @@ O QUE A PARTILHA É, E O QUE NÃO É
 * **Visível e auditada.** A abertura de uma fronteira deixa entrada no
   trilho, no histórico do processo e na etiqueta da listagem.
 
+PARTILHA EM CADEIA (Out 2026)
+-----------------------------
+Quem VÊ o processo pode passá-lo à frente: a empresa de destino (Y) partilha com
+a Z sem aprovação do parceiro angariador nem da casa dona, e a Z pode passar à W —
+uma cadeia contínua (Parceiro → Y → Z → W…). Para a cadeia não perder a origem,
+cada entrada do registo guarda DE QUEM veio (`shared_from_network`,
+`shared_from_company_name`) e a que distância da casa dona está (`depth`: 1 = a
+casa dona partilhou, 2 = uma convidada de nível 1 partilhou…). A **linhagem** que
+o ecrã mostra deriva daqui (`process_lineage`) e nunca é gravada: uma cópia
+divergia no dia em que se revogasse um elo.
+
+* O registo continua a ser PLANO (uma entrada por rede com acesso) — é o que a
+  condição Mongo indexa; a árvore reconstrói-se pelo `shared_from_network`.
+  Entradas antigas, sem o campo, são da casa dona (foi a única que partilhou até
+  aqui).
+* **Revogar um elo revoga os que dele derivam** (`revogar_parceiro`): deixar a W
+  a ver um processo cujo caminho até ela foi cortado seria uma fuga com ar de
+  esquecimento.
+* A casa dona retira qualquer elo; uma convidada só retira os que ela (ou quem
+  dela deriva) abriu.
+
 As DUAS listas derivam uma da outra
 -----------------------------------
 `partner_companies` é o REGISTO (quem, quando, por ordem de quem) e é o
@@ -73,6 +94,10 @@ CAMPOS_DO_PARCEIRO = (
     "network_id",
     "added_at",
     "added_by",
+    # Cadeia (Out 2026): de quem veio e a que distância da casa dona.
+    "shared_from_network",
+    "shared_from_company_name",
+    "depth",
 )
 
 
@@ -254,6 +279,50 @@ async def empresas_da_rede(network_id: str) -> list[dict]:
     )
 
 
+def rede_de_origem_da_entrada(entrada: dict, rede_dona: str) -> str:
+    """A rede de quem abriu este elo. Entradas antigas (sem o campo) são da casa dona."""
+    return _texto((entrada or {}).get("shared_from_network")) or _texto(rede_dona)
+
+
+def profundidade_do_elo(registo: list[dict], rede_de_quem_partilha: str, rede_dona: str) -> int:
+    """Nível do elo novo: 1 se partilha a casa dona; senão o nível do elo de quem partilha + 1.
+
+    Se quem partilha não está no registo (um Master a agir por uma rede) conta como
+    nível 2 — nunca como 1, que seria mentir sobre a distância da casa dona.
+    """
+    if not rede_de_quem_partilha or rede_de_quem_partilha == _texto(rede_dona):
+        return 1
+    for entrada in registo:
+        if _texto(entrada.get(CAMPO_REDE)) == rede_de_quem_partilha:
+            try:
+                return int(entrada.get("depth") or 1) + 1
+            except (TypeError, ValueError):
+                return 2
+    return 2
+
+
+def elo_e_meu(registo: list, entrada: dict, minhas_redes: set, rede_dona: str) -> bool:
+    """Este elo foi aberto por uma das minhas redes, ou por quem deriva delas?
+
+    Sobe a cadeia a partir do elo: se algum antepassado foi aberto por uma rede minha,
+    o elo é "meu" (retirá-lo é retirar uma ramificação do que eu abri). Os elos da
+    casa dona e os de uma convidada irmã nunca são meus.
+    """
+    por_rede = {_texto(e.get(CAMPO_REDE)): e for e in registo}
+    visto: set = set()
+    actual = entrada
+    while actual is not None:
+        origem = rede_de_origem_da_entrada(actual, rede_dona)
+        if origem in minhas_redes and origem != _texto(rede_dona):
+            return True
+        rede = _texto(actual.get(CAMPO_REDE))
+        if rede in visto:  # defesa: um ciclo no registo não pode prender o pedido
+            return False
+        visto.add(rede)
+        actual = por_rede.get(origem)
+    return False
+
+
 async def partilhar_com_rede(
     process_id: str,
     network_id: str,
@@ -261,6 +330,7 @@ async def partilhar_com_rede(
     via_verde: Optional[bool] = None,
     por_ordem_de: Any = None,
     registar_historico=None,
+    partilhado_por: Optional[dict] = None,
 ) -> dict:
     """Envia um processo para uma rede de destino ESCOLHIDA (multi-fornecedor).
 
@@ -271,6 +341,10 @@ async def partilhar_com_rede(
 
     `via_verde` é gravada no processo ANTES da triagem (a triagem lê-a do
     documento); `None` mantém o que lá está.
+
+    `partilhado_por` (`{"network_id", "company_name"}`) diz QUEM abre o elo: a casa dona
+    (omissão) ou uma convidada que passa o processo à frente (cadeia). Fica no registo
+    — é o que permite reconstruir a linhagem sem perder a origem.
 
     Levanta `DestinoInvalido` para um destino que não serve. Devolve
     `{partilhado, ja_partilhado, rede, empresas, triagem, destino_tem_index}`.
@@ -306,12 +380,20 @@ async def partilhar_com_rede(
 
     registo = parceiros_do_processo(processo)
     ja_partilhado = destino in redes_do_registo(registo)
+    rede_dona = _texto(processo.get(CAMPO_REDE))
+    quem = partilhado_por or {}
+    rede_de_quem = _texto(quem.get(CAMPO_REDE)) or rede_dona
+    if rede_de_quem == destino:
+        raise DestinoInvalido("Não pode partilhar um processo com a própria rede.")
     nova = {
         "company_id": _texto(empresas[0].get("id")),
         "company_name": " / ".join(_texto(e.get("name")) for e in empresas if _texto(e.get("name"))),
         CAMPO_REDE: destino,
         "added_at": _agora(),
         "added_by": _texto(por_ordem_de),
+        "shared_from_network": rede_de_quem,
+        "shared_from_company_name": _texto(quem.get("company_name")),
+        "depth": profundidade_do_elo(registo, rede_de_quem, rede_dona),
     }
     if not ja_partilhado:
         novo_registo = [*registo, nova]
@@ -390,7 +472,22 @@ async def revogar_parceiro(
     if not retiradas:
         return []
 
-    sobram = [e for e in registo if not _e_o_alvo(e)]
+    # CADEIA: revogar um elo revoga os que dele derivam. Deixar a W a ver um processo
+    # cujo caminho até ela foi cortado seria uma fuga com ar de esquecimento.
+    redes_retiradas = {_texto(e.get(CAMPO_REDE)) for e in retiradas}
+    pendentes = list(redes_retiradas)
+    while pendentes:
+        rede = pendentes.pop()
+        for filha in registo:
+            rede_filha = _texto(filha.get(CAMPO_REDE))
+            if rede_filha in redes_retiradas:
+                continue
+            if _texto(filha.get("shared_from_network")) == rede:
+                redes_retiradas.add(rede_filha)
+                retiradas.append(filha)
+                pendentes.append(rede_filha)
+
+    sobram = [e for e in registo if _texto(e.get(CAMPO_REDE)) not in redes_retiradas]
     await db.processes.update_one(
         {"id": process_id},
         {"$set": {
@@ -507,6 +604,9 @@ __all__ = [
     "partilhar_com_rede",
     "esta_partilhado",
     "etiquetas_da_partilha",
+    "elo_e_meu",
+    "profundidade_do_elo",
+    "rede_de_origem_da_entrada",
     "parceiros_do_processo",
     "redes_do_registo",
     "revogar_parceiro",

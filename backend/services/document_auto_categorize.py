@@ -145,6 +145,7 @@ async def auto_categorize_document_background(
     s3_path: str,
     filename: str,
     file_content: bytes,
+    satisfazer_pedidos: bool = True,
 ):
     """
     Categoriza automaticamente um documento com IA em background,
@@ -152,6 +153,10 @@ async def auto_categorize_document_background(
 
     Também executa OCR de entidades (Nome, NIF, Morada, Validade) quando
     a categoria sugere identificação/fiscal.
+
+    ``satisfazer_pedidos=False`` (uploads do Portal do Cliente): o cliente já declarou
+    a que pedido o ficheiro responde e o servidor já o tratou; deixar a IA tentar
+    satisfazer outro pedido pendente com o MESMO ficheiro dava-o duas vezes.
 
     Nunca propaga excepções (tarefa de background resiliente).
     """
@@ -255,6 +260,9 @@ async def auto_categorize_document_background(
         # Após categorização IA, tentar satisfazer pedido portal pendente
         # (útil quando o upload staff foi para Index/Outros e só agora há categoria)
         try:
+            if not satisfazer_pedidos:
+                logger.info("[AUTO-CAT] Concluída sem satisfazer pedidos (upload do Portal)")
+                return
             from services.document_portal_fulfill import (
                 fulfill_portal_requests_on_staff_upload,
             )

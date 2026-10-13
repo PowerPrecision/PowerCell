@@ -370,6 +370,11 @@ class PublicClientRegistration(BaseModel):
     personal_data: Optional[dict] = None
     real_estate_data: Optional[dict] = None
     titular2_data: Optional[dict] = None
+    # Passos 4–5 do formulário (situação financeira). O frontend sempre os enviou e o
+    # DTO não os declarava: o Pydantic descartava-os em silêncio e o cliente ficava com
+    # `dados_financeiros` vazio — sem nada para o perfil do Portal mostrar nem para o
+    # processo herdar na criação (Out 2026).
+    financial_data: Optional[dict] = None
     empresa_id: Optional[str] = Field(
         None, max_length=100,
         description="Identificador da empresa do link de registo (`?empresa=`): o formulário é por rede.",

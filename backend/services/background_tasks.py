@@ -53,3 +53,16 @@ def spawn_background_task(
 def pending_background_tasks() -> int:
     """Número de tarefas background registadas e ainda em curso."""
     return len(_background_tasks)
+
+
+async def aguardar_tarefas_pendentes() -> None:
+    """Espera que as tarefas registadas terminem (usado por testes e no encerramento).
+
+    Nunca levanta: o resultado/excepção de cada tarefa é assunto dela.
+    """
+    # Só as do loop corrente: uma task que sobrou de outro loop (já fechado) não se pode
+    # esperar daqui — `gather` levanta «future belongs to a different loop».
+    loop = asyncio.get_running_loop()
+    pendentes = [t for t in _background_tasks if t.get_loop() is loop and not t.done()]
+    if pendentes:
+        await asyncio.gather(*pendentes, return_exceptions=True)

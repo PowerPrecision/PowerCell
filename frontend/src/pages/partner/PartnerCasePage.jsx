@@ -176,7 +176,7 @@ export default function PartnerCasePage() {
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-bold">{caso.client_name || "Sem nome"}</h1>
           <p className="text-sm text-muted-foreground">
-            {[caso.process_number, caso.consultor_name && `Consultor: ${caso.consultor_name}`, `Actualizado em ${formatarData(caso.updated_at)}`]
+            {[caso.process_number, caso.empresa_actual && `Está em ${caso.empresa_actual}`, caso.consultor_name && `Consultor: ${caso.consultor_name}`, `Actualizado em ${formatarData(caso.updated_at)}`]
               .filter(Boolean).join(" · ")}
           </p>
         </div>

@@ -25,6 +25,7 @@ import { AIBadge, getFieldMeta, buildManualMetadata } from "../components/ui/AIB
 import { alteracoesDeTexto, estaVazio } from "../utils/camposLimpos";
 import {
   ArrowLeft,
+  ArrowRightLeft,
   User,
   Users,
   Phone,
@@ -51,6 +52,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { getClient, getClientFiles, updateClient, restoreClient } from "../services/api";
+import { useAuth } from "../contexts/AuthContext";
+import { isMaster } from "../utils/roleUtils";
+import TransferirClienteDialog from "../components/clients/TransferirClienteDialog";
 import { formatFonteLabel } from "../utils/fonteLabels";
 import { pt } from "date-fns/locale";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
@@ -262,6 +266,9 @@ export default function ClientDetailPage() {
   const [editForm, setEditForm] = useState({ nome: "", nif: "", email: "", telefone: "" });
   // PACOTE 11 (Eixo 4) — restauro rápido: estado do botão do banner
   const [restoring, setRestoring] = useState(false);
+  // «Alterar Empresa»: só a CONTA Master (o servidor exige-o e pede a password).
+  const { user: sessao } = useAuth();
+  const [transferirAberto, setTransferirAberto] = useState(false);
 
   // PACOTE 11 (Eixo 4) — Proteção Soft-Delete: quando o registo está
   // eliminado (is_deleted/deleted/status 'eliminado'), TODOS os inputs e
@@ -545,6 +552,19 @@ export default function ClientDetailPage() {
               <Pencil className="h-4 w-4" />
               Editar Cliente
             </Button>
+            {isMaster(sessao) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setTransferirAberto(true)}
+                disabled={isDeletedClient}
+                title="Mover o cliente (e os processos dele) para outra empresa"
+                className="gap-2 transition-colors duration-200"
+              >
+                <ArrowRightLeft className="h-4 w-4" />
+                Alterar Empresa
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -1048,6 +1068,20 @@ export default function ClientDetailPage() {
           </DialogContent>
         </Dialog>
       </div>
+      {isMaster(sessao) && (
+        <TransferirClienteDialog
+          open={transferirAberto}
+          onOpenChange={setTransferirAberto}
+          clientId={id}
+          empresaActual={client?.company_name}
+          onSucesso={(resposta) => {
+            toast.success(
+              `Cliente transferido para ${resposta?.empresa?.company_name || "a empresa escolhida"}.`,
+            );
+            fetchClientData();
+          }}
+        />
+      )}
     </DashboardLayout>
   );
 }

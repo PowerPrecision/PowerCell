@@ -119,12 +119,14 @@ def build_portal_access_payload(
 
 async def anexar_permissao_de_ia(process: dict, user: dict, request) -> None:
     """`pode_usar_ia_documentos`: a resposta do SERVIDOR à pergunta «este utilizador
-    pode usar a IA sobre os documentos deste processo?», calculada ao servir.
+    pode usar a IA manual sobre os documentos deste processo?», calculada ao servir.
 
-    É a MESMA função que as rotas de IA aplicam (`document_ai_access`), para o
-    botão e o 403 nunca divergirem — o ecrã não tem cópia da lista de campos de
-    atribuição. Nunca levanta: sem resposta o ecrã esconde o botão (e o servidor
-    continua a ser a parede).
+    É a MESMA função que as rotas de IA aplicam (`document_ai_access`: só os altos
+    perfis, dentro da fronteira de rede), para o botão e o 403 nunca divergirem.
+    Nunca levanta. Se a pergunta falha o campo FICA POR PREENCHER: o ecrã então
+    decide só pelo cargo (que já exclui os perfis operacionais) — um `False` por
+    erro tiraria o botão à gestão por um soluço da base de dados — e o servidor
+    continua a ser a parede.
     """
     try:
         from services.document_ai_access import pode_usar_ia_no_processo
@@ -134,7 +136,7 @@ async def anexar_permissao_de_ia(process: dict, user: dict, request) -> None:
         )
     except Exception as exc:  # pragma: no cover — degradação graciosa
         logger.warning("[DOCS-IA] Não foi possível calcular a permissão de IA: %s", exc)
-        process["pode_usar_ia_documentos"] = False
+        process.pop("pode_usar_ia_documentos", None)
 
 
 async def run_get_process_detail(
@@ -158,6 +160,14 @@ async def run_get_process_detail(
     from services.process_owner import anexar_empresa_dona
 
     await anexar_empresa_dona(process, user)
+    # Linhagem Parceiro → Y → Z (partilha em cadeia): deriva do registo de partilhas,
+    # nunca gravada. Depois da empresa dona, de onde tira o nome da casa dona.
+    from services.process_lineage import anexar_linhagem
+
+    await anexar_linhagem(
+        process, user,
+        casa_dona=str((process.get("empresa_dona") or {}).get("company_name") or ""),
+    )
     await anexar_permissao_de_ia(process, user, request)
     return serialize_process_detail_response(process, process_id)
 

@@ -241,6 +241,7 @@ import ProcessLabelsEditor from "../components/processDetails/ProcessLabelsEdito
 import ProcessSummaryTimeline from "../components/processDetails/ProcessSummaryTimeline";
 import { PageHeader } from "../components/shared/PageHeader";
 import EmpresaDonaTag from "../components/processDetails/EmpresaDonaTag";
+import LinhagemDoProcesso from "../components/processDetails/LinhagemDoProcesso";
 // Ponto 17 — Navegação Contígua. O hook resolve os vizinhos a partir do
 // contexto que a listagem trouxe (zero pedidos) e só pergunta ao
 // servidor na fronteira da página.
@@ -2435,6 +2436,8 @@ const ProcessDetails = () => {
                   ) : null}
                   {headerConsultor ? <span>Consultor: {headerConsultor}</span> : null}
                   <EmpresaDonaTag empresaDona={process?.empresa_dona} />
+                  {/* Partilha em cadeia: Parceiro → Y → Z (só quando há mais do que a casa dona). */}
+                  <LinhagemDoProcesso linhagem={process?.linhagem} />
                   {/* Ponto 15 — as etiquetas deixam de ser só crachás.
                       O PACOTE DD removeu o cartão de Etiquetas e prometeu
                       um Dialog no botão "+" que nunca foi construído: o
@@ -2632,7 +2635,7 @@ const ProcessDetails = () => {
                       onClick={async () => {
                         try {
                           await sendMagicLinkEmail(id);
-                          toast.success("Email enviado com o link do portal!");
+                          toast.success("A enviar o email com o link do portal. Será avisado se não sair.");
                         } catch (error) {
                           // 404 («processo eliminado»), 400 (sem remetente), 502 e 500: um
                           // só aviso, com o motivo do servidor — e o toast «retry agendado»
@@ -3211,16 +3214,24 @@ const ProcessDetails = () => {
               podeRevogar={podeRevogarPartilha(effectiveRole)}
               podePartilhar={podePartilharProcesso(effectiveRole)}
               processoFechado={isProcessLocked}
-              onRevoked={(restantes) => setProcess((prev) => ({
-                ...prev,
-                partner_companies: restantes,
-                partner_network_ids: restantes.map((p) => p.network_id).filter(Boolean),
-              }))}
-              onShared={(parceirosActuais) => setProcess((prev) => ({
-                ...prev,
-                partner_companies: parceirosActuais,
-                partner_network_ids: parceirosActuais.map((p) => p.network_id).filter(Boolean),
-              }))}
+              onRevoked={(restantes) => {
+                setProcess((prev) => ({
+                  ...prev,
+                  partner_companies: restantes,
+                  partner_network_ids: restantes.map((p) => p.network_id).filter(Boolean),
+                }));
+                // A linhagem e o que cada um pode retirar vêm do servidor: revogar um elo
+                // revoga os que dele derivam, e só o servidor sabe quais.
+                fetchData();
+              }}
+              onShared={(parceirosActuais) => {
+                setProcess((prev) => ({
+                  ...prev,
+                  partner_companies: parceirosActuais,
+                  partner_network_ids: parceirosActuais.map((p) => p.network_id).filter(Boolean),
+                }));
+                fetchData();
+              }}
             />
 
             {/* Bloco 4, ponto 7 — a quem se atribui o negócio (comissões).

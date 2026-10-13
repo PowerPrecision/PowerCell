@@ -27,6 +27,7 @@ from fastapi import HTTPException
 import services.client_portal_email as cpe
 import services.portal_email_context as pec
 import services.portal_magic_link as pml
+from services.background_tasks import aguardar_tarefas_pendentes
 
 REDE_OMISSAO = "grupo_power_precision"
 REDE_DOMUS = "grupo_domus"
@@ -83,9 +84,16 @@ async def _enviar(db, efeitos, *, conta_de_sistema=None, processo=None):
          patch.object(pml, "issue_portal_magic_link", efeitos.emitir), \
          patch("services.history.log_history", efeitos.historico), \
          patch("services.email_service.send_email", efeitos.enviar):
-        return await pml.send_magic_link_to_client(
+        resposta = await pml.send_magic_link_to_client(
             process_id="p1", process=processo or PROCESSO_DOMUS, user=UTILIZADOR, request=_Pedido(),
         )
+        # A entrega corre em segundo plano (Lote 2): espera-se DENTRO dos patches.
+        await aguardar_tarefas_pendentes()
+        return resposta
+
+
+def _notificacoes(db):
+    return [n for n in db.notifications.docs if n.get("type") == "email_failed"]
 
 
 @pytest.mark.asyncio
@@ -147,9 +155,12 @@ class TestRedeSemRemetente:
     async def test_a_falha_so_depois_do_envio_nao_deixa_historico(self, ambiente):
         efeitos = _Efeitos()
         efeitos.enviar.return_value = {"success": False, "error": "boom", "error_code": "outro"}
-        with pytest.raises(HTTPException) as erro:
-            await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
-        assert erro.value.status_code == 502
+        resposta = await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
+        # O pedido já não espera pela entrega: responde de imediato e a falha chega
+        # ao utilizador como notificação.
+        assert resposta["queued"] is True
+        assert len(_notificacoes(ambiente)) == 1
+        assert "boom" in _notificacoes(ambiente)[0]["message"]
         efeitos.historico.assert_not_awaited(), "«Enviou o link» não descreve um envio que falhou"
 
 
@@ -159,26 +170,27 @@ class TestFalhasDeConfiguracaoDaConta:
     async def test_credenciais_recusadas_sao_400_nao_500(self, ambiente, codigo):
         efeitos = _Efeitos()
         efeitos.enviar.return_value = {"success": False, "error": "535 recusado", "error_code": codigo}
-        with pytest.raises(HTTPException) as erro:
-            await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
-        assert erro.value.status_code == 400
-        assert "Contas de Email" in erro.value.detail
+        await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
+        avisos = _notificacoes(ambiente)
+        assert len(avisos) == 1
+        assert "Contas de Email" in avisos[0]["message"]
+        efeitos.historico.assert_not_awaited()
 
     async def test_smtp_nao_configurado_devolvido_pelo_envio_e_400(self, ambiente):
         efeitos = _Efeitos()
         efeitos.enviar.return_value = {"success": False, "error": "x", "error_code": "SMTP_NOT_CONFIGURED"}
         processo = {**PROCESSO_DOMUS, "network_id": REDE_OMISSAO, "company_id": "cmp-power", "company_name": "Power"}
-        with pytest.raises(HTTPException) as erro:
-            await _enviar(ambiente, efeitos, processo=processo)
-        assert erro.value.status_code == 400
+        await _enviar(ambiente, efeitos, processo=processo)
+        assert len(_notificacoes(ambiente)) == 1
+        efeitos.historico.assert_not_awaited()
 
     async def test_uma_excepcao_do_servico_de_email_e_502_nao_500(self, ambiente):
         efeitos = _Efeitos()
         efeitos.enviar.side_effect = RuntimeError("rede em baixo")
-        with pytest.raises(HTTPException) as erro:
-            await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
-        assert erro.value.status_code == 502
-        assert "Contas de Email" in erro.value.detail
+        resposta = await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
+        assert resposta["queued"] is True  # a excepção do serviço de email já não rebenta o pedido
+        avisos = _notificacoes(ambiente)
+        assert len(avisos) == 1 and "Contas de Email" in avisos[0]["message"]
         efeitos.historico.assert_not_awaited()
 
 
@@ -247,9 +259,11 @@ class TestNenhumaExcepcaoDoServicoDeEmailFura:
              patch.object(pml, "issue_portal_magic_link", efeitos.emitir), \
              patch("services.history.log_history", efeitos.historico), \
              patch("services.email_service.send_email", efeitos.enviar):
-            return await pml.send_magic_link_to_client(
+            resposta = await pml.send_magic_link_to_client(
                 process_id="p1", process=processo or PROCESSO_DOMUS, user=UTILIZADOR, request=_Pedido(),
             )
+            await aguardar_tarefas_pendentes()
+            return resposta
 
     async def test_porta_smtp_ilegivel_na_config_de_sistema_e_400_nao_excepcao(self, ambiente):
         efeitos = _Efeitos()
@@ -308,3 +322,56 @@ class TestNenhumaExcepcaoDoServicoDeEmailFura:
         resposta = await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
         assert resposta["success"] is True
         efeitos.enviar.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+class TestOEnvioNaoBloqueiaOPedido:
+    """Lote 2 (Out 2026): o SMTP pendurado fazia o pedido esperar até ao 502 do proxy."""
+
+    async def test_o_pedido_responde_sem_esperar_pela_entrega(self, ambiente):
+        import asyncio
+
+        efeitos = _Efeitos()
+        libertar = asyncio.Event()
+
+        async def envio_lento(*a, **k):
+            await libertar.wait()
+            return {"success": True}
+
+        efeitos.enviar.side_effect = envio_lento
+        with patch.object(pec, "db", ambiente), patch.object(pml, "db", ambiente), \
+             patch.object(pec, "_conta_de_sistema_generica", AsyncMock(return_value=_conta("no-reply@sistema.pt"))), \
+             patch.object(pml, "ensure_portal_access_code", efeitos.codigo), \
+             patch.object(pml, "issue_portal_magic_link", efeitos.emitir), \
+             patch("services.history.log_history", efeitos.historico), \
+             patch("services.email_service.send_email", efeitos.enviar):
+            resposta = await asyncio.wait_for(
+                pml.send_magic_link_to_client(
+                    process_id="p1", process=PROCESSO_DOMUS, user=UTILIZADOR, request=_Pedido(),
+                ),
+                timeout=2,
+            )
+            assert resposta["success"] is True and resposta["queued"] is True
+            efeitos.historico.assert_not_awaited()  # ainda nada saiu
+            libertar.set()
+            await aguardar_tarefas_pendentes()
+        efeitos.historico.assert_awaited_once()
+        assert not _notificacoes(ambiente)
+
+    async def test_cliente_sem_email_continua_a_ser_400_imediato(self, ambiente):
+        efeitos = _Efeitos()
+        with pytest.raises(HTTPException) as erro:
+            await _enviar(
+                ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"),
+                processo={**PROCESSO_DOMUS, "client_email": ""},
+            )
+        assert erro.value.status_code == 400
+        efeitos.enviar.assert_not_awaited()
+
+    async def test_a_falha_da_entrega_avisa_quem_pediu_e_so_ele(self, ambiente):
+        efeitos = _Efeitos()
+        efeitos.enviar.return_value = {"success": False, "error": "relay recusado", "error_code": "x"}
+        await _enviar(ambiente, efeitos, conta_de_sistema=_conta("no-reply@sistema.pt"))
+        avisos = _notificacoes(ambiente)
+        assert [a["user_id"] for a in avisos] == [UTILIZADOR["id"]]
+        assert avisos[0]["process_id"] == "p1" and avisos[0]["read"] is False

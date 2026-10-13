@@ -682,6 +682,7 @@ async def send_email(
     references: Optional[List[str]] = None,
     from_name_override: Optional[str] = None,
     use_system_signature: bool = True,
+    smtp_timeout: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
@@ -1206,7 +1207,7 @@ async def send_email(
                     account.smtp_server,
                     account.smtp_port,
                     context=context,
-                    timeout=get_smtp_connect_timeout(),
+                    timeout=smtp_timeout if smtp_timeout and smtp_timeout > 0 else get_smtp_connect_timeout(),
                 ) as server:
                     server.login(account.email, smtp_password)
 

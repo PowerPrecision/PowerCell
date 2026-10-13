@@ -28,6 +28,7 @@ from database import db
 # com o resto do serviço, antes de qualquer teste patchar o que quer que seja.
 from services import phase_automation
 from services.task_assignment_hygiene import normalizar_assigned_to
+from services.tenant_network import PROJECCAO_DO_CARIMBO
 
 logger = logging.getLogger(__name__)
 
@@ -255,16 +256,31 @@ async def execute_action(rule: dict, context: dict) -> bool:
             message = message.replace("{process_id}", context.get("process_id", ""))
             
             if config.get("target_role"):
-                # Notificar todos os utilizadores com esse role
-                from services.role_query import deep_role_filter
-                users = await db.users.find(
-                    {"$and": [deep_role_filter(config["target_role"]), {"is_active": {"$ne": False}}]},
-                    {"_id": 0, "id": 1}
-                ).to_list(20)
-                for user in users:
+                # Notificar os utilizadores com esse role DA REDE DO PROCESSO. A mensagem
+                # leva o nome do cliente: sem este filtro, uma regra da Power notificava
+                # (com esse nome) quem tem o mesmo cargo na Domus (Lote 2, Out 2026).
+                # Sem rede determinável não se notifica ninguém (falha fechada).
+                from services.alert_audience import gestao_da_rede_do_processo
+
+                processo = None
+                if context.get("process_id"):
+                    processo = await db.processes.find_one(
+                        {"id": context["process_id"]},
+                        {"_id": 0, "id": 1, **PROJECCAO_DO_CARIMBO},
+                    )
+                destinatarios = (
+                    await gestao_da_rede_do_processo(processo, [str(config["target_role"])])
+                    if processo else []
+                )
+                if not destinatarios:
+                    logger.warning(
+                        "[WORKFLOW] Regra '%s': sem destinatários do cargo %r na rede do processo %s.",
+                        rule.get("name"), config["target_role"], context.get("process_id"),
+                    )
+                for user_id in destinatarios[:20]:
                     await db.notifications.insert_one({
                         "id": str(uuid.uuid4()),
-                        "user_id": user["id"],
+                        "user_id": user_id,
                         "message": message,
                         "type": "automation",
                         "process_id": context.get("process_id"),

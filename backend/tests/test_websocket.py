@@ -137,11 +137,16 @@ class TestRealtimeNotifications:
         assert callable(send_realtime_notification)
     
     @pytest.mark.asyncio
-    async def test_broadcast_function_exists(self):
-        """Test broadcast function exists."""
-        from services.realtime_notifications import broadcast_notification
-        
-        assert callable(broadcast_notification)
+    async def test_no_system_wide_broadcast_notification(self):
+        """Lote 2 (Out 2026): a difusão por cargo a TODO o sistema foi apagada.
+
+        Notificava todos os utilizadores com um cargo, de todas as redes, e não
+        tinha chamadores. Quem precisa de notificar uma audiência usa a do
+        processo (`alert_audience`).
+        """
+        import services.realtime_notifications as rn
+
+        assert not hasattr(rn, "broadcast_notification")
     
     @pytest.mark.asyncio
     async def test_notify_process_update_exists(self):

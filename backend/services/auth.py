@@ -420,6 +420,18 @@ async def get_current_user(
             )
             user["effective_role"] = _jwt_primary_role(user)
 
+        # A empresa que o Master tem seleccionada é a VISTA das listagens
+        # (`tenant_network.resolve_vista_scope`). Só para a conta Master.
+        try:
+            from services.role_scope import conta_e_master
+
+            if request is not None and conta_e_master(user):
+                vista = (request.headers.get("X-Company-Id") or "").strip()
+                if vista and vista.lower() not in {"default", "all"}:
+                    user["vista_empresa_id"] = vista
+        except Exception as exc:  # noqa: BLE001 - a vista nunca derruba a autenticação
+            logger.warning("[get_current_user] Falha a ler a vista da empresa: %s", exc)
+
         # Controlo de histórico (Bloco 1, ponto 4): a política por PERFIL
         # EFECTIVO aplica-se aqui, onde o perfil já está resolvido, para que
         # o `_is_stealth_user` (puro e síncrono) continue a ser a única regra.

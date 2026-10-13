@@ -59,6 +59,14 @@ export function podeRevogarPartilha(papel) {
 export function parceirosDoProcesso(processo) {
   const registo = processo?.partner_companies;
   if (!Array.isArray(registo)) return [];
+  // Cadeia (Out 2026): o servidor diz DE QUEM veio cada elo e se o utilizador o pode
+  // retirar (`linhagem.partilhas`). Sem a linhagem (sessão/servidor antigos) fica `null`:
+  // não se sabe, e o botão volta a depender só do papel — o servidor recusa na mesma.
+  const extras = new Map();
+  for (const p of Array.isArray(processo?.linhagem?.partilhas) ? processo.linhagem.partilhas : []) {
+    const chave = String(p?.company_id ?? "").trim() || String(p?.nome ?? "").trim();
+    if (chave) extras.set(chave, p);
+  }
   const vistos = new Set();
   const parceiros = [];
   for (const entrada of registo) {
@@ -67,16 +75,26 @@ export function parceirosDoProcesso(processo) {
     const chave = id || nome;
     if (!chave || vistos.has(chave)) continue;
     vistos.add(chave);
+    const extra = extras.get(chave);
     parceiros.push({
       id,
       nome: nome || id,
       desde: typeof entrada?.added_at === "string" ? entrada.added_at : null,
+      partilhadoPor: typeof extra?.partilhado_por === "string" && extra.partilhado_por.trim()
+        ? extra.partilhado_por.trim()
+        : null,
+      // Só o booleano estrito do servidor conta; qualquer outra coisa é «não sei».
+      podeRevogar: typeof extra?.pode_revogar === "boolean" ? extra.pode_revogar : null,
     });
   }
   return parceiros;
 }
 
-/** Sem `company_id` não há como revogar: o botão não se desenha. */
+/**
+ * Sem `company_id` não há como revogar: o botão não se desenha. E com a cadeia, uma
+ * convidada só retira os elos que abriu: se o servidor disse `pode_revogar: false`, o
+ * botão não se desenha (em vez de aparecer para devolver um 403).
+ */
 export function sePodeRevogar(parceiro) {
-  return Boolean(parceiro?.id);
+  return Boolean(parceiro?.id) && parceiro?.podeRevogar !== false;
 }
