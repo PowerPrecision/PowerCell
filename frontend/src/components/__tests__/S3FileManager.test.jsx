@@ -311,19 +311,18 @@ describe("S3FileManager — ferramentas de IA são de gestão", () => {
   });
 });
 
-describe("S3FileManager — IA para quem trata do processo (rede satélite)", () => {
-  // Processo da Power partilhado com a Precision: o consultor atribuído na rede de destino
-  // não é «gestão», mas o servidor diz que pode (`pode_usar_ia_documentos`). Antes o botão
-  // não aparecia a ninguém que não fosse admin/CEO/diretor.
-  it("o consultor ATRIBUÍDO (o servidor diz que pode) vê Analisar e Renomear IA", async () => {
+describe("S3FileManager — IA manual só para os altos perfis", () => {
+  // Decisão da direcção (custos da API): o consultor/intermediário atribuído NÃO tem as
+  // ferramentas, mesmo que o servidor tivesse (por engano ou sessão antiga) dito `true`.
+  it("o consultor ATRIBUÍDO não vê Analisar nem Renomear IA, nem com podeUsarIA=true", async () => {
     montar(utilizador(), { podeUsarIA: true });
     await aguardarCarregado();
 
-    expect(await screen.findByTestId("ai-analyze-btn")).toBeInTheDocument();
-    expect(screen.getByTestId("smart-rename-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("ai-analyze-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("smart-rename-btn")).not.toBeInTheDocument();
   });
 
-  it("o consultor NÃO atribuído (servidor diz false) continua sem as ferramentas", async () => {
+  it("o consultor NÃO atribuído continua sem as ferramentas", async () => {
     montar(utilizador(), { podeUsarIA: false });
     await aguardarCarregado();
 
@@ -331,7 +330,19 @@ describe("S3FileManager — IA para quem trata do processo (rede satélite)", ()
     expect(screen.queryByTestId("smart-rename-btn")).not.toBeInTheDocument();
   });
 
-  it("o servidor não responder NÃO tira o botão à gestão (nunca pior do que antes)", async () => {
+  it("o diretor vê as ferramentas quando o servidor não responde", async () => {
+    montar(
+      utilizador({
+        user: { id: "u-3", name: "Diana", role: "diretor" },
+        effectiveRole: "diretor",
+      }),
+    );
+    await aguardarCarregado();
+
+    expect(await screen.findByTestId("ai-analyze-btn")).toBeInTheDocument();
+  });
+
+  it("um `false` explícito do servidor (processo fora do âmbito de rede) esconde-as ao diretor", async () => {
     montar(
       utilizador({
         user: { id: "u-3", name: "Diana", role: "diretor" },
@@ -341,11 +352,17 @@ describe("S3FileManager — IA para quem trata do processo (rede satélite)", ()
     );
     await aguardarCarregado();
 
-    expect(await screen.findByTestId("ai-analyze-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("ai-analyze-btn")).not.toBeInTheDocument();
   });
 
-  it("num processo FECHADO nem o atribuído tem as ferramentas", async () => {
-    montar(utilizador(), { podeUsarIA: true, readOnly: true });
+  it("num processo FECHADO nem a gestão tem as ferramentas", async () => {
+    montar(
+      utilizador({
+        user: { id: "u-3", name: "Diana", role: "diretor" },
+        effectiveRole: "diretor",
+      }),
+      { readOnly: true },
+    );
     await aguardarCarregado();
 
     expect(screen.queryByTestId("ai-analyze-btn")).not.toBeInTheDocument();

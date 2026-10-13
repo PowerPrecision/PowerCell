@@ -27,6 +27,7 @@ from database import db
 from models.auth import UserRole
 from models.document import DocumentExpiryCreate, DocumentExpiryResponse
 from services.auth import get_current_user, require_roles, require_staff
+from services.document_ai_access import PAPEIS_DE_GESTAO_DA_IA
 from services.by_id_scope import (
     exigir_alvo_do_documento_no_ambito,
     exigir_process_id_do_pedido_no_ambito,
@@ -885,14 +886,14 @@ async def ai_analyze_documents(
     process_id: str,
     files: List[UploadFile] = File(...),
     file_paths: Optional[str] = Form(None),
-    user: dict = Depends(require_staff()),
+    user: dict = Depends(require_roles(PAPEIS_DE_GESTAO_DA_IA)),
 ):
     """
     Analisa documentos com IA para extração de dados.
 
-    Gestão (admin, CEO, diretor / "gestor") OU atribuído ao processo, dentro
-    da fronteira de rede (rede dona ou convidada) — a decisão vive em
-    `services/document_ai_access` porque o `require_roles` não vê o processo.
+    SÓ os altos perfis (Master, Admin, CEO, Diretor) — controlo de custos da API;
+    estar atribuído ao processo não chega. A fronteira de rede (rede dona ou
+    convidada) é verificada em `services/document_ai_access`.
     Documentos já marcados com ai_analyzed são saltados.
     
     Funcionalidades:
@@ -1010,13 +1011,12 @@ async def rename_document_smart(
 async def rename_all_documents_smart(
     request: Request,
     process_id: str,
-    user: dict = Depends(require_staff()),
+    user: dict = Depends(require_roles(PAPEIS_DE_GESTAO_DA_IA)),
 ):
     """
     Renomeia TODOS os documentos de um processo usando nomes inteligentes IA.
     Apenas documentos já categorizados são renomeados.
-    Gestão (admin, CEO, diretor / "gestor") OU atribuído ao processo
-    (`services/document_ai_access`).
+    SÓ os altos perfis (Master, Admin, CEO, Diretor) — `services/document_ai_access`.
     
     Returns:
     - total: Total de documentos

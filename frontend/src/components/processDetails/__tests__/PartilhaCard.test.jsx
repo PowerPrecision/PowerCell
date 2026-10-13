@@ -93,4 +93,43 @@ describe("PartilhaCard", () => {
     );
     expect(onRevoked).not.toHaveBeenCalled();
   });
+
+  describe("cadeia de partilhas (Out 2026)", () => {
+    const EM_CADEIA = {
+      id: "p1",
+      partner_companies: [
+        { company_id: "cmp-z", company_name: "Empresa Z", network_id: "rede-z" },
+        { company_id: "cmp-w", company_name: "Empresa W", network_id: "rede-w" },
+      ],
+      linhagem: {
+        partilhas: [
+          { company_id: "cmp-z", nome: "Empresa Z", partilhado_por: "Empresa Y", pode_revogar: false },
+          { company_id: "cmp-w", nome: "Empresa W", partilhado_por: "Empresa Z", pode_revogar: true },
+        ],
+      },
+    };
+
+    it("diz de quem veio cada elo", () => {
+      render(<PartilhaCard process={EM_CADEIA} podeRevogar />);
+      const dizeres = screen.getAllByTestId("partilhado-por").map((el) => el.textContent);
+      expect(dizeres).toEqual(["Partilhado por Empresa Y", "Partilhado por Empresa Z"]);
+    });
+
+    it("com o papel certo, o botão só aparece nos elos que o servidor diz que posso retirar", () => {
+      render(<PartilhaCard process={EM_CADEIA} podeRevogar />);
+      expect(screen.queryByRole("button", { name: "Revogar partilha com Empresa Z" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Revogar partilha com Empresa W" })).toBeInTheDocument();
+    });
+
+    it("sem a informação do servidor o botão depende só do papel (como antes)", () => {
+      render(<PartilhaCard process={{ ...EM_CADEIA, linhagem: undefined }} podeRevogar />);
+      expect(screen.getAllByRole("button", { name: /^Revogar partilha com/ })).toHaveLength(2);
+      expect(screen.queryByTestId("partilhado-por")).toBeNull();
+    });
+
+    it("sem o papel nunca há botão, mesmo que o servidor diga que o elo é meu", () => {
+      render(<PartilhaCard process={EM_CADEIA} podeRevogar={false} />);
+      expect(screen.queryByRole("button", { name: /^Revogar partilha com/ })).toBeNull();
+    });
+  });
 });

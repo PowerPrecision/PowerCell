@@ -8,10 +8,11 @@ base de dados. Este é o acto manual que faltava.
 
 AS REGRAS
 =========
-* **Quem**: admin, CEO e diretor (o papel EFECTIVO, não o do JWT). O
-  diretor só da casa DONA do processo: o de uma rede convidada vê o
-  processo, mas quem decide quem mais o vê é a casa que o detém. Admin e
-  CEO reconciliam entre redes, como no resto da fronteira de documentos;
+* **Quem**: admin, CEO e diretor (o papel EFECTIVO, não o do JWT). A casa
+  DONA retira qualquer elo. Uma rede CONVIDADA só retira os elos que ela
+  abriu (e os que dela derivam, na cadeia) — não os da casa dona nem os de
+  uma convidada irmã (Out 2026, partilha em cadeia). Admin/CEO/Master
+  reconciliam entre redes, como no resto da fronteira de documentos;
 * **403 e não 404** a quem vê o processo e não pode decidir: já sabe que
   ele existe, e o motivo diz-se. **404** a quem nem sequer o vê, com a
   MESMA mensagem de «não existe» (não se confirma o id);
@@ -36,6 +37,7 @@ from services.process_sharing import (
     CAMPO_REDES_PARCEIRAS,
     DestinoInvalido,
     empresas_da_rede,
+    elo_e_meu,
     parceiros_do_processo,
     partilhar_com_rede,
     redes_do_registo,
@@ -43,6 +45,7 @@ from services.process_sharing import (
 )
 from services.tenant_access_context import resolver_papel_efectivo
 from services.tenant_network import (
+    CAMPO_REDE,
     PROJECCAO_DO_CARIMBO,
     documento_no_ambito,
     processo_no_ambito,
@@ -60,14 +63,13 @@ PAPEIS_SEM_FRONTEIRA = tuple(sorted(PAPEIS_GLOBAIS))
 
 ERRO_PROCESSO_NAO_ENCONTRADO = "Processo não encontrado"
 ERRO_SEM_PERMISSAO = "Só a administração e a direcção podem revogar uma partilha."
-ERRO_NAO_E_A_CASA_DONA = (
-    "Só a empresa dona do processo pode revogar a partilha."
-)
 ERRO_NAO_E_PARCEIRA = "Esta empresa não é parceira deste processo."
 ERRO_SEM_PERMISSAO_PARTILHAR = (
     "Só a administração, a direcção e o administrativo podem partilhar um processo com outra rede."
 )
-ERRO_SO_A_CASA_DONA_PARTILHA = "Só a empresa dona do processo pode partilhá-lo com outra rede."
+ERRO_NAO_E_O_SEU_ELO = (
+    "Só pode retirar as partilhas que a sua empresa abriu (ou a casa dona do processo)."
+)
 
 
 def _pode_revogar(papel: str) -> bool:
@@ -78,13 +80,38 @@ def _pode_partilhar(papel: str) -> bool:
     return str(papel or "").strip().lower() in PAPEIS_QUE_PARTILHAM
 
 
+async def _nome_da_rede(rede: str, fallback: str = "") -> str:
+    nomes = [str(e.get("name") or "").strip() for e in await empresas_da_rede(rede)]
+    return " / ".join(n for n in nomes if n) or fallback
+
+
+async def _quem_partilha(processo: dict, scope, atravessa_redes: bool) -> dict:
+    """A rede (e o nome) em nome da qual se abre o elo.
+
+    A casa dona, se o utilizador é dela (ou é Master); senão a rede CONVIDADA por onde
+    ele vê o processo — a primeira do registo que esteja no seu âmbito.
+    """
+    dona = str(processo.get(CAMPO_REDE) or "").strip()
+    if atravessa_redes or documento_no_ambito(processo, scope):
+        return {CAMPO_REDE: dona, "company_name": str(processo.get("company_name") or "").strip()
+                or await _nome_da_rede(dona)}
+    minhas = {str(r).strip() for r in scope.network_ids if str(r).strip()}
+    for entrada in parceiros_do_processo(processo):
+        rede = str(entrada.get(CAMPO_REDE) or "").strip()
+        if rede in minhas:
+            return {CAMPO_REDE: rede, "company_name": str(entrada.get("company_name") or "").strip()
+                    or await _nome_da_rede(rede)}
+    return {CAMPO_REDE: dona, "company_name": ""}
+
+
 async def _processo_que_posso_partilhar(
     process_id: str, user: dict, request: Optional[Request],
-) -> dict:
-    """Papel, visibilidade e «casa dona» — pela mesma ordem do revogar.
+) -> tuple[dict, dict]:
+    """Papel e visibilidade — e QUEM abre o elo (a casa dona ou uma convidada).
 
-    403 a quem vê o processo e não pode decidir; 404 (igual ao de «não
-    existe») a quem nem o vê.
+    Partilha em cadeia (Out 2026): quem VÊ o processo pode passá-lo à frente, sem
+    aprovação do parceiro angariador nem da casa dona. 403 a quem não tem o papel;
+    404 (igual ao de «não existe») a quem nem o vê.
     """
     papel = await resolver_papel_efectivo(
         user, request, traduzir_todos_os_perfis=_pode_partilhar,
@@ -95,15 +122,13 @@ async def _processo_que_posso_partilhar(
     scope = await resolve_tenant_scope(user)
     processo = await db.processes.find_one(
         {"id": process_id},
-        {"_id": 0, "id": 1, "process_number": 1, "via_verde": 1,
+        {"_id": 0, "id": 1, "process_number": 1, "via_verde": 1, "company_name": 1,
          CAMPO_EMPRESAS_PARCEIRAS: 1, CAMPO_REDES_PARCEIRAS: 1, **PROJECCAO_DO_CARIMBO},
     )
     atravessa_redes = str(papel).strip().lower() in PAPEIS_SEM_FRONTEIRA
     if not processo or not (atravessa_redes or processo_no_ambito(processo, scope)):
         raise HTTPException(status_code=404, detail=ERRO_PROCESSO_NAO_ENCONTRADO)
-    if not atravessa_redes and not documento_no_ambito(processo, scope):
-        raise HTTPException(status_code=403, detail=ERRO_SO_A_CASA_DONA_PARTILHA)
-    return processo
+    return processo, await _quem_partilha(processo, scope, atravessa_redes)
 
 
 async def run_list_share_targets(
@@ -111,11 +136,13 @@ async def run_list_share_targets(
 ) -> dict:
     """As redes para onde este processo pode ser enviado, com o que o ecrã precisa."""
     from services.network_triage import redes_com_index
-    from services.tenant_network import CAMPO_REDE, resolve_network_id
+    from services.tenant_network import resolve_network_id
 
-    processo = await _processo_que_posso_partilhar(process_id, user, request)
+    processo, quem = await _processo_que_posso_partilhar(process_id, user, request)
     dono = str(processo.get(CAMPO_REDE) or "").strip()
     ja = set(redes_do_registo(parceiros_do_processo(processo)))
+    # A rede de quem partilha nunca é destino (já vê o processo).
+    propria = str(quem.get(CAMPO_REDE) or "").strip()
     com_index = await redes_com_index()
 
     empresas = await db.companies.find(
@@ -126,7 +153,7 @@ async def run_list_share_targets(
         if e.get("is_active") is False:
             continue
         rede = resolve_network_id(e, company_id=e.get("id"))
-        if rede and rede != dono and str(e.get("name") or "").strip():
+        if rede and rede != dono and rede != propria and str(e.get("name") or "").strip():
             redes.setdefault(rede, []).append(str(e["name"]).strip())
 
     destinos = [
@@ -154,7 +181,7 @@ async def run_share_process(
     request: Optional[Request] = None,
 ) -> dict:
     """Envia o processo para a rede de destino escolhida (multi-fornecedor)."""
-    await _processo_que_posso_partilhar(process_id, user, request)
+    _, quem = await _processo_que_posso_partilhar(process_id, user, request)
 
     async def _historico(texto: str) -> None:
         await log_history(process_id, user, texto, CAMPO_EMPRESAS_PARCEIRAS)
@@ -166,6 +193,7 @@ async def run_share_process(
             via_verde=via_verde,
             por_ordem_de=user.get("id") or user.get("email"),
             registar_historico=_historico,
+            partilhado_por=quem,
         )
     except DestinoInvalido as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -205,9 +233,21 @@ async def run_revoke_partner(
     if not processo or not (atravessa_redes or processo_no_ambito(processo, scope)):
         raise HTTPException(status_code=404, detail=ERRO_PROCESSO_NAO_ENCONTRADO)
 
-    # Vê o processo — mas é a casa DONA que decide quem mais o vê.
+    # Vê o processo. A casa DONA retira qualquer elo; uma CONVIDADA só os que abriu
+    # (e os que dela derivam). Distingue-se «não é parceira deste processo» (404) de «é,
+    # mas o elo não é seu» (403).
     if not atravessa_redes and not documento_no_ambito(processo, scope):
-        raise HTTPException(status_code=403, detail=ERRO_NAO_E_A_CASA_DONA)
+        entrada = next(
+            (e for e in parceiros_do_processo(processo) if str(e.get("company_id") or "") == str(company_id)),
+            None,
+        )
+        if entrada is None:
+            raise HTTPException(status_code=404, detail=ERRO_NAO_E_PARCEIRA)
+        if not elo_e_meu(
+            parceiros_do_processo(processo), entrada,
+            {str(r).strip() for r in scope.network_ids}, str(processo.get(CAMPO_REDE) or ""),
+        ):
+            raise HTTPException(status_code=403, detail=ERRO_NAO_E_O_SEU_ELO)
 
     async def _historico(texto: str) -> None:
         await log_history(process_id, user, texto, CAMPO_EMPRESAS_PARCEIRAS)

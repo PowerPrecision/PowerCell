@@ -457,6 +457,8 @@ class TestSemDadosFinanceiros:
         assert set(item) == {
             "kind", "id", "process_number", "client_name", "process_type", "etapa", "etapa_label",
             "consultor_name", "pedidos_pendentes", "created_at", "updated_at",
+            # Onde o processo está agora (cadeia B2B): só o NOME da empresa.
+            "empresa_actual",
         }
         assert item["consultor_name"] == "Carla Consultora"
 

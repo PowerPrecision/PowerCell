@@ -21,6 +21,7 @@ from services.document_process_resolve import (
 )
 from services.s3_content_quarantine import exigir_conteudo_valido
 from services.document_receipt_draft import agendar_apos_upload_do_cliente
+from services.document_ai_trigger import agendar_ia_da_entrada
 from services.portal_assigned_users import get_all_assigned_user_ids as _get_all_assigned_user_ids
 from services.portal_onboarding_advance import _trigger_onboarding_check
 from services.notification_service import send_notification_with_preference_check
@@ -673,6 +674,20 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
             )
 
     await invalidate_stats_cache()
+
+    # IA AUTOMÁTICA (QA, Out 2026): o Portal força SEMPRE a `Index`, e a direcção retirou o
+    # botão manual aos perfis operacionais — sem este gatilho o ficheiro do cliente ficava
+    # na pasta sem categoria, sem OCR e fora da fila da estação de Indexação. Em
+    # background, uma vez por ficheiro, nunca falha o upload (ver `document_ai_trigger`).
+    await agendar_ia_da_entrada(
+        process_id=process_id,
+        client_name=(process or {}).get("client_name") or client.get("nome") or "Cliente",
+        s3_path=file_key,
+        filename=original_filename,
+        origem="portal_cliente",
+        tamanho=file_size if isinstance(file_size, int) else None,
+        satisfazer_pedidos=False,
+    )
 
     if process_id:
         try:

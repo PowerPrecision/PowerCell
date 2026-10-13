@@ -29,6 +29,7 @@ from services.alerts import notify_new_client_registration
 from services.background_tasks import spawn_background_task
 from utils.frontend_url import get_frontend_url
 from services.encryption import encrypt_client_data
+from services.portal_profile_sections import dados_financeiros_do_registo
 from models.client import generate_portal_access_code
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
@@ -121,7 +122,10 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             "telefone": clean_phone
         },
         "dados_pessoais": personal_data,
-        "dados_financeiros": {},  # Dados financeiros pertencem ao Processo
+        # Passos 4–5 do registo. Copiam-se para o processo quando ele é criado
+        # (`onboarding_mandatory_config`/`client_assign`); o NIF da entidade patronal
+        # fica cifrado como no processo.
+        "dados_financeiros": dados_financeiros_do_registo(data.financial_data),
         "dados_imobiliarios": {},  # Dados do imóvel recolhidos depois
         "process_ids": [],  # Será preenchido quando o staff criar o processo
         "portal_access_code": generate_portal_access_code(),  # Código de acesso ao Portal

@@ -230,3 +230,120 @@ describe("O convite não pode soar a exigência (Ponto 9)", () => {
     expect(screen.getByText(/impede.*continuar/i)).toBeInTheDocument();
   });
 });
+
+
+// ====================================================================
+// O perfil espelha TODO o registo (Out 2026): só de leitura e novos tipos
+// ====================================================================
+
+describe("Campos só de leitura (NIF)", () => {
+  const schema = [
+    { field_key: "nif", label: "NIF", field_type: "text", is_required: true, is_primary: true, read_only: true },
+    { field_key: "email", label: "Email", field_type: "email", is_required: true, is_primary: true },
+  ];
+
+  it("mostra o texto que o servidor mandou (já mascarado), desactivado", () => {
+    montar({ schema, somenteLeitura: { nif: "••••••789" } });
+    const campo = screen.getByLabelText(/^NIF/);
+    expect(campo).toHaveValue("••••••789");
+    expect(campo).toBeDisabled();
+    expect(campo).toHaveAttribute("readonly");
+  });
+
+  it("não é obrigatório para o leitor de ecrã e explica quem o gere", () => {
+    montar({ schema, somenteLeitura: { nif: "••••••789" } });
+    // O email é obrigatório e tem a marca; o NIF, que não se edita, não.
+    const rotuloDoNif = screen.getByText("NIF", { selector: "label" });
+    expect(within(rotuloDoNif).queryByText(/obrigatório/i)).not.toBeInTheDocument();
+    const rotuloDoEmail = screen.getByText("Email", { selector: "label" });
+    expect(within(rotuloDoEmail).getByText(/obrigatório/i)).toBeInTheDocument();
+    expect(screen.getByText(/Gerido pela nossa equipa/i)).toBeInTheDocument();
+  });
+
+  it("carregar nele nunca chama onChange", async () => {
+    const { onChange } = montar({ schema, somenteLeitura: { nif: "••••••789" } });
+    await userEvent.type(screen.getByLabelText(/^NIF/), "1", { skipClick: true });
+    expect(onChange).not.toHaveBeenCalledWith("nif", expect.anything());
+  });
+
+  it("o valor em claro não está em lado nenhum do DOM", () => {
+    montar({ schema, values: { nif: "123456789" }, somenteLeitura: { nif: "••••••789" } });
+    expect(document.body.innerHTML).not.toContain("123456789");
+  });
+});
+
+describe("Tipos do registo", () => {
+  it("grupo de opções: marcar e desmarcar devolve a lista", async () => {
+    const onChange = vi.fn();
+    render(
+      <PortalProfileFields
+        schema={[{ field_key: "caracteristicas", label: "Características", field_type: "checkbox",
+          is_primary: true, options: ["Garagem", "Elevador"] }]}
+        values={{ caracteristicas: ["Garagem"] }}
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByLabelText("Garagem")).toBeChecked();
+    await userEvent.click(screen.getByLabelText("Elevador"));
+    expect(onChange).toHaveBeenLastCalledWith("caracteristicas", ["Garagem", "Elevador"]);
+    await userEvent.click(screen.getByLabelText("Garagem"));
+    expect(onChange).toHaveBeenLastCalledWith("caracteristicas", []);
+  });
+
+  it("caixa simples devolve booleano", async () => {
+    const onChange = vi.fn();
+    render(
+      <PortalProfileFields
+        schema={[{ field_key: "ja_tem", label: "Já tem casa escolhida", field_type: "checkbox", is_primary: true }]}
+        values={{ ja_tem: false }}
+        onChange={onChange}
+      />,
+    );
+    await userEvent.click(screen.getByLabelText("Já tem casa escolhida"));
+    expect(onChange).toHaveBeenLastCalledWith("ja_tem", true);
+  });
+
+  it("área de texto e número", async () => {
+    const onChange = vi.fn();
+    render(
+      <PortalProfileFields
+        schema={[
+          { field_key: "notas", label: "Notas", field_type: "textarea", is_primary: true },
+          { field_key: "valor", label: "Valor máximo", field_type: "number", is_primary: true },
+        ]}
+        values={{}}
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByLabelText("Notas").tagName).toBe("TEXTAREA");
+    expect(screen.getByLabelText("Valor máximo")).toHaveAttribute("type", "number");
+  });
+
+  it("perfil trancado desactiva as caixas", () => {
+    render(
+      <PortalProfileFields
+        schema={[{ field_key: "ja_tem", label: "Já tem casa", field_type: "checkbox", is_primary: true }]}
+        values={{}}
+        onChange={() => {}}
+        disabled
+      />,
+    );
+    expect(screen.getByLabelText("Já tem casa")).toBeDisabled();
+  });
+
+  it("dois cartões na mesma página não partilham o id do painel adicional", () => {
+    const adicional = (section) => [
+      { field_key: `${section}-a`, label: `A ${section}`, field_type: "text", is_primary: true, section },
+      { field_key: `${section}-b`, label: `B ${section}`, field_type: "text", is_primary: false, section },
+    ];
+    render(
+      <>
+        <PortalProfileFields schema={adicional("titular")} values={{}} onChange={() => {}} />
+        <PortalProfileFields schema={adicional("imovel")} values={{}} onChange={() => {}} />
+      </>,
+    );
+    const controlados = screen.getAllByRole("button", { name: /Informação adicional importante/i })
+      .map((b) => b.getAttribute("aria-controls"));
+    expect(new Set(controlados).size).toBe(2);
+  });
+});

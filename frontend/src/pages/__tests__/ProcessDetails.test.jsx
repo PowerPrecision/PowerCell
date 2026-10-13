@@ -412,6 +412,61 @@ describe("ProcessDetails — empresa dona no cabeçalho", () => {
   });
 });
 
+describe("ProcessDetails — linhagem do processo no cabeçalho (partilha em cadeia)", () => {
+  const PARCEIRO = { tipo: "parceiro", nome: "João Angariador", nivel: 0 };
+  const Y = { tipo: "empresa", papel: "dona", nome: "Empresa Y", nivel: 1 };
+  const Z = { tipo: "empresa", papel: "convidada", nome: "Empresa Z", nivel: 2, partilhado_por: "Empresa Y" };
+
+  it("mostra Parceiro → Y → Z — a ligação página ↔ linhagem", async () => {
+    pacote.valor = pacoteCompleto({
+      process: {
+        ...PROCESSO,
+        partner_companies: [{ company_id: "cmp-z", company_name: "Empresa Z", network_id: "rede-z" }],
+        linhagem: {
+          origem: PARCEIRO, dona: { nome: "Empresa Y" }, caminhos: [[PARCEIRO, Y, Z]],
+          empresa_actual: ["Empresa Z"], tem_cadeia: true,
+          partilhas: [{ company_id: "cmp-z", nome: "Empresa Z", network_id: "rede-z",
+            partilhado_por: "Empresa Y", nivel: 2, pode_revogar: true }],
+        },
+      },
+    });
+    montar();
+    await screen.findByTestId("layout");
+
+    const linhagem = await screen.findByTestId("linhagem-do-processo");
+    expect(within(linhagem).getByRole("list", {
+      name: /João Angariador → Empresa Y → Empresa Z/,
+    })).toBeInTheDocument();
+    // E o cartão de partilha diz de quem veio o elo.
+    expect(await screen.findByTestId("partilhado-por")).toHaveTextContent("Partilhado por Empresa Y");
+  });
+
+  it("um elo que não é meu não tem botão de revogar", async () => {
+    pacote.valor = pacoteCompleto({
+      process: {
+        ...PROCESSO,
+        partner_companies: [{ company_id: "cmp-z", company_name: "Empresa Z", network_id: "rede-z" }],
+        linhagem: {
+          origem: null, caminhos: [[Y, Z]], empresa_actual: ["Empresa Z"], tem_cadeia: true,
+          partilhas: [{ company_id: "cmp-z", nome: "Empresa Z", network_id: "rede-z",
+            partilhado_por: "Empresa Y", nivel: 2, pode_revogar: false }],
+        },
+      },
+    });
+    montar();
+    await screen.findByTestId("layout");
+    await screen.findByTestId("cartao-partilha");
+    expect(screen.queryByRole("button", { name: /Revogar partilha com/ })).toBeNull();
+  });
+
+  it("um processo da casa, sem linhagem (servidor antigo), não desenha nada (contraprova)", async () => {
+    montar();
+    await screen.findByTestId("layout");
+    await waitFor(() => expect(screen.getAllByText(/Ana Martins/).length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("linhagem-do-processo")).toBeNull();
+  });
+});
+
 describe("ProcessDetails — serviço pago pelo parceiro (Portal do Parceiro)", () => {
   afterEach(() => { sessao.papel = "consultor"; });
 

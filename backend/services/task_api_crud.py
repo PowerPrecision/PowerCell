@@ -20,6 +20,7 @@ from utils.input_sanitization import sanitize_string
 from services.task_api_helpers import _block_parceiro, enrich_task, get_user_names
 from services.task_assignment_hygiene import (
     diff_de_responsaveis,
+    exigir_responsaveis_atribuiveis,
     normalizar_assigned_to,
 )
 from services.tenant_network import (
@@ -37,6 +38,8 @@ async def run_create_task(task_data: TaskCreate, current_user: dict):
     Qualquer utilizador pode criar tarefas e atribuir a qualquer pessoa.
     """
     _block_parceiro(current_user)
+    # Parceiros (freelancers) nunca recebem tarefas — antes de qualquer escrita.
+    await exigir_responsaveis_atribuiveis(task_data.assigned_to, base=db)
     task_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
@@ -302,6 +305,8 @@ async def run_update_task(task_id: str, task_data: TaskUpdate, current_user: dic
         diff = diff_de_responsaveis(
             antes=task.get("assigned_to"), depois=task_data.assigned_to
         )
+        # Só os que ENTRAM: uma tarefa antiga não pode ficar impossível de editar.
+        await exigir_responsaveis_atribuiveis(diff.entraram, base=db)
         link = "/tasks" if not task.get("process_id") else f"/process/{task['process_id']}"
 
         for user_id in diff.entraram:

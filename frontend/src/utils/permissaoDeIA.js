@@ -1,20 +1,17 @@
 /**
- * Quem vê os botões de IA sobre os documentos de um processo («Analisar», «Renomear IA»,
+ * Quem vê os botões de IA MANUAL sobre os documentos de um processo («Analisar», «Renomear IA»,
  * «Extrair dados»).
  *
- * O gate era só o cargo (`MANAGEMENT_ROLES.includes(effectiveRole)`), por isso a equipa
- * que trata de um processo PARTILHADO na rede de destino — consultor e intermediário
- * atribuídos — nunca via o botão, embora o servidor lhe devesse permitir a ferramenta:
- * a regra é «gestão OU atribuído ao processo, dentro da fronteira de rede».
+ * REGRA (decisão da direcção, Out 2026 — controlo de custos da API): SÓ os altos perfis
+ * (Master, Admin, CEO, Diretor), pelo perfil activo. Estar atribuído ao processo NÃO dá o
+ * botão (uma iteração anterior abriu-o a «gestão OU atribuído»; foi revogada). O fluxo normal
+ * não depende do clique: a IA corre sozinha quando um documento cai na `Index`.
  *
- * A resposta «estou atribuído?» NÃO se calcula aqui: a lista de campos de atribuição tem
- * 15 nomes e vive no servidor (`collect_assigned_ids`); uma cópia no ecrã divergiria sem
- * dar erro e esconderia o botão a quem tem direito. O detalhe do processo devolve
- * `pode_usar_ia_documentos`, calculado pela MESMA função que as rotas usam para recusar.
- *
- * O cargo continua a contar (OU, nunca E): se o servidor não respondeu — sessão anterior ao
- * deploy, ecrã que não carrega o processo — a gestão não perde o botão que sempre teve.
- * A parede é o servidor, que recusa na mesma.
+ * O cargo é a condição; a resposta do servidor (`pode_usar_ia_documentos`, calculada pela MESMA
+ * função que as rotas usam para recusar) só pode ESTREITAR — um `false` explícito quer dizer
+ * «o processo está fora do teu âmbito de rede», e mostrar um botão que dá 403 é o que o QA
+ * reportou. Sem resposta (`undefined`: sessão anterior ao deploy, ecrã que não carrega o
+ * processo) vale o cargo: a parede é o servidor, que recusa na mesma.
  */
 import { MANAGEMENT_ROLES } from "./roleUtils";
 
@@ -31,7 +28,7 @@ export function podeUsarFerramentasDeIA({
   somenteLeitura = false,
 } = {}) {
   if (somenteLeitura) return false;
-  // Só o `true` estrito conta: um campo em falta ou "true" em texto não abre nada.
-  if (permissaoDoServidor === true) return true;
-  return MANAGEMENT_ROLES.includes(effectiveRole);
+  if (!MANAGEMENT_ROLES.includes(effectiveRole)) return false;
+  // Só o `false` ESTRITO estreita: um campo em falta nunca tira o botão à gestão.
+  return permissaoDoServidor !== false;
 }

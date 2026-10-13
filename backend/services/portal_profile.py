@@ -447,12 +447,20 @@ async def run_get_client_profile(client_data: dict):
     except Exception as e:  # noqa: BLE001 - o perfil abre à mesma
         logger.warning("[PORTAL PROFILE] Falha a montar o esquema: %s", e)
 
+    # Secções para além dos dados pessoais (segundo titular, imóvel, situação financeira):
+    # o PROCESSO manda (é a cópia que o CRM lê), o cliente preenche o que falta.
+    seccoes = await montar_seccoes_do_perfil(client, form_schema)
+
     return {
         "id": client.get("id"),
         "nome": client.get("nome", ""),
         "contacto": clean_contacto,
         "dados_pessoais": clean_dados_pessoais,
-        "form_schema": form_schema,
+        **seccoes["valores"],
+        "somente_leitura": seccoes["somente_leitura"],
+        "tem_segundo_titular": seccoes["tem_segundo_titular"],
+        "secoes": seccoes["secoes"],
+        "form_schema": seccoes["form_schema"],
         "has_process": has_process,
         # PACOTE BM — flag de dados confirmados/congelados pela Indexação.
         # Quando true, o Portal bloqueia todos os campos de input do perfil.
@@ -460,10 +468,86 @@ async def run_get_client_profile(client_data: dict):
     }
 
 
+async def montar_seccoes_do_perfil(client: dict, form_schema: list) -> dict:
+    """Valores, campos só de leitura e esquema final das secções do perfil.
+
+    Nunca levanta: sem as secções o perfil continua a abrir só com os dados pessoais.
+    """
+    from services.portal_profile_sections import (
+        CAMPO_DO_CLIENTE,
+        tem_segundo_titular,
+        valores_da_seccao,
+        valores_somente_leitura,
+    )
+    from services.portal_profile_schema import SECCOES_DO_PERFIL
+
+    vazio = {
+        "valores": {g: {} for g in CAMPO_DO_CLIENTE},
+        "somente_leitura": {},
+        "tem_segundo_titular": False,
+        "secoes": [],
+        "form_schema": form_schema,
+    }
+    try:
+        processo = None
+        process_ids = (client or {}).get("process_ids") or []
+        if process_ids:
+            processo = await db.processes.find_one(
+                {"id": {"$in": list(process_ids)}, "is_deleted": {"$ne": True}},
+                {"_id": 0, "titular2_data": 1, "real_estate_data": 1, "financial_data": 1},
+            )
+        segundo = tem_segundo_titular(client, processo)
+        esquema = [
+            c for c in form_schema
+            if segundo or c.get("section") != "segundo_titular"
+        ]
+        completos = {g: valores_da_seccao(g, client, processo) for g in CAMPO_DO_CLIENTE}
+        # Só vai para o ecrã o que o esquema editável desenha: o resto (o NIF do 2.º
+        # titular, as listas de bancos) viaja mascarado/resumido em `somente_leitura`.
+        valores = {g: {} for g in CAMPO_DO_CLIENTE}
+        for entrada in esquema:
+            grupo, nome = entrada["destino"]
+            if grupo in valores and not entrada.get("read_only") and nome in completos[grupo]:
+                valores[grupo][nome] = completos[grupo][nome]
+        presentes = {c.get("section") for c in esquema}
+        return {
+            "valores": valores,
+            "somente_leitura": valores_somente_leitura(esquema, client, completos),
+            "tem_segundo_titular": segundo,
+            "secoes": [
+                {"id": i, "titulo": t} for i, t in SECCOES_DO_PERFIL if i in presentes
+            ],
+            "form_schema": esquema,
+        }
+    except Exception as exc:  # noqa: BLE001 - o perfil abre à mesma
+        logger.warning("[PORTAL PROFILE] Falha a montar as secções: %s", exc)
+        vazio["form_schema"] = [c for c in form_schema if c.get("section", "titular") == "titular"]
+        return vazio
+
+
 class ClientProfileUpdate(BaseModel):
     """Schema para atualização de perfil do cliente via Portal."""
     contacto: Optional[dict] = None
     dados_pessoais: Optional[dict] = None
+    # Secções do registo para além dos dados pessoais (Out 2026). Os nomes são os do
+    # formulário; onde vivem no cliente e no processo vê-se em `portal_profile_sections`.
+    titular2_data: Optional[dict] = None
+    real_estate_data: Optional[dict] = None
+    financial_data: Optional[dict] = None
+
+
+async def _esquema_do_cliente(client: dict) -> list:
+    """O esquema do perfil do cliente (do formulário da rede dele). Vazio se não acessível."""
+    try:
+        from services.portal_profile_schema import build_portal_profile_schema
+        from services.public_form_config import load_merged_form_fields
+
+        return build_portal_profile_schema(
+            await load_merged_form_fields(rede_do_formulario_do_cliente(client))
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[PORTAL PROFILE] Esquema indisponível ao gravar: %s", exc)
+        return []
 
 
 async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict):
@@ -493,7 +577,11 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
     # s3_folder — este endpoint não deve ler nem escrever mapeamentos S3.
     client = await db.clients.find_one(
         {"id": client_id},
-        {"_id": 0, "process_ids": 1, "field_metadata": 1, "network_id": 1}
+        {
+            "_id": 0, "process_ids": 1, "field_metadata": 1, "network_id": 1,
+            # Para decidir se o 2.º titular existe (nunca para o devolver).
+            "dados_pessoais.compra_tipo": 1, "titular2_data": 1,
+        }
     )
 
     if not client:
@@ -534,6 +622,31 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
         data, client, now, campos_editaveis=campos_editaveis, recusados=recusados
     )
 
+    # Secções do registo para além dos dados pessoais: gravam no cliente E espelham-se
+    # nos processos dele (a cópia que o CRM lê primeiro).
+    espelhos: dict = {}
+    pedido_das_seccoes = {
+        g: getattr(data, g) for g in ("titular2_data", "real_estate_data", "financial_data")
+        if getattr(data, g)
+    }
+    if pedido_das_seccoes:
+        from services.portal_profile_sections import construir_update_das_seccoes
+
+        esquema = await _esquema_do_cliente(client)
+        set_das_seccoes, espelhos = construir_update_das_seccoes(
+            pedido_das_seccoes, cliente=client, schema=esquema,
+            permitidos=campos_editaveis, agora=now, recusados=recusados,
+        )
+        if set_das_seccoes:
+            mongo_update = {**(mongo_update or {}), **set_das_seccoes}
+            metadados = {
+                chave: {"source": "client", "updated_at": now}
+                for chave in set_das_seccoes if chave != "updated_at"
+            }
+            existentes = (mongo_update.get("field_metadata")
+                          or (client.get("field_metadata") or {}))
+            mongo_update["field_metadata"] = {**existentes, **metadados}
+
     if recusados:
         # Antes descartava-se em silêncio: o cliente preenchia, gravava e
         # lia "Perfil atualizado com sucesso!" com o valor perdido.
@@ -550,15 +663,25 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
             "rejected_fields": sorted(set(recusados)),
         }
 
+    from services.portal_profile_sections import CAMPO_DO_CLIENTE
+
     updated_fields = [
         key for key in ("contacto", "dados_pessoais")
         if any(k.startswith(f"{key}.") for k in mongo_update)
+    ] + [
+        grupo for grupo, campo in CAMPO_DO_CLIENTE.items()
+        if any(k.startswith(f"{campo}.") for k in mongo_update)
     ]
 
     await db.clients.update_one(
         {"id": client_id},
         {"$set": mongo_update}
     )
+
+    if espelhos and client.get("process_ids"):
+        from services.portal_profile_sections import espelhar_nos_processos
+
+        await espelhar_nos_processos(db, client["process_ids"], espelhos)
 
     logger.info(
         f"[PORTAL PROFILE] Cliente {client_id} atualizou perfil: {updated_fields}"

@@ -84,6 +84,51 @@ def normalizar_assigned_to(valor: Any) -> list[str]:
     return [v for v in dict.fromkeys(_texto(i) for i in itens) if v]
 
 
+#: Quem NUNCA tem tarefas atribuídas. O parceiro é um angariador externo (freelancer): vê os
+#: casos que trouxe e onde estão, não executa nem recebe trabalho do CRM. As listas de
+#: responsáveis já o excluem (`staff_assignment`), mas uma lista é cortesia do ecrã — um
+#: pedido à mão ou um id de outra origem passava. Aqui é o servidor a recusar.
+PAPEIS_SEM_TAREFAS = ("parceiro", "cliente")
+
+DETALHE_PARCEIRO_SEM_TAREFAS = (
+    "Os parceiros não podem ser responsáveis por tarefas: angariam casos, não os executam."
+)
+
+
+async def exigir_responsaveis_atribuiveis(ids: Any, *, base=None) -> None:
+    """400 se algum dos responsáveis é um parceiro (conta de utilizador ou conta do Portal do Parceiro).
+
+    ``base`` é a base de dados DO CHAMADOR (a referência ao proxy que o seu módulo tem): este
+    módulo faz o seu próprio `from database import db` e um teste que substitua só a do
+    chamador deixava aqui falar com a base real — a armadilha da ordem de importação.
+
+    Só se chama com os que ENTRAM numa tarefa: uma tarefa antiga com um parceiro lá dentro
+    não pode impedir a edição do resto (a regra é nova, a base é antiga).
+    """
+    from fastapi import HTTPException
+
+    alvos = normalizar_assigned_to(ids)
+    if not alvos:
+        return
+    bd = base if base is not None else db
+    utilizadores = await bd.users.find(
+        {"id": {"$in": alvos}}, {"_id": 0, "id": 1, "role": 1}
+    ).to_list(len(alvos) + 5)
+    recusados = [
+        u.get("id") for u in utilizadores
+        if _texto(u.get("role")).lower() in PAPEIS_SEM_TAREFAS
+    ]
+    contas_de_parceiro = await bd.partners.find(
+        {"id": {"$in": alvos}}, {"_id": 0, "id": 1}
+    ).to_list(len(alvos) + 5)
+    recusados += [c.get("id") for c in contas_de_parceiro]
+    if recusados:
+        logger.warning(
+            "[TAREFAS] Atribuição recusada a parceiro/cliente: %s", sorted(set(map(str, recusados)))
+        )
+        raise HTTPException(status_code=400, detail=DETALHE_PARCEIRO_SEM_TAREFAS)
+
+
 def ids_atribuidos_do_processo(process: Optional[dict]) -> set[str]:
     """Quem está atribuído a um processo, lendo todos os campos canónicos."""
     encontrados: set[str] = set()

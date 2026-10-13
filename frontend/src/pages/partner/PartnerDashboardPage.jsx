@@ -142,7 +142,7 @@ export default function PartnerDashboardPage() {
                     <div className="min-w-0">
                       <p className="truncate font-medium">{c.client_name || "Sem nome"}</p>
                       <p className="text-xs text-muted-foreground">
-                        {[c.process_number, c.consultor_name && `Consultor: ${c.consultor_name}`, formatarData(c.updated_at)]
+                        {[c.process_number, c.empresa_actual && `Está em ${c.empresa_actual}`, c.consultor_name && `Consultor: ${c.consultor_name}`, formatarData(c.updated_at)]
                           .filter(Boolean).join(" · ")}
                       </p>
                     </div>

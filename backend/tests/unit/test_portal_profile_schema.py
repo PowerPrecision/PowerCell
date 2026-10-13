@@ -93,9 +93,11 @@ class TestNifTrancado:
     def test_o_nif_esta_na_lista_de_trancados(self):
         assert "nif" in PORTAL_LOCKED_FIELDS
 
-    def test_o_nif_nao_entra_no_esquema_do_portal(self):
-        # Está no formulário interno como obrigatório; aqui não aparece.
-        assert "nif" not in _chaves(build_portal_profile_schema(CAMPOS))
+    def test_o_nif_aparece_SO_DE_LEITURA_e_nunca_obrigatorio(self):
+        # Out 2026: «O Meu Perfil» espelha o registo, NIF incluído — mas só para ver.
+        nif = next(c for c in build_portal_profile_schema(CAMPOS) if c["field_key"] == "nif")
+        assert nif["read_only"] is True
+        assert nif["is_required"] is False  # um campo que não se pode editar não bloqueia o guardar
 
     def test_o_nif_nao_e_gravavel(self):
         campos = portal_updatable_fields(build_portal_profile_schema(CAMPOS))
@@ -121,20 +123,39 @@ class TestEsquema:
         # `altura` tem is_visible=False no formulário interno.
         assert "altura" not in _chaves(build_portal_profile_schema(CAMPOS))
 
-    def test_ignora_campos_de_outros_passos(self):
-        chaves = _chaves(build_portal_profile_schema(CAMPOS))
-        assert "titular2_name" not in chaves
-        assert "finalidade" not in chaves
+    def test_traz_as_secoes_dos_outros_passos(self):
+        # Invertido (Out 2026): o perfil espelha TODO o registo, não só o passo 1.
+        schema = build_portal_profile_schema(CAMPOS)
+        por_chave = {c["field_key"]: c for c in schema}
+        assert por_chave["titular2_name"]["section"] == "segundo_titular"
+        assert por_chave["finalidade"]["section"] == "imovel"
+        assert por_chave["morada_fiscal"]["section"] == "titular"
+
+    def test_o_passo_dos_consentimentos_fica_de_fora(self):
+        # É um acto legal assinado no registo, não um dado de perfil.
+        campos = CAMPOS + [{"field_key": "consent_data", "label": "RGPD", "step": 6,
+                            "is_visible": True, "is_required": True, "field_type": "checkbox",
+                            "order": 1, "data_path": "root"}]
+        assert "consent_data" not in _chaves(build_portal_profile_schema(campos))
 
     def test_traz_contactos_do_passo_do_titular(self):
         chaves = _chaves(build_portal_profile_schema(CAMPOS))
         assert "email" in chaves
         assert "phone" in chaves
 
-    def test_respeita_a_ordem_do_formulario_interno(self):
+    def test_respeita_a_ordem_do_formulario_interno_dentro_de_cada_seccao(self):
         schema = build_portal_profile_schema(CAMPOS)
-        ordens = [c["order"] for c in schema]
-        assert ordens == sorted(ordens)
+        for seccao in {c["section"] for c in schema}:
+            ordens = [c["order"] for c in schema if c["section"] == seccao]
+            assert ordens == sorted(ordens)
+
+    def test_as_seccoes_vem_pela_ordem_do_registo(self):
+        schema = build_portal_profile_schema(CAMPOS)
+        vistas = []
+        for c in schema:
+            if c["section"] not in vistas:
+                vistas.append(c["section"])
+        assert vistas == ["titular", "segundo_titular", "imovel"]
 
     def test_transporta_rotulo_tipo_e_opcoes(self):
         schema = build_portal_profile_schema(CAMPOS)
@@ -208,10 +229,24 @@ class TestDestinoNaFicha:
             {"field_key": "profissao", "data_path": "personal_data"}
         ) == ("dados_pessoais", "profissao")
 
-    def test_campo_de_outro_data_path_nao_tem_destino(self):
+    def test_campo_de_data_path_desconhecido_nao_tem_destino(self):
+        assert destino_do_campo(
+            {"field_key": "x", "data_path": "custom_fields"}
+        ) is None
+
+    def test_os_campos_do_imovel_e_financeiros_mantem_o_nome(self):
         assert destino_do_campo(
             {"field_key": "finalidade", "data_path": "real_estate_data"}
-        ) is None
+        ) == ("real_estate_data", "finalidade")
+        assert destino_do_campo(
+            {"field_key": "salario_liquido", "data_path": "financial_data"}
+        ) == ("financial_data", "salario_liquido")
+
+    def test_o_segundo_titular_perde_o_prefixo_como_o_registo_o_grava(self):
+        # O registo grava `titular2_data.nif`, não `titular2_data.titular2_nif`.
+        assert destino_do_campo(
+            {"field_key": "titular2_documento_id", "data_path": "titular2_data"}
+        ) == ("titular2_data", "documento_id")
 
 
 # ====================================================================
@@ -226,8 +261,20 @@ class TestAllowlistDerivado:
         schema = build_portal_profile_schema(CAMPOS)
         campos = portal_updatable_fields(schema)
         for entrada in schema:
+            if entrada["read_only"]:
+                continue
             grupo, nome = entrada["destino"]
             assert nome in campos[grupo], f"{entrada['field_key']} não é gravável"
+
+    def test_tudo_o_que_e_so_de_leitura_nao_e_gravavel(self):
+        # A outra metade: o que se vê só para ler NUNCA entra no allowlist.
+        schema = build_portal_profile_schema(CAMPOS)
+        campos = portal_updatable_fields(schema)
+        so_leitura = [c for c in schema if c["read_only"]]
+        assert so_leitura, "o teste só prova alguma coisa se houver campos só de leitura"
+        for entrada in so_leitura:
+            grupo, nome = entrada["destino"]
+            assert nome not in campos[grupo], f"{entrada['field_key']} é só de leitura e é gravável"
 
     def test_nada_alem_do_esquema_e_gravavel(self):
         schema = build_portal_profile_schema(CAMPOS)

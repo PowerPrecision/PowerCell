@@ -28,6 +28,7 @@ import {
   construirPayload,
   hidratarFormulario,
   obrigatoriosEmFalta,
+  secoesDoPerfil,
 } from '../utils/portalProfile';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import {
@@ -1502,6 +1503,9 @@ function ProfilePanel() {
   // voltaria a divergir dele — foi assim que o Portal ficou sem
   // `codigo_postal` nem `niss`.
   const [formData, setFormData] = useState({});
+  // Os valores com que o formulário foi hidratado: as secções que se espelham no
+  // processo só enviam o que o cliente MUDOU (ver `construirPayload`).
+  const [baseline, setBaseline] = useState({});
   const formSchema = profile?.form_schema || [];
   // O que falta preencher, dito ao cliente ANTES de gravar — em vez
   // de um erro depois de carregar no botão.
@@ -1529,7 +1533,9 @@ function ProfilePanel() {
         if (cancelled) return;
 
         setProfile(data);
-        setFormData(hidratarFormulario(data.form_schema, data));
+        const inicial = hidratarFormulario(data.form_schema, data);
+        setFormData(inicial);
+        setBaseline(inicial);
       } catch (err) {
         if (!cancelled) setError(err.message);
       } finally {
@@ -1555,7 +1561,7 @@ function ProfilePanel() {
 
       // Construído a partir do esquema: o que se envia é exactamente o
       // que se mostrou, pelo que o backend não tem nada a descartar.
-      const payload = construirPayload(formSchema, formData);
+      const payload = construirPayload(formSchema, formData, baseline);
 
       const res = await fetchWithRetry(`${BACKEND_URL}/portal/me`, {
         method: 'PUT',
@@ -1577,6 +1583,7 @@ function ProfilePanel() {
         throw new Error(data.detail || 'Erro ao guardar perfil.');
       }
 
+      setBaseline(formData);
       setSaveResult({ success: true, message: data.message || 'Perfil atualizado com sucesso.' });
       toast.success('Perfil atualizado com sucesso!');
     } catch (err) {
@@ -1683,49 +1690,58 @@ function ProfilePanel() {
         </div>
       )}
 
-      {/* ── Identidade — sempre só de leitura ──
-          O nome e o NIF são geridos pela equipa. O NIF nem sequer é
-          devolvido pelo backend (`PROFILE_HIDDEN_FIELDS`) e não entra no
-          `form_schema`: a regra de negócio é que NUNCA é editável pelo
-          cliente, e é aplicada no servidor, não aqui. */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
-        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
-          <User className="w-5 h-5 text-blue-500" />
-          Dados Pessoais
-        </h3>
+      {/* ── Um cartão por secção do registo ──
+          «O Meu Perfil» espelha TODO o formulário de registo: dados pessoais, segundo
+          titular (só quem o declarou), imóvel pretendido e situação financeira. O NIF
+          aparece mascarado e só para ler; o nome é gerido pela equipa. As regras vivem
+          no servidor (esquema + allowlist), não aqui. */}
+      {secoesDoPerfil(formSchema, profile?.secoes).map((seccao) => (
+        <div
+          key={seccao.id}
+          className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6"
+          data-testid={`perfil-seccao-${seccao.id}`}
+        >
+          <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <User className="w-5 h-5 text-blue-500" />
+            {seccao.titulo}
+          </h3>
 
-        <div className="mb-4">
-          <label htmlFor="perfil-nome" className="text-xs font-medium text-gray-600 mb-1 block">
-            Nome Completo
-          </label>
-          <input
-            id="perfil-nome"
-            type="text"
-            value={profile?.nome || ''}
-            disabled
-            className="w-full px-3 py-2 text-sm border border-gray-100 rounded-lg bg-gray-50 text-gray-400 cursor-not-allowed"
+          {seccao.id === 'titular' && (
+            <div className="mb-4">
+              <label htmlFor="perfil-nome" className="text-xs font-medium text-gray-600 mb-1 block">
+                Nome Completo
+              </label>
+              <input
+                id="perfil-nome"
+                type="text"
+                value={profile?.nome || ''}
+                disabled
+                className="w-full px-3 py-2 text-sm border border-gray-100 rounded-lg bg-gray-50 text-gray-400 cursor-not-allowed"
+              />
+              <p className="text-[10px] text-gray-400 mt-0.5">
+                O nome e o NIF não podem ser alterados aqui. Contacte o seu consultor se precisar.
+              </p>
+            </div>
+          )}
+
+          {/* Campos vindos do formulário interno, com divulgação
+              progressiva: obrigatórios à vista, os restantes atrás de
+              "Preencher mais detalhes". */}
+          <PortalProfileFields
+            schema={seccao.campos}
+            values={formData}
+            onChange={handleChange}
+            disabled={isLocked}
+            somenteLeitura={profile?.somente_leitura || {}}
           />
-          <p className="text-[10px] text-gray-400 mt-0.5">
-            O nome e o NIF não podem ser alterados aqui. Contacte o seu consultor se precisar.
-          </p>
         </div>
+      ))}
 
-        {/* Campos vindos do formulário interno, com divulgação
-            progressiva: obrigatórios à vista, os restantes atrás de
-            "Preencher mais detalhes". */}
-        <PortalProfileFields
-          schema={formSchema}
-          values={formData}
-          onChange={handleChange}
-          disabled={isLocked}
-        />
-
-        {!isLocked && camposEmFalta.length > 0 && (
-          <p className="text-xs text-amber-600 mt-4">
-            Falta preencher: {camposEmFalta.map((c) => c.label).join(', ')}.
-          </p>
-        )}
-      </div>
+      {!isLocked && camposEmFalta.length > 0 && (
+        <p className="text-xs text-amber-600">
+          Falta preencher: {camposEmFalta.map((c) => c.label).join(', ')}.
+        </p>
+      )}
 
       {/* ── Botão Guardar (só visível se NÃO bloqueado) ── */}
       {!isLocked && (

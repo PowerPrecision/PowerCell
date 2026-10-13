@@ -217,6 +217,9 @@ PROJECCAO_DO_PROCESSO: dict[str, int] = {
     "network_id": 1, "company_id": 1, "company_name": 1, "company": 1,
     "client_id": 1, "second_client_id": 1, "client_ids": 1,
     "s3_folder": 1, "is_indexed": 1, "skip_index": 1, "is_deleted": 1,
+    # Só para dizer ao parceiro ONDE o processo está (a cadeia de partilhas B2B). Entram
+    # na leitura, nunca na saída: ele não vê redes, ids nem quem passou a quem.
+    "partner_companies": 1,
 }
 
 PROJECCAO_DA_LEAD: dict[str, int] = {
@@ -248,6 +251,18 @@ def _texto(valor: Any) -> Optional[str]:
     return str(getattr(valor, "value", valor))
 
 
+def _onde_esta(proc: dict) -> Optional[str]:
+    """«Está em: Empresa Z» — o que o parceiro vê da cadeia B2B.
+
+    Só o NOME da(s) empresa(s) que têm o processo agora. Nunca a rede, os ids nem o
+    caminho (quem o passou a quem é da linhagem do staff). Sem nome conhecido, `None`.
+    """
+    from services.process_lineage import empresas_onde_esta
+
+    nomes = empresas_onde_esta(proc)
+    return ", ".join(nomes) if nomes else None
+
+
 def dto_do_processo(proc: dict, etapa: str, *, pedidos_pendentes: int = 0) -> dict:
     """Um processo, como o parceiro o vê. Campo a campo — nunca `**proc`."""
     return {
@@ -259,6 +274,9 @@ def dto_do_processo(proc: dict, etapa: str, *, pedidos_pendentes: int = 0) -> di
         "etapa": etapa,
         "etapa_label": ROTULOS_DAS_ETAPAS.get(etapa, ROTULOS_DAS_ETAPAS[ETAPA_EM_CURSO]),
         "consultor_name": _nome_do_consultor(proc),
+        # Onde o processo está agora (Out 2026): a empresa de destino ou, se esta o
+        # partilhou em cadeia, a(s) que o têm. O parceiro angaria; não executa.
+        "empresa_actual": _onde_esta(proc),
         "pedidos_pendentes": int(pedidos_pendentes),
         "created_at": proc.get("created_at"),
         "updated_at": proc.get("updated_at") or proc.get("created_at"),

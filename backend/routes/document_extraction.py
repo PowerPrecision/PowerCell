@@ -14,7 +14,8 @@ consultor confirmar no diálogo de revisão.
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from services.auth import require_staff
+from services.auth import require_roles
+from services.document_ai_access import PAPEIS_DE_GESTAO_DA_IA
 from services.document_vision_extract import run_extract_document_data
 from services.process_closed_guard import exigir_processo_editavel
 
@@ -32,12 +33,12 @@ async def extract_document_data(
     request: Request,
     process_id: str,
     payload: DocumentExtractRequest,
-    user: dict = Depends(require_staff()),
+    user: dict = Depends(require_roles(PAPEIS_DE_GESTAO_DA_IA)),
 ):
     """Lê um documento arquivado no S3 e devolve os dados para revisão.
 
-    Gestão OU atribuído ao processo, como as restantes ferramentas de IA sobre
-    documentos (`/documents/ai-analyze`, `/rename-all-smart`) — a decisão vive em
+    SÓ os altos perfis (Master, Admin, CEO, Diretor), como as restantes ferramentas
+    de IA manual sobre documentos (`/documents/ai-analyze`, `/rename-all-smart`) —
     `services/document_ai_access`.
     """
     return await run_extract_document_data(
