@@ -69,7 +69,7 @@ from fastapi import Depends, HTTPException, Request
 
 from database import db
 from services.auth import get_current_user
-from services.role_scope import utilizador_e_global
+from services.role_scope import conta_e_master, utilizador_e_global
 from services.tenant_network import (
     CAMPO_REDES_PARCEIRAS,
     PROJECCAO_DO_CARIMBO,
@@ -109,6 +109,18 @@ PROJECCAO_DA_TAREFA = {
 #: do dono.
 _METODOS_QUE_ACEITAM_CONVIDADO = frozenset({"GET", "PUT"})
 _CAMINHO_DA_FICHA = "/clients/{client_id}"
+
+
+def _master_passa(user: Optional[dict]) -> bool:
+    """O Master abre por id o que lhe indicam, com qualquer chapéu (Lote 2, Out 2026).
+
+    `utilizador_e_global` olha para o perfil ACTIVO: um Master com o chapéu de
+    Admin de uma empresa passava a ter só o âmbito dessa empresa e recebia 404
+    ao abrir os ficheiros de um cliente de outra — o que nenhum chapéu lhe
+    devia tirar. As LISTAGENS continuam a ser a vista da empresa escolhida
+    (`tenant_network.resolve_vista_scope`); abrir por id é global.
+    """
+    return conta_e_master(user) or utilizador_e_global(user)
 
 
 def cliente_e_da_pool(cliente: Optional[dict]) -> bool:
@@ -179,7 +191,7 @@ async def cliente_no_ambito(
     cliente = await db.clients.find_one({"id": client_id}, PROJECCAO_DO_CLIENTE)
     if not cliente:
         return None
-    if utilizador_e_global(user):
+    if _master_passa(user):
         return True
 
     scope = await resolve_tenant_scope(user)
@@ -197,7 +209,7 @@ async def tarefa_no_ambito(task_id: str, user: dict) -> Optional[bool]:
     tarefa = await db.tasks.find_one({"id": task_id}, PROJECCAO_DA_TAREFA)
     if not tarefa:
         return None
-    if utilizador_e_global(user):
+    if _master_passa(user):
         return True
     if tarefa_e_do_utilizador(tarefa, str((user or {}).get("id") or "")):
         return True
@@ -232,7 +244,7 @@ async def id_flexivel_no_ambito(flexible_id: str, user: dict) -> Optional[bool]:
         return None
     processo = await db.processes.find_one({"id": flexible_id}, PROJECCAO_DO_PROCESSO_FLEXIVEL)
     if processo:
-        if utilizador_e_global(user):
+        if _master_passa(user):
             return True
         scope = await resolve_tenant_scope(user)
         return processo_no_ambito(processo, scope)
@@ -241,7 +253,7 @@ async def id_flexivel_no_ambito(flexible_id: str, user: dict) -> Optional[bool]:
         {"id": flexible_id}, {**PROJECCAO_DO_CLIENTE, "process_ids": 1},
     )
     if cliente:
-        if utilizador_e_global(user):
+        if _master_passa(user):
             return True
         if await cliente_no_ambito(flexible_id, user, com_convidados=True) is False:
             return False
@@ -262,7 +274,7 @@ async def id_flexivel_no_ambito(flexible_id: str, user: dict) -> Optional[bool]:
         {"client_id": flexible_id}, PROJECCAO_DO_PROCESSO_FLEXIVEL,
     )
     if por_cliente:
-        if utilizador_e_global(user):
+        if _master_passa(user):
             return True
         return processo_no_ambito(por_cliente, await resolve_tenant_scope(user))
     return None
@@ -285,7 +297,7 @@ async def documento_no_ambito_por_id(doc_id: str, user: dict) -> Optional[bool]:
         registo = await db.document_expiries.find_one({"id": doc_id}, PROJECCAO_DO_DOCUMENTO)
     if registo is None:
         return None
-    if utilizador_e_global(user):
+    if _master_passa(user):
         return True
 
     for chave in ("process_id", "client_id"):

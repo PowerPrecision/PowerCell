@@ -330,7 +330,14 @@ async def _ambito_do_utilizador(user: dict):
     era a saída cómoda e desligava a fronteira por causa de um soluço da
     rede, que é o oposto do que esta guarda existe para fazer.
     """
+    from services.role_scope import conta_e_master
     from services.tenant_network import TenantScope, resolve_tenant_scope
+
+    # Lote 2 (Out 2026): a CONTA Master abre os documentos de qualquer cliente,
+    # com o chapéu que tiver — o mesmo que `by_id_scope` já decide à entrada.
+    # Sem isto a guarda do router deixava passar e esta recusava logo a seguir.
+    if conta_e_master(user):
+        return TenantScope(inclui_rede_de_omissao=True, sem_fronteira=True)
 
     try:
         return await resolve_tenant_scope(user or {})

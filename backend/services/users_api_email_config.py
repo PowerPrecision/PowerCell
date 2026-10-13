@@ -5,6 +5,7 @@ Preserves multi-empresa resolution, dual-write, and FORCED_SHARED_ROLES blocks.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -796,6 +797,13 @@ async def run_set_primary_email_account(
 # ====================================================================
 
 
+#: Timeout de cada operação do socket SMTP no envio de teste, e tecto do envio
+#: inteiro (ligação + login + envio). Ambos bem abaixo dos ~30 s a que o proxy
+#: do Render corta o pedido: um servidor pendurado tem de dar um erro nosso.
+TIMEOUT_DO_ENVIO_DE_TESTE = 5
+TECTO_DO_ENVIO_DE_TESTE = 12
+
+
 async def run_send_test_email(
     request: Request,
     company_id: Optional[str],
@@ -855,18 +863,39 @@ async def run_send_test_email(
         "incluindo a entrega, e não apenas as credenciais."
     )
 
-    resultado = await send_email(
-        account_name=account.name,
-        to_emails=[destino],
-        subject="PowerCell — email de teste",
-        body=corpo,
-        from_email=account.email,
-        reply_to=destino,
-        active_company_id=active_company_id,
-        account_override=account,
-        created_by=current_user.get("id"),
-        skip_proc_tag=True,
-    )
+    try:
+        resultado = await asyncio.wait_for(
+            send_email(
+                account_name=account.name,
+                to_emails=[destino],
+                subject="PowerCell — email de teste",
+                body=corpo,
+                from_email=account.email,
+                reply_to=destino,
+                active_company_id=active_company_id,
+                account_override=account,
+                created_by=current_user.get("id"),
+                skip_proc_tag=True,
+                smtp_timeout=TIMEOUT_DO_ENVIO_DE_TESTE,
+            ),
+            timeout=TECTO_DO_ENVIO_DE_TESTE,
+        )
+    except asyncio.TimeoutError:
+        # O proxy do Render corta o pedido aos ~30 s e devolve um 502 que não
+        # diz nada ao utilizador. Responder nós, antes, com a causa.
+        logger.error(
+            "[email-test-send] Tempo esgotado user=%s source=%s account=%s host=%s:%s",
+            current_user.get("id"), source, account.email,
+            account.smtp_server, account.smtp_port,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"O servidor SMTP {account.smtp_server}:{account.smtp_port} não respondeu a tempo "
+                f"({TECTO_DO_ENVIO_DE_TESTE} s). Verifique o servidor e a porta "
+                f"(conta: {account.email}, origem: {source})."
+            ),
+        ) from None
 
     if not resultado.get("success"):
         # A origem vai na resposta de propósito: sem ela, diagnosticar isto

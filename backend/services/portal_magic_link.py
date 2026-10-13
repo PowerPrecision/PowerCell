@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -231,7 +232,8 @@ def build_send_magic_link_response(
 ) -> dict[str, Any]:
     return {
         "success": True,
-        "message": f"Email enviado para {client_email}",
+        "message": f"A enviar o email para {client_email}. Será avisado se não sair.",
+        "queued": True,
         "magic_link": magic_link,
         "short_id": short_id,
         "portal_access_code": portal_access_code,
@@ -309,8 +311,6 @@ async def _send_magic_link_to_client(
     # Portal vêm do carimbo do processo/cliente, nunca de uma constante.
     from services.email_branding import build_email_header_logo_html
     from services.portal_email_context import (
-        enviar_email_do_portal,
-        mensagem_sem_remetente,
         resolver_contexto,
         verificar_remetente,
     )
@@ -358,6 +358,76 @@ async def _send_magic_link_to_client(
         portal_login_url=contexto.portal_url,
     )
 
+    # O envio SMTP já NÃO bloqueia o pedido (Lote 2, Out 2026): um servidor de
+    # email pendurado fazia o pedido esperar o timeout SMTP e o proxy do Render
+    # cortava-o com um 502 que não diz nada ao utilizador. Tudo o que se pode
+    # recusar de imediato (cliente sem email, remetente em falta) foi recusado
+    # acima, com 400. Daqui para a frente a entrega corre em segundo plano e uma
+    # falha chega ao utilizador como NOTIFICAÇÃO — nunca em silêncio.
+    from services.background_tasks import spawn_background_task
+
+    spawn_background_task(
+        _entregar_magic_link(
+            contexto=contexto,
+            process_id=process_id,
+            user=user,
+            client_email=client_email,
+            client_name=client_name,
+            text_body=text_body,
+            html_body=html_body,
+            short_id=short_id,
+        ),
+        name=f"magic-link-email-{process_id}",
+    )
+    return build_send_magic_link_response(
+        client_email=client_email,
+        magic_link=magic_link,
+        short_id=short_id,
+        portal_access_code=portal_access_code,
+    )
+
+
+async def _avisar_falha_do_envio(user: dict, process_id: str, client_name: str, motivo: str) -> None:
+    """Notifica quem pediu o envio de que o email NÃO saiu. Nunca levanta."""
+    try:
+        user_id = (user or {}).get("id")
+        if not user_id:
+            return
+        await db.notifications.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "message": (
+                f"O email com o link do Portal para {client_name} não foi enviado: {motivo}"
+            ),
+            "type": "email_failed",
+            "process_id": process_id,
+            "client_name": client_name,
+            "link": f"/processo/{process_id}",
+            "read": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:  # noqa: BLE001 - o aviso é o último recurso
+        logger.error("[MAGIC-LINK] Nem a notificação da falha foi gravada (processo %s): %s", process_id, exc)
+
+
+async def _entregar_magic_link(
+    *,
+    contexto,
+    process_id: str,
+    user: dict,
+    client_email: str,
+    client_name: str,
+    text_body: str,
+    html_body: str,
+    short_id: str,
+) -> None:
+    """Entrega o email do link do Portal, fora do ciclo pedido/resposta.
+
+    Nunca levanta (é uma task sem ninguém à espera): qualquer falha fica no log
+    e numa notificação para quem pediu o envio.
+    """
+    from services.portal_email_context import enviar_email_do_portal, mensagem_sem_remetente
+
     try:
         send_result = await enviar_email_do_portal(
             contexto,
@@ -367,48 +437,30 @@ async def _send_magic_link_to_client(
             body_html=html_body,
         )
     except ValueError as e:
-        # ValueError (ex: purpose inválido no transporter) é erro de
-        # configuração, não de infraestrutura — 400 para o frontend tratar.
         logger.error(f"Erro de configuração ao enviar magic link email: {e}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"SMTP não está configurado: {e}",
-        )
-    except Exception as e:
-        # O serviço de email levantou algo que não é configuração: não entregou.
-        # 502 (o serviço a montante falhou), não um 500 nosso.
+        await _avisar_falha_do_envio(user, process_id, client_name, f"SMTP não está configurado ({e}).")
+        return
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Erro ao enviar magic link email: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=DETALHE_FALHA_DE_ENTREGA)
+        await _avisar_falha_do_envio(user, process_id, client_name, DETALHE_FALHA_DE_ENTREGA)
+        return
 
-    # BUGFIX (onboarding — Bug 3, Fev 2026): `send_email` NÃO levanta excepção
-    # quando o envio falha (ex: SMTP mal configurado, autenticação inválida) —
-    # devolve {"success": False, "error": ...}. Sem esta verificação, o
-    # endpoint reportava sempre sucesso ao frontend mesmo quando o email
-    # nunca chegou a ser enviado.
+    # `send_email` NÃO levanta quando o envio falha — devolve {"success": False}.
     if not send_result or not send_result.get("success"):
         error_detail = (send_result or {}).get("error") or "Falha desconhecida ao enviar o email."
         error_code = (send_result or {}).get("error_code")
         logger.error(f"Erro ao enviar magic link email para {client_email}: {error_detail}")
-        # FIX (Set 2026): falha de CONFIGURAÇÃO (SMTP ausente) é erro do lado
-        # do cliente — 400 Bad Request com detalhe claro, em vez de 500
-        # Internal Server Error. O frontend exibe um erro tratado e o admin
-        # sabe exactamente onde configurar.
         if error_code == "SMTP_NOT_CONFIGURED":
-            raise HTTPException(status_code=400, detail=mensagem_sem_remetente(contexto))
-        if error_code in CODIGOS_DE_CONFIGURACAO_DO_REMETENTE:
-            # A conta existe mas não serve (credenciais recusadas / password
-            # ilegível): é configuração, não infraestrutura — 400 e não 500.
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"A conta de e-mail da empresa não está a funcionar ({error_detail}). "
-                    "Verifique as credenciais em Contas de Email e tente novamente."
-                ),
+            motivo = mensagem_sem_remetente(contexto)
+        elif error_code in CODIGOS_DE_CONFIGURACAO_DO_REMETENTE:
+            motivo = (
+                f"A conta de e-mail da empresa não está a funcionar ({error_detail}). "
+                "Verifique as credenciais em Contas de Email."
             )
-        raise HTTPException(
-            status_code=502,
-            detail=f"{DETALHE_FALHA_DE_ENTREGA} ({error_detail})",
-        )
+        else:
+            motivo = f"{DETALHE_FALHA_DE_ENTREGA} ({error_detail})"
+        await _avisar_falha_do_envio(user, process_id, client_name, motivo)
+        return
 
     # Bloco 3 (ponto 21): enviar acesso ao Portal fica no histórico (sem o link)
     # — só DEPOIS de o email ter saído: um registo de «enviou» não pode
@@ -426,10 +478,4 @@ async def _send_magic_link_to_client(
     logger.info(
         f"Magic link enviado por email para {client_email} "
         f"(processo {process_id}, short_id: {short_id})"
-    )
-    return build_send_magic_link_response(
-        client_email=client_email,
-        magic_link=magic_link,
-        short_id=short_id,
-        portal_access_code=portal_access_code,
     )

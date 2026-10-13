@@ -1217,7 +1217,7 @@ const ProcessDetailsModal = memo(({
                   setResendingPortal(true);
                   try {
                     const res = await sendMagicLinkEmail(process?.id);
-                    toast.success('Email de acesso ao Portal reenviado com sucesso.');
+                    toast.success('A reenviar o email de acesso ao Portal. Será avisado se não sair.');
                     const data = res.data;
                     if (onProcessUpdate && data?.magic_link) {
                       onProcessUpdate(process.id, {

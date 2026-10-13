@@ -50,7 +50,17 @@ async def run_get_users(
         empresas_do_ambito,
     )
 
-    ambito = await empresas_do_ambito(user or {})
+    if process_id:
+        ambito = await empresas_do_ambito(user or {})
+    else:
+        # Sem processo (criar tarefa, filtros, calendário…) a equipa que o Master
+        # vê é a da EMPRESA que tem seleccionada (`X-Company-Id`); com um processo,
+        # manda o que o processo alcança (abaixo). Sem empresa escolhida mantém-se
+        # o âmbito normal.
+        from services.admin_users_scope import empresas_do_scope
+        from services.tenant_network import resolve_vista_scope
+
+        ambito = await empresas_do_scope(await resolve_vista_scope(user or {}))
     scope_query = await build_users_scope_query(ambito)
     if scope_query:
         query = {"$and": [query, scope_query]} if query else scope_query

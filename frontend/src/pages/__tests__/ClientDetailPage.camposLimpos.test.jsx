@@ -15,6 +15,11 @@ vi.mock("../../layouts/DashboardLayout", () => ({
   default: ({ children }) => <div data-testid="layout">{children}</div>,
 }));
 
+// A ficha lê a sessão (o botão «Alterar Empresa» é só do Master); aqui é um consultor.
+vi.mock("../../contexts/AuthContext", () => ({
+  useAuth: () => ({ user: { id: "u1", role: "consultor" } }),
+}));
+
 const api = vi.hoisted(() => ({
   getClient: vi.fn(),
   getClientFiles: vi.fn(() => Promise.resolve({ data: { files: [] } })),

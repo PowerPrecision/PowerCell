@@ -83,6 +83,18 @@ def utilizador_e_global(user: Optional[dict]) -> bool:
     return e_papel_global(papel_concreto_do_utilizador(user))
 
 
+def conta_e_master(user: Optional[dict]) -> bool:
+    """A CONTA é Master, seja qual for o chapéu que veste agora?
+
+    Ao contrário de `utilizador_e_global` (perfil ACTIVO), isto olha para o
+    perfil da conta. Serve às duas coisas que não dependem do chapéu:
+    o Master abrir por id o que lhe indicam (não há registo «seu» que o
+    chapéu de Admin de uma empresa lhe tire) e a VISTA da empresa activa
+    nas listagens.
+    """
+    return e_papel_global(normalizar_papel((user or {}).get("role")))
+
+
 def pode_conceder_papel(quem_concede: Optional[dict], papel: Any) -> bool:
     """Quem concede um perfil pode concedê-lo?
 
@@ -96,6 +108,7 @@ def pode_conceder_papel(quem_concede: Optional[dict], papel: Any) -> bool:
 
 
 __all__ = [
+    "conta_e_master",
     "PAPEIS_GLOBAIS",
     "PAPEIS_SO_MASTER_CONCEDE",
     "e_papel_global",

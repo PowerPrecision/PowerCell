@@ -53,3 +53,13 @@ def spawn_background_task(
 def pending_background_tasks() -> int:
     """Número de tarefas background registadas e ainda em curso."""
     return len(_background_tasks)
+
+
+async def aguardar_tarefas_pendentes() -> None:
+    """Espera que as tarefas registadas terminem (usado por testes e no encerramento).
+
+    Nunca levanta: o resultado/excepção de cada tarefa é assunto dela.
+    """
+    pendentes = list(_background_tasks)
+    if pendentes:
+        await asyncio.gather(*pendentes, return_exceptions=True)

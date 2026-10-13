@@ -42,8 +42,11 @@ class _SMTPFalso:
     enviadas: list = []
     erro = None
 
+    construcoes: list = []
+    pendurar_segundos = 0
+
     def __init__(self, *a, **kw):
-        pass
+        type(self).construcoes.append(kw)
 
     def __enter__(self):
         return self
@@ -52,6 +55,9 @@ class _SMTPFalso:
         return False
 
     def login(self, *a, **kw):
+        if type(self).pendurar_segundos:
+            import time
+            time.sleep(type(self).pendurar_segundos)
         if type(self).erro:
             raise type(self).erro
 
@@ -66,6 +72,8 @@ class _SMTPFalso:
 def smtp():
     _SMTPFalso.enviadas = []
     _SMTPFalso.erro = None
+    _SMTPFalso.construcoes = []
+    _SMTPFalso.pendurar_segundos = 0
     return _SMTPFalso
 
 
@@ -164,6 +172,49 @@ class TestEnvioDeTeste:
 
         gravados = [d async for d in ambiente.emails.find({})]
         assert gravados == [], "sem process_id, o send_email não deve arquivar"
+
+
+class TestTimeoutCurtoDoEnvioDeTeste:
+    """Lote 2 (Out 2026): um SMTP pendurado dava 502 do proxy do Render, sem causa.
+
+    O servidor tem de responder ele, antes dos ~30 s do proxy, com um 400 que diga o quê.
+    """
+
+    async def test_o_timeout_curto_chega_ao_socket_smtp(self, ambiente, smtp):
+        # Um nível ABAIXO: o parâmetro que sai para o `smtplib`, não o resultado.
+        with patch(
+            "services.email_config_resolver.resolve_sending_account",
+            AsyncMock(return_value=(_conta(), "profile:user")),
+        ):
+            await _correr()
+        assert smtp.construcoes[-1]["timeout"] == users_api_email_config.TIMEOUT_DO_ENVIO_DE_TESTE
+        assert users_api_email_config.TIMEOUT_DO_ENVIO_DE_TESTE <= 5
+
+    async def test_servidor_pendurado_devolve_400_rapido(self, ambiente, smtp, monkeypatch):
+        import time
+
+        monkeypatch.setattr(users_api_email_config, "TECTO_DO_ENVIO_DE_TESTE", 0.2)
+        smtp.pendurar_segundos = 1.5
+        with patch(
+            "services.email_config_resolver.resolve_sending_account",
+            AsyncMock(return_value=(_conta(), "profile:user")),
+        ):
+            inicio = time.monotonic()
+            with pytest.raises(HTTPException) as exc:
+                await _correr()
+            gasto = time.monotonic() - inicio
+        assert exc.value.status_code == 400
+        assert "não respondeu a tempo" in exc.value.detail
+        assert "mail.precisioncredito.pt:465" in exc.value.detail
+        assert gasto < 1.0, "o pedido esperou pelo servidor em vez de responder"
+
+    async def test_o_envio_normal_nao_e_afectado(self, ambiente, smtp):
+        with patch(
+            "services.email_config_resolver.resolve_sending_account",
+            AsyncMock(return_value=(_conta(), "profile:user")),
+        ):
+            resposta = await _correr()
+        assert resposta["success"] is True
 
 
 class TestPontoUnicoDeResolucao:

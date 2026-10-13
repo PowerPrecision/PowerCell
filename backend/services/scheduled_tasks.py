@@ -560,30 +560,52 @@ class ScheduledTasksService:
             logger.info("Nenhum cliente em espera há muito tempo")
             return 0
         
-        from services.role_query import deep_role_in_filter
-        managers = await self.db.users.find({
-            "$and": [deep_role_in_filter(["ceo", "diretor", "admin"]), {"is_active": {"$ne": False}}]
-        }, {"_id": 0, "id": 1, "name": 1}).to_list(50)
-        
-        notifications_created = 0
-        
-        for manager in managers:
-            # Verificar se já enviou notificação hoje
-            existing = await self.db.notifications.find_one({
-                "user_id": manager["id"],
-                "type": "clients_waiting",
-                "created_at": {"$gte": (today - timedelta(hours=24)).isoformat()}
-            })
-            
-            if not existing:
-                await self.create_notification(
-                    user_id=manager["id"],
-                    message=f"⚠️ {len(processes)} cliente(s) em espera há mais de {days} dias. Requer atenção!",
-                    notification_type="clients_waiting",
-                    link="/admin?tab=overview"
+        # Cada gestão só ouve falar dos clientes DA SUA REDE (Lote 2, Out 2026): antes,
+        # a contagem somava os processos de todas as redes e ia a toda a gestão do
+        # sistema — a Domus era avisada de «7 clientes em espera» em que 5 eram da Power.
+        # Sem rede determinável não se avisa ninguém (falha fechada, com aviso no log).
+        from services.alert_audience import (
+            gestao_da_rede_do_processo,
+            rede_resolvida_do_processo,
+        )
+
+        por_rede: dict = {}
+        for processo in processes:
+            rede = await rede_resolvida_do_processo(processo)
+            if not rede:
+                logger.warning(
+                    "[WAITING] Processo %s sem rede determinável: não entra em nenhum aviso.",
+                    processo.get("id"),
                 )
-                notifications_created += 1
-        
+                continue
+            por_rede.setdefault(rede, []).append(processo)
+
+        notifications_created = 0
+
+        for rede, processos_da_rede in por_rede.items():
+            gestores = await gestao_da_rede_do_processo(
+                processos_da_rede[0], ["ceo", "diretor", "admin"],
+            )
+            for manager_id in gestores:
+                # Verificar se já enviou notificação hoje
+                existing = await self.db.notifications.find_one({
+                    "user_id": manager_id,
+                    "type": "clients_waiting",
+                    "created_at": {"$gte": (today - timedelta(hours=24)).isoformat()}
+                })
+
+                if not existing:
+                    await self.create_notification(
+                        user_id=manager_id,
+                        message=(
+                            f"⚠️ {len(processos_da_rede)} cliente(s) em espera há mais de "
+                            f"{days} dias. Requer atenção!"
+                        ),
+                        notification_type="clients_waiting",
+                        link="/admin?tab=overview"
+                    )
+                    notifications_created += 1
+
         logger.info(f"Clientes em espera: {notifications_created} notificações criadas para {len(processes)} clientes")
         return notifications_created
     

@@ -7,7 +7,7 @@ Funções utilitárias para enviar notificações via WebSocket.
 """
 
 import logging
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime, timezone
 import uuid
 
@@ -157,58 +157,6 @@ async def send_realtime_notification(
         )
     
     return notification
-
-
-async def broadcast_notification(
-    title: str,
-    message: str,
-    notification_type: str = "info",
-    link: Optional[str] = None,
-    exclude_users: Optional[List[str]] = None,
-    roles: Optional[List[str]] = None,
-    save_to_db: bool = True
-) -> int:
-    """
-    Enviar notificação para múltiplos utilizadores.
-    
-    Args:
-        title: Título da notificação
-        message: Mensagem da notificação
-        notification_type: Tipo (info, warning, error, success)
-        link: Link opcional
-        exclude_users: Lista de user_ids a excluir
-        roles: Lista de papéis a notificar (None = todos)
-        save_to_db: Se deve guardar na base de dados
-    
-    Returns:
-        Número de utilizadores notificados
-    """
-    exclude_users = exclude_users or []
-    count = 0
-    
-    # Obter utilizadores alvo
-    from services.role_query import deep_role_in_filter
-    if roles:
-        query = {"$and": [deep_role_in_filter(roles), {"is_active": {"$ne": False}}]}
-    else:
-        query = {"is_active": {"$ne": False}}
-    
-    users = await db.users.find(query, {"id": 1, "_id": 0}).to_list(1000)
-    
-    for user in users:
-        user_id = user["id"]
-        if user_id not in exclude_users:
-            await send_realtime_notification(
-                user_id=user_id,
-                title=title,
-                message=message,
-                notification_type=notification_type,
-                link=link,
-                save_to_db=save_to_db
-            )
-            count += 1
-    
-    return count
 
 
 async def notify_process_update(

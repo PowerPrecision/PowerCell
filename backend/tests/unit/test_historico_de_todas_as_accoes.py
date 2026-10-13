@@ -422,8 +422,9 @@ class TestAsAccoesForaDoInventarioDeRotas:
         ("client_process_ops", "run_link_process_to_client"),
         ("client_process_ops", "run_unlink_process_from_client"),
         ("client_process_ops", "run_create_process_for_client"),
-        # O corpo vive em `_send_magic_link_to_client`; a pública é só o invólucro que traduz excepções.
-        ("portal_magic_link", "_send_magic_link_to_client"),
+        # O registo vive na ENTREGA, que corre em segundo plano (Lote 2, Out 2026):
+        # `_send_magic_link_to_client` só prepara e agenda.
+        ("portal_magic_link", "_entregar_magic_link"),
         ("process_portal_messages", "run_send_portal_message_staff"),
         ("restore_api_process", "run_restore_process"),
         ("portal_profile", "run_update_client_profile"),

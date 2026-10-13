@@ -2635,7 +2635,7 @@ const ProcessDetails = () => {
                       onClick={async () => {
                         try {
                           await sendMagicLinkEmail(id);
-                          toast.success("Email enviado com o link do portal!");
+                          toast.success("A enviar o email com o link do portal. Será avisado se não sair.");
                         } catch (error) {
                           // 404 («processo eliminado»), 400 (sem remetente), 502 e 500: um
                           // só aviso, com o motivo do servidor — e o toast «retry agendado»

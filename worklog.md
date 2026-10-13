@@ -12146,3 +12146,18 @@ Work Log:
 4. CADEIA B2B. O registo `partner_companies` ganhou `shared_from_network`/`shared_from_company_name`/`depth` por elo; quem vê o processo pode passá-lo à frente; revogar um elo leva os derivados; a convidada só retira os seus. `process_lineage` (pura, nunca gravada) devolve parceiro → casa dona → elos; o detalhe leva `linhagem`, o parceiro vê `empresa_actual` (só nomes). Parceiros e clientes são recusados (400) como responsáveis de tarefas ao criar/reatribuir (só os que entram).
 - **Testes:** backend `test_ia_nos_documentos_do_processo` (invertido), `test_ia_automatica_na_index` (24), `test_perfil_do_portal_seccoes` (71), `test_partilha_em_cadeia` (59), `test_portal_profile_schema` (38, 5 invertidos/adaptados), `test_triagem_por_rede_de_destino` (1 invertido: a convidada passava a 403); frontend `permissaoDeIA`, `portalProfile`, `PortalProfileFields`, `ClientPortal.perfil` (monta a página), `linhagem`, `LinhagemDoProcesso`, `PartilhaCard`, `ProcessDetails`, `PartnerPortal.ondeEsta`. Mutações medidas e mortas: 15 no backend e 1 no frontend (o payload a levar campos só de leitura).
 - **A confirmar / NÃO verificado:** (a) num processo já indexado o upload do staff continua SEM IA (desvio do Bloco 2) — só o Portal corre sempre; (b) o link temporário de carregamento vai para `Cliente_Upload` e continua sem IA; (c) a cadeia alarga a PII a redes que a casa dona não escolheu (fica rasto e a casa dona retira tudo, mas não é avisada de cada elo); (d) nada foi testado contra produção nem com o modelo de IA real.
+
+---
+Task ID: lote2-emails-vista-master-notificacoes-transferir
+Agent: Cloud Agent
+Task: Lote 2 — (1) 502 nos emails (SMTP síncrono); (2) 404 em `GET /documents/client/{id}/files` para o Master; (3) «Visão Global — Registos de Clientes» ignorava a empresa escolhida; (4) dropdown de atribuição do Master; (5) notificações entre redes; (6) «Alterar Empresa» (só Master)
+
+Date: 2026-10-13
+
+Work Log:
+1. EMAILS. `send-test`: timeout de socket 5 s e tecto de 12 s → 400 com a causa. `generate-magic-link/send`: validação síncrona, entrega em segundo plano, falha = notificação `email_failed`. Os testes legados do magic link esperam agora a task (`aguardar_tarefas_pendentes`); os que afirmavam 400/502 do envio passaram a afirmar a notificação.
+2. VISTA DO MASTER. Listar estreita à rede da empresa do `X-Company-Id` (`resolve_vista_scope`); abrir por id e os documentos são globais para a conta Master. A lista de empresas não é estreitada.
+3. DROPDOWN. Sem `process_id`, a equipa do Master é a da empresa escolhida.
+4. NOTIFICAÇÕES. Automações `target_role` e «clientes em espera» passaram a ser por rede; `broadcast_notification` apagada.
+5. ALTERAR EMPRESA. `POST /clients/{id}/transfer-company` (Master + password), sem tocar no S3; botão na ficha.
+- **NÃO verificado / a confirmar:** (a) o 404 do caso `42e1451a-ab14-43c4-a9af-01f6b338e89c` NÃO foi reproduzido (a guarda abre para o Master com o perfil `master`; com chapéu de Admin estava a fechar — corrigido); falta o log de produção `[DOCS] Nenhum processo ou cliente encontrado` para confirmar se o id simplesmente não existe; (b) a estreitação do Master pela empresa escolhida afecta TODAS as listagens que usam `build_tenant_condition`/`build_tenant_process_condition` (clientes, tarefas, processos, Kanban, pesquisa) — confirmar que é isso o pretendido para o Kanban; (c) emails agendados `admins/all_staff` não foram auditados; (d) nada foi testado contra produção nem com SMTP real.
