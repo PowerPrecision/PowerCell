@@ -260,7 +260,16 @@ export function AuthProvider({ children }) {
       password,
     });
     const { access_token, refresh_token, user: userData } = response.data;
-    
+
+    // Entrar é trocar de identidade: a cache do TanStack é de QUEM esteve
+    // antes neste separador (o logout é uma navegação SPA, sem recarregar a
+    // página) e tem 5 minutos de vida. Sem isto, o utilizador da Domus que
+    // entrava a seguir a um da Power via primeiro o quadro Kanban, os registos
+    // e as listas DELE — cartões que o servidor nunca lhe devolveria e que o
+    // detalhe recusa («Processo não encontrado»). Antes de publicar o token
+    // novo, para nenhuma query arrancar com a identidade nova e dados velhos.
+    queryClient.clear();
+
     // Guardar ambos os tokens
     localStorage.setItem("token", access_token);
     localStorage.setItem("refreshToken", refresh_token);
@@ -284,7 +293,7 @@ export function AuthProvider({ children }) {
     scheduleTokenRefresh(access_token);
     
     return userData;
-  }, [scheduleTokenRefresh]);
+  }, [scheduleTokenRefresh, queryClient]);
 
   const register = useCallback(async (name, email, password, phone) => {
     const response = await api.post("/auth/register", {
@@ -294,11 +303,12 @@ export function AuthProvider({ children }) {
       phone,
     });
     const { access_token, user: userData } = response.data;
+    queryClient.clear(); // nova identidade: a cache é de quem esteve antes (ver o `login`)
     setAuthToken(access_token);
     setToken(access_token);
     setUser(userData);
     return userData;
-  }, []);
+  }, [queryClient]);
 
   const logout = useCallback(async () => {
     // Tentar revogar refresh token no servidor
@@ -337,7 +347,10 @@ export function AuthProvider({ children }) {
     syncAuthContextHeaders({ role: null, companyId: null });
     activeRoleInitialized.current = false;
     activeCompanyInitialized.current = false;
-  }, []);
+
+    // Sair é deixar de ter dados: a cache é de quem saiu (ver o `login`).
+    queryClient.clear();
+  }, [queryClient]);
 
   const applyUserContext = useCallback((userData) => {
     const primaryRole = userData?.role || "consultor";
