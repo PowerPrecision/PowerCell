@@ -270,20 +270,22 @@ async def send_magic_link_to_client(
         resolver_contexto,
         verificar_remetente,
     )
-    from utils.frontend_url import get_frontend_url
 
-    contexto = await resolver_contexto(
-        company_id=process.get("company_id"),
-        company_name=process.get("company_name"),
-        network_id=process.get("network_id"),
-        client_id=client_id or None,
-        user=user,
-        frontend_url=get_frontend_url(request),
-    )
+    def _contexto(frontend_url):
+        return resolver_contexto(
+            company_id=process.get("company_id"),
+            company_name=process.get("company_name"),
+            network_id=process.get("network_id"),
+            client_id=client_id or None,
+            user=user,
+            frontend_url=frontend_url,
+        )
 
     # FAIL FAST: sem remetente não há o que emitir, gravar ou repetir. Antes de
     # emitir o link (um token novo por tentativa) e de escrever «Enviou o link»
-    # no histórico de um email que nunca sairá.
+    # no histórico de um email que nunca sairá. O remetente depende da rede e
+    # não do endereço do Portal, que só se conhece depois de emitir o link.
+    contexto = await _contexto(None)
     sem_remetente = await verificar_remetente(contexto)
     if sem_remetente:
         logger.warning(
@@ -300,6 +302,7 @@ async def send_magic_link_to_client(
     )
     magic_link = issued["magic_link"]
     short_id = issued["short_id"]
+    contexto = await _contexto(issued.get("frontend_url"))
 
     text_body, html_body = build_magic_link_email_bodies(
         client_name=client_name,

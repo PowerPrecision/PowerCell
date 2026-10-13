@@ -133,6 +133,16 @@ class TestRedeSemRemetente:
         assert resposta["success"] is True
         efeitos.enviar.assert_awaited_once()
 
+    async def test_sem_rede_de_omissao_configurada_nao_se_antecipa_a_recusa(self, ambiente, monkeypatch):
+        # Dev/CI sem `TENANT_DEFAULT_NETWORK_ID`: mantém-se o comportamento anterior
+        # ao isolamento (o critério das outras colecções); em produção a variável existe.
+        from services.portal_email_context import verificar_remetente
+
+        monkeypatch.delenv("TENANT_DEFAULT_NETWORK_ID", raising=False)
+        contexto = type("Ctx", (), {"account": None, "network_id": REDE_DOMUS, "nome": "Domus"})()
+        with patch("services.portal_email_context._conta_de_sistema_generica", AsyncMock(return_value=None)):
+            assert await verificar_remetente(contexto) is None
+
     async def test_a_falha_so_depois_do_envio_nao_deixa_historico(self, ambiente):
         efeitos = _Efeitos()
         efeitos.enviar.return_value = {"success": False, "error": "boom", "error_code": "outro"}

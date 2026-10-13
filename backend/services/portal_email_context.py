@@ -418,7 +418,12 @@ async def verificar_remetente(contexto: "ContextoDoEmailDoPortal") -> Optional[s
     if await _conta_de_sistema_generica(contexto.network_id) is not None:
         return None
     omissao = rede_de_omissao()
-    if contexto.network_id and omissao and contexto.network_id == omissao:
+    if not omissao:
+        # Dev/CI sem `TENANT_DEFAULT_NETWORK_ID`: não há rede a que atribuir o
+        # último recurso, e o comportamento anterior ao isolamento mantém-se
+        # (o critério das outras colecções). Em produção a variável existe.
+        return None
+    if contexto.network_id and contexto.network_id == omissao:
         return None
     return mensagem_sem_remetente(contexto)
 
