@@ -542,7 +542,7 @@ async def run_list_my_email_accounts(
         if user_ucr_roles & set(CAIXA_GERAL_INJECT_ROLES):
             for cid, cname in company_names.items():
                 try:
-                    caixa = await load_caixa_geral_config(cid)
+                    caixa = await load_caixa_geral_config(cid, user=current_user)
                 except Exception as exc:
                     logger.warning(
                         "[email-accounts] Falha a carregar Caixa Geral "
@@ -591,7 +591,7 @@ async def run_list_my_email_accounts(
     # PACOTE DV — só o perfil ACTIVO (effective_role) injeta Caixa Geral,
     # e apenas se a conta tiver email real. Sem mocks genéricos.
     if effective_role in CAIXA_GERAL_INJECT_ROLES:
-        caixa = await load_caixa_geral_config(active_company_id)
+        caixa = await load_caixa_geral_config(active_company_id, user=current_user)
         caixa_email = ((caixa or {}).get("email_address") or "").strip()
         if caixa and caixa_email and "@" in caixa_email:
             existing = {

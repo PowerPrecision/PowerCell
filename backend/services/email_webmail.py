@@ -165,7 +165,7 @@ async def _user_caixa_geral_emails(request: Request, current_user: dict) -> set:
         }
         for cid in list(company_ids)[:10]:
             try:
-                caixa = await load_caixa_geral_config(cid)
+                caixa = await load_caixa_geral_config(cid, user=current_user)
                 caixa_email = ((caixa or {}).get("email_address") or "").strip().lower()
                 if caixa_email:
                     emails.add(caixa_email)
@@ -1114,7 +1114,7 @@ async def run_webmail_sync_user(
     wants_caixa_geral = account_id == CAIXA_GERAL_ACCOUNT_ID
     if selected_mailbox and not wants_caixa_geral:
         try:
-            caixa = await load_caixa_geral_config(active_company_id)
+            caixa = await load_caixa_geral_config(active_company_id, user=current_user)
             caixa_email = ((caixa or {}).get("email_address") or "").strip().lower()
             wants_caixa_geral = bool(caixa_email and caixa_email == selected_mailbox)
         except Exception:
