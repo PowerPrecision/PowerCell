@@ -162,7 +162,11 @@ class TestBug3ResendPortalErrorPropagation:
             assert body.get("success") is True
         elif rr.status_code == 400:
             # Erro tratado de configuração — detalhe claro para o frontend.
-            assert "smtp" in (body.get("detail") or "").lower(), f"Mensagem 400 inesperada: {body}"
+            # Fail fast (Out 2026): sem caixa da empresa a mensagem é «A empresa
+            # … não tem e-mail configurado»; credenciais SMTP erradas continuam
+            # a dizer «SMTP». Qualquer das duas é um erro de configuração claro.
+            detalhe = (body.get("detail") or "").lower()
+            assert "smtp" in detalhe or "e-mail configurado" in detalhe, f"Mensagem 400 inesperada: {body}"
         else:
             assert body.get("detail"), f"Erro sem detail: {body}"
 
