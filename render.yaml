@@ -64,6 +64,14 @@ services:
       # Sem ele, em produção, o portal responde 503 — nunca deriva do segredo do staff.
       - key: JWT_PARTNER_SECRET
         sync: false
+      # Portal do CLIENTE (D-2): segredo PRÓPRIO, opcional. Definido, os tokens novos do Portal
+      # (magic link, sessões) assinam-se com ele; os antigos continuam válidos enquanto
+      # PORTAL_JWT_ACCEPT_LEGACY não for "false" (passar a "false" ao fim de 90 dias, o magic link
+      # mais longo). Sem ele nada muda. >= 32 caracteres e diferente do JWT_SECRET.
+      - key: PORTAL_JWT_SECRET
+        sync: false
+      - key: PORTAL_JWT_ACCEPT_LEGACY
+        value: "true"
 
       # ── URL PÚBLICO DO FRONTEND ──
       # Domínio do Portal do Cliente nos emails de boas-vindas quando o pedido não traz

@@ -432,6 +432,14 @@ async def get_current_user(
         except Exception as exc:  # noqa: BLE001 - a vista nunca derruba a autenticação
             logger.warning("[get_current_user] Falha a ler a vista da empresa: %s", exc)
 
+        # Defaults de capacidades por cargo (D-27): converge entre workers (cache de 30 s, nunca levanta).
+        try:
+            from services.role_defaults_store import refrescar as refrescar_defaults_por_cargo
+
+            await refrescar_defaults_por_cargo()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[get_current_user] Falha a refrescar os defaults por cargo: %s", exc)
+
         # Controlo de histórico (Bloco 1, ponto 4): a política por PERFIL
         # EFECTIVO aplica-se aqui, onde o perfil já está resolvido, para que
         # o `_is_stealth_user` (puro e síncrono) continue a ser a única regra.

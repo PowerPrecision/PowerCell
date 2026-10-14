@@ -811,6 +811,16 @@ _definir(
     [
         {"keys": [("process_id", 1), ("created_at", -1)], "name": "idx_scraper_job_process_recente"},
         {"keys": [("id", 1)], "name": "idx_scraper_job_id", "unique": True},
+        # D-29: UM job activo por processo, ATÓMICO. `active` existe (verdadeiro) só enquanto o job
+        # está em processing/awaiting_mfa — o `partialFilterExpression` não aceita `$in` sobre
+        # `status`. Os jobs anteriores a este índice não têm o campo e ficam de fora (envelhecem e
+        # `encerrar_jobs_mortos` fecha-os).
+        {
+            "keys": [("process_id", 1)],
+            "name": "idx_scraper_job_activo_unico",
+            "unique": True,
+            "partialFilterExpression": {"active": True},
+        },
     ],
 )
 

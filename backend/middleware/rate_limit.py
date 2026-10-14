@@ -74,9 +74,18 @@ def _get_rate_limit_key(request: Request) -> str:
         try:
             import jwt
             from config import JWT_SECRET, JWT_ALGORITHM
+            from services.portal_jwt_secret import segredos_de_verificacao
             token = auth_header[7:]
-            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-            user_id = payload.get("sub")
+            payload = None
+            # O staff assina com o `JWT_SECRET`; o Portal pode ter segredo próprio (D-2) — a chave
+            # por processo do Portal não pode degradar para o IP quando os segredos se separam.
+            for segredo in dict.fromkeys([JWT_SECRET, *segredos_de_verificacao()]):
+                try:
+                    payload = jwt.decode(token, segredo, algorithms=[JWT_ALGORITHM])
+                    break
+                except Exception:
+                    continue
+            user_id = (payload or {}).get("sub")
             if user_id:
                 return f"user:{user_id}"
         except Exception:

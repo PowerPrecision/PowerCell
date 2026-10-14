@@ -32,6 +32,7 @@ from services.portal_estado import (
 )
 from config import JWT_SECRET, JWT_ALGORITHM
 from services import portal_brute_force
+from services.portal_jwt_secret import descodificar_token_do_portal, segredo_de_assinatura
 from services.portal_brute_force import AMBITO_DO_VERIFY, MINUTOS_DE_VIDA_DO_REGISTO, POLITICA_DO_VERIFY
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ def create_client_magic_token(process_id: str) -> str:
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc) + timedelta(days=PORTAL_TOKEN_VALIDITY_DAYS),
     }
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    token = jwt.encode(payload, segredo_de_assinatura(), algorithm=JWT_ALGORITHM)
     logger.info(f"Magic link gerado para processo {process_id} (expira em {PORTAL_TOKEN_VALIDITY_DAYS}d)")
     return token
 
@@ -124,7 +125,7 @@ def create_verified_session_token(process_id: str, client_id: str) -> str:
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc) + timedelta(hours=PORTAL_SESSION_VALIDITY_HOURS),
     }
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    token = jwt.encode(payload, segredo_de_assinatura(), algorithm=JWT_ALGORITHM)
     logger.info(
         f"Sessão verificada gerada para processo {process_id}, "
         f"cliente {client_id} (expira em {PORTAL_SESSION_VALIDITY_HOURS}h)"
@@ -162,7 +163,7 @@ def create_access_code_session_token(process_id: str, client_id: str) -> str:
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc) + timedelta(hours=PORTAL_SESSION_VALIDITY_HOURS),
     }
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    token = jwt.encode(payload, segredo_de_assinatura(), algorithm=JWT_ALGORITHM)
     logger.info(
         f"Sessão access_code gerada para cliente {client_id}, "
         f"processo {process_id} (expira em {PORTAL_SESSION_VALIDITY_HOURS}h)"
@@ -353,11 +354,8 @@ async def get_current_client(
         )
 
     try:
-        payload = jwt.decode(
-            credentials.credentials,
-            JWT_SECRET,
-            algorithms=[JWT_ALGORITHM]
-        )
+        # Segredo PRÓPRIO do Portal (D-2), com a janela de rotação do antigo.
+        payload = descodificar_token_do_portal(credentials.credentials)
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=401,

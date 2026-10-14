@@ -138,6 +138,12 @@ async def run_reset_user_permissions(user_id: str, user: dict):
     }
 
 
+async def _diferencas_do_legado() -> list:
+    from services.role_defaults_store import diferencas_do_legado
+
+    return await diferencas_do_legado()
+
+
 async def run_get_capabilities_registry(user: dict):
     """
     Retorna o registo completo de capabilities, categorias e defaults por cargo.
@@ -150,6 +156,8 @@ async def run_get_capabilities_registry(user: dict):
         "role_defaults": {role: defaults for role, defaults in ROLE_CAPABILITY_DEFAULTS.items() 
                          if role not in ["cliente"]},
         "super_admin_roles": SUPER_ADMIN_ROLES,
+        # Retrato antigo (nunca aplicado) com diferenças em relação ao código: para o Master rever.
+        "legado_por_rever": await _diferencas_do_legado(),
     }
 
 
@@ -184,16 +192,15 @@ async def run_update_role_defaults(role: str, request: CapabilityUpdateRequest, 
     # Validar capabilities
     validated = validate_capabilities(request.capabilities)
     
-    # Atualizar defaults em memória (para a sessão actual)
+    # Sincroniza primeiro com a base de dados (outro worker pode ter gravado entretanto), aplica a
+    # edição em memória e persiste os DESVIOS em relação ao código (D-27, Lote 5): é isto que
+    # sobrevive a um reinício e converge entre workers. O retrato completo antigo deixou de se escrever.
+    from services import role_defaults_store
+
+    await role_defaults_store.refrescar(forcar=True)
     ROLE_CAPABILITY_DEFAULTS[role].update(validated)
-    
-    # Persistir na collection system_config para sobreviver a restarts
-    await db.system_config.update_one(
-        {"key": "role_capability_defaults"},
-        {"$set": {"key": "role_capability_defaults", "value": {r: d for r, d in ROLE_CAPABILITY_DEFAULTS.items()}}},
-        upsert=True
-    )
-    
+    await role_defaults_store.guardar_overrides_actuais(user)
+
     await _audit_log(
         "role_defaults_updated",
         "role",

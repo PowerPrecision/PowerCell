@@ -226,11 +226,12 @@ async def verify_portal_websocket_token(token: str):
         para o chamador fechar com o código certo; ``None`` se o processo não
         existir ou estiver eliminado.
     """
+    from services.portal_jwt_secret import descodificar_token_do_portal
     from services.portal_security import PORTAL_ROLE
     from services.ws_client_identity import tipo_de_token_e_do_portal
 
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = descodificar_token_do_portal(token)
     except jwt.ExpiredSignatureError:
         logger.info("[WS-PORTAL] Token expirado")
         return "expired"
