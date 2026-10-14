@@ -144,13 +144,13 @@ async def run_get_active_background_tasks(current_user: dict):
                     "aggregated_import": "BULK_IMPORT",
                     "bulk_analysis": "AI_ANALYSIS",
                     "data_export": "DATA_EXPORT",
-                    "email_sync": "EMAIL_SEND",
+                    "email_sync": "EMAIL_SYNC",
                     "pdf_gen": "PDF_GEN",
                     "async_import": "BULK_IMPORT",
                     "sync_import": "BULK_IMPORT",
                 }
                 task_type = task_type_map.get(raw_type, raw_type if raw_type in [
-                    "PDF_GEN", "AI_ANALYSIS", "EMAIL_SEND", "DOCUMENT_UPLOAD",
+                    "PDF_GEN", "AI_ANALYSIS", "EMAIL_SEND", "EMAIL_SYNC", "DOCUMENT_UPLOAD",
                     "BULK_IMPORT", "REPORT_GEN", "DATA_EXPORT", "DOC_CATEGORIZE",
                     "TEMPLATE_FILL", "S3_UPLOAD", "CUSTOM"
                 ] else "CUSTOM")

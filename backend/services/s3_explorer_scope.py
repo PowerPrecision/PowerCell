@@ -70,6 +70,9 @@ logger = logging.getLogger(__name__)
 # local era mostrar-lhe os clientes das outras.
 PAPEIS_DE_RECONCILIACAO = frozenset({UserRole.MASTER})
 
+#: O papel com que o Master LISTA quando escolheu uma empresa: perde a reconciliação (órfãs).
+PAPEL_DA_VISTA = "vista_da_empresa"
+
 PROJECCAO = {"_id": 0, "id": 1, "s3_folder": 1, "network_id": 1,
              "company_id": 1, "company_name": 1, "client_id": 1,
              "client_name": 1}
@@ -357,7 +360,7 @@ async def assert_pasta_no_ambito(
         raise HTTPException(status_code=404, detail="Pasta não encontrada")
 
 
-async def ambito_do_utilizador(request, user: dict) -> tuple[TenantScope, str]:
+async def ambito_do_utilizador(request, user: dict, *, vista: bool = False) -> tuple[TenantScope, str]:
     """`(TenantScope, papel efectivo)` de quem está a fazer o pedido.
 
     O papel é o **efectivo**, colapsado por `resolve_concrete_role`: é o
@@ -367,7 +370,18 @@ async def ambito_do_utilizador(request, user: dict) -> tuple[TenantScope, str]:
     `can_update_status` tinha.
     """
     from services.auth import get_effective_role, resolve_concrete_role
-    from services.tenant_network import resolve_tenant_scope
+    from services.tenant_network import resolve_tenant_scope, resolve_vista_scope
 
     papel = resolve_concrete_role(get_effective_role(request, user), user)
-    return await resolve_tenant_scope(user), papel
+    # `vista=True` só para LISTAR (Lote 4): o Master com uma empresa escolhida vê as pastas da
+    # rede dela. Mover/renomear/apagar por caminho continua com o âmbito normal.
+    resolver = resolve_vista_scope if vista else resolve_tenant_scope
+    scope = await resolver(user)
+    # O Master é «reconciliação»: vê tudo, incluindo as pastas órfãs. Com uma empresa
+    # escolhida (âmbito estreitado) deixa de o ser — a vista é a da rede dela, e as órfãs
+    # (sem dono conhecido) só aparecem na vista global, onde se reconciliam.
+    if vista and not scope.sem_fronteira and _texto(getattr(papel, "value", papel)).lower() in {
+        p.value for p in PAPEIS_DE_RECONCILIACAO
+    }:
+        papel = PAPEL_DA_VISTA
+    return scope, papel

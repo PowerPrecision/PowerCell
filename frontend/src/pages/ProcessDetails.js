@@ -104,6 +104,7 @@ import {
   uploadVoiceNote,
   // Ponto 15 — catálogo de etiquetas para as sugestões do editor
   getProcessLabels,
+  cabecalhosDeContexto,
 } from "../services/api";
 import ProcessDomainTabsList from "../components/processDetails/ProcessDomainTabsList";
 import {
@@ -124,6 +125,7 @@ import {
   valoresAprovados,
 } from "../utils/sugestoesEmLinha";
 import { BarraDeSugestoes } from "../components/ui/InlineAISuggestion";
+import SugestoesIADrawer from "../components/processDetails/SugestoesIADrawer";
 import {
   PLACEHOLDERS_POR_CAMPO,
   indicadorDeConfianca,
@@ -632,6 +634,7 @@ const ProcessDetails = () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          ...cabecalhosDeContexto(),
         },
         body: JSON.stringify({
           process_id: id,
@@ -644,9 +647,11 @@ const ProcessDetails = () => {
       const data = await response.json();
       
       if (response.ok) {
-        if (data.status === 'signed') {
+        // `existing` vem do servidor: só um pedido REUTILIZADO é «já existe». Um pedido novo também
+        // tem `status: pending` — ler o estado dizia «já existe» na primeira vez que se pedia (Lote 4).
+        if (data.existing && data.status === 'signed') {
           toast.success("RGPD já foi assinado!");
-        } else if (data.status === 'pending') {
+        } else if (data.existing && data.status === 'pending') {
           toast.info("Já existe um pedido pendente. Verifique o email do cliente.");
         } else {
           // PACOTE 5 — feedback do 2º envio independente (quando o processo
@@ -665,6 +670,9 @@ const ProcessDetails = () => {
             }
           } else {
             toast.success("Email de RGPD enviado para o cliente!");
+          }
+          if (data.email_sent === false) {
+            toast.warning("O pedido foi criado mas o email ao cliente não saiu. Use «Reenviar» quando o email do sistema estiver configurado.");
           }
         }
         fetchRgpdStatus();
@@ -733,6 +741,14 @@ const ProcessDetails = () => {
   // destaque, e decidem-se uma a uma. A regra de ouro continua intacta —
   // mostrar não é gravar (ver `utils/sugestoesEmLinha`).
   const [sugestoesIA, setSugestoesIA] = useState(null);
+  // Painel lateral «Rever Sugestões IA» (Lote 4, ponto 4): só uma VISTA das
+  // mesmas sugestões — não tem estado próprio de decisões.
+  const [drawerSugestoesAberto, setDrawerSugestoesAberto] = useState(false);
+  // Sem sugestões o painel fecha E esquece que estava aberto — senão a
+  // extracção seguinte abria-o sozinha, sem ninguém o pedir.
+  useEffect(() => {
+    if (!sugestoesIA) setDrawerSugestoesAberto(false);
+  }, [sugestoesIA]);
   // Épico 9 — extracção por ficheiro à espera de confirmação.
   // Enquanto isto não for `null`, NADA foi escrito: nem no formulário, nem
   // na base de dados. É o que separa este caminho do da análise em lote.
@@ -2875,9 +2891,18 @@ const ProcessDetails = () => {
                           onAprovarTodas={handleAprovarTodasSugestoes}
                           onRejeitarTodas={handleRejeitarTodasSugestoes}
                           onFechar={() => setSugestoesIA(null)}
+                          onRever={() => setDrawerSugestoesAberto(true)}
                         />
                       </div>
                     )}
+                    <SugestoesIADrawer
+                      aberto={drawerSugestoesAberto && Boolean(sugestoesIA)}
+                      onAbertoChange={setDrawerSugestoesAberto}
+                      sugestoes={sugestoesIA}
+                      onAprovar={handleAprovarSugestao}
+                      onRejeitar={handleRejeitarSugestao}
+                      onAprovarTodas={handleAprovarTodasSugestoes}
+                    />
                     <Tabs value={activeTab} onValueChange={(v) => {
                       setEditingCardId(null);
                       setActiveTab(v);

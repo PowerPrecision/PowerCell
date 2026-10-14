@@ -113,7 +113,7 @@ async def run_get_s3_folder_contents(folder_path: str, user: dict, request=None)
     # A PAREDE (Épico 10, Passo 3). Duas coisas distintas:
     #   1. entrar numa pasta de outra rede → 404, como se não existisse;
     #   2. listar a raiz → devolve só o que é da rede de quem pede.
-    scope, papel = await ambito_do_utilizador(request, user)
+    scope, papel = await ambito_do_utilizador(request, user, vista=True)
     await assert_pasta_no_ambito(prefix, scope, role=papel)
 
     try:

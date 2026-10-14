@@ -220,39 +220,46 @@ async def send_to_admins(
     subject: str,
     body: str,
     notification_type: str = "urgent",
-    html_body: str = None
+    html_body: str = None,
+    processo: dict = None,
 ) -> int:
     """
-    Envia notificação para todos os administradores (Admin e CEO) que
-    aceitam esse tipo de notificação, respeitando preferências individuais.
+    Envia notificação à gestão que aceita esse tipo de notificação,
+    respeitando preferências individuais.
 
-    Útil para alertas do sistema que requerem atenção da gestão, como
-    erros críticos, novos processos ou alertas de segurança.
+    **Âmbito (Lote 3, Out 2026):** Admin e CEO são perfis LOCAIS. Com
+    `processo`, o aviso vai à gestão (Admin/CEO) da REDE do processo e aos
+    Master; sem `processo` — um alerta que não pertence a rede nenhuma — vai
+    só aos Master. Antes ia a todos os Admin/CEO de todas as redes, com o
+    nome do cliente no corpo.
 
     Args:
         subject: Assunto do email.
         body: Corpo do email em texto simples.
         notification_type: Tipo de notificação para filtragem.
         html_body: Corpo em HTML (opcional).
+        processo: O processo a que o aviso diz respeito (decide a rede).
 
     Returns:
         int: Número de emails efetivamente enviados.
     """
-    from models.auth import UserRole
-    from services.role_query import deep_role_in_filter
-    
-    admins = await db.users.find(
-        deep_role_in_filter([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]),
-        {"_id": 0, "email": 1}
-    ).to_list(100)
-    
+    from services.alert_audience import (
+        emails_da_gestao_da_rede_do_processo,
+        emails_dos_master,
+    )
+
+    if processo:
+        emails = await emails_da_gestao_da_rede_do_processo(processo, ["admin", "ceo"])
+    else:
+        emails = await emails_dos_master()
+
     sent_count = 0
-    for admin in admins:
+    for email in emails:
         if await send_notification_with_preference_check(
-            admin["email"], subject, body, notification_type, html_body=html_body
+            email, subject, body, notification_type, html_body=html_body
         ):
             sent_count += 1
-    
+
     return sent_count
 
 

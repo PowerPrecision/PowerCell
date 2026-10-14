@@ -70,6 +70,7 @@ export const TaskTypes = {
   PDF_GEN: "PDF_GEN",
   AI_ANALYSIS: "AI_ANALYSIS",
   EMAIL_SEND: "EMAIL_SEND",
+  EMAIL_SYNC: "EMAIL_SYNC",
   DOCUMENT_UPLOAD: "DOCUMENT_UPLOAD",
   BULK_IMPORT: "BULK_IMPORT",
   REPORT_GEN: "REPORT_GEN",
@@ -98,6 +99,7 @@ export const TaskTypeLabels = {
   PDF_GEN: "Geração de PDF",
   AI_ANALYSIS: "Análise com IA",
   EMAIL_SEND: "Envio de Email",
+  EMAIL_SYNC: "Sincronização de Email",
   DOCUMENT_UPLOAD: "Upload de Documento",
   BULK_IMPORT: "Importação em Massa",
   REPORT_GEN: "Geração de Relatório",
@@ -140,6 +142,19 @@ export function TasksProvider({ children }) {
 
   const MAX_LOADING_TOASTS = 5;
 
+  // A sincronização de email é ROTINA (corre ao entrar, ao trocar de perfil, de 10 em 10 minutos): o
+  // seu toast não pode ficar para sempre. Um toast «a carregar» nunca expira sozinho (o Sonner não
+  // o faz), por isso arma-se um limite; e o de sucesso desaparece sozinho. Falhas ficam, com fecho.
+  const TOAST_DE_SYNC_LIMITE_MS = 90_000;
+  const TOAST_DE_SYNC_SUCESSO_MS = 5_000;
+  const temporizadoresDeSyncRef = useRef(new Map());
+  const eSyncDeEmail = (task) => task?.task_type === TaskTypes.EMAIL_SYNC;
+  const largarTemporizadorDeSync = (id) => {
+    const t = temporizadoresDeSyncRef.current.get(id);
+    if (t) clearTimeout(t);
+    temporizadoresDeSyncRef.current.delete(id);
+  };
+
   const toastIdFor = (taskId) => `bg-task-${taskId}`;
 
   /**
@@ -173,6 +188,14 @@ export function TasksProvider({ children }) {
       duration: Infinity,
       closeButton: true, // PACOTE DD — utilizador pode fechar manualmente
     });
+
+    if (eSyncDeEmail(task) && !temporizadoresDeSyncRef.current.has(id)) {
+      temporizadoresDeSyncRef.current.set(id, setTimeout(() => {
+        temporizadoresDeSyncRef.current.delete(id);
+        loadingToastIdsRef.current = loadingToastIdsRef.current.filter((x) => x !== id);
+        toast.dismiss(id);
+      }, TOAST_DE_SYNC_LIMITE_MS));
+    }
   }, []);
 
   /**
@@ -182,12 +205,15 @@ export function TasksProvider({ children }) {
     const id = toastIdFor(task.task_id);
     loadingToastIdsRef.current = loadingToastIdsRef.current.filter((x) => x !== id);
     esquecerToastDeEmail(id);
+    largarTemporizadorDeSync(id);
 
     if (kind === "success") {
       toast.success(`${task.title} concluída!`, {
         id,
         description: task.description || "A tarefa foi concluída com sucesso.",
-        duration: Infinity,
+        // A sincronização de email é rotina: o sucesso some sozinho (as outras tarefas ficam até
+        // o utilizador fechar, que é o PACOTE DD).
+        duration: eSyncDeEmail(task) ? TOAST_DE_SYNC_SUCESSO_MS : Infinity,
         closeButton: true, // PACOTE DD — utilizador pode fechar manualmente
         action: task.result_url
           ? {

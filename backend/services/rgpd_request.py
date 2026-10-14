@@ -73,6 +73,7 @@ async def run_request_rgpd(data: RGPDCreate, request, user: dict):
                     signed_at=result.get("signed_at"),
                     created_at="",
                     created_by_name=user.get("name", ""),
+                    existing=True,
                 )
             elif result.get("status") == "pending":
                 return RGPDResponse(
@@ -84,6 +85,7 @@ async def run_request_rgpd(data: RGPDCreate, request, user: dict):
                     token_expires_at=result.get("expires_at"),
                     created_at="",
                     created_by_name=user.get("name", ""),
+                    existing=True,
                 )
 
         frontend_base_url = _frontend_base_url_from_request(request)
@@ -194,6 +196,8 @@ async def run_request_rgpd(data: RGPDCreate, request, user: dict):
             created_by_name=user.get("name", ""),
             second_titular_name=second_titular_name,
             second_email_sent=second_email_sent,
+            existing=False,
+            email_sent=bool(email_sent),
         )
 
     except HTTPException:

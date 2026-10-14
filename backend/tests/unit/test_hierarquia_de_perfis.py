@@ -296,6 +296,10 @@ EXCEPCOES_SEM_MASTER = {
     # Quem recebe o relatório da SUA rede: CEO e Admin. O Master não é
     # destinatário local — o dele é o consolidado (`destino_global`).
     "services/relatorio_semanal_destinos.py",
+    # Aviso de «novo processo» à gestão LOCAL da rede do processo (admin, ceo): os
+    # Master são acrescentados à parte por `emails_da_gestao_da_rede_do_processo`
+    # (`incluir_master`), nunca por cargo (Lote 3).
+    "services/notification_service.py",
 }
 
 

@@ -110,21 +110,33 @@ ERRO_DESTINO_INDISPONIVEL = "Empresa de destino indisponível."
 
 
 async def _empresas_de_destino() -> list[dict]:
-    """As empresas activas das redes que TÊM Index: ``[{company_id, company_name, network_id}]``."""
+    """As empresas activas que RECEBEM leads de parceiros: ``[{company_id, company_name, network_id}]``.
+
+    Regra (Lote 4, Out 2026): `companies.aceita_parceiros` é um tri-estado.
+      * ``True``  — sempre destino (uma rede satélite sem indexadores, como a Domus, que o
+        Master quer abrir aos parceiros — os processos dela nascem com `skip_index`);
+      * ``False`` — nunca destino, mesmo com Index;
+      * ``None`` / ausente — automático: só as redes que TÊM Index (o comportamento anterior).
+    Sem a flag, uma empresa de uma rede sem indexador activo desaparecia do Portal do Parceiro sem
+    um aviso e sem nada que o Master pudesse ligar.
+    """
     from services.network_triage import redes_com_index
 
     com_index = await redes_com_index()
-    if not com_index:
-        return []
     empresas = await db.companies.find(
-        {}, {"_id": 0, "id": 1, "name": 1, CAMPO_REDE: 1, "is_active": 1},
+        {}, {"_id": 0, "id": 1, "name": 1, CAMPO_REDE: 1, "is_active": 1, "aceita_parceiros": 1},
     ).to_list(1000)
     saida = []
     for e in empresas:
         if e.get("is_active") is False or not str(e.get("id") or "").strip():
             continue
+        aceita = e.get("aceita_parceiros")
+        if aceita is False:
+            continue
         rede = resolve_network_id(e, company_id=e.get("id"))
-        if rede and rede in com_index and str(e.get("name") or "").strip():
+        if not rede or not str(e.get("name") or "").strip():
+            continue
+        if aceita is True or rede in com_index:
             saida.append({"company_id": str(e["id"]).strip(), "company_name": str(e["name"]).strip(), "network_id": rede})
     return sorted(saida, key=lambda d: d["company_name"].lower())
 

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
-from services.workflow_phases import fases_do_utilizador
+from services.workflow_phases import fases_do_utilizador, nomes_terminais
 from models.client import (
     Client, ClientCreate, ClientUpdate,
     ClientContact, ClientPersonalData,
@@ -176,6 +176,20 @@ async def run_search_clients(
 
     return {"results": results}
 
+def _so_processos_terminados(cliente: dict, terminais: set) -> bool:
+    """O cliente tem processos e TODOS estão terminados (fase terminal do motor ou eliminados).
+
+    Sem processos não é histórico: é uma lead, e o ecrã de trabalho é onde ela é tratada.
+    """
+    processos = cliente.get("processes") or []
+    if not processos:
+        return False
+    return all(
+        bool(p.get("is_deleted")) or p.get("status") in terminais
+        for p in processos
+    )
+
+
 async def run_list_clients(
     user: dict,
     search: Optional[str] = None,
@@ -191,6 +205,7 @@ async def run_list_clients(
     fonte: Optional[str] = None,
     tipo: Optional[str] = None,
     status: Optional[str] = None,
+    historico: Optional[bool] = False,
 ):
     """
     Listar clientes.
@@ -198,6 +213,12 @@ async def run_list_clients(
     - show_all=False: Utilizadores vêem apenas os seus clientes (atribuídos)
     
     Filtros disponíveis:
+    - historico: o ecrã «Clientes Registados» é o ecrã de TRABALHO. Por omissão (`False`)
+      não mostra os clientes cujos processos estão TODOS terminados (Concluído,
+      Desistência… — as fases terminais DO MOTOR, nunca uma lista de nomes) nem
+      eliminados; `True` mostra só esses (o separador «Histórico»). Um cliente sem
+      nenhum processo (lead) continua no ecrã de trabalho. O `total_historico` da
+      resposta diz quantos há, para o separador anunciar o que esconde.
     - status_filter: Filtrar por fase do processo
     - assignment_filter: 'both' (consultor+intermediario), 'consultor', 'intermediario', 'none'
     
@@ -491,6 +512,7 @@ async def run_list_clients(
                 "status_label": status_info.get("label", proc.get("status")),
                 "status_color": status_info.get("color", "#6B7280"),
                 "is_active": proc.get("is_active", True),
+                "is_deleted": bool(proc.get("is_deleted", False)),
                 "consultor_name": proc.get("consultor_name"),
                 "mediador_name": proc.get("mediador_name"),
                 "prioridade": proc_priority,
@@ -551,6 +573,18 @@ async def run_list_clients(
             (c.get("nome") or "").lower()
         ))
         
+        # Trabalho vs Histórico (Lote 4). O «Eliminados» é outra vista e não se mexe.
+        total_historico = 0
+        if not deleted_only:
+            terminais = set(nomes_terminais(workflow_statuses))
+            historicos = [c for c in clients if _so_processos_terminados(c, terminais)]
+            total_historico = len(historicos)
+            if historico:
+                clients = historicos
+            else:
+                ids_do_historico = {id(c) for c in historicos}
+                clients = [c for c in clients if id(c) not in ids_do_historico]
+
         # Filtrar por ter processo activo
         if has_active_process is not None:
             clients = [c for c in clients if (c["active_processes_count"] > 0) == has_active_process]
@@ -571,6 +605,7 @@ async def run_list_clients(
         return {
             "clients": clients,
             "total": total_count,
+            "total_historico": total_historico,
             "showing_all": True,
             "available_statuses": available_statuses
         }

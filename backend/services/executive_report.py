@@ -216,9 +216,11 @@ async def resolver_ambito(user: Optional[dict]) -> Ambito:
         )
         return Ambito(chave="global")
 
-    from services.tenant_network import resolve_tenant_scope
+    from services.tenant_network import resolve_vista_scope
 
-    return await resolver_ambito_do_scope(await resolve_tenant_scope(user))
+    # A VISTA do Master (Lote 4): o relatório e o desempenho da equipa seguem a empresa que
+    # ele escolheu no cabeçalho; sem empresa escolhida mantém-se o consolidado.
+    return await resolver_ambito_do_scope(await resolve_vista_scope(user))
 
 
 async def resolver_ambito_do_scope(scope) -> Ambito:

@@ -66,7 +66,8 @@ import { TableSkeleton } from "../components/ui/skeletons";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import CreateProcessModal from "../components/CreateProcessModal";
 import CreateClientModal from "../components/kanban/CreateClientModal";
-import { getExportPermission } from "../services/api";
+import { cabecalhosDeContexto, getExportPermission } from "../services/api";
+import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import ClientFilters from "../components/filters/ClientFilters";
 import { formatFonteLabel } from "../utils/fonteLabels";
 import { API_BASE_URL } from "../utils/apiBaseUrl";
@@ -97,6 +98,10 @@ export default function ClientsPage() {
   const tipoFilter = searchParams.get("tipo") || "all";
   const statusFilter = searchParams.get("status") || "all";
   const showDeleted = statusFilter === "deleted" || searchParams.get("show_deleted") === "true";
+  // Lote 4 — separador «Histórico»: clientes cujos processos estão TODOS terminados
+  // (Concluído, Desistência…). O ecrã de trabalho não os mostra.
+  const verHistorico = searchParams.get("vista") === "historico";
+  const [totalHistorico, setTotalHistorico] = useState(0);
   
   const updateParam = (key, value) => {
     setSearchParams(prev => {
@@ -170,14 +175,16 @@ export default function ClientsPage() {
       if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
       // Hide deleted clients by default unless the status filter is "eliminados"
       if (!showDeleted) params.append("exclude_deleted", "true");
+      if (verHistorico) params.append("historico", "true");
 
       const response = await fetch(`${API_URL}/clients?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() },
       });
 
       if (response.ok) {
         const data = await response.json();
         setClients(data.clients || []);
+        setTotalHistorico(Number.isFinite(data.total_historico) ? data.total_historico : 0);
         // PACOTE DG — removido `setAvailablePhases(data.available_statuses || [])` (dropdown de Fase removido).
       } else {
         const errorData = await response.json().catch(() => ({}));
@@ -190,7 +197,7 @@ export default function ClientsPage() {
       setLoading(false);
     }
   // PACOTE DG — deps array: removidos `statusFilter` e `phaseFilter` (filtros removidos).
-  }, [searchTerm, fonteFilter, tipoFilter, statusFilter, showDeleted]);
+  }, [searchTerm, fonteFilter, tipoFilter, statusFilter, showDeleted, verHistorico]);
 
   useEffect(() => {
     fetchClients();
@@ -310,7 +317,7 @@ export default function ClientsPage() {
       const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/clients/${clientId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() },
       });
 
       if (response.ok) {
@@ -434,6 +441,21 @@ export default function ClientsPage() {
             )}
           </div>
         </div>
+
+        {/* Trabalho vs Histórico (Lote 4): o ecrã ativo não mostra processos já terminados. */}
+        {!showDeleted && (
+          <Tabs
+            value={verHistorico ? "historico" : "ativos"}
+            onValueChange={(v) => updateParam("vista", v === "historico" ? "historico" : "")}
+          >
+            <TabsList data-testid="clients-vista-tabs">
+              <TabsTrigger value="ativos" data-testid="clients-tab-ativos">Ativos</TabsTrigger>
+              <TabsTrigger value="historico" data-testid="clients-tab-historico">
+                Histórico{totalHistorico > 0 && !verHistorico ? ` (${totalHistorico})` : ""}
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        )}
 
         {/* Search, Filters & Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

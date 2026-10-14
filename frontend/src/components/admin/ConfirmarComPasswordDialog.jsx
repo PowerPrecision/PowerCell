@@ -22,6 +22,7 @@
  * @param {string}   [rotuloConfirmar]  texto do botão (por omissão «Confirmar»)
  * @param {React.ElementType} [Icone]   ícone do botão
  * @param {string}   [testIdBase]       prefixo dos data-testid (por omissão «confirmar-password»)
+ * @param {boolean}  [confirmarDesactivado]  impede confirmar (ex.: a prévia diz que a acção está bloqueada)
  * @param {function} [lerErro]          err => {tipo, mensagem, fases} (por omissão a leitura genérica)
  */
 import { useEffect, useRef, useState } from "react";
@@ -44,6 +45,7 @@ export default function ConfirmarComPasswordDialog({
   Icone = ShieldCheck,
   testIdBase = "confirmar-password",
   lerErro = lerErroDeConfirmacao,
+  confirmarDesactivado = false,
 }) {
   const [password, setPassword] = useState("");
   const [erro, setErro] = useState(null);
@@ -139,7 +141,7 @@ export default function ConfirmarComPasswordDialog({
             <Button
               type="submit"
               variant="destructive"
-              disabled={!password || aEnviar}
+              disabled={!password || aEnviar || confirmarDesactivado}
               data-testid={`${testIdBase}-confirmar`}
             >
               {aEnviar ? (

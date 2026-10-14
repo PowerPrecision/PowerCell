@@ -154,6 +154,28 @@ describe("A escrita da IA na ficha", () => {
     );
   });
 
+  it("o painel «Rever Sugestões IA» usa os MESMOS handlers e não grava por si", () => {
+    // Lote 4, ponto 4: o Drawer é uma segunda vista das sugestões em linha.
+    // Se tivesse handlers próprios, haveria duas máquinas de estado a
+    // divergir — e um caminho de gravação que o guarda de cima não vê.
+    const inicio = CODIGO.indexOf("<SugestoesIADrawer");
+    assert.ok(inicio > 0, "o painel não está ligado à página");
+    const uso = CODIGO.slice(inicio, CODIGO.indexOf("/>", inicio));
+    assert.ok(uso.includes("onAprovar={handleAprovarSugestao}"));
+    assert.ok(uso.includes("onRejeitar={handleRejeitarSugestao}"));
+    assert.ok(uso.includes("onAprovarTodas={handleAprovarTodasSugestoes}"));
+    assert.ok(!uso.includes("persistAISuggestions"), "o painel grava directamente");
+
+    const componente = readFileSync(
+      join(AQUI, "..", "..", "components", "processDetails", "SugestoesIADrawer.jsx"),
+      "utf8",
+    );
+    assert.ok(
+      !semComentarios(componente).includes("persistAISuggestions"),
+      "o painel não pode conhecer a gravação",
+    );
+  });
+
   it("os dados só são aplicados ao formulário na confirmação", () => {
     // Pré-preencher antes da revisão não grava na BD, mas mostra ao
     // consultor uma ficha já alterada por baixo do diálogo que ele ainda

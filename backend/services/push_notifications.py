@@ -168,37 +168,6 @@ async def send_push_to_multiple_users(
     return results
 
 
-async def broadcast_push_notification(
-    title: str,
-    body: str,
-    roles: Optional[List[str]] = None,
-    exclude_users: Optional[List[str]] = None,
-    **kwargs
-) -> dict:
-    """
-    Enviar notificação push para múltiplos utilizadores baseado em roles.
-    
-    Args:
-        title: Título da notificação
-        body: Corpo da notificação
-        roles: Lista de roles a notificar (None = todos)
-        exclude_users: Lista de user_ids a excluir
-    """
-    exclude_users = exclude_users or []
-    
-    # Obter utilizadores alvo
-    from services.role_query import deep_role_in_filter
-
-    query = {"is_active": {"$ne": False}}
-    if roles:
-        query.update(deep_role_in_filter(roles))
-    
-    users = await db.users.find(query, {"id": 1, "_id": 0}).to_list(1000)
-    user_ids = [u["id"] for u in users if u["id"] not in exclude_users]
-    
-    return await send_push_to_multiple_users(user_ids, title, body, **kwargs)
-
-
 async def cleanup_expired_subscriptions():
     """
     Remover subscrições expiradas.

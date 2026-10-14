@@ -8,6 +8,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
+import { cabecalhosDeContexto } from "../services/api";
 import { CODEC_NUMERO, useEstadoNaUrl, useTextoNaUrl } from "../hooks/useEstadoNaUrl";
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
@@ -71,7 +72,7 @@ const ExpiringDocumentsDashboard = () => {
       const response = await fetch(
         `${API_URL}/api/documents/expiring-dashboard?${params.toString()}`,
         {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() },
         }
       );
       

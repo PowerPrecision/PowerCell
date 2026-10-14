@@ -266,9 +266,17 @@ async def run_get_expiring_documents_dashboard(
 
     consultors_filter = []
     if is_management:
+        from services.admin_users_scope import build_users_scope_query, empresas_do_ambito
         from services.role_query import deep_role_in_filter
+
+        # O filtro de consultor só lista gente do ÂMBITO de quem pergunta (rede, e a empresa
+        # escolhida no caso do Master): antes eram todos os consultores do sistema (Lote 4).
+        consulta_de_equipa = deep_role_in_filter(["consultor", "intermediario"])
+        ambito_de_equipa = await build_users_scope_query(await empresas_do_ambito(user, vista=True))
+        if ambito_de_equipa:
+            consulta_de_equipa = {"$and": [consulta_de_equipa, ambito_de_equipa]}
         all_consultors = await db.users.find(
-            deep_role_in_filter(["consultor", "intermediario"]),
+            consulta_de_equipa,
             {"_id": 0, "id": 1, "name": 1},
         ).to_list(100)
         consultors_filter = [

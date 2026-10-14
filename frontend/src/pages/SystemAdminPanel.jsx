@@ -58,6 +58,17 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { hasRole } from "../utils/roleUtils";
+import {
+  AMBITO_EMPRESA,
+  AMBITO_SISTEMA,
+  ROTULOS_DOS_AMBITOS,
+  ambitoDaSeccao,
+  ambitoEmVigor,
+  ambitosVisiveis,
+  avisoDoAmbito,
+  nomeDaEmpresaActiva,
+  primeiraSeccaoDoAmbito,
+} from "../utils/painelAdminAmbitos";
 
 // Embedded pages — Gestão (eager: leves)
 import UsersAccessAdminTab from "../components/admin/UsersAccessAdminTab";
@@ -99,7 +110,7 @@ const TabLoader = () => (
 
 const SystemAdminPanel = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, activeCompanyId } = useAuth();
 
   // Perfil MASTER: o único global. As tabs técnicas e a configuração global do
   // sistema (workflow, contas de email do sistema, notificações, histórico)
@@ -113,6 +124,20 @@ const SystemAdminPanel = () => {
   const podeAnonimizar = isMaster || hasRole(user, "admin") || hasRole(user, "ceo");
 
   const [activeTab, setActiveTab] = useState("users-mgmt");
+  const [ambitoPedido, setAmbitoPedido] = useState(AMBITO_EMPRESA);
+  // Lote 4, ponto 6: dois âmbitos, que não se misturam numa só fila. O
+  // global é do Master; quem é local nunca o vê (ver `utils/painelAdminAmbitos`).
+  const ambito = ambitoEmVigor(ambitoPedido, { isMaster });
+  const ambitos = ambitosVisiveis({ isMaster });
+  const nomeDaEmpresa = nomeDaEmpresaActiva(user, activeCompanyId);
+  // Cada separador declara o seu âmbito no registo; um que lá não esteja
+  // não se desenha em nenhum (e o teste da página falha).
+  const mostra = (valor) => ambitoDaSeccao(valor) === ambito;
+
+  const mudarAmbito = (novo) => {
+    setAmbitoPedido(novo);
+    setActiveTab(primeiraSeccaoDoAmbito(novo));
+  };
 
   return (
     <DashboardLayout>
@@ -139,11 +164,50 @@ const SystemAdminPanel = () => {
           </Button>
         </div>
 
+        {/* Âmbito: empresa em contexto vs sistema global (Lote 4, ponto 6) */}
+        {ambitos.length > 1 && (
+          <div
+            role="tablist"
+            aria-label="Âmbito das configurações"
+            className="grid gap-2 sm:grid-cols-2"
+            data-testid="seletor-de-ambito"
+          >
+            {ambitos.map((a) => (
+              <button
+                key={a}
+                type="button"
+                role="tab"
+                aria-selected={ambito === a}
+                onClick={() => mudarAmbito(a)}
+                data-testid={`ambito-${a}`}
+                className={`rounded-lg border px-4 py-3 text-left text-sm transition-colors ${
+                  ambito === a
+                    ? "border-primary bg-primary/10 font-semibold text-foreground"
+                    : "border-border text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {ROTULOS_DOS_AMBITOS[a]}
+              </button>
+            ))}
+          </div>
+        )}
+        <p
+          className={`rounded-md border px-3 py-2 text-xs ${
+            ambito === AMBITO_SISTEMA
+              ? "border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100"
+              : "border-border bg-muted/40 text-muted-foreground"
+          }`}
+          data-testid="aviso-do-ambito"
+        >
+          <strong>{ROTULOS_DOS_AMBITOS[ambito]}</strong> — {avisoDoAmbito(ambito, nomeDaEmpresa)}
+        </p>
+
         {/* Main Tabs — Administração do Sistema */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">
             <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
               {/* === TABS DE GESTÃO (amber/gold) === */}
+              {mostra("users-mgmt") && (
               <TabsTrigger
                 value="users-mgmt"
                 className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
@@ -153,6 +217,8 @@ const SystemAdminPanel = () => {
                 <span className="hidden sm:inline">Utilizadores</span>
                 <span className="sm:hidden">Users</span>
               </TabsTrigger>
+              )}
+              {mostra("permissions") && (
               <TabsTrigger
                 value="permissions"
                 className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
@@ -162,6 +228,8 @@ const SystemAdminPanel = () => {
                 <span className="hidden sm:inline">Permissões</span>
                 <span className="sm:hidden">Perms</span>
               </TabsTrigger>
+              )}
+              {mostra("config") && (
               <TabsTrigger
                 value="config"
                 className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
@@ -171,6 +239,8 @@ const SystemAdminPanel = () => {
                 <span className="hidden sm:inline">Configurações</span>
                 <span className="sm:hidden">Config</span>
               </TabsTrigger>
+              )}
+              {mostra("automation") && (
               <TabsTrigger
                 value="automation"
                 className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
@@ -180,6 +250,8 @@ const SystemAdminPanel = () => {
                 <span className="hidden sm:inline">Automações</span>
                 <span className="sm:hidden">Auto</span>
               </TabsTrigger>
+              )}
+              {mostra("empresas") && (
               <TabsTrigger
                 value="empresas"
                 className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
@@ -189,11 +261,13 @@ const SystemAdminPanel = () => {
                 <span className="hidden sm:inline">Empresas</span>
                 <span className="sm:hidden">Emp</span>
               </TabsTrigger>
+              )}
 
               {/* Separador visual */}
-              <div className="w-px h-6 bg-border mx-1 self-center" />
+              {ambito === AMBITO_EMPRESA && <div className="w-px h-6 bg-border mx-1 self-center" />}
 
               {/* === TAB FINANÇAS (amber/gold) === */}
+              {mostra("financas") && (
               <TabsTrigger
                 value="financas"
                 className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
@@ -203,11 +277,13 @@ const SystemAdminPanel = () => {
                 <span className="hidden sm:inline">Finanças</span>
                 <span className="sm:hidden">Fin</span>
               </TabsTrigger>
+              )}
 
               {/* Separador visual */}
-              <div className="w-px h-6 bg-border mx-1 self-center" />
+              {ambito === AMBITO_EMPRESA && <div className="w-px h-6 bg-border mx-1 self-center" />}
 
               {/* === TAB CUSTOMIZAÇÃO (emerald/green) === */}
+              {mostra("customizacao") && (
               <TabsTrigger
                 value="customizacao"
                 className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-emerald-600 dark:text-emerald-400"
@@ -217,9 +293,10 @@ const SystemAdminPanel = () => {
                 <span className="hidden sm:inline">Customização</span>
                 <span className="sm:hidden">Custom</span>
               </TabsTrigger>
+              )}
 
               {/* === TAB COMUNICAÇÕES (sky/blue) === */}
-              {isMaster && (
+              {isMaster && mostra("comunicacoes") && (
                 <TabsTrigger
                   value="comunicacoes"
                   className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-sky-600 dark:text-sky-400"
@@ -232,6 +309,7 @@ const SystemAdminPanel = () => {
               )}
 
               {/* === TAB COMPLIANCE (violet/purple) === */}
+              {mostra("compliance") && (
               <TabsTrigger
                 value="compliance"
                 className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-violet-600 dark:text-violet-400"
@@ -241,11 +319,11 @@ const SystemAdminPanel = () => {
                 <span className="hidden sm:inline">Compliance</span>
                 <span className="sm:hidden">Compl</span>
               </TabsTrigger>
+              )}
 
               {/* === TAB TÉCNICO (red, exclusiva do Master) === */}
-              {isMaster && (
+              {isMaster && mostra("tecnico") && (
                 <>
-                  <div className="w-px h-6 bg-border mx-1 self-center" />
                   <TabsTrigger
                     value="tecnico"
                     className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-red-600 dark:text-red-400"

@@ -8,7 +8,7 @@
  */
 
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Button } from "../components/ui/button";
 import { hasRole } from "../utils/roleUtils";
@@ -16,7 +16,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Alert, AlertDescription } from "../components/ui/alert";
-import { Mail, Lock, Loader2, Eye, EyeOff, Info } from "lucide-react";
+import { Mail, Lock, Loader2, Eye, EyeOff, Info, Handshake } from "lucide-react";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 
@@ -187,6 +187,18 @@ export default function LoginPage() {
             <p className="mt-4 text-xs text-center text-muted-foreground">
               Para criar uma conta, contacte o administrador do sistema.
             </p>
+            {/* O Portal do Parceiro tem a sua própria sessão e o seu próprio login: sem este atalho
+                quem chega ao endereço principal não sabe por onde entrar (Lote 4). */}
+            <div className="mt-4 border-t border-border pt-4 text-center">
+              <Link
+                to="/parceiro/entrar"
+                className="inline-flex items-center justify-center gap-2 text-sm font-medium text-primary hover:underline"
+                data-testid="login-acesso-parceiros"
+              >
+                <Handshake className="h-4 w-4" aria-hidden="true" />
+                Acesso a Parceiros
+              </Link>
+            </div>
           </CardContent>
         </Card>
       </div>

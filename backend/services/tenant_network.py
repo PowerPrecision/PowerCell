@@ -297,8 +297,12 @@ def build_pool_scope_condition(scope: TenantScope) -> dict:
 
 
 async def build_tenant_pool_condition(user: dict) -> dict:
-    """Atalho da Pool: âmbito do utilizador já convertido em condição."""
-    return build_pool_scope_condition(await resolve_tenant_scope(user))
+    """Atalho da Pool: âmbito do utilizador já convertido em condição.
+
+    LISTA, logo leva a VISTA do Master (a empresa escolhida no cabeçalho): sem ela o Master
+    com a Domus seleccionada via o Registo de Clientes de todas as redes (Lote 4).
+    """
+    return build_pool_scope_condition(await resolve_vista_scope(user))
 
 
 async def _redes_das_empresas(company_ids: Sequence[str]) -> dict[str, Optional[str]]:

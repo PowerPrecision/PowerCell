@@ -1918,6 +1918,28 @@ export const getCompanies = (search, { page, size } = {}) =>
       ...(size ? { size } : {}),
     },
   });
+/**
+ * TODAS as empresas do âmbito, página a página.
+ *
+ * A API limita `size` a 100 (`le=100`): pedir 200 dava 422 (Lote 4). Em vez de um tamanho
+ * grande, percorre as páginas até ao `total` — sem o tecto que truncava em silêncio.
+ */
+export const TAMANHO_DA_PAGINA_DE_EMPRESAS = 100;
+const MAXIMO_DE_PAGINAS_DE_EMPRESAS = 50;
+
+export async function getAllCompanies(search) {
+  const empresas = [];
+  for (let pagina = 1; pagina <= MAXIMO_DE_PAGINAS_DE_EMPRESAS; pagina += 1) {
+    const res = await getCompanies(search, { page: pagina, size: TAMANHO_DA_PAGINA_DE_EMPRESAS });
+    const dados = res?.data;
+    const lote = Array.isArray(dados) ? dados : (dados?.companies ?? dados?.empresas ?? []);
+    if (!Array.isArray(lote) || lote.length === 0) break;
+    empresas.push(...lote);
+    const total = Number.isFinite(dados?.total) ? dados.total : null;
+    if (total !== null ? empresas.length >= total : lote.length < TAMANHO_DA_PAGINA_DE_EMPRESAS) break;
+  }
+  return empresas;
+}
 export const getCompany = (id) => api.get(`/admin/companies/${id}`);
 export const createCompany = (data) => api.post("/admin/companies", data);
 // Alterar o `network_id` exige a password ACTUAL (o servidor valida): `{ password }` junta-a ao corpo
@@ -1943,6 +1965,12 @@ export const transferClientCompany = (clientId, companyId, password) =>
         { skipErrorToast: true },
       )
     : Promise.reject(new Error("transferClientCompany: a password actual é obrigatória."));
+// O que a transferência faria (processos a mover, mantidos e impeditivos) — só lê, sem password.
+export const previewTransferClientCompany = (clientId, companyId) =>
+  api.get(`/clients/${encodeURIComponent(clientId)}/transfer-company/preview`, {
+    params: { company_id: companyId },
+    skipErrorToast: true,
+  });
 export const uploadCompanyLogo = (id, file) => {
   const formData = new FormData();
   formData.append("file", file);

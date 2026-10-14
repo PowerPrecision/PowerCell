@@ -764,7 +764,12 @@ const WebmailPage = () => {
   // Cap retries: in dev (no IMAP/email) or when the API is down (502),
   // infinite polling floods the console with CORS/network noise.
   const pollJobStatus = useCallback((jobId) => {
-    if (!jobId || !token) return;
+    // Sem job (ou sem sessão) não há nada a esperar: largar o estado «a sincronizar» — antes
+    // ficava preso e o botão/indicador nunca voltava (Lote 4).
+    if (!jobId || !token) {
+      setSyncing(false);
+      return;
+    }
     let attempts = 0;
     const MAX_ATTEMPTS = 20; // ~1 min of polling
     const MAX_NETWORK_ERRORS = 3;

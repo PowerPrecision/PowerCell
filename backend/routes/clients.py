@@ -120,6 +120,7 @@ async def list_clients(
     fonte: Optional[str] = Query(None, description="PACOTE FK — Origem do cliente (campo fonte)"),
     tipo: Optional[str] = Query(None, description="PACOTE FK — Tipo de cliente: particular, dois_titulares, empresa"),
     status: Optional[str] = Query(None, description="PACOTE FK — Estado da ficha: active, inactive, deleted"),
+    historico: Optional[bool] = Query(False, description="Lote 4 — False: só clientes com trabalho em curso (sem os de processos todos terminados); True: só o histórico"),
     limit: Optional[int] = Query(100, le=500),
     skip: Optional[int] = Query(0),
     user: dict = Depends(get_current_user)
@@ -137,6 +138,7 @@ async def list_clients(
         fonte=fonte,
         tipo=tipo,
         status=status,
+        historico=historico,
         limit=limit,
         skip=skip,
     )

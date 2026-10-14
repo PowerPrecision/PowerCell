@@ -149,6 +149,12 @@ class RGPDResponse(BaseModel):
     # PACOTE 5 — informação do 2º envio independente (quando aplicável)
     second_titular_name: Optional[str] = None
     second_email_sent: Optional[bool] = None
+    # Lote 4 — a resposta diz se o pedido JÁ EXISTIA (reutilizado, nada foi enviado) ou foi criado
+    # agora. Sem isto o ecrã só via `status: pending` — verdade nos dois casos — e dizia «já existe
+    # um pedido» na PRIMEIRA vez que se pedia o consentimento.
+    existing: bool = False
+    # Se o email do 1.º titular saiu (só num pedido novo; `None` quando nada foi enviado).
+    email_sent: Optional[bool] = None
 
 
 class RGPDPublicView(BaseModel):

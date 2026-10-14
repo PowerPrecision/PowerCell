@@ -5,6 +5,7 @@
  * Agora utiliza a API de pesquisa global do backend (/api/search/global) que faz
  * pesquisa accent-insensitive em processos E clientes registados.
  */
+import { cabecalhosDeContexto } from "../../services/api";
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
@@ -41,7 +42,7 @@ const ClientSearchTab = ({ workflowStatuses }) => {
       const token = localStorage.getItem("token");
       const response = await fetch(
         `${API_URL}/api/search/global?q=${encodeURIComponent(term)}&limit=20`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() } }
       );
 
       if (response.ok) {

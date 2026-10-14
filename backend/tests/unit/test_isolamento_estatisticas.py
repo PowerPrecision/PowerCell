@@ -819,7 +819,9 @@ class TestGuardaDoPontoUnico:
             (RAIZ_BACKEND / "services" / "stats_scope.py").read_text(encoding="utf-8")
         )
         assert "build_network_scope_condition" in fonte
-        assert "resolve_tenant_scope" in fonte
+        # Lote 4: as estatísticas LISTAM/AGREGAM, logo levam a VISTA do Master
+        # (`resolve_vista_scope`, que delega no `resolve_tenant_scope`).
+        assert "resolve_vista_scope" in fonte
 
 
 # ════════════════════════════════════════════════════════════════════
