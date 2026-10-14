@@ -1,8 +1,10 @@
-"""Alterar a empresa de um cliente (só Master) — Lote 2, Out 2026.
+"""Alterar a empresa de processos de um cliente (só Master) — Lote 2, reescrito no Lote 6 (Out 2026).
 
 Router próprio: `routes/clients.py` é só stubs finos e tem tecto de linhas. Mantém o prefixo
 `/clients` e a MESMA dependência de rede (`exigir_cliente_no_ambito`) do router de clientes.
 """
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 
 from models.auth import UserRole
@@ -26,9 +28,9 @@ async def transfer_client_company(
     data: TransferirClienteIn,
     user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
-    """Mover o cliente (e os processos de que é titular) para outra empresa. Só Master, com password.
+    """Mover os PROCESSOS escolhidos do cliente para outra empresa. Só Master, com password.
 
-    Muda o carimbo; **não** move nada no S3.
+    O cliente fica onde está. Muda o carimbo dos processos; **não** move nada no S3.
     """
     return await run_transfer_client_company(client_id, data, user)
 
@@ -36,8 +38,8 @@ async def transfer_client_company(
 @router.get("/{client_id}/transfer-company/preview")
 async def preview_transfer_client_company(
     client_id: str,
-    company_id: str = Query(..., min_length=1, description="Empresa de destino"),
+    company_id: Optional[str] = Query(None, description="Empresa de destino (opcional)"),
     user: dict = Depends(require_roles([UserRole.MASTER])),
 ):
-    """O que a transferência faria (processos a mover, mantidos e impeditivos). Só lê."""
+    """Os processos do cliente que se podem mover (e, com destino, os que já lá estão). Só lê."""
     return await run_preview_transfer_client_company(client_id, company_id, user)

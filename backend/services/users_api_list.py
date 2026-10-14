@@ -50,9 +50,11 @@ async def run_get_users(
         empresas_do_ambito,
     )
 
-    # Com um processo manda o que o processo alcança (abaixo); sem ele, a equipa que o
-    # Master vê é a da EMPRESA que tem seleccionada (`X-Company-Id`).
-    ambito = await empresas_do_ambito(user or {}, vista=not process_id)
+    # A equipa que o Master vê é SEMPRE a da EMPRESA que tem seleccionada (`X-Company-Id`), com ou
+    # sem processo (Lote 6, «janela, não porta»): num processo partilhado, o operador da Domus
+    # nunca vê nem atribui a um operador da Precision. Com um processo, o que ele alcança ainda
+    # estreita a lista (abaixo): escolher a Domus num processo que não é dela não a abre.
+    ambito = await empresas_do_ambito(user or {}, vista=True)
     scope_query = await build_users_scope_query(ambito)
     if scope_query:
         query = {"$and": [query, scope_query]} if query else scope_query

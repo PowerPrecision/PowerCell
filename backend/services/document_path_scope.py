@@ -123,14 +123,32 @@ async def ficheiro_no_ambito(file_path: str, user: dict) -> bool:
         logger.warning("[S3-FICHEIRO] Falha a resolver o dono de %s (%s).", file_path, exc)
         return False
 
+    # A chave NOMEIA um processo (`…/processos/{id}/…`)? Então o dono é esse processo e mais nenhum:
+    # um cliente com processos em duas empresas (Lote 6: o que transita entre redes é o processo)
+    # tem as subpastas de cada um, e a pasta do vizinho não é minha só porque o cliente é o mesmo.
+    nomeados = [p for p in processos if str(p.get("id") or "") in set(segmentos)]
+    if nomeados:
+        processos, clientes = nomeados, []
+
     donos = [*processos, *clientes]
     if not donos:
         return False  # órfã
 
+    # Ambígua = reclamada por FICHAS DIFERENTES de redes diferentes (os homónimos do D-19). Um cliente
+    # e os processos dele são UMA ficha: se os processos estão em duas empresas (a triagem enganou-se
+    # e moveu um), o que está na raiz da pasta do cliente é de quem vê qualquer um deles — senão
+    # ninguém, nem o dono, leria o BI do próprio cliente.
+    fichas = {
+        str(i) if i else None for i in (
+            *(p.get("client_id") for p in processos),
+            *(c.get("id") for c in clientes),
+        )
+    }
+    # Um dono sem ficha identificada conta como outra ficha: não se prova que seja a mesma.
     redes_dos_donos = {
         str(d.get(CAMPO_REDE)).strip() for d in donos if str(d.get(CAMPO_REDE) or "").strip()
     }
-    if len(redes_dos_donos) > 1:
+    if (len(fichas) != 1 or None in fichas) and len(redes_dos_donos) > 1:
         return False  # ambígua
 
     scope = await resolve_tenant_scope(user)

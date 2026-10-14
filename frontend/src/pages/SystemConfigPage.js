@@ -27,6 +27,7 @@
  * <SystemConfigPage />
  * // Acesso via rota protegida: /admin/config?tab=storage
  */
+import { mensagemDeFalha, mensagemDeResposta } from "../utils/falhaDeLigacao";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -296,16 +297,25 @@ const SystemConfigPage = ({ embedded = false }) => {
     await fetchConfig();
   };
 
+  // Nunca levanta: quem chama espera `{ success, message }`. Um 502 do proxy (corpo HTML) ou uma
+  // ligação cortada diziam-se «Erro ao testar», como se a configuração estivesse errada.
   const handleTest = async (service) => {
-    const response = await fetch(
-      `${API_URL}/api/system-config/test-connection/${service}`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+    try {
+      const response = await fetch(
+        `${API_URL}/api/system-config/test-connection/${service}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const corpo = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return { success: false, message: mensagemDeResposta(response.status, corpo, "Falha no teste de ligação") };
       }
-    );
-
-    return await response.json();
+      return corpo;
+    } catch (erro) {
+      return { success: false, message: mensagemDeFalha(erro, "Falha no teste de ligação") };
+    }
   };
 
   if (loading) {

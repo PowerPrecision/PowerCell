@@ -11,6 +11,7 @@ import { Label } from "../../components/ui/label";
 import { Badge } from "../../components/ui/badge";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
+import { mensagemDeFalha, mensagemDeResposta } from "../../utils/falhaDeLigacao";
 import { safeString } from "../../utils/safeString";
 import {
   Save,
@@ -154,9 +155,15 @@ export default function SystemEmailsSection({ token }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
-      setTestResult({ purpose, success: data.success, message: data.message });
-    } catch {
-      setTestResult({ purpose, success: false, message: "Erro de ligação" });
+      // Um 502/504 do proxy traz HTML: sem isto o resultado ficava `success: undefined` e sem
+      // mensagem — um teste falhado que não diz nada.
+      if (!res.ok) {
+        setTestResult({ purpose, success: false, message: mensagemDeResposta(res.status, data, "Falha no teste") });
+      } else {
+        setTestResult({ purpose, success: data.success, message: data.message });
+      }
+    } catch (erro) {
+      setTestResult({ purpose, success: false, message: mensagemDeFalha(erro, "Erro de ligação") });
     } finally {
       setTesting(null);
     }

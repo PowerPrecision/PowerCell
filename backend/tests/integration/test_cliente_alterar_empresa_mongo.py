@@ -1,4 +1,4 @@
-"""Alterar a empresa de um cliente — contra um MongoDB REAL (Lote 2, Out 2026).
+"""Alterar a empresa de PROCESSOS de um cliente — contra um MongoDB REAL (Lote 2; reescrito no Lote 6).
 
 Real porque o duplo de Mongo não implementa `$pull` (com um subdocumento como
 critério, em `partner_companies`) nem prova os `update_many` sobre as colecções
@@ -61,14 +61,14 @@ async def bd(monkeypatch):
     cliente.close()
 
 
-async def _transferir(bd, destino="cmp-domus"):
+async def _transferir(bd, destino="cmp-domus", processos=("p1",)):
     import services.admin_helpers as helpers
     import services.client_company_transfer as mod
     import services.reauth_password as reauth
 
     with tenant_db(bd, helpers, mod, reauth), patch("services.history.db", bd):
         return await mod.run_transfer_client_company(
-            "cli-1", mod.TransferirClienteIn(company_id=destino, password=SENHA), MASTER,
+            "cli-1", mod.TransferirClienteIn(company_id=destino, process_ids=list(processos), password=SENHA), MASTER,
         )
 
 
@@ -78,8 +78,10 @@ async def test_a_transferencia_completa_contra_mongo_real(bd):
 
     cliente = await bd.clients.find_one({"id": "cli-1"})
     processo = await bd.processes.find_one({"id": "p1"})
+    # O PROCESSO muda de empresa; o CLIENTE fica (pode ter processos em várias empresas).
+    assert (processo["company_id"], processo["network_id"]) == ("cmp-domus", REDE_DOMUS)
+    assert (cliente["company_id"], cliente["network_id"]) == ("cmp-power", REDE_INCUMBENTE)
     for doc in (cliente, processo):
-        assert (doc["company_id"], doc["network_id"]) == ("cmp-domus", REDE_DOMUS)
         assert doc["s3_folder"] == S3  # o S3 não se mexe
 
     # A Domus deixou de ser «convidada» do que agora é seu; as outras partilhas ficam.
@@ -102,3 +104,40 @@ async def test_a_segunda_passagem_nao_altera_nada(bd):
     resposta = await _transferir(bd)
     assert resposta["transferido"] is False
     assert await bd.processes.find_one({"id": "p1"}, {"_id": 0}) == antes
+
+
+async def test_depois_de_mover_um_processo_cada_empresa_le_so_os_ficheiros_do_seu(bd):
+    """A consequência nos DOCUMENTOS (Lote 6): o cliente fica com processos em duas empresas.
+
+    A pasta do cliente passa a ser reclamada por duas redes, e antes disto «ambígua» queria dizer
+    que NINGUÉM a lia — nem a Power o BI do próprio cliente, nem a Domus o do processo que recebeu.
+    Agora a subpasta de um processo é desse processo, e a raiz do cliente é de quem vê qualquer um
+    dos processos dele.
+    """
+    from services.document_path_scope import ficheiro_no_ambito
+    import services.document_path_scope as janela
+    import services.by_id_scope as por_id
+
+    await bd.processes.insert_one({
+        "id": "p2", "client_id": "cli-1", "network_id": REDE_INCUMBENTE, "company_id": "cmp-power",
+    })
+    await bd.clients.update_one({"id": "cli-1"}, {"$set": {"process_ids": ["p1", "p2"]}})
+    await bd.processes.update_one({"id": "p1"}, {"$unset": {"s3_folder": ""}})
+    await bd.user_company_roles.insert_many([
+        {"user_id": "u-power", "company_id": "cmp-power", "company_name": "Power Real Estate", "role": "diretor"},
+        {"user_id": "u-domus", "company_id": "cmp-domus", "company_name": "Domus", "role": "diretor"},
+    ])
+    await _transferir(bd, processos=("p1",))
+    power = {"id": "u-power", "role": "diretor", "effective_role": "diretor", "company": "Power Real Estate"}
+    domus = {"id": "u-domus", "role": "diretor", "effective_role": "diretor", "company": "Domus"}
+    raiz = "Documentação Clientes/cli-1"
+
+    with tenant_db(bd, janela, por_id):
+        # raiz do cliente (o BI): as duas empresas têm um processo dele
+        assert await ficheiro_no_ambito(f"{raiz}/bi.pdf", power) is True
+        assert await ficheiro_no_ambito(f"{raiz}/bi.pdf", domus) is True
+        # subpastas de cada processo: só quem vê esse processo
+        assert await ficheiro_no_ambito(f"{raiz}/processos/p1/a.pdf", domus) is True
+        assert await ficheiro_no_ambito(f"{raiz}/processos/p1/a.pdf", power) is False
+        assert await ficheiro_no_ambito(f"{raiz}/processos/p2/b.pdf", power) is True
+        assert await ficheiro_no_ambito(f"{raiz}/processos/p2/b.pdf", domus) is False

@@ -3,6 +3,7 @@
  * Extraído de EmailAccountsPage.js (Refactor UX — Fev 2026).
  * Mantém exatamente a mesma lógica e gestão de estado (React Query/hooks).
  */
+import { mensagemDeFalha, mensagemDeResposta } from "../../utils/falhaDeLigacao";
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../../contexts/AuthContext";
@@ -97,12 +98,15 @@ export const SystemSmtpCard = () => {
           toast.error(data.message || "Falha na conexão");
         }
       } else {
-        const data = await res.json();
-        setTestResult({ success: false, message: extractErrorMessage(data.detail || data.message, "Falha na conexão") });
-        toast.error(extractErrorMessage(data.detail || data.message, "Falha na conexão"));
+        const data = await res.json().catch(() => ({}));
+        const msg = mensagemDeResposta(res.status, data, "Falha na conexão");
+        setTestResult({ success: false, message: msg });
+        toast.error(msg);
       }
     } catch (err) {
-      const msg = err.name === "AbortError" ? "Timeout: o teste demorou demasiado tempo (30s)" : "Erro no teste de conexão";
+      const msg = err.name === "AbortError"
+        ? "Timeout: o teste demorou demasiado tempo (30s)"
+        : mensagemDeFalha(err, "Erro no teste de conexão");
       setTestResult({ success: false, message: msg });
       toast.error(msg);
     } finally {

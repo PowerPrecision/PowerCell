@@ -14,7 +14,12 @@ from fastapi import HTTPException, UploadFile
 
 from database import db
 from services.s3_document_root import (
+    RAIZ,
     PastaGravadaInvalida,
+    dentro_da_pasta,
+    normalizar,
+    pasta_do_cliente,
+    pasta_gravada,
     pasta_para_gravar,
 )
 from services.document_constants import (
@@ -30,6 +35,9 @@ from services.document_process_resolve import (
 )
 from services.document_path_scope import exigir_ficheiro_no_ambito
 from services.document_s3_paths import s3_path_variations
+# Módulo (e não o nome) e no TOPO: o `db` do `s3_relink` não pode ser capturado por um import
+# preguiçoso dentro de um `patch("database.db")`; e o teste patcha o atributo do módulo.
+from services import s3_relink
 from services.s3_storage import s3_service
 
 logger = logging.getLogger(__name__)
@@ -71,53 +79,142 @@ async def run_check_file_upload(file: UploadFile) -> dict[str, Any]:
         )
 
 
-async def run_initialize_folders(client_id: str) -> dict[str, Any]:
+async def run_initialize_folders(
+    client_id: str, user: Optional[dict] = None
+) -> dict[str, Any]:
+    """«Forçar criação de pasta» / «Religar S3» (Lote 6, ponto 4).
+
+    A válvula de quem não tem a pasta documental: cria a estrutura no S3 e
+    actualiza o registo — do PROCESSO, ou do CLIENTE quando ele ainda não tem
+    processo (a Pool). Idempotente: uma pasta que existe devolve-se tal e qual.
+
+    O caminho NUNCA vem do pedido. Três casos, por ordem:
+
+    1. o registo aponta para uma pasta VÁLIDA (dentro da raiz documental) e ela
+       existe no S3 → nada a fazer (`already_exists`);
+    2. aponta para uma pasta válida que JÁ NÃO existe → recria-se a estrutura
+       NO MESMO caminho, sem mexer no ponteiro (`recreated`): mover o ponteiro
+       aqui seria decidir sozinho que a documentação mudou de sítio;
+    3. não aponta para nada, ou aponta para algo inutilizável (tipo errado, fora
+       da raiz, a própria raiz) → deriva do ID e grava o ponteiro (`created`).
+
+    O S3 em baixo é um 503 que se lê no ecrã, não um `success: false` num 200
+    que o botão engolia.
+    """
     process, effective_id = await resolve_process_from_flexible_id(
         client_id,
         log_prefix="[INIT-FOLDERS]",
-        client_without_process_detail=(
-            "Cliente encontrado mas sem processo associado. "
-            "Não é possível inicializar pastas."
-        ),
+        allow_client_without_process=True,
     )
-    existing_s3_folder = process.get("s3_folder")
-    if existing_s3_folder and s3_service._folder_exists(existing_s3_folder):
-        logger.info(
-            f"Pasta S3 já existe para cliente {client_id}: {existing_s3_folder}"
-        )
-        return {
-            "success": True,
-            "s3_folder": existing_s3_folder,
-            "already_exists": True,
-        }
+    if process:
+        tipo, coleccao, entity_id, doc = "processo", db.processes, effective_id, process
+    else:
+        client = await db.clients.find_one({"id": client_id})
+        if not client:
+            raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        tipo, coleccao, entity_id, doc = "cliente", db.clients, client_id, client
 
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    second_client_name = extract_second_client_name(process)
-    # `effective_id` é o id do PROCESSO; a pasta nasce sob a do cliente para a
-    # documentação dele continuar ao alcance (Lote 6, ponto 1).
-    success, s3_folder_path = s3_service.initialize_client_folders(
-        effective_id,
-        client_name,
-        second_client_name=second_client_name,
-        owner_client_id=process.get("client_id"),
+    if not s3_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="O armazenamento de documentos (S3) não está disponível. Tente novamente dentro de instantes.",
+        )
+
+    gravada = pasta_gravada(doc.get("s3_folder"), contexto=f"init-folders de {entity_id}")
+    # Uma pasta fora da raiz (ou a própria raiz) é um ponteiro ENVENENADO: não se
+    # reaproveita — substitui-se pelo derivado do id.
+    utilizavel = (
+        gravada
+        if gravada
+        and normalizar(gravada) != normalizar(RAIZ)
+        and dentro_da_pasta(gravada, RAIZ)
+        else None
     )
+
+    base_path = None
+    if utilizavel:
+        if await asyncio.to_thread(s3_service._folder_exists, utilizavel):
+            logger.info("[INIT-FOLDERS] Pasta S3 já existe para %s %s: %s", tipo, entity_id, utilizavel)
+            return {
+                "success": True,
+                "entidade": tipo,
+                "s3_folder": utilizavel,
+                "already_exists": True,
+                "created": False,
+                "recreated": False,
+            }
+        base_path = utilizavel
+    elif tipo == "cliente":
+        base_path = pasta_do_cliente(entity_id)
+
+    nome = (
+        doc.get("client_name") if tipo == "processo" else doc.get("nome")
+    ) or DEFAULT_CLIENT_NAME
+    try:
+        success, s3_folder_path = await asyncio.to_thread(
+            lambda: s3_service.initialize_client_folders(
+                entity_id,
+                nome,
+                extract_second_client_name(doc) if tipo == "processo" else None,
+                base_path=base_path,
+                owner_client_id=doc.get("client_id") if tipo == "processo" else None,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - o S3 a falhar é um aviso legível, não um 500 mudo
+        logger.error("[INIT-FOLDERS] Falha a criar a pasta de %s %s: %s", tipo, entity_id, exc)
+        success, s3_folder_path = False, None
+
     # `initialize_client_folders` devolve o par `(sucesso, caminho)` e foi o
     # par gravado inteiro que produziu as 10 anomalias de produção. Aqui o
     # desempacotamento está certo; o primitivo é a rede que o mantém assim.
     try:
         caminho = pasta_para_gravar(
-            s3_folder_path, contexto=f"init-folders do processo {effective_id}"
+            s3_folder_path, contexto=f"init-folders de {tipo} {entity_id}"
         )
     except PastaGravadaInvalida as erro:
         logger.error("[INIT-FOLDERS] %s", erro)
-        return {"success": False, "s3_folder": None, "erro": str(erro)}
+        raise HTTPException(status_code=500, detail=str(erro))
 
-    if success and caminho:
-        await db.processes.update_one(
-            {"id": effective_id},
-            {"$set": {"s3_folder": caminho}},
+    if not (success and caminho):
+        raise HTTPException(
+            status_code=503,
+            detail="Não foi possível criar a pasta no armazenamento. Tente novamente; se persistir, contacte a administração.",
         )
-    return {"success": success, "s3_folder": caminho}
+
+    recriada = bool(utilizavel)
+    if not recriada:
+        # O ponteiro só se grava quando mudou (ausente ou inutilizável).
+        await coleccao.update_one({"id": entity_id}, {"$set": {"s3_folder": caminho}})
+        await s3_relink.registar_na_auditoria(
+            tipo=tipo, entity_id=entity_id, anterior=doc.get("s3_folder") if isinstance(doc.get("s3_folder"), str) else None,
+            novo=caminho, user=user or {}, papel_efectivo=None,
+        )
+    return {
+        "success": True,
+        "entidade": tipo,
+        "s3_folder": caminho,
+        "already_exists": False,
+        "created": not recriada,
+        "recreated": recriada,
+    }
+
+
+async def base_path_do_cliente_sem_processo(client: dict) -> Optional[str]:
+    """A pasta do cliente que ainda não tem processo, SE existir no armazenamento.
+
+    `None` = não há pasta (sem ponteiro utilizável, ou o ponteiro aponta para o vazio): é o sinal
+    que mostra o botão «Forçar criação de pasta». Uma falha do S3 também dá `None` — o botão
+    aparece e, se o S3 estiver mesmo em baixo, o 503 di-lo; esconder o botão por um soluço
+    deixaria a ficha sem saída.
+    """
+    pasta = pasta_gravada(client.get("s3_folder"), contexto=f"cliente {client.get('id')}")
+    if not pasta or not s3_service.is_configured():
+        return None
+    try:
+        existe = await asyncio.to_thread(s3_service._folder_exists, pasta)
+    except Exception:  # noqa: BLE001 - ver docstring
+        return None
+    return pasta if existe else None
 
 
 async def run_get_download_url(client_id: str, file_path: str) -> dict[str, Any]:

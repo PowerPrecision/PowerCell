@@ -12212,3 +12212,27 @@ Work Log:
 4. MEDIÇÕES (só leitura): `scripts/medir_colecoes.py` (D-13 passo 1) e `scripts/medir_datas_de_nascimento.py` (D-15). Achados ao testar contra mongod real: `collStats` de colecção inexistente não falha; a idade tem de contar datetime E texto ISO.
 - **Testes:** `test_lote5_*.py` (parceiro 30, convite 14, D-6 8, D-4 14, D-12 7, D-18 26, D-27 24, D-2 23, medições 43) + integração (co_buyers 2, D-29 8, medições 7). **Mutações:** 18 no fecho, todas mortas.
 - **NÃO verificado / a confirmar:** (a) o recuo do convite não foi observado com um SMTP real nem em produção; (b) o worker ARQ e o Node 20 do CI não foram exercitados para o código novo; (c) D-15 e D-13 passos 2–5 não implementados (decisão de produto / prazos legais / acesso ao Atlas); (d) a migração dos `co_buyers` em produção ainda não correu.
+
+## Iteração `lote6-b2b-janela-e-pastas` (Out 2026) — Refatoração de negócio B2B
+
+### 1. «Janela, não porta» (partilha B2B)
+- Reproduzi contra um `mongod` real (10 de 16 testes novos falhavam no código antigo): a ficha do titular de um processo partilhado devolvia todos os processos do cliente, a actividade deles e o **código de acesso + magic link do Portal**; o `PUT` propagava (e limpava espelhos) a todos os processos; a lista «Clientes Registados» trazia a ficha de outra rede; o Master com a Domus escolhida via a equipa da Power na dropdown de um processo partilhado; as tarefas não tinham guarda de rede.
+- `services/client_window.py` (janela + visitante), `client_crud`, `campos_limpaveis(apenas_ids)`, `client_list_search`, `assignment_network_guard.redes_permitidas_do_ator`, `users_api_list`/`origem_financeira` (`vista=True`), `task_api_crud` (criar e reatribuir), `document_path_scope` (a chave que nomeia um processo é desse processo).
+- **Não verificado em produção:** o comportamento com dados reais de partilha; o `ficheiro_no_ambito` continua a tratar uma pasta legada partilhada por duas fichas como ambígua.
+
+### 2. «Alterar Empresa» passa a mover PROCESSOS
+- `TransferirClienteIn.process_ids` obrigatório; a ficha não muda, o S3 não se mexe, já não há bloqueio por processo activo noutra empresa. Apaguei `test_lote4_transferir_cliente_cruzados.py` (afirmava o bloqueio e o carimbo do cliente — premissas revogadas pelo dono do produto) e reescrevi `test_cliente_alterar_empresa.py`.
+- **A confirmar com o dono do produto:** o cliente continua com UM carimbo (D-38: a identidade é por rede). «Pertencer a várias empresas» concretiza-se pelos processos; a empresa-visitante vê a ficha do titular desse processo e só esse.
+
+### 3. Fuga de âmbito em «Clientes Registados»
+- Reproduzi para o diretor da Domus e para o Master com a Domus: a fuga vinha dos processos partilhados (as linhas saem dos processos). Corrigido por `client_list_search`. **O que NÃO mudei, de propósito:** a Pool (clientes sem carimbo e sem processos) continua visível a todas as redes (desenho do D-24/Pool). Se o relato era a Pool, é decisão de produto.
+
+### 4. «Forçar criação de pasta» / «Religar S3»
+- `init-folders` estendido (cliente sem processo, ponteiro válido mas inexistente recria no mesmo caminho, ponteiro envenenado substitui-se, 503 legível), `base_path: null` como sinal, botão no `S3FileManager` e na ficha do cliente. Achado: a ficha tratava `files` como lista e mostrava sempre «Sem documentação».
+
+### 5. Resiliência (502 do SMTP, `ERR_CONNECTION_CLOSED`)
+- `utils/falhaDeLigacao.js`; `switchActiveCompany` desfaz a troca se o servidor está inalcançável em vez de recarregar. **Não reproduzi** nem o 502 nem o `ERR_CONNECTION_CLOSED` (dependem do servidor/credenciais da Domus); tratei o que o ecrã faz quando acontecem.
+
+### Medição
+- Mutações: backend 25 (6 sobreviventes na 1.ª passagem: 4 testes fracos reforçados, 2 equivalentes) e frontend 16 (1 sobrevivente: o corpo do pedido de `forceCreateS3Folder`, coberto por `api.forcarPastaS3.test.js`).
+

@@ -100,6 +100,7 @@ vi.mock("../../services/api", async (original) => {
       cliente.post(`/documents/rename-all-smart/${processId}`, {}),
     renameS3DocumentSmart: (processId, carga) =>
       cliente.post(`/documents/rename-smart/${processId}`, carga),
+    forceCreateS3Folder: (id) => cliente.post(`/documents/client/${id}/init-folders`, null),
     generateProcessTemplate: (processId, modelo) =>
       cliente.get(`/templates/process/${processId}/generate/${modelo}`),
   };
@@ -434,3 +435,83 @@ describe("S3FileManager — ficheiros à espera da Indexação (desvio inteligen
     expect(screen.queryByTestId("aviso-em-indexacao")).not.toBeInTheDocument();
   });
 });
+
+
+// ====================================================================
+
+describe("S3FileManager — «Forçar criação de pasta» (Lote 6)", () => {
+  const SEM_PASTA = { files: {}, stats: { total_files: 0, total_size: 0 }, base_path: null };
+  const COM_PASTA = { ...RESPOSTA_FICHEIROS, base_path: "Documentação Clientes/c-1/processos/proc-1" };
+  const pedidosDeCriacao = () =>
+    axiosFalso.chamadas.filter((c) => c.metodo === "POST" && c.url.endsWith("/init-folders"));
+
+  it("sem pasta no armazenamento (base_path null) oferece o botão", async () => {
+    ligarRede({ carga: SEM_PASTA });
+    montar();
+    await aguardarCarregado();
+
+    expect(await screen.findByTestId("forcar-pasta-s3-btn")).toBeInTheDocument();
+  });
+
+  it("carregar pede ao servidor SÓ o id (o caminho nunca viaja) e recarrega a listagem", async () => {
+    ligarRede({ carga: SEM_PASTA });
+    axiosFalso.respostas.set("/init-folders", {
+      success: true, created: true, recreated: false, already_exists: false,
+      s3_folder: "Documentação Clientes/c-1/processos/proc-1",
+    });
+    const u = (await import("@testing-library/user-event")).default.setup();
+    montar();
+    await aguardarCarregado();
+    const listagensAntes = axiosFalso.chamadas.filter((c) => c.metodo === "GET" && c.url.endsWith("/files")).length;
+
+    await u.click(await screen.findByTestId("forcar-pasta-s3-btn"));
+
+    await waitFor(() => expect(pedidosDeCriacao()).toHaveLength(1));
+    expect(pedidosDeCriacao()[0].url).toBe("/documents/client/proc-1/init-folders");
+    expect(pedidosDeCriacao()[0].resto[0]).toBeNull();
+    await waitFor(() =>
+      expect(axiosFalso.chamadas.filter((c) => c.metodo === "GET" && c.url.endsWith("/files")).length)
+        .toBeGreaterThan(listagensAntes));
+  });
+
+  it.each([
+    ["com pasta (base_path preenchido)", COM_PASTA, {}],
+    ["resposta sem base_path (contrato antigo)", RESPOSTA_FICHEIROS, {}],
+    ["processo fechado (modo de leitura)", SEM_PASTA, { readOnly: true }],
+  ])("não oferece o botão: %s", async (_nome, carga, props) => {
+    ligarRede({ carga });
+    montar(utilizador(), props);
+    await aguardarCarregado();
+
+    expect(screen.queryByTestId("forcar-pasta-s3-btn")).not.toBeInTheDocument();
+  });
+
+  it("o S3 em baixo (503) diz-se ao lado do botão, que continua disponível", async () => {
+    ligarRede({ carga: SEM_PASTA });
+    const erro = new Error("HTTP 503");
+    erro.response = { status: 503, data: { detail: "O armazenamento de documentos (S3) não está disponível." } };
+    axiosFalso.respostas.set("/init-folders", erro);
+    const u = (await import("@testing-library/user-event")).default.setup();
+    montar();
+    await aguardarCarregado();
+
+    await u.click(await screen.findByTestId("forcar-pasta-s3-btn"));
+
+    expect(await screen.findByTestId("forcar-pasta-s3-erro")).toHaveTextContent(/não está disponível/i);
+    expect(screen.getByTestId("forcar-pasta-s3-btn")).toBeEnabled();
+    expect(screen.getByTestId("s3-file-manager")).toBeInTheDocument();
+  });
+
+  it("sem resposta (ligação cortada) também se diz, em vez de um botão mudo", async () => {
+    ligarRede({ carga: SEM_PASTA });
+    axiosFalso.respostas.set("/init-folders", new Error("Network Error"));
+    const u = (await import("@testing-library/user-event")).default.setup();
+    montar();
+    await aguardarCarregado();
+
+    await u.click(await screen.findByTestId("forcar-pasta-s3-btn"));
+
+    expect(await screen.findByTestId("forcar-pasta-s3-erro")).toHaveTextContent(/contactar o servidor/i);
+  });
+});
+
