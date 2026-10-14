@@ -80,6 +80,12 @@ class EmpresasDoAmbito:
     #: utilizadores, os perfis globais incluídos. Todos os outros nunca
     #: vêem um perfil global — ver `build_users_scope_query`.
     sem_fronteira: bool = False
+    #: As redes do âmbito. Serve a UM caso: o parceiro (operador externo e
+    #: independente, Lote 5) não pertence a empresa nenhuma — o que o liga a
+    #: quem o criou é a REDE de quem o criou (`criado_pela_rede`). Sem isto
+    #: desaparecia da lista do próprio Admin que o acabou de criar (a pilha
+    #: sem empresa só pertence a quem detém a rede de omissão).
+    redes: tuple = ()
 
 
 async def empresas_do_ambito(user: dict, *, vista: bool = False) -> EmpresasDoAmbito:
@@ -126,6 +132,7 @@ async def empresas_do_scope(scope) -> EmpresasDoAmbito:
         fechado=True,
         inclui_sem_empresa=bool(scope.inclui_rede_de_omissao),
         sem_fronteira=bool(scope.sem_fronteira),
+        redes=tuple(str(r) for r in (scope.network_ids or ()) if str(r).strip()),
     )
 
 
@@ -152,7 +159,20 @@ async def build_users_scope_query(ambito: EmpresasDoAmbito) -> dict:
         # de omissão, tal como nos documentos (Lote 4). Uma conta sem
         # empresa que desaparecesse do painel nunca mais podia ser
         # associada a uma, porque deixava de se ver.
-        ramos.append(_sem_empresa_nenhuma())
+        # Excepto o parceiro carimbado por OUTRA rede (Lote 5): esse não é
+        # «órfão», é de quem o criou.
+        ramos.append({
+            "$and": [
+                _sem_empresa_nenhuma(),
+                {"criado_pela_rede": {"$in": [None, "", *ambito.redes]}},
+            ]
+        })
+
+    if ambito.redes:
+        # O parceiro criado por alguém destas redes. Só `role == parceiro`: o
+        # carimbo é de uma conta sem acesso à plataforma, e não pode tornar-se
+        # um atalho para ver utilizadores comuns.
+        ramos.append({"role": "parceiro", "criado_pela_rede": {"$in": list(ambito.redes)}})
 
     if ambito.ids or ambito.nomes:
         ucr_query: dict = {"$or": []}

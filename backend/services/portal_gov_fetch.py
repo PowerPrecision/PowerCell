@@ -21,12 +21,15 @@ from services.websocket_manager import WSEventType
 from services.realtime_delivery import entregar_na_sala, sala_do_processo
 from services.gov_fetch_archive import arquivar_documentos, rotulos_em_falta
 from services.gov_fetch_jobs import (
+    CAMPO_ACTIVO,
+    JobJaActivo,
     criar_job,
     encerrar_jobs_mortos,
     job_activo_do_processo,
     ler_job_do_processo,
 )
 from services.gov_fetch_policy import MFA_ESPERA_SEGUNDOS
+from services.mfa_cache import ESTADOS_ACTIVOS
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +236,9 @@ async def _gravar_estado_do_job(scraper_job_id: str, campos: dict, *, remover: t
     «processar» para sempre.
     """
     operacao: dict = {"$set": {**campos, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    if campos.get("status") not in ESTADOS_ACTIVOS:
+        # Saiu de um estado activo: liberta o «um job activo por processo» (D-29).
+        operacao["$set"][CAMPO_ACTIVO] = False
     operacao["$unset"] = {campo: "" for campo in ("mfa_code", *remover)}
     try:
         await db.portal_scraper_jobs.update_one({"id": scraper_job_id}, operacao)
@@ -733,6 +739,14 @@ async def _iniciar_recolha(
         raise HTTPException(status_code=400, detail="A password é obrigatória.")
 
     activo = await job_activo_do_processo(process_id)
+    if not activo:
+        try:
+            scraper_job_id = await criar_job(process_id, fonte.chave)
+        except JobJaActivo:
+            # Outro pedido ganhou a corrida entre a verificação e a criação (D-29).
+            activo = await job_activo_do_processo(process_id)
+            if not activo:  # ganhou e já terminou: pede-se de novo, não se inventa um job
+                raise HTTPException(status_code=409, detail="Tente de novo dentro de instantes.")
     if activo:
         if activo.get("source") == fonte.chave:
             logger.info("[PORTAL] Recolha %s já em curso para o processo %s — a reutilizar o job.", fonte.nome, process_id)
@@ -748,7 +762,6 @@ async def _iniciar_recolha(
             detail="Já existe uma obtenção de documentos em curso. Aguarde que termine antes de iniciar outra.",
         )
 
-    scraper_job_id = await criar_job(process_id, fonte.chave)
     background_tasks.add_task(
         corpo_background,
         **{

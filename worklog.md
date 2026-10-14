@@ -12197,3 +12197,18 @@ Work Log:
 - **Testes:** backend `test_lote4_*` (85) + frontend (Drawer 8, âmbitos 9, ClientsPage 5, rascunhos 5, …). **Mutações:** 16 backend + 13 frontend, 28 mortas e 1 equivalente (`isMaster &&` no separador Técnico: defesa em profundidade atrás de `ambitoEmVigor`).
 - **NÃO verificado / a confirmar:** (a) nada corrido em produção nem com SMTP real; (b) a Domus só aparece como destino de parceiros se tiver indexador activo OU o Master puser `aceita_parceiros=true` na empresa; (c) o Histórico esconde por omissão os clientes só com processos terminados; (d) a política do toast de sync (tecto 90 s, sucesso 5 s) é uma escolha minha; (e) o Drawer NÃO tem «reabrir» (decidida é decidida, como nas sugestões em linha).
 
+
+---
+Task ID: lote5-parceiros-convite-zero-debt
+Agent: Cloud Agent
+Task: Lote 5 — (1) Parceiro sem empresa obrigatória; (2) convite do Portal a falhar com a Caixa Geral inacessível; (3) Zero Debt (D-2, D-4, D-6, D-10, D-12, D-18, D-27, D-29; medições D-13 passo 1 e D-15)
+
+Date: 2026-10-14
+
+Work Log:
+1. PARCEIROS. `company_id` opcional só para o Parceiro; `redes: []` + `convidado_pela_rede`; `conta_com_acesso` único; `_no_ambito_do_actor`; suspensão do independente pelo `status`; `criado_pela_rede` no âmbito de utilizadores; frontend sem o campo Empresa obrigatório.
+2. CONVITE DO PORTAL. `send_email` classifica a fase SMTP (`smtp_connection`) e `enviar_email_do_portal` recua para o Email do Sistema só em falhas antes da entrega. Causa INFERIDA (não observada em produção).
+3. D-10 (`INDEX_DEFINITIONS`, equivalência provada gravando as chamadas ao driver; 113 índices idempotentes num mongod real), D-6 (fases fechadas do motor), D-4 (`Politica` por âmbito), D-12 (SLA só global), D-18 (mapeador `i > 0` + migração `migrar_co_buyers_adicionais.py`), D-27 (overrides persistidos, TTL 30 s), D-29 (índice único parcial `active`), D-2 (`PORTAL_JWT_SECRET` opcional + janela de rotação).
+4. MEDIÇÕES (só leitura): `scripts/medir_colecoes.py` (D-13 passo 1) e `scripts/medir_datas_de_nascimento.py` (D-15). Achados ao testar contra mongod real: `collStats` de colecção inexistente não falha; a idade tem de contar datetime E texto ISO.
+- **Testes:** `test_lote5_*.py` (parceiro 30, convite 14, D-6 8, D-4 14, D-12 7, D-18 26, D-27 24, D-2 23, medições 43) + integração (co_buyers 2, D-29 8, medições 7). **Mutações:** 18 no fecho, todas mortas.
+- **NÃO verificado / a confirmar:** (a) o recuo do convite não foi observado com um SMTP real nem em produção; (b) o worker ARQ e o Node 20 do CI não foram exercitados para o código novo; (c) D-15 e D-13 passos 2–5 não implementados (decisão de produto / prazos legais / acesso ao Atlas); (d) a migração dos `co_buyers` em produção ainda não correu.

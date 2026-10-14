@@ -38,7 +38,12 @@ from database import db
 logger = logging.getLogger(__name__)
 
 #: Falhas de CONFIGURAÇÃO do remetente: acontecem antes de qualquer entrega.
-CODIGOS_ANTES_DA_ENTREGA = frozenset({"smtp_auth", "smtp_password_unreadable", "SMTP_NOT_CONFIGURED"})
+CODIGOS_ANTES_DA_ENTREGA = frozenset({
+    "smtp_auth", "smtp_password_unreadable", "SMTP_NOT_CONFIGURED",
+    # A ligação ao SMTP da caixa não chegou a acontecer (timeout, recusada, porta bloqueada pela
+    # hospedagem): nada foi entregue, e o Email do Sistema (HTTPS) pode estar acessível.
+    "smtp_connection",
+})
 
 #: Nome usado quando não se consegue determinar a empresa. Neutro de propósito.
 NOME_NEUTRO = "Portal do Cliente"

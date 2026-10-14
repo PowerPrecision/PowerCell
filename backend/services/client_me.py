@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
-from services.workflow_phases import fases_do_utilizador
+from services.workflow_phases import fases_do_utilizador, nomes_terminais
 from models.client import (
     Client, ClientCreate, ClientUpdate,
     ClientContact, ClientPersonalData,
@@ -36,7 +36,6 @@ from services.encryption import (
     generate_telefone_hash,
 )
 from services.process_service import get_next_process_number
-from services.process_status import INACTIVE_STATUSES
 from services.s3_storage import s3_service
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
@@ -90,10 +89,9 @@ async def run_get_my_assigned_clients(
             ]
         }
     elif user_role in [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
-        # Fix: Normalize process status filters — inclui as variações
-        # legadas singular/plural (ver services/process_status.py).
+        # As fases fechadas vêm do motor de workflow de quem olha (D-6).
         query = {
-            "status": {"$nin": INACTIVE_STATUSES},
+            "status": {"$nin": nomes_terminais(await fases_do_utilizador(user))},
             "is_active": {"$ne": False}
         }
     else:

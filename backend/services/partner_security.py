@@ -226,6 +226,30 @@ def redes_activas(partner: Optional[dict]) -> list[dict]:
     ]
 
 
+def conta_com_acesso(partner: Optional[dict]) -> bool:
+    """A conta pode entrar no portal? (a CREDENCIAL e o estado da conta são
+    verificados antes, por quem chama.)
+
+    Há dois casos que passam, e um que não:
+
+    * **com ligações e pelo menos uma activa** — o parceiro de sempre;
+    * **sem NENHUMA ligação** — agente independente (Lote 5): um parceiro não
+      pertence a uma empresa, escolhe o destino de cada lead e a primeira
+      escolha cria a ligação de mercado. Vê zero dados até lá (a condição de
+      rede de um âmbito vazio é impossível, nunca «sem filtro»);
+    * **com ligações e TODAS suspensas** — recusado. A suspensão é decisão da
+      gestão de uma rede, e uma lista de ligações suspensas não pode
+      confundir-se com «nunca esteve ligado» (seria reabrir a conta a quem
+      acabou de ser suspenso).
+    """
+    if not partner:
+        return False
+    if redes_activas(partner):
+        return True
+    ligacoes = [r for r in (partner.get("redes") or []) if isinstance(r, dict)]
+    return not ligacoes
+
+
 def ids_das_redes_activas(partner: Optional[dict]) -> list[str]:
     return list(dict.fromkeys(str(r["network_id"]).strip() for r in redes_activas(partner)))
 
@@ -281,7 +305,7 @@ async def get_current_partner(
         raise _recusa()
     if int(payload.get("tv") or 0) != int(partner.get("token_epoch") or 0):
         raise _recusa()
-    if not redes_activas(partner):
+    if not conta_com_acesso(partner):
         raise _recusa()
     return partner
 
@@ -304,6 +328,7 @@ __all__ = [
     "exigir_portal_ligado",
     "get_current_partner",
     "hash_de_token",
+    "conta_com_acesso",
     "ids_das_redes_activas",
     "portal_do_parceiro_ligado",
     "redes_activas",

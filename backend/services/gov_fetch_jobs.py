@@ -25,6 +25,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from pymongo.errors import DuplicateKeyError
+
 from database import db
 from services.gov_fetch_policy import (
     ESPERA_PELO_SEMAFORO_SEGUNDOS,
@@ -53,6 +55,18 @@ CAMPOS_PUBLICOS_DO_JOB = (
     "id", "source", "status", "documents_count", "documents_missing",
     "error_type", "message", "created_at", "updated_at",
 )
+
+
+#: Booleano que existe SÓ enquanto o job está activo. O índice único parcial
+#: `idx_scraper_job_activo_unico` (`process_id`, filtro `active: True`) é o que torna «um job
+#: activo por processo» ATÓMICO (D-29): o `partialFilterExpression` do Mongo não aceita `$in`
+#: sobre `status`, daí um campo próprio. Tem de ser desligado em TODA a saída de um estado
+#: activo — um `active: True` esquecido bloquearia o processo para sempre.
+CAMPO_ACTIVO = "active"
+
+
+class JobJaActivo(Exception):
+    """Já existe um job activo para o processo (perdeu-se a corrida da criação)."""
 
 
 def _agora() -> datetime:
@@ -84,6 +98,7 @@ async def encerrar_jobs_mortos(process_id: Optional[str] = None, *, agora: Optio
                     "error_type": "scraper_unavailable",
                     "message": MENSAGEM_DE_JOB_MORTO,
                     "updated_at": (agora or _agora()).isoformat(),
+                    CAMPO_ACTIVO: False,
                 },
                 "$unset": {"mfa_code": ""},
             },
@@ -115,17 +130,26 @@ async def job_activo_do_processo(process_id: str) -> Optional[dict]:
 
 
 async def criar_job(process_id: str, source: str) -> str:
-    """Cria o job em `processing` e devolve o id."""
+    """Cria o job em `processing` e devolve o id.
+
+    ATÓMICO (D-29): o índice único parcial recusa um segundo job activo para o mesmo processo, e a
+    corrida perde com ``JobJaActivo`` — verificar «há um activo?» e depois criar eram duas operações,
+    e dois pedidos simultâneos passavam ambos (dois logins, dois SMS ao cliente).
+    """
     job_id = str(uuid.uuid4())
     agora = _agora().isoformat()
-    await db.portal_scraper_jobs.insert_one({
-        "id": job_id,
-        "process_id": process_id,
-        "source": source,
-        "status": "processing",
-        "created_at": agora,
-        "updated_at": agora,
-    })
+    try:
+        await db.portal_scraper_jobs.insert_one({
+            "id": job_id,
+            "process_id": process_id,
+            "source": source,
+            "status": "processing",
+            CAMPO_ACTIVO: True,
+            "created_at": agora,
+            "updated_at": agora,
+        })
+    except DuplicateKeyError as exc:
+        raise JobJaActivo(process_id) from exc
     return job_id
 
 

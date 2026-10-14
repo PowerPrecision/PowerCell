@@ -18,32 +18,6 @@ quatro, é um comentário e não uma dívida.
 
 ## Segurança
 
-### D-2 · Segredo JWT partilhado entre o Portal e o staff
-**Onde:** `backend/config.py` (`JWT_SECRET`), `services/portal_security.py`,
-`services/auth.py`.
-
-Os tokens do Portal do Cliente e os do staff são assinados com o **mesmo**
-segredo. Até ao lote dos WebSockets externos, o que separava as duas famílias
-era uma **coincidência**: o `sub` de um token de Portal é um `process_id`, que
-não existe em `db.users`.
-
-**Porque foi adiado:** separar os segredos invalida **todos** os magic links em
-circulação — clientes a meio de um onboarding perdem o acesso e têm de pedir
-um link novo. A mitigação escolhida foi tornar a claim `type` **autoritativa**
-nos dois lados (`ws_client_identity.tipo_de_token_e_de_staff` /
-`tipo_de_token_e_do_portal`), o que fecha o problema prático sem invalidar
-nada.
-
-**Quem é atingido:** com o `type` autoritativo, ninguém hoje. A dívida é de
-**defesa em profundidade**: um segredo só significa que um erro futuro num
-verificador de tipo volta a ser explorável, em vez de ser inofensivo.
-
-**Para fechar:** `PORTAL_JWT_SECRET` próprio + rotação com janela de
-sobreposição (aceitar os dois segredos durante o tempo de vida do magic link
-mais longo), ou aceitar a invalidação numa janela de manutenção anunciada.
-
----
-
 ### D-24 · O registo público não carimba a rede, e a Sala de Triagem é global
 **Onde:** `services/public_registration.py`, `services/client_registered.py`
 (`build_tenant_pool_condition`)
@@ -85,115 +59,6 @@ pequeno (`resolve_tenant_stamp` no `public_registration`) e a Pool passa a
 
 ---
 
-### D-4 · Duas políticas de força bruta para as duas portas do Portal (o resto fechou)
-**Onde:** `backend/services/portal_brute_force.py`, `backend/services/portal_security.py`
-
-**Fechado (Out 2026):** o IP real do cliente deixou de ser escolhido por quem
-ataca. `middleware/client_ip.py::ip_do_cliente` lê o `X-Forwarded-For` **da
-direita**, saltando `TRUSTED_PROXY_HOPS` proxies de confiança (Render sozinho = 1,
-já no `render.yaml`; atrás de Cloudflare = 2) — antes lia o primeiro elemento,
-que é o que o cliente envia, e o limite por IP não mordia em lado nenhum. Sem a
-variável, ou com ela inválida, usa o peer do socket e di-lo no log; um
-`X-Forwarded-For` mais curto do que os saltos conhecidos cai no peer.
-Cobertura: `test_ip_do_cliente_atras_do_proxy.py`. **Operação:** confirmar o
-valor de `TRUSTED_PROXY_HOPS` em cada ambiente (com o número errado todos os
-clientes agrupam-se numa só chave e o limite tranca o sistema).
-O varrimento de `@limiter.limit` do Portal fechou no Lote 10 (abaixo).
-
-**Historial, para o contexto da metade que continua aberta:**
-
-**Medido no Lote 9 (Fase B):** o `/portal/visits/request` ganhou limite
-(fazia o servidor ir buscar um URL escolhido pelo cliente, sem tecto de
-custo de IA). Ficavam **nove POST do Portal sem limite nenhum**, e o Portal
-é a única superfície externa:
-`portal_login`, `verify_portal_login`, `authenticate_portal`,
-`update_client_profile`, `send_portal_message`, `fetch_financas_documents`,
-`fetch_seguranca_social_documents`, `submit_mfa_code` e
-`create_recommendations`. Os três primeiros são de autenticação (força
-bruta de magic link) e os dois dos scrapers governamentais abrem ligações
-de saída — são os de maior consequência.
-
-**Fechado no Lote 10 (o Portal):** os nove ganharam `@limiter.limit` e
-`response: Response`, e a guarda de inventário passou a afirmar a
-PROPRIEDADE (nenhum endpoint de escrita de `routes/portal.py` sem limite),
-derivada das rotas e não de uma lista
-(`tests/unit/test_portal_forca_bruta_e_limites.py`). O login por email
-passou a ter um ponto único (`services/portal_brute_force.py`) em vez de
-~55 linhas à mão mais uma segunda cópia da política no
-`_record_login_attempt`, no mesmo ficheiro.
-
-**Correcção a uma afirmação deste mesmo lote:** disse que o
-`run_verify_portal_login` prometia «5 tentativas, lockout de 15 min» na
-docstring e não tinha código a contar tentativas. **Não era verdade** — o
-travão vive em `portal_security.verify_client_credentials`, está completo e
-diz exactamente esses números. Inventariei um módulo e concluí da
-ausência; o travão que acrescentei era uma segunda política na mesma porta
-e foi retirado.
-
-**O que continua aberto — duas políticas de força bruta para as duas portas do mesmo Portal**
-
-| Porta | Onde | Tentativas | Bloqueio | Colecção |
-|---|---|---|---|---|
-| Login (email + código) | `portal_brute_force` | 8 | 10 min | `portal_login_attempts` |
-| Verify (NIF + nº processo) | `portal_security` | 5 | 15 min | `portal_verify_attempts` |
-
-São duas implementações independentes da mesma ideia, e foi essa
-dispersão que me levou a declarar inexistente a segunda (procurei-a no
-handler e ela está na camada abaixo).
-
-**Porque não se consolidou agora:** a consolidação parece uma limpeza e
-tem uma armadilha — **as constantes têm de ficar POR PORTA**. Escolher um
-dos pares mudaria a política da outra em silêncio (apertar o login para 5
-tentativas bloqueia um cliente que erra um código de 6 caracteres cinco
-vezes; alargar o verify para 8/10 abre a porta que tem o espaço de busca
-mais pequeno). Uma consolidação que muda a política não é uma
-consolidação.
-
-**Quem é atingido:** ninguém hoje — as duas portas estão protegidas. O
-custo é de manutenção e de diagnóstico: uma correcção feita numa das
-implementações não chega à outra, e já foi essa divergência a produzir um
-engano de leitura.
-
-**Para fechar:** `portal_brute_force` recebe a política por âmbito
-(`POLITICAS = {porta: (tentativas, minutos, colecção)}`), com os valores
-ACTUAIS de cada porta preservados; `portal_security` passa a chamá-lo e o
-`_record_failed_attempt` desaparece. Teste de concordância a afirmar que
-cada porta mantém os seus números depois da mudança — é essa asserção que
-distingue uma consolidação de uma alteração de política.
-
----
-
-### D-10 · As definições de índices vivem dentro de `create_indexes`
-**Onde:** `backend/services/db_indexes.py::create_indexes`
-
-Os índices são 15 literais de lista **locais** dentro de uma função async de
-~380 linhas, cada um seguido do seu ciclo de criação. Não há forma de um teste
-(nem de um script de diagnóstico) obter as definições sem executar a função
-contra uma base de dados.
-
-Foi isso que permitiu o placebo: o `test_db_indexes.py` mantinha uma CÓPIA das
-definições escrita à mão e injectava-a em `sys.modules['services.db_indexes']`,
-substituindo o módulo inteiro. A cópia tinha 2 colecções e 6 índices de
-`processes`; o módulo real tem 13 e 18. Hoje o teste lê o módulo por **AST** —
-honesto, mas é uma leitura de texto a fazer o trabalho que uma estrutura de
-dados faria.
-
-**Porque foi adiado:** mover 380 linhas do caminho de ARRANQUE da aplicação, no
-dia de um deploy, por um ganho que é de forma e não de comportamento. O AST
-fecha o problema que importava (o teste passou a poder falhar) sem tocar em
-produção.
-
-**Quem é atingido:** ninguém em produção. Quem escrever o próximo teste ou
-script sobre índices paga o preço: ou repete a leitura por AST, ou recria a
-cópia que acabámos de apagar — e a cópia é o defeito.
-
-**Para fechar:** extrair um `INDEX_DEFINITIONS: dict[str, list[dict]]` ao nível
-do módulo, `create_indexes` passa a iterá-lo, e o leitor por AST do teste é
-substituído por um import. A lista de colecções que o `get_index_stats` reporta
-sai da mesma estrutura, em vez de ser uma segunda lista à mão.
-
----
-
 ## Correcção e modelo de dados
 
 ### D-15 · A data de nascimento é PII e está em claro
@@ -221,63 +86,17 @@ filtro deixa de existir.
 fica para uma sprint dedicada à criptografia, de propósito, para não partir o
 filtro Sub35 recém-construído.
 
+**Medição disponível (Lote 5):** `python scripts/medir_datas_de_nascimento.py`
+(só leitura, só contagens, nenhum valor no output) diz em que colecções e
+campos a data existe, quantas estão em claro, quantas já estão cifradas e
+quantas não são nem uma coisa nem outra (lixo que uma migração teria de tratar
+à mão). Correr em produção antes da decisão.
+
 **O que é preciso para fechar:** decidir entre o filtro e a encriptação, com
 o DPO. Se a escolha for encriptar, a opção (a) com um campo `ano_de_nascimento`
 (não a idade, não um booleano) é a única que não quebra a pesquisa nem precisa
 de recálculo: o ano não muda, e o limiar de "menos de 36" calcula-se sobre ele
 com uma margem de um ano a resolver em Python.
-
-### D-12 · Os limiares de SLA guardam-se por empresa e leem-se globalmente
-**Onde:** `backend/services/stats_sla.py::_limiares`,
-`backend/models/system_config.py::DashboardSlaConfig`
-
-O `SystemConfig` é por empresa e o `PATCH /api/system-config/dashboard_slas`
-aceita `company_id`. Mas `_limiares()` chama `get_system_config()` **sem
-argumento**, logo lê sempre a configuração `default`: a Domus não pode ter
-limiares diferentes da Power, apesar de o modelo o prometer na docstring (que
-foi corrigida).
-
-**Porque foi adiado:** o ecrã de administração construído neste lote é
-deliberadamente GLOBAL e diz-o ao utilizador — é a forma honesta de viver com
-a limitação. Fazer a leitura por empresa obriga a decidir QUAL empresa: o
-`run_get_sla` tem `user`, mas a "empresa activa" é contexto de pedido e
-resolvê-la mal recria a confusão id/nome de 2026-09-21. Não é trabalho para
-encaixar no fim de um lote.
-
-**Quem é atingido:** redes com ritmos de negócio diferentes. Hoje ninguém, por
-não haver limiares distintos configurados — mas o primeiro que os configurar
-por empresa vai vê-los ignorados em silêncio.
-
-**Para fechar:** `_limiares(user)` a resolver o âmbito pelo mesmo caminho que
-as restantes leituras por empresa, o ecrã a ganhar um selector, e um teste a
-afirmar que o que a UI grava é o que o leitor lê (o padrão do
-`test_email_config_write_read_key.py`).
-
----
-
-### D-6 · `INACTIVE_STATUSES` é resíduo legado, não definição
-**Onde:** `backend/services/process_status.py`,
-`services/my_clients_api_helpers.py`, `services/client_list_search.py`
-
-Quem define o que está "fechado" é a flag `is_active` da fase no **motor de
-workflow** (`workflow_phases.nomes_terminais`). O `INACTIVE_STATUSES` é uma
-lista cravada em código que sobrevive como **recurso** para quando o motor não
-é injectado — e continua a ser o caminho usado em `client_list_search`.
-
-**Porque foi adiado:** substituí-lo exige passar o motor por funções que são
-**puras** de propósito (é isso que as torna testáveis sem Mongo no
-`backend-fast`), e cada chamador tem de o injectar.
-
-**Quem é atingido:** uma fase nova marcada como terminal no painel de admin
-não é reconhecida como fechada nos caminhos que ainda usam a lista — os
-números de "carteira activa" divergem do quadro.
-
-**Para fechar:** injectar `terminais=` em todos os chamadores (o
-`my_clients_api_helpers` já o aceita) e reduzir o `INACTIVE_STATUSES` a um
-recurso de arranque, com um teste a afirmar que nenhum caminho de produção o lê
-sem tentar o motor primeiro.
-
----
 
 ## Infraestrutura e custos
 
@@ -304,7 +123,11 @@ degradação não é linear.
 
 **Passos, do mais barato ao mais caro:**
 
-1. **MEDIR antes de mover.** `db.stats()` por colecção (tamanho de dados,
+1. **MEDIR antes de mover.** *(Ferramenta pronta, Lote 5:
+   `python scripts/medir_colecoes.py [--csv f]` — só leitura, `collStats` por
+   colecção + idade por escalão 30/90/180/365 dias, contando datas
+   `datetime` E texto ISO; falta CORRÊ-LA em produção e colar a tabela no
+   `worklog.md`.)* `db.stats()` por colecção (tamanho de dados,
    tamanho de índices, contagem) e o *Performance Advisor* do Atlas. Sem isto
    arrisca-se arquivar a colecção errada: a intuição diz `history`, os números
    podem dizer `emails` (que guarda corpos de mensagens). **Nenhum passo
@@ -394,70 +217,26 @@ migrações/resets de processos e reset de permissões.
 `test_accoes_destrutivas_com_password.py::TestInventario::COM_PASSWORD`; quem criar UI usa o
 `ConfirmarComPasswordDialog`.
 
-### D-18 · `co_buyers` tem dois significados
-**Onde:** `backend/services/ai_document.py::build_update_data_from_extraction`
-(mapeador do CPCV), `backend/services/process_clients_nm.py::build_add_client_update`.
+### D-18 · `co_buyers`: falta correr a migração dos dados em produção
+**Onde:** `backend/scripts/migrar_co_buyers_adicionais.py`, `backend/services/co_buyers_migration.py`
 
-O mesmo campo é escrito com dois significados diferentes:
+O CÓDIGO está fechado (Lote 5): o mapeador do CPCV passou a gravar só os
+compradores ADICIONAIS (`i > 0`), como o `build_add_client_update` sempre fez,
+e o campo tem um só significado. Falta o DADO: os processos analisados pelo
+mapeador antigo têm o titular 1 em `co_buyers[0]`.
 
-* o mapeador do CPCV grava **TODOS** os compradores — o elemento 0 é o
-  titular 1, e é dele que o mapeador copia o `personal_data`;
-* o `build_add_client_update` grava apenas os compradores **ADICIONAIS**, e usa
-  `co_buyers[0]` para construir o `titular2_data`.
+**Porque está aberta:** a migração escreve em produção e só se pode correr com
+a base de dados à frente. O script é conservador — remove `co_buyers[0]` só
+quando a sua identidade normalizada (NIF/CC em dígitos, nome sem acentos) é
+EXACTAMENTE a do titular 1; tudo o resto fica e é listado. A omissão só lê;
+`--aplicar` escreve; idempotente.
 
-Encontrado ao fechar a D-17: a regra Sub35 estrita conta "compradores a mais",
-e sob o primeiro significado o titular 1 era contado duas vezes. Como um CPCV
-português muitas vezes não indica datas de nascimento, isso retirava a etiqueta
-a qualquer processo cujo CPCV tivesse sido analisado — **mesmo com um só
-comprador**.
+**Enquanto não correr:** a desduplicação por identidade em `sub35.py` mantém-se
+(é o que impede a regra de se desligar a si mesma). Depois de uma passagem
+limpa pode simplificar-se.
 
-**Porque foi adiado:** a correcção óbvia (passar o mapeador a gravar
-`compradores[1:]`) criaria um TERCEIRO significado durante a transição, porque
-os documentos já gravados mantêm o primeiro. E o campo é lido por
-`ai_bulk_clients`, `client_process_ops`, `gdpr`, `encryption` e
-`process_service`, nenhum dos quais distingue os dois casos. A regra Sub35 foi
-por isso escrita para ser correcta sob **os dois** significados, desduplicando
-por identidade (`sub35.compradores_que_bloqueiam`) — o que é mais robusto do
-que escolher um e migrar o resto.
-
-**Quem é atingido se explodir:** qualquer regra nova que conte elementos de
-`co_buyers` (número de compradores, LTV por comprador, rateio de comissões)
-dá um resultado diferente conforme quem escreveu o array.
-
-**O que é preciso para fechar:** decidir o significado único (o nome do campo e
-o `titular2_data` apontam para "os adicionais"), migrar os documentos escritos
-pelo mapeador do CPCV — identificáveis porque `co_buyers[0]` tem a identidade
-do titular 1 — e só então simplificar a desduplicação.
-
-### D-27 · Os defaults por cargo do registo de capacidades não persistem
-**Onde:** `backend/services/admin_permissions.py::run_update_role_defaults`,
-`backend/models/permissions.py::ROLE_CAPABILITY_DEFAULTS`.
-
-`PUT /admin/permissions/role-defaults/{role}` altera o dicionário
-`ROLE_CAPABILITY_DEFAULTS` **em memória** e escreve uma cópia em
-`system_config` (`key: "role_capability_defaults"`). **Nada a lê de volta**:
-`grep` por `role_capability_defaults` encontra um único escritor. Duas
-consequências: a alteração perde-se no reinício do serviço, e com mais de um
-worker só o que recebeu o pedido a conhece.
-
-Encontrada ao desenhar o controlo de histórico (Bloco 1, ponto 4), que por
-isso NÃO usa este registo — um interruptor de segurança em cima disto seria o
-placebo do `build_company_scope_condition`. Usa uma colecção própria
-(`history_policy`) com leitura real.
-
-**Porque foi adiado:** não pertence ao ponto 4, e corrigi-la muda o
-comportamento de uma matriz de permissões que o dono do produto pode ter
-editado julgando-a permanente — carregar o persistido no arranque revive
-edições antigas que ninguém espera.
-
-**Quem é atingido:** qualquer admin que altere os defaults de um cargo na
-`PermissionsTab` e espere que sobreviva a um deploy. Os overrides por
-**pessoa** (`users.permissions.capabilities`) persistem e não são afectados.
-
-**O que é preciso para fechar:** ler `role_capability_defaults` no arranque (e
-com o mesmo TTL curto do `history_tracking`, para os workers convergirem),
-decidir o que fazer com o documento já gravado (mostrá-lo ao admin antes de o
-aplicar), e um teste que reinicie o módulo e afirme que o valor sobrevive.
+**Para fechar:** `python scripts/migrar_co_buyers_adicionais.py` (ver o plano),
+`--aplicar`, repetir até «0 a migrar», e então remover a desduplicação.
 
 ### D-28 · O `history` não leva carimbo de rede
 **Onde:** colecção `history`, `services/executive_report.py`
@@ -468,17 +247,6 @@ duas redes tem na rede A as mudanças que fez na rede B. A lista de movimentos j
 filtra pelos processos do âmbito; as contagens não. Fechar exige carimbar
 `history` (escritor único `log_history`) e migrar o legado — adiado por ser um
 escritor central e por o impacto ser só em quem trabalha em duas redes.
-
-### D-29 · Um job activo por processo não é atómico
-**Onde:** `services/portal_gov_fetch._iniciar_recolha`, colecção `portal_scraper_jobs`
-
-A verificação «há um job activo?» e a criação do job são duas operações. Dois
-pedidos simultâneos podem passar ambos e arrancar dois logins (dois SMS ao
-cliente, e o código escrito serve um só). Mitigado: limite de 5/min por processo,
-o botão fica desactivado enquanto o pedido corre e o dano é um SMS a mais, não
-uma fuga. Fechar exige um índice único parcial por `process_id` sobre um campo
-booleano `active` (o `partialFilterExpression` do Mongo não aceita `$in` sobre
-`status`) e a reivindicação por `insert` com tratamento de `DuplicateKeyError`.
 
 ### D-30 · Os scrapers do Estado e dos portais só se provam em produção
 **Onde:** `services/gov_scraper.py`, `services/scraper.py`
@@ -705,6 +473,13 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 
 | # | Dívida | Fechada em |
 |---|---|---|
+| D-2 | Segredo JWT partilhado entre o Portal e o staff | Iteração `lote5-zero-debt` — `PORTAL_JWT_SECRET` próprio e OPCIONAL (`services/portal_jwt_secret.py`): definido, os tokens do Portal passam a ser assinados com ele e o verificador aceita os dois segredos durante a janela (`PORTAL_JWT_ACCEPT_LEGACY`, por omissão ligada), pelo que **nada se invalida**. Sem a variável, comportamento anterior. **Operação:** definir `PORTAL_JWT_SECRET` no serviço web e, passados ~90 dias (tempo de vida do magic link mais longo), pôr `PORTAL_JWT_ACCEPT_LEGACY=false`. Cobre também o WebSocket do Portal e o rate limit. `test_lote5_d2_segredo_proprio_do_portal.py` (23) |
+| D-4 | Duas políticas de força bruta para as duas portas do Portal | Iteração `lote5-zero-debt` — a política é DADO (`Politica` por âmbito: login 8/10 min, verify 5/15 min, colecção própria) num só motor; o `verify` passou a usar o mesmo mecanismo que o login (ordem: recusar antes de olhar para a credencial; 400 não gasta tentativas; sucesso limpa; ler falha aberto). `test_lote5_d4_politicas_de_forca_bruta.py` (14) |
+| D-6 | `INACTIVE_STATUSES` era resíduo legado e ainda decidia em `client_list_search` | Iteração `lote5-zero-debt` — as fases fechadas vêm do MOTOR (por rede) em `client_list_search`, `admin_observability`, `document_delete`, `client_me` e `process_kanban_diagnose`; a lista fica só como recurso de arranque. `test_lote5_d6_estados_fechados_vem_do_motor.py` (8) |
+| D-10 | As definições de índices viviam dentro de `create_indexes` | Iteração `lote5-zero-debt` — `INDEX_DEFINITIONS` ao nível do módulo (`_definir`), `create_indexes` itera-o e `colecoes_com_indices` sai da mesma estrutura. **Equivalência provada** (gravando as chamadas ao driver antes e depois: os mesmos índices) e 113 índices criados e idempotentes num `mongod` real; o leitor por AST do teste foi substituído por um import |
+| D-12 | Os limiares de SLA guardavam-se por empresa e liam-se globalmente | Iteração `lote5-zero-debt` — fechada pelo lado da ESCRITA: `dashboard_slas` é uma secção só-global (`SECCOES_SO_GLOBAIS`) e uma escrita por empresa é recusada, logo o que o ecrã grava é o que o leitor lê. **Decisão registada:** NÃO se construiu o leitor por empresa; se o negócio quiser limiares por rede, reabre-se com `_limiares(user)` e um selector. `test_lote5_d12_sla_so_global.py` (7) |
+| D-27 | Os defaults por cargo do registo de capacidades não persistiam | Iteração `lote5-zero-debt` — `role_defaults_store`: os defaults persistem como overrides sobre os do código, relidos com TTL de 30 s no `get_current_user` (throttled para não pendurar pedidos com o Mongo em baixo); guarda-se só o DESVIO (`role_capability_defaults_v2`), nunca o retrato, para um deploy que mude um default do código não ser desfeito em silêncio. **O documento antigo NÃO se aplica** (não distingue edição de administrador de default da altura): mostra-se no log do arranque e no registo de capacidades (`legado_por_rever`) para o administrador repetir pelo ecrã o que ainda quer, e depois apaga-se. `test_lote5_d27_defaults_por_cargo_persistem.py` (24) |
+| D-29 | Um job activo por processo não era atómico | Iteração `lote5-zero-debt` — índice único parcial `idx_scraper_job_activo_unico` (`process_id`, filtro `active: true`) + `JobJaActivo` no `DuplicateKeyError`; `active` desliga-se em TODA a saída de um estado activo. Provado contra `mongod` real com pedidos simultâneos (o duplo não implementa índices parciais): `tests/integration/test_d29_job_activo_atomico_mongo.py` (8) |
 | D-38 | O registo público actualizava, sem prova de posse, um cliente já existente da mesma rede | Iteração `d38-duplicados-por-rede` — **NIF, Email e Telemóvel não se repetem dentro da rede**: o formulário público responde 409 genérico (`DUPLICATE_CLIENT`, sem id, nome nem campo — a porta é anónima) e não cria nem altera nada; o ramo de upsert foi apagado, não desligado. A criação e a edição do CRM passaram do âmbito GLOBAL para o da rede (o 409 devolvia o id e o nome de clientes de OUTRAS redes) e verificam também o telemóvel (com e sem indicativo, via blind index); na edição só se verifica o que MUDOU. `services/client_uniqueness.py` é o ponto único. Cobertura: `test_d38_duplicados_por_rede.py` (39), `tests/integration/test_duplicados_por_rede_mongo.py` (8, MongoDB real), `PublicClientForm.duplicado.test.jsx`. 14 mutações medidas, todas mortas |
 | D-41 (parcial) | A anonimização individual (`/gdpr/anonymize`) era irreversível e não pedia password | Iteração `accoes-destrutivas-ui`: `AnonymizeRequest.password` exigida fora do `dry_run` (que é FALSO por omissão neste pedido, ao contrário do lote), depois da fronteira de rede (404 antes do 403) e antes de qualquer escrita; painel «Compliance › Anonimização» com diálogo. O resto das acções de infraestrutura continua em aberto (secção D-41) |
 | D-14 | O formulário público podia criar um cliente com NIF repetido | Iteração `d38-duplicados-por-rede` — fechada pelo mesmo ponto: opção (c) (recusar com mensagem clara). Limite dito: o portal do parceiro (`partner_leads`) não recusa — marca `possible_duplicate_of` e a colisão B2B (D-39) resolve-se na libertação |

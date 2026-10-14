@@ -323,6 +323,12 @@ async def run_create_user(data: UserCreate, user: dict):
             "base_salary": _safe_float(data.base_salary),  # Vencimento fixo mensal
             "created_at": now
         }
+        # Sem empresa (Lote 5): a rede de quem o cria é o que o mantém visível
+        # e gerível por essa rede (`build_users_scope_query`).
+        from services.partner_accounts import rede_de_quem_convida
+        rede_de_origem = await rede_de_quem_convida(user)
+        if rede_de_origem:
+            user_doc["criado_pela_rede"] = rede_de_origem
         
         await db.users.insert_one(user_doc)
         await _audit_log("user_created", "user", user_id, user, {"role": data.role, "additional_roles": data.additional_roles, "name": clean_name, "type": "parceiro_ghost"})

@@ -205,7 +205,7 @@ export default function PartnersAdminTab() {
           <DialogHeader>
             <DialogTitle>Convidar parceiro</DialogTitle>
             <DialogDescription>
-              O parceiro recebe um link por email para definir a palavra-passe. Fica ligado à empresa que escolher.
+              O parceiro recebe um link por email para definir a palavra-passe. Não pertence a nenhuma empresa: escolhe a empresa de destino de cada lead. Pode, se quiser, ligá-lo já a uma.
             </DialogDescription>
           </DialogHeader>
 
@@ -228,16 +228,15 @@ export default function PartnersAdminTab() {
                 <Input id="parceiro-telefone" type="tel" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="parceiro-empresa">Empresa *</Label>
+                <Label htmlFor="parceiro-empresa">Empresa (opcional)</Label>
                 <select
                   id="parceiro-empresa" value={form.company_id}
                   onChange={(e) => setForm((f) => ({ ...f, company_id: e.target.value }))}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 >
-                  <option value="">Escolha…</option>
+                  <option value="">Nenhuma — parceiro independente</option>
                   {(empresas.data || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
-                {erros.company_id && <p role="alert" className="text-xs text-destructive">{erros.company_id}</p>}
               </div>
               {erroGeral && <p role="alert" className="text-sm text-destructive">{erroGeral}</p>}
             </form>

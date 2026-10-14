@@ -82,17 +82,15 @@ SECCOES_DO_CLIENTE = ("dados_pessoais",)
 #: criação (ver `process_create`).
 SECCAO_DO_TITULAR2 = "titular2_data"
 
-#: A lista de TODOS os compradores extraída de um CPCV pela IA.
+#: Os compradores ADICIONAIS de um processo (D-18 fechada, Lote 5): UM só significado.
 #:
-#: **Atenção — este campo tem DUAS escritas com significados diferentes**, e é
-#: a razão de a regra ter de desduplicar por identidade (ver `compradores_que_
-#: bloqueiam`): o mapeador do CPCV (`ai_document`) grava **todos** os
-#: compradores, sendo o elemento 0 o titular 1 (é dele que copia o
-#: `personal_data`); o `process_clients_nm.build_add_client_update` grava
-#: apenas os compradores ADICIONAIS (e usa `co_buyers[0]` para construir o
-#: `titular2_data`). Contar cegamente os elementos como "compradores a mais"
-#: retiraria a etiqueta a qualquer processo cujo CPCV tenha sido analisado,
-#: mesmo com UM só comprador. Registado em `TECHNICAL_DEBT.md` (D-18).
+#: O mapeador do CPCV (`ai_document`) e o `process_clients_nm.build_add_client_update` gravam agora
+#: ambos só os adicionais — o titular 1 vive em `personal_data`, o titular 2 em `titular2_data`.
+#: **A desduplicação por identidade em `compradores_que_bloqueiam` fica, de propósito, até a
+#: migração `scripts/migrar_co_buyers_adicionais.py` ter corrido em produção**: os documentos
+#: escritos pelo mapeador ANTIGO têm o titular 1 em `co_buyers[0]`, e sem ela um processo de UM só
+#: comprador, sem datas no contrato, perdia a etiqueta. Depois de uma passagem limpa
+#: («retirar_o_titular_1: 0») pode simplificar-se.
 SECCAO_DOS_COMPRADORES = "co_buyers"
 
 #: O que identifica um comprador da lista. `nome` é o nome que o mapeador do

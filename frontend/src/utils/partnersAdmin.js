@@ -6,6 +6,10 @@
  *     redes: [{ network_id, company_id, company_name, status }],
  *     invite_pending, created_at, last_login_at }
  * — nunca o hash, o convite nem os termos.
+ *
+ * `redes` vazio = agente INDEPENDENTE (Lote 5): um parceiro é um operador externo
+ * e não pertence a uma empresa; a primeira lead que submete a uma empresa de
+ * destino cria a ligação. Para ele a suspensão actua na conta (`status`).
  */
 
 const lista = (v) => (Array.isArray(v) ? v : []);
@@ -23,17 +27,28 @@ export function estadoDoParceiro(parceiro) {
   const redes = lista(parceiro?.redes);
   const activas = redes.filter((r) => (r.status || "active") === "active");
   if (parceiro?.status === "invited") return { chave: "convidado", rotulo: "Convite pendente", variant: "outline" };
+  if (parceiro?.status === "suspended") return { chave: "suspenso", rotulo: "Suspenso", variant: "destructive" };
   if (redes.length > 0 && activas.length === 0) return { chave: "suspenso", rotulo: "Suspenso", variant: "destructive" };
   if (activas.length < redes.length) return { chave: "parcial", rotulo: "Activo (parcial)", variant: "secondary" };
   return { chave: "activo", rotulo: "Activo", variant: "default" };
 }
 
-/** Há ligações activas que se possam suspender? (o botão diz «Suspender») */
+export const eIndependente = (parceiro) => lista(parceiro?.redes).length === 0;
+
+/** Há algo activo que se possa suspender? (o botão diz «Suspender») */
 export const podeSuspender = (parceiro) =>
-  lista(parceiro?.redes).some((r) => (r.status || "active") === "active");
+  !parceiro
+    ? false
+    : eIndependente(parceiro)
+      ? parceiro.status !== "suspended"
+      : lista(parceiro?.redes).some((r) => (r.status || "active") === "active");
+
+export const ROTULO_INDEPENDENTE = "Independente";
 
 export const nomesDasEmpresas = (parceiro) =>
-  lista(parceiro?.redes).map((r) => r.company_name || r.network_id).filter(Boolean).join(", ");
+  eIndependente(parceiro)
+    ? ROTULO_INDEPENDENTE
+    : lista(parceiro?.redes).map((r) => r.company_name || r.network_id).filter(Boolean).join(", ");
 
 /** O link completo do convite, a partir do caminho que o servidor devolve. */
 export function linkDoConvite(caminho, origem) {
@@ -49,7 +64,7 @@ export function validarConvite(form) {
   const erros = {};
   if (String(f.name).trim().length < 2) erros.name = "Indique o nome do parceiro.";
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(f.email).trim())) erros.email = "Indique um email válido.";
-  if (!String(f.company_id).trim()) erros.company_id = "Escolha a empresa.";
+  // A empresa é OPCIONAL (Lote 5): o parceiro é independente e escolhe o destino de cada lead.
   return erros;
 }
 
@@ -59,8 +74,9 @@ export function corpoDoConvite(form) {
   const corpo = {
     name: String(f.name).trim(),
     email: String(f.email).trim(),
-    company_id: String(f.company_id).trim(),
   };
+  const empresa = String(f.company_id).trim();
+  if (empresa) corpo.company_id = empresa;
   const telefone = String(f.phone).trim();
   if (telefone) corpo.phone = telefone;
   return corpo;

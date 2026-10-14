@@ -284,7 +284,20 @@ async def user_rate_limit_middleware(request, call_next):
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         try:
-            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            from services.portal_jwt_secret import segredos_de_verificacao
+
+            payload = None
+            ultimo_erro = None
+            for segredo in dict.fromkeys([JWT_SECRET, *segredos_de_verificacao()]):
+                try:
+                    payload = jwt.decode(token, segredo, algorithms=[JWT_ALGORITHM])
+                    break
+                except jwt.ExpiredSignatureError:
+                    raise
+                except jwt.PyJWTError as exc:
+                    ultimo_erro = exc
+            if payload is None:
+                raise ultimo_erro
             user_id = payload.get("sub")
             role = payload.get("role", "default")
         except jwt.ExpiredSignatureError:
@@ -943,6 +956,13 @@ async def startup():
     except (IOError, OSError, ValueError, KeyError) as index_err:
         logger.warning(f"⚠️ Erro ao criar índices (não fatal): {index_err}")
     
+    # Defaults de capacidades por cargo (D-27): carrega os overrides persistidos.
+    try:
+        from services.role_defaults_store import arrancar as carregar_defaults_por_cargo
+        await carregar_defaults_por_cargo()
+    except Exception as perm_err:  # noqa: BLE001 — não fatal: ficam os defaults do código
+        logger.warning(f"⚠️ Erro a carregar os defaults de permissões (não fatal): {perm_err}")
+
     # Tenta conectar Redis sem falhar a app se não existir
     try:
         from services.task_queue import task_queue

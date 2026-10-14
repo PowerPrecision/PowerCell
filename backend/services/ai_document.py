@@ -2691,7 +2691,14 @@ def build_update_data_from_extraction(
             buyer_data = {k: v for k, v in buyer_data.items() if v}
             
             if buyer_data.get('nome') or buyer_data.get('nif'):
-                co_buyers.append(buyer_data)
+                # D-18 (Lote 5): `co_buyers` tem UM significado — os compradores ADICIONAIS, tal
+                # como o `build_add_client_update` sempre o escreveu e o nome do campo diz. O
+                # primeiro comprador é o TITULAR 1: os seus dados vão para `personal_data` (abaixo)
+                # e NÃO se repetem aqui. Gravá-lo também em `co_buyers[0]` era o segundo significado
+                # do campo: fazia o titular 1 aparecer como «titular adicional» no cartão do 2.º
+                # titular e obrigava a regra Sub35 a desduplicar por identidade.
+                if i > 0:
+                    co_buyers.append(buyer_data)
                 
                 # O primeiro comprador vai para personal_data principal
                 if i == 0:
@@ -2714,11 +2721,10 @@ def build_update_data_from_extraction(
                     if buyer_data.get('telefone'):
                         update_data['client_phone'] = buyer_data['telefone']
         
-        # Guardar array de 2º Titular / Fiador
+        # Guardar array de compradores ADICIONAIS (2º Titular / Fiador…)
         if len(co_buyers) > 0:
             update_data["co_buyers"] = co_buyers
-            if len(co_buyers) > 1:
-                logger.info(f"CPCV com {len(co_buyers)} compradores detectados")
+            logger.info(f"CPCV com {len(co_buyers) + 1} compradores detectados")
         
         # === DADOS DO VENDEDOR ===
         if vendedor:

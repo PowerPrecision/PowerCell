@@ -58,6 +58,7 @@ deliberada e o prazo é curto por causa dela.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -65,26 +66,63 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
-#: Tentativas falhadas antes de bloquear. O valor do login de email
-#: desde sempre; o verify passa a usar o MESMO, para não haver duas
-#: políticas de força bruta no mesmo ecrã de entrada.
-MAX_TENTATIVAS = 8
-#: Minutos de bloqueio depois de esgotadas as tentativas.
-MINUTOS_DE_BLOQUEIO = 10
+@dataclass(frozen=True)
+class Politica:
+    """A política de força bruta de UMA porta: quantas tentativas, quanto bloqueio, onde se conta.
+
+    Cada porta tem os seus números (D-4 fechada, Out 2026): eram duas implementações
+    independentes da mesma ideia, e uma correcção feita numa não chegava à outra. Hoje há UMA
+    implementação e uma tabela — e um teste a afirmar que cada porta MANTÉM os seus números,
+    que é o que distingue uma consolidação de uma alteração de política (apertar o login para
+    5 bloqueia quem erra um código de 6 caracteres cinco vezes; alargar o verify para 8/10 abre
+    a porta que tem o espaço de busca mais pequeno).
+    """
+
+    tentativas: int
+    minutos_de_bloqueio: int
+    colecao: str
+    #: O 429 leva o `detail` em TEXTO (o formato histórico do `verify`) em vez do dicionário
+    #: do login. Os dois ecrãs do frontend já tratam cada um o seu.
+    detalhe_em_texto: bool = False
+
+
+#: A política do login por email do Portal (e das portas que a herdam: login do Parceiro,
+#: confirmação por password). Desde sempre 8 tentativas / 10 minutos.
+POLITICA_DO_LOGIN = Politica(8, 10, "portal_login_attempts")
+
+#: O `verify` (NIF + nº de processo): espaço de busca mais pequeno, logo mais apertado.
+POLITICA_DO_VERIFY = Politica(5, 15, "portal_verify_attempts", detalhe_em_texto=True)
+
+#: O âmbito é um PARÂMETRO (`chave_do_travao` recebe-o), para uma porta nova não gastar as
+#: tentativas de outra. Um âmbito sem entrada própria herda a política do login.
+AMBITO_DO_LOGIN = "portal_login"
+AMBITO_DO_VERIFY = "portal_verify"
+
+POLITICAS: dict[str, Politica] = {
+    AMBITO_DO_LOGIN: POLITICA_DO_LOGIN,
+    AMBITO_DO_VERIFY: POLITICA_DO_VERIFY,
+}
+
+
+def politica_de(ambito: str) -> Politica:
+    return POLITICAS.get(ambito, POLITICA_DO_LOGIN)
+
+
+#: Compatibilidade: as constantes do login, usadas por `portal_auth` e pelos testes.
+MAX_TENTATIVAS = POLITICA_DO_LOGIN.tentativas
+MINUTOS_DE_BLOQUEIO = POLITICA_DO_LOGIN.minutos_de_bloqueio
 
 #: Quanto tempo o registo de tentativas sobrevive depois da última escrita
-#: (D-31, remate). A identidade (o email) é escolhida por quem pergunta, logo
+#: (D-31, remate). A identidade (o email, aqui) é escolhida por quem pergunta, logo
 #: cada email inventado deixava um documento que nunca expirava — e, com
 #: `attempts >= MAX`, cada pedido renovava o bloqueio antes de olhar para a
 #: credencial: quem esgotava as tentativas ficava trancado PARA SEMPRE.
 #: O índice TTL (`db_indexes`, campo `expire_at`) purga-os.
 #:
-#: É a constante de AMBAS as portas do Portal (o `verify` por NIF usa-a em
-#: `portal_security`): dois prazos diferentes para o mesmo ecrã de entrada é a
-#: divergência que a D-4 já registou. **Tem de ser MAIOR que qualquer
+#: É a constante de TODAS as portas. **Tem de ser MAIOR que qualquer
 #: bloqueio** — um registo apagado a meio do bloqueio desbloqueava o alvo.
 MINUTOS_DE_VIDA_DO_REGISTO = 30
-assert MINUTOS_DE_VIDA_DO_REGISTO > MINUTOS_DE_BLOQUEIO
+assert all(MINUTOS_DE_VIDA_DO_REGISTO > p.minutos_de_bloqueio for p in POLITICAS.values())
 
 
 def expira_em(agora: datetime) -> datetime:
@@ -95,17 +133,8 @@ def expira_em(agora: datetime) -> datetime:
     """
     return agora + timedelta(minutes=MINUTOS_DE_VIDA_DO_REGISTO)
 
-#: O prefixo de chave em uso. O âmbito é um PARÂMETRO (`chave_do_travao`
-#: recebe-o), para uma porta nova não gastar as tentativas de outra; mas
-#: só se declara a constante que tem chamador — declarei
-#: `AMBITO_DO_VERIFY` e `AMBITO_DO_MFA` sem os usar, e uma constante sem
-#: chamador lê-se como código vivo (foi o que o `AGENCY_LINK_TEXTS`
-#: ensinou neste mesmo lote).
-AMBITO_DO_LOGIN = "portal_login"
-
-
 def chave_do_travao(ambito: str, identidade) -> str:
-    """`portal_verify:<client_id>`.
+    """`<âmbito>:<identidade>` (ex.: `portal_verify:<client_id>`).
 
     A identidade é NORMALIZADA (minúsculas, aparada): `A@B.PT` e `a@b.pt`
     são a mesma conta, e sem isto bastava alternar a caixa das letras para
@@ -144,17 +173,26 @@ def segundos_de_bloqueio(doc: Optional[dict], *, agora: datetime) -> int:
     return restantes if restantes > 0 else 0
 
 
-def esgotou_as_tentativas(doc: Optional[dict]) -> bool:
+def esgotou_as_tentativas(doc: Optional[dict], politica: Politica = POLITICA_DO_LOGIN) -> bool:
     if not doc:
         return False
     try:
-        return int(doc.get("attempts", 0) or 0) >= MAX_TENTATIVAS
+        return int(doc.get("attempts", 0) or 0) >= politica.tentativas
     except (TypeError, ValueError):
         return False
 
 
-def _erro_de_bloqueio(segundos: int) -> HTTPException:
+def _erro_de_bloqueio(segundos: int, politica: Politica = POLITICA_DO_LOGIN) -> HTTPException:
     minutos = max(1, segundos // 60)
+    if politica.detalhe_em_texto:
+        return HTTPException(
+            status_code=429,
+            detail=(
+                f"Muitas tentativas falhadas. Tente novamente em {minutos} "
+                f"minuto{'s' if minutos != 1 else ''}."
+            ),
+            headers={"Retry-After": str(segundos)},
+        )
     return HTTPException(
         status_code=429,
         detail={
@@ -183,8 +221,10 @@ async def exigir_sem_bloqueio(db, ambito: str, identidade) -> None:
     ESCREVER, sim, é a parte que importa e vai no `registar_falha`.
     """
     chave = chave_do_travao(ambito, identidade)
+    politica = politica_de(ambito)
+    colecao = getattr(db, politica.colecao)
     try:
-        doc = await db.portal_login_attempts.find_one({"_id": chave})
+        doc = await colecao.find_one({"_id": chave})
     except Exception as exc:
         logger.warning("[PORTAL] Falha a ler o travão de %s: %s", chave, exc)
         return
@@ -193,31 +233,33 @@ async def exigir_sem_bloqueio(db, ambito: str, identidade) -> None:
     restantes = segundos_de_bloqueio(doc, agora=agora)
     if restantes:
         logger.warning("[PORTAL] %s bloqueado por %ds", chave, restantes)
-        raise _erro_de_bloqueio(restantes)
+        raise _erro_de_bloqueio(restantes, politica)
 
     # Tentativas esgotadas e sem `locked_until`: é o caso de quem chegou
     # ao limite e volta. Carimba-se o bloqueio aqui para a janela começar
     # a contar, senão as tentativas ficavam no limite e o travão nunca
     # fechava.
-    if esgotou_as_tentativas(doc):
-        segundos = MINUTOS_DE_BLOQUEIO * 60
-        ate = (agora + timedelta(minutes=MINUTOS_DE_BLOQUEIO)).isoformat()
+    if esgotou_as_tentativas(doc, politica):
+        segundos = politica.minutos_de_bloqueio * 60
+        ate = (agora + timedelta(minutes=politica.minutos_de_bloqueio)).isoformat()
         try:
-            await db.portal_login_attempts.update_one(
+            await colecao.update_one(
                 {"_id": chave}, {"$set": {"locked_until": ate}}
             )
         except Exception as exc:
             logger.warning("[PORTAL] Falha a carimbar o bloqueio de %s: %s", chave, exc)
         logger.warning("[PORTAL] Bloqueio aplicado a %s", chave)
-        raise _erro_de_bloqueio(segundos)
+        raise _erro_de_bloqueio(segundos, politica)
 
 
 async def registar_falha(db, ambito: str, identidade) -> None:
     """Conta uma tentativa falhada, e bloqueia quando chega ao limite."""
     chave = chave_do_travao(ambito, identidade)
+    politica = politica_de(ambito)
+    colecao = getattr(db, politica.colecao)
     agora = datetime.now(timezone.utc)
     try:
-        await db.portal_login_attempts.update_one(
+        await colecao.update_one(
             {"_id": chave},
             {
                 "$inc": {"attempts": 1},
@@ -232,22 +274,22 @@ async def registar_falha(db, ambito: str, identidade) -> None:
             },
             upsert=True,
         )
-        doc = await db.portal_login_attempts.find_one({"_id": chave})
+        doc = await colecao.find_one({"_id": chave})
     except Exception as exc:
         # Aqui NÃO se engole em silêncio: se não se consegue contar, o
         # travão não existe, e isso tem de aparecer no log como aviso.
         logger.warning("[PORTAL] Falha a registar tentativa em %s: %s", chave, exc)
         return
 
-    if esgotou_as_tentativas(doc) and not segundos_de_bloqueio(doc, agora=agora):
-        ate = (agora + timedelta(minutes=MINUTOS_DE_BLOQUEIO)).isoformat()
+    if esgotou_as_tentativas(doc, politica) and not segundos_de_bloqueio(doc, agora=agora):
+        ate = (agora + timedelta(minutes=politica.minutos_de_bloqueio)).isoformat()
         try:
-            await db.portal_login_attempts.update_one(
+            await colecao.update_one(
                 {"_id": chave}, {"$set": {"locked_until": ate}}
             )
             logger.warning(
                 "[PORTAL] Bloqueio aplicado a %s após %d tentativas",
-                chave, MAX_TENTATIVAS,
+                chave, politica.tentativas,
             )
         except Exception as exc:
             logger.warning("[PORTAL] Falha a bloquear %s: %s", chave, exc)
@@ -263,13 +305,19 @@ async def limpar(db, ambito: str, identidade) -> None:
     """
     chave = chave_do_travao(ambito, identidade)
     try:
-        await db.portal_login_attempts.delete_one({"_id": chave})
+        await getattr(db, politica_de(ambito).colecao).delete_one({"_id": chave})
     except Exception as exc:
         logger.warning("[PORTAL] Falha a limpar o travão de %s: %s", chave, exc)
 
 
 __all__ = [
     "AMBITO_DO_LOGIN",
+    "AMBITO_DO_VERIFY",
+    "POLITICAS",
+    "POLITICA_DO_LOGIN",
+    "POLITICA_DO_VERIFY",
+    "Politica",
+    "politica_de",
     "MAX_TENTATIVAS",
     "MINUTOS_DE_BLOQUEIO",
     "MINUTOS_DE_VIDA_DO_REGISTO",

@@ -19,7 +19,7 @@ from services.document_process_resolve import (
     resolve_process_from_flexible_id,
 )
 from services.process_closed_guard import exigir_processo_aberto
-from services.process_status import INACTIVE_STATUSES
+from services.workflow_phases import so_processos_com_fase_activa
 from services.history import log_history
 from services.s3_document_root import dentro_da_pasta
 from services.s3_storage import s3_service
@@ -95,13 +95,12 @@ async def _assert_no_cross_process_refs(
             "client_id": effective_client_id,
             "id": {"$ne": client_id},
             "is_deleted": {"$ne": True},
-            # Fix: Normalize process status filters — inclui as variações
-            # legadas singular/plural em vez de apenas a forma plural.
-            "status": {"$nin": INACTIVE_STATUSES},
         },
         {
             "_id": 0,
             "id": 1,
+            # O workflow da rede DONA diz se o processo está activo (D-6).
+            "network_id": 1,
             "process_number": 1,
             "client_name": 1,
             "status": 1,
@@ -111,6 +110,7 @@ async def _assert_no_cross_process_refs(
             "s3_folder": 1,
         },
     ).to_list(100)
+    other_processes = await so_processos_com_fase_activa(other_processes)
 
     doc_id = doc_metadata.get("id") if doc_metadata else None
     for other_proc in other_processes:
