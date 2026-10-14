@@ -31,7 +31,8 @@ from services.portal_estado import (
     exigir_processo_activo,
 )
 from config import JWT_SECRET, JWT_ALGORITHM
-from services.portal_brute_force import MINUTOS_DE_VIDA_DO_REGISTO, expira_em
+from services import portal_brute_force
+from services.portal_brute_force import AMBITO_DO_VERIFY, MINUTOS_DE_VIDA_DO_REGISTO, POLITICA_DO_VERIFY
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +44,14 @@ PORTAL_ROLE = "client_portal"
 PORTAL_TOKEN_VALIDITY_DAYS = 90  # 90 dias
 PORTAL_SESSION_VALIDITY_HOURS = 4  # Sessão verificada: 4 horas (mais curta que magic link)
 
-# Tentativas máximas de verificação por client_id (prevenção de brute-force)
-MAX_VERIFY_ATTEMPTS = 5
-VERIFY_LOCKOUT_MINUTES = 15
+# Tentativas máximas de verificação por client_id (prevenção de brute-force).
+# A POLÍTICA vive no `portal_brute_force` (D-4 fechada: uma só implementação, uma tabela de
+# políticas por porta); estes nomes ficam como alias de leitura da do `verify`.
+MAX_VERIFY_ATTEMPTS = POLITICA_DO_VERIFY.tentativas
+VERIFY_LOCKOUT_MINUTES = POLITICA_DO_VERIFY.minutos_de_bloqueio
 
 # Quanto tempo o registo de tentativas sobrevive depois da última escrita
-# (D-31, remate): a constante é a do `portal_brute_force` — as duas portas do
+# (D-31, remate): a constante é a do `portal_brute_force` — as portas do
 # Portal partilham o prazo. **Tem de ser MAIOR que o bloqueio** (15 aqui):
 # um registo apagado a meio do bloqueio desbloqueava o alvo.
 VERIFY_ATTEMPTS_TTL_MINUTES = MINUTOS_DE_VIDA_DO_REGISTO
@@ -206,55 +209,16 @@ async def verify_client_credentials(client_id: str, nif: str, process_number: in
             detail="NIF inválido. Deve conter 9 dígitos."
         )
 
-    # ── 2. Verificar lockout por tentativas falhadas ──
-    lockout_key = f"portal_verify:{client_id}"
-    lockout_doc = await db.portal_verify_attempts.find_one({"_id": lockout_key})
-
-    if lockout_doc:
-        attempts = lockout_doc.get("attempts", 0)
-        locked_until = lockout_doc.get("locked_until")
-
-        if locked_until:
-            try:
-                locked_until_dt = datetime.fromisoformat(
-                    locked_until.replace('Z', '+00:00') if isinstance(locked_until, str) else locked_until
-                )
-                if datetime.now(timezone.utc) < locked_until_dt:
-                    remaining = int((locked_until_dt - datetime.now(timezone.utc)).total_seconds() / 60)
-                    logger.warning(
-                        f"[PORTAL VERIFY] Conta bloqueada para client_id={client_id}. "
-                        f"Tenta novamente em {remaining} min."
-                    )
-                    raise HTTPException(
-                        status_code=429,
-                        detail=f"Muitas tentativas falhadas. Tente novamente em {remaining} minutos."
-                    )
-            except (ValueError, TypeError):
-                pass  # Data inválida, ignorar lockout
-
-        if attempts >= MAX_VERIFY_ATTEMPTS:
-            # Aplicar lockout
-            locked_until_str = (
-                datetime.now(timezone.utc) + timedelta(minutes=VERIFY_LOCKOUT_MINUTES)
-            ).isoformat()
-            await db.portal_verify_attempts.update_one(
-                {"_id": lockout_key},
-                {"$set": {"locked_until": locked_until_str}}
-            )
-            logger.warning(
-                f"[PORTAL VERIFY] Lockout aplicado para client_id={client_id} "
-                f"após {attempts} tentativas falhadas"
-            )
-            raise HTTPException(
-                status_code=429,
-                detail=f"Muitas tentativas falhadas. Conta bloqueada por {VERIFY_LOCKOUT_MINUTES} minutos."
-            )
+    # ── 2. Travão de tentativas, por IDENTIDADE (o client_id) ──
+    # ANTES de olhar para a credencial: o código de resposta de uma verificação é informação
+    # sobre ela. A política (5 tentativas / 15 min) é a do `verify` em `portal_brute_force`.
+    await portal_brute_force.exigir_sem_bloqueio(db, AMBITO_DO_VERIFY, client_id)
 
     # ── 3. Buscar cliente e cruzar NIF ──
     client = await db.clients.find_one({"id": client_id})
 
     if not client:
-        await _record_failed_attempt(lockout_key)
+        await portal_brute_force.registar_falha(db, AMBITO_DO_VERIFY, client_id)
         logger.warning(f"[PORTAL VERIFY] Cliente não encontrado: {client_id}")
         raise HTTPException(
             status_code=401,
@@ -287,7 +251,7 @@ async def verify_client_credentials(client_id: str, nif: str, process_number: in
                 nif_matches = True
 
     if not nif_matches:
-        await _record_failed_attempt(lockout_key)
+        await portal_brute_force.registar_falha(db, AMBITO_DO_VERIFY, client_id)
         logger.warning(
             f"[PORTAL VERIFY] NIF não corresponde para client_id={client_id}"
         )
@@ -304,7 +268,7 @@ async def verify_client_credentials(client_id: str, nif: str, process_number: in
     try:
         process_number_int = int(process_number)
     except (ValueError, TypeError):
-        await _record_failed_attempt(lockout_key)
+        await portal_brute_force.registar_falha(db, AMBITO_DO_VERIFY, client_id)
         raise HTTPException(
             status_code=400,
             detail="Número de processo inválido."
@@ -330,7 +294,7 @@ async def verify_client_credentials(client_id: str, nif: str, process_number: in
             )
 
     if not process:
-        await _record_failed_attempt(lockout_key)
+        await portal_brute_force.registar_falha(db, AMBITO_DO_VERIFY, client_id)
         logger.warning(
             f"[PORTAL VERIFY] Processo nº{process_number} não encontrado "
             f"para client_id={client_id}"
@@ -341,7 +305,7 @@ async def verify_client_credentials(client_id: str, nif: str, process_number: in
         )
 
     # ── 5. Verificação bem-sucedida — limpar tentativas falhadas ──
-    await db.portal_verify_attempts.delete_one({"_id": lockout_key})
+    await portal_brute_force.limpar(db, AMBITO_DO_VERIFY, client_id)
 
     client_name = client.get("nome", "Cliente")
     process_id = process.get("id")
@@ -357,43 +321,6 @@ async def verify_client_credentials(client_id: str, nif: str, process_number: in
         "client_name": client_name,
         "process_number": process_number_int,
     }
-
-
-async def _record_failed_attempt(lockout_key: str) -> None:
-    """
-    Regista uma tentativa falhada de verificação e aplica lockout se necessário.
-
-    Incrementa o contador de tentativas. Se atingir o limite, aplica lockout.
-    """
-    agora = datetime.now(timezone.utc)
-    now = agora.isoformat()
-
-    result = await db.portal_verify_attempts.update_one(
-        {"_id": lockout_key},
-        {
-            "$inc": {"attempts": 1},
-            # `expire_at` é um datetime NATIVO de propósito: o TTL do Mongo
-            # não actua sobre uma string ISO (foi o que inutilizou o
-            # `idx_ttl` antigo). A `last_attempt_at` em texto fica como está.
-            "$set": {"last_attempt_at": now, "expire_at": expira_em(agora)},
-        },
-        upsert=True,
-    )
-
-    # Verificar se atingiu o limite
-    doc = await db.portal_verify_attempts.find_one({"_id": lockout_key})
-    if doc and doc.get("attempts", 0) >= MAX_VERIFY_ATTEMPTS:
-        locked_until_str = (
-            datetime.now(timezone.utc) + timedelta(minutes=VERIFY_LOCKOUT_MINUTES)
-        ).isoformat()
-        await db.portal_verify_attempts.update_one(
-            {"_id": lockout_key},
-            {"$set": {"locked_until": locked_until_str}}
-        )
-        logger.warning(
-            f"[PORTAL VERIFY] Lockout aplicado para {lockout_key} "
-            f"após {MAX_VERIFY_ATTEMPTS} tentativas"
-        )
 
 
 # ====================================================================

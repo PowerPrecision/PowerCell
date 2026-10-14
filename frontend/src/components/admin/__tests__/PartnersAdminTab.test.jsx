@@ -71,8 +71,22 @@ describe("PartnersAdminTab", () => {
     await userEvent.click(screen.getByRole("button", { name: "Criar convite" }));
     expect(await screen.findByText("Indique o nome do parceiro.")).toBeInTheDocument();
     expect(screen.getByText("Indique um email válido.")).toBeInTheDocument();
-    expect(screen.getByText("Escolha a empresa.")).toBeInTheDocument();
+    expect(screen.queryByText("Escolha a empresa.")).toBeNull();
     expect(api.invitePartner).not.toHaveBeenCalled();
+  });
+
+  it("convida SEM empresa: parceiro independente, o corpo não leva company_id", async () => {
+    montar();
+    await screen.findByTestId("parceiro-pt-1");
+    await abrirConvite();
+    await userEvent.type(screen.getByLabelText("Nome *"), "Ivo Independente");
+    await userEvent.type(screen.getByLabelText("Email *"), "ivo@parceiros.pt");
+    await userEvent.click(screen.getByRole("button", { name: "Criar convite" }));
+
+    await waitFor(() => expect(api.invitePartner).toHaveBeenCalledWith({
+      name: "Ivo Independente", email: "ivo@parceiros.pt",
+    }));
+    expect(await screen.findByLabelText("Link do convite")).toBeInTheDocument();
   });
 
   it("convida: envia SÓ o que o servidor aceita, mostra o link UMA vez e recarrega a lista", async () => {
@@ -81,7 +95,7 @@ describe("PartnersAdminTab", () => {
     await abrirConvite();
     await userEvent.type(screen.getByLabelText("Nome *"), "Rui Parceiro");
     await userEvent.type(screen.getByLabelText("Email *"), "rui@parceiros.pt");
-    await userEvent.selectOptions(await screen.findByRole("option", { name: "Power Real Estate" }).then(() => screen.getByLabelText("Empresa *")), "cmp-power");
+    await userEvent.selectOptions(await screen.findByRole("option", { name: "Power Real Estate" }).then(() => screen.getByLabelText("Empresa (opcional)")), "cmp-power");
     await userEvent.click(screen.getByRole("button", { name: "Criar convite" }));
 
     await waitFor(() => expect(api.invitePartner).toHaveBeenCalledWith({
@@ -100,7 +114,7 @@ describe("PartnersAdminTab", () => {
     await userEvent.type(screen.getByLabelText("Nome *"), "Rui Parceiro");
     await userEvent.type(screen.getByLabelText("Email *"), "rui@parceiros.pt");
     await screen.findByRole("option", { name: "Precision" });
-    await userEvent.selectOptions(screen.getByLabelText("Empresa *"), "cmp-prec");
+    await userEvent.selectOptions(screen.getByLabelText("Empresa (opcional)"), "cmp-prec");
     await userEvent.click(screen.getByRole("button", { name: "Criar convite" }));
     expect(await screen.findByText("Já existe uma conta com este email.")).toBeInTheDocument();
     expect(screen.getByLabelText("Nome *")).toHaveValue("Rui Parceiro");

@@ -5,8 +5,6 @@ TESTES UNITÁRIOS - SERVIÇO DE ÍNDICES MONGODB
 Testes para o serviço de criação e gestão de índices.
 ====================================================================
 """
-import ast
-import pathlib
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -36,7 +34,7 @@ class TestIndexCreation:
         assert "idx_email_status" in index_names
     
     def test_o_leitor_das_definicoes_le_mesmo_o_modulo(self):
-        """CONTRAPROVA do leitor por AST — sem ela, trocava-se um placebo por outro.
+        """CONTRAPROVA do registo — sem ela, trocava-se um placebo por outro.
 
         Todas as asserções deste ficheiro são da forma `"idx_x" in nomes`.
         Um leitor que devolvesse pouco continuaria a passá-las enquanto o
@@ -187,98 +185,118 @@ class TestIndexStats:
         ).read_text()
 
     def test_get_index_stats_lists_fj_collections(self):
-        src = self._source()
-        stats_block = src.split("async def get_index_stats")[1].split("return stats")[0]
+        from services.db_indexes import colecoes_com_indices
+
+        listadas = colecoes_com_indices()
         for name in ("emails", "user_company_roles", "notifications", "companies"):
-            assert f'"{name}"' in stats_block
+            assert name in listadas
 
 
 # ====================================================================
-# AS DEFINIÇÕES REAIS, LIDAS DO CÓDIGO
+# AS DEFINIÇÕES REAIS
 # ====================================================================
-# Este ficheiro tinha aqui uma `get_index_definitions()` que devolvia uma
-# CÓPIA das definições, escrita à mão, e a seguir fazia
+# Este ficheiro tinha aqui uma `get_index_definitions()` que devolvia uma CÓPIA das definições,
+# escrita à mão, e a seguir fazia `sys.modules['services.db_indexes'] = type(sys)(...)` —
+# substituindo o módulo INTEIRO por um objecto vazio. Os testes validavam o duplo e não o código
+# (a cópia tinha seis índices de `processes`; o real tinha dezoito), e o `sys.modules` envenenado
+# sobrevivia à sessão do pytest.
 #
-#     sys.modules['services.db_indexes'] = type(sys)('services.db_indexes')
-#     sys.modules['services.db_indexes'].get_index_definitions = ...
-#
-# — substituindo o módulo INTEIRO por um objecto vazio. Duas consequências:
-#
-#   1. Os testes validavam o duplo e não o código. A cópia tinha seis
-#      índices de `processes`; o módulo real tem dezoito. Qualquer
-#      asserção passava com o `db_indexes.py` a declarar o que quisesse,
-#      e foi assim que `idx_network_scope` pôde faltar em produção sem
-#      um teste vermelho. Terceira variante da lição "um duplo que
-#      reimplementa a lógica valida o duplo".
-#
-#   2. O `sys.modules` envenenado sobrevivia à sessão do pytest: qualquer
-#      módulo importado DEPOIS deste via um `services.db_indexes` vazio.
-#      O `test_db_index_stats.py` rebentava com "cannot import name
-#      'get_index_stats' (unknown location)" — e só não parte o CI porque
-#      a ordem alfabética o coloca antes. É a armadilha da ordem de
-#      importação que o AGENTS.md já documenta, agravada: aqui o módulo
-#      não é apenas patchado, é apagado.
-#
-# As definições vivem em literais LOCAIS dentro de `create_indexes`, pelo
-# que a leitura é por AST. A associação lista → colecção não é adivinhada
-# pelo nome da variável: sai do próprio `_create_index_safe(db.<colecção>,
-# …)` que a consome, que é a única fonte que não pode divergir.
-def _definicoes_reais() -> dict:
-    """Definições de índices lidas de `services/db_indexes.py`."""
-    caminho = (
-        pathlib.Path(__file__).resolve().parents[2] / "services" / "db_indexes.py"
-    )
-    arvore = ast.parse(caminho.read_text(encoding="utf-8"))
-
-    funcao = next(
-        no
-        for no in ast.walk(arvore)
-        if isinstance(no, ast.AsyncFunctionDef) and no.name == "create_indexes"
-    )
-
-    # nome da variável -> lista de dicionários de índice
-    listas: dict[str, list] = {}
-    for no in ast.walk(funcao):
-        if isinstance(no, ast.Assign) and isinstance(no.value, ast.List):
-            for destino in no.targets:
-                if isinstance(destino, ast.Name):
-                    listas[destino.id] = [
-                        _dicionario(e) for e in no.value.elts if isinstance(e, ast.Dict)
-                    ]
-
-    # `for idx in <lista>:` cujo corpo chama `_create_index_safe(db.<colecção>, …)`
-    definicoes: dict[str, list] = {}
-    for no in ast.walk(funcao):
-        if not (isinstance(no, ast.For) and isinstance(no.iter, ast.Name)):
-            continue
-        for interno in ast.walk(no):
-            if (
-                isinstance(interno, ast.Call)
-                and isinstance(interno.func, ast.Name)
-                and interno.func.id == "_create_index_safe"
-                and interno.args
-                and isinstance(interno.args[0], ast.Attribute)
-            ):
-                colecao = interno.args[0].attr
-                definicoes.setdefault(colecao, []).extend(
-                    listas.get(no.iter.id, [])
-                )
-    return definicoes
-
-
-def _dicionario(no: ast.Dict) -> dict:
-    """Converte um literal de índice em dicionário, ignorando o que não seja literal."""
-    saida = {}
-    for chave, valor in zip(no.keys, no.values):
-        if not isinstance(chave, ast.Constant):
-            continue
-        try:
-            saida[chave.value] = ast.literal_eval(valor)
-        except ValueError:
-            saida[chave.value] = None
-    return saida
-
-
+# Depois, enquanto as definições eram literais LOCAIS de `create_indexes`, a leitura era por AST.
+# Desde a D-10 (Lote 5) vivem num registo ao nível do módulo — `INDEX_DEFINITIONS` — e este
+# ficheiro IMPORTA-o: o leitor por AST, com a sua contraprova, deixou de ser necessário.
+# A contraprova que fica é a mesma de sempre: os mínimos folgados abaixo são o alarme para o dia
+# em que o registo deixar de ter o conteúdo que tem.
 def get_index_definitions() -> dict:
-    """As definições REAIS. O nome mantém-se para os testes já escritos."""
-    return _definicoes_reais()
+    """As definições REAIS (cópia profunda: um teste não pode alterar o registo de outro)."""
+    import copy
+
+    from services.db_indexes import INDEX_DEFINITIONS
+
+    return copy.deepcopy(INDEX_DEFINITIONS)
+
+
+# ====================================================================
+# D-10 (Lote 5): O REGISTO É A FONTE ÚNICA
+# ====================================================================
+class TestORegistoEAFonteUnica:
+    def test_nenhum_indice_ficou_escrito_dentro_de_uma_funcao(self):
+        """Uma lista local de índices dentro de uma função é exactamente o defeito que a D-10 fechou."""
+        import ast
+        import pathlib
+
+        fonte = pathlib.Path(__file__).resolve().parents[2] / "services" / "db_indexes.py"
+        arvore = ast.parse(fonte.read_text(encoding="utf-8"))
+        for no in arvore.body:
+            if not isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for interno in ast.walk(no):
+                if isinstance(interno, ast.Dict):
+                    chaves = {k.value for k in interno.keys if isinstance(k, ast.Constant)}
+                    try:
+                        ast.literal_eval(interno)
+                        e_literal = True
+                    except ValueError:
+                        e_literal = False  # um dicionário MONTADO (o construtor dos TTL) não é uma definição
+                    assert not ({"keys", "name"} <= chaves and e_literal), (
+                        f"definição de índice dentro de `{no.name}` (linha {interno.lineno}): "
+                        "declare-a com `_definir(...)` ao nível do módulo"
+                    )
+
+    def test_create_indexes_itera_o_registo_e_cria_tudo_o_que_ele_declara(self):
+        import asyncio
+
+        import services.db_indexes as di
+
+        criadas = []
+
+        async def falso(colecao, idx, nome, results):
+            criadas.append((nome, idx["name"]))
+
+        class Db:
+            def __getattr__(self, nome):
+                return type("C", (), {"nome": nome})()
+
+        with patch.object(di, "_create_index_safe", falso), \
+                patch.object(di, "cleanup_deprecated_indexes", AsyncMock(return_value={})), \
+                patch.object(di, "_preparar_indices", AsyncMock()), \
+                patch.object(di, "create_ttl_indexes", AsyncMock(return_value={})):
+            asyncio.run(di.create_indexes(Db()))
+
+        esperadas = [(c, i["name"]) for c, lista in di.INDEX_DEFINITIONS.items() for i in lista]
+        assert criadas == esperadas
+        assert len(criadas) >= 100, "alarme: o registo deixou de ter o conteúdo que tem"
+
+    def test_cada_definicao_tem_nome_e_chaves_e_os_nomes_nao_se_repetem_por_colecao(self):
+        from services.db_indexes import INDEX_DEFINITIONS
+
+        for colecao, lista in INDEX_DEFINITIONS.items():
+            nomes = [i["name"] for i in lista]
+            assert all(i.get("name") and i.get("keys") for i in lista), colecao
+            assert len(nomes) == len(set(nomes)), f"nome de índice repetido em {colecao}: {nomes}"
+
+    def test_o_painel_de_diagnostico_cobre_todas_as_colecoes_indexadas(self):
+        from services.db_indexes import INDEX_DEFINITIONS, TTL_INDEXES, colecoes_com_indices
+
+        todas = set(colecoes_com_indices())
+        assert set(INDEX_DEFINITIONS) <= todas
+        assert {i["collection"] for i in TTL_INDEXES} <= todas
+        assert {"partners", "task_queue", "workflow_statuses"} <= todas  # as que a lista à mão nunca teve
+
+    def test_uma_colecao_inexistente_e_vazia_e_nao_avariada(self):
+        import asyncio
+
+        from services.db_indexes import get_index_stats
+
+        class NaoExiste(Exception):
+            code = 26
+
+        class Col:
+            async def index_information(self):
+                raise NaoExiste("ns not found")
+
+        class Db:
+            def __getattr__(self, nome):
+                return Col()
+
+        stats = asyncio.run(get_index_stats(Db()))
+        assert stats["partners"] == {"count": 0, "indexes": []}

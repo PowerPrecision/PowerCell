@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request
 
 from database import db
-from services.workflow_phases import fases_do_utilizador, nomes_terminais
+from services.workflow_phases import fases_do_utilizador
 from models.client import (
     Client, ClientCreate, ClientUpdate,
     ClientContact, ClientPersonalData,
@@ -65,6 +65,8 @@ PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM = {
     "assigned_consultor_id": 1, "assigned_mediador_id": 1,
     "consultor_name": 1, "mediador_name": 1, "is_active": 1, "is_deleted": 1, "created_at": 1,
     "updated_at": 1, "prioridade": 1, "priority": 1,
+    # A rede DONA decide o que é "terminado" (workflow por rede, D-6).
+    "network_id": 1,
 }
 
 
@@ -176,16 +178,45 @@ async def run_search_clients(
 
     return {"results": results}
 
-def _so_processos_terminados(cliente: dict, terminais: set) -> bool:
+async def _predicado_de_processo_activo(processos: list):
+    """``e_activo(processo) -> bool`` decidido pelo MOTOR, não por uma lista cravada (D-6).
+
+    Cada processo fecha segundo o workflow da rede DONA (um processo partilhado continua a
+    significar em casa o que significa em casa). Eliminado nunca é activo. Se o motor não se
+    deixar ler, cai no resíduo `INACTIVE_STATUSES` — e di-lo no log: um número de «carteira
+    activa» que diverge do quadro tem de ter um aviso, não uma explicação por descobrir.
+    """
+    from services.portal_estado import estado_e_terminal
+    from services.workflow_phases import chave_da_rede, fases_por_rede, rede_do_processo
+
+    try:
+        fases = await fases_por_rede(rede_do_processo(p) for p in processos)
+    except Exception as exc:  # noqa: BLE001 — a listagem não pode cair por causa do motor
+        logger.warning("[CLIENTES] Motor de workflow ilegível (%s): a usar a lista legada de fases fechadas.", exc)
+        fases = None
+
+    def e_activo(proc: dict) -> bool:
+        if proc.get("is_deleted", False):
+            return False
+        if fases is None:
+            return proc.get("status") not in INACTIVE_STATUSES
+        return not estado_e_terminal(proc.get("status"), fases[chave_da_rede(rede_do_processo(proc))])
+
+    return e_activo
+
+
+def _so_processos_terminados(cliente: dict, terminais: set, ids_terminados: frozenset = frozenset()) -> bool:
     """O cliente tem processos e TODOS estão terminados (fase terminal do motor ou eliminados).
 
-    Sem processos não é histórico: é uma lead, e o ecrã de trabalho é onde ela é tratada.
+    `terminais` são nomes de fase; `ids_terminados` os processos que o MOTOR da rede dona fechou
+    (a resposta exacta por processo, D-6). Sem processos não é histórico: é uma lead, e o ecrã de
+    trabalho é onde ela é tratada.
     """
     processos = cliente.get("processes") or []
     if not processos:
         return False
     return all(
-        bool(p.get("is_deleted")) or p.get("status") in terminais
+        bool(p.get("is_deleted")) or p.get("status") in terminais or p.get("id") in ids_terminados
         for p in processos
     )
 
@@ -464,6 +495,11 @@ async def run_list_clients(
             ids_permitidos=matching_client_ids,
         ))
         
+        e_activo = await _predicado_de_processo_activo(processes)
+        ids_terminados = frozenset(
+            p.get("id") for p in processes if p.get("id") and not p.get("is_deleted", False) and not e_activo(p)
+        )
+
         # Agrupar por cliente
         clients_map = {}
         for proc in processes:
@@ -535,15 +571,9 @@ async def run_list_clients(
             # FIX (Pacote K): Cálculo de "processo ativo" baseado em status + is_deleted
             # (anteriormente usava a flag is_active desnormalizada + lista de status
             # com typos "concluidos"/"arquivado"). Um processo conta como ativo se
-            # NÃO estiver eliminado (is_deleted) e o status NÃO for terminal.
-            # Fix: Normalize process status filters — reutiliza a constante
-            # central `INACTIVE_STATUSES` (todas as variações singular/plural
-            # documentadas), em vez de uma tupla local incompleta.
-            proc_is_active = (
-                not proc.get("is_deleted", False)
-                and proc.get("status") not in INACTIVE_STATUSES
-            )
-            if proc_is_active:
+            # NÃO estiver eliminado (is_deleted) e a fase NÃO for terminal NO WORKFLOW
+            # DA REDE DONA (`_predicado_de_processo_activo`, D-6) — não uma lista cravada.
+            if e_activo(proc):
                 clients_map[key]["active_processes_count"] += 1
         
         # Determinar is_active de cada cliente com base nos seus processos
@@ -556,7 +586,7 @@ async def run_list_clients(
             if all_processes:
                 has_any_active = any(
                     not p.get("is_deleted", False)
-                    and p.get("status") not in INACTIVE_STATUSES
+                    and p.get("id") not in ids_terminados
                     for p in all_processes
                 )
                 clients_map[key]["is_active"] = has_any_active
@@ -576,8 +606,7 @@ async def run_list_clients(
         # Trabalho vs Histórico (Lote 4). O «Eliminados» é outra vista e não se mexe.
         total_historico = 0
         if not deleted_only:
-            terminais = set(nomes_terminais(workflow_statuses))
-            historicos = [c for c in clients if _so_processos_terminados(c, terminais)]
+            historicos = [c for c in clients if _so_processos_terminados(c, set(), ids_terminados)]
             total_historico = len(historicos)
             if historico:
                 clients = historicos
@@ -685,7 +714,7 @@ async def run_list_clients(
         com_isolamento(tenant_condition, process_query),
         {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
          "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1, "created_at": 1,
-         "is_deleted": 1,
+         "is_deleted": 1, "network_id": 1,
          "prioridade": 1, "priority": 1}
     ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
 
@@ -699,6 +728,8 @@ async def run_list_clients(
         ids_permitidos=matching_client_ids,
     ))
     
+    e_activo = await _predicado_de_processo_activo(processes)
+
     # Agrupar por cliente (usando client_id ou client_name como chave)
     clients_map = {}
     for proc in processes:
@@ -741,15 +772,8 @@ async def run_list_clients(
             clients_map[key]["prioridade"] = proc_priority
         
         # FIX (Pacote K): Cálculo de "processo ativo" baseado em status + is_deleted
-        # (anteriormente usava lista de status com typos e sem desistencias).
-        # Fix: Normalize process status filters — reutiliza a constante
-        # central `INACTIVE_STATUSES` (todas as variações singular/plural
-        # documentadas), em vez de uma tupla local incompleta.
-        proc_is_active = (
-            not proc.get("is_deleted", False)
-            and proc.get("status") not in INACTIVE_STATUSES
-        )
-        if proc_is_active:
+        # Activo = não eliminado e fase não terminal no workflow da rede dona (D-6).
+        if e_activo(proc):
             clients_map[key]["active_processes_count"] += 1
     
     clients = list(clients_map.values())

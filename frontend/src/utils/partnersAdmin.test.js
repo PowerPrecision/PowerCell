@@ -46,14 +46,16 @@ describe("estadoDoParceiro", () => {
     expect(estadoDoParceiro({ status: "active", redes: [{ network_id: "r" }] }).chave).toBe("activo");
   });
 
-  it("sem ligações não é «suspenso» (não há nada a suspender)", () => {
+  it("sem ligações (agente independente) está activo — e suspenso quando a CONTA o está", () => {
     expect(estadoDoParceiro({ status: "active", redes: [] }).chave).toBe("activo");
+    expect(estadoDoParceiro({ status: "suspended", redes: [] }).chave).toBe("suspenso");
   });
 
-  it("o botão diz «Suspender» só quando há ligações activas", () => {
+  it("o botão diz «Suspender» quando há algo activo: uma ligação, ou a conta de um independente", () => {
     expect(podeSuspender({ redes: redes("active", "suspended") })).toBe(true);
     expect(podeSuspender({ redes: redes("suspended") })).toBe(false);
-    expect(podeSuspender({ redes: [] })).toBe(false);
+    expect(podeSuspender({ status: "active", redes: [] })).toBe(true);
+    expect(podeSuspender({ status: "suspended", redes: [] })).toBe(false);
     expect(podeSuspender(null)).toBe(false);
   });
 });
@@ -63,6 +65,10 @@ describe("empresas e link do convite", () => {
     expect(nomesDasEmpresas({ redes: [{ company_name: "A" }, { network_id: "rede_x" }, {}] })).toBe("A, rede_x");
   });
 
+  it("sem ligações diz «Independente» e não uma célula vazia", () => {
+    expect(nomesDasEmpresas({ redes: [] })).toBe("Independente");
+  });
+
   it("o link junta a origem ao caminho do servidor (sem barras duplas)", () => {
     expect(linkDoConvite(conviteCriado.invite_path, "https://app.x.pt/")).toBe("https://app.x.pt/parceiro/convite/TOKEN-DO-CONVITE");
     expect(linkDoConvite("parceiro/convite/t", "https://app.x.pt")).toBe("https://app.x.pt/parceiro/convite/t");
@@ -70,10 +76,15 @@ describe("empresas e link do convite", () => {
 });
 
 describe("o convite", () => {
-  it("valida nome, email e empresa", () => {
-    expect(Object.keys(validarConvite({}))).toEqual(["name", "email", "company_id"]);
+  it("valida nome e email — a empresa é OPCIONAL (Lote 5)", () => {
+    expect(Object.keys(validarConvite({}))).toEqual(["name", "email"]);
+    expect(validarConvite({ name: "Rui", email: "rui@p.pt" })).toEqual({});
     expect(validarConvite({ name: "Rui", email: "rui@p.pt", company_id: "cmp" })).toEqual({});
     expect(validarConvite({ name: "Rui", email: "rui@p", company_id: "cmp" }).email).toBeTruthy();
+  });
+
+  it("sem empresa o corpo NÃO leva `company_id` (o servidor não recebe uma string vazia)", () => {
+    expect(corpoDoConvite({ name: "Rui", email: "r@p.pt", company_id: "  " })).toEqual({ name: "Rui", email: "r@p.pt" });
   });
 
   it("o corpo leva SÓ o que o servidor aceita (extra=forbid), sem opcionais vazios", () => {

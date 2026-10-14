@@ -265,27 +265,31 @@ async def cleanup_deprecated_indexes(db) -> dict:
     return results
 
 
-async def create_indexes(db) -> dict:
-    """
-    Cria índices optimizados nas colecções principais.
-    
-    Returns:
-        dict: Resumo dos índices criados
-    """
-    # Primeiro, limpar índices antigos/incorretos
-    cleanup_results = await cleanup_deprecated_indexes(db)
-    
-    results = {
-        "created": [],
-        "errors": [],
-        "skipped": [],
-        "cleanup": cleanup_results
-    }
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'processes'
-    # ====================================================================
-    process_indexes = [
+# ====================================================================
+# DEFINIÇÕES DOS ÍNDICES (D-10 fechada, Out 2026)
+# ====================================================================
+# As definições vivem num REGISTO ao nível do módulo — `INDEX_DEFINITIONS`, colecção →
+# lista de índices — e `create_indexes` limita-se a iterá-lo. Antes eram 34 listas locais de
+# uma função de ~750 linhas, sem forma de um teste (ou de um script de diagnóstico) as obter
+# sem executar a função contra uma base de dados; o `test_db_indexes.py` chegou a manter uma
+# CÓPIA escrita à mão, e foi assim que um índice pôde faltar em produção sem um teste vermelho.
+#
+# Um índice de que a aplicação depende declara-se AQUI, nunca num passo de operações.
+# O registo é de ordem estável: dentro de cada colecção, a ordem de declaração.
+INDEX_DEFINITIONS: dict[str, list[dict]] = {}
+
+
+def _definir(colecao: str, indices: list[dict]) -> None:
+    """Acrescenta índices à colecção (várias declarações da mesma colecção somam-se)."""
+    INDEX_DEFINITIONS.setdefault(colecao, []).extend(indices)
+
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'processes'
+# ====================================================================
+_definir(
+    "processes",
+    [
         # Índice no status - muito usado em filtros e dashboard
         {"keys": [("status", 1)], "name": "idx_status"},
         
@@ -357,15 +361,15 @@ async def create_indexes(db) -> dict:
             ], 
             "name": "idx_text_search"
         },
-    ]
-    
-    for idx in process_indexes:
-        await _create_index_safe(db.processes, idx, "processes", results)
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'users'
-    # ====================================================================
-    user_indexes = [
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'users'
+# ====================================================================
+_definir(
+    "users",
+    [
         # Índice único no email - login
         {"keys": [("email", 1)], "name": "idx_email", "unique": True},
         
@@ -377,15 +381,15 @@ async def create_indexes(db) -> dict:
         
         # Índice composto role + is_active
         {"keys": [("role", 1), ("is_active", 1)], "name": "idx_role_active"},
-    ]
-    
-    for idx in user_indexes:
-        await _create_index_safe(db.users, idx, "users", results)
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'system_error_logs'
-    # ====================================================================
-    log_indexes = [
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'system_error_logs'
+# ====================================================================
+_definir(
+    "system_error_logs",
+    [
         # Índice no timestamp - queries por período
         {"keys": [("timestamp", -1)], "name": "idx_timestamp_desc"},
         
@@ -400,43 +404,43 @@ async def create_indexes(db) -> dict:
         
         # NOTA: TTL index movido para create_ttl_indexes() 
         # O TTL requer campo datetime nativo (timestamp_dt), não ISO string
-    ]
-    
-    for idx in log_indexes:
-        await _create_index_safe(db.system_error_logs, idx, "system_error_logs", results)
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'properties' (Imóveis)
-    # ====================================================================
-    property_indexes = [
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'properties' (Imóveis)
+# ====================================================================
+_definir(
+    "properties",
+    [
         {"keys": [("internal_reference", 1)], "name": "idx_internal_reference", "unique": True, "sparse": True},
         {"keys": [("status", 1)], "name": "idx_property_status"},
         {"keys": [("address.district", 1), ("address.municipality", 1)], "name": "idx_location"},
         {"keys": [("financials.asking_price", 1)], "name": "idx_asking_price"},
         {"keys": [("created_at", -1)], "name": "idx_created_desc"},
-    ]
-    
-    for idx in property_indexes:
-        await _create_index_safe(db.properties, idx, "properties", results)
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'tasks'
-    # ====================================================================
-    task_indexes = [
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'tasks'
+# ====================================================================
+_definir(
+    "tasks",
+    [
         {"keys": [("process_id", 1)], "name": "idx_process_id"},
         {"keys": [("assigned_to", 1)], "name": "idx_assigned_to"},
         {"keys": [("status", 1)], "name": "idx_task_status"},
         {"keys": [("due_date", 1)], "name": "idx_due_date"},
         {"keys": [("status", 1), ("due_date", 1)], "name": "idx_status_due"},
-    ]
-    
-    for idx in task_indexes:
-        await _create_index_safe(db.tasks, idx, "tasks", results)
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'chat_messages'
-    # ====================================================================
-    chat_message_indexes = [
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'chat_messages'
+# ====================================================================
+_definir(
+    "chat_messages",
+    [
         # Índice no sender_id - mensagens enviadas
         {"keys": [("sender_id", 1)], "name": "idx_sender"},
         
@@ -460,15 +464,15 @@ async def create_indexes(db) -> dict:
             "keys": [("content", "text")],
             "name": "idx_content_text"
         },
-    ]
-    
-    for idx in chat_message_indexes:
-        await _create_index_safe(db.chat_messages, idx, "chat_messages", results)
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'chat_groups'
-    # ====================================================================
-    chat_group_indexes = [
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'chat_groups'
+# ====================================================================
+_definir(
+    "chat_groups",
+    [
         # Índice no criador
         {"keys": [("created_by", 1)], "name": "idx_group_creator"},
         
@@ -477,15 +481,15 @@ async def create_indexes(db) -> dict:
         
         # Índice na data de criação
         {"keys": [("created_at", -1)], "name": "idx_group_created_desc"},
-    ]
-    
-    for idx in chat_group_indexes:
-        await _create_index_safe(db.chat_groups, idx, "chat_groups", results)
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'document_annotations' (Anotações Contextuais)
-    # ====================================================================
-    annotation_indexes = [
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'document_annotations' (Anotações Contextuais)
+# ====================================================================
+_definir(
+    "document_annotations",
+    [
         # Índice no processo - queries por processo
         {"keys": [("process_id", 1)], "name": "idx_ann_process"},
         
@@ -500,19 +504,19 @@ async def create_indexes(db) -> dict:
         
         # Índice composto processo + página - ordenação por página
         {"keys": [("process_id", 1), ("page", 1)], "name": "idx_ann_process_page"},
-    ]
-    
-    for idx in annotation_indexes:
-        await _create_index_safe(db.document_annotations, idx, "document_annotations", results)
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'clients' - BLIND INDEXES (RGPD)
-    # ====================================================================
-    # IMPORTANTE: Os campos NIF, telefone e email são encriptados com Fernet.
-    # Para pesquisar, usamos BLIND INDEXES (hashes SHA-256 determinísticos).
-    # Os índices DEVEM apontar para os campos _hash, NUNCA para os encriptados.
-    # ====================================================================
-    client_indexes = [
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'clients' - BLIND INDEXES (RGPD)
+# ====================================================================
+# IMPORTANTE: Os campos NIF, telefone e email são encriptados com Fernet.
+# Para pesquisar, usamos BLIND INDEXES (hashes SHA-256 determinísticos).
+# Os índices DEVEM apontar para os campos _hash, NUNCA para os encriptados.
+# ====================================================================
+_definir(
+    "clients",
+    [
         # BLIND INDEXES - Pesquisa de dados encriptados
         # NIF hash - permite encontrar clientes por NIF sem expor o valor real
         {"keys": [("dados_pessoais.nif_hash", 1)], "name": "idx_client_nif_hash", "sparse": True},
@@ -535,50 +539,50 @@ async def create_indexes(db) -> dict:
         
         # Índice composto para listagem de registos pendentes
         {"keys": [("registration_completed", 1), ("assigned_to", 1)], "name": "idx_client_pending_assignment"},
-    ]
-    
-    for idx in client_indexes:
-        await _create_index_safe(db.clients, idx, "clients", results)
-    
-    # ====================================================================
-    # ÍNDICES ADICIONAIS PARA BLIND INDEXES EM 'processes'
-    # ====================================================================
-    # Os processos também têm dados encriptados com blind indexes
-    process_blind_indexes = [
+    ],
+)
+
+# ====================================================================
+# ÍNDICES ADICIONAIS PARA BLIND INDEXES EM 'processes'
+# ====================================================================
+# Os processos também têm dados encriptados com blind indexes
+_definir(
+    "processes",
+    [
         # NIF hash no processo - pesquisa por NIF
         {"keys": [("personal_data.nif_hash", 1)], "name": "idx_process_nif_hash", "sparse": True},
         {"keys": [("personal_data.email_hash", 1)], "name": "idx_process_email_hash", "sparse": True},
-    ]
-    
-    for idx in process_blind_indexes:
-        await _create_index_safe(db.processes, idx, "processes", results)
+    ],
+)
 
-    # ====================================================================
-    # PACOTE 10 — ÍNDICES PARA COLECÇÃO 'task_logs' (MONITOR GLOBAL)
-    # ====================================================================
-    # Os task_logs alimentam o widget "Processos em Segundo Plano"
-    # (GET /tasks/active faz polling 5s/30s por utilizador). Sem índice,
-    # cada poll seria um collection scan.
-    task_log_indexes = [
+# ====================================================================
+# PACOTE 10 — ÍNDICES PARA COLECÇÃO 'task_logs' (MONITOR GLOBAL)
+# ====================================================================
+# Os task_logs alimentam o widget "Processos em Segundo Plano"
+# (GET /tasks/active faz polling 5s/30s por utilizador). Sem índice,
+# cada poll seria um collection scan.
+_definir(
+    "task_logs",
+    [
         # Query principal de get_active_tasks: user + status
         {"keys": [("user_id", 1), ("status", 1)], "name": "idx_task_logs_user_status"},
         # Limpeza TTL (cleanup_old_tasks): status + acknowledged/completed
         {"keys": [
             ("status", 1), ("acknowledged_at", 1), ("completed_at", 1)
         ], "name": "idx_task_logs_cleanup"},
-    ]
+    ],
+)
 
-    for idx in task_log_indexes:
-        await _create_index_safe(db.task_logs, idx, "task_logs", results)
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'history' - HISTÓRICO DEDICADO
-    # ====================================================================
-    # CRÍTICO: Esta coleção armazena o histórico de processos de forma
-    # separada do documento principal (Padrão "Dedicated Collection").
-    # Isto evita o limite de 16MB do MongoDB e melhora a performance.
-    # ====================================================================
-    history_indexes = [
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'history' - HISTÓRICO DEDICADO
+# ====================================================================
+# CRÍTICO: Esta coleção armazena o histórico de processos de forma
+# separada do documento principal (Padrão "Dedicated Collection").
+# Isto evita o limite de 16MB do MongoDB e melhora a performance.
+# ====================================================================
+_definir(
+    "history",
+    [
         # ÍNDICE PRINCIPAL: process_id + timestamp (ordenado desc)
         # Este é o índice MAIS CRÍTICO para queries de timeline
         # Permite buscar histórico de um processo de forma instantânea
@@ -595,28 +599,28 @@ async def create_indexes(db) -> dict:
         
         # Índice para queries por campo alterado
         {"keys": [("field", 1)], "name": "idx_history_field", "sparse": True},
-    ]
-    
-    for idx in history_indexes:
-        await _create_index_safe(db.history, idx, "history", results)
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'announcements'
-    # ====================================================================
-    announcement_indexes = [
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'announcements'
+# ====================================================================
+_definir(
+    "announcements",
+    [
         {"keys": [("created_at", -1)], "name": "idx_announcements_created_desc"},
         {"keys": [("author_id", 1)], "name": "idx_announcements_author"},
-    ]
-    
-    for idx in announcement_indexes:
-        await _create_index_safe(db.announcements, idx, "announcements", results)
+    ],
+)
 
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'emails' (Pacote FF — C1/C5)
-    # ====================================================================
-    # Lookup por id, listagem de mailbox, timeline de processo e
-    # deduplicação IMAP (message_id + account).
-    email_indexes = [
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'emails' (Pacote FF — C1/C5)
+# ====================================================================
+# Lookup por id, listagem de mailbox, timeline de processo e
+# deduplicação IMAP (message_id + account).
+_definir(
+    "emails",
+    [
         {"keys": [("id", 1)], "name": "idx_emails_id", "unique": True},
         {
             "keys": [("company_id", 1), ("direction", 1), ("sent_at", -1)],
@@ -642,9 +646,332 @@ async def create_indexes(db) -> dict:
                 "status": "draft", "auto_draft_kind": "document_receipt",
             },
         },
-    ]
-    for idx in email_indexes:
-        await _create_index_safe(db.emails, idx, "emails", results)
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'oauth_states' (Google OAuth)
+# ====================================================================
+_definir(
+    "oauth_states",
+    [
+        # Índice único no state — CSRF protection lookup
+        {"keys": [("state", 1)], "name": "idx_oauth_state", "unique": True},
+        
+        # TTL no created_at — limpar states velhos automaticamente (10 min)
+        {
+            "keys": [("created_at", 1)],
+            "name": "idx_oauth_state_ttl",
+            "expireAfterSeconds": 600,
+        },
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'company_email_configs'
+# ====================================================================
+_definir(
+    "company_email_configs",
+    [
+        {"keys": [("company_name", 1)], "name": "idx_company_name", "unique": True},
+    ],
+)
+
+_definir(
+    "user_company_roles",
+    [
+        # Pacote FF — lookup único pelo id da associação user↔empresa
+        {"keys": [("id", 1)], "name": "idx_ucr_id", "unique": True},
+        # Índice composto único — um user pode ter vários cargos na mesma
+        # empresa; só a combinação exacta user+empresa+cargo é única.
+        {
+            "keys": [("user_id", 1), ("company_id", 1), ("role", 1)],
+            "name": "idx_user_company_role_unique",
+            "unique": True,
+        },
+        # Índice no company_id — queries por empresa
+        {"keys": [("company_id", 1)], "name": "idx_company_id"},
+        # Índice para lookup rápido da empresa padrão
+        {"keys": [("user_id", 1), ("is_default", 1)], "name": "idx_user_default", "sparse": True},
+    ],
+)
+
+_definir(
+    "user_email_configs",
+    [
+        {
+            "keys": [("user_id", 1), ("company_id", 1), ("email_address", 1)],
+            "name": "idx_user_company_email_address_unique",
+            "unique": True,
+        },
+        {"keys": [("user_id", 1)], "name": "idx_user_email_user_id"},
+        {"keys": [("company_id", 1)], "name": "idx_user_email_company_id"},
+        {
+            "keys": [("user_id", 1), ("company_id", 1), ("is_primary", 1)],
+            "name": "idx_user_email_primary",
+        },
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'task_queue' (fila do Processador — Lote 2)
+# ====================================================================
+# Declarados AQUI e não num passo de operações: um índice criado à mão
+# em produção deixa dev e CI sem ele, que é onde as consultas se
+# escrevem (lição de Set 2026, `idx_network_scope`).
+#
+# A ordem das chaves do índice da reclamação segue a consulta do
+# `get_next_task`: `status` é o prefixo mais selectivo e mais presente,
+# `disponivel_em` o intervalo, e `created_at` serve o `sort` FIFO sem
+# um segundo índice.
+_definir(
+    "task_queue",
+    [
+        {
+            "keys": [("status", 1), ("disponivel_em", 1), ("created_at", 1)],
+            "name": "idx_task_queue_reclamar",
+        },
+        # Pedidos de execução forçada por job (painel «Estado do Motor»).
+        {"keys": [("type", 1), ("status", 1)], "name": "idx_task_queue_tipo_estado"},
+        {"keys": [("id", 1)], "name": "idx_task_queue_id", "unique": True},
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'job_schedule_marks' (agenda dos relatórios)
+# ====================================================================
+# Uma marca por job: é o que impede o relatório semanal de sair 24
+# vezes à segunda-feira (Lote 2, ponto 1).
+_definir(
+    "job_schedule_marks",
+    [{"keys": [("chave", 1)], "name": "idx_job_schedule_chave", "unique": True}],
+)
+
+# ====================================================================
+# ÍNDICES DO RELATÓRIO EXECUTIVO (Bloco 4, pontos 13 e 16)
+# ====================================================================
+# As agregações de `services/executive_report.py` abrem com um `$match`
+# sobre estes campos: sem eles varriam `tasks` inteira a cada clique em
+# «Actualizar». O histórico já tem `idx_history_user_time`
+# (user_id, created_at), que serve a pergunta «o que fez cada pessoa».
+#   - concluídas no período, por quem concluiu;
+#   - carga em aberto: atribuídas a X e criadas antes do fim.
+_definir(
+    "tasks",
+    [
+        {"keys": [("completed_by", 1), ("completed_at", 1)], "name": "idx_tasks_completed_by_time"},
+        {"keys": [("assigned_to", 1), ("created_at", 1)], "name": "idx_tasks_assigned_created"},
+    ],
+)
+
+# Calendário do Dashboard (ponto 29): as datas de escritura e de CPCV
+# vivem no processo e a consulta do mês filtra por elas. `sparse`: a
+# maioria dos processos não tem as datas preenchidas.
+_definir(
+    "processes",
+    [
+        {"keys": [("real_estate_data.data_escritura_prevista", 1)], "name": "idx_proc_data_escritura", "sparse": True},
+        {"keys": [("real_estate_data.data_cpcv", 1)], "name": "idx_proc_data_cpcv", "sparse": True},
+    ],
+)
+
+# O registo semanal: um por (âmbito, semana). O `unique` impede que dois
+# pedidos concorrentes do mesmo CEO deixem dois registos da mesma semana.
+_definir(
+    "executive_weekly_reports",
+    [{
+        "keys": [("scope_key", 1), ("week_start", -1)],
+        "name": "idx_exec_weekly_scope_week",
+        "unique": True,
+    }],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'process_financial_origins' (Bloco 4, ponto 7)
+# ====================================================================
+# Uma origem por processo: o `unique` é o que impede duas escritas
+# concorrentes de deixarem duas origens (e o cálculo de comissões de
+# escolher uma à sorte).
+_definir(
+    "process_financial_origins",
+    [
+        {"keys": [("process_id", 1)], "name": "idx_origin_process", "unique": True},
+        {"keys": [("angariador_id", 1)], "name": "idx_origin_angariador", "sparse": True},
+    ],
+)
+
+# ====================================================================
+# ÍNDICES PARA COLECÇÃO 'portal_scraper_jobs' (Bloco 5, pontos 8 e 9)
+# ====================================================================
+# Tudo o que se pergunta a esta colecção é «os jobs deste processo,
+# activos, o mais recente»: o MFA, o job activo antes de criar outro e a
+# limpeza dos mortos. Sem o índice, cada polling do ecrã (3 s) varria-a.
+_definir(
+    "portal_scraper_jobs",
+    [
+        {"keys": [("process_id", 1), ("created_at", -1)], "name": "idx_scraper_job_process_recente"},
+        {"keys": [("id", 1)], "name": "idx_scraper_job_id", "unique": True},
+    ],
+)
+
+# ====================================================================
+# PORTAL DO PARCEIRO (Out 2026)
+# ====================================================================
+# `partners`: o login procura por email e a sessão por id — ambos
+# únicos (dois documentos com o mesmo email deixavam o login escolher à
+# sorte). O convite procura-se pelo hash do token (`sparse`: só os
+# convites pendentes o têm).
+_definir(
+    "partners",
+    [
+        {"keys": [("id", 1)], "name": "idx_partner_id", "unique": True},
+        {"keys": [("email", 1)], "name": "idx_partner_email", "unique": True},
+        {"keys": [("invite.token_hash", 1)], "name": "idx_partner_invite", "sparse": True},
+    ],
+)
+
+# Leads RETIDAS do lado do parceiro (filtro de viabilidade, Out 2026):
+# o id é único (a libertação move o documento com o MESMO id para
+# `clients`) e o parceiro lista as suas por (parceiro, estado).
+_definir(
+    "partner_drafts",
+    [
+        {"keys": [("id", 1)], "name": "idx_partner_draft_id", "unique": True},
+        {"keys": [("submitted_by_partner_id", 1), ("partner_stage", 1)], "name": "idx_partner_draft_parceiro"},
+        {"keys": [("partner_stage", 1), ("last_activity_at", 1)], "name": "idx_partner_draft_inactividade"},
+    ],
+)
+
+# Um controlo «serviço pago pelo parceiro» por processo: o `unique` é o que
+# impede duas escritas concorrentes de deixarem dois registos (e a ficha
+# de mostrar um ao acaso).
+_definir(
+    "process_partner_service",
+    [{"keys": [("process_id", 1)], "name": "idx_partner_service_process", "unique": True}],
+)
+
+# A pergunta de TODAS as listagens e métricas do parceiro: «os meus
+# processos, da(s) minha(s) rede(s), não eliminados». O prefixo é o
+# campo mais selectivo (um parceiro tem dezenas, a rede milhares).
+_definir(
+    "processes",
+    [{
+        "keys": [("assigned_parceiro_id", 1), ("network_id", 1), ("is_deleted", 1)],
+        "name": "idx_proc_parceiro_rede",
+        "sparse": True,
+    }],
+)
+
+# As leads que o parceiro submeteu (clientes sem processo).
+_definir(
+    "clients",
+    [{
+        "keys": [("submitted_by_partner_id", 1), ("network_id", 1)],
+        "name": "idx_client_parceiro_rede",
+        "sparse": True,
+    }],
+)
+
+# Workflow POR REDE: `carregar_fases(rede)` lê as fases de UMA rede por
+# `order`, e a edição procura por (rede, nome). Não é único de propósito
+# (o `scripts/migrar_workflow_por_rede.py` cria o único depois de provar
+# que não há duplicados — um índice único que falha no arranque não ajuda).
+_definir(
+    "workflow_statuses",
+    [
+        {"keys": [("network_id", 1), ("order", 1)], "name": "idx_workflow_rede_ordem"},
+        {"keys": [("network_id", 1), ("name", 1)], "name": "idx_workflow_rede_nome"},
+    ],
+)
+
+# Formulário público POR REDE: lê-se um documento por (tipo, rede) e o modelo
+# é o que não tem rede. Não é único aqui pelo mesmo motivo do workflow: o único
+# nasce no `scripts/migrar_formularios_por_rede.py`, depois de provar que não há
+# duplicados; o upsert por (tipo, rede) já evita criá-los.
+_definir(
+    "form_config",
+    [
+        {"keys": [("type", 1), ("network_id", 1)], "name": "idx_form_config_tipo_rede"},
+    ],
+)
+
+_definir(
+    "form_templates",
+    [
+        {"keys": [("network_id", 1)], "name": "idx_form_templates_rede", "sparse": True},
+    ],
+)
+
+# Caixas partilhadas por cargo (D-8): a identidade é (cargo, rede). NÃO é único
+# de propósito: as configurações antigas não têm `network_id` e o upsert por
+# (cargo, rede) já evita duplicados; o índice serve a consulta de cada
+# leitor (cargo + âmbito de rede) e o backfill carimba as antigas.
+_definir(
+    "shared_role_email_configs",
+    [
+        {"keys": [("role", 1), ("network_id", 1)], "name": "idx_shared_role_configs_cargo_rede"},
+    ],
+)
+
+
+async def _preparar_indices(db) -> None:
+    """Remove índices antigos que CONFLITUAM com as definições novas (corre antes de as criar).
+
+    Não são definições: são limpezas de esquema que a criação não consegue fazer sozinha
+    (um único restritivo residual só é substituído se for apagado primeiro).
+    """
+    # Pacote EA — vários cargos na mesma empresa: unique é (user_id, company_id, role).
+    # Drop defensivo de qualquer unique residual só em (user_id, company_id).
+    try:
+        existing_ucr_indexes = await db.user_company_roles.index_information()
+        for existing_name, existing_info in existing_ucr_indexes.items():
+            if existing_name == "_id_":
+                continue
+            existing_key = list(existing_info.get("key", []))
+            if existing_info.get("unique") and existing_key == [
+                ("user_id", 1),
+                ("company_id", 1),
+            ]:
+                await db.user_company_roles.drop_index(existing_name)
+                logger.info(
+                    "Índice único restritivo removido (Pacote EA): "
+                    f"user_company_roles.{existing_name}"
+                )
+    except Exception as drop_err:
+        logger.warning(
+            f"Não foi possível inspeccionar índices UCR para Pacote EA: {drop_err}"
+        )
+
+    # Unicidade: (user_id, company_id, email_address) — várias contas por perfil.
+    try:
+        await db.user_email_configs.drop_index("idx_user_company_email_unique")
+        logger.info("Índice antigo idx_user_company_email_unique removido (DN.4)")
+    except Exception:
+        pass
+
+
+async def create_indexes(db) -> dict:
+    """
+    Cria os índices declarados em `INDEX_DEFINITIONS` (e os TTL de `TTL_INDEXES`).
+
+    Returns:
+        dict: Resumo dos índices criados
+    """
+    # Primeiro, limpar índices antigos/incorretos
+    cleanup_results = await cleanup_deprecated_indexes(db)
+
+    results = {
+        "created": [],
+        "errors": [],
+        "skipped": [],
+        "cleanup": cleanup_results
+    }
+
+    await _preparar_indices(db)
+
+    for colecao, definicoes in INDEX_DEFINITIONS.items():
+        for idx in definicoes:
+            await _create_index_safe(getattr(db, colecao), idx, colecao, results)
 
     # Resumo
     logger.info(
@@ -653,13 +980,13 @@ async def create_indexes(db) -> dict:
         f"{len(results['skipped'])} já existiam, "
         f"{len(results['errors'])} erros"
     )
-    
+
     # ====================================================================
     # CRIAR ÍNDICES TTL (DATA LIFECYCLE MANAGEMENT)
     # ====================================================================
     ttl_results = await create_ttl_indexes(db)
     results["ttl"] = ttl_results
-    
+
     return results
 
 
@@ -735,280 +1062,41 @@ async def create_ttl_indexes(db) -> dict:
             f"{len(results['skipped'])} já existiam, "
             f"{len(results['errors'])} erros"
         )
-    
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'oauth_states' (Google OAuth)
-    # ====================================================================
-    oauth_indexes = [
-        # Índice único no state — CSRF protection lookup
-        {"keys": [("state", 1)], "name": "idx_oauth_state", "unique": True},
-        
-        # TTL no created_at — limpar states velhos automaticamente (10 min)
-        {
-            "keys": [("created_at", 1)],
-            "name": "idx_oauth_state_ttl",
-            "expireAfterSeconds": 600,
-        },
-    ]
-    
-    for idx in oauth_indexes:
-        await _create_index_safe(db.oauth_states, idx, "oauth_states", results)
-
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'company_email_configs'
-    # ====================================================================
-    company_email_indexes = [
-        {"keys": [("company_name", 1)], "name": "idx_company_name", "unique": True},
-    ]
-    for idx in company_email_indexes:
-        await _create_index_safe(db.company_email_configs, idx, "company_email_configs", results)
-
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'user_company_roles' (M:N User-Company)
-    # ====================================================================
-    # Pacote EA — vários cargos na mesma empresa: unique é (user_id, company_id, role).
-    # Drop defensivo de qualquer unique residual só em (user_id, company_id).
-    try:
-        existing_ucr_indexes = await db.user_company_roles.index_information()
-        for existing_name, existing_info in existing_ucr_indexes.items():
-            if existing_name == "_id_":
-                continue
-            existing_key = list(existing_info.get("key", []))
-            if existing_info.get("unique") and existing_key == [
-                ("user_id", 1),
-                ("company_id", 1),
-            ]:
-                await db.user_company_roles.drop_index(existing_name)
-                logger.info(
-                    "Índice único restritivo removido (Pacote EA): "
-                    f"user_company_roles.{existing_name}"
-                )
-    except Exception as drop_err:
-        logger.warning(
-            f"Não foi possível inspeccionar índices UCR para Pacote EA: {drop_err}"
-        )
-
-    user_company_role_indexes = [
-        # Pacote FF — lookup único pelo id da associação user↔empresa
-        {"keys": [("id", 1)], "name": "idx_ucr_id", "unique": True},
-        # Índice composto único — um user pode ter vários cargos na mesma
-        # empresa; só a combinação exacta user+empresa+cargo é única.
-        {
-            "keys": [("user_id", 1), ("company_id", 1), ("role", 1)],
-            "name": "idx_user_company_role_unique",
-            "unique": True,
-        },
-        # Índice no company_id — queries por empresa
-        {"keys": [("company_id", 1)], "name": "idx_company_id"},
-        # Índice para lookup rápido da empresa padrão
-        {"keys": [("user_id", 1), ("is_default", 1)], "name": "idx_user_default", "sparse": True},
-    ]
-    for idx in user_company_role_indexes:
-        await _create_index_safe(db.user_company_roles, idx, "user_company_roles", results)
-
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'user_email_configs' (Multi-Empresa + Multi-Conta)
-    # ====================================================================
-    # Unicidade: (user_id, company_id, email_address) — várias contas por perfil.
-    try:
-        await db.user_email_configs.drop_index("idx_user_company_email_unique")
-        logger.info("Índice antigo idx_user_company_email_unique removido (DN.4)")
-    except Exception:
-        pass
-    user_email_config_indexes = [
-        {
-            "keys": [("user_id", 1), ("company_id", 1), ("email_address", 1)],
-            "name": "idx_user_company_email_address_unique",
-            "unique": True,
-        },
-        {"keys": [("user_id", 1)], "name": "idx_user_email_user_id"},
-        {"keys": [("company_id", 1)], "name": "idx_user_email_company_id"},
-        {
-            "keys": [("user_id", 1), ("company_id", 1), ("is_primary", 1)],
-            "name": "idx_user_email_primary",
-        },
-    ]
-    for idx in user_email_config_indexes:
-        await _create_index_safe(db.user_email_configs, idx, "user_email_configs", results)
-
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'task_queue' (fila do Processador — Lote 2)
-    # ====================================================================
-    # Declarados AQUI e não num passo de operações: um índice criado à mão
-    # em produção deixa dev e CI sem ele, que é onde as consultas se
-    # escrevem (lição de Set 2026, `idx_network_scope`).
-    #
-    # A ordem das chaves do índice da reclamação segue a consulta do
-    # `get_next_task`: `status` é o prefixo mais selectivo e mais presente,
-    # `disponivel_em` o intervalo, e `created_at` serve o `sort` FIFO sem
-    # um segundo índice.
-    task_queue_indexes = [
-        {
-            "keys": [("status", 1), ("disponivel_em", 1), ("created_at", 1)],
-            "name": "idx_task_queue_reclamar",
-        },
-        # Pedidos de execução forçada por job (painel «Estado do Motor»).
-        {"keys": [("type", 1), ("status", 1)], "name": "idx_task_queue_tipo_estado"},
-        {"keys": [("id", 1)], "name": "idx_task_queue_id", "unique": True},
-    ]
-    for idx in task_queue_indexes:
-        await _create_index_safe(db.task_queue, idx, "task_queue", results)
-
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'job_schedule_marks' (agenda dos relatórios)
-    # ====================================================================
-    # Uma marca por job: é o que impede o relatório semanal de sair 24
-    # vezes à segunda-feira (Lote 2, ponto 1).
-    for idx in [{"keys": [("chave", 1)], "name": "idx_job_schedule_chave", "unique": True}]:
-        await _create_index_safe(db.job_schedule_marks, idx, "job_schedule_marks", results)
-
-    # ====================================================================
-    # ÍNDICES DO RELATÓRIO EXECUTIVO (Bloco 4, pontos 13 e 16)
-    # ====================================================================
-    # As agregações de `services/executive_report.py` abrem com um `$match`
-    # sobre estes campos: sem eles varriam `tasks` inteira a cada clique em
-    # «Actualizar». O histórico já tem `idx_history_user_time`
-    # (user_id, created_at), que serve a pergunta «o que fez cada pessoa».
-    #   - concluídas no período, por quem concluiu;
-    #   - carga em aberto: atribuídas a X e criadas antes do fim.
-    executive_task_indexes = [
-        {"keys": [("completed_by", 1), ("completed_at", 1)], "name": "idx_tasks_completed_by_time"},
-        {"keys": [("assigned_to", 1), ("created_at", 1)], "name": "idx_tasks_assigned_created"},
-    ]
-    for idx in executive_task_indexes:
-        await _create_index_safe(db.tasks, idx, "tasks", results)
-
-    # Calendário do Dashboard (ponto 29): as datas de escritura e de CPCV
-    # vivem no processo e a consulta do mês filtra por elas. `sparse`: a
-    # maioria dos processos não tem as datas preenchidas.
-    for idx in [
-        {"keys": [("real_estate_data.data_escritura_prevista", 1)], "name": "idx_proc_data_escritura", "sparse": True},
-        {"keys": [("real_estate_data.data_cpcv", 1)], "name": "idx_proc_data_cpcv", "sparse": True},
-    ]:
-        await _create_index_safe(db.processes, idx, "processes", results)
-
-    # O registo semanal: um por (âmbito, semana). O `unique` impede que dois
-    # pedidos concorrentes do mesmo CEO deixem dois registos da mesma semana.
-    for idx in [{
-        "keys": [("scope_key", 1), ("week_start", -1)],
-        "name": "idx_exec_weekly_scope_week",
-        "unique": True,
-    }]:
-        await _create_index_safe(
-            db.executive_weekly_reports, idx, "executive_weekly_reports", results,
-        )
-
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'process_financial_origins' (Bloco 4, ponto 7)
-    # ====================================================================
-    # Uma origem por processo: o `unique` é o que impede duas escritas
-    # concorrentes de deixarem duas origens (e o cálculo de comissões de
-    # escolher uma à sorte).
-    origin_indexes = [
-        {"keys": [("process_id", 1)], "name": "idx_origin_process", "unique": True},
-        {"keys": [("angariador_id", 1)], "name": "idx_origin_angariador", "sparse": True},
-    ]
-    for idx in origin_indexes:
-        await _create_index_safe(
-            db.process_financial_origins, idx, "process_financial_origins", results,
-        )
-
-    # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'portal_scraper_jobs' (Bloco 5, pontos 8 e 9)
-    # ====================================================================
-    # Tudo o que se pergunta a esta colecção é «os jobs deste processo,
-    # activos, o mais recente»: o MFA, o job activo antes de criar outro e a
-    # limpeza dos mortos. Sem o índice, cada polling do ecrã (3 s) varria-a.
-    scraper_job_indexes = [
-        {"keys": [("process_id", 1), ("created_at", -1)], "name": "idx_scraper_job_process_recente"},
-        {"keys": [("id", 1)], "name": "idx_scraper_job_id", "unique": True},
-    ]
-    for idx in scraper_job_indexes:
-        await _create_index_safe(
-            db.portal_scraper_jobs, idx, "portal_scraper_jobs", results,
-        )
-
-    # ====================================================================
-    # PORTAL DO PARCEIRO (Out 2026)
-    # ====================================================================
-    # `partners`: o login procura por email e a sessão por id — ambos
-    # únicos (dois documentos com o mesmo email deixavam o login escolher à
-    # sorte). O convite procura-se pelo hash do token (`sparse`: só os
-    # convites pendentes o têm).
-    for idx in [
-        {"keys": [("id", 1)], "name": "idx_partner_id", "unique": True},
-        {"keys": [("email", 1)], "name": "idx_partner_email", "unique": True},
-        {"keys": [("invite.token_hash", 1)], "name": "idx_partner_invite", "sparse": True},
-    ]:
-        await _create_index_safe(db.partners, idx, "partners", results)
-
-    # Leads RETIDAS do lado do parceiro (filtro de viabilidade, Out 2026):
-    # o id é único (a libertação move o documento com o MESMO id para
-    # `clients`) e o parceiro lista as suas por (parceiro, estado).
-    for idx in [
-        {"keys": [("id", 1)], "name": "idx_partner_draft_id", "unique": True},
-        {"keys": [("submitted_by_partner_id", 1), ("partner_stage", 1)], "name": "idx_partner_draft_parceiro"},
-        {"keys": [("partner_stage", 1), ("last_activity_at", 1)], "name": "idx_partner_draft_inactividade"},
-    ]:
-        await _create_index_safe(db.partner_drafts, idx, "partner_drafts", results)
-
-    # Um controlo «serviço pago pelo parceiro» por processo: o `unique` é o que
-    # impede duas escritas concorrentes de deixarem dois registos (e a ficha
-    # de mostrar um ao acaso).
-    for idx in [{"keys": [("process_id", 1)], "name": "idx_partner_service_process", "unique": True}]:
-        await _create_index_safe(db.process_partner_service, idx, "process_partner_service", results)
-
-    # A pergunta de TODAS as listagens e métricas do parceiro: «os meus
-    # processos, da(s) minha(s) rede(s), não eliminados». O prefixo é o
-    # campo mais selectivo (um parceiro tem dezenas, a rede milhares).
-    for idx in [{
-        "keys": [("assigned_parceiro_id", 1), ("network_id", 1), ("is_deleted", 1)],
-        "name": "idx_proc_parceiro_rede",
-        "sparse": True,
-    }]:
-        await _create_index_safe(db.processes, idx, "processes", results)
-
-    # As leads que o parceiro submeteu (clientes sem processo).
-    for idx in [{
-        "keys": [("submitted_by_partner_id", 1), ("network_id", 1)],
-        "name": "idx_client_parceiro_rede",
-        "sparse": True,
-    }]:
-        await _create_index_safe(db.clients, idx, "clients", results)
-
-    # Workflow POR REDE: `carregar_fases(rede)` lê as fases de UMA rede por
-    # `order`, e a edição procura por (rede, nome). Não é único de propósito
-    # (o `scripts/migrar_workflow_por_rede.py` cria o único depois de provar
-    # que não há duplicados — um índice único que falha no arranque não ajuda).
-    for idx in [
-        {"keys": [("network_id", 1), ("order", 1)], "name": "idx_workflow_rede_ordem"},
-        {"keys": [("network_id", 1), ("name", 1)], "name": "idx_workflow_rede_nome"},
-    ]:
-        await _create_index_safe(db.workflow_statuses, idx, "workflow_statuses", results)
-
-    # Formulário público POR REDE: lê-se um documento por (tipo, rede) e o modelo
-    # é o que não tem rede. Não é único aqui pelo mesmo motivo do workflow: o único
-    # nasce no `scripts/migrar_formularios_por_rede.py`, depois de provar que não há
-    # duplicados; o upsert por (tipo, rede) já evita criá-los.
-    for idx in [
-        {"keys": [("type", 1), ("network_id", 1)], "name": "idx_form_config_tipo_rede"},
-    ]:
-        await _create_index_safe(db.form_config, idx, "form_config", results)
-    for idx in [
-        {"keys": [("network_id", 1)], "name": "idx_form_templates_rede", "sparse": True},
-    ]:
-        await _create_index_safe(db.form_templates, idx, "form_templates", results)
-
-    # Caixas partilhadas por cargo (D-8): a identidade é (cargo, rede). NÃO é único
-    # de propósito: as configurações antigas não têm `network_id` e o upsert por
-    # (cargo, rede) já evita duplicados; o índice serve a consulta de cada
-    # leitor (cargo + âmbito de rede) e o backfill carimba as antigas.
-    for idx in [
-        {"keys": [("role", 1), ("network_id", 1)], "name": "idx_shared_role_configs_cargo_rede"},
-    ]:
-        await _create_index_safe(db.shared_role_email_configs, idx, "shared_role_email_configs", results)
 
     return results
+
+
+#: Colecções que o painel de diagnóstico mostra SEMPRE, mesmo sem índices próprios declarados
+#: (a observabilidade de uma colecção que ficou sem índices é precisamente a que interessa).
+COLECCOES_OBSERVADAS = (
+    "processes",
+    "clients",
+    "users",
+    "system_error_logs",
+    "properties",
+    "tasks",
+    "chat_messages",
+    "chat_groups",
+    "history",
+    "compliance_audit_logs",
+    "emails",
+    "user_company_roles",
+    "notifications",
+    "companies",
+)
+
+
+def colecoes_com_indices() -> list[str]:
+    """Todas as colecções que a aplicação indexa — DERIVADAS do registo e dos TTL.
+
+    Antes `get_index_stats` tinha uma segunda lista à mão que divergia da realidade em cada
+    índice novo (D-10): uma colecção indexada que não constasse dela nunca aparecia no painel.
+    """
+    return list(dict.fromkeys([
+        *COLECCOES_OBSERVADAS,
+        *INDEX_DEFINITIONS,
+        *(i["collection"] for i in TTL_INDEXES),
+    ]))
 
 
 async def get_index_stats(db) -> dict:
@@ -1016,25 +1104,8 @@ async def get_index_stats(db) -> dict:
     Obtém estatísticas dos índices existentes.
     """
     stats = {}
-    
-    collections = [
-        "processes",
-        "clients",
-        "users",
-        "system_error_logs",
-        "properties",
-        "tasks",
-        "chat_messages",
-        "chat_groups",
-        "history",
-        "compliance_audit_logs",
-        "emails",
-        "user_company_roles",
-        "notifications",
-        "companies",
-    ]
-    
-    for collection_name in collections:
+
+    for collection_name in colecoes_com_indices():
         try:
             collection = getattr(db, collection_name)
             indexes = await collection.index_information()
@@ -1043,6 +1114,11 @@ async def get_index_stats(db) -> dict:
                 "indexes": list(indexes.keys())
             }
         except Exception as e:
-            stats[collection_name] = {"error": str(e)}
-    
+            # Uma colecção que ainda não existe (nenhum documento escrito) não tem índices: é
+            # «vazia», não «avariada». O Mongo responde `NamespaceNotFound` (código 26).
+            if getattr(e, "code", None) == 26 or "ns not found" in str(e).lower():
+                stats[collection_name] = {"count": 0, "indexes": []}
+            else:
+                stats[collection_name] = {"error": str(e)}
+
     return stats

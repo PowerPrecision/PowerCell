@@ -48,6 +48,10 @@ from services.email_threading import (
 
 logger = logging.getLogger(__name__)
 
+#: `error_code` de uma falha do SMTP directo ANTES de qualquer entrega (a ligação ou o login não
+#: chegaram a acontecer). Um chamador que tenha outro canal pode recuar sem risco de duplicar.
+CODIGO_SMTP_SEM_LIGACAO = "smtp_connection"
+
 # Thread pool para operações IMAP/SMTP bloqueantes
 _email_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="email_")
 
@@ -1007,6 +1011,8 @@ async def send_email(
             body = f"{body}\n\n---\n{sig_text}"
         logger.info(f"[Send Email] Assinatura injetada no corpo do email (source={sig_source}, active_company_id={active_company_id!r})")
 
+    # Até onde chegou o envio por SMTP directo (ver `_enviar_por_smtp`).
+    progresso_smtp: Dict[str, Optional[str]] = {"fase": None}
     try:
         # === TAG MÁGICA: Injetar [Proc-{id}] no assunto ===
         # Se o email está associado a um processo e o assunto ainda não tem a tag
@@ -1201,15 +1207,22 @@ async def send_email(
                     "account_email": account.email,
                 }
             def _enviar_por_smtp():
-                """Bloco SMTP bloqueante — corre numa thread, fora do event loop."""
+                """Bloco SMTP bloqueante — corre numa thread, fora do event loop.
+
+                `progresso_smtp["fase"]` diz até onde se chegou: uma falha ANTES de o login
+                ter sucesso é uma falha em que nada foi entregue (ver `smtp_connection`).
+                """
                 context = ssl.create_default_context()
+                progresso_smtp["fase"] = "ligar"
                 with smtplib.SMTP_SSL(
                     account.smtp_server,
                     account.smtp_port,
                     context=context,
                     timeout=smtp_timeout if smtp_timeout and smtp_timeout > 0 else get_smtp_connect_timeout(),
                 ) as server:
+                    progresso_smtp["fase"] = "autenticar"
                     server.login(account.email, smtp_password)
+                    progresso_smtp["fase"] = "entregar"
 
                     all_recipients = to_emails + (cc_emails or []) + (bcc_emails or [])
                     server.sendmail(account.email, all_recipients, msg.as_string())
@@ -1296,6 +1309,21 @@ async def send_email(
                 "success": False,
                 "error": "Falha de autenticação SMTP. Verifique as credenciais da conta de email activa ou da Caixa Geral.",
                 "error_code": "smtp_auth",
+                "account": getattr(account, "name", None),
+                "account_email": getattr(account, "email", None),
+            }
+        if progresso_smtp["fase"] in ("ligar", "autenticar"):
+            # O servidor SMTP nunca chegou a aceitar uma mensagem (timeout, ligação recusada,
+            # DNS, porta bloqueada pela hospedagem): NADA foi entregue, logo tentar por outro
+            # canal não duplica o email. É esta distinção que deixa o Portal recuar para o
+            # Email do Sistema em vez de morrer na Caixa Geral da rede.
+            return {
+                "success": False,
+                "error": (
+                    f"Não foi possível ligar ao servidor de email {getattr(account, 'smtp_server', '?')}"
+                    f":{getattr(account, 'smtp_port', '?')} ({type(e).__name__})."
+                ),
+                "error_code": CODIGO_SMTP_SEM_LIGACAO,
                 "account": getattr(account, "name", None),
                 "account_email": getattr(account, "email", None),
             }

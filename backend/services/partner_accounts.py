@@ -64,10 +64,10 @@ from services.partner_security import (
     ESTADO_ACTIVO,
     ESTADO_CONVIDADO,
     ESTADO_SUSPENSO,
+    conta_com_acesso,
     create_partner_token,
     exigir_portal_ligado,
     hash_de_token,
-    redes_activas,
 )
 from services import portal_brute_force
 from utils.input_sanitization import sanitize_email, sanitize_name, sanitize_phone
@@ -113,7 +113,11 @@ class PartnerInvite(_Estrito):
     name: str = Field(..., min_length=2, max_length=120)
     email: str = Field(..., min_length=3, max_length=100)
     phone: Optional[str] = Field(None, max_length=30)
-    company_id: str = Field(..., min_length=1, max_length=80)
+    #: Opcional (Lote 5): um parceiro é um operador EXTERNO e independente — não
+    #: «veste a camisola» de uma empresa. Sem empresa não há ligação a nenhuma
+    #: rede à partida: a primeira lead que submeter a uma empresa de destino cria
+    #: a ligação de mercado (`acrescentar_ligacao_de_mercado`).
+    company_id: Optional[str] = Field(None, max_length=80)
     #: Conta-fantasma (`users.role == "parceiro"`) a adoptar: o parceiro
     #: herda o `id` e com ele os processos que já apontam para ela.
     adopt_user_id: Optional[str] = Field(None, max_length=80)
@@ -193,9 +197,10 @@ def novo_documento_de_parceiro(
     name: str,
     email: str,
     phone: Optional[str],
-    ligacao: dict,
+    ligacao: Optional[dict],
     token_hash: str,
     agora: datetime,
+    convidado_pela_rede: Optional[str] = None,
 ) -> dict:
     return {
         "id": partner_id,
@@ -203,7 +208,12 @@ def novo_documento_de_parceiro(
         "email": email,
         "phone": phone or None,
         "status": ESTADO_CONVIDADO,
-        "redes": [ligacao],
+        # Sem ligação = agente independente (lista vazia, nunca ausente: a
+        # leitura distingue «nunca esteve ligado» de «todas suspensas»).
+        "redes": [ligacao] if ligacao else [],
+        # A rede de QUEM CONVIDOU: sem ligações, é o que mantém o parceiro
+        # visível (e gerível) por quem o trouxe. Não dá acesso a dados.
+        "convidado_pela_rede": convidado_pela_rede or None,
         "token_epoch": 0,
         "invite": {
             "token_hash": token_hash,
@@ -278,7 +288,7 @@ async def run_partner_login(data: PartnerLogin) -> dict:
         raise HTTPException(status_code=401, detail=ERRO_CREDENCIAIS)
 
     # 2. Credencial provada: agora, e só agora, diz-se o estado.
-    if partner.get("status") != ESTADO_ACTIVO or not redes_activas(partner):
+    if partner.get("status") != ESTADO_ACTIVO or not conta_com_acesso(partner):
         logger.warning("[PARCEIRO] Login recusado a %s (estado=%s).", partner["id"], partner.get("status"))
         raise HTTPException(status_code=403, detail=ERRO_CONTA_INDISPONIVEL)
 
@@ -357,7 +367,7 @@ async def run_accept_invite(data: PartnerAcceptInvite, *, ip: str = "") -> dict:
     await portal_brute_force.limpar(db, AMBITO_DO_LOGIN_DO_PARCEIRO, partner.get("email"))
 
     partner = await db.partners.find_one({"id": partner["id"]}, {"_id": 0})
-    if not redes_activas(partner):
+    if not conta_com_acesso(partner):
         raise HTTPException(status_code=403, detail=ERRO_CONTA_INDISPONIVEL)
     return _sessao(partner)
 
@@ -396,18 +406,37 @@ async def parceiro_no_ambito(partner: Optional[dict], actor: dict) -> bool:
     documento que só leva a rede: é a mesma resposta que as listagens dão.
     """
     from services.role_scope import utilizador_e_global
-    from services.tenant_network import CAMPO_REDE, documento_no_ambito, resolve_tenant_scope
+    from services.tenant_network import resolve_tenant_scope
 
     if not partner:
         return False
     if utilizador_e_global(actor):
         return True
     scope = await resolve_tenant_scope(actor or {})
-    return any(
+    return _no_ambito_do_actor(partner, scope)
+
+
+def _no_ambito_do_actor(partner: dict, scope: Any) -> bool:
+    """Alguma ligação do parceiro — ou, se não tem nenhuma, a rede de quem o
+    convidou — cai no âmbito? (PURA)
+
+    O agente independente não tem ligações: sem a rede do convite ninguém o
+    veria nem o poderia suspender, e uma conta que ninguém gere é a que
+    ninguém consegue travar. A rede do convite só vale ENQUANTO ele não tem
+    ligações — a partir da primeira, mandam as ligações (a suspensão é por
+    ligação, e a rede que convidou não passa a gerir as das outras).
+    """
+    from services.tenant_network import CAMPO_REDE, documento_no_ambito
+
+    ligacoes = [r for r in (partner.get("redes") or []) if isinstance(r, dict)]
+    if any(
         documento_no_ambito({CAMPO_REDE: r.get("network_id")}, scope)
-        for r in (partner.get("redes") or [])
-        if isinstance(r, dict) and r.get("network_id")
-    )
+        for r in ligacoes
+        if r.get("network_id")
+    ):
+        return True
+    rede_do_convite = str(partner.get("convidado_pela_rede") or "").strip()
+    return bool(not ligacoes and rede_do_convite and documento_no_ambito({CAMPO_REDE: rede_do_convite}, scope))
 
 
 async def acrescentar_ligacao_de_mercado(partner_id: str, ligacao: dict) -> None:
@@ -466,7 +495,9 @@ def _redes_do_ambito(partner: dict, scope: Any, global_: bool) -> list[int]:
     return indices
 
 
-async def _garantir_directorio(partner_id: str, name: str, email: str, agora: str) -> None:
+async def _garantir_directorio(
+    partner_id: str, name: str, email: str, agora: str, criado_pela_rede: Optional[str] = None,
+) -> None:
     """A linha-fantasma em `users` (ver o cabeçalho). Idempotente."""
     existente = await db.users.find_one({"id": partner_id}, {"_id": 0, "role": 1, "name": 1})
     if existente:
@@ -481,10 +512,30 @@ async def _garantir_directorio(partner_id: str, name: str, email: str, agora: st
             "role": "parceiro",
             "is_active": True,
             "partner_directory": True,
+            **({"criado_pela_rede": criado_pela_rede} if criado_pela_rede else {}),
             "created_at": agora,
             "updated_at": agora,
         }
     )
+
+
+async def rede_de_quem_convida(actor: dict) -> Optional[str]:
+    """A rede de QUEM CONVIDA, para um parceiro sem empresa.
+
+    Um perfil local tem uma (ou mais); fica a primeira do seu âmbito. O Master
+    (sem fronteira) não tem rede própria: o parceiro fica só no âmbito global,
+    que é o dele. Nunca levanta: sem rede conhecida o parceiro é criado na
+    mesma e só o Master o gere.
+    """
+    try:
+        from services.tenant_network import resolve_tenant_scope
+
+        scope = await resolve_tenant_scope(actor or {})
+        redes = [str(r).strip() for r in (getattr(scope, "network_ids", ()) or ()) if str(r).strip()]
+        return redes[0] if redes else None
+    except Exception as exc:  # noqa: BLE001 — informação de gestão, nunca bloqueia o convite
+        logger.warning("[PARCEIRO] Sem rede para o convidante %s: %s", (actor or {}).get("id"), exc)
+        return None
 
 
 async def run_invite_partner(data: PartnerInvite, actor: dict) -> dict:
@@ -499,17 +550,23 @@ async def run_invite_partner(data: PartnerInvite, actor: dict) -> dict:
         raise HTTPException(status_code=400, detail="Nome inválido.")
     telefone = sanitize_phone(data.phone) if data.phone else None
 
-    company_id = data.company_id.strip()
-    # A empresa tem de existir e estar no âmbito de quem convida (404 nos
-    # dois casos, igual): um Admin não convida para a rede de outro.
-    empresa = await db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1, "name": 1})
-    if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa não encontrada")
-    await exigir_empresas_concediveis(actor, [company_id])
+    company_id = (data.company_id or "").strip()
+    empresa = None
+    carimbo = None
+    if company_id:
+        # A empresa tem de existir e estar no âmbito de quem convida (404 nos
+        # dois casos, igual): um Admin não convida para a rede de outro.
+        empresa = await db.companies.find_one({"id": company_id}, {"_id": 0, "id": 1, "name": 1})
+        if not empresa:
+            raise HTTPException(status_code=404, detail="Empresa não encontrada")
+        await exigir_empresas_concediveis(actor, [company_id])
 
-    carimbo = await resolve_tenant_stamp({}, active_company_id=company_id)
-    if not carimbo or not carimbo.get("network_id"):
-        raise HTTPException(status_code=400, detail="Não foi possível determinar a rede desta empresa.")
+        carimbo = await resolve_tenant_stamp({}, active_company_id=company_id)
+        if not carimbo or not carimbo.get("network_id"):
+            raise HTTPException(status_code=400, detail="Não foi possível determinar a rede desta empresa.")
+    # Sem empresa (agente independente) a rede de quem convida fica registada
+    # para que o parceiro continue gerível por ela — ver `_no_ambito_do_actor`.
+    rede_do_convite = (carimbo or {}).get("network_id") or await rede_de_quem_convida(actor)
 
     # Email já usado por um parceiro OU por um utilizador do staff: a mesma
     # recusa, sem dizer qual — nunca se liga uma conta de parceiro à de um
@@ -533,23 +590,29 @@ async def run_invite_partner(data: PartnerInvite, actor: dict) -> dict:
     agora = datetime.now(timezone.utc)
     partner_id = fantasma["id"] if fantasma else str(uuid.uuid4())
     token = secrets.token_urlsafe(32)
-    ligacao = {
-        "network_id": carimbo["network_id"],
-        "company_id": carimbo.get("company_id") or company_id,
-        "company_name": carimbo.get("company_name") or empresa.get("name"),
-        "status": ESTADO_ACTIVO,
-        "invited_by": actor.get("id"),
-        "invited_by_name": actor.get("name"),
-        "invited_at": agora.isoformat(),
-    }
+    ligacao = None
+    if carimbo:
+        ligacao = {
+            "network_id": carimbo["network_id"],
+            "company_id": carimbo.get("company_id") or company_id,
+            "company_name": carimbo.get("company_name") or empresa.get("name"),
+            "status": ESTADO_ACTIVO,
+            "invited_by": actor.get("id"),
+            "invited_by_name": actor.get("name"),
+            "invited_at": agora.isoformat(),
+        }
     doc = novo_documento_de_parceiro(
         partner_id=partner_id, name=nome, email=email, phone=telefone,
         ligacao=ligacao, token_hash=hash_de_token(token), agora=agora,
+        convidado_pela_rede=rede_do_convite,
     )
     await db.partners.insert_one(dict(doc))
-    await _garantir_directorio(partner_id, nome, email, agora.isoformat())
+    await _garantir_directorio(partner_id, nome, email, agora.isoformat(), rede_do_convite)
 
-    await _auditar(actor, partner_id, f"Parceiro convidado: {nome}", "partner_invite", {"network_id": ligacao["network_id"]})
+    await _auditar(
+        actor, partner_id, f"Parceiro convidado: {nome}", "partner_invite",
+        {"network_id": (ligacao or {}).get("network_id"), "independente": ligacao is None},
+    )
     _enviar_convite_em_segundo_plano(nome, email, token)
 
     return {
@@ -608,9 +671,18 @@ async def run_update_partner(partner_id: str, data: PartnerUpdate, actor: dict) 
         # operação rara de administração, e a posição de uma ligação não é
         # um identificador estável se alguém acrescentar outra entretanto.
         redes = [dict(r) if isinstance(r, dict) else r for r in (partner.get("redes") or [])]
-        for i in _redes_do_ambito(partner, scope, eglobal):
-            redes[i]["status"] = novo_estado
-        definir["redes"] = redes
+        if redes:
+            for i in _redes_do_ambito(partner, scope, eglobal):
+                redes[i]["status"] = novo_estado
+            definir["redes"] = redes
+        else:
+            # Agente independente: não há ligações onde pôr a suspensão, logo
+            # é a CONTA que se suspende. Reactivar devolve-o ao estado que
+            # tinha (convidado, se nunca definiu a palavra-passe).
+            definir["status"] = (
+                ESTADO_SUSPENSO if data.suspended
+                else (ESTADO_ACTIVO if partner.get("password_set_at") or partner.get("terms") else ESTADO_CONVIDADO)
+            )
         incremento = bool(data.suspended)
 
     operacao: dict[str, Any] = {"$set": definir}
@@ -638,7 +710,7 @@ async def run_list_partners(actor: dict) -> dict:
     eglobal = utilizador_e_global(actor)
     scope = None if eglobal else await resolve_tenant_scope(actor or {})
     docs = await db.partners.find({}, {"_id": 0, "password_hash": 0}).to_list(2000)
-    visiveis = [p for p in docs if eglobal or _redes_do_ambito(p, scope, False)]
+    visiveis = [p for p in docs if eglobal or _no_ambito_do_actor(p, scope)]
     visiveis.sort(key=lambda p: (p.get("name") or "").lower())
     return {"partners": [publico(p) for p in visiveis], "total": len(visiveis)}
 

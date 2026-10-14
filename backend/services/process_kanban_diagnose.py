@@ -10,14 +10,9 @@ import traceback
 from typing import Any
 
 from database import db
-from services.process_status import INACTIVE_STATUSES
+from services.workflow_phases import nomes_terminais_de_todas_as_redes
 
 WORKFLOW_REQUIRED_FIELDS = ["name", "id", "label", "color", "order"]
-# Fix: Normalize process status filters — reutiliza a constante central
-# (com todas as variações legadas singular/plural) em vez de uma cópia
-# local desactualizada.
-INACTIVE_STATUS_NAMES = INACTIVE_STATUSES
-
 
 async def check_workflow_statuses(report: dict[str, Any]) -> None:
     """Preenche report['checks']['workflow_statuses'] e blocking_issue se vazio."""
@@ -59,7 +54,8 @@ async def check_processes_counts(report: dict[str, Any]) -> None:
         )
         active_processes = await db.processes.count_documents({
             "is_deleted": {"$ne": True},
-            "status": {"$nin": INACTIVE_STATUS_NAMES},
+            # O motor (a união dos workflows) decide o que está fechado, não uma lista cravada.
+            "status": {"$nin": await nomes_terminais_de_todas_as_redes()},
         })
         report["checks"]["processes"] = {
             "total": total_processes,

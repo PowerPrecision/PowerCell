@@ -422,6 +422,6 @@ class TestALigacao:
 
     def test_o_indice_unico_por_processo_esta_declarado(self):
         fonte = (BACKEND / "services" / "db_indexes.py").read_text(encoding="utf-8")
-        bloco = fonte[fonte.index("origin_indexes"):]
+        bloco = fonte[fonte.index('"process_financial_origins"'):]
         assert "idx_origin_process" in bloco
         assert '"unique": True' in bloco.split("idx_origin_angariador")[0]

@@ -33,7 +33,8 @@ from services import db_indexes, portal_brute_force, portal_security
 from services.portal_attempts_ttl import COLECCOES_DE_TENTATIVAS, expire_at_do_registo
 
 AGORA = datetime(2026, 10, 11, 12, 0, 0, tzinfo=timezone.utc)
-CHAVE = "portal_verify:cli-inventado"
+CLIENTE = "cli-inventado"
+CHAVE = f"portal_verify:{CLIENTE}"
 
 
 def _indice_do_login() -> dict:
@@ -48,6 +49,11 @@ def _indice() -> dict:
     return achados[0]
 
 
+async def _falhar(bd):
+    """Uma falha do `verify`, no escritor REAL (o ponto único `portal_brute_force`)."""
+    await portal_brute_force.registar_falha(bd, portal_brute_force.AMBITO_DO_VERIFY, CLIENTE)
+
+
 @pytest.fixture
 def tentativas(fake_async_db):
     with patch.object(portal_security, "db", fake_async_db):
@@ -57,8 +63,8 @@ def tentativas(fake_async_db):
 # ════════════════════════════════════════════════════════════════════
 class TestOEscritorGravaUmaDataQueOTTLEntende:
     @pytest.mark.asyncio
-    async def test_expire_at_e_um_datetime_nativo_e_nao_um_texto(self, tentativas):
-        await portal_security._record_failed_attempt(CHAVE)
+    async def test_expire_at_e_um_datetime_nativo_e_nao_um_texto(self, tentativas, fake_async_db):
+        await _falhar(fake_async_db)
 
         doc = await tentativas.find_one({"_id": CHAVE})
         campo = _indice()["field"]                      # o campo vem do ÍNDICE
@@ -66,9 +72,9 @@ class TestOEscritorGravaUmaDataQueOTTLEntende:
         assert isinstance(doc["last_attempt_at"], str)  # o texto antigo fica como está
 
     @pytest.mark.asyncio
-    async def test_expira_30_minutos_depois_da_falha(self, tentativas):
+    async def test_expira_30_minutos_depois_da_falha(self, tentativas, fake_async_db):
         antes = datetime.now(timezone.utc)
-        await portal_security._record_failed_attempt(CHAVE)
+        await _falhar(fake_async_db)
         depois = datetime.now(timezone.utc)
 
         expira = (await tentativas.find_one({"_id": CHAVE}))["expire_at"]
@@ -76,24 +82,24 @@ class TestOEscritorGravaUmaDataQueOTTLEntende:
         assert antes + timedelta(minutes=30) <= expira <= depois + timedelta(minutes=30)
 
     @pytest.mark.asyncio
-    async def test_cada_nova_falha_desliza_o_prazo(self, tentativas):
+    async def test_cada_nova_falha_desliza_o_prazo(self, tentativas, fake_async_db):
         """Um ataque em curso não pode ver o contador voltar a zero a meio."""
         await tentativas.insert_one({
             "_id": CHAVE, "attempts": 1,
             "expire_at": datetime(2020, 1, 1, tzinfo=timezone.utc),
         })
-        await portal_security._record_failed_attempt(CHAVE)
+        await _falhar(fake_async_db)
 
         doc = await tentativas.find_one({"_id": CHAVE})
         assert doc["attempts"] == 2
         assert doc["expire_at"].replace(tzinfo=timezone.utc) > datetime.now(timezone.utc)
 
     @pytest.mark.asyncio
-    async def test_o_registo_sobrevive_ao_bloqueio_inteiro(self, tentativas):
+    async def test_o_registo_sobrevive_ao_bloqueio_inteiro(self, tentativas, fake_async_db):
         """Medido no escritor REAL, depois das cinco falhas: o registo (e com
         ele o bloqueio) vive para além de `locked_until`."""
         for _ in range(portal_security.MAX_VERIFY_ATTEMPTS):
-            await portal_security._record_failed_attempt(CHAVE)
+            await _falhar(fake_async_db)
 
         doc = await tentativas.find_one({"_id": CHAVE})
         bloqueado_ate = datetime.fromisoformat(doc["locked_until"])
@@ -105,12 +111,12 @@ class TestOEscritorGravaUmaDataQueOTTLEntende:
         assert portal_security.VERIFY_ATTEMPTS_TTL_MINUTES == 30
 
     @pytest.mark.asyncio
-    async def test_um_bloqueio_expirado_deixa_de_prender_o_cliente(self, tentativas):
+    async def test_um_bloqueio_expirado_deixa_de_prender_o_cliente(self, tentativas, fake_async_db):
         """Antes, `attempts >= 5` re-trancava o cliente a cada pedido, para sempre
         (o 429 vinha ANTES de qualquer credencial). Com o registo purgado pelo
         TTL, o pedido segue para a verificação normal."""
         for _ in range(portal_security.MAX_VERIFY_ATTEMPTS):
-            await portal_security._record_failed_attempt(CHAVE)
+            await _falhar(fake_async_db)
         await tentativas.delete_one({"_id": CHAVE})           # o que o TTL faz
 
         with patch.object(portal_security, "db") as bd:
@@ -370,4 +376,4 @@ class TestOLoginPorEmailTemOMesmoTTL:
         assert portal_brute_force.MINUTOS_DE_VIDA_DO_REGISTO > portal_brute_force.MINUTOS_DE_BLOQUEIO
 
     def test_a_data_sai_da_mesma_funcao_nas_duas_portas(self):
-        assert portal_security.expira_em is portal_brute_force.expira_em
+        assert not hasattr(portal_security, "expira_em"), "o `verify` já não escreve datas à mão: usa o ponto único"

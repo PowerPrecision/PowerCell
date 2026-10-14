@@ -654,6 +654,17 @@ EXTRA_SECTIONS = {
 }
 
 
+#: Secções que SÓ existem no documento global (D-12 fechada, Out 2026). O leitor dos limiares de SLA
+#: (`stats_sla._limiares`) lê SEMPRE a configuração `default`: aceitar uma escrita por empresa seria
+#: gravar um valor que nada lê — o primeiro administrador que os configurasse por empresa via-os
+#: ignorados em silêncio. Recusa-se alto (400). Se o negócio vier a pedir SLAs por empresa, faz-se o
+#: LEITOR por empresa e tira-se a secção daqui, nunca ao contrário.
+SECCOES_SO_GLOBAIS = frozenset({"dashboard_slas"})
+
+#: O que `company_id` quer dizer «a configuração global».
+VALORES_DE_EMPRESA_GLOBAL = frozenset({None, "", "default"})
+
+
 def mask_sensitive(obj, parent_key=""):
     """Mascara campos sensíveis de um dicionário de configuração.
 
@@ -722,6 +733,14 @@ async def run_update_config(
     """Actualizar uma secção da configuração."""
     if section not in CONFIG_FIELDS and section not in EXTRA_SECTIONS:
         raise HTTPException(status_code=400, detail=f"Secção inválida: {section}")
+    if section in SECCOES_SO_GLOBAIS and company_id not in VALORES_DE_EMPRESA_GLOBAL:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"A secção '{section}' é global (vale para todas as empresas) e não pode ser "
+                "gravada para uma empresa em concreto."
+            ),
+        )
 
     try:
         await update_config_section(section, data, company_id)
