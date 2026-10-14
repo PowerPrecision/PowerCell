@@ -29,6 +29,8 @@ from services.tenant_network import (
     resolve_tenant_stamp,
 )
 
+from services.assignment_network_guard import exigir_atribuidos_da_minha_rede
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,6 +42,9 @@ async def run_create_task(task_data: TaskCreate, current_user: dict):
     _block_parceiro(current_user)
     # Parceiros (freelancers) nunca recebem tarefas — antes de qualquer escrita.
     await exigir_responsaveis_atribuiveis(task_data.assigned_to, base=db)
+    # «Janela, não porta» (Lote 6): uma tarefa não se atribui a quem é de outra rede, nem num
+    # processo partilhado. O operador da Domus nunca atribui a um da Precision.
+    await exigir_atribuidos_da_minha_rede(current_user, normalizar_assigned_to(task_data.assigned_to), base=db)
     task_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
@@ -307,6 +312,7 @@ async def run_update_task(task_id: str, task_data: TaskUpdate, current_user: dic
         )
         # Só os que ENTRAM: uma tarefa antiga não pode ficar impossível de editar.
         await exigir_responsaveis_atribuiveis(diff.entraram, base=db)
+        await exigir_atribuidos_da_minha_rede(current_user, diff.entraram, base=db)
         link = "/tasks" if not task.get("process_id") else f"/process/{task['process_id']}"
 
         for user_id in diff.entraram:

@@ -184,7 +184,9 @@ async def _carregar_processo(process_id: str, user: dict, papel: str) -> dict:
 async def _utilizadores_do_ambito(user: dict, extra: Optional[dict] = None, limite: int = 300) -> list[dict]:
     from services.admin_users_scope import build_users_scope_query, empresas_do_ambito
 
-    ambito_query = await build_users_scope_query(await empresas_do_ambito(user))
+    # `vista=True`: o candidato a angariador é da EMPRESA que o Master tem seleccionada (Lote 6).
+    # Sem isto o Master via — e podia escolher — toda a gente do sistema.
+    ambito_query = await build_users_scope_query(await empresas_do_ambito(user, vista=True))
     condicoes = [{"is_active": {"$ne": False}}, ambito_query]
     if extra:
         condicoes.append(extra)

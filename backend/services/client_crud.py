@@ -40,6 +40,9 @@ from services.process_service import get_next_process_number
 from services.s3_document_root import pasta_para_gravar
 from services.s3_storage import s3_service
 from services.tenant_network import rede_de_omissao, resolve_tenant_stamp
+# No TOPO de propósito: importado à primeira chamada, dentro de um `patch("database.db")` de um teste, o
+# módulo ficava com o `db` do duplo para sempre (a armadilha da ordem de importação).
+from services.client_window import e_visitante_do_cliente, ids_dos_processos_visiveis
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
     sanitize_string, sanitize_url, log_sanitization_rejection,
@@ -56,6 +59,10 @@ from services.campos_limpaveis import (
     exigir_nome,
     limpar_espelhos_nos_processos,
 )
+
+class _SemAcessoAoPortal(Exception):
+    """Sinal interno: o visitante de um cliente partilhado não recebe o acesso ao Portal."""
+
 
 async def run_get_client(
     client_id: str,
@@ -79,6 +86,13 @@ async def run_get_client(
     
     # Combinar IDs (sem duplicados)
     all_process_ids = list(dict.fromkeys(process_ids_as_main + process_ids_as_second))
+
+    # «JANELA, NÃO PORTA» (Lote 6): quem chega a esta ficha por um processo PARTILHADO vê esse
+    # processo e mais nenhum. Tudo o que se deriva dos processos do cliente (a lista, a última
+    # actividade, o acesso ao Portal) lê-se só sobre os que a janela deixa ver.
+    all_process_ids = await ids_dos_processos_visiveis(user, all_process_ids, client_id=client_id)
+    visitante = await e_visitante_do_cliente(client, user)
+    client["process_ids"] = [pid for pid in (client.get("process_ids") or []) if pid in all_process_ids]
     
     processes = []
     if all_process_ids:
@@ -149,15 +163,24 @@ async def run_get_client(
                 _fe_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
                 if _fe_url:
                     active_magic_link = f"{_fe_url}/portal/{active_short_id}"
+        if visitante:
+            # O acesso do cliente ao Portal é do dono do cliente: com ele entrava-se em TUDO o
+            # que o cliente vê, não só no processo partilhado.
+            raise _SemAcessoAoPortal()
         client["portal_access"] = {
             "portal_access_code": portal_access_code,
             "short_id": active_short_id,
             "magic_link": active_magic_link,
             "has_active_token": active_short_id is not None,
         }
+    except _SemAcessoAoPortal:
+        client["portal_access"] = None
     except Exception as e:
         logger.warning(f"Erro ao buscar portal_access para cliente {client_id}: {e}")
         client["portal_access"] = None
+
+    if visitante:
+        client.pop("portal_access_code", None)
 
     # Desencriptar dados sensíveis
     client = decrypt_client_data(client)
@@ -558,7 +581,12 @@ async def run_update_client(
     )
     
     # === SYNC TO LINKED PROCESSES: Propagate name, email, phone, dados_pessoais ===
-    process_ids = client.get("process_ids", [])
+    # A edição só se propaga aos processos que a JANELA de quem edita deixa ver (Lote 6): um
+    # visitante de um processo partilhado não reescreve os outros processos do cliente.
+    process_ids_do_cliente = client.get("process_ids", [])
+    process_ids = await ids_dos_processos_visiveis(
+        user, process_ids_do_cliente, client_id=client_id,
+    ) if process_ids_do_cliente else []
     if process_ids:
         process_sync = {}
 
@@ -629,7 +657,9 @@ async def run_update_client(
     # cego (`nif_hash`), a cópia da raiz (`client_nif`) e os nomes alternativos.
     # Procura também por `client_id`: o `process_ids` da ficha nem sempre está
     # mantido e um processo que escapasse guardava o NIF antigo para sempre.
-    await limpar_espelhos_nos_processos(db, client_id, process_ids, pessoais_limpos)
+    await limpar_espelhos_nos_processos(
+        db, client_id, process_ids, pessoais_limpos, apenas_ids=process_ids,
+    )
 
     logger.info(f"Cliente {client_id} actualizado por {user.get('email')}")
     

@@ -50,6 +50,7 @@ from services.tenant_network import (
     TenantScope,
     redes_parceiras,
     resolve_tenant_scope,
+    resolve_vista_scope,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,39 @@ def redes_permitidas(
     return {r for r in alcance if r}
 
 
+async def redes_permitidas_do_ator(
+    ator: dict,
+    processo: Optional[dict] = None,
+) -> Optional[set[str]]:
+    """As redes que o ator pode atribuir, JÁ com a empresa que o Master escolheu (Lote 6).
+
+    «Janela, não porta»: um processo partilhado não faz do Master um atribuidor de toda a gente
+    que o processo alcança. Com a Domus seleccionada no cabeçalho, atribui-se Domus — nunca a
+    Precision, mesmo num processo partilhado. Sem empresa escolhida (vista «Sistema») vale o
+    que valia: o que o processo alcança.
+
+    * utilizador normal → as redes a que pertence (a vista não o toca);
+    * Master com empresa escolhida → a rede dessa empresa, e, se há processo, só se o processo a
+      alcança (dono ou convidada): escolher a Domus num processo que não é dela não a abre.
+    """
+    from services.role_scope import conta_e_master
+    from services.tenant_network import CAMPO_VISTA
+
+    scope = await resolve_tenant_scope(ator)
+    if not (conta_e_master(ator) and _texto((ator or {}).get(CAMPO_VISTA))):
+        return redes_permitidas(scope, processo)
+    vista = await resolve_vista_scope(ator)
+    if vista.sem_fronteira:  # empresa que não existe (cabeçalho velho): não estreita
+        return redes_permitidas(scope, processo)
+
+    escolhidas = {r for r in vista.network_ids if r}
+    if not scope.sem_fronteira:
+        escolhidas &= {r for r in scope.network_ids if r}
+    elif processo is not None:
+        escolhidas &= redes_permitidas(scope, processo) or set()
+    return escolhidas
+
+
 async def redes_do_atribuido(utilizador: dict) -> Optional[set[str]]:
     """As redes de quem vai ser atribuído. ``None`` = sem fronteira (Master)."""
     scope = await resolve_tenant_scope(utilizador)
@@ -122,27 +156,36 @@ async def exigir_atribuidos_da_minha_rede(
     *,
     processo: Optional[dict] = None,
     ja_atribuidos: Iterable[str] = (),
+    base=None,
 ) -> None:
     """Levanta 403 se algum atribuído NOVO for de fora das redes do ator.
+
+    `base` é a base de dados DO CHAMADOR (a referência ao proxy que o seu módulo tem): este
+    módulo faz o seu próprio `from database import db`, e um teste que substitua só a do
+    chamador deixava aqui falar com a base real — a armadilha da ordem de importação.
 
     `ja_atribuidos` são os que já estavam no processo (regra 1): não se
     revalidam. Ids inexistentes passam (regra 4) — quem escreve já os
     ignora.
     """
+    # Atribuir-se a si próprio nunca atravessa uma rede: quem actua está sempre na sua. Sem esta
+    # excepção, um utilizador cuja rede não se determina (UCR em falta) não conseguia criar uma
+    # tarefa para si — que é o valor por omissão — e a falha fechada punia a vítima do dado em falta.
+    proprio = _texto((ator or {}).get("id"))
     novos = [
         i for i in dict.fromkeys(_texto(i) for i in ids)
-        if i and i not in {_texto(j) for j in ja_atribuidos}
+        if i and i != proprio and i not in {_texto(j) for j in ja_atribuidos}
     ]
     if not novos:
         return
 
-    permitidas = redes_permitidas(await resolve_tenant_scope(ator), processo)
+    permitidas = await redes_permitidas_do_ator(ator, processo)
     if permitidas is None:
         return
 
     recusados: list[str] = []
     for uid in novos:
-        alvo = await db.users.find_one(
+        alvo = await (base if base is not None else db).users.find_one(
             {"id": uid},
             {"_id": 0, "id": 1, "role": 1, "company": 1, "active_company_id": 1},
         )
@@ -181,7 +224,7 @@ async def ids_atribuiveis(
     de duas redes e a interface devolve a lista inteira ao gravar; se o
     nome desaparecesse da lista, desaparecia da equipa sem ninguém o pedir.
     """
-    permitidas = redes_permitidas(await resolve_tenant_scope(ator), processo)
+    permitidas = await redes_permitidas_do_ator(ator, processo)
     if permitidas is None:
         return list(utilizadores)
     mantidos = {_texto(i) for i in ja_atribuidos if _texto(i)}
@@ -242,5 +285,6 @@ __all__ = [
     "pode_atribuir",
     "redes_do_atribuido",
     "redes_permitidas",
+    "redes_permitidas_do_ator",
     "utilizadores_atribuiveis_ao_processo",
 ]

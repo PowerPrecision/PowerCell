@@ -204,6 +204,7 @@ async def limpar_espelhos_nos_processos(
     campos: Iterable[str],
     *,
     excluir: Optional[Iterable[str]] = None,
+    apenas_ids: Optional[Iterable[str]] = None,
 ) -> int:
     """Apaga as cópias dos campos pessoais limpos em TODOS os processos do cliente.
 
@@ -228,6 +229,9 @@ async def limpar_espelhos_nos_processos(
     if not ramos:
         return 0
     ignorados = set(excluir or ())
+    # `apenas_ids` é a JANELA de quem edita (Lote 6): quem só vê um processo partilhado não
+    # apaga as cópias dos outros processos do cliente.
+    permitidos = None if apenas_ids is None else set(apenas_ids)
     escritos = 0
     cursor = db.processes.find(
         {"$or": ramos} if len(ramos) > 1 else ramos[0],
@@ -235,6 +239,8 @@ async def limpar_espelhos_nos_processos(
     )
     async for doc in cursor:
         if doc.get("id") in ignorados:
+            continue
+        if permitidos is not None and doc.get("id") not in permitidos:
             continue
         sets = espelhos_no_processo(doc, campos)
         if sets:

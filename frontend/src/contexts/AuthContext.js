@@ -41,6 +41,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { hasRole } from "../utils/roleUtils";
 import { collectUserRoles, getUserCompanyRecords, resolveCompanyIdFromUser } from "../utils/userProfiles";
 import { papelEfectivoDaSessao } from "../utils/papelEfectivo";
+import { eFalhaDeLigacao } from "../utils/falhaDeLigacao";
+import { toast } from "sonner";
 // PACOTE DI — helper centralizado para rotas públicas (/portal, /rgpd, /upload, /download)
 import { isPublicRoute } from "../utils/publicRoutes";
 
@@ -483,12 +485,17 @@ export function AuthProvider({ children }) {
   }, [applyUserContext, aoTrocarDeIdentidade]);
 
   // Pacote FH / C6: persistir UCR activo em /auth/active-company (user+company+role).
+  //
+  // Devolve `true` quando o servidor está INALCANÇÁVEL (sem resposta, ou 502/503/504). Um 4xx
+  // continua a ser só um aviso: o cliente já tem a empresa nos cabeçalhos.
   const persistActiveCompany = useCallback(async (companyId, role) => {
-    if (!companyId || !role) return;
+    if (!companyId || !role) return false;
     try {
       await api.post("/auth/active-company", { company_id: companyId, role });
+      return false;
     } catch (error) {
       console.warn("[AuthContext] Erro ao definir empresa/cargo ativo no backend:", error);
+      return eFalhaDeLigacao(error);
     }
   }, []);
 
@@ -570,6 +577,13 @@ export function AuthProvider({ children }) {
     const resolvedId = resolveCompanyIdFromUser(user, companyId, activeRole || user?.role)
       || companyId;
 
+    // Lote 6, ponto 5 — o que havia ANTES, para voltar atrás se o servidor não responder.
+    const anterior = {
+      local: localStorage.getItem("active_company_id"),
+      sessao: sessionStorage.getItem("activeCompanyId"),
+      id: activeCompanyId,
+    };
+
     // PACOTE AR: guardar em localStorage (persiste entre sessões) E sessionStorage
     // (retrocompatibilidade). O interceptor api.js lê de localStorage primeiro.
     localStorage.setItem("active_company_id", resolvedId);
@@ -594,7 +608,35 @@ export function AuthProvider({ children }) {
     // forma — sincronizar antes não custa nada e fecha a janela.
     syncAuthContextHeaders({ role: role || null, companyId: resolvedId });
 
-    await persistActiveCompany(resolvedId, role);
+    const servidorInalcancavel = await persistActiveCompany(resolvedId, role);
+
+    // Lote 6, ponto 5 — `ERR_CONNECTION_CLOSED` ao mudar de empresa.
+    //
+    // A troca termina num `reload()`. Se o servidor não responde (o pedido acima é a sonda),
+    // recarregar leva o browser à sua página de erro e a aplicação desaparece. Em vez disso
+    // desfaz-se a troca por inteiro — storage, estado, cabeçalhos e tema — e diz-se porquê:
+    // ficar a meio (cabeçalhos da empresa nova sobre dados da antiga, sem reload que os limpe)
+    // é a fuga que o reload existe para evitar.
+    if (servidorInalcancavel) {
+      for (const [armazem, chave, valor] of [
+        [localStorage, "active_company_id", anterior.local],
+        [sessionStorage, "activeCompanyId", anterior.sessao],
+      ]) {
+        if (valor) armazem.setItem(chave, valor);
+        else armazem.removeItem(chave);
+      }
+      setActiveCompanyId(anterior.id);
+      syncAuthContextHeaders({
+        role: activeRole || user?.role || null,
+        companyId: anterior.id || anterior.local || null,
+      });
+      const anteriorRegisto = companies.find((c) => c.company_id === anterior.id);
+      applyBrandTheme(anteriorRegisto?.company_name || user?.company);
+      toast.error(
+        "Não foi possível mudar de empresa: o servidor não respondeu. A empresa activa mantém-se; tente novamente dentro de instantes.",
+      );
+      return false;
+    }
 
     // Lote 6, ponto 4 — um `company_id` no URL sobrevive ao reload.
     //
@@ -618,7 +660,8 @@ export function AuthProvider({ children }) {
     // de componentes, etc.) e evitar fugas de dados da empresa anterior na UI.
     // É a forma mais segura num CRM multi-empresa.
     window.location.reload();
-  }, [user, activeRole, persistActiveCompany]);
+    return true;
+  }, [user, activeRole, activeCompanyId, persistActiveCompany]);
 
   // Refresh user data from /auth/me (e.g. after email config save)
   const refreshUser = useCallback(async () => {

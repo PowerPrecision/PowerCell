@@ -1,15 +1,16 @@
 /**
- * TransferirClienteDialog — «Alterar Empresa» de um cliente (só Master).
+ * TransferirClienteDialog — «Alterar Empresa» (só Master), a mover PROCESSOS do cliente.
  *
- * Um cliente registado na empresa errada não tinha como ser movido. Esta acção muda o carimbo
- * (empresa e rede) do cliente e dos processos dele — e NÃO mexe no S3: os ficheiros ficam
- * onde estão, só muda quem os vê. O SERVIDOR exige a password actual e a conta Master; este
- * diálogo recolhe a empresa de destino e a password (`ConfirmarComPasswordDialog`).
+ * Reescrito no Lote 6. A regra de negócio: um cliente pode pertencer a várias empresas, e o que
+ * transita de uma rede para a outra quando a triagem se enganou é o PROCESSO. O diálogo lista os
+ * processos do cliente, deixa escolher quais mover e para que empresa; a ficha do cliente NÃO muda
+ * e os ficheiros NÃO são movidos no armazenamento. O SERVIDOR exige a password actual e a conta
+ * Master; este diálogo recolhe processos, destino e password (`ConfirmarComPasswordDialog`).
  *
  * @param {boolean}  open
  * @param {function} onOpenChange
  * @param {string}   clientId
- * @param {string}   [empresaActual]   nome da empresa onde o cliente está (não é destino)
+ * @param {string}   [empresaActual]   nome da empresa da ficha do cliente (só informativo)
  * @param {function} [onSucesso]       chamada com a resposta do servidor
  */
 import { useEffect, useState } from "react";
@@ -21,14 +22,21 @@ import { getAllCompanies, previewTransferClientCompany, transferClientCompany } 
 import { lerErroDeConfirmacao } from "../../utils/confirmarComPassword";
 
 const TEXTOS_DE_ERRO = {
-  naoEncontrado: "O cliente ou a empresa de destino já não existe.",
-  recusado: "Não foi possível transferir o cliente para esta empresa.",
+  naoEncontrado: "O cliente, o processo ou a empresa de destino já não existe.",
+  recusado: "Não foi possível transferir os processos para esta empresa.",
 };
 
-const MENSAGEM_BLOQUEADO =
-  "O cliente é titular de processos activos noutra empresa. Resolva-os antes de o transferir.";
-
 const lerErro = (err) => lerErroDeConfirmacao(err, TEXTOS_DE_ERRO);
+
+const rejeitar = (detail) => Promise.reject({ response: { status: 400, data: { detail } } });
+
+function etiqueta(p) {
+  const numero = p?.process_number ? `#${p.process_number}` : p?.id;
+  const partes = [numero];
+  if (p?.company_name) partes.push(p.company_name);
+  if (p?.status) partes.push(p.status);
+  return partes.join(" · ");
+}
 
 export default function TransferirClienteDialog({
   open,
@@ -41,38 +49,55 @@ export default function TransferirClienteDialog({
   const [destino, setDestino] = useState("");
   const [aCarregar, setACarregar] = useState(false);
   const [falhaAoCarregar, setFalhaAoCarregar] = useState(false);
-  // O que a transferência faria para o destino escolhido (processos a mover / mantidos / que impedem).
-  const [previa, setPrevia] = useState(null);
-  const [aCalcularPrevia, setACalcularPrevia] = useState(false);
-
-  useEffect(() => {
-    if (!destino || !open) {
-      setPrevia(null);
-      return undefined;
-    }
-    let cancelado = false;
-    setACalcularPrevia(true);
-    previewTransferClientCompany(clientId, destino)
-      .then((res) => {
-        if (!cancelado) setPrevia(res?.data ?? null);
-      })
-      .catch(() => {
-        // Sem prévia não se bloqueia aqui: o servidor recusa o que não puder fazer.
-        if (!cancelado) setPrevia(null);
-      })
-      .finally(() => {
-        if (!cancelado) setACalcularPrevia(false);
-      });
-    return () => {
-      cancelado = true;
-    };
-  }, [destino, open, clientId]);
+  // Os processos do cliente (com, dado um destino, quais já lá estão).
+  const [processos, setProcessos] = useState([]);
+  const [escolhidos, setEscolhidos] = useState([]);
+  const [aCarregarProcessos, setACarregarProcessos] = useState(false);
+  const [falhaNosProcessos, setFalhaNosProcessos] = useState(false);
 
   useEffect(() => {
     if (!open) {
       setDestino("");
+      setProcessos([]);
+      setEscolhidos([]);
+      setFalhaNosProcessos(false);
       return undefined;
     }
+    let cancelado = false;
+    setACarregarProcessos(true);
+    setFalhaNosProcessos(false);
+    previewTransferClientCompany(clientId, destino || undefined)
+      .then((res) => {
+        if (cancelado) return;
+        const lista = Array.isArray(res?.data?.processos) ? res.data.processos : [];
+        setProcessos(lista);
+        // Só sobrevive à escolha o que ainda se pode mover (o que já está no destino sai).
+        setEscolhidos((actuais) => {
+          const movíveis = new Set(lista.filter((p) => !p.ja_no_destino).map((p) => p.id));
+          const mantidos = actuais.filter((id) => movíveis.has(id));
+          // Um só processo: já vem escolhido (não há mais nada a decidir).
+          return mantidos.length === 0 && lista.length === 1 && !lista[0].ja_no_destino
+            ? [lista[0].id]
+            : mantidos;
+        });
+      })
+      .catch(() => {
+        // Sem a lista não há o que escolher: diz-se, em vez de um diálogo que parece vazio.
+        if (!cancelado) {
+          setProcessos([]);
+          setFalhaNosProcessos(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelado) setACarregarProcessos(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [open, clientId, destino]);
+
+  useEffect(() => {
+    if (!open) return undefined;
     let cancelado = false;
     setACarregar(true);
     setFalhaAoCarregar(false);
@@ -93,35 +118,34 @@ export default function TransferirClienteDialog({
     };
   }, [open]);
 
-  const possiveis = empresas.filter((e) => e?.id && e.name !== empresaActual);
+  const alternar = (id) =>
+    setEscolhidos((actuais) => (actuais.includes(id) ? actuais.filter((x) => x !== id) : [...actuais, id]));
+
+  const possiveis = empresas.filter((e) => e?.id);
   const idDoCampo = "transferir-cliente-empresa";
 
   return (
     <ConfirmarComPasswordDialog
       open={open}
       onOpenChange={onOpenChange}
-      titulo="Alterar a empresa do cliente"
-      rotuloConfirmar="Transferir cliente"
+      titulo="Alterar a empresa de processos do cliente"
+      rotuloConfirmar="Transferir processos"
       Icone={ArrowRightLeft}
       testIdBase="transferir-cliente"
-      confirmarDesactivado={Boolean(previa?.bloqueado)}
+      confirmarDesactivado={escolhidos.length === 0}
       lerErro={lerErro}
       onConfirmar={(password) => {
-        if (previa?.bloqueado) {
-          return Promise.reject({ response: { status: 409, data: { detail: MENSAGEM_BLOQUEADO } } });
-        }
-        if (!destino) {
-          return Promise.reject({ response: { status: 400, data: { detail: "Escolha a empresa de destino." } } });
-        }
-        return transferClientCompany(clientId, destino, password);
+        if (!destino) return rejeitar("Escolha a empresa de destino.");
+        if (escolhidos.length === 0) return rejeitar("Escolha pelo menos um processo a transferir.");
+        return transferClientCompany(clientId, destino, escolhidos, password);
       }}
       onSucesso={onSucesso}
       descricao={
         <>
           <p>
-            O cliente{empresaActual ? <> (hoje em <strong>{empresaActual}</strong>)</> : null} e os processos
-            de que é titular passam a pertencer à empresa escolhida — e deixam de ser vistos pela
-            empresa de origem.
+            Escolha os <strong>processos</strong> que passam para outra empresa (por exemplo, quando a
+            triagem se enganou). O cliente{empresaActual ? <> (hoje em <strong>{empresaActual}</strong>)</> : null}{" "}
+            <strong>não muda</strong>: pode ter processos em várias empresas.
           </p>
           <p>
             Os ficheiros <strong>não são movidos</strong> no armazenamento: ficam na mesma pasta.
@@ -143,50 +167,76 @@ export default function TransferirClienteDialog({
                 </option>
               ))}
             </select>
-            {destino && aCalcularPrevia && (
-              <p className="text-xs text-muted-foreground" data-testid="transferir-cliente-previa-a-carregar">
-                A calcular o que será movido…
-              </p>
-            )}
-            {previa && !aCalcularPrevia && <PreviaDaTransferencia previa={previa} />}
             {falhaAoCarregar && (
               <p role="alert" className="text-xs text-destructive">
                 Não foi possível carregar as empresas. Feche e volte a abrir.
               </p>
             )}
           </div>
+          <ListaDeProcessos
+            processos={processos}
+            escolhidos={escolhidos}
+            onAlternar={alternar}
+            aCarregar={aCarregarProcessos}
+            falhou={falhaNosProcessos}
+          />
         </>
       }
     />
   );
 }
 
-
-function etiqueta(p) {
-  const numero = p?.process_number ? `#${p.process_number}` : p?.id;
-  return `${numero}${p?.company_name ? ` · ${p.company_name}` : ""}`;
-}
-
-/** O que vai acontecer aos processos do cliente — dito antes de pedir a password. */
-function PreviaDaTransferencia({ previa }) {
-  const impedem = previa.processos_que_impedem || [];
-  const mantidos = previa.processos_mantidos || [];
-  return (
-    <div className="space-y-1 pt-1 text-xs" data-testid="transferir-cliente-previa">
-      <p>
-        <strong>{previa.processos_a_mover}</strong> processo(s) acompanham o cliente.
+/** Os processos do cliente, um a um, com a escolha de quais mover. */
+function ListaDeProcessos({ processos, escolhidos, onAlternar, aCarregar, falhou }) {
+  if (falhou) {
+    return (
+      <p role="alert" className="pt-2 text-xs text-destructive" data-testid="transferir-cliente-processos-falhou">
+        Não foi possível carregar os processos do cliente. Feche e volte a abrir.
       </p>
-      {mantidos.length > 0 && (
-        <p className="text-muted-foreground" data-testid="transferir-cliente-previa-mantidos">
-          Ficam na empresa onde estão (já terminados): {mantidos.map(etiqueta).join("; ")}.
-        </p>
-      )}
-      {impedem.length > 0 && (
-        <p role="alert" className="text-destructive" data-testid="transferir-cliente-previa-bloqueio">
-          Não é possível transferir: o cliente é titular de processo(s) activo(s) noutra empresa —{" "}
-          {impedem.map(etiqueta).join("; ")}. Resolva-os primeiro.
-        </p>
-      )}
-    </div>
+    );
+  }
+  if (aCarregar && processos.length === 0) {
+    return (
+      <p className="pt-2 text-xs text-muted-foreground" data-testid="transferir-cliente-processos-a-carregar">
+        A carregar os processos…
+      </p>
+    );
+  }
+  if (processos.length === 0) {
+    return (
+      <p className="pt-2 text-xs text-muted-foreground" data-testid="transferir-cliente-sem-processos">
+        Este cliente não tem processos para transferir.
+      </p>
+    );
+  }
+  return (
+    <fieldset className="space-y-1 pt-2" data-testid="transferir-cliente-processos">
+      <legend className="text-sm font-medium">Processos a transferir</legend>
+      {processos.map((p) => {
+        const idDoProcesso = `transferir-processo-${p.id}`;
+        return (
+          <div key={p.id} className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              id={idDoProcesso}
+              className="mt-1"
+              checked={escolhidos.includes(p.id)}
+              disabled={Boolean(p.ja_no_destino)}
+              onChange={() => onAlternar(p.id)}
+            />
+            <label htmlFor={idDoProcesso} className={p.ja_no_destino ? "text-muted-foreground" : undefined}>
+              {etiqueta(p)}
+              {p.terminado ? <span className="text-xs text-muted-foreground"> (terminado)</span> : null}
+              {p.ja_no_destino ? (
+                <span className="text-xs" data-testid={`transferir-processo-ja-no-destino-${p.id}`}>
+                  {" "}
+                  — já pertence à empresa escolhida
+                </span>
+              ) : null}
+            </label>
+          </div>
+        );
+      })}
+    </fieldset>
   );
 }

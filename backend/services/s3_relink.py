@@ -176,6 +176,11 @@ async def _registar_na_auditoria(
         )
 
 
+#: Nome público para quem regista o mesmo rasto fora desta ferramenta (o botão «Forçar
+#: criação de pasta»). O privado fica: os testes patcham-no pelo nome.
+registar_na_auditoria = _registar_na_auditoria
+
+
 async def run_set_s3_mapping(
     *,
     tipo: str,

@@ -710,6 +710,12 @@ EXCEPCOES_ESCRITAS = {
         "fronteira do calendário vem do `carregar_contexto_de_acesso`, "
         "que já usa a condição de processos"
     ),
+    "client_list_search": (
+        "(Lote 6, «janela, não porta») as linhas de «Clientes Registados» saem dos processos, "
+        "mas a lista é de CLIENTES: um processo partilhado não pode trazer a ficha — com os "
+        "dados pessoais — de um cliente de outra rede. Por isso usa a condição genérica "
+        "de propósito; o processo partilhado continua a ver-se na lista de processos"
+    ),
     "lead_list": (
         "consulta `db.processes` só para resolver o nome do cliente de "
         "uma lead; a fronteira das leads é a condição genérica, porque "

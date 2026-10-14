@@ -29,6 +29,7 @@
 
 import { useState, useEffect } from "react";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { mensagemDeFalha } from "../utils/falhaDeLigacao";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -123,6 +124,9 @@ const EmailConfigForm = ({
   const [testResult, setTestResult] = useState(null);
   const [sendingTest, setSendingTest] = useState(false);
   const [sendTestResult, setSendTestResult] = useState(null);
+  // A leitura da configuração falhou (servidor/rede): diz-se, em vez de um formulário vazio que
+  // convida a escrever por cima de uma configuração que existe.
+  const [erroDeLeitura, setErroDeLeitura] = useState("");
   const [googleOAuthConnecting, setGoogleOAuthConnecting] = useState(false);
   const [googleOAuthConnected, setGoogleOAuthConnected] = useState(false);
   // "user" | "company" | "system" | "shared_role" | "none"
@@ -196,8 +200,9 @@ const EmailConfigForm = ({
     });
     setHasPassword(false);
     setConfigSource("none");
+    setErroDeLeitura("");
     try {
-      const response = await api.get(getConfigUrl(), companyRequestConfig());
+      const response = await api.get(getConfigUrl(), { ...companyRequestConfig(), skipErrorToast: true });
       const config = response.data;
       if (createAdditional) {
         setConfigSource(config?.config_source || "none");
@@ -258,7 +263,8 @@ const EmailConfigForm = ({
         setHasPassword(false);
         setWebmailConfigured(false);
       }
-    } catch {
+    } catch (erro) {
+      setErroDeLeitura(mensagemDeFalha(erro, "Não foi possível carregar a configuração de email."));
       setConfigSource("none");
       setWebmailConfigured(false);
       setEmailConfig({
@@ -359,14 +365,13 @@ const EmailConfigForm = ({
     setSendingTest(true);
     setSendTestResult(null);
     try {
-      const response = await api.post(sendTestUrl(), null, companyRequestConfig());
+      // `skipErrorToast`: o aviso é este (um só). Um 502 do proxy ou uma ligação cortada dizem-se
+      // como tal — não mandam rever as credenciais, que podem estar certas.
+      const response = await api.post(sendTestUrl(), null, { ...companyRequestConfig(), skipErrorToast: true });
       setSendTestResult({ success: true, ...response.data });
       toast.success(response.data?.message || "Email de teste enviado");
     } catch (error) {
-      const detail = extractErrorMessage(
-        error.response?.data?.detail,
-        "Não foi possível enviar o email de teste",
-      );
+      const detail = mensagemDeFalha(error, "Não foi possível enviar o email de teste");
       setSendTestResult({ success: false, error: detail });
       toast.error(detail);
     } finally {
@@ -409,7 +414,7 @@ const EmailConfigForm = ({
       }
 
       // Now test with the just-saved stored credentials
-      const response = await api.post(testConfigUrl(), null, companyRequestConfig());
+      const response = await api.post(testConfigUrl(), null, { ...companyRequestConfig(), skipErrorToast: true });
       const result = response.data;
       setTestResult(result);
 
@@ -421,7 +426,7 @@ const EmailConfigForm = ({
         toast.error(`Erro na ligação: ${result.error || "Desconhecido"}`);
       }
     } catch (error) {
-      const msg = extractErrorMessage(error.response?.data?.detail, "Erro ao testar a ligação");
+      const msg = mensagemDeFalha(error, "Erro ao testar a ligação");
       toast.error(msg);
       setTestResult({ success: false, error: msg });
     } finally {
@@ -496,6 +501,19 @@ const EmailConfigForm = ({
 
   return (
     <div className="space-y-6">
+      {erroDeLeitura && (
+        <div
+          role="alert"
+          data-testid="email-config-erro-de-leitura"
+          className="flex items-start justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+        >
+          <span>{erroDeLeitura} A configuração guardada não foi alterada.</span>
+          <Button variant="outline" size="sm" onClick={loadConfig} className="shrink-0 gap-1.5">
+            <RefreshCw className="h-3.5 w-3.5" />
+            Tentar novamente
+          </Button>
+        </div>
+      )}
       {/* Company / profile context — mailbox is per company, not per role */}
       {isSelf && ((companyId && companyId !== "default") || effectiveCompanyId || hasMultipleRoles) && (
         <div className="bg-muted/50 rounded-lg p-3 mb-4">

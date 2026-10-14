@@ -92,6 +92,7 @@ import {
   separarPorTipoAceite,
 } from "@/utils/dropzone";
 import { resumirAnaliseEmLote } from "../utils/analiseEmLoteFeedback";
+import ForcarPastaS3 from "./documents/ForcarPastaS3";
 import AvisoEmIndexacao from "./documents/AvisoEmIndexacao";
 import { quantosEmIndexacao, resumoDosEnvios } from "../utils/desvioInteligente";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
@@ -258,6 +259,8 @@ const S3FileManager = ({
   const [stats, setStats] = useState(null);
   // Ficheiros à espera da Indexação, para quem não vê a pasta `Index`.
   const [emIndexacao, setEmIndexacao] = useState(0);
+  // `base_path` a `null` (e não ausente) = o servidor procurou e não há NADA no armazenamento.
+  const [semPasta, setSemPasta] = useState(false);
   const [loading, setLoading] = useState(true);
   // PACOTE 11 (Eixo 3 — Privacy Warning localizado): quando o utilizador
   // não tem permissão para ver os documentos do processo (403 do backend,
@@ -466,6 +469,7 @@ const S3FileManager = ({
       setFiles(data.files || {});
       setStats(data.stats || null);
       setEmIndexacao(quantosEmIndexacao(data));
+      setSemPasta(data?.base_path === null);
       setPermissionDenied(false);
     } catch (error) {
       const status = error?.response?.status;
@@ -475,6 +479,7 @@ const S3FileManager = ({
         // O `skipErrorToast` da função de API é o que impede o interceptor
         // de sobrepor aqui o toast genérico "Acesso Negado".
         setPermissionDenied(true);
+        setSemPasta(false);
         setFiles({});
         setStats(null);
         setEmIndexacao(0);
@@ -2098,6 +2103,9 @@ const S3FileManager = ({
     <>
       <Card data-testid="s3-file-manager" className="h-full">
         {!canSeeIndexCategory && <AvisoEmIndexacao total={emIndexacao} />}
+        {semPasta && !readOnly && !loading && (
+          <ForcarPastaS3 id={processId} onFeito={fetchFiles} />
+        )}
         {/* Mapeamento S3 (apenas para admin) */}
         {canMapS3 && (
           <div className="border-b">

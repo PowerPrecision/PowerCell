@@ -295,9 +295,16 @@ class TestADropdownDoMasterSegueAEmpresaEscolhida:
         ids = await self._lista(equipa, _sessao(MASTER, efectivo="admin", vista="cmp-power"))
         assert {"u-ana", "u-carla"} <= ids
 
-    async def test_com_um_processo_manda_o_alcance_do_processo_e_nao_a_vista(self, equipa):
-        # O servidor aceita ao gravar o que o processo alcança: a lista tem de coincidir.
+    async def test_com_um_processo_a_vista_e_o_alcance_do_processo_JUNTAM_SE(self, equipa):
+        # INVERTIDO no Lote 6 («janela, não porta»). Antes mandava só o alcance do processo: com a
+        # Domus escolhida, num processo da Power, a dropdown mostrava a equipa da POWER. A regra do
+        # produto é que o Master atribui à empresa que tem escolhida — nunca à de outra rede — e
+        # escolher uma empresa que o processo não alcança não a abre. Resultado: nada a atribuir.
         ids = await self._lista(equipa, _sessao(MASTER, vista="cmp-domus"), process_id="p-power")
+        assert not ids & {"u-ana", "u-carla", "u-bruno"}, f"atribuível fora da regra: {sorted(ids)}"
+
+    async def test_contraprova_escolhida_a_empresa_do_processo_vê_se_a_equipa_dela(self, equipa):
+        ids = await self._lista(equipa, _sessao(MASTER, vista="cmp-power"), process_id="p-power")
         assert "u-bruno" not in ids
         assert {"u-ana", "u-carla"} <= ids
 

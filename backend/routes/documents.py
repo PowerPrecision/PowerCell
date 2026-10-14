@@ -160,6 +160,7 @@ from services.document_expiry_crud import (
 )
 from services.document_misc import (
     run_check_file_upload,
+    base_path_do_cliente_sem_processo,
     run_initialize_folders,
     run_get_download_url,
     run_get_download_url_by_path,
@@ -219,7 +220,11 @@ async def list_client_files(
         # Cliente sem processo OU não encontrado — distinguir
         client = await db.clients.find_one({"id": client_id})
         if client:
-            return {"files": {}, "categories": []}
+            return {
+                "files": {},
+                "categories": [],
+                "base_path": await base_path_do_cliente_sem_processo(client),
+            }
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
 
     # ── Guarda de visibilidade (pré-indexação) ──
@@ -518,7 +523,7 @@ async def check_file_upload(
 @router.post("/client/{client_id}/init-folders", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def initialize_folders(client_id: str, user: dict = Depends(get_current_user)):
     """Cria a estrutura de pastas inicial no S3 (se não existir)."""
-    return await run_initialize_folders(client_id)
+    return await run_initialize_folders(client_id, user=user)
 
 
 

@@ -1,58 +1,45 @@
 """
 ====================================================================
-ALTERAR A EMPRESA DE UM CLIENTE (só Master) — Lote 2, Out 2026
+ALTERAR A EMPRESA DE UM OU MAIS PROCESSOS DE UM CLIENTE (só Master) — Lote 6, Out 2026
 ====================================================================
-Um cliente registado na empresa errada não tinha como ser movido: o carimbo de
-empresa/rede é permanente por desenho (é a fronteira de dados). Esta acção é a
-válvula, e é por isso estreita.
+(Reescrito no Lote 6. Até aí a acção movia o CLIENTE inteiro — Lote 2 —, e a regra de negócio
+é outra: **um cliente pode pertencer a várias empresas; o que transita de uma rede para a
+outra, quando a triagem se enganou, é o PROCESSO.**)
 
 O QUE FAZ
-  * muda o carimbo (`company_id`, `company_name`, `network_id`) do CLIENTE e dos
-    PROCESSOS de que ele é o titular principal;
-  * leva atrás o que lista por esse carimbo e diz respeito a esses processos —
-    tarefas, prazos e visitas. Sem isto o nome do cliente ficaria no calendário e
-    nas tarefas da empresa antiga (a mensagem de uma tarefa leva o nome do
-    cliente), ou desapareceria das da nova;
-  * a empresa de destino deixa de ser «convidada» dos processos que passa a ter
-    como dona (a dona nunca está na lista de convidadas).
+  * recebe a lista EXPLÍCITA de processos a mover (`process_ids`, pelo menos um) e a empresa de
+    destino, e muda o carimbo (`company_id`, `company_name`, `network_id`) desses processos;
+  * leva atrás o que lista por esse carimbo e diz respeito a eles — tarefas, prazos e visitas.
+    Sem isto o nome do cliente ficava no calendário e nas tarefas da empresa antiga (a mensagem
+    de uma tarefa leva o nome do cliente), ou desaparecia das da nova;
+  * a empresa de destino deixa de ser «convidada» dos processos que passa a ter como dona (a
+    dona nunca está na lista de convidadas).
 
 O QUE NUNCA FAZ
-  * **não mexe no S3.** O `s3_folder` gravado fica tal e qual: o ficheiro não muda
-    de sítio, só muda quem o vê. Mover objectos foi o que produziu as 205 ligações
-    partidas do Épico 10 — e a posse de um ficheiro deriva do processo/cliente,
-    que é o que aqui se carimba;
-  * não toca nos processos em que o cliente é só 2.º titular: esses são de outro
-    titular (e de outra ficha) e movê-los arrastava o cliente errado;
-  * não apaga a ficha de ninguém nem as partilhas B2B a outras redes (o dono é que
-    muda; quem já via o processo continua a ver).
-
-PROCESSOS EM OUTRA EMPRESA («cruzados», Lote 4)
-  Um cliente pode ser titular de um processo carimbado noutra empresa que não a dele
-  (Power ↔ Precision partilham a rede; o parceiro abre processos; cargas antigas). Mover
-  «tudo o que é dele» arrastava para o destino um processo que pertence a OUTRA empresa e
-  corrompia o histórico dela (carimbo, tarefas, prazos e visitas). Por isso:
-    * só se movem os processos que SEGUEM o cliente — carimbados na empresa de origem do
-      cliente ou ainda por carimbar;
-    * um processo cruzado **activo** (fase não terminal no workflow da rede dona) **impede**
-      a transferência (409): arrastá-lo é o defeito, e deixá-lo no sítio deixava a ficha
-      do cliente no destino a apontar para um processo que a empresa nova não vê;
-    * um cruzado já **terminado** fica onde está, sem bloquear — é histórico — e a resposta
-      di-lo (`processos_mantidos`).
-  A alternativa (o mesmo NIF pertencer a várias empresas) foi recusada: a identidade do
-  cliente é POR REDE (D-38: a mesma pessoa em duas redes são duas fichas) e mudá-lo
-  desfazia a unicidade que o registo público e a criação garantem.
-  O preview (`GET …/transfer-company/preview`) devolve esta classificação sem escrever nada,
-  para o ecrã mostrar o que vai acontecer ANTES de pedir a password.
+  * **não toca na ficha do cliente.** Ela fica onde está, com o carimbo que tinha: o cliente
+    continua a ser da empresa de origem e passa a ter processos noutra. Quem recebe o processo
+    vê-o inteiro e vê a ficha pela JANELA (`client_window`: só os processos da sua rede, nunca
+    os outros nem o acesso do cliente ao Portal). A identidade do cliente continua a ser POR
+    REDE (D-38) — o mesmo NIF numa segunda empresa é uma segunda ficha, que a empresa de destino
+    cria quando quiser; nada se funde nem se duplica aqui;
+  * **não mexe no S3.** O `s3_folder` gravado fica tal e qual: o ficheiro não muda de sítio,
+    só muda quem o vê. Mover objectos foi o que produziu as 205 ligações partidas do Épico 10;
+  * não apaga as partilhas B2B a outras redes (o dono é que muda; quem já via o processo
+    continua a ver).
 
 REGRAS
-  * só a CONTA Master (a rota exige-o) e com a password ACTUAL confirmada, como as
-    outras acções que mexem na fronteira (`reauth_password`) — ANTES de qualquer
-    escrita;
-  * a empresa de destino tem de existir; um destino que não dá carimbo completo
-    (empresa + rede) é recusado: meio carimbo é pior do que nenhum;
-  * o mesmo destino é uma resposta e não um erro (idempotente, nada se escreve);
-  * deixa rasto no trilho de auditoria (de onde, para onde, quantos processos) e
-    no histórico de cada processo (honra o interruptor).
+  * só a CONTA Master (a rota exige-o) e com a password ACTUAL confirmada, como as outras
+    acções que mexem na fronteira (`reauth_password`) — ANTES de qualquer escrita;
+  * os processos pedidos têm de ser do cliente (titular principal) e não estar eliminados; um
+    id que não é dele recusa o pedido INTEIRO (400): mover «o que sobrar» seria adivinhar;
+  * a empresa de destino tem de existir; um destino que não dá carimbo completo (empresa +
+    rede) é recusado: meio carimbo é pior do que nenhum;
+  * um processo que já pertence à empresa de destino é uma resposta e não um erro
+    (idempotente: nada se escreve, e a resposta di-lo);
+  * deixa rasto no trilho de auditoria (de onde, para onde, quais) e no histórico de cada
+    processo movido (honra o interruptor).
+  * o preview (`GET …/transfer-company/preview`) lista os processos movíveis e, com destino,
+    quais já lá estão — sem escrever nada, para o ecrã deixar escolher ANTES da password.
 ====================================================================
 """
 from __future__ import annotations
@@ -77,9 +64,9 @@ ERRO_EMPRESA_SEM_CARIMBO = (
     "Verifique a configuração da empresa antes de transferir."
 )
 ERRO_EMPRESA_EM_FALTA = "Indique a empresa de destino."
-ERRO_PROCESSOS_CRUZADOS = (
-    "O cliente é titular de processos activos noutra empresa. Conclua-os, ou resolva-os na "
-    "empresa a que pertencem, antes de transferir o cliente."
+ERRO_SEM_PROCESSOS = "Escolha pelo menos um processo a transferir."
+ERRO_PROCESSOS_QUE_NAO_SAO_DO_CLIENTE = (
+    "Há processos escolhidos que não pertencem a este cliente. Nada foi transferido."
 )
 
 #: Colecções que listam por carimbo e dizem respeito a um processo (`process_id`).
@@ -92,6 +79,8 @@ class TransferirClienteIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     company_id: str = Field(min_length=1)
+    #: Os processos a mover. Obrigatório e explícito: «o cliente todo» já não é uma opção.
+    process_ids: list[str] = Field(min_length=1)
     #: A password ACTUAL de quem pede. Nunca vai para log nem para o rasto.
     password: Optional[str] = Field(default=None, repr=False)
 
@@ -123,94 +112,91 @@ async def _processos_do_titular(cliente: dict) -> list[dict]:
     return await db.processes.find(
         filtro,
         {"_id": 0, "id": 1, "company": 1, "status": 1, "is_deleted": 1, "process_number": 1,
-         **PROJECCAO_DO_CARIMBO},
+         "partner_network_ids": 1, **PROJECCAO_DO_CARIMBO},
     ).to_list(2000)
 
 
-def _segue_o_cliente(processo: dict, cliente: dict) -> bool:
-    """O processo pertence à MESMA empresa do cliente (ou ainda não tem carimbo)?
-
-    Compara o id da empresa quando os dois o têm; senão o nome; um processo sem nenhuma marca
-    de empresa é da pilha por carimbar e acompanha o cliente.
-    """
-    do_processo = _texto(processo.get("company_id"))
-    do_cliente = _texto(cliente.get("company_id"))
-    if do_processo and do_cliente:
-        return do_processo == do_cliente
-    nome_processo = _texto(processo.get("company_name") or processo.get("company"))
-    nome_cliente = _texto(cliente.get("company_name") or cliente.get("company"))
-    if nome_processo and nome_cliente:
-        return nome_processo.lower() == nome_cliente.lower()
-    # Um cliente SEM carimbo (a Pool, ainda por reivindicar) não tem «outra empresa» em relação à
-    # qual um processo possa estar cruzado: acompanha-o tudo. Cruzado exige as duas pontas marcadas.
-    if not (do_cliente or nome_cliente):
-        return True
-    return not (do_processo or nome_processo)
+def _ja_pertence(processo: dict, carimbo: dict) -> bool:
+    return (
+        _texto(processo.get("company_id")) == carimbo["company_id"]
+        and _texto(processo.get(CAMPO_REDE)) == carimbo[CAMPO_REDE]
+    )
 
 
-async def classificar_processos(cliente: dict) -> dict:
-    """``{seguem, cruzados, bloqueantes}`` — a decisão do que se move e do que impede."""
+async def _terminados(processos: list[dict]) -> set[str]:
+    """Os ids dos processos em fase TERMINAL no workflow da rede DONA (informativo)."""
     from services.workflow_phases import fases_dos_processos, nomes_terminais
 
-    processos = await _processos_do_titular(cliente)
-    seguem = [p for p in processos if _segue_o_cliente(p, cliente)]
-    cruzados = [p for p in processos if not _segue_o_cliente(p, cliente)]
-
-    # «Activo» = não eliminado e fora das fases TERMINAIS do workflow da rede DONA do processo.
-    # Pela negativa de propósito: uma fase que o motor não conhece não pode deixar um processo
-    # em curso passar por terminado (e arrastá-lo).
-    por_rede, rede_de = await fases_dos_processos(cruzados)
+    if not processos:
+        return set()
+    por_rede, rede_de = await fases_dos_processos(processos)
     terminais = {rede: set(nomes_terminais(fases)) for rede, fases in por_rede.items()}
-    bloqueantes = [
-        p for p in cruzados
-        if not p.get("is_deleted")
-        and p.get("status") not in terminais.get(rede_de.get(str(p.get("id")), ""), set())
-    ]
-    return {"seguem": seguem, "cruzados": cruzados, "bloqueantes": bloqueantes}
+    return {
+        str(p.get("id")) for p in processos
+        if p.get("status") in terminais.get(rede_de.get(str(p.get("id")), ""), set())
+    }
 
 
-def _resumo(processo: dict) -> dict:
+def _resumo(processo: dict, *, terminado: bool = False, ja_no_destino: bool = False) -> dict:
     """O mínimo que o ecrã precisa para dizer de que processo se fala (nunca o documento)."""
     return {
         "id": processo.get("id"),
         "process_number": processo.get("process_number"),
         "status": processo.get("status"),
         "company_name": processo.get("company_name") or processo.get("company"),
+        "terminado": terminado,
+        "ja_no_destino": ja_no_destino,
     }
 
 
-async def run_preview_transfer_client_company(client_id: str, company_id: str, actor: dict) -> dict:
-    """O que a transferência faria — sem escrever e sem password (só lê, e é só Master)."""
+async def _carregar_cliente(client_id: str) -> dict:
     cliente = await db.clients.find_one(
         {"id": client_id}, {"_id": 0, "id": 1, "process_ids": 1, "company": 1, **PROJECCAO_DO_CARIMBO},
     )
     if not cliente:
         raise HTTPException(status_code=404, detail=ERRO_CLIENTE_NAO_ENCONTRADO)
-    empresa = await db.companies.find_one({"id": _texto(company_id)}, {"_id": 0, "id": 1})
-    if not empresa:
-        raise HTTPException(status_code=404, detail=ERRO_EMPRESA_NAO_ENCONTRADA)
+    return cliente
 
-    grupos = await classificar_processos(cliente)
+
+async def run_preview_transfer_client_company(
+    client_id: str, company_id: Optional[str], actor: dict,
+) -> dict:
+    """Os processos que se podem mover — e, com destino, quais já lá estão. Só lê, sem password."""
+    cliente = await _carregar_cliente(client_id)
+    carimbo = None
+    destino = _texto(company_id)
+    if destino:
+        empresa = await db.companies.find_one({"id": destino}, {"_id": 0, "id": 1})
+        if not empresa:
+            raise HTTPException(status_code=404, detail=ERRO_EMPRESA_NAO_ENCONTRADA)
+        carimbo = await resolve_tenant_stamp(actor, active_company_id=empresa["id"])
+
+    processos = [p for p in await _processos_do_titular(cliente) if not p.get("is_deleted")]
+    terminados = await _terminados(processos)
     return {
-        "company_id": empresa["id"],
-        "processos_a_mover": len(grupos["seguem"]),
-        "processos_mantidos": [_resumo(p) for p in grupos["cruzados"] if p not in grupos["bloqueantes"]],
-        "processos_que_impedem": [_resumo(p) for p in grupos["bloqueantes"]],
-        "bloqueado": bool(grupos["bloqueantes"]),
+        "company_id": destino or None,
+        "processos": [
+            _resumo(
+                p,
+                terminado=str(p.get("id")) in terminados,
+                ja_no_destino=bool(carimbo and carimbo.get("company_id") and _ja_pertence(p, carimbo)),
+            )
+            for p in processos
+        ],
     }
 
 
 async def run_transfer_client_company(client_id: str, data: TransferirClienteIn, actor: dict) -> dict:
-    """Transfere o cliente (e os processos dele) para outra empresa. Só Master."""
-    cliente = await db.clients.find_one(
-        {"id": client_id}, {"_id": 0, "id": 1, "process_ids": 1, "company": 1, **PROJECCAO_DO_CARIMBO},
-    )
-    if not cliente:
-        raise HTTPException(status_code=404, detail=ERRO_CLIENTE_NAO_ENCONTRADO)
+    """Move os processos escolhidos de um cliente para outra empresa. Só Master."""
+    cliente = await _carregar_cliente(client_id)
 
     destino_id = _texto(data.company_id)
     if not destino_id:
         raise HTTPException(status_code=400, detail=ERRO_EMPRESA_EM_FALTA)
+    pedidos = list(dict.fromkeys(_texto(i) for i in data.process_ids if _texto(i)))
+    if not pedidos:
+        raise HTTPException(status_code=400, detail=ERRO_SEM_PROCESSOS)
+
     empresa = await db.companies.find_one(
         {"id": destino_id}, {"_id": 0, "id": 1, "name": 1, CAMPO_REDE: 1},
     )
@@ -221,94 +207,91 @@ async def run_transfer_client_company(client_id: str, data: TransferirClienteIn,
     if not carimbo or not all(carimbo.get(k) for k in ("company_id", "company_name", CAMPO_REDE)):
         raise HTTPException(status_code=400, detail=ERRO_EMPRESA_SEM_CARIMBO)
 
-    origem = {k: cliente.get(k) for k in ("company_id", "company_name", CAMPO_REDE)}
-    if (
-        _texto(cliente.get("company_id")) == carimbo["company_id"]
-        and _texto(cliente.get(CAMPO_REDE)) == carimbo[CAMPO_REDE]
-    ):
-        return {
-            "transferido": False,
-            "motivo": "O cliente já pertence a esta empresa.",
-            "empresa": carimbo,
-            "processos_transferidos": 0,
-        }
-
     # A password vem ANTES de qualquer escrita (e do estado: não se diz o que há para mover).
     await exigir_password_actual(actor, data.password)
 
-    grupos = await classificar_processos(cliente)
-    if grupos["bloqueantes"]:
-        # DEPOIS da password (não se diz o que há a quem não a confirmou) e ANTES de escrever.
-        raise HTTPException(status_code=409, detail=ERRO_PROCESSOS_CRUZADOS)
-    processos = grupos["seguem"]
-    mantidos = [p for p in grupos["cruzados"]]
-    ids_processos = [p["id"] for p in processos if p.get("id")]
+    do_cliente = {str(p["id"]): p for p in await _processos_do_titular(cliente) if p.get("id")}
+    # Um id que não é deste cliente (ou está eliminado) recusa o pedido INTEIRO.
+    if any(i not in do_cliente or do_cliente[i].get("is_deleted") for i in pedidos):
+        raise HTTPException(status_code=400, detail=ERRO_PROCESSOS_QUE_NAO_SAO_DO_CLIENTE)
 
-    await db.clients.update_one(
-        {"id": client_id}, {"$set": _carimbo_com_empresa_legada(carimbo, cliente)},
-    )
+    escolhidos = [do_cliente[i] for i in pedidos]
+    a_mover = [p for p in escolhidos if not _ja_pertence(p, carimbo)]
+    ja_la = [p for p in escolhidos if _ja_pertence(p, carimbo)]
+    if not a_mover:
+        return {
+            "transferido": False,
+            "motivo": "Os processos escolhidos já pertencem a esta empresa.",
+            "empresa": carimbo,
+            "processos_transferidos": 0,
+            "processos_ja_no_destino": [_resumo(p, ja_no_destino=True) for p in ja_la],
+        }
 
-    for processo in processos:
+    ids_a_mover = [p["id"] for p in a_mover]
+    for processo in a_mover:
         await db.processes.update_one(
             {"id": processo["id"]}, {"$set": _carimbo_com_empresa_legada(carimbo, processo)},
         )
-    if ids_processos:
-        # A dona nunca é «convidada» do que é seu: se o destino já via o processo por uma
-        # partilha, a partilha deixa de fazer sentido.
-        await db.processes.update_many(
-            {"id": {"$in": ids_processos}},
-            {"$pull": {
-                "partner_network_ids": carimbo[CAMPO_REDE],
-                "partner_companies": {CAMPO_REDE: carimbo[CAMPO_REDE]},
-            }},
+    # A dona nunca é «convidada» do que é seu: se o destino já via o processo por uma partilha,
+    # a partilha deixa de fazer sentido.
+    await db.processes.update_many(
+        {"id": {"$in": ids_a_mover}},
+        {"$pull": {
+            "partner_network_ids": carimbo[CAMPO_REDE],
+            "partner_companies": {CAMPO_REDE: carimbo[CAMPO_REDE]},
+        }},
+    )
+    for colecao in COLECCOES_QUE_ACOMPANHAM_O_PROCESSO:
+        await getattr(db, colecao).update_many(
+            {"process_id": {"$in": ids_a_mover}}, {"$set": carimbo},
         )
-        for colecao in COLECCOES_QUE_ACOMPANHAM_O_PROCESSO:
-            await getattr(db, colecao).update_many(
-                {"process_id": {"$in": ids_processos}}, {"$set": carimbo},
-            )
 
+    origens = {
+        p["id"]: {k: p.get(k) for k in ("company_id", "company_name", CAMPO_REDE)} for p in a_mover
+    }
     await _audit_log(
-        "client_company_transferred", "client", client_id, actor,
+        "process_company_transferred", "client", client_id, actor,
         details={
-            "de": origem,
             "para": carimbo,
-            "processos": ids_processos,
-            "processos_mantidos": [p.get("id") for p in mantidos],
+            "processos": ids_a_mover,
+            "de": origens,
+            "ja_no_destino": [p.get("id") for p in ja_la],
+            "ficha_do_cliente": "inalterada",
             "s3_folder": "inalterado",
         },
     )
-    await _historico_dos_processos(ids_processos, actor, origem, carimbo)
+    await _historico_dos_processos(a_mover, actor, carimbo)
 
     logger.info(
-        "[CLIENTE-EMPRESA] %s transferiu o cliente %s de %s para %s (%d processo(s)).",
-        (actor or {}).get("id"), client_id, origem.get("company_name"),
-        carimbo["company_name"], len(ids_processos),
+        "[PROCESSO-EMPRESA] %s moveu %d processo(s) do cliente %s para %s.",
+        (actor or {}).get("id"), len(ids_a_mover), client_id, carimbo["company_name"],
     )
     return {
         "transferido": True,
         "empresa": carimbo,
-        "processos_transferidos": len(ids_processos),
-        "processos_mantidos": [_resumo(p) for p in mantidos],
+        "processos_transferidos": len(ids_a_mover),
+        "processos_ja_no_destino": [_resumo(p, ja_no_destino=True) for p in ja_la],
+        "ficha_do_cliente": "inalterada",
         "s3_folder": "inalterado",
     }
 
 
-async def _historico_dos_processos(ids: list[str], actor: dict, origem: dict, destino: dict) -> None:
+async def _historico_dos_processos(processos: list[dict], actor: dict, destino: dict) -> None:
     """Uma linha no histórico de cada processo. Nunca levanta (o rasto não desfaz a acção)."""
     from services.history import log_history
 
-    de = origem.get("company_name") or "—"
-    for process_id in ids:
+    for processo in processos:
+        de = processo.get("company_name") or processo.get("company") or "—"
         try:
             await log_history(
-                process_id, actor, "Cliente transferido para outra empresa",
+                processo["id"], actor, "Processo transferido para outra empresa",
                 "company_name", de, destino["company_name"],
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[CLIENTE-EMPRESA] Histórico de %s falhou: %s", process_id, exc)
+            logger.warning("[PROCESSO-EMPRESA] Histórico de %s falhou: %s", processo.get("id"), exc)
 
 
 __all__ = [
-    "TransferirClienteIn", "classificar_processos",
+    "TransferirClienteIn",
     "run_preview_transfer_client_company", "run_transfer_client_company",
 ]

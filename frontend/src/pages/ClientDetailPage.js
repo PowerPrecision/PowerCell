@@ -51,6 +51,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import ForcarPastaS3 from "../components/documents/ForcarPastaS3";
 import { getClient, getClientFiles, updateClient, restoreClient } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import { isMaster } from "../utils/roleUtils";
@@ -261,6 +262,8 @@ export default function ClientDetailPage() {
   // "Sem documentação" no lugar dela mentia — dizia que não existem, e
   // existem.
   const [docsEmTratamento, setDocsEmTratamento] = useState(false);
+  // O servidor procurou e não há NADA no armazenamento para este cliente (`base_path: null`).
+  const [semPasta, setSemPasta] = useState(false);
   const [savingField, setSavingField] = useState(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editForm, setEditForm] = useState({ nome: "", nif: "", email: "", telefone: "" });
@@ -427,13 +430,24 @@ export default function ClientDetailPage() {
     try {
       const res = await getClientFiles(id);
       const docs = res.data?.files || res.data;
-      setClientDocs(Array.isArray(docs) ? docs : []);
+      // O servidor devolve os ficheiros AGRUPADOS por categoria (`{categoria: [ficheiro]}`):
+      // tratá-los só como lista deixava a tabela sempre vazia ("Sem documentação").
+      setClientDocs(
+        Array.isArray(docs)
+          ? docs
+          : docs && typeof docs === "object"
+            ? Object.values(docs).filter(Array.isArray).flat()
+            : [],
+      );
+      // `base_path` a `null` = não há NADA no armazenamento (nem a pasta): é o caso do botão.
+      setSemPasta(res.data?.base_path === null);
       setDocsEmTratamento(false);
     } catch (erro) {
       // Um 403 é a regra de negócio (documentos em tratamento pelo Índice)
       // e diz-se; o resto continua a ser silencioso, porque a secção é
       // suplementar e a ficha tem de abrir.
       setClientDocs([]);
+      setSemPasta(false);
       setDocsEmTratamento(erro?.response?.status === 403);
     } finally {
       setDocsLoading(false);
@@ -558,7 +572,7 @@ export default function ClientDetailPage() {
                 size="sm"
                 onClick={() => setTransferirAberto(true)}
                 disabled={isDeletedClient}
-                title="Mover o cliente (e os processos dele) para outra empresa"
+                title="Mover processos deste cliente para outra empresa (o cliente fica onde está)"
                 className="gap-2 transition-colors duration-200"
               >
                 <ArrowRightLeft className="h-4 w-4" />
@@ -940,6 +954,11 @@ export default function ClientDetailPage() {
                     <p className="text-muted-foreground/70 text-sm mt-1">
                       Este cliente ainda não tem documentos associados.
                     </p>
+                    {semPasta && (
+                      <div className="mt-4">
+                        <ForcarPastaS3 id={id} onFeito={fetchClientDocuments} compacto />
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               ) : (
@@ -963,7 +982,7 @@ export default function ClientDetailPage() {
                           <TableRow key={doc.id || idx}>
                             <TableCell className="font-medium">{doc.name || doc.filename || "-"}</TableCell>
                             <TableCell>{doc.type || doc.category || "-"}</TableCell>
-                            <TableCell>{formatDate(doc.created_at || doc.uploaded_at)}</TableCell>
+                            <TableCell>{formatDate(doc.created_at || doc.uploaded_at || doc.last_modified)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -1075,8 +1094,11 @@ export default function ClientDetailPage() {
           clientId={id}
           empresaActual={client?.company_name}
           onSucesso={(resposta) => {
+            const n = resposta?.processos_transferidos ?? 0;
             toast.success(
-              `Cliente transferido para ${resposta?.empresa?.company_name || "a empresa escolhida"}.`,
+              `${n === 1 ? "1 processo transferido" : `${n} processos transferidos`} para ${
+                resposta?.empresa?.company_name || "a empresa escolhida"
+              }.`,
             );
             fetchClientData();
           }}

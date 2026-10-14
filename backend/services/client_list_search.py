@@ -46,7 +46,6 @@ from utils.search_filters import create_accent_insensitive_regex, build_multiwor
 from services.tenant_network import (
     PROJECCAO_DO_CARIMBO,
     build_tenant_condition,
-    build_tenant_process_condition,
     com_isolamento,
 )
 from services.client_list_filters import (
@@ -292,7 +291,12 @@ async def run_list_clients(
     # era acrescentar um `$or` que nenhum documento satisfaz; usar a
     # genérica nos processos escondia ao parceiro a ficha que ele vê.
     tenant_condition = await build_tenant_condition(user)
-    tenant_condition_processos = await build_tenant_process_condition(user)
+    # «JANELA, NÃO PORTA» (Lote 6): esta lista é de CLIENTES, e as linhas saem dos processos. Com a
+    # condição de processos (que conta a rede convidada) um processo partilhado trazia para aqui a
+    # ficha de um cliente de OUTRA rede — nome, email, NIF, e todos os processos dele. O processo
+    # partilhado continua visível onde é um processo (Kanban, lista de processos, detalhe); aqui
+    # só entra o que é da minha rede.
+    tenant_condition_processos = tenant_condition
     matching_client_ids = None
     extra_client_docs: list[dict] = []
     if client_entity_query:

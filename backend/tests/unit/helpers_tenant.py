@@ -108,11 +108,15 @@ def tenant_db(fake_db, *modulos_extra):
     o quadro vinha SEM COLUNAS — um teste vermelho a apontar para o
     isolamento quando o problema era o `db`.
 
+    LOTE 6 — e outra: `client_window` (a «janela» do cliente) lê `db.processes` e
+    falha fechada; está sempre patchada aqui.
+
     DASHBOARD, PONTO 1 — e cresceu outra vez: `stats_scope`,
     `admin_users_scope` e os módulos de estatísticas importam `db` no
     topo cada um. **Uma cadeia nova de `db` entra aqui**, por nome, via
     `modulos_extra`.
     """
+    import services.client_window as cw
     import services.tenant_network as tn
     import services.workflow_phases as wp
 
@@ -121,6 +125,9 @@ def tenant_db(fake_db, *modulos_extra):
         with contextlib.ExitStack() as pilha:
             pilha.enter_context(patch.object(tn, "db", fake_db))
             pilha.enter_context(patch.object(wp, "db", fake_db))
+            # LOTE 6 — a janela do cliente lê processos com o seu `db` (falha FECHADA: sem este
+            # patch a janela fica vazia e a edição não propaga a nada, sem dar erro).
+            pilha.enter_context(patch.object(cw, "db", fake_db))
             pilha.enter_context(patch("database.db", fake_db))
             for modulo in modulos_extra:
                 pilha.enter_context(patch.object(modulo, "db", fake_db))

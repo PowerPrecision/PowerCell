@@ -1112,6 +1112,18 @@ export const getClientS3Mappings = (search) =>
     params: { search: search || "" },
     skipErrorToast: true,
   });
+/**
+ * «Forçar criação de pasta» / «Religar S3» (Lote 6).
+ *
+ * Pede ao servidor que crie a estrutura de pastas no armazenamento e actualize o registo
+ * (processo, ou cliente sem processo). O caminho NUNCA se envia: deriva do id no servidor.
+ * `skipErrorToast`: quem chama diz o que falhou no próprio sítio (um 503 do S3 lê-se melhor
+ * ao lado do botão do que num toast solto).
+ */
+export const forceCreateS3Folder = (clientOrProcessId) =>
+  api.post(`/documents/client/${clientOrProcessId}/init-folders`, null, {
+    skipErrorToast: true,
+  });
 export const saveClientS3Mapping = (processId, s3Folder) =>
   api.post("/admin/client-s3-mappings", null, {
     params: s3Folder
@@ -1954,21 +1966,24 @@ export const deleteCompany = (id, password) =>
   password
     ? api.delete(`/admin/companies/${id}`, { data: { password }, skipErrorToast: true })
     : Promise.reject(new Error("deleteCompany: a password actual é obrigatória."));
-// Alterar a empresa de um cliente (só Master): muda o carimbo do cliente e dos processos dele e NUNCA
-// mexe no S3. Exige a password ACTUAL (o servidor valida) — sem ela nem sai o pedido; o erro diz-se
-// no diálogo de confirmação e não num toast (`skipErrorToast`).
-export const transferClientCompany = (clientId, companyId, password) =>
-  password
-    ? api.post(
-        `/clients/${encodeURIComponent(clientId)}/transfer-company`,
-        { company_id: companyId, password },
-        { skipErrorToast: true },
-      )
-    : Promise.reject(new Error("transferClientCompany: a password actual é obrigatória."));
-// O que a transferência faria (processos a mover, mantidos e impeditivos) — só lê, sem password.
+// Alterar a empresa de PROCESSOS de um cliente (só Master, Lote 6): o que transita de uma rede para
+// a outra é o processo — o cliente fica onde está e pode ter processos em várias empresas. Os
+// processos a mover vão EXPLÍCITOS (`processIds`, pelo menos um); NUNCA mexe no S3. Exige a password
+// ACTUAL (o servidor valida) — sem ela nem sai o pedido; o erro diz-se no diálogo e não num toast.
+export const transferClientCompany = (clientId, companyId, processIds, password) =>
+  !password
+    ? Promise.reject(new Error("transferClientCompany: a password actual é obrigatória."))
+    : !Array.isArray(processIds) || processIds.length === 0
+      ? Promise.reject(new Error("transferClientCompany: escolha pelo menos um processo."))
+      : api.post(
+          `/clients/${encodeURIComponent(clientId)}/transfer-company`,
+          { company_id: companyId, process_ids: processIds, password },
+          { skipErrorToast: true },
+        );
+// Os processos do cliente que se podem mover (e, com destino, os que já lá estão) — só lê, sem password.
 export const previewTransferClientCompany = (clientId, companyId) =>
   api.get(`/clients/${encodeURIComponent(clientId)}/transfer-company/preview`, {
-    params: { company_id: companyId },
+    params: companyId ? { company_id: companyId } : {},
     skipErrorToast: true,
   });
 export const uploadCompanyLogo = (id, file) => {
