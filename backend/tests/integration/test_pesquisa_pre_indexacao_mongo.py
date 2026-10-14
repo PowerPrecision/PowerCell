@@ -188,10 +188,9 @@ class TestOTTLDasTentativasDoPortalContraOMongoReal:
             assert info[nome]["key"] == [("expire_at", 1)]
 
     async def test_as_duas_portas_gravam_uma_BSON_Date(self, bd):
-        from services import portal_brute_force, portal_security
+        from services import portal_brute_force
 
-        with patch.object(portal_security, "db", bd):
-            await portal_security._record_failed_attempt("portal_verify:c1")
+        await portal_brute_force.registar_falha(bd, portal_brute_force.AMBITO_DO_VERIFY, "c1")
         await portal_brute_force.registar_falha(bd, "portal_login", "a@x.pt")
 
         verify = await bd.portal_verify_attempts.find_one({"_id": "portal_verify:c1"})

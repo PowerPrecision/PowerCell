@@ -44,6 +44,7 @@ from utils.input_sanitization import (
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 from services.tenant_network import (
+    PROJECCAO_DO_CARIMBO,
     build_tenant_condition,
     build_tenant_process_condition,
     com_isolamento,
@@ -65,8 +66,9 @@ PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM = {
     "assigned_consultor_id": 1, "assigned_mediador_id": 1,
     "consultor_name": 1, "mediador_name": 1, "is_active": 1, "is_deleted": 1, "created_at": 1,
     "updated_at": 1, "prioridade": 1, "priority": 1,
-    # A rede DONA decide o que é "terminado" (workflow por rede, D-6).
-    "network_id": 1,
+    # A rede DONA decide o que é "terminado" (workflow por rede, D-6): o carimbo
+    # vem do ponto único, não escrito à mão.
+    **PROJECCAO_DO_CARIMBO,
 }
 
 
@@ -714,7 +716,7 @@ async def run_list_clients(
         com_isolamento(tenant_condition, process_query),
         {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
          "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1, "created_at": 1,
-         "is_deleted": 1, "network_id": 1,
+         "is_deleted": 1, **PROJECCAO_DO_CARIMBO,
          "prioridade": 1, "priority": 1}
     ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
 
