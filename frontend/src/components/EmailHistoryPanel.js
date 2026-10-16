@@ -14,7 +14,6 @@ import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Textarea } from "./ui/textarea";
 import { Badge } from "./ui/badge";
 import { Label } from "./ui/label";
 import { ScrollArea } from "./ui/scroll-area";
@@ -54,15 +53,15 @@ import {
   Star, StarOff,
   Filter, Calendar, FileText, Download,
   AlertCircle, CheckCircle, Copy,
-  Sparkles, EyeOff
+  EyeOff
 } from "lucide-react";
 import { toast } from "sonner";
 import { isAfter, isBefore, startOfDay, endOfDay } from "date-fns";
 import { pt } from "date-fns/locale";
 import {
-  getProcessEmails, createEmail, deleteEmail, syncProcessEmails, getMonitoredEmails,
-  addMonitoredEmail, removeMonitoredEmail, getEmailStats, getEmailTemplates,
-  applyEmailTemplate, markEmail as markEmailRequest, unmarkEmail as unmarkEmailRequest,
+  getProcessEmails, deleteEmail, syncProcessEmails, getMonitoredEmails,
+  addMonitoredEmail, removeMonitoredEmail, getEmailStats,
+  markEmail as markEmailRequest, unmarkEmail as unmarkEmailRequest,
   searchEmailsToAssociate, associateEmailToProcess, getProcessEmailSyncStatus,
   downloadWebmailAttachment, readBlobErrorBody,
 } from "../services/api";
@@ -89,10 +88,8 @@ const EmailHistoryPanel = ({
   const [acessoNegado, setAcessoNegado] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [filter, setFilter] = useState("all"); // all, sent, received
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
   
   // Modal de visualização
   const [isViewerOpen, setIsViewerOpen] = useState(false);
@@ -124,11 +121,6 @@ const EmailHistoryPanel = ({
     isStarred: false
   });
   
-  // Templates
-  const [templates, setTemplates] = useState([]);
-  const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
-  const [previewTemplate, setPreviewTemplate] = useState(null);
-  
   // Anexos
   const [attachmentPreview, setAttachmentPreview] = useState(null);
   
@@ -141,16 +133,6 @@ const EmailHistoryPanel = ({
     precision: "http://webmail.precisioncredito.pt/",
     power: "https://webmail2.hcpro.pt/Mondo/lang/sys/login.aspx"
   };
-  
-  // Form state
-  const [newEmail, setNewEmail] = useState({
-    direction: "sent",
-    from_email: "",
-    to_emails: "",
-    subject: "",
-    body: "",
-    notes: ""
-  });
   
   const openWebmail = (webmail) => {
     window.open(WEBMAIL_URLS[webmail], '_blank');
@@ -165,7 +147,6 @@ const EmailHistoryPanel = ({
     if (processId) {
       fetchData();
       fetchMonitoredEmails();
-      fetchTemplates();
     }
   }, [processId, filter, advancedFilters]);
 
@@ -175,15 +156,6 @@ const EmailHistoryPanel = ({
       setMonitoredEmails(response.data.monitored_emails || []);
     } catch (error) {
       console.error("Erro ao carregar emails monitorizados:", error);
-    }
-  };
-
-  const fetchTemplates = async () => {
-    try {
-      const { data } = await getEmailTemplates();
-      setTemplates(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error("Erro ao carregar templates:", error);
     }
   };
 
@@ -356,67 +328,6 @@ const EmailHistoryPanel = ({
 
   // Preview de anexo
 
-  // Pré-visualizar template com dados fictícios
-  const MOCK_DATA = {
-    "{cliente}": "João Silva",
-    "{email_cliente}": "joao.silva@email.pt",
-    "{nome_cliente}": "João Silva",
-    "{processo}": "PROC-2024-0042",
-    "{process_number}": "PROC-2024-0042",
-    "{telefone}": "912 345 678",
-    "{nif}": "234567890",
-    "{banco_atual}": "CGD",
-    "{montante_divida}": "150.000,00 €",
-    "{valor_aquisicao}": "220.000,00 €",
-    "{localidade_imovel}": "Lisboa",
-    "{p1_nome}": "João Silva",
-    "{p1_email}": "joao.silva@email.pt",
-    "{p1_telefone}": "912 345 678",
-    "{p1_nif}": "234567890",
-    "{p2_nome}": "Maria Santos",
-    "{p2_email}": "maria.santos@email.pt",
-    "{p2_telefone}": "923 456 789",
-    "{sender_name}": "Carlos Mendes",
-    "{sender_email}": "carlos@precisioncredito.pt",
-    "{sender_phone}": "911 222 333",
-    "{data}": new Date().toLocaleDateString("pt-PT"),
-  };
-
-  const renderPreviewHtml = (content) => {
-    if (!content) return "";
-    let html = content;
-    // Escape HTML first
-    html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    // Replace template variables with styled spans
-    Object.entries(MOCK_DATA).forEach(([key, value]) => {
-      const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      html = html.replace(
-        new RegExp(escapedKey, 'gi'),
-        `<span class="inline-block bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded font-medium text-blue-800 dark:text-blue-200">${value}</span>`
-      );
-    });
-    // Convert newlines
-    html = html.replace(/\n/g, '<br/>');
-    return html;
-  };
-
-  // Aplicar template ao email
-  const applyTemplate = async (templateId) => {
-    try {
-      const { data } = await applyEmailTemplate(templateId, processId);
-      setNewEmail(prev => ({
-        ...prev,
-        subject: data.subject,
-        body: data.body
-      }));
-      setIsTemplateDialogOpen(false);
-      setIsCreateDialogOpen(true);
-      toast.success("Template aplicado");
-    } catch {
-      toast.error("Erro ao aplicar template");
-    }
-  };
-
   const handleAddMonitoredEmail = async () => {
     if (!newMonitoredEmail.trim() || !newMonitoredEmail.includes("@")) {
       toast.error("Introduza um email válido");
@@ -555,49 +466,6 @@ const EmailHistoryPanel = ({
     }
   };
 
-  const handleCreateEmail = async () => {
-    if (!newEmail.subject.trim() || !newEmail.body.trim()) {
-      toast.error("Assunto e corpo são obrigatórios");
-      return;
-    }
-    if (!newEmail.to_emails.trim()) {
-      toast.error("Destinatário é obrigatório");
-      return;
-    }
-
-    try {
-      setCreating(true);
-      const toEmails = newEmail.to_emails.split(",").map(e => e.trim()).filter(e => e);
-      
-      await createEmail({
-        process_id: processId,
-        direction: newEmail.direction,
-        from_email: newEmail.from_email || (newEmail.direction === "sent" ? "sistema@precisioncredito.pt" : clientEmail),
-        to_emails: toEmails,
-        subject: newEmail.subject,
-        body: newEmail.body,
-        notes: newEmail.notes,
-        status: "sent"
-      });
-      
-      toast.success("Email registado com sucesso");
-      setIsCreateDialogOpen(false);
-      setNewEmail({
-        direction: "sent",
-        from_email: "",
-        to_emails: "",
-        subject: "",
-        body: "",
-        notes: ""
-      });
-      fetchData();
-    } catch {
-      toast.error("Erro ao registar email");
-    } finally {
-      setCreating(false);
-    }
-  };
-
   const handleDeleteEmail = async (emailId) => {
     if (!window.confirm("Tem a certeza que deseja eliminar este email?")) return;
     try {
@@ -607,18 +475,6 @@ const EmailHistoryPanel = ({
     } catch {
       toast.error("Erro ao eliminar email");
     }
-  };
-
-  const openCreateDialog = (direction = "sent") => {
-    setNewEmail({
-      direction,
-      from_email: direction === "sent" ? "" : clientEmail || "",
-      to_emails: direction === "sent" ? clientEmail || "" : "",
-      subject: "",
-      body: "",
-      notes: ""
-    });
-    setIsCreateDialogOpen(true);
   };
 
   const clearFilters = () => {
@@ -709,18 +565,6 @@ const EmailHistoryPanel = ({
                 <ExternalLink className="h-3 w-3 ml-1 hidden sm:inline" />
               </Button>
               
-              {/* Templates */}
-              <Button 
-                size="sm" 
-                variant="outline"
-                onClick={() => setIsTemplateDialogOpen(true)}
-                title="Templates"
-                className="bg-purple-50 hover:bg-purple-100 border-purple-200 px-2 sm:px-3"
-              >
-                <Sparkles className="h-4 w-4 sm:mr-1 text-purple-500" />
-                <span className="text-xs hidden sm:inline">Templates</span>
-              </Button>
-              
               <Button 
                 size="sm" 
                 variant="outline"
@@ -759,16 +603,6 @@ const EmailHistoryPanel = ({
                 <span className="text-xs ml-1 hidden sm:inline">Sync</span>
               </Button>
               
-              {/* Botão Novo - sempre visível */}
-              <Button 
-                size="sm"
-                onClick={() => openCreateDialog('sent')}
-                title="Novo email"
-                className="bg-teal-600 hover:bg-teal-700 px-2 sm:px-3"
-              >
-                <Plus className="h-4 w-4 sm:mr-1" />
-                <span className="text-xs hidden sm:inline">Novo</span>
-              </Button>
             </div>
             
             {!compact && (
@@ -1140,147 +974,6 @@ const EmailHistoryPanel = ({
         processId={processId}
       />
 
-      {/* Modal de Templates */}
-      <Dialog open={isTemplateDialogOpen} onOpenChange={setIsTemplateDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-purple-500" />
-              Templates de Resposta Rápida
-            </DialogTitle>
-            <DialogDescription>
-              Escolha um template para resposta rápida
-            </DialogDescription>
-          </DialogHeader>
-          
-          <ScrollArea className="h-[400px] pr-4">
-            {templates.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <FileText className="h-12 w-12 mx-auto mb-2 opacity-30" />
-                <p>Nenhum template disponível</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {templates.map((template) => (
-                  <div
-                    key={template.id}
-                    className="p-3 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
-                    onClick={() => applyTemplate(template.id)}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-sm">{template.name}</p>
-                          {template.is_default && (
-                            <Badge variant="outline" className="text-xs">Default</Badge>
-                          )}
-                        </div>
-                        {template.subject && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Assunto: {template.subject}
-                          </p>
-                        )}
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                          {template.body.substring(0, 100)}...
-                        </p>
-                        {template.category && (
-                          <Badge variant="secondary" className="mt-2 text-xs">{template.category}</Badge>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={(e) => { e.stopPropagation(); setPreviewTemplate(template); }}
-                          title="Pré-visualizar"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7">
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsTemplateDialogOpen(false)}>
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal de Preview de Template */}
-      <Dialog open={!!previewTemplate} onOpenChange={(open) => { if (!open) setPreviewTemplate(null); }}>
-        <DialogContent className="sm:max-w-[650px] max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Eye className="h-5 w-5" />
-              Pré-visualização: {previewTemplate?.name}
-            </DialogTitle>
-            <DialogDescription>
-              As variáveis são substituídas por dados fictícios para demonstração
-            </DialogDescription>
-          </DialogHeader>
-
-          {previewTemplate?.subject && (
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Assunto</Label>
-              <div
-                className="p-3 bg-muted/50 rounded-lg text-sm font-medium"
-                dangerouslySetInnerHTML={{ __html: renderPreviewHtml(previewTemplate.subject) }}
-              />
-            </div>
-          )}
-
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Corpo do Email</Label>
-            <div
-              className="prose prose-sm max-w-none bg-white dark:bg-gray-900 border rounded-lg p-6 overflow-y-auto max-h-[50vh] break-words text-sm"
-              dangerouslySetInnerHTML={{ __html: renderPreviewHtml(previewTemplate?.body || "") }}
-            />
-          </div>
-
-          <div className="bg-muted/50 rounded-lg p-3">
-            <p className="text-xs font-medium mb-2">Variáveis utilizadas:</p>
-            <div className="flex flex-wrap gap-1.5">
-              {Object.keys(MOCK_DATA).map((key) => (
-                <Badge key={key} variant="secondary" className="font-mono text-[10px]">
-                  {key}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          <DialogFooter className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setPreviewTemplate(null)}
-            >
-              Fechar
-            </Button>
-            <Button
-              onClick={() => {
-                if (previewTemplate) {
-                  applyTemplate(previewTemplate.id);
-                  setPreviewTemplate(null);
-                  setIsTemplateDialogOpen(false);
-                }
-              }}
-            >
-              <Sparkles className="h-4 w-4 mr-2" />
-              Usar este Template
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Modal de Configurações */}
       <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
         <DialogContent className="sm:max-w-[500px]">
@@ -1448,108 +1141,6 @@ const EmailHistoryPanel = ({
           <DialogFooter>
             <Button variant="outline" onClick={() => { setIsAssociateDialogOpen(false); setSearchQuery(""); setSearchResults([]); }}>
               Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal de Criar Email */}
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle>
-              {newEmail.direction === "sent" ? "Registar Email Enviado" : "Registar Email Recebido"}
-            </DialogTitle>
-            <DialogDescription>
-              {newEmail.direction === "sent" ? "Registe um email enviado ao cliente" : "Registe um email recebido do cliente"}
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Tipo</Label>
-              <Select 
-                value={newEmail.direction} 
-                onValueChange={(v) => setNewEmail(prev => ({ 
-                  ...prev, 
-                  direction: v,
-                  from_email: v === "sent" ? "" : clientEmail || "",
-                  to_emails: v === "sent" ? clientEmail || "" : ""
-                }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="sent">
-                    <div className="flex items-center gap-2">
-                      <Send className="h-4 w-4" /> Email Enviado
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="received">
-                    <div className="flex items-center gap-2">
-                      <Inbox className="h-4 w-4" /> Email Recebido
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>De</Label>
-                <Input
-                  placeholder="email@exemplo.pt"
-                  value={newEmail.from_email}
-                  onChange={(e) => setNewEmail(prev => ({ ...prev, from_email: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Para *</Label>
-                <Input
-                  placeholder="email@exemplo.pt"
-                  value={newEmail.to_emails}
-                  onChange={(e) => setNewEmail(prev => ({ ...prev, to_emails: e.target.value }))}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Assunto *</Label>
-              <Input
-                placeholder="Assunto do email"
-                value={newEmail.subject}
-                onChange={(e) => setNewEmail(prev => ({ ...prev, subject: e.target.value }))}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Corpo do Email *</Label>
-              <Textarea
-                placeholder="Conteúdo do email..."
-                value={newEmail.body}
-                onChange={(e) => setNewEmail(prev => ({ ...prev, body: e.target.value }))}
-                rows={6}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Notas (opcional)</Label>
-              <Input
-                placeholder="Notas internas"
-                value={newEmail.notes}
-                onChange={(e) => setNewEmail(prev => ({ ...prev, notes: e.target.value }))}
-              />
-            </div>
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleCreateEmail} disabled={creating} className="bg-teal-600 hover:bg-teal-700">
-              {creating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
-              Registar Email
             </Button>
           </DialogFooter>
         </DialogContent>

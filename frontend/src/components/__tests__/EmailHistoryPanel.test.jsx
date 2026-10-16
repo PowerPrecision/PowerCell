@@ -97,6 +97,36 @@ describe("EmailHistoryPanel", () => {
   });
 });
 
+describe("EmailHistoryPanel — sem registo manual de emails (Lote 7.2)", () => {
+  it("não há botão «Novo» nem diálogo «Registar Email Enviado» (os enviados ficam na BD pelo envio real)", async () => {
+    montar();
+    await screen.findByText("Documentos do crédito");
+
+    expect(screen.queryByRole("button", { name: /novo email|^novo$/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/registar email (enviado|recebido)/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /registar email/i })).not.toBeInTheDocument();
+  });
+
+  it("contraprova: o painel continua a oferecer as acções que ficam (sincronizar, associar, emails monitorizados)", async () => {
+    montar();
+    await screen.findByText("Documentos do crédito");
+
+    expect(screen.getByRole("button", { name: /sync/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /associar/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^emails$/i })).toBeInTheDocument();
+  });
+
+  it("a escrita manual saiu do componente (não há `createEmail` nem estado do diálogo)", () => {
+    const codigo = fs.readFileSync(
+      path.resolve(process.cwd(), "src/components/EmailHistoryPanel.js"), "utf-8",
+    ).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(codigo).not.toMatch(/createEmail/);
+    expect(codigo).not.toMatch(/isCreateDialogOpen/);
+    expect(codigo).not.toMatch(/Registar Email/);
+    expect(codigo).toContain("getProcessEmails(");
+  });
+});
+
 describe("EmailHistoryPanel — transporte", () => {
   const fonte = fs.readFileSync(
     path.resolve(process.cwd(), "src/components/EmailHistoryPanel.js"),

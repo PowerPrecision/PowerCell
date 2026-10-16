@@ -19,6 +19,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 // PACOTE 9 — Undo Send: parse da resposta {queued, send_id, undo_window_seconds}
 import { parseSendResponse } from "../utils/webmailSendQueue";
+import { sendWebmailEmail, cancelEmailSend } from "../services/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -231,81 +232,53 @@ const EmailViewerModal = ({
 
     setSendingReply(true);
     try {
-      // Enviar a empresa ativa para o backend resolver a assinatura correta
-      // (cada user pode ter uma assinatura por empresa — UCR). Lida-se do
-      // sessionStorage tal como o interceptor do axios faz.
-      const activeCompanyId = sessionStorage.getItem("activeCompanyId");
-      const response = await fetch(`${API_URL}/api/emails/send?account=personal`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {})
-        },
-        body: JSON.stringify({
+      // Pelo cliente Axios: é o interceptor que acrescenta `X-Company-Id` e
+      // `X-Active-Role`, de que o servidor depende para escolher a conta de
+      // envio e a assinatura da empresa activa. Um `fetch` cru só levava o
+      // que lhe escrevessem à mão (e perdia o perfil activo).
+      let resposta;
+      try {
+        resposta = await sendWebmailEmail({
           to_emails: [currentEmail.from_email],
           subject: replySubject,
           body: replyBody,
           process_id: currentEmail.process_id,
-          from_box: "personal"
-        })
-      });
-
-      if (!response.ok) {
+          from_box: "personal",
+        }, "personal");
+      } catch (erroDeEnvio) {
         // Preservar a mensagem útil do backend (ex.: 403 "Configuração de
         // email pessoal não encontrada. Vá ao seu Perfil > Configuração de
         // Webmail para configurar o seu email antes de enviar.").
-        let detail = "Erro ao enviar resposta";
-        try {
-          const errData = await response.json();
-          detail = errData.detail || errData.message || errData.error || detail;
-        } catch {
-          /* resposta sem corpo JSON — manter mensagem genérica */
-        }
-        throw new Error(detail);
+        const dados = erroDeEnvio?.response?.data || {};
+        throw new Error(dados.detail || dados.message || dados.error || "Erro ao enviar resposta");
       }
 
       // PACOTE 9 — UNDO SEND: o backend agenda o envio após a janela de
       // "Desfazer" (10s por defeito). Mostramos o toast com a acção de undo;
       // cancelar chama /emails/{send_id}/cancel-send e repõe a caixa de
       // resposta com o texto intacto.
-      const sendResult = parseSendResponse(await response.json().catch(() => null));
+      const sendResult = parseSendResponse(resposta?.data ?? null);
 
       if (sendResult.queued && sendResult.sendId && sendResult.undoWindowMs > 0) {
         setShowReplyBox(false); // fecha a caixa de resposta (estilo Gmail)
 
         const cancelReplySend = async () => {
           try {
-            const res = await fetch(
-              `${API_URL}/api/emails/${sendResult.sendId}/cancel-send`,
-              {
-                method: "POST",
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {})
-                }
-              }
-            );
-            if (res.ok) {
-              // Envio abortado no backend — regressar ao modo de edição
-              // PACOTE 12 (Eixo 1) — cancelar o toast de sucesso agendado
-              // para o fim da janela de Desfazer (envio desfeito ≠ enviado).
-              if (sendConfirmTimerRef.current) {
-                clearTimeout(sendConfirmTimerRef.current);
-                sendConfirmTimerRef.current = null;
-              }
-              setShowReplyBox(true);
-              toast.success("Envio cancelado — pode continuar a editar a resposta.");
-            } else {
-              let detail = "Não foi possível cancelar o envio.";
-              try {
-                const errData = await res.json();
-                detail = errData.detail || detail;
-              } catch { /* sem corpo JSON */ }
-              toast.error(detail, { duration: 8000 });
+            await cancelEmailSend(sendResult.sendId);
+            // Envio abortado no backend — regressar ao modo de edição
+            // PACOTE 12 (Eixo 1) — cancelar o toast de sucesso agendado
+            // para o fim da janela de Desfazer (envio desfeito ≠ enviado).
+            if (sendConfirmTimerRef.current) {
+              clearTimeout(sendConfirmTimerRef.current);
+              sendConfirmTimerRef.current = null;
             }
-          } catch {
-            toast.error("Não foi possível cancelar o envio.", { duration: 8000 });
+            setShowReplyBox(true);
+            toast.success("Envio cancelado — pode continuar a editar a resposta.");
+          } catch (erroDoCancelamento) {
+            toast.error(
+              erroDoCancelamento?.response?.data?.detail || "Não foi possível cancelar o envio.",
+              { duration: 8000 },
+            );
           }
         };
 

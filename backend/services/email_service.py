@@ -544,6 +544,28 @@ async def _resolve_system_smtp_account() -> Optional["EmailAccount"]:
     return None
 
 
+async def _ucr_da_empresa(user_id: str, empresa: str, projeccao: dict) -> Optional[dict]:
+    """UCR do utilizador numa empresa dada pelo ID **ou pelo NOME**.
+
+    A empresa chega ao envio nas duas notações do projecto: o ID (cabeçalho
+    ``X-Company-Id``) e o NOME (``users.company`` e o recuo de
+    ``get_active_company_id_async`` quando o cabeçalho falta). Procurar só pelo
+    ID exacto deixava o email sair SEM a assinatura que o utilizador tem
+    configurada, sem erro nenhum (Lote 7.2) — o ``_find_ucr`` do ``auth`` sempre
+    casou pelos dois; é a mesma regra, não uma segunda.
+    """
+    from services.auth import _company_match_or
+
+    exacto = await db.user_company_roles.find_one(
+        {"user_id": user_id, "company_id": empresa}, projeccao
+    )
+    if exacto:
+        return exacto
+    return await db.user_company_roles.find_one(
+        {"user_id": user_id, "$or": _company_match_or(empresa)}, projeccao
+    )
+
+
 async def resolve_email_signature(
     *,
     created_by: Optional[str],
@@ -590,9 +612,8 @@ async def resolve_email_signature(
 
         # 1. UCR da empresa activa.
         if tem_empresa_activa:
-            ucr_active = await db.user_company_roles.find_one(
-                {"user_id": created_by, "company_id": active_company_id},
-                {"signature": 1, "_id": 0},
+            ucr_active = await _ucr_da_empresa(
+                created_by, active_company_id, {"signature": 1, "_id": 0}
             )
             if ucr_active and ucr_active.get("signature"):
                 return ucr_active["signature"], f"ucr_active({active_company_id})"
@@ -622,9 +643,8 @@ async def resolve_email_signature(
         #    empresa activa escolhida, ir buscar a assinatura de outra
         #    seria assinar um email da empresa A com a identidade da B.
         if not tem_empresa_activa and sender_user and sender_user.get("company"):
-            ucr = await db.user_company_roles.find_one(
-                {"user_id": created_by, "company_id": sender_user["company"]},
-                {"signature": 1, "_id": 0},
+            ucr = await _ucr_da_empresa(
+                created_by, sender_user["company"], {"signature": 1, "_id": 0}
             )
             if ucr and ucr.get("signature"):
                 return ucr["signature"], f"ucr_default({sender_user['company']})"

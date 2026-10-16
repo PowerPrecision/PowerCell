@@ -12264,3 +12264,38 @@ Work Log:
 - Não mexi no D-38 (identidade por rede) — a conversa de arquitectura precede o código.
 - Um link para um registo de outra empresa continua a dar 404 uniforme: a interface não pode sugerir «troque de empresa» sem criar um oráculo sobre o que existe.
 - O realtime `new_email` e as caixas partilhadas por cargo do Index não foram revistos (o Index deixou de ter Webmail, mas os sockets não foram auditados neste lote).
+
+---
+Task ID: lote-7-2-motor-de-email-e-fuga-b2b
+Agent: Cloud Agent
+Task: Lote 7.2 — Refatoração do motor de email (emails fantasma, assinatura, link do convite, Portal em segundo plano, UX) e fuga de âmbito B2B
+
+Date: 2026-10-16
+
+Work Log:
+
+### 1. Emails fantasma
+- Causa lida no código: arquivo em `db.emails` só com `process_id` e nenhum APPEND IMAP. Hoje todo o envio de uma pessoa fica em `Sent` (processo explícito ou herdado do email pai) e é copiado para a pasta «Enviados» do servidor, excepto onde o servidor já guarda (Gmail/Office365). Falha do APPEND regista-se e não desfaz o envio.
+- Achado: contas pessoais usavam host/porta do SMTP como IMAP.
+- 27 testes ao nível da chamada SMTP/IMAP; 8 mutações mortas.
+
+### 2. Assinatura
+- Causa: a resolução procurava o UCR só por `company_id` exacto; a empresa chega por ID ou por NOME. Corrigido com a mesma regra do `_find_ucr`. Reproduzido primeiro (5 vermelhos) contra MongoDB real.
+- `EmailViewerModal` passou de `fetch` cru a Axios (perdia `X-Active-Role`).
+
+### 3. Link do convite do staff
+- Estava escrito à letra no código. Agora `FRONTEND_URL` → domínio do admin → sem botão.
+
+### 4. Portal em segundo plano
+- Já o era em todos os caminhos; acrescentada a guarda por AST (propriedade, não comportamento).
+
+### 5. UX
+- Removidos o botão «Novo» e o diálogo «Registar Email Enviado» (e os Templates que só os serviam).
+
+### 6. B2B
+- Visitante vê só os processos partilhados com a sua rede, cego ao estado. Reproduzido apenas com processos por carimbar em ambiente sem `TENANT_DEFAULT_NETWORK_ID`.
+
+### Não fiz (dito)
+- **Pré-seleccionar as caixas dos «emails associados ao processo»:** não identifiquei o componente. O `SendDocumentationModal` não tem uma lista de emails do processo (só documentos, balcões e TO configurados) e o diálogo de ligação de ficheiros temporários já vem com «Enviar email para o cliente» marcado. Pré-seleccionar todos os documentos enviaria dados do cliente a bancos por omissão — não o fiz sem confirmação.
+- D-42 (identidade global do cliente) intocado.
+- `SendDocumentationModal` e os anexos do `EmailViewerModal` continuam com `fetch` cru (perdem `X-Company-Id`/`X-Active-Role`): fora do âmbito pedido.
