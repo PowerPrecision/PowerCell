@@ -20,7 +20,7 @@ DATA LIFECYCLE MANAGEMENT (TTL Indexes):
 """
 import logging
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo.errors import OperationFailure
+from pymongo.errors import AutoReconnect, OperationFailure
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,8 @@ async def _create_index_safe(collection, idx: dict, collection_name: str, result
         else:
             results["errors"].append(f"{label}: {str(e)}")
             logger.error(f"Erro ao criar índice {label}: {e}")
+            if isinstance(e, AutoReconnect):
+                results["indisponivel"] = True
 
 
 # Lista de índices antigos/incorretos que devem ser removidos
@@ -960,13 +962,44 @@ async def _preparar_indices(db) -> None:
         pass
 
 
+async def _base_de_dados_alcancavel(db) -> bool:
+    """Pergunta UMA vez se a base de dados responde (`ping`) antes de começar.
+
+    Sem isto, com o Atlas inalcançável (IP não autorizado, cluster em pausa, rede) cada
+    um dos ~100 índices esperava o seu próprio `serverSelectionTimeout` de 30 s e o
+    arranque durava mais do que o Render espera por uma porta aberta — o deploy morria
+    com «No open ports detected / Timed Out» sem uma única linha a dizer porquê.
+    Só uma falha de LIGAÇÃO (`AutoReconnect` e derivadas: seleção de servidor, timeout de
+    rede) conta como «inalcançável»; qualquer outro erro (um duplo de teste sem `command`,
+    um erro de autorização) não decide nada aqui e a criação segue o seu caminho normal.
+    """
+    try:
+        await db.command("ping")
+    except AutoReconnect as exc:
+        logger.error(
+            "❌ Base de dados INALCANÇÁVEL no arranque — criação de índices ADIADA para o "
+            "próximo arranque (verificar Network Access/IP do Atlas, estado do cluster e "
+            f"MONGO_URL): {exc}"
+        )
+        return False
+    except Exception:  # noqa: BLE001 — não é uma falha de ligação: não decide nada
+        return True
+    return True
+
+
 async def create_indexes(db) -> dict:
     """
     Cria os índices declarados em `INDEX_DEFINITIONS` (e os TTL de `TTL_INDEXES`).
 
     Returns:
-        dict: Resumo dos índices criados
+        dict: Resumo dos índices criados (`indisponivel: True` se a base de dados não respondeu)
     """
+    if not await _base_de_dados_alcancavel(db):
+        return {
+            "created": [], "errors": [], "skipped": [], "cleanup": {},
+            "indisponivel": True,
+        }
+
     # Primeiro, limpar índices antigos/incorretos
     cleanup_results = await cleanup_deprecated_indexes(db)
 
@@ -981,7 +1014,15 @@ async def create_indexes(db) -> dict:
 
     for colecao, definicoes in INDEX_DEFINITIONS.items():
         for idx in definicoes:
+            if results.get("indisponivel"):
+                break
             await _create_index_safe(getattr(db, colecao), idx, colecao, results)
+        if results.get("indisponivel"):
+            logger.error(
+                "❌ A ligação à base de dados caiu a meio da criação de índices — "
+                "os restantes ficam para o próximo arranque."
+            )
+            return results
 
     # Resumo
     logger.info(
