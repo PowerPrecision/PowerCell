@@ -239,7 +239,9 @@ def url_de_acesso_ao_crm(frontend_url: Optional[str] = None) -> str:
     return f"{base}/login"
 
 
-async def run_create_user(data: UserCreate, user: dict, frontend_url: Optional[str] = None):
+async def run_create_user(
+    data: UserCreate, user: dict, frontend_url: Optional[str] = None, request: Optional[Request] = None,
+):
     """Cria um novo utilizador no sistema com lógica diferenciada por role.
 
     Este endpoint suporta dois fluxos distintos de criação:
@@ -423,6 +425,10 @@ async def run_create_user(data: UserCreate, user: dict, frontend_url: Optional[s
         }
         role_name = role_names.get(data.role, data.role)
         
+        if not frontend_url and request is not None:
+            from services.rgpd_helpers import _frontend_base_url_from_request
+
+            frontend_url = _frontend_base_url_from_request(request, log_prefix="[USERS]")
         _link_crm = url_de_acesso_ao_crm(frontend_url)
         _linha_do_link = f"🔗 Aceda à plataforma em: {_link_crm}\n\n" if _link_crm else ""
         _botao_do_link = (

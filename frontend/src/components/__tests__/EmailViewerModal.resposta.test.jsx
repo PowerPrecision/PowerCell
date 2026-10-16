@@ -32,7 +32,7 @@ const montar = () => render(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  global.fetch = vi.fn(() => { throw new Error("fetch cru não devia ser usado para enviar"); });
+  globalThis.fetch = vi.fn(() => { throw new Error("fetch cru não devia ser usado para enviar"); });
 });
 
 describe("EmailViewerModal — responder", () => {
@@ -54,7 +54,7 @@ describe("EmailViewerModal — responder", () => {
       to_emails: ["cliente@x.pt"], body: "Obrigado!", process_id: "p-7", from_box: "personal",
     });
     expect(payload.subject).toMatch(/^RE: Documentos/);
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it("o motivo do servidor chega ao utilizador (403 de configuração em falta)", async () => {
@@ -76,7 +76,7 @@ describe("EmailViewerModal — responder", () => {
 
     expect(api.cancelEmailSend).toHaveBeenCalledWith("s-1");
     await waitFor(() => expect(toast.success.mock.calls.at(-1)[0]).toMatch(/envio cancelado/i));
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });
 
