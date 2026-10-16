@@ -314,11 +314,15 @@ const DashboardLayout = ({ children, title }) => {
       label: "Comunicações e Ficheiros",
       icon: Mail,
       items: [
-        {
-          label: "Webmail",
-          icon: Mail,
-          href: "/webmail",
-        },
+        // Lote 7.1: o Index não tem Webmail. Esta lista TEM de casar com as
+        // `allowedRoles` da rota `/webmail` em App.js (ver `App.rotasMenu.test.js`).
+        ...(["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"].includes(userRole)
+          ? [{
+              label: "Webmail",
+              icon: Mail,
+              href: "/webmail",
+            }]
+          : []),
         // PACOTE BU — Menu temporariamente oculto:
         // { label: "Minutas", icon: FileArchive, href: "/minutas" },
         // Explorador do bucket, reaberto ao staff no Épico 10 com
@@ -391,7 +395,11 @@ const DashboardLayout = ({ children, title }) => {
         id: "comunicacoes",
         label: "Comunicações e Ficheiros",
         icon: Mail,
-        items: comunicacoesGroup.items.filter(i => i.href !== "/minutas" && i.href !== "/calculadoras"),
+        // Lote 7.1: o perfil Index NÃO tem Webmail (a API recusa-o com 403; o menu
+        // e as rotas têm de concordar), nem Minutas nem Calculadoras.
+        items: comunicacoesGroup.items.filter(
+          i => i.href !== "/minutas" && i.href !== "/calculadoras" && i.href !== "/webmail",
+        ),
       };
       // PACOTE DB — Visão Global do indexacao SEM "Registos de Clientes"
       // (restrição mantida: indexacao não necessita de acesso a registos de clientes)

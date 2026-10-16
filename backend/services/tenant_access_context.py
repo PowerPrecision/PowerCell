@@ -163,6 +163,30 @@ async def resolver_papel_efectivo(
     return str(papel or "").strip()
 
 
+async def papel_para_os_dados(user: dict, papel: Any) -> str:
+    """O papel com que a FRONTEIRA DE DADOS trata este pedido (Lote 7.1).
+
+    O Master tem passe livre sobre os dados — mas com uma empresa escolhida
+    no cabeçalho o pedido passa a ser o dessa empresa (contexto estrito), e
+    as superfícies que decidem por `e_papel_sem_fronteira(papel)`
+    (calendário, visitas, imóveis, finanças) continuavam a abrir tudo.
+    Aqui o Master com empresa escolhida trabalha os dados como **Admin dessa
+    empresa**: o âmbito local de um Admin é exactamente o que se pede. Só
+    muda a fronteira de DADOS — as guardas de papel (`require_roles`) e a
+    configuração global continuam a ver o Master, porque quem decide isso
+    não passa por aqui.
+
+    Sem empresa escolhida, ou com uma que não existe (cabeçalho velho, o
+    âmbito volta a ser completo), nada muda.
+    """
+    from services.role_scope import CAMPO_VISTA, e_papel_global
+
+    if not e_papel_global(papel) or not str((user or {}).get(CAMPO_VISTA) or "").strip():
+        return str(papel or "").strip()
+    scope = await resolve_tenant_scope(user)
+    return str(papel or "").strip() if scope.sem_fronteira else "admin"
+
+
 async def carregar_contexto_de_acesso(
     user: dict,
     request: Optional[Request] = None,
@@ -186,6 +210,7 @@ async def carregar_contexto_de_acesso(
         user, request, traduzir_todos_os_perfis=equipa
     )
 
+    papel = await papel_para_os_dados(user, papel)
     scope = await resolve_tenant_scope(user)
     condicao = build_network_scope_condition(scope)
     utilizador_com_papel = {**(user or {}), "_papel_efectivo": papel}
@@ -217,5 +242,6 @@ __all__ = [
     "ContextoDeAcesso",
     "carregar_contexto_de_acesso",
     "condicao_dos_meus_processos",
+    "papel_para_os_dados",
     "resolver_papel_efectivo",
 ]

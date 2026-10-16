@@ -190,9 +190,29 @@ class TestOExploradorSegueAEmpresaEscolhida:
         orfa = PastaDoExplorador(caminho="Documentação Clientes/x/", orfa=True)
         assert pode_ver(orfa, scope, role=papel) is True
 
-    async def test_so_a_listagem_pede_a_vista_as_operacoes_por_caminho_nao(self, mundo):
-        """Mover/renomear/apagar por caminho não podem 404 para o Master por causa do cabeçalho."""
+    async def test_as_operacoes_por_caminho_tambem_ficam_na_empresa_escolhida(self, mundo):
+        """INVERTIDO no Lote 7.1 (contexto estrito).
+
+        Antes: «mover/renomear/apagar por caminho não podem 404 para o Master por causa do
+        cabeçalho» (`sem_fronteira is True`). Agora a empresa escolhida é a fronteira do pedido,
+        para listar e para mexer por caminho: um Master a trabalhar como Domus não mexe nas pastas
+        da Power (a interface obriga a trocar de empresa), e as órfãs só se reconciliam na vista
+        «Sistema».
+        """
+        from services.s3_explorer_scope import PastaDoExplorador, pode_ver
+
         scope, papel = await self._ambito(mundo, _sessao("cmp-domus"), vista=False)
+        assert scope.sem_fronteira is False
+        assert tuple(scope.network_ids) == (REDE_DOMUS,)
+        da_power = PastaDoExplorador(
+            caminho="Documentação Clientes/p/", network_ids=frozenset({REDE_INCUMBENTE}), company_ids=frozenset({"cmp-power"}),
+        )
+        orfa = PastaDoExplorador(caminho="Documentação Clientes/x/", orfa=True)
+        assert pode_ver(da_power, scope, role=papel) is False
+        assert pode_ver(orfa, scope, role=papel) is False
+
+    async def test_contraprova_sem_empresa_escolhida_as_operacoes_continuam_globais(self, mundo):
+        scope, _ = await self._ambito(mundo, _sessao(), vista=False)
         assert scope.sem_fronteira is True
 
     def test_a_listagem_do_servico_pede_a_vista_e_as_outras_nao(self):

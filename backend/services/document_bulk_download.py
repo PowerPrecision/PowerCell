@@ -25,7 +25,7 @@ from services.document_process_resolve import DOCUMENT_S3_ROOT_PREFIX
 from services.document_path_scope import ficheiro_no_ambito
 from services.document_s3_paths import s3_path_variations
 from services.history import log_history
-from services.role_scope import utilizador_e_global
+from services.role_scope import fronteira_levantada
 from services.s3_storage import s3_service
 from services.tenant_network import processo_no_ambito, resolve_tenant_scope
 
@@ -81,7 +81,7 @@ async def run_bulk_download_documents(data: dict, *, user: dict) -> StreamingRes
             raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
         # D-31: o `process_id` do corpo é um ALVO (o histórico de outro
         # processo ganhava a linha «Download em massa»), tal como o do caminho.
-        if not utilizador_e_global(user) and not processo_no_ambito(
+        if not fronteira_levantada(user) and not processo_no_ambito(
             process, await resolve_tenant_scope(user)
         ):
             raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)

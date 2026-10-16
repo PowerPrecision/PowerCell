@@ -69,7 +69,7 @@ from fastapi import Depends, HTTPException, Request
 
 from database import db
 from services.auth import get_current_user
-from services.role_scope import conta_e_master, utilizador_e_global
+from services.role_scope import fronteira_levantada
 from services.tenant_network import (
     CAMPO_REDES_PARCEIRAS,
     PROJECCAO_DO_CARIMBO,
@@ -112,15 +112,17 @@ _CAMINHO_DA_FICHA = "/clients/{client_id}"
 
 
 def _master_passa(user: Optional[dict]) -> bool:
-    """O Master abre por id o que lhe indicam, com qualquer chapéu (Lote 2, Out 2026).
+    """O Master abre por id o que lhe indicam — SÓ na vista «Sistema».
 
-    `utilizador_e_global` olha para o perfil ACTIVO: um Master com o chapéu de
-    Admin de uma empresa passava a ter só o âmbito dessa empresa e recebia 404
-    ao abrir os ficheiros de um cliente de outra — o que nenhum chapéu lhe
-    devia tirar. As LISTAGENS continuam a ser a vista da empresa escolhida
-    (`tenant_network.resolve_vista_scope`); abrir por id é global.
+    Lote 2 (Out 2026): a conta Master abria por id com qualquer chapéu, para
+    que um link para um processo de outra empresa não desse 404 a quem pode
+    tudo. Lote 7.1 inverte-o quando há uma empresa escolhida no cabeçalho:
+    «um Master a operar como Domus tem de receber 404 se tentar aceder a um
+    registo da Precision (forçando a troca na UI)». Sem empresa escolhida
+    (vista «Sistema») nada muda. O chapéu continua a não contar: olha-se para
+    a CONTA (`por_conta=True`).
     """
-    return conta_e_master(user) or utilizador_e_global(user)
+    return fronteira_levantada(user, por_conta=True)
 
 
 def cliente_e_da_pool(cliente: Optional[dict]) -> bool:

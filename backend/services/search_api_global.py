@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from database import db
 from services.encryption import (
@@ -15,9 +15,13 @@ from services.encryption import (
     generate_telefone_hash,
     decrypt_client_data,  # PACOTE DD — desencriptar clientes na pesquisa global
 )
+from services.process_owner import calcular_empresa_dona
 from services.tenant_network import (
-    build_tenant_condition,
-    build_tenant_process_condition,
+    CAMPO_REDE,
+    build_network_scope_condition,
+    build_process_scope_condition,
+    resolve_tenant_scope,
+    resolve_tenant_scope_completo,
 )
 from utils.input_sanitization import sanitize_string
 from utils.search_filters import (
@@ -26,6 +30,30 @@ from utils.search_filters import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+#: O carimbo que se lê para etiquetar o resultado com a empresa dona.
+PROJECCAO_DA_EMPRESA = {"company_id": 1, "company_name": 1, CAMPO_REDE: 1, "company": 1}
+
+
+async def _etiqueta_da_empresa(doc: dict, scope_activo) -> Optional[dict]:
+    """``{company_id, company_name, network_id, e_de_outra_rede}`` ou ``None``.
+
+    ``e_de_outra_rede`` é relativo à empresa ACTIVA: é o que diz ao ecrã que
+    abrir este resultado exige trocar de empresa. Nunca levanta — a etiqueta é
+    um enfeite sobre um resultado que já existe.
+    """
+    try:
+        return await calcular_empresa_dona(doc, scope_activo)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[PESQUISA] Falha a etiquetar a empresa de %s: %s", doc.get("id"), exc)
+        return None
+
+
+def _tirar_carimbo(doc: dict) -> None:
+    """O carimbo serviu para a etiqueta; não vai para o ecrã."""
+    for chave in ("company_id", "company_name", CAMPO_REDE, "company"):
+        doc.pop(chave, None)
 
 
 async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
@@ -79,13 +107,22 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
     # filtro de empresa NENHUM e devolvia clientes de outras empresas com
     # o NIF já desencriptado (`decrypt_client_data`, mais abaixo). É
     # pesquisa com dados pessoais em claro a atravessar redes.
-    tenant_condition = await build_tenant_condition(user)
+    #
+    # A PESQUISA GLOBAL É A ÚNICA EXCEPÇÃO AO CONTEXTO ESTRITO (Lote 7.1): tudo o
+    # resto estreita-se à empresa do `X-Company-Id`, mas aqui a pergunta é «onde
+    # está este cliente?» e a resposta pode estar noutra empresa do próprio
+    # utilizador. Procura em TODAS as redes que ele pode ver e etiqueta cada
+    # resultado com a empresa dona (`empresa`); abrir um resultado de outra
+    # empresa continua a exigir trocar de empresa (o por-id é estrito).
+    scope_completo = await resolve_tenant_scope_completo(user)
+    scope_activo = await resolve_tenant_scope(user)
+    tenant_condition = build_network_scope_condition(scope_completo)
     # A pesquisa global percorre TRÊS colecções e só os processos têm
     # partilha (D-25). Duas funções, para o sítio da chamada dizer qual
     # das duas perguntas está a fazer — um `com_isolamento` único aqui
     # ou acrescentava um ramo inútil aos clientes e tarefas, ou escondia
     # ao parceiro o processo que ele vê.
-    tenant_condition_processos = await build_tenant_process_condition(user)
+    tenant_condition_processos = build_process_scope_condition(scope_completo)
 
     def com_isolamento(query: dict) -> dict:
         return {"$and": [tenant_condition, query]}
@@ -135,10 +172,14 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
                 "client_name": 1,
                 "process_type": 1,
                 "status": 1,
-                "personal_data.nif": 1
+                "personal_data.nif": 1,
+                **PROJECCAO_DA_EMPRESA,
             }
         ).limit(limit).to_list(limit)
 
+        for processo in processes:
+            processo["empresa"] = await _etiqueta_da_empresa(processo, scope_activo)
+            _tirar_carimbo(processo)
         results["processes"] = processes
 
         # Pesquisar CLIENTES (registos de clientes) - usar blind indexes
@@ -193,6 +234,7 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
                 "assigned_to": 1,
                 "status": 1,
                 "fase_principal": 1,
+                **PROJECCAO_DA_EMPRESA,
             }
         ).limit(limit).to_list(limit)
 
@@ -226,6 +268,7 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
                 "process_count": len(process_ids),
                 "first_process_id": first_process_id,
                 "status": decrypted_client.get("fase_principal", {}).get("status") or decrypted_client.get("status"),
+                "empresa": await _etiqueta_da_empresa(decrypted_client, scope_activo),
             })
 
         results["clients"] = formatted_clients
@@ -248,10 +291,14 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
                 "title": 1,
                 "status": 1,
                 "priority": 1,
-                "client_name": 1
+                "client_name": 1,
+                **PROJECCAO_DA_EMPRESA,
             }
         ).limit(limit).to_list(limit)
 
+        for tarefa in tasks:
+            tarefa["empresa"] = await _etiqueta_da_empresa(tarefa, scope_activo)
+            _tirar_carimbo(tarefa)
         results["tasks"] = tasks
 
         logger.info(

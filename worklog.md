@@ -12236,3 +12236,31 @@ Work Log:
 ### Medição
 - Mutações: backend 25 (6 sobreviventes na 1.ª passagem: 4 testes fracos reforçados, 2 equivalentes) e frontend 16 (1 sobrevivente: o corpo do pedido de `forceCreateS3Folder`, coberto por `api.forcarPastaS3.test.js`).
 
+
+---
+Task ID: lote-7-1-contexto-estrito-permissoes-e-parecer-de-identidade
+Agent: Cloud Agent
+Task: Lote 7.1 — Strict Context Switching (X-Company-Id como fronteira do pedido), permissões críticas (Index sem Webmail, envio do Master/CEO, «Ver comprovativo») e parecer sobre a identidade do cliente
+
+Date: 2026-10-16
+
+Work Log:
+
+### 1. Contexto estrito de empresa
+- **Reproduzido primeiro** (`tests/integration/test_lote71_contexto_estrito_mongo.py`, MongoDB real): um CEO com UCR na Precision e na Domus, a trabalhar como Domus, abre por id o processo, o cliente, a tarefa e o ficheiro da Precision; o Master com a Domus escolhida também (Lote 2 tinha-o decidido assim). Causa: o `X-Company-Id` só chegava ao utilizador na conta Master (`vista_empresa_id`), o âmbito dos outros era a união das redes dele e `by_id_scope`/6 guardas de posse davam passe livre ao Master pelo cargo.
+- **Correcção num ponto único:** `resolve_tenant_scope` devolve o âmbito estreitado à rede da empresa activa (o completo chama-se `resolve_tenant_scope_completo`); o cabeçalho nunca alarga; `role_scope.fronteira_levantada` substitui o passe livre por cargo (só vale na vista «Sistema»); o Master com empresa escolhida trabalha os DADOS como Admin dela (`papel_para_os_dados`) nas superfícies que decidem por papel (calendário, visitas, imóveis, finanças).
+- **Pesquisa global = única excepção**, com selo de empresa em cada resultado e troca de empresa ao abrir um resultado de outra.
+- **Webmail:** separadores e vista consolidada das contas limitados à rede activa. **Frontend:** trocar de perfil que muda de empresa grava no servidor e recarrega (o `?company_id=` do Webmail sobrevivia ao `clear()` da cache).
+- Inverti 3 testes que afirmavam o comportamento anterior; a suite unitária só tinha 5 vermelhos, todos esses. Mutantes: 17 medidos, 1 equivalente.
+
+### 2. Permissões
+- **Index sem Webmail:** dependência do router `/emails` (`webmail_perfis.py`), menu e rota; o ecrã do processo mantém a leitura do correio ligado a ele.
+- **`POST /emails/send` 403:** era a falta de conta pessoal na empresa escolhida; e `general` enviava pela conta de ambiente «power» fosse qual fosse a empresa. Agora usa a Caixa Geral da empresa activa (reconstruída no executor; a password nunca viaja no registo).
+- **«Ver comprovativo» 403:** a causa NÃO era RBAC nem rede — a guarda de posse do Portal só aceitava a subpasta do processo e o comprovativo vive na pasta do cliente (entra com a lead). Agora pergunta pelas duas pastas.
+
+### 3. Parecer (ver TECHNICAL_DEBT D-42): o sistema NÃO lança 409/422 a bloquear a criação multi-canal por engano; lança 409 quando a pessoa já existe NA REDE, por desenho (D-38). A premissa «cliente global na BD sem duplicados» é uma mudança de modelo, não uma correcção — pedida decisão do dono do produto.
+
+### Não fiz (dito)
+- Não mexi no D-38 (identidade por rede) — a conversa de arquitectura precede o código.
+- Um link para um registo de outra empresa continua a dar 404 uniforme: a interface não pode sugerir «troque de empresa» sem criar um oráculo sobre o que existe.
+- O realtime `new_email` e as caixas partilhadas por cargo do Index não foram revistos (o Index deixou de ter Webmail, mas os sockets não foram auditados neste lote).

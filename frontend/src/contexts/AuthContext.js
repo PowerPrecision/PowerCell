@@ -533,6 +533,7 @@ export function AuthProvider({ children }) {
     sessionStorage.setItem("activeRole", newRole);
     setActiveRole(newRole);
 
+    let gravacaoNoServidor = null;
     if (resolvedCompanyId) {
       sessionStorage.setItem("activeCompanyId", resolvedCompanyId);
       localStorage.setItem("active_company_id", resolvedCompanyId);
@@ -543,7 +544,7 @@ export function AuthProvider({ children }) {
       if (matching?.company_name) {
         applyBrandTheme(matching.company_name);
       }
-      persistActiveCompany(resolvedCompanyId, newRole);
+      gravacaoNoServidor = persistActiveCompany(resolvedCompanyId, newRole);
     }
 
     // Lote 6, pontos 3 e 4 — o snapshot dos cabeçalhos ANTES do `clear()`.
@@ -568,6 +569,35 @@ export function AuthProvider({ children }) {
     });
 
     queryClient.clear();
+
+    // Lote 7.1 — trocar de PERFIL que muda de EMPRESA recarrega, como a troca de empresa.
+    //
+    // `clear()` esvazia a cache do TanStack, mas há estado que não vive nela: o
+    // Webmail guarda a empresa em `?company_id=` (o parâmetro vence a empresa
+    // activa, e deve vencer — é o que faz um link funcionar) e em estado local.
+    // Sem recarregar, quem passava de «Precision» a «Domus» pelo seletor de
+    // perfis continuava a ler a caixa da empresa anterior, com o cabeçalho
+    // novo: o isolamento por empresa a depender de cada ecrã se lembrar de
+    // reagir. Se só o CARGO muda (mesma empresa) não há nada a reler que o
+    // `clear()` não resolva, e não se recarrega.
+    if (resolvedCompanyId && resolvedCompanyId !== activeCompanyId) {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("company_id")) {
+        url.searchParams.set("company_id", resolvedCompanyId);
+        window.history.replaceState(null, "", url.toString());
+      }
+      // Só depois de o servidor saber a empresa nova: recarregar a meio do pedido
+      // deixava o `/auth/active-company` por gravar e a sessão a arrancar na antiga.
+      Promise.resolve(gravacaoNoServidor).then((servidorInalcancavel) => {
+        if (servidorInalcancavel) {
+          toast.error(
+            "Não foi possível mudar de empresa: o servidor não respondeu. Recarregue a página dentro de instantes.",
+          );
+          return;
+        }
+        window.location.reload();
+      });
+    }
   }, [user, persistActiveCompany, queryClient, activeCompanyId]);
 
   // Context Switching - Múltiplas Empresas

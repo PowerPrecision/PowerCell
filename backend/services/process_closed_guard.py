@@ -66,7 +66,7 @@ from fastapi import Depends, HTTPException, Request
 from database import db
 from services.auth import get_current_user
 from services.portal_estado import estado_e_terminal
-from services.role_scope import utilizador_e_global
+from services.role_scope import fronteira_levantada
 from services.tenant_network import (
     CAMPO_REDES_PARCEIRAS,
     PROJECCAO_DO_CARIMBO,
@@ -149,7 +149,7 @@ async def exigir_processo_aberto_por_id(process_id: str, user: dict) -> None:
     processo = await db.processes.find_one({"id": process_id}, PROJECCAO_DO_PROCESSO_FECHADO)
     if not processo:
         return
-    if not utilizador_e_global(user):
+    if not fronteira_levantada(user):
         scope = await resolve_tenant_scope(user)
         if not processo_no_ambito(processo, scope):
             return

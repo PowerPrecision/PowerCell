@@ -43,6 +43,11 @@ from typing import Any, Optional
 
 from models.auth import UserRole, normalizar_papel
 
+#: Chave que o `get_current_user` põe no utilizador: a empresa que ele tem
+#: seleccionada no cabeçalho (`X-Company-Id`). É o CONTEXTO ESTRITO do pedido
+#: (Lote 7.1): para listar e para abrir por id.
+CAMPO_VISTA = "vista_empresa_id"
+
 #: Os perfis que atravessam empresas. Uma lista de UM elemento, de propósito.
 PAPEIS_GLOBAIS: frozenset[str] = frozenset({UserRole.MASTER})
 
@@ -95,6 +100,26 @@ def conta_e_master(user: Optional[dict]) -> bool:
     return e_papel_global(normalizar_papel((user or {}).get("role")))
 
 
+def fronteira_levantada(user: Optional[dict], *, por_conta: bool = False) -> bool:
+    """O Master a trabalhar SEM empresa escolhida: nada a verificar.
+
+    Antes do Lote 7.1 o Master passava sem ler nada em todas as guardas de
+    posse (`utilizador_e_global` / `conta_e_master`), com qualquer empresa
+    escolhida no cabeçalho — e foi assim que uma sessão «como Domus» abria
+    um registo da Precision. Hoje o passe livre só vale na vista «Sistema»
+    (nenhuma empresa em `X-Company-Id`); com uma empresa escolhida a guarda
+    pergunta ao âmbito estreitado (`tenant_network.resolve_tenant_scope`), e
+    uma empresa que não existe (cabeçalho velho) devolve-lhe o âmbito
+    completo — logo continua a passar.
+
+    `por_conta=True` olha para a CONTA (qualquer chapéu), como o abrir por
+    id sempre fez; o omisso olha para o perfil ACTIVO.
+    """
+    if str((user or {}).get(CAMPO_VISTA) or "").strip():
+        return False
+    return conta_e_master(user) if por_conta else utilizador_e_global(user)
+
+
 def pode_conceder_papel(quem_concede: Optional[dict], papel: Any) -> bool:
     """Quem concede um perfil pode concedê-lo?
 
@@ -108,7 +133,9 @@ def pode_conceder_papel(quem_concede: Optional[dict], papel: Any) -> bool:
 
 
 __all__ = [
+    "CAMPO_VISTA",
     "conta_e_master",
+    "fronteira_levantada",
     "PAPEIS_GLOBAIS",
     "PAPEIS_SO_MASTER_CONCEDE",
     "e_papel_global",

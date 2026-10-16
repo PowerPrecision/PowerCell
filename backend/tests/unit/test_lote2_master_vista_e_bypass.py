@@ -172,9 +172,16 @@ class TestOCabecalhoChegaAoUtilizador:
         user = await self._sessao_de(fake_async_db, "m1", "master", **{"X-Company-Id": valor})
         assert "vista_empresa_id" not in user
 
-    async def test_quem_nao_e_master_nunca_recebe_vista(self, fake_async_db):
+    async def test_qualquer_staff_recebe_a_empresa_do_cabecalho(self, fake_async_db):
+        """INVERTIDO no Lote 7.1 (contexto estrito).
+
+        Antes só o Master recebia a vista e o cabeçalho era ignorado para os outros: um CEO com
+        acesso a duas redes que trabalhava como Domus abria registos da Precision. A chave passa a
+        existir para todos; QUEM A VALIDA é o âmbito (`resolve_tenant_scope`), que nunca alarga —
+        ver `tests/integration/test_lote71_contexto_estrito_mongo.py::test_um_cabecalho_forjado…`.
+        """
         user = await self._sessao_de(fake_async_db, "a1", "admin", **{"X-Company-Id": "cmp-domus"})
-        assert "vista_empresa_id" not in user
+        assert user["vista_empresa_id"] == "cmp-domus"
 
 
 # ════════════════════════════════════════════════════════════════════

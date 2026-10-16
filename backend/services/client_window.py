@@ -30,7 +30,7 @@ import logging
 from typing import Iterable, Optional
 
 from database import db
-from services.role_scope import conta_e_master
+from services.role_scope import fronteira_levantada
 from services.tenant_network import (
     PROJECCAO_DO_CARIMBO,
     build_process_scope_condition,
@@ -58,7 +58,7 @@ async def ids_dos_processos_visiveis(
     FECHADA: se a base de dados não responde, a janela é vazia e não «tudo».
     """
     ids = _ids(candidatos)
-    master = conta_e_master(user)
+    master = fronteira_levantada(user, por_conta=True)
 
     ramos: list[dict] = []
     if ids:
@@ -89,7 +89,7 @@ async def e_visitante_do_cliente(cliente: Optional[dict], user: dict) -> bool:
     A Pool (sem carimbo e sem processos) não é «de outra rede»: é de quem a reivindicar.
     O Master nunca é visitante.
     """
-    if not cliente or conta_e_master(user):
+    if not cliente or fronteira_levantada(user, por_conta=True):
         return False
     from services.by_id_scope import cliente_e_da_pool
 
