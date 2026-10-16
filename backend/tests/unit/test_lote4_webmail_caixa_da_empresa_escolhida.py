@@ -19,6 +19,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from tests.unit.helpers_tenant import tenant_db
+
 MASTER = {"id": "u-master", "name": "Master", "role": "master", "effective_role": "master"}
 
 
@@ -59,7 +61,9 @@ def mundo(fake_async_db):
         {"id": "a1", "email_address": "master@power.pt", "company_id": "cmp-power", "label": "Pessoal"},
         {"id": "a2", "email_address": "master@precision.pt", "company_id": "cmp-precision", "label": "Pessoal"},
     ]
-    with patch.object(mod, "db", fake_async_db), \
+    # Lote 7.1: o cabeçalho estreita a vista de QUALQUER staff pela rede da empresa — a cadeia de
+    # resolução do âmbito (`tenant_network`) também fala com a base de dados, logo `tenant_db`.
+    with tenant_db(fake_async_db, mod), \
          patch("services.user_email_config_service.list_user_email_configs_all_companies",
                AsyncMock(return_value=pessoais)), \
          patch("services.email_config_resolver.load_caixa_geral_config", carregar):
