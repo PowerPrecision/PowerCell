@@ -9,6 +9,7 @@ import logging
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
+from pymongo.errors import ConnectionFailure
 
 from database import db
 from middleware.client_ip import ip_do_cliente
@@ -26,6 +27,10 @@ from services.refresh_token_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+MENSAGEM_BASE_DE_DADOS_INDISPONIVEL = (
+    "Serviço temporariamente indisponível. Tente novamente dentro de instantes."
+)
 
 
 async def run_login(request, data: UserLogin, response):
@@ -150,6 +155,12 @@ async def run_login_v2(request, data: UserLogin, response):
         )
     except HTTPException:
         raise  # Re-lançar HTTPExceptions (401, 403, etc.)
+    except ConnectionFailure as e:
+        # A base de dados não respondeu (rede, lista de IPs do Atlas, cluster em baixo):
+        # não é um erro desta aplicação nem das credenciais — diz-se, em vez de um
+        # «Erro interno» que manda procurar no sítio errado.
+        logger.error(f"Login impossível: base de dados inalcançável ({type(e).__name__}): {e}")
+        raise HTTPException(status_code=503, detail=MENSAGEM_BASE_DE_DADOS_INDISPONIVEL)
     except Exception as e:
         logger.exception(f"Login crash inesperado: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=f"Erro interno: {type(e).__name__}")

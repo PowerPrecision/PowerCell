@@ -12349,3 +12349,11 @@ Work Log:
 * O dono do produto informou que **todas as operações de produção** do `DEPLOY_RUNBOOK.md` (promoção a Master, backfills de rede/emails/caixas/TTL, migrações de workflow e formulários, `co_buyers`, limpeza de cópias órfãs e medições) **foram executadas com sucesso na consola do Render**. Registado como concluído; **não verificado por mim** (sem saídas dos scripts; os números das medições não foram colados aqui).
 * Desenvolvimento de funcionalidades congelado. Ideias de negócio adiadas: comparador de bancos, painel de cobrança de documentos, alertas accionáveis.
 * CI: o run do `e0c790bd` ficou **cancelado** (o Backend Fast excedeu `timeout-minutes: 10`, 8+ min de testes; o do `f6254187` tinha demorado 6m12s) e foi substituído pelo run do commit seguinte (só documentação, mesmo código). Causa do excesso de tempo **não determinada** (runner lento vs. teste pendurado).
+
+## 16 Out 2026 — Incidente: Atlas sem IPs autorizados (deploy «Timed Out», login 500)
+
+- **Sintoma:** deploy do Render das 17:07 falhou com «No open ports detected / Timed Out»; depois o login respondia 500.
+- **Causa:** IP Access List do Atlas vazia (cluster activo). Pacotes descartados → `NetworkTimeout` de 20 s nos 3 shards. Resolvido com `0.0.0.0/0` pelo dono do produto; verificado com `ping` na shell do Render (`ok: 1.0`) e login a funcionar.
+- **Por que ficou vazia:** não determinado (hipótese: entrada temporária expirada; ver Activity Feed do Atlas).
+- **Código:** `create_indexes` com `ping` prévio e disjuntor (commit `3795e6cf`); falha de ligação à BD → 503 no login e handler global; registo de erros com tecto de 2 s.
+- **Pendente (operação, não código):** substituir `0.0.0.0/0` pelos IPs de saída do Render (web e worker) e remover o `0.0.0.0/0`.

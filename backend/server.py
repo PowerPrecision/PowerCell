@@ -1,3 +1,4 @@
+import asyncio
 import os
 import logging
 from datetime import datetime, timezone
@@ -360,6 +361,8 @@ if os.getenv("TESTING") == "true":
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException, RequestValidationError
+from pymongo.errors import ConnectionFailure
+from services.auth_login_handlers import MENSAGEM_BASE_DE_DADOS_INDISPONIVEL
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -386,7 +389,9 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             if hasattr(request.state, 'user'):
                 user_id = request.state.user.get('id')
             
-            await system_error_logger.log_error(
+            # Limite de tempo: com a base de dados em baixo este registo esperava mais 30 s
+            # (serverSelectionTimeout) e atrasava a resposta de erro que já devia ter saído.
+            await asyncio.wait_for(system_error_logger.log_error(
                 error_type=f"http_{exc.status_code}",
                 message=str(exc.detail),
                 component="api",
@@ -399,7 +404,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
                 severity=severity,
                 user_id=user_id,
                 request_path=str(request.url.path)
-            )
+            ), timeout=2)
         except Exception as log_error:
             logger.warning(f"Erro ao registar log: {type(log_error).__name__}: {log_error}")
     
@@ -496,6 +501,24 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=422,
         content={"detail": safe_errors},
         headers=cors_headers
+    )
+
+
+@app.exception_handler(ConnectionFailure)
+async def database_unreachable_handler(request: Request, exc: ConnectionFailure):
+    """Base de dados inalcançável (timeout de seleção de servidor, rede, IP não autorizado no Atlas).
+
+    Qualquer rota que deixe subir esta excepção responde 503 com uma mensagem verdadeira, em vez
+    de um 500 genérico. Não escreve na base de dados (está em baixo): só regista no log.
+    """
+    logger.error(
+        f"Base de dados inalcançável em {request.method} {request.url.path} "
+        f"({type(exc).__name__}): {exc}"
+    )
+    return JSONResponse(
+        status_code=503,
+        content={"detail": MENSAGEM_BASE_DE_DADOS_INDISPONIVEL},
+        headers={"Retry-After": "30", "Cache-Control": "no-store"},
     )
 
 
