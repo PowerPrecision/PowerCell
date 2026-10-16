@@ -3,6 +3,7 @@
  * Classifica eventos, gera descrições e junta history + activities.
  * Espelha `services/history.py` (classify_history_event / build_history_description).
  */
+import { acaoLegivel, descreverAlteracao } from "./rotulosDoHistorico";
 
 export const AUDIT_EVENT_TYPES = {
   status_change: { label: "Fase" },
@@ -60,7 +61,18 @@ export function classifyAuditEvent(entry) {
 
 export function describeAuditEvent(entry) {
   if (!entry || typeof entry !== "object") return "Ação registada";
-  if (entry.description) return String(entry.description);
+  // Com `field` a frase refaz-se aqui: a do servidor traz a chave técnica
+  // (`assigned_mediador_ids`, `portal_access`) e, nos campos de ids, os próprios ids.
+  const type0 = classifyAuditEvent(entry);
+  if (entry.field && type0 !== "status_change") {
+    return descreverAlteracao({
+      action: entry.action,
+      field: entry.field,
+      oldValue: entry.old_value ?? entry.old_status,
+      newValue: entry.new_value ?? entry.new_status,
+    }).principal;
+  }
+  if (entry.description) return acaoLegivel(String(entry.description));
 
   const action = String(entry.action || "").trim() || "Atualização";
   const field = entry.field;

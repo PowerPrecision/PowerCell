@@ -106,8 +106,14 @@ describe("A escrita da IA na ficha", () => {
       CODIGO.indexOf("const handleDocumentDataExtracted"),
     );
     assert.ok(
-      commit.includes("setSugestoesIA(criarSugestoes(revisao))"),
+      commit.includes("receberSugestoesIA(revisao)"),
       "a extracção em lote não levanta sugestões para revisão",
+    );
+    // Contraprova (Lote 7.3): o ponto de entrada é o que ABRE o painel — se
+    // deixasse de levantar as sugestões, a asserção acima passaria vazia.
+    assert.ok(
+      /const receberSugestoesIA = useCallback\(\(revisao\) => \{\s*setSugestoesIA\(criarSugestoes\(revisao\)\);\s*setDrawerSugestoesAberto\(true\);/.test(CODIGO),
+      "receberSugestoesIA tem de guardar as sugestões e abrir o painel",
     );
 
     // A afirmação que interessa é a AUSÊNCIA do ramo: a versão original

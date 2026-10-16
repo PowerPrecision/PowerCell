@@ -12,6 +12,8 @@ import { Card, CardContent } from "../../ui/card";
 import EmailHistoryPanel from "../../EmailHistoryPanel";
 import { Plus, Send } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { getUsers } from "../../../services/api";
+import { destinatariosDoProcesso } from "../../../utils/destinatariosDoProcesso";
 
 export default function EmailsTab({ id, savedProcessRef, process, token }) {
   const navigate = useNavigate();
@@ -19,9 +21,24 @@ export default function EmailsTab({ id, savedProcessRef, process, token }) {
 
   // PACOTE 12 — abre o Webmail com o compositor pré-preenchido (destinatário
   // = email do cliente; processo já associado para a Tag Mágica/histórico).
-  const handleNewEmail = () => {
+  //
+  // Lote 7.3: o «Para» leva o cliente (e o 2.º titular) e o(s) intermediário(s)
+  // atribuídos. A equipa que o processo alcança é pedida ao abrir (e não ao
+  // montar o separador): se falhar, o email abre na mesma, só com o cliente.
+  // Os anexos NUNCA vão pré-seleccionados.
+  const handleNewEmail = async () => {
+    const processoAtual = { ...(process || {}), ...(savedProcessRef.current || {}) };
+    let equipa = [];
+    try {
+      const { data } = await getUsers(undefined, { processId: id, skipErrorToast: true });
+      equipa = Array.isArray(data) ? data : [];
+    } catch {
+      equipa = [];
+    }
+    const { para } = destinatariosDoProcesso(processoAtual, equipa);
     const params = new URLSearchParams({ compose: "new", process_id: id });
-    if (clientEmail) params.set("to", clientEmail);
+    if (para.length > 0) params.set("to", para.join(", "));
+    else if (clientEmail) params.set("to", clientEmail);
     navigate(`/webmail?${params.toString()}`);
   };
 

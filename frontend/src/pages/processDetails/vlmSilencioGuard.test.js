@@ -102,6 +102,10 @@ describe("ProcessDetails — todos os desfechos têm palavra", () => {
     // diálogo sobreposto e passou a ser preenchimento em linha. A
     // contraprova é a mesma — alguma coisa tem de aparecer ao consultor —,
     // e aponta agora para onde a revisão vive.
-    expect(corpo).toContain("setSugestoesIA(criarSugestoes(revisao))");
+    expect(corpo).toContain("receberSugestoesIA(revisao)");
+    // Contraprova (Lote 7.3): o ponto de entrada levanta as sugestões E abre o painel.
+    expect(PROCESS_DETAILS).toMatch(
+      /const receberSugestoesIA = useCallback\(\(revisao\) => \{\s*setSugestoesIA\(criarSugestoes\(revisao\)\);\s*setDrawerSugestoesAberto\(true\);/,
+    );
   });
 });

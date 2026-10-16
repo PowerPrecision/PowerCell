@@ -8,7 +8,8 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -26,6 +27,7 @@ import {
   MailWarning
 } from "lucide-react";
 import { getProcessAlerts } from "../services/api";
+import { queryKeys } from "../lib/queryClient";
 
 const alertIcons = {
   age_under_35: Star,
@@ -60,32 +62,22 @@ const priorityLabels = {
 };
 
 const ProcessAlerts = ({ processId, className = "" }) => {
-  const [alerts, setAlerts] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(true);
-  const [hasCritical, setHasCritical] = useState(false);
-  const [hasHigh, setHasHigh] = useState(false);
 
-  useEffect(() => {
-    if (processId) {
-      fetchAlerts();
-    }
-  }, [processId]);
-
-  const fetchAlerts = async () => {
-    try {
-      setLoading(true);
-      const res = await getProcessAlerts(processId);
-      setAlerts(res.data.alerts || []);
-      setHasCritical(res.data.has_critical || false);
-      setHasHigh(res.data.has_high || false);
-    } catch (error) {
-      console.error("Erro ao carregar alertas:", error);
-      setAlerts([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Os alertas são DERIVADOS do estado do processo (não há «resolver» um
+  // alerta: resolve-se a causa). Por isso vivem na cache do TanStack debaixo
+  // do prefixo do detalhe — qualquer invalidação do processo faz desaparecer
+  // o que deixou de valer. Um estado local lido só ao montar deixava o alerta
+  // no ecrã até se recarregar a página.
+  const { data, isLoading: loading, isError } = useQuery({
+    queryKey: queryKeys.processes.alerts(processId),
+    queryFn: async () => (await getProcessAlerts(processId)).data,
+    enabled: Boolean(processId),
+    refetchOnWindowFocus: true,
+  });
+  const alerts = Array.isArray(data?.alerts) ? data.alerts : [];
+  const hasCritical = Boolean(data?.has_critical);
+  const hasHigh = Boolean(data?.has_high);
 
   const getIcon = (type) => {
     return alertIcons[type] || alertIcons.default;
@@ -98,6 +90,23 @@ const ProcessAlerts = ({ processId, className = "" }) => {
           <div className="flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" />
             <span className="text-sm text-muted-foreground">A carregar alertas...</span>
+          </div>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  // Falhou e não há nada em cache: dizê-lo. «Sem alertas ativos» seria uma
+  // afirmação falsa sobre um pedido que nem chegou a responder.
+  if (isError && !data) {
+    return (
+      <Card className={`${className} border-amber-200 bg-amber-50/30`} data-testid="process-alerts-erro">
+        <CardHeader className="py-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-amber-600" />
+            <CardTitle className="text-sm font-medium">
+              Não foi possível carregar os alertas
+            </CardTitle>
           </div>
         </CardHeader>
       </Card>

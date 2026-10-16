@@ -14,6 +14,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   sendWebmailEmail: vi.fn(),
   cancelEmailSend: vi.fn(),
+  downloadEmailAttachment: vi.fn(),
+  getEmailAttachmentPreview: vi.fn(),
 }));
 vi.mock("../../services/api", () => api);
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -80,6 +82,35 @@ describe("EmailViewerModal — responder", () => {
   });
 });
 
+describe("EmailViewerModal — anexos pelo Axios (Lote 7.3)", () => {
+  const COM_ANEXO = { ...EMAIL, attachments: [{ id: "a1", filename: "irs.pdf", content_type: "application/pdf", size: 2048 }] };
+  const montarComAnexo = () => render(
+    <EmailViewerModal isOpen onClose={() => {}} emails={[COM_ANEXO]} selectedEmailId="e1" token="t" clientName="Joana" />,
+  );
+
+  it("descarregar um anexo usa `downloadEmailAttachment` e nunca o `fetch` cru", async () => {
+    api.downloadEmailAttachment.mockResolvedValue({ data: new Blob(["x"]) });
+    window.URL.createObjectURL = vi.fn(() => "blob:x");
+    window.URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    montarComAnexo();
+
+    fireEvent.click(await screen.findByRole("button", { name: /descarregar|download/i }));
+
+    await waitFor(() => expect(api.downloadEmailAttachment).toHaveBeenCalledWith("e1", "a1"));
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("um erro ao descarregar diz-se (antes era engolido)", async () => {
+    api.downloadEmailAttachment.mockRejectedValue({ response: { status: 403 } });
+    montarComAnexo();
+
+    fireEvent.click(await screen.findByRole("button", { name: /descarregar|download/i }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/descarregar o anexo/i)));
+  });
+});
+
 describe("EmailViewerModal — transporte do envio", () => {
   it("nenhum `fetch` para /emails/send nem /cancel-send", () => {
     const fonte = fs.readFileSync(path.resolve(process.cwd(), "src/components/EmailViewerModal.js"), "utf-8")
@@ -87,5 +118,7 @@ describe("EmailViewerModal — transporte do envio", () => {
     expect(fonte).not.toMatch(/emails\/send/);
     expect(fonte).not.toMatch(/cancel-send/);
     expect(fonte).toContain("sendWebmailEmail(");
+    expect(fonte).not.toMatch(/\bfetch\(/);
+    expect(fonte).not.toMatch(/API_URL/);
   });
 });

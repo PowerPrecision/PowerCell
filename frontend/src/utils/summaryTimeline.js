@@ -3,6 +3,8 @@
  * Espelha `services/process_timeline.py` (criação + histórico GET /history).
  */
 
+import { acaoLegivel, descreverAlteracao } from "./rotulosDoHistorico";
+
 function isCreatedAction(action) {
   return String(action || "").trim().toLowerCase().startsWith("criou processo");
 }
@@ -27,14 +29,15 @@ function descriptionForHistoryItem(item) {
   const oldValue = item?.old_value;
   const newValue = item?.new_value;
   if (!field && oldValue == null && newValue == null) return null;
-  const parts = [];
-  if (field) parts.push(String(field));
-  if (oldValue != null && oldValue !== "" && newValue != null && newValue !== "") {
-    parts.push(`${oldValue} → ${newValue}`);
-  } else if (newValue != null && newValue !== "") {
-    parts.push(String(newValue));
+  if (kindForHistoryItem(item) === "status") {
+    if (oldValue != null && oldValue !== "" && newValue != null && newValue !== "") {
+      return `${oldValue} → ${newValue}`;
+    }
+    return newValue != null && newValue !== "" ? String(newValue) : null;
   }
-  return parts.length ? parts.join(" · ") : null;
+  // Chave técnica → português (Lote 7.3); os ids nunca vão para o ecrã.
+  const { detalhe } = descreverAlteracao({ action: item?.action, field, oldValue, newValue });
+  return detalhe || null;
 }
 
 /**
@@ -65,7 +68,7 @@ export function buildSummaryTimeline(process, history, options = {}) {
     events.push({
       id: item.id,
       kind: kindForHistoryItem(item),
-      title: item.action || "Atualização",
+      title: acaoLegivel(item.action),
       description: descriptionForHistoryItem(item),
       actor: item.user_name,
       at: item.created_at,

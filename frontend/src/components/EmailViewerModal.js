@@ -19,7 +19,12 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 // PACOTE 9 — Undo Send: parse da resposta {queued, send_id, undo_window_seconds}
 import { parseSendResponse } from "../utils/webmailSendQueue";
-import { sendWebmailEmail, cancelEmailSend } from "../services/api";
+import {
+  sendWebmailEmail,
+  cancelEmailSend,
+  downloadEmailAttachment,
+  getEmailAttachmentPreview,
+} from "../services/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,8 +42,6 @@ import { pt } from "date-fns/locale";
 import { sanitizeEmailHtml } from "../utils/sanitize";
 import { safeFormat } from "../lib/utils";
 import { toast } from "sonner";
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // PACOTE 11 (Eixo 2) — converte o corpo em TEXTO SIMPLES num fragmento
 // HTML sanitizado com parágrafos reais: o <pre> denso passa a ter a mesma
@@ -168,22 +171,18 @@ const EmailViewerModal = ({
         return;
       }
       
-      const response = await fetch(
-        `${API_URL}/api/emails/${currentEmail.id}/attachments/${attachment.id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = attachment.filename;
-        a.click();
-        window.URL.revokeObjectURL(url);
-      }
+      // Pelo Axios (com `X-Company-Id`/`X-Active-Role`): o servidor decide se este
+      // utilizador pode ler o email pelo perfil activo.
+      const { data: blob } = await downloadEmailAttachment(currentEmail.id, attachment.id);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = attachment.filename;
+      a.click();
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Erro ao descarregar anexo:", error);
+      toast.error("Não foi possível descarregar o anexo.");
     }
   };
 
@@ -199,16 +198,9 @@ const EmailViewerModal = ({
       }
       
       try {
-        const response = await fetch(
-          `${API_URL}/api/emails/${currentEmail.id}/attachments/${attachment.id}/preview`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data.preview_url) {
-            window.open(data.preview_url, '_blank');
-          }
+        const { data } = await getEmailAttachmentPreview(currentEmail.id, attachment.id);
+        if (data?.preview_url) {
+          window.open(data.preview_url, '_blank');
         }
       } catch {
         console.error("Preview não disponível");

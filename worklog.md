@@ -12299,3 +12299,41 @@ Work Log:
 - **Pré-seleccionar as caixas dos «emails associados ao processo»:** não identifiquei o componente. O `SendDocumentationModal` não tem uma lista de emails do processo (só documentos, balcões e TO configurados) e o diálogo de ligação de ficheiros temporários já vem com «Enviar email para o cliente» marcado. Pré-seleccionar todos os documentos enviaria dados do cliente a bancos por omissão — não o fiz sem confirmação.
 - D-42 (identidade global do cliente) intocado.
 - `SendDocumentationModal` e os anexos do `EmailViewerModal` continuam com `fetch` cru (perdem `X-Company-Id`/`X-Active-Role`): fora do âmbito pedido.
+
+---
+Task ID: lote-7-3-polimento-axios-e-ux
+Agent: Cloud Agent
+Task: Lote 7.3 — Axios nos modais de email, destinatários pré-preenchidos, processos na modal do cliente, S3 fallback, Drawer de IA reactivo, Timeline traduzida e alertas que acompanham o processo
+
+Date: 2026-10-16
+
+Work Log:
+### 1. `fetch` cru → Axios (risco de tenant)
+- `SendDocumentationModal` (destinatários, documentos, pré-visualização, balcões, envio) e os anexos do `EmailViewerModal` (descarregar/pré-visualizar, `responseType: blob`) passam por funções de `services/api.js`; zero `fetch`/`API_URL` nos dois ficheiros. Todas com `skipErrorToast` (os componentes têm o seu aviso).
+- `getUsers(role, {forAssignment, processId, skipErrorToast})` para a lista de intermediários do processo.
+
+### 2. Destinatários pré-preenchidos
+- `utils/destinatariosDoProcesso.js` (puro): e-mails do cliente (titular 1, 2.º titular, `client_email`) + intermediários atribuídos ao processo, sem duplicados e sem inválidos. `EmailsTab.handleNewEmail` preenche o «Para»; **anexos continuam vazios** (confirmado pelo dono do produto). Falhar a lista de intermediários não impede o composer: preenche só com os do cliente.
+
+### 3. Processos na modal do cliente
+- `ProcessosDoCliente` na `ClientDetailsModal` (agora por Axios `getClient`), com ligação para cada processo. O backend **já** respeitava a janela B2B (`client_window`): provado por `test_lote73_processos_do_cliente_mongo.py` (MongoDB real, 5 casos) — não houve alteração de servidor.
+
+### 4. S3 fallback
+- Causa: depois de forçar a pasta o painel mantinha o estado antigo. `ForcarPastaS3` recebe `onFeito={aoCriarPasta}`, que esconde o selector vazio e recarrega o explorador.
+
+### 5. Drawer de IA
+- Causa: a barra «Rever Sugestões» e o `SugestoesIADrawer` viviam dentro do separador Resumo, mas a análise corre no separador Documentos. Subiram para fora do `<Tabs>` e `receberSugestoesIA` (único ponto de entrada) guarda as sugestões **e abre o painel**. Fechar o painel não o volta a abrir.
+
+### 6. Timeline e alertas
+- `utils/rotulosDoHistorico.js`: dicionário campo-técnico → português (`assigned_mediador_ids` → «Intermediários», `portal_access` → «Acesso ao Portal»…), valores legíveis, ids de pessoas nunca em bruto; campo desconhecido cai num humanizador (nunca na chave crua). Usado por `processAuditHistory`, `UnifiedAuditTrail` e `summaryTimeline`. `test_campos_do_historico_traduzidos.py` lê por AST todos os `field` estáticos de `log_history` e exige que o dicionário os conheça.
+- Alertas: **não existe «resolver» um alerta** — são derivados do estado do processo (`get_process_alerts`). O defeito era o `ProcessAlerts` ler uma vez ao montar (estado local). Passou a `useQuery` com chave `queryKeys.processes.alerts(id)` **debaixo do prefixo do detalhe**, logo toda a invalidação do processo (gravar ficha, prazos, atribuições) refaz os alertas. Adicionar uma validade de documento (`DashboardShared`) invalida-os explicitamente. Falha sem cache diz-se («Não foi possível carregar os alertas»), nunca «Sem alertas ativos»; falha ao refrescar mantém o que já se sabia.
+
+### Guardas legadas actualizadas (não apagadas)
+- `sendDocumentation.test.js` (import de `api` agora multi-linha), `aiWriteGuard.test.js` e `vlmSilencioGuard.test.js` (o ponto de entrada passou a `receberSugestoesIA`, com contraprova do que ele faz).
+
+### Mutações medidas (todas mortas)
+- tirar `setDrawerSugestoesAberto(true)`; `onFeito` do `ForcarPastaS3` a vazio; chave dos alertas fora do prefixo do detalhe; `descreverAlteracao` substituído por `String`. Alertas: a versão anterior do componente deixa 2 dos 4 testes vermelhos.
+
+### Não fiz (dito)
+- Alertas **não têm botão «resolver»**: se a direcção queria um (dispensar/adiar), é funcionalidade nova com decisão de produto (o que significa «resolvido» para um alerta calculado).
+- O refresco dos alertas depende de alguma invalidação do processo; uma mudança feita fora do `useProcessMutations` (ex.: upload noutro separador) só se reflecte ao focar a janela ou ao passar o `staleTime` de 60 s.
