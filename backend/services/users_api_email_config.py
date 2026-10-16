@@ -936,6 +936,7 @@ async def run_send_test_email(
                 created_by=current_user.get("id"),
                 skip_proc_tag=True,
                 smtp_timeout=TIMEOUT_DO_ENVIO_DE_TESTE,
+                guardar_copia=False,
             ),
             timeout=TECTO_DO_ENVIO_DE_TESTE,
         )

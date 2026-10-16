@@ -90,7 +90,9 @@ async def run_get_client(
     # «JANELA, NÃO PORTA» (Lote 6): quem chega a esta ficha por um processo PARTILHADO vê esse
     # processo e mais nenhum. Tudo o que se deriva dos processos do cliente (a lista, a última
     # actividade, o acesso ao Portal) lê-se só sobre os que a janela deixa ver.
-    all_process_ids = await ids_dos_processos_visiveis(user, all_process_ids, client_id=client_id)
+    all_process_ids = await ids_dos_processos_visiveis(
+        user, all_process_ids, client_id=client_id, cliente=client,
+    )
     visitante = await e_visitante_do_cliente(client, user)
     client["process_ids"] = [pid for pid in (client.get("process_ids") or []) if pid in all_process_ids]
     
@@ -585,7 +587,7 @@ async def run_update_client(
     # visitante de um processo partilhado não reescreve os outros processos do cliente.
     process_ids_do_cliente = client.get("process_ids", [])
     process_ids = await ids_dos_processos_visiveis(
-        user, process_ids_do_cliente, client_id=client_id,
+        user, process_ids_do_cliente, client_id=client_id, cliente=client,
     ) if process_ids_do_cliente else []
     if process_ids:
         process_sync = {}

@@ -32,6 +32,8 @@ from typing import Iterable, Optional
 from database import db
 from services.role_scope import fronteira_levantada
 from services.tenant_network import (
+    CAMPO_REDE,
+    CAMPO_REDES_PARCEIRAS,
     PROJECCAO_DO_CARIMBO,
     build_process_scope_condition,
     com_isolamento,
@@ -46,16 +48,42 @@ def _ids(valores: Iterable) -> list[str]:
     return list(dict.fromkeys(str(v).strip() for v in valores or [] if v and str(v).strip()))
 
 
+def condicao_do_visitante(redes: Iterable[str]) -> dict:
+    """A janela de um VISITANTE: só o que a sua rede recebeu ou lhe pertence, de forma EXPLÍCITA.
+
+    Lote 7.2 (Out 2026). O âmbito de processos tem um ramo para «a pilha por carimbar» (processos
+    antigos, sem rede nem empresa), que em dev/QA — ou numa produção sem a rede de omissão definida —
+    vale para TODAS as redes. Para o dono é a tolerância do legado; para um VISITANTE era uma porta:
+    os processos antigos do cliente, em estados fechados (Desistência, Concluído…) por serem os mais
+    velhos e por isso os que nunca foram carimbados, entravam na janela. A regra do visitante é cega
+    ao estado e ao legado: só entra um processo cuja rede está entre as redes do visitante
+    (carimbo explícito) ou cuja lista de redes convidadas as inclui (partilha explícita).
+    """
+    lista = sorted({str(r).strip() for r in redes if r and str(r).strip()})
+    if not lista:
+        return CONDICAO_IMPOSSIVEL_DO_VISITANTE
+    return {"$or": [{CAMPO_REDE: {"$in": lista}}, {CAMPO_REDES_PARCEIRAS: {"$in": lista}}]}
+
+
+#: Sem redes não há janela. `_id: None` não casa com nenhum documento (todos têm `_id`).
+CONDICAO_IMPOSSIVEL_DO_VISITANTE = {"_id": None}
+
+
 async def ids_dos_processos_visiveis(
     user: dict,
     candidatos: Iterable[str],
     *,
     client_id: Optional[str] = None,
+    cliente: Optional[dict] = None,
 ) -> list[str]:
     """Dos processos `candidatos` (e dos que apontam para `client_id`), os que `user` vê.
 
     A condição é a de PROCESSOS (conta a rede convidada): é exactamente a janela. Falha
     FECHADA: se a base de dados não responde, a janela é vazia e não «tudo».
+
+    Com `cliente` (o documento do cliente) um VISITANTE — cliente de outra rede que só se
+    alcança por partilha — recebe a janela ESTRITA (`condicao_do_visitante`): só os processos
+    partilhados com a sua rede, ou carimbados com ela, seja qual for o estado de cada um.
     """
     ids = _ids(candidatos)
     master = fronteira_levantada(user, por_conta=True)
@@ -75,7 +103,10 @@ async def ids_dos_processos_visiveis(
             consulta = base  # a conta Master não tem janela: tudo o que aponta para o cliente
         else:
             scope = await resolve_tenant_scope(user)
-            consulta = com_isolamento(build_process_scope_condition(scope), base)
+            if cliente is not None and await e_visitante_do_cliente(cliente, user):
+                consulta = com_isolamento(condicao_do_visitante(scope.network_ids), base)
+            else:
+                consulta = com_isolamento(build_process_scope_condition(scope), base)
         encontrados = await db.processes.find(consulta, {"_id": 0, "id": 1}).to_list(500)
     except Exception as exc:  # noqa: BLE001 - numa fronteira, a dúvida fecha
         logger.warning("[JANELA] Não foi possível resolver os processos visíveis (%s): janela vazia.", exc)
@@ -99,4 +130,60 @@ async def e_visitante_do_cliente(cliente: Optional[dict], user: dict) -> bool:
     return not documento_no_ambito(cliente, scope)
 
 
-__all__ = ["PROJECCAO_DO_CARIMBO", "e_visitante_do_cliente", "ids_dos_processos_visiveis"]
+def processo_na_janela_do_visitante(processo: Optional[dict], redes: Iterable[str]) -> bool:
+    """Gémeo em Python do `condicao_do_visitante`: carimbo explícito ou partilha explícita."""
+    minhas = {str(r).strip() for r in redes if r and str(r).strip()}
+    if not minhas or not processo:
+        return False
+    if str(processo.get(CAMPO_REDE) or "").strip() in minhas:
+        return True
+    convidadas = processo.get(CAMPO_REDES_PARCEIRAS)
+    if isinstance(convidadas, (list, tuple, set)):
+        return bool({str(r).strip() for r in convidadas if r} & minhas)
+    return bool(convidadas) and str(convidadas).strip() in minhas
+
+
+async def so_o_que_a_janela_deixa_ver(processos: list[dict], user: dict) -> list[dict]:
+    """Das linhas de processos de uma listagem, tira as de clientes-visitados que a janela não cobre.
+
+    Para as listagens que partem dos PROCESSOS («Clientes Registados»): um cliente de outra rede só
+    aparece pelos processos que a minha rede recebeu ou que lhe pertencem, explicitamente; os outros
+    processos desse cliente — antigos, sem carimbo, desistidos — não entram. Os clientes que são
+    meus (ou da Pool) não mudam. Falha FECHADA: sem ler os clientes, as linhas de clientes
+    desconhecidos saem.
+    """
+    if not processos or fronteira_levantada(user, por_conta=True):
+        return processos
+    ids = _ids(p.get("client_id") for p in processos)
+    if not ids:
+        return processos
+    try:
+        docs = await db.clients.find(
+            {"id": {"$in": ids}}, {"_id": 0, "id": 1, "process_ids": 1, "lead_status": 1, **PROJECCAO_DO_CARIMBO},
+        ).to_list(len(ids))
+        scope = await resolve_tenant_scope(user)
+        visitados = {
+            d["id"] for d in docs if d.get("id") and await e_visitante_do_cliente(d, user)
+        }
+        conhecidos = {d.get("id") for d in docs}
+    except Exception as exc:  # noqa: BLE001 - numa fronteira, a dúvida fecha
+        logger.warning("[JANELA] Não foi possível ler os clientes da listagem (%s): sem linhas de outras redes.", exc)
+        return [p for p in processos if not p.get("client_id")]
+    redes = scope.network_ids
+    return [
+        p for p in processos
+        if not p.get("client_id")
+        or p.get("client_id") not in conhecidos
+        or p.get("client_id") not in visitados
+        or processo_na_janela_do_visitante(p, redes)
+    ]
+
+
+__all__ = [
+    "processo_na_janela_do_visitante",
+    "so_o_que_a_janela_deixa_ver",
+    "PROJECCAO_DO_CARIMBO",
+    "condicao_do_visitante",
+    "e_visitante_do_cliente",
+    "ids_dos_processos_visiveis",
+]
