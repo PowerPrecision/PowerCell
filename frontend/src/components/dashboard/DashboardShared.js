@@ -37,6 +37,7 @@ import { EmptyState } from "../ui/EmptyState";
 import { sanitizeHtml } from "../../utils/sanitize";
 import { markdownToHtml } from "../../utils/markdown";
 import { findProcessBySelectValue, resolveProcessId } from "../../utils/processAuditHistory";
+import queryClient, { queryKeys } from "../../lib/queryClient";
 
 // ====================================================================
 // HELPERS
@@ -638,6 +639,9 @@ export const useDocumentManagement = (fetchData) => {
         ...expiryFormData
       });
       toast.success("Data de documento adicionada");
+      // Os alertas do processo derivam das validades: sem isto o processo, se
+      // for aberto dentro do staleTime, mostra os alertas de antes.
+      queryClient.invalidateQueries({ queryKey: queryKeys.processes.alerts(selectedProcessId) });
       setIsAddExpiryOpen(false);
       setExpiryFormData({ document_type: "", document_name: "", expiry_date: "", notes: "" });
       fetchData();

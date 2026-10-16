@@ -420,17 +420,20 @@ async def get_current_user(
             )
             user["effective_role"] = _jwt_primary_role(user)
 
-        # A empresa que o Master tem seleccionada é a VISTA das listagens
-        # (`tenant_network.resolve_vista_scope`). Só para a conta Master.
+        # A empresa seleccionada no cabeçalho é o CONTEXTO ESTRITO do pedido
+        # (Lote 7.1): estreita listagens e abrir por id (`tenant_network.resolve_tenant_scope`).
+        # Vale para QUALQUER staff — antes só para o Master, e um CEO com acesso a duas
+        # redes que trabalhava como Domus abria registos da Precision. O cabeçalho nunca
+        # alarga: o âmbito valida-o contra as empresas do utilizador.
         try:
-            from services.role_scope import conta_e_master
+            from services.role_scope import CAMPO_VISTA
 
-            if request is not None and conta_e_master(user):
+            if request is not None:
                 vista = (request.headers.get("X-Company-Id") or "").strip()
                 if vista and vista.lower() not in {"default", "all"}:
-                    user["vista_empresa_id"] = vista
-        except Exception as exc:  # noqa: BLE001 - a vista nunca derruba a autenticação
-            logger.warning("[get_current_user] Falha a ler a vista da empresa: %s", exc)
+                    user[CAMPO_VISTA] = vista
+        except Exception as exc:  # noqa: BLE001 - o contexto nunca derruba a autenticação
+            logger.warning("[get_current_user] Falha a ler a empresa activa: %s", exc)
 
         # Defaults de capacidades por cargo (D-27): converge entre workers (cache de 30 s, nunca levanta).
         try:

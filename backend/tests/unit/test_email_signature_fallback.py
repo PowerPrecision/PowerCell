@@ -56,7 +56,16 @@ def _db(*, utilizador=None, ucrs=None):
                 continue
             # A consulta do antigo `ucr_any` não filtrava por empresa: pedia
             # só "um UCR qualquer com assinatura".
-            if "company_id" not in filtro and not ucr.get("signature"):
+            if "$or" in filtro:
+                # A procura pelo NOME da empresa (Lote 7.2): um ramo do `$or`
+                # tem de casar com o UCR, como num Mongo real (igualdade; os
+                # ramos `$regex` são a mesma comparação sem maiúsculas).
+                if not any(
+                    isinstance(v, str) and ucr.get(k) == v
+                    for ramo in filtro["$or"] for k, v in ramo.items()
+                ):
+                    continue
+            elif "company_id" not in filtro and not ucr.get("signature"):
                 continue
             return ucr
         return None

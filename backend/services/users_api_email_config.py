@@ -552,6 +552,30 @@ async def run_list_my_email_accounts(
         # DESSA empresa. O Master não tem UCR em todas, logo a vista consolidada mostrava-lhe a
         # Caixa Geral da empresa errada (a da Power com a Precision escolhida) e nenhuma da certa.
         vista_do_master = await _empresa_da_vista_do_master(current_user)
+
+        # Lote 7.1 (contexto estrito): quem não é Master também tem a vista consolidada limitada à
+        # REDE da empresa que escolheu. Um CEO com a Domus escolhida deixou de ver, no «A LER
+        # EMAILS DE», a caixa da Precision: troca de empresa na interface.
+        if not vista_do_master:
+            from services.tenant_network import _redes_das_empresas, redes_do_contexto_activo
+
+            redes_activas = await redes_do_contexto_activo(current_user)
+            if redes_activas is not None:
+                mapa_de_redes = await _redes_das_empresas(list(company_names))
+                company_names = {
+                    cid: nome for cid, nome in company_names.items() if mapa_de_redes.get(cid) in redes_activas
+                }
+                user_ucr_roles = {
+                    (u.get("role") or "").strip().lower()
+                    for u in ucrs
+                    if u.get("company_id") in company_names and (u.get("role") or "").strip()
+                }
+                ucrs_visiveis = set(company_names)
+            else:
+                ucrs_visiveis = None
+        else:
+            ucrs_visiveis = None
+
         if vista_do_master:
             caixa_empresas = {vista_do_master["id"]: vista_do_master["name"]}
         else:
@@ -565,6 +589,8 @@ async def run_list_my_email_accounts(
             account = publicize_email_account(doc)
             cid = account.get("company_id") or "default"
             if vista_do_master and cid not in ("default", vista_do_master["id"]):
+                continue
+            if ucrs_visiveis is not None and cid not in ("default", *ucrs_visiveis):
                 continue
             if account.get("email_address"):
                 account["company_name"] = company_names.get(cid) or ""
@@ -910,6 +936,7 @@ async def run_send_test_email(
                 created_by=current_user.get("id"),
                 skip_proc_tag=True,
                 smtp_timeout=TIMEOUT_DO_ENVIO_DE_TESTE,
+                guardar_copia=False,
             ),
             timeout=TECTO_DO_ENVIO_DE_TESTE,
         )

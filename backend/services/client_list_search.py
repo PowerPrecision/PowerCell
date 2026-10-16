@@ -53,6 +53,7 @@ from services.client_list_filters import (
     client_doc_to_list_item,
 )
 from services.client_list_titulares import linhas_dos_titulares_secundarios
+from services.client_window import so_o_que_a_janela_deixa_ver
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,8 @@ PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM = {
     # A rede DONA decide o que é "terminado" (workflow por rede, D-6): o carimbo
     # vem do ponto único, não escrito à mão.
     **PROJECCAO_DO_CARIMBO,
+    # Lote 7.2: a janela do visitante pergunta pelas redes convidadas de cada processo.
+    "partner_network_ids": 1,
 }
 
 
@@ -488,6 +491,7 @@ async def run_list_clients(
             com_isolamento(tenant_condition_processos, process_query),
             PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM,
         ).sort("client_name", 1).to_list(length=None)
+        processes = await so_o_que_a_janela_deixa_ver(processes, user)
 
         # Quem é 2.º titular ou co-titular também é cliente: cada processo com
         # titulares secundários contribui com uma linha por secundário, que
@@ -721,8 +725,9 @@ async def run_list_clients(
         {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
          "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1, "created_at": 1,
          "is_deleted": 1, **PROJECCAO_DO_CARIMBO,
-         "prioridade": 1, "priority": 1}
+         "prioridade": 1, "priority": 1, "partner_network_ids": 1}
     ).sort("client_name", 1).skip(skip).limit(limit).to_list(length=limit)
+    processes = await so_o_que_a_janela_deixa_ver(processes, user)
 
     # Os titulares secundários dos processos que são meus (Bloco 1, ponto 6).
     processes.extend(await linhas_dos_titulares_secundarios(

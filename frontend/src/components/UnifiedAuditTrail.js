@@ -24,6 +24,7 @@ import { safeFormat } from "../lib/utils";
 import { safeString } from "../utils/safeString";
 import { EmptyState } from "./ui/EmptyState";
 import { hasRole } from "../utils/roleUtils";
+import { descreverAlteracao } from "../utils/rotulosDoHistorico";
 import {
   AUDIT_EVENT_TYPES,
   classifyAuditEvent,
@@ -62,11 +63,18 @@ function EventIcon({ type }) {
 function detailsText(event) {
   const oldVal = event.old_value ?? event.old_status;
   const newVal = event.new_value ?? event.new_status;
+  if (event.field && classifyAuditEvent(event) !== "status_change") {
+    return descreverAlteracao({
+      action: event.action, field: event.field, oldValue: oldVal, newValue: newVal,
+    }).detalhe;
+  }
   if (oldVal != null && oldVal !== "" && newVal != null && newVal !== "") {
     return `${safeString(oldVal)} → ${safeString(newVal)}`;
   }
-  if (event.field && (newVal != null && newVal !== "")) {
-    return `${safeString(event.field)}: ${safeString(newVal)}`;
+  if (event.field) {
+    return descreverAlteracao({
+      action: event.action, field: event.field, oldValue: oldVal, newValue: newVal,
+    }).detalhe;
   }
   return "";
 }

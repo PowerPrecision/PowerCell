@@ -744,11 +744,18 @@ const ProcessDetails = () => {
   // Painel lateral «Rever Sugestões IA» (Lote 4, ponto 4): só uma VISTA das
   // mesmas sugestões — não tem estado próprio de decisões.
   const [drawerSugestoesAberto, setDrawerSugestoesAberto] = useState(false);
-  // Sem sugestões o painel fecha E esquece que estava aberto — senão a
-  // extracção seguinte abria-o sozinha, sem ninguém o pedir.
+  // Sem sugestões o painel fecha E esquece que estava aberto.
   useEffect(() => {
     if (!sugestoesIA) setDrawerSugestoesAberto(false);
   }, [sugestoesIA]);
+  // Chegaram sugestões de uma análise (Lote 7.3): o painel abre LOGO. A análise corre no
+  // separador Documentos e a barra «Rever» vivia dentro do Resumo — quem analisava não via
+  // nada a acontecer e «o Drawer não abria». Quem decide abrir é quem as RECEBE (e não um
+  // efeito sobre `sugestoesIA`): fechar o painel e escolher nos campos não o volta a abrir.
+  const receberSugestoesIA = useCallback((revisao) => {
+    setSugestoesIA(criarSugestoes(revisao));
+    setDrawerSugestoesAberto(true);
+  }, []);
   // Épico 9 — extracção por ficheiro à espera de confirmação.
   // Enquanto isto não for `null`, NADA foi escrito: nem no formulário, nem
   // na base de dados. É o que separa este caminho do da análise em lote.
@@ -939,7 +946,7 @@ const ProcessDetails = () => {
       if (revisao) {
         setAiConflicts(revisao.conflicts);
         setRevisaoPendente(revisao);
-        setSugestoesIA(criarSugestoes(revisao));
+        receberSugestoesIA(revisao);
         if (revisao.conflicts.length > 0) {
           toast.info(
             `${revisao.conflicts.length} conflito(s) detectado(s). Reveja os valores.`,
@@ -998,7 +1005,7 @@ const ProcessDetails = () => {
 
     setAiConflicts(revisao.conflicts);
     setRevisaoPendente(revisao);
-    setSugestoesIA(criarSugestoes(revisao));
+    receberSugestoesIA(revisao);
   };
 
   // Handler para dados extraídos pela IA dos documentos
@@ -2805,6 +2812,29 @@ const ProcessDetails = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* ── Coluna Esquerda: Ação & Exploração (2/3) ── */}
           <div className="lg:col-span-2 space-y-6">
+            {/* «Rever Sugestões IA» (Lote 7.3): a barra e o painel vivem ACIMA dos separadores
+                principais. A análise corre no separador Documentos e as sugestões chegam de
+                lá; com a barra dentro do Resumo, quem analisava não via nada. O painel abre
+                sozinho quando as sugestões chegam (`receberSugestoesIA`) e a barra continua
+                à vista até se decidir tudo. Mostrar não é gravar (`utils/sugestoesEmLinha`). */}
+            {sugestoesIA && (
+              <BarraDeSugestoes
+                contagem={contarPorEstado(sugestoesIA)}
+                sourceDocument={sugestoesIA.sourceDocument}
+                onAprovarTodas={handleAprovarTodasSugestoes}
+                onRejeitarTodas={handleRejeitarTodasSugestoes}
+                onFechar={() => setSugestoesIA(null)}
+                onRever={() => setDrawerSugestoesAberto(true)}
+              />
+            )}
+            <SugestoesIADrawer
+              aberto={drawerSugestoesAberto && Boolean(sugestoesIA)}
+              onAbertoChange={setDrawerSugestoesAberto}
+              sugestoes={sugestoesIA}
+              onAprovar={handleAprovarSugestao}
+              onRejeitar={handleRejeitarSugestao}
+              onAprovarTodas={handleAprovarTodasSugestoes}
+            />
             <Tabs value={mainTab} onValueChange={(v) => {
               setMainTab(v);
               writeTabQuery(v, activeTab);
@@ -2878,31 +2908,6 @@ const ProcessDetails = () => {
                     <CardTitle className="text-lg">Dados do Processo</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {/* Preenchimento em linha (Lote 3, ponto 1): a barra
-                        substitui o diálogo sobreposto. Fica ACIMA dos
-                        separadores porque as sugestões podem tocar campos de
-                        mais do que um — escondê-la dentro de um separador
-                        fazia-a desaparecer ao mudar de aba. */}
-                    {sugestoesIA && (
-                      <div className="mb-4">
-                        <BarraDeSugestoes
-                          contagem={contarPorEstado(sugestoesIA)}
-                          sourceDocument={sugestoesIA.sourceDocument}
-                          onAprovarTodas={handleAprovarTodasSugestoes}
-                          onRejeitarTodas={handleRejeitarTodasSugestoes}
-                          onFechar={() => setSugestoesIA(null)}
-                          onRever={() => setDrawerSugestoesAberto(true)}
-                        />
-                      </div>
-                    )}
-                    <SugestoesIADrawer
-                      aberto={drawerSugestoesAberto && Boolean(sugestoesIA)}
-                      onAbertoChange={setDrawerSugestoesAberto}
-                      sugestoes={sugestoesIA}
-                      onAprovar={handleAprovarSugestao}
-                      onRejeitar={handleRejeitarSugestao}
-                      onAprovarTodas={handleAprovarTodasSugestoes}
-                    />
                     <Tabs value={activeTab} onValueChange={(v) => {
                       setEditingCardId(null);
                       setActiveTab(v);

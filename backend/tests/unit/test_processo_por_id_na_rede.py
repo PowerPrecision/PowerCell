@@ -171,4 +171,6 @@ class TestALigacaoAoRouterReal:
 
     def test_o_master_passa_sem_ler_a_base_de_dados(self):
         fonte = (BACKEND / "services" / "process_scope_guard.py").read_text(encoding="utf-8")
-        assert fonte.index("utilizador_e_global(user)") < fonte.index("db.processes.find_one")
+        # Lote 7.1: o Master só passa SEM ler a base de dados na vista «Sistema» (nenhuma empresa
+        # escolhida); com uma empresa escolhida pergunta ao âmbito estreitado.
+        assert fonte.index("fronteira_levantada(user)") < fonte.index("db.processes.find_one")

@@ -338,8 +338,17 @@ async def _redes_das_empresas(company_ids: Sequence[str]) -> dict[str, Optional[
     }
 
 
-async def resolve_tenant_scope(user: dict) -> TenantScope:
-    """Âmbito de dados de um utilizador: todas as redes a que pertence."""
+async def resolve_tenant_scope_completo(user: dict) -> TenantScope:
+    """Âmbito de dados de um utilizador: TODAS as redes a que pertence.
+
+    É o âmbito SEM a empresa activa (Lote 7.1, Out 2026): o que o utilizador
+    pode ver se escolher cada uma das suas empresas à vez. Só duas coisas o
+    querem — a **pesquisa global** (a única excepção ao contexto estrito) e as
+    superfícies de administração/sistema, que listam de propósito
+    `AMBITOS_COMPLETOS_ESCRITOS` em `test_contexto_estrito_de_empresa.py`.
+    Tudo o resto pergunta `resolve_tenant_scope`, que é o mesmo âmbito já
+    estreitado à empresa do cabeçalho `X-Company-Id`.
+    """
     from services.auth import get_user_companies
     from services.role_scope import utilizador_e_global
 
@@ -425,43 +434,105 @@ def _avisar_omissao_por_definir() -> None:
     )
 
 
-#: Chave que o `get_current_user` põe no utilizador: a empresa que o Master
-#: tem seleccionada (`X-Company-Id`). Só existe para a conta Master.
-CAMPO_VISTA = "vista_empresa_id"
+#: Chave que o `get_current_user` põe no utilizador: a empresa que ele tem
+#: seleccionada (`X-Company-Id`). Vive em `role_scope` para os guardas a
+#: poderem perguntar sem importar este módulo.
+from services.role_scope import CAMPO_VISTA  # noqa: E402
 
 
-async def resolve_vista_scope(user: dict) -> TenantScope:
-    """O âmbito para LISTAR: o do utilizador, estreitado à empresa que o Master escolheu.
+async def _rede_da_empresa_escolhida(empresa: str) -> Optional[str]:
+    """A rede de uma empresa que EXISTE; ``None`` se não existe ou não se sabe.
 
-    O Master não tem fronteira (`resolve_tenant_scope` devolve «tudo»), e por
-    isso a empresa que escolhe no cabeçalho não mudava nada nas listagens:
-    com a Domus seleccionada via os clientes da Precision. A empresa activa é
-    uma VISTA — para o Master, a vista é a REDE dessa empresa.
+    Uma empresa que não existe (cabeçalho velho) NÃO estreita: `_redes_das_empresas`
+    trata-a como ilha própria e quem a escolheu ficava com a lista vazia.
+    """
+    try:
+        existe = await db.companies.find_one({"id": empresa}, {"_id": 0, "id": 1})
+    except Exception as exc:  # noqa: BLE001 - sem a lista de empresas, sem estreitamento
+        logger.warning("[tenant_network] Falha a validar a empresa activa %s (%s).", empresa, exc)
+        return None
+    if not existe:
+        return None
+    return (await _redes_das_empresas([empresa])).get(empresa) or None
 
-    **Só para listar.** Abrir por id continua a ser global para o Master
-    (`by_id_scope`): estreitar também aí faria um link para um processo de
-    outra empresa dar 404 a quem pode tudo. Sem empresa escolhida (vista
-    «Sistema»/global), ou uma empresa que não existe, devolve o âmbito normal.
+
+async def resolve_tenant_scope(user: dict) -> TenantScope:
+    """O âmbito de dados de QUEM PEDE: o completo, estreitado à empresa activa.
+
+    CONTEXTO ESTRITO (Lote 7.1, Out 2026)
+    =====================================
+    O `X-Company-Id` era ignorado por quem não era Master: um CEO com
+    acesso à Precision e à Domus que trabalhava COMO Domus abria um
+    processo da Precision (o âmbito era a união das suas redes) e, no
+    Master, `by_id_scope` abria tudo por id. Hoje a empresa escolhida no
+    cabeçalho é a fronteira do pedido, para listar **e** para abrir por id:
+    o registo de outra empresa responde como «não existe» e a interface
+    obriga a trocar de empresa. A pesquisa global é a única excepção
+    (`resolve_tenant_scope_completo`).
+
+    * O cabeçalho **nunca alarga**: para quem não é Master só estreita se a
+      empresa estiver entre as suas; uma empresa alheia (ou inexistente, ou
+      um cabeçalho velho) deixa o âmbito normal — acrescentar-lhe o que lá
+      está seria o contrário de uma fronteira.
+    * Sem empresa escolhida (o Master na vista «Sistema», ou um pedido sem
+      cabeçalho) devolve o âmbito completo: nada a estreitar.
+    * A fronteira é a REDE da empresa (Power e Precision partilham a mesma:
+      decisão do Lote 4). Duas empresas da mesma rede não se escondem uma
+      da outra.
     """
     from services.role_scope import conta_e_master
 
+    base = await resolve_tenant_scope_completo(user)
     empresa = _texto((user or {}).get(CAMPO_VISTA))
-    if empresa and conta_e_master(user) and empresa not in VALORES_SEM_EMPRESA:
-        try:
-            existe = await db.companies.find_one({"id": empresa}, {"_id": 0, "id": 1})
-        except Exception as exc:  # noqa: BLE001 - sem a lista de empresas, sem vista
-            logger.warning("[tenant_network] Falha a validar a vista %s (%s).", empresa, exc)
-            existe = None
-        # Uma empresa que não existe (cabeçalho velho) NÃO estreita: `_redes_das_empresas`
-        # trata-a como ilha própria e o Master ficava com a lista vazia.
-        rede = (await _redes_das_empresas([empresa])).get(empresa) if existe else None
-        if rede:
-            omissao = rede_de_omissao()
-            return TenantScope(
-                network_ids=(rede,),
-                company_ids=(empresa,),
-                inclui_rede_de_omissao=(rede == omissao) if omissao else True,
-            )
+    if not empresa or empresa in VALORES_SEM_EMPRESA:
+        return base
+
+    master = conta_e_master(user)
+    if not master and not base.sem_fronteira and not _empresa_e_do_ambito(empresa, base):
+        # Não alarga, e também não finge que estreitou: a empresa não é dele.
+        return base
+
+    rede = await _rede_da_empresa_escolhida(empresa)
+    if not rede:
+        return base
+    if not master and not base.sem_fronteira and rede not in base.network_ids:
+        return base
+
+    omissao = rede_de_omissao()
+    return TenantScope(
+        network_ids=(rede,),
+        company_ids=(empresa,),
+        inclui_rede_de_omissao=(rede == omissao) if omissao else base.inclui_rede_de_omissao or master,
+    )
+
+
+async def redes_do_contexto_activo(user: dict) -> Optional[set[str]]:
+    """As redes a que a empresa activa limita ESTE pedido, ou ``None`` se não limita nada.
+
+    Para as superfícies que listam EMPRESAS ou caixas em vez de documentos (os separadores do
+    Webmail, a vista consolidada das contas de email): a pergunta é «que empresas pode este
+    pedido tocar?», e com uma empresa escolhida a resposta é a REDE dela. ``None`` = sem
+    empresa escolhida (ou o Master na vista «Sistema»): vale tudo o que o utilizador já pode.
+    """
+    if not _texto((user or {}).get(CAMPO_VISTA)):
+        return None
+    scope = await resolve_tenant_scope(user)
+    if scope.sem_fronteira:
+        return None
+    return {r for r in scope.network_ids if r}
+
+
+def _empresa_e_do_ambito(empresa: str, scope: TenantScope) -> bool:
+    return empresa in scope.company_ids or empresa in scope.company_names
+
+
+async def resolve_vista_scope(user: dict) -> TenantScope:
+    """O âmbito para LISTAR. É o mesmo de abrir por id: `resolve_tenant_scope`.
+
+    Mantém o nome porque as listagens (`build_tenant_condition`…) o usam desde o
+    Lote 2; antes só estreitava para o Master e era a única metade do contexto
+    que existia.
+    """
     return await resolve_tenant_scope(user)
 
 

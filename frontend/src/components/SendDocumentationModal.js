@@ -35,7 +35,12 @@
  * />
  */
 import { useState, useEffect } from "react";
-import api from "../services/api";
+import api, {
+  getDocumentRecipients,
+  getProcessDocumentsForSending,
+  previewDocumentationEmail,
+  createUserBranch,
+} from "../services/api";
 import {
   Dialog,
   DialogContent,
@@ -72,8 +77,6 @@ import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { safeString } from "../utils/safeString";
 import SmartRichEditor from "./ui/SmartRichEditor";
-
-const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
 /**
  * Tags Disponíveis para templates de email bancário.
@@ -212,30 +215,24 @@ const SendDocumentationModal = ({
   const loadData = async () => {
     setLoading(true);
     try {
-      // Carregar configuração de destinatários
-      const configRes = await fetch(`${API_URL}/api/emails/document-recipients`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      
-      if (configRes.ok) {
-        const configData = await configRes.json();
+      // Carregar configuração de destinatários (um erro aqui não impede os documentos)
+      try {
+        const { data: configData } = await getDocumentRecipients();
         setConfig(configData);
         setRecipients(configData.recipients || []);
         setEmailTemplate(configData.email_template || "");
         // Pré-selecionar todos os TO emails por padrão
         setSelectedToEmails(configData.default_to_emails || []);
+      } catch (erroConfig) {
+        console.error("Erro ao carregar destinatários:", erroConfig);
       }
 
       // Carregar documentos do processo
-      const docsRes = await fetch(`${API_URL}/api/documents/process/${processId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      
-      if (docsRes.ok) {
-        const docsData = await docsRes.json();
+      try {
+        const { data: docsData } = await getProcessDocumentsForSending(processId);
         const allDocs = docsData.documents || docsData || [];
         setDocuments(allDocs);
-        
+
         // Separar documentos RGPD assinados (categoria "RGPD") e pré-selecionar
         const rgpdDocs = allDocs.filter(d => d.category === "RGPD" || String(d.original_name || "").toLowerCase().includes("rgpd"));
         setRgpdDocuments(rgpdDocs);
@@ -243,15 +240,9 @@ const SendDocumentationModal = ({
           // Pré-selecionar documentos RGPD assinados
           setSelectedDocs(rgpdDocs.map(d => d.id));
         }
+      } catch (erroDocs) {
+        console.error("Erro ao carregar documentos:", erroDocs);
       }
-      
-      // Carregar status do RGPD do processo
-      try {
-        await fetch(`${API_URL}/api/rgpd/status/${processId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        // RGPD status loaded silently - used to decide pre-selection
-      } catch { /* silent */ }
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
       toast.error("Erro ao carregar dados");
@@ -264,23 +255,14 @@ const SendDocumentationModal = ({
   const loadPreview = async () => {
     setPreviewLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/emails/preview-documentation/${processId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success) {
-          setEmailHtml(data.html);
-          setEmailSubject(data.subject);
-        }
-      } else {
-        const errorData = await response.json().catch(() => ({}));
-        toast.error(extractErrorMessage(errorData.detail, "Erro ao carregar preview do email"));
+      const { data } = await previewDocumentationEmail(processId);
+      if (data.success) {
+        setEmailHtml(data.html);
+        setEmailSubject(data.subject);
       }
     } catch (error) {
       console.error("Erro ao carregar preview:", error);
-      toast.error("Erro ao carregar preview do email");
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao carregar preview do email"));
     } finally {
       setPreviewLoading(false);
     }
@@ -302,43 +284,29 @@ const SendDocumentationModal = ({
 
     setSavingBranch(true);
     try {
-      const response = await fetch(`${API_URL}/api/user-branches`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name: newBranchName.trim(),
-          email: newBranchEmail.trim(),
-        }),
+      const { data: newBranch } = await createUserBranch({
+        name: newBranchName.trim(),
+        email: newBranchEmail.trim(),
       });
 
-      if (response.ok) {
-        const newBranch = await response.json();
+      // FIX (Pacote K): re-buscar a lista canónica do backend em vez de
+      // anexar manualmente ao state local. Isto garante que todos os
+      // campos (company_id, created_by, ordering, metadata) vêm do
+      // backend e que o novo balcão aparece imediatamente na lista.
+      await loadData();
 
-        // FIX (Pacote K): re-buscar a lista canónica do backend em vez de
-        // anexar manualmente ao state local. Isto garante que todos os
-        // campos (company_id, created_by, ordering, metadata) vêm do
-        // backend e que o novo balcão aparece imediatamente na lista.
-        await loadData();
+      // Pré-selecionar o novo balcão nos destinatários selecionados
+      setSelectedRecipients((prev) => [...prev, newBranch.email]);
 
-        // Pré-selecionar o novo balcão nos destinatários selecionados
-        setSelectedRecipients((prev) => [...prev, newBranch.email]);
+      // Limpar formulário e fechar
+      setNewBranchName("");
+      setNewBranchEmail("");
+      setShowNewBranch(false);
 
-        // Limpar formulário e fechar
-        setNewBranchName("");
-        setNewBranchEmail("");
-        setShowNewBranch(false);
-
-        toast.success(`Balcão "${newBranch.name}" guardado com sucesso!`);
-      } else {
-        const data = await response.json();
-        toast.error(extractErrorMessage(data.detail, "Erro ao guardar balcão."));
-      }
+      toast.success(`Balcão "${newBranch.name}" guardado com sucesso!`);
     } catch (error) {
       console.error("Erro ao criar balcão:", error);
-      toast.error("Erro ao guardar balcão.");
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao guardar balcão."));
     } finally {
       setSavingBranch(false);
     }

@@ -12236,3 +12236,116 @@ Work Log:
 ### Medição
 - Mutações: backend 25 (6 sobreviventes na 1.ª passagem: 4 testes fracos reforçados, 2 equivalentes) e frontend 16 (1 sobrevivente: o corpo do pedido de `forceCreateS3Folder`, coberto por `api.forcarPastaS3.test.js`).
 
+
+---
+Task ID: lote-7-1-contexto-estrito-permissoes-e-parecer-de-identidade
+Agent: Cloud Agent
+Task: Lote 7.1 — Strict Context Switching (X-Company-Id como fronteira do pedido), permissões críticas (Index sem Webmail, envio do Master/CEO, «Ver comprovativo») e parecer sobre a identidade do cliente
+
+Date: 2026-10-16
+
+Work Log:
+
+### 1. Contexto estrito de empresa
+- **Reproduzido primeiro** (`tests/integration/test_lote71_contexto_estrito_mongo.py`, MongoDB real): um CEO com UCR na Precision e na Domus, a trabalhar como Domus, abre por id o processo, o cliente, a tarefa e o ficheiro da Precision; o Master com a Domus escolhida também (Lote 2 tinha-o decidido assim). Causa: o `X-Company-Id` só chegava ao utilizador na conta Master (`vista_empresa_id`), o âmbito dos outros era a união das redes dele e `by_id_scope`/6 guardas de posse davam passe livre ao Master pelo cargo.
+- **Correcção num ponto único:** `resolve_tenant_scope` devolve o âmbito estreitado à rede da empresa activa (o completo chama-se `resolve_tenant_scope_completo`); o cabeçalho nunca alarga; `role_scope.fronteira_levantada` substitui o passe livre por cargo (só vale na vista «Sistema»); o Master com empresa escolhida trabalha os DADOS como Admin dela (`papel_para_os_dados`) nas superfícies que decidem por papel (calendário, visitas, imóveis, finanças).
+- **Pesquisa global = única excepção**, com selo de empresa em cada resultado e troca de empresa ao abrir um resultado de outra.
+- **Webmail:** separadores e vista consolidada das contas limitados à rede activa. **Frontend:** trocar de perfil que muda de empresa grava no servidor e recarrega (o `?company_id=` do Webmail sobrevivia ao `clear()` da cache).
+- Inverti 3 testes que afirmavam o comportamento anterior; a suite unitária só tinha 5 vermelhos, todos esses. Mutantes: 17 medidos, 1 equivalente.
+
+### 2. Permissões
+- **Index sem Webmail:** dependência do router `/emails` (`webmail_perfis.py`), menu e rota; o ecrã do processo mantém a leitura do correio ligado a ele.
+- **`POST /emails/send` 403:** era a falta de conta pessoal na empresa escolhida; e `general` enviava pela conta de ambiente «power» fosse qual fosse a empresa. Agora usa a Caixa Geral da empresa activa (reconstruída no executor; a password nunca viaja no registo).
+- **«Ver comprovativo» 403:** a causa NÃO era RBAC nem rede — a guarda de posse do Portal só aceitava a subpasta do processo e o comprovativo vive na pasta do cliente (entra com a lead). Agora pergunta pelas duas pastas.
+
+### 3. Parecer (ver TECHNICAL_DEBT D-42): o sistema NÃO lança 409/422 a bloquear a criação multi-canal por engano; lança 409 quando a pessoa já existe NA REDE, por desenho (D-38). A premissa «cliente global na BD sem duplicados» é uma mudança de modelo, não uma correcção — pedida decisão do dono do produto.
+
+### Não fiz (dito)
+- Não mexi no D-38 (identidade por rede) — a conversa de arquitectura precede o código.
+- Um link para um registo de outra empresa continua a dar 404 uniforme: a interface não pode sugerir «troque de empresa» sem criar um oráculo sobre o que existe.
+- O realtime `new_email` e as caixas partilhadas por cargo do Index não foram revistos (o Index deixou de ter Webmail, mas os sockets não foram auditados neste lote).
+
+---
+Task ID: lote-7-2-motor-de-email-e-fuga-b2b
+Agent: Cloud Agent
+Task: Lote 7.2 — Refatoração do motor de email (emails fantasma, assinatura, link do convite, Portal em segundo plano, UX) e fuga de âmbito B2B
+
+Date: 2026-10-16
+
+Work Log:
+
+### 1. Emails fantasma
+- Causa lida no código: arquivo em `db.emails` só com `process_id` e nenhum APPEND IMAP. Hoje todo o envio de uma pessoa fica em `Sent` (processo explícito ou herdado do email pai) e é copiado para a pasta «Enviados» do servidor, excepto onde o servidor já guarda (Gmail/Office365). Falha do APPEND regista-se e não desfaz o envio.
+- Achado: contas pessoais usavam host/porta do SMTP como IMAP.
+- 27 testes ao nível da chamada SMTP/IMAP; 8 mutações mortas.
+
+### 2. Assinatura
+- Causa: a resolução procurava o UCR só por `company_id` exacto; a empresa chega por ID ou por NOME. Corrigido com a mesma regra do `_find_ucr`. Reproduzido primeiro (5 vermelhos) contra MongoDB real.
+- `EmailViewerModal` passou de `fetch` cru a Axios (perdia `X-Active-Role`).
+
+### 3. Link do convite do staff
+- Estava escrito à letra no código. Agora `FRONTEND_URL` → domínio do admin → sem botão.
+
+### 4. Portal em segundo plano
+- Já o era em todos os caminhos; acrescentada a guarda por AST (propriedade, não comportamento).
+
+### 5. UX
+- Removidos o botão «Novo» e o diálogo «Registar Email Enviado» (e os Templates que só os serviam).
+
+### 6. B2B
+- Visitante vê só os processos partilhados com a sua rede, cego ao estado. Reproduzido apenas com processos por carimbar em ambiente sem `TENANT_DEFAULT_NETWORK_ID`.
+
+### Não fiz (dito)
+- **Pré-seleccionar as caixas dos «emails associados ao processo»:** não identifiquei o componente. O `SendDocumentationModal` não tem uma lista de emails do processo (só documentos, balcões e TO configurados) e o diálogo de ligação de ficheiros temporários já vem com «Enviar email para o cliente» marcado. Pré-seleccionar todos os documentos enviaria dados do cliente a bancos por omissão — não o fiz sem confirmação.
+- D-42 (identidade global do cliente) intocado.
+- `SendDocumentationModal` e os anexos do `EmailViewerModal` continuam com `fetch` cru (perdem `X-Company-Id`/`X-Active-Role`): fora do âmbito pedido.
+
+---
+Task ID: lote-7-3-polimento-axios-e-ux
+Agent: Cloud Agent
+Task: Lote 7.3 — Axios nos modais de email, destinatários pré-preenchidos, processos na modal do cliente, S3 fallback, Drawer de IA reactivo, Timeline traduzida e alertas que acompanham o processo
+
+Date: 2026-10-16
+
+Work Log:
+### 1. `fetch` cru → Axios (risco de tenant)
+- `SendDocumentationModal` (destinatários, documentos, pré-visualização, balcões, envio) e os anexos do `EmailViewerModal` (descarregar/pré-visualizar, `responseType: blob`) passam por funções de `services/api.js`; zero `fetch`/`API_URL` nos dois ficheiros. Todas com `skipErrorToast` (os componentes têm o seu aviso).
+- `getUsers(role, {forAssignment, processId, skipErrorToast})` para a lista de intermediários do processo.
+
+### 2. Destinatários pré-preenchidos
+- `utils/destinatariosDoProcesso.js` (puro): e-mails do cliente (titular 1, 2.º titular, `client_email`) + intermediários atribuídos ao processo, sem duplicados e sem inválidos. `EmailsTab.handleNewEmail` preenche o «Para»; **anexos continuam vazios** (confirmado pelo dono do produto). Falhar a lista de intermediários não impede o composer: preenche só com os do cliente.
+
+### 3. Processos na modal do cliente
+- `ProcessosDoCliente` na `ClientDetailsModal` (agora por Axios `getClient`), com ligação para cada processo. O backend **já** respeitava a janela B2B (`client_window`): provado por `test_lote73_processos_do_cliente_mongo.py` (MongoDB real, 5 casos) — não houve alteração de servidor.
+
+### 4. S3 fallback
+- Causa: depois de forçar a pasta o painel mantinha o estado antigo. `ForcarPastaS3` recebe `onFeito={aoCriarPasta}`, que esconde o selector vazio e recarrega o explorador.
+
+### 5. Drawer de IA
+- Causa: a barra «Rever Sugestões» e o `SugestoesIADrawer` viviam dentro do separador Resumo, mas a análise corre no separador Documentos. Subiram para fora do `<Tabs>` e `receberSugestoesIA` (único ponto de entrada) guarda as sugestões **e abre o painel**. Fechar o painel não o volta a abrir.
+
+### 6. Timeline e alertas
+- `utils/rotulosDoHistorico.js`: dicionário campo-técnico → português (`assigned_mediador_ids` → «Intermediários», `portal_access` → «Acesso ao Portal»…), valores legíveis, ids de pessoas nunca em bruto; campo desconhecido cai num humanizador (nunca na chave crua). Usado por `processAuditHistory`, `UnifiedAuditTrail` e `summaryTimeline`. `test_campos_do_historico_traduzidos.py` lê por AST todos os `field` estáticos de `log_history` e exige que o dicionário os conheça.
+- Alertas: **não existe «resolver» um alerta** — são derivados do estado do processo (`get_process_alerts`). O defeito era o `ProcessAlerts` ler uma vez ao montar (estado local). Passou a `useQuery` com chave `queryKeys.processes.alerts(id)` **debaixo do prefixo do detalhe**, logo toda a invalidação do processo (gravar ficha, prazos, atribuições) refaz os alertas. Adicionar uma validade de documento (`DashboardShared`) invalida-os explicitamente. Falha sem cache diz-se («Não foi possível carregar os alertas»), nunca «Sem alertas ativos»; falha ao refrescar mantém o que já se sabia.
+
+### Guardas legadas actualizadas (não apagadas)
+- `sendDocumentation.test.js` (import de `api` agora multi-linha), `aiWriteGuard.test.js` e `vlmSilencioGuard.test.js` (o ponto de entrada passou a `receberSugestoesIA`, com contraprova do que ele faz).
+
+### Mutações medidas (todas mortas)
+- tirar `setDrawerSugestoesAberto(true)`; `onFeito` do `ForcarPastaS3` a vazio; chave dos alertas fora do prefixo do detalhe; `descreverAlteracao` substituído por `String`. Alertas: a versão anterior do componente deixa 2 dos 4 testes vermelhos.
+
+### Não fiz (dito)
+- Alertas **não têm botão «resolver»**: se a direcção queria um (dispensar/adiar), é funcionalidade nova com decisão de produto (o que significa «resolvido» para um alerta calculado).
+- O refresco dos alertas depende de alguma invalidação do processo; uma mudança feita fora do `useProcessMutations` (ex.: upload noutro separador) só se reflecte ao focar a janela ou ao passar o `staleTime` de 60 s.
+
+---
+Task ID: fecho-do-ciclo-operacoes-de-producao
+Agent: Cloud Agent
+Task: Fecho do ciclo (Lotes 1–7.3) — operações de produção e estado do CI
+
+Date: 2026-10-16
+
+Work Log:
+* O dono do produto informou que **todas as operações de produção** do `DEPLOY_RUNBOOK.md` (promoção a Master, backfills de rede/emails/caixas/TTL, migrações de workflow e formulários, `co_buyers`, limpeza de cópias órfãs e medições) **foram executadas com sucesso na consola do Render**. Registado como concluído; **não verificado por mim** (sem saídas dos scripts; os números das medições não foram colados aqui).
+* Desenvolvimento de funcionalidades congelado. Ideias de negócio adiadas: comparador de bancos, painel de cobrança de documentos, alertas accionáveis.
+* CI: o run do `e0c790bd` ficou **cancelado** (o Backend Fast excedeu `timeout-minutes: 10`, 8+ min de testes; o do `f6254187` tinha demorado 6m12s) e foi substituído pelo run do commit seguinte (só documentação, mesmo código). Causa do excesso de tempo **não determinada** (runner lento vs. teste pendurado).

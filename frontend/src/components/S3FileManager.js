@@ -549,7 +549,20 @@ const S3FileManager = ({
     }
   };
 
-  // Inicializar pastas
+  // Depois de «Forçar criação de pasta»: o ponteiro mudou NO SERVIDOR e o painel
+  // «Mapeamento S3» ficou com dados de antes — uma lista de pastas e um «sem
+  // mapeamento» que já não são verdade (a dropdown continuava aberta e vazia depois
+  // do sucesso). Fecha-se o painel, esquecem-se esses dados (voltam a ser lidos na
+  // próxima abertura) e relê-se o explorador.
+  const aoCriarPasta = useCallback(async (resposta) => {
+    const pasta = typeof resposta?.s3_folder === "string" ? resposta.s3_folder : "";
+    setS3MappingOpen(false);
+    setS3Folders([]);
+    setCurrentS3Mapping(pasta || null);
+    setSelectedS3Folder(pasta);
+    setSemPasta(false);
+    await fetchFiles();
+  }, [fetchFiles]);
 
   // Verificar NIF da empresa
   const checkEmpresaNif = async (nif) => {
@@ -2104,7 +2117,7 @@ const S3FileManager = ({
       <Card data-testid="s3-file-manager" className="h-full">
         {!canSeeIndexCategory && <AvisoEmIndexacao total={emIndexacao} />}
         {semPasta && !readOnly && !loading && (
-          <ForcarPastaS3 id={processId} onFeito={fetchFiles} />
+          <ForcarPastaS3 id={processId} onFeito={aoCriarPasta} />
         )}
         {/* Mapeamento S3 (apenas para admin) */}
         {canMapS3 && (

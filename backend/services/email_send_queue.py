@@ -157,6 +157,7 @@ def build_pending_send_record(
     references: Optional[list] = None,
     actor_silenciado: bool = False,
     created_by_name: Optional[str] = None,
+    usar_caixa_geral: bool = False,
 ) -> dict:
     """Constrói o documento PENDING (função pura — testável isoladamente).
 
@@ -173,6 +174,9 @@ def build_pending_send_record(
         "undo_window_seconds": UNDO_SEND_WINDOW_SECONDS,
         # Remetente/config resolvidos de forma síncrona pelo run_send_email
         "account": account,
+        # Lote 7.1: o envio sai pela Caixa Geral da empresa ACTIVA (o executor
+        # reconstrói a conta — a password nunca viaja neste registo).
+        "usar_caixa_geral": bool(usar_caixa_geral),
         "from_box": from_box,
         "from_email": from_email,
         "company_id": company_id,
@@ -325,6 +329,33 @@ async def schedule_pending_email_send(
     return {"arq": scheduled_arq, "timer": True}
 
 
+async def _conta_da_caixa_geral(company_id: Optional[str]):
+    """A conta SMTP da Caixa Geral da empresa, ou ``None`` se já não existe.
+
+    A posse da empresa foi provada ao ENFILEIRAR (`run_send_email`, com o
+    utilizador à frente); aqui não há sessão, só o registo.
+    """
+    from services.email_config_resolver import load_caixa_geral_config
+    from services.email_service import EmailAccount
+
+    try:
+        caixa = await load_caixa_geral_config(company_id)
+    except Exception as exc:  # noqa: BLE001 - sem conta, o envio falha com motivo
+        logger.warning("[UNDO-SEND] Falha a ler a Caixa Geral de %s: %s", company_id, exc)
+        return None
+    if not (caixa and caixa.get("password") and caixa.get("smtp_server") and caixa.get("email_address")):
+        return None
+    return EmailAccount(
+        name="caixa_geral",
+        imap_server=caixa.get("imap_server") or caixa["smtp_server"],
+        imap_port=int(caixa.get("imap_port") or 993),
+        smtp_server=caixa["smtp_server"],
+        smtp_port=int(caixa.get("smtp_port") or 465),
+        email=caixa["email_address"],
+        password=caixa["password"],
+    )
+
+
 async def execute_pending_email_send(send_id: str) -> dict:
     """
     Executa o envio real de um email pendente (idempotente).
@@ -379,9 +410,18 @@ async def execute_pending_email_send(send_id: str) -> dict:
     )
 
     # ── 3) Envio real ─────────────────────────────────────────────
+    account_override = None
+    if record.get("usar_caixa_geral"):
+        account_override = await _conta_da_caixa_geral(record.get("company_id"))
+        if account_override is None:
+            erro = "A Caixa Geral da empresa já não está configurada."
+            logger.error("[UNDO-SEND] %s (send_id=%s, empresa=%s)", erro, send_id, record.get("company_id"))
+            await _mark_failed(send_id, erro, task_log_id=record.get("task_log_id"))
+            return {"executed": True, "success": False, "reason": erro}
     try:
         result = await send_email(
             account_name=record.get("account") or "power",
+            account_override=account_override,
             to_emails=record.get("to_emails") or [],
             subject=record.get("subject") or "",
             body=record.get("body") or "",

@@ -610,6 +610,25 @@ async def run_search_emails(q: str, current_user: dict, limit: int = 20):
     return {"emails": emails, "total": len(emails)}
 
 
+async def _caixa_geral_da_empresa_activa(company_id: Optional[str], current_user: dict) -> Optional[dict]:
+    """A Caixa Geral (com password) da empresa activa, ou ``None``.
+
+    Passa o utilizador: uma empresa fora do âmbito de rede dele não tem
+    Caixa Geral para ele (`load_caixa_geral_config` recusa-a), e é isso que
+    impede um cabeçalho forjado de enviar em nome de outra rede.
+    """
+    from services.email_config_resolver import load_caixa_geral_config
+
+    try:
+        caixa = await load_caixa_geral_config(company_id, user=current_user)
+    except Exception as exc:  # noqa: BLE001 - sem caixa, o chamador responde com motivo
+        logger.warning("[Send Email] Falha a ler a Caixa Geral de %s: %s", company_id, exc)
+        return None
+    if caixa and caixa.get("password") and caixa.get("smtp_server") and caixa.get("email_address"):
+        return caixa
+    return None
+
+
 async def run_send_email(payload: EmailSendRequest, request: Request, current_user: dict, account: str = "power"):
     """
     Enviar email através de uma das contas configuradas.
@@ -663,54 +682,59 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
                 active_company_id, exc,
             )
 
-    user_role = current_user.get("role", "")
+    # Lote 7.1: decide-se pelo perfil ACTIVO (`effective_role`), não pelo do JWT.
+    # Quem tem perfil base de consultor e entra COMO CEO não pode ser tratado
+    # como consultor aqui (nem o contrário) — é a forma do `_is_stealth_user`.
+    from services.email_config_resolver import CAIXA_GERAL_ROLES
+    from services.role_scope import papel_concreto_do_utilizador
+
+    user_role = papel_concreto_do_utilizador(current_user) or current_user.get("role", "")
     can_use_global_accounts = user_role in (UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     from_box = payload.from_box
     from_email = current_user.get("email")  # Remetente Base
+    usar_caixa_geral = False
 
-    # === indexacao role: auto-use shared email account ===
+    # === Index (indexacao): SEM Webmail (Lote 7.1) ===
+    # O perfil Index trabalha no Kanban e nos documentos; o correio não é dele.
+    # A parede é do servidor: esconder o menu não chega (o menu e as rotas têm
+    # de concordar, e a API é a rota).
     if user_role == UserRole.INDEXACAO:
-        shared_config = await config_do_utilizador(
-            UserRole.INDEXACAO, current_user, {"_id": 0, "email_address": 1, "email": 1},
-            is_configured=True,
+        raise HTTPException(
+            status_code=403,
+            detail="O perfil Index não tem acesso ao Webmail.",
         )
-        if shared_config:
-            shared_email_addr = shared_config.get("email_address") or shared_config.get("email", "")
-            account = "personal"
-            logger.info(f"[Send Email] indexacao user {current_user.get('email')}: using shared account {shared_email_addr}")
-        else:
-            resolved = await resolve_email_config_for_sync(
-                current_user["id"],
-                active_role=user_role,
-                active_company_id=active_company_id
-            )
-            if not resolved:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Configuração de email partilhada para indexacao não encontrada. Contacte o administrador."
-                )
-            account = "personal"
 
-    # === PACOTE AL: Forçar conta pessoal e Resolver a Config ===
-    # from_box == "personal" OU utilizador não-admin → usar conta pessoal.
+    # === from_box == "general": a Caixa Geral da empresa ACTIVA ===
+    # Antes saía pela conta de ambiente «power» fosse qual fosse a empresa:
+    # um CEO a trabalhar como Domus enviava em nome da Power. Agora é a
+    # caixa da empresa escolhida (`load_caixa_geral_config`, com a regra de
+    # não herdar a global fora da rede de omissão).
+    if from_box == "general":
+        if user_role not in CAIXA_GERAL_ROLES:
+            raise HTTPException(
+                status_code=403,
+                detail="Apenas admin, CEO, diretor e administrativo podem enviar emails a partir da caixa geral."
+            )
+        caixa = await _caixa_geral_da_empresa_activa(active_company_id, current_user)
+        if not caixa:
+            raise HTTPException(
+                status_code=400,
+                detail="A empresa activa não tem Caixa Geral configurada. Configure-a em Contas de Email.",
+            )
+        account = "caixa_geral"
+        usar_caixa_geral = True
+        from_email = caixa["email_address"]
+        logger.info(f"[Send Email] user {current_user.get('email')} ({user_role}): a enviar pela Caixa Geral da empresa {active_company_id}")
+
+    # === Conta pessoal (todos os outros casos não-globais) ===
     elif from_box == "personal" or not can_use_global_accounts:
         account = "personal"
 
-    # === from_box == "general": use shared geral account ===
-    elif from_box == "general":
-        if user_role not in (UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR):
-            raise HTTPException(
-                status_code=403,
-                detail="Apenas admin, CEO e diretor podem enviar emails a partir da caixa geral."
-            )
-        account = "power"
-        logger.info(f"[Send Email] user {current_user.get('email')} ({user_role}): sending from geral box (account={account})")
-
-    # === PACOTE AL: Resolver config pessoal (exceto indexacao já tratado) ===
+    # === PACOTE AL: Resolver config pessoal ===
     # Resolve o from_email correto a partir da config do utilizador para a
     # empresa ativa. Isto garante que o email sai pela conta certa e que
     # o reply_to aponta para o email configurado.
-    if account == "personal" and user_role != UserRole.INDEXACAO:
+    if account == "personal":
         try:
             resolved = await resolve_email_config_for_sync(
                 current_user["id"],
@@ -723,13 +747,29 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
                 status_code=500,
                 detail=f"Erro ao resolver configuração de email: {type(e).__name__}: {e}"
             )
-        if not resolved:
-            raise HTTPException(
-                status_code=403,
-                detail="Configuração de email não encontrada para esta empresa. Vá ao seu Perfil > Configuração de Webmail para configurar o seu email antes de enviar."
+        if resolved:
+            from_email = resolved.get("email_address") or from_email
+            logger.info(f"[Send Email] Utilizador {current_user.get('email')} ({user_role}): conta pessoal (from_email={from_email}, empresa={active_company_id})")
+        else:
+            # Lote 7.1: sem conta pessoal para ESTA empresa, quem tem direito à
+            # Caixa Geral usa a da empresa activa (o Master/CEO que escolheu a
+            # Domus recebia 403 por não ter conta pessoal lá).
+            caixa = (
+                await _caixa_geral_da_empresa_activa(active_company_id, current_user)
+                if user_role in CAIXA_GERAL_ROLES else None
             )
-        from_email = resolved.get("email_address") or from_email
-        logger.info(f"[Send Email] Utilizador {current_user.get('email')} ({user_role}): conta pessoal (from_email={from_email}, empresa={active_company_id})")
+            if not caixa:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Configuração de email não encontrada para esta empresa. Vá ao seu Perfil > Configuração de Webmail para configurar o seu email antes de enviar."
+                )
+            account = "caixa_geral"
+            usar_caixa_geral = True
+            from_email = caixa["email_address"]
+            logger.info(
+                f"[Send Email] Utilizador {current_user.get('email')} ({user_role}): sem conta pessoal na empresa "
+                f"{active_company_id}; a usar a Caixa Geral ({from_email})"
+            )
 
     # Sanitize inputs before sending and DB insert
     to_emails = [e for e in (sanitize_email(e) for e in payload.to_emails) if e]
@@ -799,6 +839,7 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
         references=payload.references,
         created_by_name=current_user.get("name"),
         actor_silenciado=_utilizador_silenciado(current_user),
+        usar_caixa_geral=usar_caixa_geral,
     )
 
     if undo_window <= 0:

@@ -43,7 +43,7 @@ describe("SendDocumentationModal — envio", () => {
 
   it("importa o cliente Axios", () => {
     assert.ok(
-      /import\s+api\s+from\s+["']\.\.\/services\/api["']/.test(FONTE),
+      /import\s+api\b[^;]*?from\s+["']\.\.\/services\/api["']/.test(FONTE),
       "sem o import, `api.post` não existe"
     );
   });

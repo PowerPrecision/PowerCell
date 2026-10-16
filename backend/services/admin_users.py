@@ -220,7 +220,28 @@ async def run_get_users_paginated(
     }
 
 
-async def run_create_user(data: UserCreate, user: dict):
+def url_de_acesso_ao_crm(frontend_url: Optional[str] = None) -> str:
+    """Link de entrada no CRM para o email de boas-vindas do STAFF.
+
+    ``FRONTEND_URL`` manda; sem ela vale o domínio de onde o administrador está
+    a trabalhar (Referer/Origin do pedido); sem nenhum dos dois devolve ``""``
+    e o email sai SEM botão — um endereço escrito à mão (o ``powercell.vercel.app``
+    que aqui estava) leva a um deploy que já não é o nosso, e um email com um
+    link morto não produz erro nenhum.
+    """
+    base = (os.environ.get("FRONTEND_URL") or "").strip() or (frontend_url or "").strip()
+    base = base.rstrip("/")
+    if not base:
+        logger.warning(
+            "FRONTEND_URL por definir: o email de boas-vindas do utilizador sai sem link de acesso."
+        )
+        return ""
+    return f"{base}/login"
+
+
+async def run_create_user(
+    data: UserCreate, user: dict, frontend_url: Optional[str] = None, request: Optional[Request] = None,
+):
     """Cria um novo utilizador no sistema com lógica diferenciada por role.
 
     Este endpoint suporta dois fluxos distintos de criação:
@@ -404,6 +425,21 @@ async def run_create_user(data: UserCreate, user: dict):
         }
         role_name = role_names.get(data.role, data.role)
         
+        if not frontend_url and request is not None:
+            from services.rgpd_helpers import _frontend_base_url_from_request
+
+            frontend_url = _frontend_base_url_from_request(request, log_prefix="[USERS]")
+        _link_crm = url_de_acesso_ao_crm(frontend_url)
+        _linha_do_link = f"🔗 Aceda à plataforma em: {_link_crm}\n\n" if _link_crm else ""
+        _botao_do_link = (
+            f'''<div style="text-align: center; margin: 30px 0;">
+                    <a href="{_link_crm}" style="background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">
+                        Aceder à Plataforma
+                    </a>
+                </div>'''
+            if _link_crm else ""
+        )
+
         # Criar corpo do email
         # PACOTE DI — marca client-facing actualizada para Precision Crédito.
         email_body = f"""Olá {clean_name},
@@ -417,9 +453,7 @@ A sua conta foi criada com sucesso. Seguem os dados de acesso:
 
 Perfil: {role_name}
 
-🔗 Aceda à plataforma em: https://powercell.vercel.app
-
-Recomendamos que altere a sua password após o primeiro acesso.
+{_linha_do_link}Recomendamos que altere a sua password após o primeiro acesso.
 
 Se tiver alguma dúvida, não hesite em contactar.
 
@@ -458,11 +492,7 @@ Equipa Precision Crédito
                     <p style="margin: 10px 0;"><strong>👤 Perfil:</strong> {role_name}</p>
                 </div>
                 
-                <div style="text-align: center; margin: 30px 0;">
-                    <a href="https://powercell.vercel.app" style="background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">
-                        Aceder à Plataforma
-                    </a>
-                </div>
+                {_botao_do_link}
                 
                 <p style="font-size: 14px; color: #64748b; background: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
                     ⚠️ Recomendamos que altere a sua password após o primeiro acesso.

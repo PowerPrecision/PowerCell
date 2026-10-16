@@ -50,6 +50,7 @@ from services.tenant_network import (
     TenantScope,
     redes_parceiras,
     resolve_tenant_scope,
+    resolve_tenant_scope_completo,
     resolve_vista_scope,
 )
 
@@ -106,9 +107,12 @@ async def redes_permitidas_do_ator(
     from services.role_scope import conta_e_master
     from services.tenant_network import CAMPO_VISTA
 
-    scope = await resolve_tenant_scope(ator)
+    # Lote 7.1: `resolve_tenant_scope` já vem estreitado à empresa activa. O Master precisa do
+    # âmbito COMPLETO para combinar a empresa escolhida com o alcance do processo; quem não é
+    # Master atribui dentro da empresa activa (o contexto estrito vale para todos).
     if not (conta_e_master(ator) and _texto((ator or {}).get(CAMPO_VISTA))):
-        return redes_permitidas(scope, processo)
+        return redes_permitidas(await resolve_tenant_scope(ator), processo)
+    scope = await resolve_tenant_scope_completo(ator)
     vista = await resolve_vista_scope(ator)
     if vista.sem_fronteira:  # empresa que não existe (cabeçalho velho): não estreita
         return redes_permitidas(scope, processo)
@@ -123,7 +127,8 @@ async def redes_permitidas_do_ator(
 
 async def redes_do_atribuido(utilizador: dict) -> Optional[set[str]]:
     """As redes de quem vai ser atribuído. ``None`` = sem fronteira (Master)."""
-    scope = await resolve_tenant_scope(utilizador)
+    # O atribuído é medido pelas redes a que pertence, não pela empresa que o ator tem activa.
+    scope = await resolve_tenant_scope_completo(utilizador)
     if scope.sem_fronteira:
         return None
     return {r for r in scope.network_ids if r}
@@ -251,7 +256,7 @@ async def utilizadores_atribuiveis_ao_processo(
     """
     if not _texto(process_id):
         return list(utilizadores)
-    if not (await resolve_tenant_scope(ator)).sem_fronteira:
+    if not (await resolve_tenant_scope_completo(ator)).sem_fronteira:
         return list(utilizadores)
 
     from services.task_assignment_hygiene import (

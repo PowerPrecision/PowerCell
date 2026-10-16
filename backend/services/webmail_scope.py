@@ -51,7 +51,12 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 from database import db
-from services.tenant_network import CONDICAO_IMPOSSIVEL, VALORES_SEM_EMPRESA
+from services.tenant_network import (
+    CONDICAO_IMPOSSIVEL,
+    VALORES_SEM_EMPRESA,
+    _redes_das_empresas,
+    redes_do_contexto_activo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +149,18 @@ async def empresas_do_webmail(user: dict) -> list[EmpresaDoWebmail]:
                 nomes[cid] = nome
     except Exception as exc:
         logger.warning("[WebmailScope] Falha a ler nomes de empresas: %s", exc)
+
+    # Lote 7.1 (contexto estrito): com uma empresa escolhida no cabeçalho os separadores são os
+    # da REDE dela — um CEO a trabalhar como Domus não vê (nem pode pedir) a caixa da Precision;
+    # troca de empresa na interface. Falha FECHADA: sem saber a rede, vazio.
+    try:
+        redes = await redes_do_contexto_activo(user)
+        if redes is not None:
+            mapa = await _redes_das_empresas(list(por_empresa))
+            por_empresa = {cid: p for cid, p in por_empresa.items() if mapa.get(cid) in redes}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[WebmailScope] Falha a estreitar os separadores à empresa activa: %s", exc)
+        return []
 
     return [
         EmpresaDoWebmail(

@@ -58,9 +58,8 @@ import { safeString } from "../utils/safeString";
 import { formatFonteLabel } from "../utils/fonteLabels";
 import { formatDate, formatDateTime } from "../lib/utils";
 import { formatCurrency } from "../utils/formatCurrency";
-import { resendPortalAccess } from "../services/api";
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import { getClient, resendPortalAccess } from "../services/api";
+import ProcessosDoCliente from "./clients/ProcessosDoCliente";
 
 const ClientDetailsModal = ({
   open,
@@ -76,14 +75,10 @@ const ClientDetailsModal = ({
   const fetchClient = useCallback(async (id) => {
     setLoading(true);
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/clients/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setClient(data);
-      }
+      // Pelo Axios: o `X-Company-Id` do cabeçalho é o que recorta `processes` à empresa
+      // activa (e aos partilhados com ela). Um `fetch` cru pedia sem contexto.
+      const { data } = await getClient(id);
+      setClient(data);
     } catch (error) {
       console.error("Erro ao carregar detalhes do cliente:", error);
     } finally {
@@ -139,6 +134,12 @@ const ClientDetailsModal = ({
                 </div>
               </div>
             </div>
+
+            {/* Processos — o servidor já recorta pela empresa activa e pelos partilhados */}
+            <ProcessosDoCliente
+              processes={client.processes}
+              onAbrir={onNavigateToProcess ? (pid) => { onClose(); onNavigateToProcess(pid); } : undefined}
+            />
 
             {/* Contactos */}
             <div>

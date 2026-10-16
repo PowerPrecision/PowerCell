@@ -474,6 +474,36 @@ describe("S3FileManager — «Forçar criação de pasta» (Lote 6)", () => {
         .toBeGreaterThan(listagensAntes));
   });
 
+  it("depois do sucesso o painel «Mapeamento S3» fecha (a dropdown velha desaparece) e o explorador é relido (Lote 7.3)", async () => {
+    // A conta Master vê o painel; o servidor devolve a pasta criada e, na releitura, já a lista.
+    ligarRede({ carga: SEM_PASTA });
+    axiosFalso.respostas.set("/admin/client-s3-mappings", {
+      available_folders: [], processes: [{ id: "proc-1", s3_folder: null }],
+    });
+    axiosFalso.respostas.set("/init-folders", {
+      success: true, created: true, recreated: false, already_exists: false,
+      s3_folder: "Documentação Clientes/c-1/processos/proc-1",
+    });
+    const u = (await import("@testing-library/user-event")).default.setup();
+    montar(utilizador({ user: { id: "u-m", name: "Sistema", role: "master" }, effectiveRole: "master" }));
+    await aguardarCarregado();
+
+    await u.click(await screen.findByTestId("s3-mapping-toggle"));
+    expect(await screen.findByTestId("s3-folder-select")).toBeInTheDocument();
+
+    // a releitura que vem a seguir já encontra a pasta
+    axiosFalso.respostas.set("/files", COM_PASTA);
+    const listagensAntes = axiosFalso.chamadas.filter((c) => c.metodo === "GET" && c.url.endsWith("/files")).length;
+    await u.click(await screen.findByTestId("forcar-pasta-s3-btn"));
+
+    await waitFor(() => expect(screen.queryByTestId("s3-folder-select")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("forcar-pasta-s3")).not.toBeInTheDocument();
+    expect(axiosFalso.chamadas.filter((c) => c.metodo === "GET" && c.url.endsWith("/files")).length)
+      .toBeGreaterThan(listagensAntes);
+    // o cabeçalho do painel já mostra a pasta nova, não «sem mapeamento»
+    expect(screen.getByTestId("s3-mapping-toggle")).toHaveTextContent("proc-1");
+  });
+
   it.each([
     ["com pasta (base_path preenchido)", COM_PASTA, {}],
     ["resposta sem base_path (contrato antigo)", RESPOSTA_FICHEIROS, {}],

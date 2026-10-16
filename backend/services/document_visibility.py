@@ -330,13 +330,14 @@ async def _ambito_do_utilizador(user: dict):
     era a saída cómoda e desligava a fronteira por causa de um soluço da
     rede, que é o oposto do que esta guarda existe para fazer.
     """
-    from services.role_scope import conta_e_master
+    from services.role_scope import fronteira_levantada
     from services.tenant_network import TenantScope, resolve_tenant_scope
 
     # Lote 2 (Out 2026): a CONTA Master abre os documentos de qualquer cliente,
     # com o chapéu que tiver — o mesmo que `by_id_scope` já decide à entrada.
     # Sem isto a guarda do router deixava passar e esta recusava logo a seguir.
-    if conta_e_master(user):
+    # Lote 7.1: só na vista «Sistema»; com uma empresa escolhida vale o âmbito dela.
+    if fronteira_levantada(user, por_conta=True):
         return TenantScope(inclui_rede_de_omissao=True, sem_fronteira=True)
 
     try:
@@ -483,9 +484,9 @@ async def ids_de_processos_com_documentos_visiveis(user: dict) -> Optional[list[
     incluindo a relação directa com o cliente do PACOTE 12). Falha FECHADA:
     sem âmbito resolvível não há processos, nunca «todos».
     """
-    from services.role_scope import utilizador_e_global
+    from services.role_scope import fronteira_levantada
 
-    if utilizador_e_global(user):
+    if fronteira_levantada(user):
         return None
 
     from services.process_staff_assignment import ASSIGNMENT_ID_FIELDS

@@ -266,8 +266,8 @@ async def get_users_paginated(
 
 
 @router.post("/users", response_model=UserResponse)
-async def create_user(data: UserCreate, user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))):
-    return await run_create_user(data, user)
+async def create_user(request: Request, data: UserCreate, user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))):
+    return await run_create_user(data, user, request=request)
 
 
 @router.put("/users/{user_id}", response_model=UserResponse)

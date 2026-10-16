@@ -544,6 +544,28 @@ async def _resolve_system_smtp_account() -> Optional["EmailAccount"]:
     return None
 
 
+async def _ucr_da_empresa(user_id: str, empresa: str, projeccao: dict) -> Optional[dict]:
+    """UCR do utilizador numa empresa dada pelo ID **ou pelo NOME**.
+
+    A empresa chega ao envio nas duas notações do projecto: o ID (cabeçalho
+    ``X-Company-Id``) e o NOME (``users.company`` e o recuo de
+    ``get_active_company_id_async`` quando o cabeçalho falta). Procurar só pelo
+    ID exacto deixava o email sair SEM a assinatura que o utilizador tem
+    configurada, sem erro nenhum (Lote 7.2) — o ``_find_ucr`` do ``auth`` sempre
+    casou pelos dois; é a mesma regra, não uma segunda.
+    """
+    from services.auth import _company_match_or
+
+    exacto = await db.user_company_roles.find_one(
+        {"user_id": user_id, "company_id": empresa}, projeccao
+    )
+    if exacto:
+        return exacto
+    return await db.user_company_roles.find_one(
+        {"user_id": user_id, "$or": _company_match_or(empresa)}, projeccao
+    )
+
+
 async def resolve_email_signature(
     *,
     created_by: Optional[str],
@@ -590,9 +612,8 @@ async def resolve_email_signature(
 
         # 1. UCR da empresa activa.
         if tem_empresa_activa:
-            ucr_active = await db.user_company_roles.find_one(
-                {"user_id": created_by, "company_id": active_company_id},
-                {"signature": 1, "_id": 0},
+            ucr_active = await _ucr_da_empresa(
+                created_by, active_company_id, {"signature": 1, "_id": 0}
             )
             if ucr_active and ucr_active.get("signature"):
                 return ucr_active["signature"], f"ucr_active({active_company_id})"
@@ -622,9 +643,8 @@ async def resolve_email_signature(
         #    empresa activa escolhida, ir buscar a assinatura de outra
         #    seria assinar um email da empresa A com a identidade da B.
         if not tem_empresa_activa and sender_user and sender_user.get("company"):
-            ucr = await db.user_company_roles.find_one(
-                {"user_id": created_by, "company_id": sender_user["company"]},
-                {"signature": 1, "_id": 0},
+            ucr = await _ucr_da_empresa(
+                created_by, sender_user["company"], {"signature": 1, "_id": 0}
             )
             if ucr and ucr.get("signature"):
                 return ucr["signature"], f"ucr_default({sender_user['company']})"
@@ -663,6 +683,137 @@ def _synthesize_html_body(body: str, signature_html: str) -> str:
     )
 
 
+# ====================================================================
+# CÓPIA NA PASTA «ENVIADOS» (IMAP APPEND) — Lote 7.2
+# ====================================================================
+# O SMTP entrega a mensagem mas NÃO a guarda na caixa de quem a enviou: o
+# cliente de email faz o APPEND para a pasta «Enviados». Um CRM que envia por
+# SMTP tem de fazer o mesmo, senão o consultor vê o email no Webmail do
+# fornecedor (Hostinger, cPanel…) sem a mensagem que acabou de mandar — os
+# «emails fantasma».
+#
+# Gmail e Microsoft 365 guardam sozinhos o que sai pelo SMTP deles: fazer o
+# APPEND também deixaria cada email duplicado nos Enviados.
+SERVIDORES_SMTP_QUE_GUARDAM_OS_ENVIADOS = (
+    "smtp.gmail.com",
+    "smtp.googlemail.com",
+    "smtp.office365.com",
+    "smtp-mail.outlook.com",
+)
+
+#: Por ordem: os nomes habituais da pasta, quando o servidor não marca a `\Sent`.
+NOMES_DA_PASTA_ENVIADOS = (
+    "Sent", "INBOX.Sent", "Sent Items", "Sent Messages", "Enviados", "INBOX.Enviados",
+    "Itens Enviados", "[Gmail]/Sent Mail", "[Gmail]/E-mails enviados",
+)
+
+_PORTAS_QUE_NAO_SAO_IMAP = {25, 465, 587, 2525}
+
+
+def copia_nos_enviados_activa() -> bool:
+    """A cópia nos «Enviados» está ligada? (`IMAP_APPEND_ENABLED`; desligada em `TESTING` por omissão)
+
+    Em dev/CI o envio SMTP é simulado e não há caixa IMAP a que ligar: esperar por um servidor que não
+    existe só serve para pendurar a suite (a mesma razão do `SMTP_CONNECT_TIMEOUT`). Quem testa a
+    cópia liga-a explicitamente.
+    """
+    valor = (os.environ.get("IMAP_APPEND_ENABLED") or "").strip().lower()
+    if valor in {"1", "true", "yes", "on"}:
+        return True
+    if valor in {"0", "false", "no", "off"}:
+        return False
+    return (os.environ.get("TESTING") or "").strip().lower() != "true"
+
+
+def servidor_guarda_os_enviados(smtp_server: Optional[str]) -> bool:
+    """O servidor SMTP já arquiva sozinho o que envia? (então não se faz APPEND)"""
+    return (smtp_server or "").strip().lower() in SERVIDORES_SMTP_QUE_GUARDAM_OS_ENVIADOS
+
+
+def _porta_imap(porta: Any) -> int:
+    """A porta IMAP SSL. Uma porta de SMTP (465/587…) é um erro de configuração: usa-se 993."""
+    try:
+        valor = int(porta)
+    except (TypeError, ValueError):
+        return 993
+    return 993 if valor <= 0 or valor in _PORTAS_QUE_NAO_SAO_IMAP else valor
+
+
+def _pasta_enviados_do_servidor(mail: "imaplib.IMAP4_SSL") -> Optional[str]:
+    """A pasta «Enviados» da caixa: a marcada `\\Sent` (RFC 6154) ou, na falta, um nome habitual."""
+    existentes: list[str] = []
+    try:
+        tipo, linhas = mail.list()
+    except Exception:  # noqa: BLE001 - sem LIST, tenta-se pelos nomes habituais
+        tipo, linhas = "NO", []
+    if tipo == "OK":
+        for linha in linhas or []:
+            texto = linha.decode("utf-8", errors="replace") if isinstance(linha, bytes) else str(linha or "")
+            m = re.match(r'\((?P<flags>[^)]*)\)\s+(?:"(?P<sep>[^"]*)"|NIL)\s+(?P<nome>.+)$', texto.strip())
+            if not m:
+                continue
+            nome = m.group("nome").strip()
+            if nome.startswith('"') and nome.endswith('"'):
+                nome = nome[1:-1]
+            existentes.append(nome)
+            if "\\sent" in m.group("flags").lower():
+                return nome
+    por_minusculas = {n.lower(): n for n in existentes}
+    for candidato in NOMES_DA_PASTA_ENVIADOS:
+        if candidato.lower() in por_minusculas:
+            return por_minusculas[candidato.lower()]
+    return None
+
+
+def _imap_append_enviados_sync(account: "EmailAccount", password: str, mensagem: bytes, timeout: int = 20) -> Dict[str, Any]:
+    """Põe uma cópia da mensagem enviada na pasta «Enviados» (marcada como lida). Bloqueante."""
+    mail = None
+    try:
+        contexto = ssl.create_default_context()
+        mail = imaplib.IMAP4_SSL(
+            account.imap_server, _porta_imap(account.imap_port), ssl_context=contexto, timeout=timeout,
+        )
+        mail.login(account.email, password)
+        pasta = _pasta_enviados_do_servidor(mail)
+        if not pasta:
+            return {"ok": False, "error": "A caixa não tem uma pasta «Enviados» reconhecível."}
+        tipo, resposta = mail.append(
+            f'"{pasta}"', "\\Seen", imaplib.Time2Internaldate(datetime.now(timezone.utc).timestamp()), mensagem,
+        )
+        if tipo != "OK":
+            return {"ok": False, "folder": pasta, "error": f"APPEND recusado: {resposta}"}
+        return {"ok": True, "folder": pasta}
+    except Exception as exc:  # noqa: BLE001 - a cópia nunca faz falhar um envio que já saiu
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    finally:
+        if mail is not None:
+            try:
+                mail.logout()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+async def imap_append_to_sent(account: "EmailAccount", password: str, mensagem: bytes) -> Dict[str, Any]:
+    """APPEND da mensagem enviada para os «Enviados» do servidor. Nunca levanta."""
+    if not (account and account.imap_server and account.email and password):
+        return {"ok": False, "skipped": True, "error": "conta sem IMAP configurado"}
+    return await asyncio.to_thread(_imap_append_enviados_sync, account, password, mensagem)
+
+
+async def _processo_do_email_pai(in_reply_to: Optional[str]) -> Optional[str]:
+    """Uma resposta herda o processo do email a que responde (a mesma regra do Smart Threading)."""
+    if not in_reply_to:
+        return None
+    try:
+        pai = await db.emails.find_one(
+            {"message_id": in_reply_to, "process_id": {"$nin": [None, ""]}},
+            {"_id": 0, "process_id": 1},
+        )
+    except Exception:  # noqa: BLE001 - herdar o processo é um extra
+        return None
+    return (pai or {}).get("process_id") or None
+
+
 async def send_email(
     account_name: str,
     to_emails: List[str],
@@ -687,6 +838,7 @@ async def send_email(
     from_name_override: Optional[str] = None,
     use_system_signature: bool = True,
     smtp_timeout: Optional[int] = None,
+    guardar_copia: bool = True,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
@@ -825,8 +977,8 @@ async def send_email(
                     password = encryption_service.decrypt(encrypted_password)
                     account = EmailAccount(
                         name="personal",
-                        imap_server=cfg.get("smtp_server", ""),
-                        imap_port=int(cfg.get("smtp_port", 465)),
+                        imap_server=cfg.get("imap_server") or cfg.get("smtp_server", ""),
+                        imap_port=_porta_imap(cfg.get("imap_port")),
                         smtp_server=cfg.get("smtp_server", ""),
                         smtp_port=int(cfg.get("smtp_port", 465)),
                         email=cfg.get("email_address", ""),
@@ -859,8 +1011,8 @@ async def send_email(
                     if resolved.get("email_address") and resolved.get("smtp_server"):
                         account = EmailAccount(
                             name="personal",
-                            imap_server=resolved.get("smtp_server", resolved.get("imap_server", "")),
-                            imap_port=int(resolved.get("smtp_port", resolved.get("imap_port", 465))),
+                            imap_server=resolved.get("imap_server") or resolved.get("smtp_server", ""),
+                            imap_port=_porta_imap(resolved.get("imap_port")),
                             smtp_server=resolved.get("smtp_server", ""),
                             smtp_port=int(resolved.get("smtp_port", 465)),
                             email=resolved.get("email_address", ""),
@@ -1162,6 +1314,7 @@ async def send_email(
         # nenhum outro pedido é servido. Foi assim que um servidor SMTP externo
         # inacessível congelou o `/public/client-registration` no CI.
         # Vão para uma thread; o loop continua livre.
+        senha_para_a_copia: Optional[str] = None  # só o SMTP directo permite o APPEND nos «Enviados»
         if account.smtp_server == "resend" and account.password:
             # --- Resend API (HTTP) ---
             # NOTA: A assinatura já foi injetada no body_html/body acima,
@@ -1228,6 +1381,7 @@ async def send_email(
                     server.sendmail(account.email, all_recipients, msg.as_string())
 
             await asyncio.to_thread(_enviar_por_smtp)
+            senha_para_a_copia = smtp_password
         
         logger.info(f"Email enviado via {account.name} para {to_emails} ({len(attachments or [])} anexos)")
         
@@ -1244,11 +1398,24 @@ async def send_email(
                     "temp_key": att.get("temp_key"),
                 })
         
-        if process_id:
+        # === ARQUIVO IMEDIATO + CÓPIA NOS «ENVIADOS» (Lote 7.2) ===
+        # Um email enviado por uma PESSOA fica sempre na base de dados (`folder="Sent"`), ligado ao
+        # processo quando o há — explícito ou herdado do email a que responde. Antes só ficava com
+        # `process_id`: um envio do Webmail sem processo entregava-se e não deixava rasto nenhum
+        # até a sincronização IMAP o ir buscar (e esta nunca o via se a caixa não tinha «Enviados»).
+        # Os emails de SISTEMA (magic link, RGPD, boas-vindas) continuam a só ficar quando têm processo.
+        ligado_ao_processo = process_id or await _processo_do_email_pai(normalized_in_reply_to)
+        # `guardar_copia=False`: o envio de teste da configuração não é correspondência.
+        envio_de_pessoa = bool(created_by) and not force_system and guardar_copia
+        email_doc_id: Optional[str] = None
+        if ligado_ao_processo or envio_de_pessoa:
+            agora = datetime.now(timezone.utc).isoformat()
+            email_doc_id = str(uuid.uuid4())
             email_doc = {
-                "id": str(uuid.uuid4()),
-                "process_id": process_id,
+                "id": email_doc_id,
+                "process_id": ligado_ao_processo,
                 "direction": "sent",
+                "folder": "Sent",
                 "from_email": effective_from_email,
                 "to_emails": to_emails,
                 "cc_emails": cc_emails or [],
@@ -1258,13 +1425,15 @@ async def send_email(
                 "body_html": body_html,
                 "attachments": attachment_records,
                 "status": "sent",
-                "sent_at": datetime.now(timezone.utc).isoformat(),
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "sent_at": agora,
+                "created_at": agora,
                 "created_by": created_by,
                 "synced_for_user": created_by,
                 "notes": f"Enviado via {account.name}" + (f" com {len(attachment_records)} anexo(s)" if attachment_records else ""),
                 "synced": False,
-                "account": account.email or account.name,
+                # Em minúsculas: é a chave com que a sincronização da caixa reconhece o que já tem
+                # (message_id + utilizador + empresa + endereço) e não o duplica.
+                "account": (account.email or account.name or "").strip().lower(),
                 # Threading: sem isto gravado, uma resposta do cliente a
                 # este email não encontra o pai na nossa BD.
                 "message_id": outgoing_message_id,
@@ -1275,7 +1444,38 @@ async def send_email(
             if active_company_id and active_company_id != "default":
                 email_doc["company_id"] = active_company_id
             await inserir_email(db, email_doc)
-        
+
+        # A cópia nos «Enviados» do servidor. Só para o SMTP directo de uma caixa de pessoa/empresa
+        # (o Resend é HTTP e as contas de sistema não têm caixa de leitura) e nunca num servidor que
+        # já guarda sozinho o que envia. Falhar aqui NÃO desfaz o envio: regista-se no email.
+        if (
+            envio_de_pessoa
+            and copia_nos_enviados_activa()
+            and senha_para_a_copia
+            and not account.name.startswith("system")
+            and not servidor_guarda_os_enviados(account.smtp_server)
+        ):
+            copia = await imap_append_to_sent(account, senha_para_a_copia, msg.as_bytes())
+            if copia.get("ok"):
+                logger.info("[Send Email] Cópia guardada em «%s» (%s).", copia.get("folder"), account.email)
+            else:
+                logger.warning(
+                    "[Send Email] A cópia nos Enviados de %s não ficou guardada: %s",
+                    account.email, copia.get("error"),
+                )
+            if email_doc_id:
+                try:
+                    await db.emails.update_one(
+                        {"id": email_doc_id},
+                        {"$set": {
+                            "imap_appended": bool(copia.get("ok")),
+                            "imap_folder": copia.get("folder"),
+                            **({} if copia.get("ok") else {"imap_append_error": str(copia.get("error"))[:300]}),
+                        }},
+                    )
+                except Exception as exc:  # noqa: BLE001 - o registo da cópia é informação
+                    logger.debug("[Send Email] Não foi possível registar o estado da cópia: %s", exc)
+
         return {"success": True, "account": account.name}
         
     except smtplib.SMTPAuthenticationError as e:

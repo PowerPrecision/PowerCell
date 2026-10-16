@@ -162,6 +162,25 @@ do passo 2.
 
 ## Produto e âmbito
 
+### D-42 · Identidade do cliente: por REDE (hoje) ou GLOBAL com processos locais (proposta do dono do produto)
+**Onde:** `services/client_uniqueness.py`, `services/b2b_client_match.py`, `services/public_registration.py`, `services/client_crud.py`
+
+**O que existe (D-38, Out 2026):** NIF, Email e Telemóvel não se repetem **dentro da rede**. O mesmo
+NIF em duas redes são dois clientes, de propósito. Os canais respondem assim: o registo público
+devolve 409 genérico (`DUPLICATE_CLIENT`, sem id nem campo — porta anónima); a criação no CRM devolve
+409 com o cliente existente **da própria rede**; a lead do Parceiro **associa-se** ao cliente existente
+na rede de destino (`b2b_client_match`, NIF primeiro, destino soberano) em vez de falhar. Não há 422:
+o 409 só aparece quando a pessoa já existe na rede, e é o comportamento pretendido.
+
+**A proposta de produto (Lote 7.1):** «Cliente (NIF/Email) é global na BD, sem duplicados; o Processo é
+local». Não é uma correcção, é outro modelo, e tem um custo que o isolamento Lote 4→7 foi construído para
+evitar: um 409 global é um **oráculo de existência entre redes** («este NIF já é cliente de alguém») e
+obriga a decidir quem é dono dos dados pessoais (RGPD: quem é o responsável por tratamento quando a
+Domus e a Power têm a mesma pessoa?). A alternativa que dá o funil central sem esse custo é uma
+**identidade global opaca ao lado da local**: uma colecção `identidades` (hash do NIF → `identity_id`),
+sem dados pessoais, que cada cliente local referencia; os canais passam a *associar* (nunca bloquear)
+quando a identidade já existe noutra rede, e só a equipa da rede dona vê os dados. **Decisão pendente.**
+
 ### D-39 · Colisão B2B: os ficheiros do parceiro ficam na pasta do registo dele
 **Onde:** `services/b2b_client_match.py`, `services/partner_drafts.py::_associar_a_cliente_existente`
 
@@ -217,7 +236,7 @@ migrações/resets de processos e reset de permissões.
 `test_accoes_destrutivas_com_password.py::TestInventario::COM_PASSWORD`; quem criar UI usa o
 `ConfirmarComPasswordDialog`.
 
-### D-18 · `co_buyers`: falta correr a migração dos dados em produção
+### D-18 · `co_buyers`: migração dos dados feita em produção; falta só remover a desduplicação
 **Onde:** `backend/scripts/migrar_co_buyers_adicionais.py`, `backend/services/co_buyers_migration.py`
 
 O CÓDIGO está fechado (Lote 5): o mapeador do CPCV passou a gravar só os
@@ -225,7 +244,12 @@ compradores ADICIONAIS (`i > 0`), como o `build_add_client_update` sempre fez,
 e o campo tem um só significado. Falta o DADO: os processos analisados pelo
 mapeador antigo têm o titular 1 em `co_buyers[0]`.
 
-**Porque está aberta:** a migração escreve em produção e só se pode correr com
+**Estado (16 Out 2026):** o dono do produto reportou que a migração foi executada em
+produção (consola do Render). Não verifiquei a execução nem tenho a saída («0 a migrar»
+por confirmar). Resta, e está congelado com o desenvolvimento de funcionalidades, remover a
+desduplicação do `sub35.py` depois de confirmar uma passagem limpa.
+
+**Porque esteve aberta:** a migração escreve em produção e só se pode correr com
 a base de dados à frente. O script é conservador — remove `co_buyers[0]` só
 quando a sua identidade normalizada (NIF/CC em dígitos, nome sem acentos) é
 EXACTAMENTE a do titular 1; tudo o resto fica e é listado. A omissão só lê;

@@ -97,6 +97,10 @@ export const queryKeys = {
     myClients: (filters) => [...queryKeys.processes.all, 'my-clients', filters],
     // Bloco 4, ponto 7 — a origem financeira desce do detalhe: invalidar o
     // processo recarrega-a, e ela nunca viaja DENTRO do documento do processo.
+    // Lote 7.3 — os alertas do processo são DERIVADOS do estado dele: vivem
+    // debaixo do prefixo do detalhe, para que qualquer invalidação do processo
+    // (gravar a ficha, prazos, atribuições) os refaça sem ninguém se lembrar.
+    alerts: (id) => [...queryKeys.processes.detail(id), 'alerts'],
     origemFinanceira: (id) => [...queryKeys.processes.detail(id), 'origem-financeira'],
     candidatosOrigemFinanceira: (id) => [...queryKeys.processes.detail(id), 'origem-financeira', 'candidatos'],
     // Portal do Parceiro — o controlo «Serviço pago pelo parceiro». Desce do

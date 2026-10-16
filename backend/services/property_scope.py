@@ -268,11 +268,13 @@ async def papel_efectivo(user: dict, request: Optional[Request] = None) -> str:
     calendário, senão um administrador em modo global perdia o passe
     livre que o produto lhe dá.
     """
-    from services.tenant_access_context import resolver_papel_efectivo
+    from services.tenant_access_context import papel_para_os_dados, resolver_papel_efectivo
 
-    return await resolver_papel_efectivo(
+    papel = await resolver_papel_efectivo(
         user, request, traduzir_todos_os_perfis=e_papel_sem_fronteira
     )
+    # Lote 7.1: o Master com empresa escolhida trabalha os dados como Admin dela.
+    return await papel_para_os_dados(user, papel)
 
 
 async def carregar_contexto_dos_imoveis(

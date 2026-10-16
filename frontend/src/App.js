@@ -936,11 +936,11 @@ function App() {
             }
           />
           
-          {/* Webmail - Email Client - Staff */}
+          {/* Webmail - Email Client - Staff, MENOS o Index (Lote 7.1: sem acesso ao correio) */}
           <Route
             path="/webmail"
             element={
-              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]}>
                 <RouteBoundary name="Webmail">
                   <WebmailPage />
                 </RouteBoundary>

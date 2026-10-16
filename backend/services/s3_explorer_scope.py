@@ -373,14 +373,15 @@ async def ambito_do_utilizador(request, user: dict, *, vista: bool = False) -> t
     from services.tenant_network import resolve_tenant_scope, resolve_vista_scope
 
     papel = resolve_concrete_role(get_effective_role(request, user), user)
-    # `vista=True` só para LISTAR (Lote 4): o Master com uma empresa escolhida vê as pastas da
-    # rede dela. Mover/renomear/apagar por caminho continua com o âmbito normal.
+    # Lote 4: `vista=True` só para LISTAR — o Master com uma empresa escolhida via as pastas da
+    # rede dela e mexia por caminho no resto. Lote 7.1 (contexto estrito): a empresa activa é a
+    # fronteira também de mover/renomear/apagar; a diferença que resta é só o papel (abaixo).
     resolver = resolve_vista_scope if vista else resolve_tenant_scope
     scope = await resolver(user)
     # O Master é «reconciliação»: vê tudo, incluindo as pastas órfãs. Com uma empresa
     # escolhida (âmbito estreitado) deixa de o ser — a vista é a da rede dela, e as órfãs
     # (sem dono conhecido) só aparecem na vista global, onde se reconciliam.
-    if vista and not scope.sem_fronteira and _texto(getattr(papel, "value", papel)).lower() in {
+    if not scope.sem_fronteira and _texto(getattr(papel, "value", papel)).lower() in {
         p.value for p in PAPEIS_DE_RECONCILIACAO
     }:
         papel = PAPEL_DA_VISTA

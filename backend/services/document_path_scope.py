@@ -38,7 +38,7 @@ from fastapi import HTTPException
 from database import db
 from services.document_process_resolve import DOCUMENT_S3_ROOT_PREFIX
 from services.document_s3_paths import s3_path_variations
-from services.role_scope import utilizador_e_global
+from services.role_scope import fronteira_levantada
 from services.tenant_network import (
     CAMPO_REDES_PARCEIRAS,
     CAMPO_REDE,
@@ -108,7 +108,7 @@ async def _donos_da_chave(prefixos: Iterable[str], segmentos: Iterable[str]):
 
 async def ficheiro_no_ambito(file_path: str, user: dict) -> bool:
     """A chave S3 pertence a uma pasta da rede de quem pede?"""
-    if utilizador_e_global(user):
+    if fronteira_levantada(user):
         return True
 
     prefixos, segmentos = prefixos_e_segmentos(file_path)

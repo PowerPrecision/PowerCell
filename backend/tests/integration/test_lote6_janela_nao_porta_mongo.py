@@ -142,13 +142,23 @@ async def test_contraprova_o_dono_ve_tudo_incluindo_o_acesso(bd):
     assert ficha["portal_access"]["portal_access_code"] == "COD-SECRETO"
 
 
-async def test_contraprova_o_master_nao_tem_janela(bd):
+async def test_o_master_sem_empresa_escolhida_nao_tem_janela(bd):
+    """Lote 6: «a conta Master não tem janela». Lote 7.1: só na vista «Sistema».
+
+    Com a Domus escolhida (`MASTER_NA_DOMUS`) o Master é um operador da Domus e, como ela, é um
+    VISITANTE da ficha de um cliente da Power que só alcança por um processo partilhado — a asserção
+    antiga («vê os dois processos») foi INVERTIDA, não apagada. O contexto estrito vale também para
+    quem não tem fronteira de dados.
+    """
     from services.client_crud import run_get_client
 
     with tenant_db(bd, *_modulos()):
-        ficha = await run_get_client("cli-p", MASTER_NA_DOMUS)
+        sistema = await run_get_client("cli-p", MASTER_SEM_VISTA)
+        na_domus = await run_get_client("cli-p", MASTER_NA_DOMUS)
 
-    assert {p["id"] for p in ficha["processes"]} == {"p-partilhado", "p-privado"}
+    assert {p["id"] for p in sistema["processes"]} == {"p-partilhado", "p-privado"}
+    assert {p["id"] for p in na_domus["processes"]} == {"p-partilhado"}
+    assert na_domus["portal_access"] is None
 
 
 # ───────────────────────── a lista «Clientes Registados» ─────────────────────────

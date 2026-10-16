@@ -824,8 +824,9 @@ export const deleteDeadline = (id) => api.delete(`/deadlines/${id}`);
 // `processId`: a dropdown de atribuição diz de que processo se trata, e o
 // servidor devolve só quem esse processo alcança (muda a lista do Master —
 // o único sem fronteira de rede; a dos restantes já vem limitada).
-export const getUsers = (role, { forAssignment, processId } = {}) =>
+export const getUsers = (role, { forAssignment, processId, skipErrorToast } = {}) =>
   api.get("/users", {
+    ...(skipErrorToast ? { skipErrorToast: true } : {}),
     params: {
       ...(role ? { role } : {}),
       ...(forAssignment ? { for_assignment: true } : {}),
@@ -1467,6 +1468,29 @@ export const downloadWebmailAttachment = (attachmentId, params) =>
     responseType: "blob",
     skipErrorToast: true,
   });
+
+// ── Envio de documentação aos balcões + anexos de um email ──
+// Tudo pelo cliente Axios: um `fetch` cru perdia `X-Company-Id` e `X-Active-Role`
+// (Lote 7.3) e o servidor decidia a empresa e a conta de envio sem o contexto activo.
+export const getDocumentRecipients = () =>
+  api.get("/emails/document-recipients", { skipErrorToast: true });
+export const getProcessDocumentsForSending = (processId) =>
+  api.get(`/documents/process/${encodeURIComponent(processId)}`, { skipErrorToast: true });
+export const previewDocumentationEmail = (processId) =>
+  api.get(`/emails/preview-documentation/${encodeURIComponent(processId)}`, { skipErrorToast: true });
+export const createUserBranch = (payload) =>
+  api.post("/user-branches", payload, { skipErrorToast: true });
+// `responseType: "blob"`: o corpo de ERRO também vem como Blob (ver `readBlobErrorBody`).
+export const downloadEmailAttachment = (emailId, attachmentId) =>
+  api.get(
+    `/emails/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    { responseType: "blob", skipErrorToast: true },
+  );
+export const getEmailAttachmentPreview = (emailId, attachmentId) =>
+  api.get(
+    `/emails/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachmentId)}/preview`,
+    { skipErrorToast: true },
+  );
 
 // Clients
 export const getClients = (params = {}) => {

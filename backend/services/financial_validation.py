@@ -343,6 +343,41 @@ async def _enviar_email_de_rejeicao(parceiro: dict, doc: dict, motivo: str) -> N
 VALIDADE_DO_URL_SEGUNDOS = 900
 
 
+async def _exigir_posse_do_comprovativo(chave: str, tipo: str, doc: dict, client_id: Any) -> None:
+    """A chave S3 do comprovativo está numa pasta deste caso? (403 se não)
+
+    O comprovativo entra quando ainda só existe a LEAD, logo vive na pasta do
+    CLIENTE; quando nasce o processo, o `s3_folder` dele aponta para a subpasta
+    `…/{cliente}/processos/{processo}`. A guarda do Portal, perguntada só pelo
+    processo (e por um cliente reduzido ao `id`), recusava o ficheiro com 403 e
+    o botão «Ver comprovativo» nunca abria nada (Lote 7.1). Hoje pergunta pelas
+    DUAS pastas — a do processo e a do cliente (com o `s3_folder` gravado) —, e
+    basta uma. Continua a ser a MESMA guarda (raiz documental + posse por
+    segmento): uma chave `backups/…` ou de outro cliente recusa-se nas duas.
+    """
+    from services.portal_upload_ops import assert_portal_file_key_e_do_cliente
+
+    cliente = doc
+    if tipo != "lead" and client_id:
+        cliente = await db.clients.find_one(
+            {"id": client_id}, {"_id": 0, "id": 1, "nome": 1, "s3_folder": 1}
+        ) or {"id": client_id}
+
+    candidatos = [(doc if tipo == "process" else None, cliente)]
+    if tipo == "process":
+        candidatos.append((None, cliente))  # a pasta do cliente, sem o processo
+
+    ultimo: Optional[HTTPException] = None
+    for processo, cliente_do_caso in candidatos:
+        try:
+            assert_portal_file_key_e_do_cliente(chave, process=processo, client=cliente_do_caso)
+            return
+        except HTTPException as exc:
+            ultimo = exc
+    assert ultimo is not None
+    raise ultimo
+
+
 async def run_url_do_comprovativo(
     tipo: str, item_id: str, utilizador: dict, *, request: Optional[Request] = None,
 ) -> dict:
@@ -355,7 +390,6 @@ async def run_url_do_comprovativo(
     import asyncio
 
     from services.partner_drafts import comprovativo_do_caso
-    from services.portal_upload_ops import assert_portal_file_key_e_do_cliente
     from services.s3_storage import s3_service
 
     await _exigir_papel(request, utilizador)
@@ -368,11 +402,7 @@ async def run_url_do_comprovativo(
     if not comprovativo:
         raise HTTPException(status_code=404, detail="Sem comprovativo.")
 
-    assert_portal_file_key_e_do_cliente(
-        comprovativo["s3_path"],
-        process=doc if tipo == "process" else None,
-        client=doc if tipo == "lead" else {"id": client_id},
-    )
+    await _exigir_posse_do_comprovativo(comprovativo["s3_path"], tipo, doc, client_id)
     if not s3_service.is_configured():
         raise HTTPException(status_code=503, detail="Serviço de armazenamento indisponível.")
     if not await asyncio.to_thread(s3_service.file_exists, comprovativo["s3_path"]):

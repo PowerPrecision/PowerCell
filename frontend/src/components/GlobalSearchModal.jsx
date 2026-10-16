@@ -19,6 +19,12 @@ import {
   Archive
 } from "lucide-react";
 import api from "../services/api";
+import { useAuth } from "../contexts/AuthContext";
+import {
+  destinoDoResultado,
+  etiquetaDaEmpresa,
+  exigeTrocaDeEmpresa,
+} from "../utils/pesquisaGlobalEmpresa";
 
 // Status values that represent inactive/archived records
 const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|eliminado|eliminados|cancelado|arquivo|perdido|inativo/i;
@@ -30,6 +36,7 @@ const isItemInactive = (item) => {
 
 const GlobalSearchModal = ({ open, onOpenChange }) => {
   const navigate = useNavigate();
+  const { switchActiveCompany } = useAuth();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState({ processes: [], clients: [], tasks: [] });
   const [loading, setLoading] = useState(false);
@@ -99,26 +106,20 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
   const handleSelect = (item) => {
     onOpenChange(false);
     setQuery("");
-    
-    switch (item.type) {
-      case "process":
-        navigate(`/processo/${item.data.id}`);
-        break;
-      case "client":
-        // Bug fix: uma entidade "Cliente" deve navegar SEMPRE para os
-        // detalhes do cliente (/cliente/:id) — nunca para o processo,
-        // mesmo que o cliente já tenha um processo associado. A rota
-        // "/clientes?cliente=" estava errada (aponta para a lista, o
-        // query param nunca era lido) e o redirect condicional para
-        // first_process_id misturava as duas entidades.
-        navigate(`/cliente/${item.data.id}`);
-        break;
-      case "task":
-        navigate(`/pendentes`);
-        break;
-      default:
-        break;
+
+    const destino = destinoDoResultado(item.type, item.data);
+    if (!destino) return;
+
+    // Lote 7.1 — a pesquisa atravessa empresas, abrir por id não. Um resultado de
+    // OUTRA empresa só abre com essa empresa activa: põe-se o destino no URL (sem
+    // passar pelo router, que renderizaria a página com a empresa errada e a veria
+    // responder «não existe») e troca-se de empresa, que recarrega nesse URL.
+    if (exigeTrocaDeEmpresa(item.data)) {
+      window.history.pushState(null, "", destino);
+      switchActiveCompany?.(item.data.empresa.company_id);
+      return;
     }
+    navigate(destino);
   };
 
   // Render a single result row
@@ -177,6 +178,16 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
             </>
           )}
         </div>
+        {etiquetaDaEmpresa(data) && (
+          <Badge
+            variant={exigeTrocaDeEmpresa(data) ? "secondary" : "outline"}
+            className="text-[10px] h-4 px-1 shrink-0 max-w-[140px] truncate"
+            data-testid={`global-search-empresa-${type}-${data.id}`}
+            title={exigeTrocaDeEmpresa(data) ? "Outra empresa — abrir muda a empresa activa" : undefined}
+          >
+            {etiquetaDaEmpresa(data)}
+          </Badge>
+        )}
         <ArrowRight className={`h-4 w-4 shrink-0 ${inactive ? "text-muted-foreground/40" : "text-muted-foreground"}`} />
       </div>
     );

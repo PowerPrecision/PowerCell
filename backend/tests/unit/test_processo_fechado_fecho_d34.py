@@ -158,7 +158,7 @@ class TestEnviarUmEmailParaUmProcessoFechado:
         codigo = codigo_da_funcao_sem_comentarios(epc.run_send_email)
         assert "exigir_processo_aberto_por_id" in codigo
         assert codigo.index("exigir_processo_aberto_por_id") < codigo.index("get_active_company_id_async")
-        assert codigo.index("exigir_processo_aberto_por_id") < codigo.index("config_do_utilizador")
+        assert codigo.index("exigir_processo_aberto_por_id") < codigo.index("_caixa_geral_da_empresa_activa")
 
     @pytest.mark.asyncio
     async def test_sem_processo_a_guarda_nao_corre(self, servicos):

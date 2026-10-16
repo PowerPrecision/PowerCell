@@ -185,3 +185,34 @@ describe("Coerência entre o menu e as rotas", () => {
     }
   });
 });
+
+describe("Webmail: o perfil Index não entra (Lote 7.1)", () => {
+  // O servidor recusa o Index com 403 em todo o router `/emails`
+  // (`services/webmail_perfis.py`); o menu e a rota têm de concordar com ele.
+  const COM_WEBMAIL = ["master", "admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"];
+
+  it("a rota /webmail não aceita indexacao e aceita os restantes perfis de staff", () => {
+    const papeis = ROTAS.get("/webmail");
+    assert.ok(papeis, "a rota /webmail perdeu as allowedRoles literais (o guarda ficou cego)");
+    assert.ok(!papeis.includes("indexacao"), "indexacao voltou a entrar em /webmail");
+    for (const perfil of COM_WEBMAIL) {
+      assert.ok(papeis.includes(perfil), `${perfil} deixou de poder abrir o Webmail`);
+    }
+  });
+
+  it("o menu do Index não tem Webmail", () => {
+    assert.ok(
+      !hrefsDoPerfil(LAYOUT, "indexacao").includes("/webmail"),
+      "o menu mostra o Webmail ao Index, que a API recusa",
+    );
+  });
+
+  it("o resto do staff continua a vê-lo no menu (contraprova: o leitor não tirou tudo)", () => {
+    for (const perfil of ["consultor", "intermediario", "diretor", "admin", "ceo"]) {
+      assert.ok(
+        hrefsDoPerfil(LAYOUT, perfil).includes("/webmail"),
+        `${perfil} deixou de ver o Webmail no menu`,
+      );
+    }
+  });
+});

@@ -198,3 +198,98 @@ describe("switchActiveCompany — o reload não dispensa o snapshot", () => {
     }
   });
 });
+
+describe("switchActiveRole — um perfil que muda de EMPRESA recarrega (Lote 7.1)", () => {
+  /**
+   * `clear()` esvazia a cache do TanStack, mas o Webmail guarda a empresa em `?company_id=` e em
+   * estado local: quem passava de Power a Domus pelo seletor de perfis continuava a ler a caixa da
+   * empresa anterior. Trocar de empresa por esta via faz o mesmo que `switchActiveCompany`.
+   */
+  function comReloadFalso() {
+    const recarregar = vi.fn();
+    const originalLocation = window.location;
+    delete window.location;
+    window.location = { ...originalLocation, reload: recarregar };
+    return { recarregar, repor: () => { window.location = originalLocation; } };
+  }
+
+  it("muda de empresa: grava no servidor e DEPOIS recarrega", async () => {
+    const { recarregar, repor } = comReloadFalso();
+    try {
+      const { result } = montar();
+      await waitFor(() => expect(result.current.user?.companies).toHaveLength(2));
+
+      await act(async () => {
+        result.current.switchActiveRole("consultor", "cmp-domus");
+      });
+
+      await waitFor(() => expect(recarregar).toHaveBeenCalledTimes(1));
+      const api = (await import("../../services/api")).default;
+      expect(api.post).toHaveBeenCalledWith("/auth/active-company", {
+        company_id: "cmp-domus", role: "consultor",
+      });
+    } finally {
+      repor();
+    }
+  });
+
+  it("o mesmo cargo na MESMA empresa não recarrega (contraprova)", async () => {
+    const { recarregar, repor } = comReloadFalso();
+    try {
+      const { result } = montar();
+      await waitFor(() => expect(result.current.user?.companies).toHaveLength(2));
+
+      await act(async () => {
+        result.current.switchActiveRole("diretor", "cmp-power");
+      });
+      // dá tempo a uma promessa pendente de se manifestar
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(recarregar).not.toHaveBeenCalled();
+    } finally {
+      repor();
+    }
+  });
+
+  it("reescreve o company_id do URL para a empresa nova antes de recarregar", async () => {
+    // O URL tem de existir ANTES de falsear `window.location` (a cópia congela o `href`).
+    window.history.replaceState(null, "", "/webmail?company_id=cmp-power&folder=inbox");
+    const { recarregar, repor } = comReloadFalso();
+    try {
+      const { result } = montar();
+      await waitFor(() => expect(result.current.user?.companies).toHaveLength(2));
+
+      await act(async () => {
+        result.current.switchActiveRole("consultor", "cmp-domus");
+      });
+      await waitFor(() => expect(recarregar).toHaveBeenCalled());
+
+      // `replaceState` mexe na história REAL (a `window.location` falsa é uma cópia congelada).
+      const url = new URL(document.location.href);
+      expect(url.searchParams.get("company_id")).toBe("cmp-domus");
+      expect(url.searchParams.get("folder")).toBe("inbox");
+    } finally {
+      repor();
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
+  it("servidor inalcançável: não recarrega (a página de erro do browser é pior)", async () => {
+    const api = (await import("../../services/api")).default;
+    api.post.mockRejectedValueOnce(Object.assign(new Error("Network Error"), { code: "ERR_NETWORK" }));
+    const { recarregar, repor } = comReloadFalso();
+    try {
+      const { result } = montar();
+      await waitFor(() => expect(result.current.user?.companies).toHaveLength(2));
+
+      await act(async () => {
+        result.current.switchActiveRole("consultor", "cmp-domus");
+      });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(recarregar).not.toHaveBeenCalled();
+    } finally {
+      repor();
+    }
+  });
+});
