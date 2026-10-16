@@ -4,6 +4,8 @@ Passos para pôr em produção o que os Lotes 1–7.3 deixaram **pronto no códi
 executar na base de dados e no ambiente**. Tudo o que está aqui foi lido dos próprios
 scripts; o que não está provado vem dito.
 
+> **Estado (16 Out 2026): executado.** O dono do produto reportou que todas as partes C foram corridas em produção (consola do Render). Este documento fica como referência e para re-verificação (cada `dry-run` deve dizer «0 a fazer»); a execução não foi observada pelo autor.
+
 ## Regras gerais
 
 * Os comandos correm a partir de `backend/`, com `MONGO_URL` e `DB_NAME` de **produção** no ambiente.

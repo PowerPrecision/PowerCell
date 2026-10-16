@@ -236,7 +236,7 @@ migrações/resets de processos e reset de permissões.
 `test_accoes_destrutivas_com_password.py::TestInventario::COM_PASSWORD`; quem criar UI usa o
 `ConfirmarComPasswordDialog`.
 
-### D-18 · `co_buyers`: falta correr a migração dos dados em produção
+### D-18 · `co_buyers`: migração dos dados feita em produção; falta só remover a desduplicação
 **Onde:** `backend/scripts/migrar_co_buyers_adicionais.py`, `backend/services/co_buyers_migration.py`
 
 O CÓDIGO está fechado (Lote 5): o mapeador do CPCV passou a gravar só os
@@ -244,7 +244,12 @@ compradores ADICIONAIS (`i > 0`), como o `build_add_client_update` sempre fez,
 e o campo tem um só significado. Falta o DADO: os processos analisados pelo
 mapeador antigo têm o titular 1 em `co_buyers[0]`.
 
-**Porque está aberta:** a migração escreve em produção e só se pode correr com
+**Estado (16 Out 2026):** o dono do produto reportou que a migração foi executada em
+produção (consola do Render). Não verifiquei a execução nem tenho a saída («0 a migrar»
+por confirmar). Resta, e está congelado com o desenvolvimento de funcionalidades, remover a
+desduplicação do `sub35.py` depois de confirmar uma passagem limpa.
+
+**Porque esteve aberta:** a migração escreve em produção e só se pode correr com
 a base de dados à frente. O script é conservador — remove `co_buyers[0]` só
 quando a sua identidade normalizada (NIF/CC em dígitos, nome sem acentos) é
 EXACTAMENTE a do titular 1; tudo o resto fica e é listado. A omissão só lê;

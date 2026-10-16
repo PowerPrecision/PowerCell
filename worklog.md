@@ -12337,3 +12337,15 @@ Work Log:
 ### Não fiz (dito)
 - Alertas **não têm botão «resolver»**: se a direcção queria um (dispensar/adiar), é funcionalidade nova com decisão de produto (o que significa «resolvido» para um alerta calculado).
 - O refresco dos alertas depende de alguma invalidação do processo; uma mudança feita fora do `useProcessMutations` (ex.: upload noutro separador) só se reflecte ao focar a janela ou ao passar o `staleTime` de 60 s.
+
+---
+Task ID: fecho-do-ciclo-operacoes-de-producao
+Agent: Cloud Agent
+Task: Fecho do ciclo (Lotes 1–7.3) — operações de produção e estado do CI
+
+Date: 2026-10-16
+
+Work Log:
+* O dono do produto informou que **todas as operações de produção** do `DEPLOY_RUNBOOK.md` (promoção a Master, backfills de rede/emails/caixas/TTL, migrações de workflow e formulários, `co_buyers`, limpeza de cópias órfãs e medições) **foram executadas com sucesso na consola do Render**. Registado como concluído; **não verificado por mim** (sem saídas dos scripts; os números das medições não foram colados aqui).
+* Desenvolvimento de funcionalidades congelado. Ideias de negócio adiadas: comparador de bancos, painel de cobrança de documentos, alertas accionáveis.
+* CI: o run do `e0c790bd` ficou **cancelado** (o Backend Fast excedeu `timeout-minutes: 10`, 8+ min de testes; o do `f6254187` tinha demorado 6m12s) e foi substituído pelo run do commit seguinte (só documentação, mesmo código). Causa do excesso de tempo **não determinada** (runner lento vs. teste pendurado).
