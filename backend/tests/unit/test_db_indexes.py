@@ -300,3 +300,135 @@ class TestORegistoEAFonteUnica:
 
         stats = asyncio.run(get_index_stats(Db()))
         assert stats["partners"] == {"count": 0, "indexes": []}
+
+
+class TestArranqueSemBaseDeDadosAlcancavel:
+    """Incidente de deploy (16 Out 2026): com o Atlas inalcançável cada índice esperava os seus
+    30 s de `serverSelectionTimeout` — o arranque passava os 15 min que o Render dá à porta
+    e o deploy morria em «Timed Out» sem causa visível. A criação de índices tem de falhar
+    RÁPIDO e DIZER porquê; e uma falha que não é de ligação não pode ser tratada como tal."""
+
+    def _db(self, ping):
+        class Db:
+            command = staticmethod(ping)
+
+            def __getattr__(self, nome):
+                return type("C", (), {"nome": nome})()
+
+        return Db()
+
+    def test_sem_ping_nao_se_tenta_criar_nenhum_indice(self):
+        import asyncio
+
+        from pymongo.errors import ServerSelectionTimeoutError
+
+        import services.db_indexes as di
+
+        async def ping_falha(*_a, **_k):
+            raise ServerSelectionTimeoutError("timed out")
+
+        criar = AsyncMock()
+        limpar = AsyncMock(return_value={})
+        with patch.object(di, "_create_index_safe", criar), \
+                patch.object(di, "cleanup_deprecated_indexes", limpar), \
+                patch.object(di, "create_ttl_indexes", AsyncMock()):
+            resultado = asyncio.run(di.create_indexes(self._db(ping_falha)))
+
+        assert resultado["indisponivel"] is True
+        assert resultado["created"] == []
+        criar.assert_not_called()
+        limpar.assert_not_called()
+
+    def test_com_ping_a_responder_cria_tudo_como_antes(self):
+        import asyncio
+
+        import services.db_indexes as di
+
+        async def ping_ok(*_a, **_k):
+            return {"ok": 1}
+
+        criadas = []
+
+        async def falso(colecao, idx, nome, results):
+            criadas.append(idx["name"])
+
+        with patch.object(di, "_create_index_safe", falso), \
+                patch.object(di, "cleanup_deprecated_indexes", AsyncMock(return_value={})), \
+                patch.object(di, "_preparar_indices", AsyncMock()), \
+                patch.object(di, "create_ttl_indexes", AsyncMock(return_value={})):
+            resultado = asyncio.run(di.create_indexes(self._db(ping_ok)))
+
+        assert not resultado.get("indisponivel")
+        assert len(criadas) >= 100
+
+    def test_um_erro_que_nao_e_de_ligacao_no_ping_nao_aborta(self):
+        import asyncio
+
+        import services.db_indexes as di
+
+        async def ping_estranho(*_a, **_k):
+            raise ValueError("não é uma falha de ligação")
+
+        assert asyncio.run(di._base_de_dados_alcancavel(self._db(ping_estranho))) is True
+
+    def test_a_ligacao_cair_a_meio_para_o_resto_em_vez_de_esperar_por_cada_indice(self):
+        import asyncio
+
+        from pymongo.errors import NetworkTimeout
+
+        import services.db_indexes as di
+
+        async def ping_ok(*_a, **_k):
+            return {"ok": 1}
+
+        chamadas = []
+
+        class Colecao:
+            async def create_index(self, *_a, **_k):
+                chamadas.append(1)
+                raise NetworkTimeout("timed out")
+
+        class Db:
+            command = staticmethod(ping_ok)
+
+            def __getattr__(self, nome):
+                return Colecao()
+
+        with patch.object(di, "cleanup_deprecated_indexes", AsyncMock(return_value={})), \
+                patch.object(di, "_preparar_indices", AsyncMock()), \
+                patch.object(di, "create_ttl_indexes", AsyncMock()) as ttl:
+            resultado = asyncio.run(di.create_indexes(Db()))
+
+        assert resultado["indisponivel"] is True
+        assert len(chamadas) == 1, "continuou a tentar índices com a base de dados em baixo"
+        ttl.assert_not_called()
+
+    def test_um_erro_de_operacao_num_indice_nao_para_os_restantes(self):
+        """Contraprova: só a falha de LIGAÇÃO trava; um índice mau não pode esconder os outros."""
+        import asyncio
+
+        import services.db_indexes as di
+
+        async def ping_ok(*_a, **_k):
+            return {"ok": 1}
+
+        chamadas = []
+
+        class Colecao:
+            async def create_index(self, *_a, **_k):
+                chamadas.append(1)
+                raise RuntimeError("índice inválido")
+
+        class Db:
+            command = staticmethod(ping_ok)
+
+            def __getattr__(self, nome):
+                return Colecao()
+
+        with patch.object(di, "cleanup_deprecated_indexes", AsyncMock(return_value={})), \
+                patch.object(di, "_preparar_indices", AsyncMock()), \
+                patch.object(di, "create_ttl_indexes", AsyncMock(return_value={})):
+            resultado = asyncio.run(di.create_indexes(Db()))
+
+        assert not resultado.get("indisponivel")
+        assert len(chamadas) >= 100
