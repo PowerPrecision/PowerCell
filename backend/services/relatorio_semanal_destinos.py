@@ -19,12 +19,12 @@ O QUE É
     acesso `ceo` ou `admin` numa empresa da rede (UCR), mais as contas
     antigas só com o campo legado `users.company`. Quem gere duas redes
     recebe dois emails, um por rede: nunca um misturado.
-  * **O consolidado existe, e é do Master.** Os utilizadores Master (e
-    os endereços de `CEO_EMAIL` que SEJAM Master) recebem o relatório
-    global. Um endereço de `CEO_EMAIL` que não seja Master é IGNORADO, com
-    aviso: era a porta por onde o consolidado podia chegar a quem não
-    devia, e não há forma de o distinguir de uma opção deliberada sem
-    isto.
+  * **O consolidado existe: vai aos Master e a `CEO_EMAIL`.** Os utilizadores
+    Master e os endereços de `CEO_EMAIL` — seja qual for o papel da conta
+    desse endereço — recebem o relatório global (QA-7: o endereço do CEO
+    configurado no deploy é uma decisão explícita do operador; antes era
+    ignorado com aviso se a conta não fosse Master). Um CEO/Admin LOCAL
+    que não esteja em `CEO_EMAIL` continua a receber só o da sua rede.
   * **A marca de «já enviei» é por destino**, não uma só: se o envio da
     rede A falhar, o ciclo horário seguinte repete só a A — e não manda
     outra vez à B, que já tem o dela.
@@ -193,28 +193,28 @@ def destino_global(
     utilizadores: Iterable[dict],
     configurados: Iterable[str] = (),
 ) -> Optional[DestinoDoRelatorio]:
-    """O consolidado: só para Master.
+    """O consolidado: os Master e os endereços de `CEO_EMAIL`.
 
-    Os endereços de `CEO_EMAIL` só valem se pertencerem a um Master activo;
-    os restantes são descartados com aviso (nunca em silêncio).
+    O endereço configurado em `CEO_EMAIL` é uma decisão explícita de quem opera o deploy («envia o
+    consolidado para este endereço»), por isso recebe-o MESMO que a conta não seja Master — a regra
+    anterior descartava-o com um aviso e o CEO da empresa ficava sem relatório. A porta continua a ser
+    a variável de ambiente (quem a escreve é o operador), nunca um perfil de utilizador: um CEO/Admin
+    local NÃO recebe o consolidado por ter esse papel.
     """
-    masters = {
-        _texto(u["email"]).lower(): u
-        for u in utilizadores
-        if e_papel_global(u.get("role")) and _email_valido(u.get("email"))
-    }
-    destinatarios = [
-        {"id": _texto(u.get("id")), "name": _texto(u.get("name")), "email": email}
-        for email, u in sorted(masters.items())
-    ]
+    por_email: dict[str, dict] = {}
+    for u in utilizadores:
+        if e_papel_global(u.get("role")) and _email_valido(u.get("email")):
+            por_email[_texto(u["email"]).lower()] = {
+                "id": _texto(u.get("id")), "name": _texto(u.get("name")), "email": _texto(u["email"]).lower(),
+            }
+    por_conta = {_texto(u.get("email")).lower(): u for u in utilizadores if _email_valido(u.get("email"))}
     for endereco in configurados:
-        if _texto(endereco).lower() not in masters:
-            logger.warning(
-                "[RELATORIO-SEMANAL] O endereço %r de CEO_EMAIL não pertence a "
-                "um utilizador Master activo: NÃO recebe o consolidado (atravessa "
-                "empresas). Se é gestão de uma empresa, recebe o relatório da sua "
-                "rede enquanto CEO/Admin.", endereco,
-            )
+        email = _texto(endereco).lower()
+        if not _email_valido(email) or email in por_email:
+            continue
+        conta = por_conta.get(email) or {}
+        por_email[email] = {"id": _texto(conta.get("id")), "name": _texto(conta.get("name")), "email": email}
+    destinatarios = [por_email[e] for e in sorted(por_email)]
     if not destinatarios:
         return None
     return DestinoDoRelatorio(

@@ -22,7 +22,6 @@ PORQUE É QUE ISTO TEM TESTES DE COMPORTAMENTO E NÃO SÓ DE FONTE
 """
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -155,12 +154,30 @@ class TestOConsolidadoEDoMaster:
         assert g.emails == ["master@x.pt"]
         assert g.scope.sem_fronteira is True
 
-    def test_um_CEO_EMAIL_que_nao_e_master_e_ignorado_e_avisado(self, caplog):
-        """Era a porta pela qual o consolidado chegava a quem não devia."""
-        with caplog.at_level(logging.WARNING):
-            g = destino_global(UTILIZADORES, ["ceo@domus.pt", "master@x.pt"])
+    def test_um_CEO_EMAIL_que_nao_e_master_RECEBE_o_consolidado(self):
+        """QA-7 (invertido): o endereço do CEO configurado no deploy é uma decisão explícita do
+        operador. Antes era ignorado com aviso por a conta não ser Master e o CEO ficava sem relatório."""
+        g = destino_global(UTILIZADORES, ["ceo@domus.pt", "master@x.pt"])
+        assert g.emails == ["ceo@domus.pt", "master@x.pt"]
+        assert g.scope.sem_fronteira is True
+
+    def test_o_endereco_configurado_sem_conta_tambem_recebe(self):
+        g = destino_global(UTILIZADORES, ["direcao@fora-do-crm.pt"])
+        assert "direcao@fora-do-crm.pt" in g.emails
+
+    def test_sem_CEO_EMAIL_um_CEO_local_continua_sem_consolidado(self):
+        """Contraprova: o que se abriu é o ENDEREÇO configurado, não o perfil `ceo`."""
+        g = destino_global(UTILIZADORES, [])
+        assert "ceo@domus.pt" not in g.emails and "ceo@power.pt" not in g.emails
+
+    def test_enderecos_invalidos_ou_repetidos_nao_entram_duas_vezes(self):
+        g = destino_global(UTILIZADORES, ["MASTER@x.pt", "sem-arroba", "parceiro@placeholder.internal"])
         assert g.emails == ["master@x.pt"]
-        assert any("ceo@domus.pt" in r.message and "CEO_EMAIL" in r.message for r in caplog.records)
+
+    def test_so_CEO_EMAIL_sem_nenhum_master_ainda_ha_consolidado(self):
+        sem_master = [u for u in UTILIZADORES if u["role"] != "master"]
+        g = destino_global(sem_master, ["ceo@domus.pt"])
+        assert g is not None and g.emails == ["ceo@domus.pt"]
 
     def test_sem_master_nao_ha_consolidado(self):
         assert destino_global([u for u in UTILIZADORES if u["role"] != "master"]) is None

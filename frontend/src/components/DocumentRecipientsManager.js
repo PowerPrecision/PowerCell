@@ -44,6 +44,12 @@ import { sanitizeHtml } from '../utils/sanitize';
  */
 import { useState, useEffect } from "react";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { podeGerirConfiguracao } from "../utils/roleUtils";
+import {
+  getDocumentRecipients,
+  previewDocumentRecipientsTemplate,
+  updateSystemConfigSection,
+} from "../services/api";
 import {
   Card,
   CardContent,
@@ -90,7 +96,6 @@ import {
 import { toast } from "sonner";
 import ReactQuill from 'react-quill-new';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
 const DocumentRecipientsManager = ({ token, user }) => {
   // Estado
@@ -130,20 +135,13 @@ const DocumentRecipientsManager = ({ token, user }) => {
   const loadConfig = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/emails/document-recipients`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setEnabled(data.enabled || false);
-        setRecipients(data.recipients || []);
-        setEmailTemplate(data.email_template || "");
-        setDefaultTo(data.default_to || "");
-        setDefaultTo(data.default_to || "geral@powerealestate.pt");
-        setDefaultToName(data.default_to_name || "Power Real Estate");
-        setDefaultToEmails(data.default_to_emails || []);
-      }
+      const { data } = await getDocumentRecipients();
+      setEnabled(data.enabled || false);
+      setRecipients(data.recipients || []);
+      setEmailTemplate(data.email_template || "");
+      setDefaultTo(data.default_to || "geral@powerealestate.pt");
+      setDefaultToName(data.default_to_name || "Power Real Estate");
+      setDefaultToEmails(data.default_to_emails || []);
     } catch (error) {
       console.error("Erro ao carregar configuração:", error);
       toast.error("Erro ao carregar configuração");
@@ -152,25 +150,29 @@ const DocumentRecipientsManager = ({ token, user }) => {
     }
   };
 
+  // Escrita da secção pelo cliente Axios: leva o `X-Company-Id`/`X-Active-Role` do perfil activo
+  // (um `fetch` cru perdia-os e o servidor decidia a empresa sem o contexto).
+  const guardarNoServidor = async (listaDeDestinatarios) => {
+    try {
+      await updateSystemConfigSection("document_recipients", {
+        enabled,
+        recipients: JSON.stringify(listaDeDestinatarios),
+        email_template: emailTemplate,
+        default_to: defaultTo,
+        default_to_name: defaultToName,
+        default_to_emails: JSON.stringify(defaultToEmails.filter((e) => e && e.includes("@"))),
+      });
+      return { ok: true };
+    } catch (erro) {
+      return { ok: false, detail: erro?.response?.data?.detail };
+    }
+  };
+
   // Guardar configuração
   const saveConfig = async () => {
     setSaving(true);
     try {
-      const response = await fetch(`${API_URL}/api/system-config/document_recipients`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          enabled,
-          recipients: JSON.stringify(recipients),
-          email_template: emailTemplate,
-          default_to: defaultTo,
-          default_to_name: defaultToName,
-          default_to_emails: JSON.stringify(defaultToEmails.filter(e => e && e.includes("@"))),
-        }),
-      });
+      const response = await guardarNoServidor(recipients);
 
       if (response.ok) {
         toast.success("Configuração guardada com sucesso");
@@ -178,8 +180,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         // Recarregar dados do servidor para confirmar que foi guardado corretamente
         await loadConfig();
       } else {
-        const data = await response.json();
-        toast.error(extractErrorMessage(data.detail, "Erro ao guardar configuração"));
+        toast.error(extractErrorMessage(response.detail, "Erro ao guardar configuração"));
       }
     } catch (error) {
       console.error("Erro ao guardar:", error);
@@ -230,21 +231,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
 
     // Guardar automaticamente
     try {
-      const response = await fetch(`${API_URL}/api/system-config/document_recipients`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          enabled,
-          recipients: JSON.stringify(newRecipients),
-          email_template: emailTemplate,
-          default_to: defaultTo,
-          default_to_name: defaultToName,
-          default_to_emails: JSON.stringify(defaultToEmails.filter(e => e && e.includes("@"))),
-        }),
-      });
+      const response = await guardarNoServidor(newRecipients);
 
       if (response.ok) {
         toast.success(editingRecipient ? "Destinatário actualizado com sucesso" : "Destinatário adicionado com sucesso");
@@ -254,8 +241,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         // Recarregar dados do servidor para confirmar
         await loadConfig();
       } else {
-        const data = await response.json();
-        toast.error(extractErrorMessage(data.detail, "Erro ao guardar alterações"));
+        toast.error(extractErrorMessage(response.detail, "Erro ao guardar alterações"));
       }
     } catch (error) {
       console.error("Erro ao guardar:", error);
@@ -276,21 +262,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
     
     // Guardar automaticamente após eliminar
     try {
-      const response = await fetch(`${API_URL}/api/system-config/document_recipients`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          enabled,
-          recipients: JSON.stringify(newRecipients),
-          email_template: emailTemplate,
-          default_to: defaultTo,
-          default_to_name: defaultToName,
-          default_to_emails: JSON.stringify(defaultToEmails.filter(e => e && e.includes("@"))),
-        }),
-      });
+      const response = await guardarNoServidor(newRecipients);
 
       if (response.ok) {
         toast.success("Destinatário removido com sucesso");
@@ -298,8 +270,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         // Recarregar dados do servidor para confirmar
         await loadConfig();
       } else {
-        const data = await response.json();
-        toast.error(extractErrorMessage(data.detail, "Erro ao guardar alterações"));
+        toast.error(extractErrorMessage(response.detail, "Erro ao guardar alterações"));
         // Reverter localmente se falhou
         setRecipients(recipients);
       }
@@ -320,28 +291,13 @@ const DocumentRecipientsManager = ({ token, user }) => {
 
     // Guardar automaticamente
     try {
-      const response = await fetch(`${API_URL}/api/system-config/document_recipients`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          enabled,
-          recipients: JSON.stringify(newRecipients),
-          email_template: emailTemplate,
-          default_to: defaultTo,
-          default_to_name: defaultToName,
-          default_to_emails: JSON.stringify(defaultToEmails.filter(e => e && e.includes("@"))),
-        }),
-      });
+      const response = await guardarNoServidor(newRecipients);
 
       if (response.ok) {
         toast.success(newRecipients[index].active ? "Destinatário activado" : "Destinatário desactivado");
         setHasChanges(false);
       } else {
-        const data = await response.json();
-        toast.error(extractErrorMessage(data.detail, "Erro ao guardar alterações"));
+        toast.error(extractErrorMessage(response.detail, "Erro ao guardar alterações"));
         // Reverter se falhou
         setRecipients(recipients);
       }
@@ -495,32 +451,19 @@ const DocumentRecipientsManager = ({ token, user }) => {
     }
     setPreviewLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/emails/preview-template`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ email_template: emailTemplate }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setPreviewHtml(data.html);
-        setPreviewSubject(data.subject);
-        setShowPreviewDialog(true);
-      } else {
-        const data = await response.json().catch(() => ({}));
-        toast.error(extractErrorMessage(data.detail, "Erro ao gerar pré-visualização"));
-      }
-    } catch {
-      toast.error("Erro ao gerar pré-visualização");
+      const { data } = await previewDocumentRecipientsTemplate(emailTemplate);
+      setPreviewHtml(data.html);
+      setPreviewSubject(data.subject);
+      setShowPreviewDialog(true);
+    } catch (erro) {
+      toast.error(extractErrorMessage(erro?.response?.data?.detail, "Erro ao gerar pré-visualização"));
     } finally {
       setPreviewLoading(false);
     }
   };
 
   // Verificar permissões
-  const canEdit = user?.role?.match(/admin|ceo/i);
+  const canEdit = podeGerirConfiguracao(user);
 
   if (loading) {
     return (

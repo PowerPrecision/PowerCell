@@ -20,6 +20,7 @@ SEGURANÇA:
 """
 
 import logging
+import re
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 
@@ -517,6 +518,81 @@ def publicize_caixa_geral_account(
     }
 
 
+def _sem_acentos_minusculas(texto: Any) -> str:
+    import unicodedata
+
+    base = unicodedata.normalize("NFKD", str(texto or ""))
+    return "".join(c for c in base if not unicodedata.combining(c)).lower().strip()
+
+
+async def _caixa_geral_da_conta_da_empresa(cid: str) -> Optional[Dict[str, Any]]:
+    """A conta de ambiente/sistema que É desta empresa (pelo nome), sem herdar a de outra.
+
+    As contas globais chamam-se `power` e `precision`. Uma empresa da rede de omissão sem
+    configuração própria só pode usar a que tem o SEU nome; sem correspondência não tem Caixa
+    Geral. O recurso antigo (`accounts[0]`) dava a todas as empresas da rede a primeira conta —
+    a da Power.
+    """
+    try:
+        empresa = await db.companies.find_one({"id": cid}, {"_id": 0, "name": 1})
+        nome = _sem_acentos_minusculas((empresa or {}).get("name"))
+        if not nome:
+            return None
+        # A configuração global (`main`) é a caixa de UMA empresa do grupo, e só se atribui a
+        # quem o endereço identifica (`geral@powerealestate.pt` é da Power, não da Precision).
+        from services.system_config import get_system_config
+
+        sys_cfg = await get_system_config("default")
+        email_cfg = sys_cfg.email
+        endereco = _sem_acentos_minusculas(email_cfg.imap_user or email_cfg.smtp_user)
+        palavras = re.findall(r"[a-z0-9]{4,}", nome)
+        if endereco and any(p in endereco for p in palavras):
+            utilizador = (email_cfg.imap_user or email_cfg.smtp_user or "").strip()
+            password = decrypt_email_secret(
+                email_cfg.imap_password or email_cfg.smtp_password or "",
+                f"caixa_geral system_config da empresa={cid} user={utilizador}",
+            )
+            smtp_server = email_cfg.smtp_server or email_cfg.imap_server
+            if utilizador and password and smtp_server:
+                return {
+                    "email_address": utilizador,
+                    "imap_server": email_cfg.imap_server or smtp_server,
+                    "imap_port": int(email_cfg.imap_port or 993),
+                    "smtp_server": smtp_server,
+                    "smtp_port": int(email_cfg.smtp_port or 465),
+                    "password": password,
+                    "has_password": True,
+                    "company_id": cid,
+                    "source": "system_config:default",
+                    "label": "Caixa Geral",
+                }
+        from services.email_service import get_email_accounts_async
+
+        for account in await get_email_accounts_async():
+            if _sem_acentos_minusculas(account.name) not in nome:
+                continue
+            password = decrypt_email_secret(
+                account.password,
+                f"caixa_geral conta da empresa={cid} account={account.name} user={account.email}",
+            )
+            if account.email and password and account.smtp_server:
+                return {
+                    "email_address": account.email,
+                    "imap_server": account.imap_server,
+                    "imap_port": int(account.imap_port or 993),
+                    "smtp_server": account.smtp_server,
+                    "smtp_port": int(account.smtp_port or 465),
+                    "password": password,
+                    "has_password": True,
+                    "company_id": cid,
+                    "source": f"global:{account.name}",
+                    "label": "Caixa Geral",
+                }
+    except Exception as exc:  # noqa: BLE001 - sem conta própria = sem Caixa Geral
+        logger.warning("[CaixaGeral] Falha a resolver a conta da empresa %s: %s", cid, exc)
+    return None
+
+
 async def load_caixa_geral_config(
     company_id: Optional[str] = None,
     *,
@@ -540,6 +616,7 @@ async def load_caixa_geral_config(
         email_do_documento,
         empresa_no_ambito_do_utilizador,
         pode_herdar_configuracao_global,
+        rede_de_omissao,
     )
 
     cid = (company_id or "").strip()
@@ -551,18 +628,28 @@ async def load_caixa_geral_config(
         return None
 
     herda_a_global = await pode_herdar_configuracao_global(cid, user=user)
+    empresa_concreta = bool(cid) and cid != "default"
+    # Dev/CI sem rede de omissão: nada se isola e vale o comportamento anterior.
+    isolar_na_rede = empresa_concreta and bool(rede_de_omissao())
     if not herda_a_global:
         # Rede satélite: só a configuração PRÓPRIA da empresa. Nunca `default`,
         # nunca contas de ambiente, nunca a cópia da global.
-        if not cid or cid == "default":
+        if not empresa_concreta:
             return None
         if not await email_do_documento(f"company:{cid}") or await e_copia_da_global(cid):
             return None
 
     candidates = []
-    if cid and cid != "default":
+    if empresa_concreta:
+        # Mesmo na rede de omissão a Caixa Geral de uma empresa CONCRETA é a dela: o
+        # `get_system_config(<empresa>)` devolve, sem config própria, a global em memória (é a
+        # herança por cópia-na-escrita), e a Precision passava a mostrar a caixa da Power.
+        if herda_a_global and isolar_na_rede and (
+            not await email_do_documento(f"company:{cid}") or await e_copia_da_global(cid)
+        ):
+            return await _caixa_geral_da_conta_da_empresa(cid)
         candidates.append(cid)
-    if herda_a_global:
+    elif herda_a_global:
         candidates.append("default")
 
     for cfg_id in candidates:
@@ -595,7 +682,7 @@ async def load_caixa_geral_config(
                 cfg_id, exc,
             )
 
-    if not herda_a_global:
+    if not herda_a_global or isolar_na_rede:
         return None
 
     try:
