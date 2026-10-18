@@ -243,4 +243,41 @@ describe("S3RelinkPanel", () => {
       await screen.findByText(/nenhuma ficha corresponde/i)
     ).toBeInTheDocument();
   });
+
+  describe("escolha da ficha (QA-6): combobox pesquisável, sem texto livre", () => {
+    it("não há caixa de texto livre para o nome", async () => {
+      await carregar();
+      expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: "Ficha a religar" })).toBeInTheDocument();
+    });
+
+    it("escolher uma ficha mostra SÓ essa linha", async () => {
+      await carregar();
+      await screen.findByTestId("linha-processo:p-1");
+      await userEvent.click(screen.getByRole("combobox", { name: "Ficha a religar" }));
+      await userEvent.click(await screen.findByRole("option", { name: /Rui Pereira/ }));
+      expect(screen.getByTestId("linha-processo:p-1")).toBeInTheDocument();
+      expect(screen.queryByTestId(`linha-cliente:${UUID_CLIENTE}`)).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: /limpar escolha/i }));
+      expect(await screen.findByTestId(`linha-cliente:${UUID_CLIENTE}`)).toBeInTheDocument();
+    });
+
+    it("abrir o combobox carrega a lista a pedido (antes não há pedido nenhum)", async () => {
+      render(<S3RelinkPanel />);
+      expect(getS3Relink).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole("combobox", { name: "Ficha a religar" }));
+      await waitFor(() => expect(getS3Relink).toHaveBeenCalledTimes(1));
+    });
+
+    it("a pesquisa do combobox vai ao servidor (a lista carregada tem no máximo 100)", async () => {
+      await carregar();
+      getS3Relink.mockClear();
+      await userEvent.click(screen.getByRole("combobox", { name: "Ficha a religar" }));
+      await userEvent.type(screen.getByPlaceholderText(/pesquisar por nome/i), "rui");
+      await waitFor(
+        () => expect(getS3Relink).toHaveBeenCalledWith(expect.objectContaining({ search: "rui" })),
+        { timeout: 2000 }
+      );
+    });
+  });
 });
