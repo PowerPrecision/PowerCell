@@ -24,7 +24,10 @@ import {
   cancelEmailSend,
   downloadEmailAttachment,
   getEmailAttachmentPreview,
+  archiveEmailAttachment,
 } from "../services/api";
+import { useAuthOpcional } from "../contexts/AuthContext";
+import { CATEGORIA_POR_OMISSAO, erroDoArquivo, mensagemDoArquivo, podeArquivarAnexos } from "../utils/emailArchive";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,7 +39,7 @@ import {
   Mail, Send, Inbox, Clock, X, ChevronLeft, ChevronRight,
   Paperclip, User, Star,
   AlertCircle, CheckCircle, Download, Eye, EyeOff, Reply,
-  Forward, Archive, MoreVertical, Image, FileText, FileSpreadsheet, Copy, Tag
+  Forward, Archive, MoreVertical, Image, FileText, FileSpreadsheet, Copy, Tag, Loader2, FolderInput
 } from "lucide-react";
 import { pt } from "date-fns/locale";
 import { sanitizeEmailHtml } from "../utils/sanitize";
@@ -92,8 +95,14 @@ const EmailViewerModal = ({
   onMarkEmail,
   onUnmarkEmail,
   token,
-  clientName
+  clientName,
+  processId = null,
 }) => {
+  const auth = useAuthOpcional();
+  // «Guardar nos Documentos do Processo»: só no contexto de um processo e para quem trata documentos
+  // (o servidor repete a regra: perfil, âmbito e processo aberto).
+  const podeGuardarAnexos = Boolean(processId) && Boolean(auth) && podeArquivarAnexos(auth.effectiveRole);
+  const [aGuardar, setAGuardar] = useState(null);
   const [currentEmail, setCurrentEmail] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showReplyBox, setShowReplyBox] = useState(false);
@@ -303,6 +312,24 @@ const EmailViewerModal = ({
     }
   };
 
+  // Envia o anexo directamente para a pasta do processo aberto (o mesmo caminho do «Arquivar no
+  // Processo» do Webmail: validação, Index/IA, histórico e pedido do Portal), sem o descarregar.
+  const guardarNosDocumentos = async (attachment, idx) => {
+    const idDoAnexo = attachment.id || `${currentEmail.id}:${idx}`;
+    setAGuardar(idDoAnexo);
+    try {
+      const { data } = await archiveEmailAttachment(currentEmail.id, idDoAnexo, {
+        process_id: processId,
+        category: CATEGORIA_POR_OMISSAO,
+      });
+      toast.success(mensagemDoArquivo(data));
+    } catch (erro) {
+      toast.error(erroDoArquivo(erro));
+    } finally {
+      setAGuardar(null);
+    }
+  };
+
   if (!currentEmail) return null;
 
   return (
@@ -377,7 +404,7 @@ const EmailViewerModal = ({
           </div>
 
           {/* Conteúdo do email - lado direito */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             {/* Barra de navegação com breadcrumb de contexto */}
             <div className="px-3 py-1.5 border-b bg-muted/30 shrink-0">
               {/* Breadcrumb de contexto */}
@@ -556,7 +583,9 @@ const EmailViewerModal = ({
             {/* Corpo do email — PACOTE 11 (Eixo 2): tipografia prose com
                 margens/interlinha confortáveis (ver .email-content no
                 index.css); texto simples é renderizado como parágrafos. */}
-            <ScrollArea className="flex-1 p-4">
+            {/* Contentor nativo, não `ScrollArea`: o Radix corta a Root e o viewport nunca transborda
+                (FRONTEND_GUIDELINES § 27.14) — um email comprido ficava cortado e ilegível. */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-4" data-testid="corpo-do-email">
               <div className="prose prose-sm max-w-none dark:prose-invert">
                 {sanitizedBodyHtml ? (
                   <div
@@ -611,6 +640,21 @@ const EmailViewerModal = ({
                                 <Eye className="h-4 w-4" />
                               </Button>
                             )}
+                            {podeGuardarAnexos && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => guardarNosDocumentos(attachment, idx)}
+                                disabled={aGuardar !== null}
+                                title="Guardar nos Documentos do Processo"
+                                aria-label={`Guardar ${attachment.filename} nos Documentos do Processo`}
+                              >
+                                {aGuardar === (attachment.id || `${currentEmail.id}:${idx}`)
+                                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                                  : <FolderInput className="h-4 w-4" />}
+                                <span className="hidden sm:inline ml-1 text-xs">Guardar no Processo</span>
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"
@@ -626,7 +670,7 @@ const EmailViewerModal = ({
                   </div>
                 </div>
               )}
-            </ScrollArea>
+            </div>
 
             {/* Caixa de resposta */}
             {showReplyBox && (

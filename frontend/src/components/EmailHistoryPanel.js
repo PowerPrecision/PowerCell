@@ -49,7 +49,7 @@ import { Checkbox } from "./ui/checkbox";
 import { 
   Mail, Send, Inbox, Plus, Loader2, Clock, 
   Paperclip, MoreVertical, Trash2, Eye, RefreshCw,
-  Settings, X, AtSign, ExternalLink, Link, Search,
+  Settings, X, AtSign, ExternalLink, Link, Unlink, Search,
   Star, StarOff,
   Filter, Calendar, FileText, Download,
   AlertCircle, CheckCircle, Copy,
@@ -62,7 +62,8 @@ import {
   getProcessEmails, deleteEmail, syncProcessEmails, getMonitoredEmails,
   addMonitoredEmail, removeMonitoredEmail, getEmailStats,
   markEmail as markEmailRequest, unmarkEmail as unmarkEmailRequest,
-  searchEmailsToAssociate, associateEmailToProcess, getProcessEmailSyncStatus,
+  searchEmailsToAssociate, associateEmailToProcess,
+  disassociateEmailFromProcess, getProcessEmailSyncStatus,
   downloadWebmailAttachment, readBlobErrorBody,
 } from "../services/api";
 import EmailViewerModal from "./EmailViewerModal";
@@ -370,6 +371,19 @@ const EmailHistoryPanel = ({
       toast.error("Erro ao pesquisar emails");
     } finally {
       setSearching(false);
+    }
+  };
+
+  // Desassociar: retira o email deste processo (fica no Webmail). Só tira a ligação, não apaga nada.
+  const handleDisassociateEmail = async (emailId) => {
+    try {
+      await disassociateEmailFromProcess(emailId);
+      toast.success("Email desassociado do processo");
+      if (selectedEmailId === emailId) setIsViewerOpen(false);
+      fetchData();
+    } catch (error) {
+      const detalhe = error?.response?.data?.detail;
+      toast.error(typeof detalhe === "string" ? detalhe : "Erro ao desassociar o email");
     }
   };
 
@@ -908,11 +922,11 @@ const EmailHistoryPanel = ({
                         {/* Dropdown de ações */}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Acções do email" onClick={(e) => e.stopPropagation()}>
                               <MoreVertical className="h-3.5 w-3.5" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-40">
+                          <DropdownMenuContent align="end" className="w-44">
                             <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openEmailViewer(email.id); }}>
                               <Eye className="h-4 w-4 mr-2" /> Ver completo
                             </DropdownMenuItem>
@@ -945,6 +959,9 @@ const EmailHistoryPanel = ({
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDisassociateEmail(email.id); }}>
+                              <Unlink className="h-4 w-4 mr-2" /> Desassociar
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteEmail(email.id); }} className="text-red-600">
                               <Trash2 className="h-4 w-4 mr-2" /> Eliminar
                             </DropdownMenuItem>

@@ -7,6 +7,7 @@
  * emails» — o degradado que não produz erro nenhum.
  */
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import fs from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +27,7 @@ const api = vi.hoisted(() => ({
   unmarkEmail: vi.fn(),
   searchEmailsToAssociate: vi.fn(),
   associateEmailToProcess: vi.fn(),
+  disassociateEmailFromProcess: vi.fn(),
   getProcessEmailSyncStatus: vi.fn(),
   downloadWebmailAttachment: vi.fn(),
   readBlobErrorBody: vi.fn(async () => ({})),
@@ -146,5 +148,35 @@ describe("EmailHistoryPanel — transporte", () => {
   it("os anexos descarregam pelo endpoint de streaming, não pelo legado", () => {
     expect(fonte).toContain("downloadWebmailAttachment(");
     expect(fonte).not.toMatch(/\/attachments\/\$\{/);
+  });
+});
+
+
+describe("EmailHistoryPanel — Desassociar (QA-8)", () => {
+  async function abrirMenu() {
+    montar();
+    await screen.findByText("Documentos do crédito");
+    await userEvent.click(screen.getByRole("button", { name: /acções do email/i }));
+    return screen.findByRole("menuitem", { name: /desassociar/i });
+  }
+
+  it("o menu oferece «Desassociar» e ele retira o email do processo e refaz a lista", async () => {
+    api.disassociateEmailFromProcess.mockResolvedValue({ data: { success: true } });
+    const item = await abrirMenu();
+    await userEvent.click(item);
+
+    await waitFor(() => expect(api.disassociateEmailFromProcess).toHaveBeenCalledWith("e1"));
+    // refaz a lista: o email sai da vista do processo
+    await waitFor(() => expect(api.getProcessEmails.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("uma recusa do servidor diz-se e não refaz a lista", async () => {
+    api.disassociateEmailFromProcess.mockRejectedValue({ response: { data: { detail: "Processo fechado" } } });
+    const item = await abrirMenu();
+    const chamadasAntes = api.getProcessEmails.mock.calls.length;
+    await userEvent.click(item);
+
+    await waitFor(() => expect(api.disassociateEmailFromProcess).toHaveBeenCalled());
+    expect(api.getProcessEmails.mock.calls.length).toBe(chamadasAntes);
   });
 });

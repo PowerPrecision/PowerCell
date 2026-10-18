@@ -679,7 +679,9 @@ async def _send_documentation_email_impl(
     if custom_subject and custom_subject.strip():
         subject = custom_subject.strip()
         # Remover tag [Proc-xxxx] caso exista no subject customizado
-        subject = re.sub(r'\s*\[Proc-[\w-]+\]\s*', ' ', subject).strip()
+        from services.email_process_link import sem_etiquetas
+
+        subject = sem_etiquetas(subject)
     else:
         subject = f"Documentação - {client_name} (Proc. {process_number})"
     

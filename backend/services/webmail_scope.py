@@ -235,6 +235,7 @@ async def conta_da_caixa_geral(company_id: str) -> set[str]:
 def build_company_mailbox_condition(
     company_id: str,
     contas: Optional[Iterable[str]] = None,
+    enviados_por: Optional[str] = None,
 ) -> dict:
     """
     Condição Mongo do separador. **Nunca devolve `None`.**
@@ -260,6 +261,22 @@ def build_company_mailbox_condition(
                     {"account": {"$regex": f"^{re.escape(e)}$", "$options": "i"}}
                     for e in enderecos
                 ]},
+                {"company_id": {"$in": [None, ""]}},
+            ]
+        })
+
+    autor = _texto(enviados_por)
+    if autor:
+        # O que ESTE utilizador enviou e ficou sem carimbo de empresa (o envio chegou sem
+        # `X-Company-Id`, ou saiu por uma conta que não é uma das suas contas pessoais — a
+        # Caixa Geral, uma conta de ambiente) não pode desaparecer dos «Enviados»: o email está na
+        # base de dados e no histórico do processo, e só o filtro de empresa o escondia. É
+        # estritamente do próprio (`created_by`) e só o que SAIU; um carimbo explícito de outra
+        # empresa continua a mandar (não entra aqui: exige `sem company_id`).
+        ramos.append({
+            "$and": [
+                {"created_by": autor},
+                {"direction": "sent"},
                 {"company_id": {"$in": [None, ""]}},
             ]
         })
@@ -296,4 +313,7 @@ async def build_webmail_scope(
             _texto((user or {}).get("id")), empresa.company_id,
         )
 
-    return build_company_mailbox_condition(empresa.company_id, contas)
+    return build_company_mailbox_condition(
+        empresa.company_id, contas,
+        enviados_por=None if box == "general" else _texto((user or {}).get("id")),
+    )

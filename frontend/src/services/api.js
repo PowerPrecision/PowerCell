@@ -1441,6 +1441,8 @@ export const deleteEmailPermanent = (emailId) =>
   api.delete(`/emails/${emailId}/permanent`);
 export const associateEmailToProcess = (data) =>
   api.post("/emails/associate", data);
+export const disassociateEmailFromProcess = (emailId) =>
+  api.post("/emails/disassociate", { email_id: emailId }, { skipErrorToast: true });
 
 // ── «Arquivar no Processo» (Bloco 2) ──
 // `skipErrorToast`: o diálogo mostra o erro no sítio (um 403 da guarda de
