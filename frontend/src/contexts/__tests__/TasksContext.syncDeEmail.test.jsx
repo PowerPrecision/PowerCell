@@ -36,6 +36,10 @@ const SYNC = {
   task_id: "t-sync", task_type: "EMAIL_SYNC", title: "Sincronização de Email",
   status: "processing", progress: 0, progress_message: "A sincronizar…", priority: "normal",
 };
+const ENVIO = {
+  task_id: "t-envio", task_type: "EMAIL_SEND", title: "Envio de Email",
+  status: "processing", progress: 0, progress_message: "A enviar…", priority: "normal",
+};
 const OUTRA = {
   task_id: "t-pdf", task_type: "PDF_GEN", title: "Geração de PDF",
   status: "processing", progress: 0, progress_message: "A gerar…", priority: "normal",
@@ -110,6 +114,23 @@ describe("toast da sincronização de email", () => {
     await act(async () => { vi.advanceTimersByTime(120_000); });
 
     expect(aviso.dismiss).not.toHaveBeenCalledWith("bg-task-t-sync");
+  });
+});
+
+describe("toast do envio de email (QA-6)", () => {
+  it("o sucesso de um envio desaparece sozinho", async () => {
+    await montar([{ ...ENVIO }]);
+    await terminar(ENVIO, "completed");
+    await waitFor(() => expect(aviso.success).toHaveBeenCalled());
+    const [, opcoes] = aviso.success.mock.calls.at(-1);
+    expect(Number.isFinite(opcoes.duration)).toBe(true);
+  });
+
+  it("a falha de um envio FICA, com botão de fechar", async () => {
+    await montar([{ ...ENVIO }]);
+    await terminar({ ...ENVIO, error_message: "535" }, "failed");
+    await waitFor(() => expect(aviso.error).toHaveBeenCalled());
+    expect(aviso.error.mock.calls.at(-1)[1].duration).toBe(Infinity);
   });
 });
 
