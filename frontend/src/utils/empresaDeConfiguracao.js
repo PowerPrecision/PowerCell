@@ -64,3 +64,18 @@ export function empresaEmVigor({ escolhida, activa, empresas }) {
   const pedida = activa || EMPRESA_GLOBAL;
   return ids.includes(pedida) ? pedida : ids[0];
 }
+
+/**
+ * O âmbito que o ecrã DIZ ao utilizador (QA-6): as definições da empresa em vigor ou as globais.
+ *
+ * As categorias genéricas lêem e escrevem a configuração DA EMPRESA escolhida (`company:<id>`;
+ * a «global» é a empresa especial `default`). As secções com ecrã próprio (manutenção, portal,
+ * documentos obrigatórios, SLAs, atualizações…) são infraestrutura partilhada por todas as
+ * empresas e só o Master lhes toca. Misturadas na mesma lista, o administrador não sabia se
+ * estava a mexer na sua empresa ou no sistema inteiro.
+ */
+export function rotuloDaEmpresaEmVigor(companyId, empresas) {
+  if (!companyId || companyId === EMPRESA_GLOBAL) return "Sistema (configuração global)";
+  const encontrada = (Array.isArray(empresas) ? empresas : []).find((e) => e.company_id === companyId);
+  return encontrada?.company_name || companyId;
+}

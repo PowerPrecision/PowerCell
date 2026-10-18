@@ -50,15 +50,19 @@ import {
   deveMostrarSeletorDeEmpresa,
   empresaEmVigor,
   normalizarEmpresas,
+  rotuloDaEmpresaEmVigor,
 } from "../utils/empresaDeConfiguracao";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
+import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
 import {
   Settings,
@@ -353,6 +357,10 @@ const SystemConfigPage = ({ embedded = false }) => {
   const navegacao = seccoesDaNavegacao(isMaster);
   const SeccaoDedicada = isMaster ? SECCOES_DEDICADAS[activeTab] : undefined;
   const seccaoReservada = !isMaster && Boolean(SECCOES_DEDICADAS[activeTab]);
+  // O ecrã diz QUE âmbito está a mostrar (QA-6): as categorias genéricas são da empresa em
+  // vigor; as secções com ecrã próprio são globais (só o Master chega a elas).
+  const nomeDaEmpresaEmVigor = rotuloDaEmpresaEmVigor(selectedCompanyId, empresas);
+  const ambitoGlobalAtivo = Boolean(SeccaoDedicada);
 
 
   const pageContent = (
@@ -391,7 +399,15 @@ const SystemConfigPage = ({ embedded = false }) => {
             <div className="hidden lg:block sticky top-20">
               <Card className="py-2">
                 <CardContent className="p-2">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2 mb-2">Categorias</p>
+                  <p
+                    className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2 mb-2"
+                    data-testid="grupo-empresa"
+                  >
+                    Definições da empresa
+                  </p>
+                  <p className="text-[11px] text-muted-foreground px-2 -mt-1 mb-2 truncate" title={nomeDaEmpresaEmVigor}>
+                    {nomeDaEmpresaEmVigor}
+                  </p>
                   <nav className="space-y-1">
                     {sections.map((key) => {
                       const Icon = SECTION_ICONS[key] || Settings;
@@ -413,27 +429,41 @@ const SystemConfigPage = ({ embedded = false }) => {
                         </button>
                       );
                     })}
-                    <div className="my-1.5 border-t border-border" />
-                    {/* Nota: "RGPD" foi removido daqui — vive apenas no tab Compliance do Painel de Administração (evita duplicação).
-                        "Integrações" e "Emails Sistema" foram movidos para o tab Comunicações no Painel de Administração */}
-                    {navegacao.map(({ key, label, Icon }) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setActiveTab(key)}
-                        className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
-                          activeTab === key
-                            ? "bg-primary/10 text-primary font-medium"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                        }`}
-                        data-testid={`nav-${key.replace(/_/g, "-")}`}
-                      >
-                        <Icon className={`h-4 w-4 shrink-0 ${activeTab === key ? "text-primary" : ""}`} />
-                        <span className="truncate">{label}</span>
-                        {activeTab === key && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
-                      </button>
-                    ))}
                   </nav>
+                  {/* Nota: "RGPD" foi removido daqui — vive apenas no tab Compliance do Painel de Administração (evita duplicação).
+                      "Integrações" e "Emails Sistema" foram movidos para o tab Comunicações no Painel de Administração */}
+                  {navegacao.length > 0 && (
+                    <div
+                      className="mt-3 rounded-lg border border-dashed border-border bg-muted/40 p-1.5"
+                      data-testid="grupo-global"
+                    >
+                      <div className="flex items-center justify-between px-1 pb-1.5">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                          Sistema (global)
+                        </p>
+                        <Badge variant="outline" className="text-[10px]">Só Master</Badge>
+                      </div>
+                      <nav className="space-y-1">
+                        {navegacao.map(({ key, label, Icon }) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setActiveTab(key)}
+                            className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
+                              activeTab === key
+                                ? "bg-primary/10 text-primary font-medium"
+                                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                            }`}
+                            data-testid={`nav-${key.replace(/_/g, "-")}`}
+                          >
+                            <Icon className={`h-4 w-4 shrink-0 ${activeTab === key ? "text-primary" : ""}`} />
+                            <span className="truncate">{label}</span>
+                            {activeTab === key && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+                          </button>
+                        ))}
+                      </nav>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
               <p className="text-xs text-muted-foreground/60 px-1 mt-2">Cada categoria guarda as suas definições independentemente.</p>
@@ -446,26 +476,34 @@ const SystemConfigPage = ({ embedded = false }) => {
                   <SelectValue placeholder="Selecionar categoria" />
                 </SelectTrigger>
                 <SelectContent>
-                  {sections.map((key) => {
-                    const Icon = SECTION_ICONS[key] || Settings;
-                    return (
-                      <SelectItem key={key} value={key}>
-                        <span className="flex items-center gap-2">
-                          <Icon className="h-4 w-4" />
-                          {getSectionNavLabel(key, fields)}
-                        </span>
-                      </SelectItem>
-                    );
-                  })}
+                  <SelectGroup>
+                    <SelectLabel>Definições da empresa · {nomeDaEmpresaEmVigor}</SelectLabel>
+                    {sections.map((key) => {
+                      const Icon = SECTION_ICONS[key] || Settings;
+                      return (
+                        <SelectItem key={key} value={key}>
+                          <span className="flex items-center gap-2">
+                            <Icon className="h-4 w-4" />
+                            {getSectionNavLabel(key, fields)}
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectGroup>
                   {/* Nota: RGPD removido (vive só em Compliance); Integrações e Emails Sistema movidos para Comunicações */}
-                  {navegacao.map(({ key, label, Icon }) => (
-                    <SelectItem key={key} value={key}>
-                      <span className="flex items-center gap-2">
-                        <Icon className="h-4 w-4" />
-                        {label}
-                      </span>
-                    </SelectItem>
-                  ))}
+                  {navegacao.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>Sistema (global) · só Master</SelectLabel>
+                      {navegacao.map(({ key, label, Icon }) => (
+                        <SelectItem key={key} value={key}>
+                          <span className="flex items-center gap-2">
+                            <Icon className="h-4 w-4" />
+                            {label}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
                 </SelectContent>
               </Select>
               {/* Chips de acesso rápido.
@@ -496,28 +534,53 @@ const SystemConfigPage = ({ embedded = false }) => {
                     </button>
                   );
                 })}
-                {navegacao.map(({ key, label, Icon }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setActiveTab(key)}
-                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
-                      activeTab === key
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-muted text-muted-foreground hover:border-muted-foreground/50"
-                    }`}
-                    data-testid={`chip-${key.replace(/_/g, "-")}`}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {label}
-                  </button>
-                ))}
               </div>
+              {navegacao.length > 0 && (
+                <div className="space-y-1.5 rounded-lg border border-dashed border-border bg-muted/40 p-2" data-testid="chips-globais">
+                  <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                    Sistema (global) · só Master
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {navegacao.map(({ key, label, Icon }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setActiveTab(key)}
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
+                          activeTab === key
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-muted text-muted-foreground hover:border-muted-foreground/50"
+                        }`}
+                        data-testid={`chip-${key.replace(/_/g, "-")}`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </aside>
 
           {/* ─── Right: Content Area ─── */}
           <main className="min-w-0 flex-1">
+            {/* O âmbito do que está aberto, dito (QA-6): «empresa» ou «sistema inteiro». */}
+            {ambitoGlobalAtivo ? (
+              <p
+                className="mb-3 rounded-md border border-dashed border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+                data-testid="ambito-global"
+              >
+                Definição <strong>global do sistema</strong>: aplica-se a todas as empresas.
+              </p>
+            ) : fields[activeTab] ? (
+              <p
+                className="mb-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+                data-testid="ambito-empresa"
+              >
+                A editar as definições de: <strong>{nomeDaEmpresaEmVigor}</strong>
+              </p>
+            ) : null}
             {SeccaoDedicada ? <SeccaoDedicada token={token} user={user} /> : null}
             {!SeccaoDedicada && fields[activeTab] && (
               <ConfigSection
