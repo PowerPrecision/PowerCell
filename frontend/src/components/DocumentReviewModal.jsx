@@ -7,14 +7,18 @@
  * explicitamente antes de aplicar.
  *
  * Padrão visual: clone do `DataConflictResolver.jsx` (grelha 3 colunas
- * "Actual → Sugerido" + botões Aceitar/Rejeitar), mas adaptado a um único
- * documento e montado num `Dialog` do Shadcn em vez de `Card` inline.
+ * "Actual → Sugerido" + botões Aceitar/Rejeitar), adaptado a um único
+ * documento e montado num painel LATERAL (`Sheet`, QA-6): o documento fica
+ * visível ao lado da revisão, que é o que um modal central escondia.
  *
  * Decisões:
  * - Cada campo é seleccionável individualmente (toggle) — o consultor pode
  *   aplicar apenas um subconjunto das sugestões (ex: aceitar a categoria mas
  *   rejeitar a validade).
  * - Campos sem sugestão da IA (`suggested_*` vazio) não são mostrados.
+ * - A selecção parte SÓ dos campos que existem e mudam o valor atual. Partir de
+ *   uma lista fixa de quatro mostrava «A IA não encontrou sugestões» por cima de
+ *   um botão «Aplicar Selecionadas (4)» (QA-6): a contagem tem de vir do que se vê.
  * - Confiança (confidence) aparece como Badge com cor semântica (primary ≥0.8,
  *   accent-foreground ≥0.6, destructive <0.6).
  * - Usa apenas tokens Shadcn (sem cores Tailwind cruas) — dark-mode safe.
@@ -30,13 +34,13 @@
  */
 import { useState, useMemo, useEffect } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "./ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from "./ui/sheet";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
@@ -73,19 +77,7 @@ export function DocumentReviewModal({ open, onOpenChange, doc, onResolved }) {
   const [applying, setApplying] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   // Campos seleccionados para aplicação parcial (toggle por campo).
-  // Pré-seleccionado: todos os campos com sugestão.
-  const [selectedFields, setSelectedFields] = useState(
-    new Set(["categoria", "validade", "nome", "filename"])
-  );
-
-  // Quando o documento muda (abrir modal para outro doc), reset ao estado de
-  // selecção para que todos os campos apareçam pré-seleccionados.
-  useEffect(() => {
-    if (open && doc) {
-      setSelectedFields(new Set(["categoria", "validade", "nome", "filename"]));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- só queremos reagir a mudanças de docId, não a mutações internas do objecto `doc`.
-  }, [open, doc?.doc_id, doc?.id]);
+  const [selectedFields, setSelectedFields] = useState(new Set());
 
   // Constrói a lista de campos a rever. Apenas campos com sugestão preenchida
   // são exibidos — o resto é omitido para evitar ruído visual.
@@ -130,8 +122,27 @@ export function DocumentReviewModal({ open, onOpenChange, doc, onResolved }) {
     ].filter((f) => f.suggested != null && f.suggested !== "");
   }, [doc]);
 
+  // Só conta como sugestão o que mudaria o valor: «igual ao atual» não é uma alteração.
+  const camposComAlteracao = useMemo(
+    () => fields.filter((f) => f.suggested !== f.current).map((f) => f.key),
+    [fields]
+  );
+  const assinaturaDasSugestoes = camposComAlteracao.join("|");
+
+  // Ao abrir (ou quando o documento / as sugestões mudam) a selecção parte dos
+  // campos que se VÊEM com alteração — nunca de uma lista fixa.
+  useEffect(() => {
+    if (open && doc) {
+      setSelectedFields(new Set(assinaturaDasSugestoes ? assinaturaDasSugestoes.split("|") : []));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reage ao id do documento e às sugestões que ele traz, não a mutações internas de `doc`.
+  }, [open, doc?.doc_id, doc?.id, assinaturaDasSugestoes]);
+
   // Early return depois dos hooks — não pode ser antes dos hooks (Rules of Hooks).
   if (!doc) return null;
+
+  const aplicaveis = camposComAlteracao.filter((k) => selectedFields.has(k));
+  const semSugestoes = fields.length === 0;
 
   const docId = doc.doc_id || doc.id;
   const docName = doc.filename || doc.original_filename || "Documento";
@@ -152,7 +163,7 @@ export function DocumentReviewModal({ open, onOpenChange, doc, onResolved }) {
     }
     setApplying(true);
     try {
-      const fieldsToApply = Array.from(selectedFields);
+      const fieldsToApply = aplicaveis;
       await applyAIReview(docId, { fields: fieldsToApply });
       toast.success("Sugestões aplicadas com sucesso.");
       onOpenChange?.(false);
@@ -183,25 +194,25 @@ export function DocumentReviewModal({ open, onOpenChange, doc, onResolved }) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
-        title="Revisão de Sugestões IA"
-        description="Reveja as sugestões da IA antes de aplicar."
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-xl overflow-hidden flex flex-col gap-0"
+        data-testid="revisao-sugestoes-documento"
       >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+        <SheetHeader className="text-left">
+          <SheetTitle className="flex items-center gap-2">
             <BrainCircuit className="h-5 w-5 text-primary" />
             Revisão de Sugestões IA
-          </DialogTitle>
-          <DialogDescription className="truncate" title={docName}>
+          </SheetTitle>
+          <SheetDescription className="truncate" title={docName}>
             {docName} — reveja as sugestões da IA antes de aplicar.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <ScrollArea className="flex-1 max-h-[60vh] pr-4">
+        <ScrollArea className="flex-1 min-h-0 pr-4">
           <div className="space-y-3 py-2">
-            {fields.length === 0 ? (
+            {semSugestoes ? (
               <p className="text-sm text-muted-foreground text-center py-6">
                 A IA não encontrou sugestões para este documento.
               </p>
@@ -232,23 +243,25 @@ export function DocumentReviewModal({ open, onOpenChange, doc, onResolved }) {
                           </Badge>
                         )}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-xs shrink-0"
-                        onClick={() => toggleField(field.key)}
-                        type="button"
-                      >
-                        {isSelected ? (
-                          <>
-                            <Check className="h-3 w-3 mr-1" /> Selecionado
-                          </>
-                        ) : (
-                          <>
-                            <X className="h-3 w-3 mr-1" /> Ignorar
-                          </>
-                        )}
-                      </Button>
+                      {hasSuggestion && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-xs shrink-0"
+                          onClick={() => toggleField(field.key)}
+                          type="button"
+                        >
+                          {isSelected ? (
+                            <>
+                              <Check className="h-3 w-3 mr-1" /> Selecionado
+                            </>
+                          ) : (
+                            <>
+                              <X className="h-3 w-3 mr-1" /> Ignorar
+                            </>
+                          )}
+                        </Button>
+                      )}
                     </div>
                     {hasSuggestion ? (
                       <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center">
@@ -282,35 +295,43 @@ export function DocumentReviewModal({ open, onOpenChange, doc, onResolved }) {
           </div>
         </ScrollArea>
 
-        <DialogFooter className="border-t pt-4 gap-2 sm:gap-2">
-          <Button
-            variant="outline"
-            onClick={handleReject}
-            disabled={rejecting || applying}
-            type="button"
-          >
-            {rejecting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <X className="h-4 w-4 mr-2" />
-            )}
-            Rejeitar Tudo
-          </Button>
-          <Button
-            onClick={handleApply}
-            disabled={applying || rejecting || selectedFields.size === 0}
-            type="button"
-          >
-            {applying ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Check className="h-4 w-4 mr-2" />
-            )}
-            Aplicar Selecionadas ({selectedFields.size})
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <SheetFooter className="border-t pt-4 gap-2 sm:gap-2 sm:flex-row sm:justify-end">
+          {semSugestoes ? (
+            <Button variant="outline" onClick={() => onOpenChange?.(false)} type="button">
+              Fechar
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                onClick={handleReject}
+                disabled={rejecting || applying}
+                type="button"
+              >
+                {rejecting ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <X className="h-4 w-4 mr-2" />
+                )}
+                Rejeitar Tudo
+              </Button>
+              <Button
+                onClick={handleApply}
+                disabled={applying || rejecting || aplicaveis.length === 0}
+                type="button"
+              >
+                {applying ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4 mr-2" />
+                )}
+                Aplicar Selecionadas ({aplicaveis.length})
+              </Button>
+            </>
+          )}
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }
 

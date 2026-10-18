@@ -97,6 +97,7 @@ import AvisoEmIndexacao from "./documents/AvisoEmIndexacao";
 import { quantosEmIndexacao, resumoDosEnvios } from "../utils/desvioInteligente";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { opcoesDeMapeamento, rotuloDaPastaGravada } from "../utils/mapeamentoS3";
+import { ACAO_CLASSIFICAR, ACAO_EXTRAIR } from "../utils/acoesDeIADoDocumento";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
 // PACOTE DJ — Modal de revisão Human-in-the-Loop de sugestões IA por documento
 import DocumentReviewModal from "./DocumentReviewModal";
@@ -2699,13 +2700,14 @@ const S3FileManager = ({
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-5 w-5 flex-shrink-0 text-primary hover:text-primary"
+                                className={`h-5 w-5 flex-shrink-0 ${ACAO_CLASSIFICAR.classe}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleAnalyzeDocForReview(file);
                                 }}
                                 disabled={analyzingDocIds.has(file.doc_id || file.id)}
-                                title="Analisar com IA"
+                                title={ACAO_CLASSIFICAR.titulo}
+                                aria-label={ACAO_CLASSIFICAR.aria(file.name)}
                                 data-testid={`dj-analyze-btn-${idx}`}
                               >
                                 {analyzingDocIds.has(file.doc_id || file.id) ? (
@@ -2719,13 +2721,13 @@ const S3FileManager = ({
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-5 w-5 flex-shrink-0 text-primary hover:text-primary"
+                                className={`h-5 w-5 flex-shrink-0 ${ACAO_EXTRAIR.classe}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleExtractDocData(file);
                                 }}
                                 disabled={extractingPaths.has(file.path)}
-                                title="Extrair Dados com IA"
+                                title={ACAO_EXTRAIR.titulo}
                                 aria-label={`Extrair dados de ${file.name}`}
                                 data-testid={`vlm-extract-btn-${idx}`}
                               >
@@ -3085,13 +3087,14 @@ const S3FileManager = ({
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-6 w-6 text-primary hover:text-primary"
+                                    className={`h-6 w-6 ${ACAO_CLASSIFICAR.classe}`}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleAnalyzeDocForReview(file);
                                     }}
                                     disabled={analyzingDocIds.has(file.doc_id || file.id)}
-                                    title="Analisar com IA"
+                                    title={ACAO_CLASSIFICAR.titulo}
+                                    aria-label={ACAO_CLASSIFICAR.aria(file.name)}
                                     data-testid={`dj-analyze-btn-all-${idx}`}
                                   >
                                     {analyzingDocIds.has(file.doc_id || file.id) ? (
@@ -3105,13 +3108,13 @@ const S3FileManager = ({
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-6 w-6 text-primary hover:text-primary"
+                                    className={`h-6 w-6 ${ACAO_EXTRAIR.classe}`}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleExtractDocData(file);
                                     }}
                                     disabled={extractingPaths.has(file.path)}
-                                    title="Extrair Dados com IA"
+                                    title={ACAO_EXTRAIR.titulo}
                                     aria-label={`Extrair dados de ${file.name}`}
                                     data-testid={`vlm-extract-btn-all-${idx}`}
                                   >
@@ -3293,13 +3296,14 @@ const S3FileManager = ({
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      className="h-6 w-6 text-primary hover:text-primary"
+                                      className={`h-6 w-6 ${ACAO_CLASSIFICAR.classe}`}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         handleAnalyzeDocForReview(file);
                                       }}
                                       disabled={analyzingDocIds.has(file.doc_id || file.id)}
-                                      title="Analisar com IA"
+                                      title={ACAO_CLASSIFICAR.titulo}
+                                      aria-label={ACAO_CLASSIFICAR.aria(file.name)}
                                       data-testid={`dj-analyze-btn-cat-${idx}`}
                                     >
                                       {analyzingDocIds.has(file.doc_id || file.id) ? (
@@ -3313,13 +3317,13 @@ const S3FileManager = ({
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      className="h-6 w-6 text-primary hover:text-primary"
+                                      className={`h-6 w-6 ${ACAO_EXTRAIR.classe}`}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         handleExtractDocData(file);
                                       }}
                                       disabled={extractingPaths.has(file.path)}
-                                      title="Extrair Dados com IA"
+                                      title={ACAO_EXTRAIR.titulo}
                                       aria-label={`Extrair dados de ${file.name}`}
                                       data-testid={`vlm-extract-btn-cat-${idx}`}
                                     >
