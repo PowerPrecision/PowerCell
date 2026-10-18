@@ -41,7 +41,6 @@ except ImportError as e:
 # NOTA: Os seguintes módulos NÃO são importados aqui (Lazy Loading):
 # - services.scraper (scrape_property_url)
 # - services.email_service (email_service)
-# - services.client_match (match_leads_to_clients)
 # - services.scheduled_tasks (ScheduledTasksService)
 # ====================================================================
 
@@ -107,15 +106,6 @@ async def process_task(task: dict):
                             "updated_at": datetime.now(timezone.utc).isoformat()
                         }}
                     )
-        
-        # ============================================================
-        # MATCH LEADS - Importa Pandas/Fuzzy apenas quando necessário
-        # ============================================================
-        elif task_type == "match_leads":
-            # LAZY IMPORT: Carrega o módulo pesado de matching (Pandas)
-            from services.client_match import match_leads_to_clients
-            
-            result = await match_leads_to_clients()
         
         # ============================================================
         # SEND EMAIL - Importa email service apenas quando necessário
@@ -366,7 +356,7 @@ async def main():
         logger.info("=" * 60)
         logger.info("🛑 RADICAL KILL SWITCH: Worker process NOT starting")
         logger.info("   ENVIRONMENT = '%s' (only 'production' enables worker)", os.environ.get('ENVIRONMENT', ''))
-        logger.info("   All scheduled tasks (webmail sync, matching, etc.)")
+        logger.info("   All scheduled tasks (alertas e limpezas, webmail sync)")
         logger.info("   are BLOCKED. Use on-demand endpoints instead.")
         logger.info("=" * 60)
         return  # Exit immediately — no event loop, no DB connection, no RAM

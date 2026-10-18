@@ -11,7 +11,8 @@ arranque trouxe-os:
 2. `can't subtract offset-naive and offset-aware datetimes` nos countdowns de
    pré-aprovação — e como as tarefas agendadas corriam seguidas num só `try`,
    essa ficha parava as nove tarefas seguintes (limpezas e relatórios).
-3. (não corrigido aqui) `match_leads_to_clients` nunca existiu — ver worklog.
+3. `match_leads_to_clients` nunca existiu: o job `lead_matching` falhava a cada 30 min com
+   ImportError. Decisão do dono do produto: o job foi RETIRADO (ver `TestOJobLeadMatchingFoiRetirado`).
 """
 from __future__ import annotations
 
@@ -170,3 +171,27 @@ def test_o_modulo_nao_tem_fromisoformat_cru_comparado_com_utc():
     fonte = Path(scheduled_tasks.__file__).read_text(encoding="utf-8")
     assert "datetime.fromisoformat(approval_date_str" not in fonte
     assert "datetime.fromisoformat(last_update" not in fonte
+
+
+class TestOJobLeadMatchingFoiRetirado:
+    """Apagado, não desligado: um job adormecido é um convite a religá-lo."""
+
+    def test_nao_esta_declarado_nem_tem_executor(self):
+        from services.job_executors import EXECUTORES
+        from services.job_heartbeat import JOBS_DECLARADOS
+
+        assert "lead_matching" not in {j["chave"] for j in JOBS_DECLARADOS}
+        assert "lead_matching" not in EXECUTORES
+
+    def test_o_codigo_do_worker_ja_nao_chama_a_funcao_que_nunca_existiu(self):
+        for ficheiro in ("worker.py", "services/job_executors.py"):
+            fonte = (BACKEND / ficheiro).read_text(encoding="utf-8")
+            assert "match_leads_to_clients" not in fonte.replace("`match_leads_to_clients`", ""), ficheiro
+            assert "_executar_matching_de_leads" not in fonte, ficheiro
+
+    def test_todos_os_jobs_declarados_tem_executor_e_vice_versa(self):
+        """Contraprova da retirada: declarar sem executor (ou o contrário) é como o job fantasma nasceu."""
+        from services.job_executors import EXECUTORES
+        from services.job_heartbeat import JOBS_DECLARADOS
+
+        assert set(EXECUTORES) == {j["chave"] for j in JOBS_DECLARADOS}

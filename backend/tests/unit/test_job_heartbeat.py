@@ -150,7 +150,6 @@ class TestRegistoDeclarado:
             "backup_diario",
             "cdc_audit",
             "scheduled_tasks",
-            "lead_matching",
             "webmail_worker_sync",
         }
 
