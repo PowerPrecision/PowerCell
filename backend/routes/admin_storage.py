@@ -47,16 +47,14 @@ router = APIRouter(prefix="/admin", tags=["Admin - Storage"])
 logger = logging.getLogger(__name__)
 
 
-# ============== ALIAS PARA RETROCOMPATIBILIDADE ==============
-# O frontend usa "client-s3-mappings" mas o backend usa "process-s3-mappings"
-
+# ====== ALIAS: o frontend usa "client-s3-mappings", o backend "process-s3-mappings" ======
 @router.get("/client-s3-mappings")
 async def get_client_s3_mappings_alias(
     request: Request,
     search: str = Query(None),
     process_id: str = Query(None),
     s3_folder: str = Query(None),
-    has_mapping: bool = Query(None, description="true = só com pasta; false = só sem pasta; omitido = todos"),
+    has_mapping: bool = Query(None, description="true = com pasta; false = sem pasta"),
     include_closed: bool = Query(False, description="Incluir processos concluídos e desistências"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
