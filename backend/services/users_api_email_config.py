@@ -506,6 +506,7 @@ async def run_list_my_email_accounts(
     existentes.
     """
     from services.auth import get_active_company_id_async, get_effective_role
+    from services.role_scope import conta_e_master
     from services.user_email_config_service import (
         list_company_email_configs,
         list_user_email_configs_all_companies,
@@ -650,7 +651,14 @@ async def run_list_my_email_accounts(
     caixa_injected = False
     # PACOTE DV — só o perfil ACTIVO (effective_role) injeta Caixa Geral,
     # e apenas se a conta tiver email real. Sem mocks genéricos.
-    if effective_role in CAIXA_GERAL_INJECT_ROLES:
+    # A vista «Sistema» do Master (nenhuma empresa escolhida) não é uma empresa: uma Caixa Geral
+    # pertence a uma empresa, e mostrar a da Power aí era a fuga de contexto da Área Pessoal.
+    vista_sistema = (
+        conta_e_master(current_user)
+        and not str(current_user.get("vista_empresa_id") or "").strip()
+        and active_company_id in ("default", "all", "")
+    )
+    if effective_role in CAIXA_GERAL_INJECT_ROLES and not vista_sistema:
         caixa = await load_caixa_geral_config(active_company_id, user=current_user)
         caixa_email = ((caixa or {}).get("email_address") or "").strip()
         if caixa and caixa_email and "@" in caixa_email:

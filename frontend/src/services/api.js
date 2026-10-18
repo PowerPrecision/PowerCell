@@ -1491,6 +1491,8 @@ export const getDocumentRecipients = () =>
   api.get("/emails/document-recipients", { skipErrorToast: true });
 export const getProcessDocumentsForSending = (processId) =>
   api.get(`/documents/process/${encodeURIComponent(processId)}`, { skipErrorToast: true });
+export const previewDocumentRecipientsTemplate = (emailTemplate) =>
+  api.post("/emails/preview-template", { email_template: emailTemplate }, { skipErrorToast: true });
 export const previewDocumentationEmail = (processId) =>
   api.get(`/emails/preview-documentation/${encodeURIComponent(processId)}`, { skipErrorToast: true });
 export const createUserBranch = (payload) =>

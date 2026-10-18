@@ -704,8 +704,23 @@ SERVIDORES_SMTP_QUE_GUARDAM_OS_ENVIADOS = (
 #: Por ordem: os nomes habituais da pasta, quando o servidor não marca a `\Sent`.
 NOMES_DA_PASTA_ENVIADOS = (
     "Sent", "INBOX.Sent", "Sent Items", "Sent Messages", "Enviados", "INBOX.Enviados",
-    "Itens Enviados", "[Gmail]/Sent Mail", "[Gmail]/E-mails enviados",
+    "Itens Enviados", "INBOX.Itens Enviados", "[Gmail]/Sent Mail", "[Gmail]/E-mails enviados",
 )
+NOMES_DA_PASTA_RASCUNHOS = (
+    "Drafts", "INBOX.Drafts", "Rascunhos", "INBOX.Rascunhos", "[Gmail]/Drafts", "[Gmail]/Rascunhos",
+)
+NOMES_DA_PASTA_LIXO = (
+    "Trash", "INBOX.Trash", "Eliminados", "INBOX.Eliminados", "Itens Eliminados", "Lixo", "INBOX.Lixo",
+    "Deleted Items", "INBOX.Deleted", "[Gmail]/Trash", "[Gmail]/Lixo",
+)
+
+#: tipo -> (atributo «special-use» RFC 6154, nomes habituais). A marca do servidor manda; os nomes
+#: (em inglês E em português) só servem quando o servidor não a marca.
+PASTAS_ESPECIAIS = {
+    "sent": ("\\sent", NOMES_DA_PASTA_ENVIADOS),
+    "drafts": ("\\drafts", NOMES_DA_PASTA_RASCUNHOS),
+    "trash": ("\\trash", NOMES_DA_PASTA_LIXO),
+}
 
 _PORTAS_QUE_NAO_SAO_IMAP = {25, 465, 587, 2525}
 
@@ -718,6 +733,19 @@ def copia_nos_enviados_activa() -> bool:
     cópia liga-a explicitamente.
     """
     valor = (os.environ.get("IMAP_APPEND_ENABLED") or "").strip().lower()
+    if valor in {"1", "true", "yes", "on"}:
+        return True
+    if valor in {"0", "false", "no", "off"}:
+        return False
+    return (os.environ.get("TESTING") or "").strip().lower() != "true"
+
+
+def descoberta_de_pastas_activa() -> bool:
+    """Descobrir as pastas no servidor (`IMAP_PASTAS_DESCOBERTA_ENABLED`; desligada em `TESTING` por omissão).
+
+    Em dev/CI os servidores IMAP não existem: ligar a um que não responde só pendura a suite.
+    """
+    valor = (os.environ.get("IMAP_PASTAS_DESCOBERTA_ENABLED") or "").strip().lower()
     if valor in {"1", "true", "yes", "on"}:
         return True
     if valor in {"0", "false", "no", "off"}:
@@ -739,32 +767,89 @@ def _porta_imap(porta: Any) -> int:
     return 993 if valor <= 0 or valor in _PORTAS_QUE_NAO_SAO_IMAP else valor
 
 
-def _pastas_enviados_do_servidor(mail: "imaplib.IMAP4_SSL") -> List[str]:
-    """As pastas «Enviados» possíveis, por ordem: a marcada `\\Sent` (RFC 6154) e depois os nomes habituais que existem."""
-    existentes: list[str] = []
-    marcadas: list[str] = []
+def _listar_pastas_do_servidor(mail: "imaplib.IMAP4_SSL") -> List[tuple]:
+    """`(nome, atributos em minúsculas)` de cada pasta do `LIST`; vazio se o servidor não responde."""
     try:
         tipo, linhas = mail.list()
     except Exception:  # noqa: BLE001 - sem LIST, tenta-se pelos nomes habituais
-        tipo, linhas = "NO", []
-    if tipo == "OK":
-        for linha in linhas or []:
-            texto = linha.decode("utf-8", errors="replace") if isinstance(linha, bytes) else str(linha or "")
-            m = re.match(r'\((?P<flags>[^)]*)\)\s+(?:"(?P<sep>[^"]*)"|NIL)\s+(?P<nome>.+)$', texto.strip())
-            if not m:
-                continue
-            nome = m.group("nome").strip()
-            if nome.startswith('"') and nome.endswith('"'):
-                nome = nome[1:-1]
-            existentes.append(nome)
-            if "\\sent" in m.group("flags").lower() and nome not in marcadas:
-                marcadas.append(nome)
-    por_minusculas = {n.lower(): n for n in existentes}
-    habituais = [
-        por_minusculas[c.lower()] for c in NOMES_DA_PASTA_ENVIADOS
-        if c.lower() in por_minusculas and por_minusculas[c.lower()] not in marcadas
-    ]
+        return []
+    pastas: list = []
+    if tipo != "OK":
+        return pastas
+    for linha in linhas or []:
+        texto = linha.decode("utf-8", errors="replace") if isinstance(linha, bytes) else str(linha or "")
+        m = re.match(r'\((?P<flags>[^)]*)\)\s+(?:"(?P<sep>[^"]*)"|NIL)\s+(?P<nome>.+)$', texto.strip())
+        if not m:
+            continue
+        nome = m.group("nome").strip()
+        if nome.startswith('"') and nome.endswith('"'):
+            nome = nome[1:-1]
+        pastas.append((nome, set(m.group("flags").lower().split())))
+    return pastas
+
+
+def _variantes_do_nome(nome: str) -> List[str]:
+    """O nome tal como vem e com os prefixos `INBOX.` / `INBOX/` (o servidor decide qual usa)."""
+    if nome.upper().startswith("INBOX") or nome.startswith("["):
+        return [nome]
+    return [nome, f"INBOX.{nome}", f"INBOX/{nome}"]
+
+
+def _pastas_especiais_do_servidor(mail: "imaplib.IMAP4_SSL", tipo: str) -> List[str]:
+    """As pastas `sent`/`drafts`/`trash` possíveis, por ordem: a marcada pelo servidor
+    (`\\Sent`/`\\Drafts`/`\\Trash`, RFC 6154) e depois os nomes habituais que EXISTEM."""
+    atributo, nomes = PASTAS_ESPECIAIS[tipo]
+    listadas = _listar_pastas_do_servidor(mail)
+    marcadas = [nome for nome, flags in listadas if atributo in flags]
+    por_minusculas = {nome.lower(): nome for nome, _ in listadas}
+    habituais: list = []
+    for candidata in nomes:
+        for variante in _variantes_do_nome(candidata):
+            real = por_minusculas.get(variante.lower())
+            if real and real not in marcadas and real not in habituais:
+                habituais.append(real)
     return [*marcadas, *habituais]
+
+
+def _pastas_enviados_do_servidor(mail: "imaplib.IMAP4_SSL") -> List[str]:
+    """As pastas «Enviados» possíveis, por ordem: a marcada `\\Sent` (RFC 6154) e depois os nomes habituais que existem."""
+    return _pastas_especiais_do_servidor(mail, "sent")
+
+
+def pastas_candidatas_sync(account: "EmailAccount", timeout: int = 20) -> Dict[str, List[str]]:
+    """Para a sincronização: por tipo, as pastas descobertas no servidor seguidas dos nomes habituais.
+
+    Uma ligação, um `LIST`. Nunca levanta — sem LIST ficam só os nomes habituais (o comportamento
+    anterior). A ordem é a de tentativa: quem usa pára na primeira que devolve emails.
+    """
+    descobertas: Dict[str, List[str]] = {tipo: [] for tipo in PASTAS_ESPECIAIS}
+    mail = None
+    try:
+        if not descoberta_de_pastas_activa():
+            raise RuntimeError("descoberta de pastas desligada")
+        mail = imaplib.IMAP4_SSL(
+            account.imap_server, _porta_imap(account.imap_port), ssl_context=ssl.create_default_context(),
+            timeout=timeout,
+        )
+        mail.login(account.email, account.password)
+        for tipo in PASTAS_ESPECIAIS:
+            descobertas[tipo] = _pastas_especiais_do_servidor(mail, tipo)
+    except Exception as exc:  # noqa: BLE001 - a descoberta é um acréscimo, não pode partir a sincronização
+        logger.debug("[IMAP] Descoberta de pastas falhou para %s: %s", getattr(account, "name", "?"), exc)
+    finally:
+        if mail is not None:
+            try:
+                mail.logout()
+            except Exception:  # noqa: BLE001
+                pass
+    resultado: Dict[str, List[str]] = {}
+    for tipo, (_, nomes) in PASTAS_ESPECIAIS.items():
+        resultado[tipo] = list(dict.fromkeys([*descobertas[tipo], *nomes]))
+    return resultado
+
+
+async def pastas_candidatas(account: "EmailAccount") -> Dict[str, List[str]]:
+    return await asyncio.to_thread(pastas_candidatas_sync, account)
 
 
 def _pasta_enviados_do_servidor(mail: "imaplib.IMAP4_SSL") -> Optional[str]:
@@ -804,6 +889,12 @@ def _imap_append_enviados_sync(account: "EmailAccount", password: str, mensagem:
                 recusas.append(f"{pasta}: {type(exc).__name__}: {exc}")
                 continue
             if tipo == "OK":
+                # Um cliente de email só mostra as pastas SUBSCRITAS: o APPEND na «Enviados» de um
+                # servidor onde ela não está subscrita deixava a mensagem invisível no cliente.
+                try:
+                    mail.subscribe(f'"{pasta}"')
+                except Exception:  # noqa: BLE001 - subscrever é um acréscimo
+                    pass
                 return {"ok": True, "folder": pasta}
             recusas.append(f"{pasta}: {resposta}")
         return {"ok": False, "folder": pastas[0], "error": "APPEND recusado — " + " | ".join(recusas)}
@@ -1967,8 +2058,10 @@ async def sync_webmail_emails(
             
             all_emails.extend(inbox_result.get("emails", []))
             
-            # Buscar da pasta de Enviados (tentar vários nomes)
-            for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados", "INBOX.Enviados", "[Gmail]/Sent Mail", "[Gmail]/E-mails enviados"]:
+            # As pastas «Enviados», «Rascunhos» e «Lixo» descobrem-se no servidor (atributos
+            # \\Sent/\\Drafts/\\Trash) e só depois se tentam os nomes habituais, em inglês e em português.
+            pastas_do_servidor = await pastas_candidatas(account)
+            for sent_folder in pastas_do_servidor["sent"]:
                 try:
                     sent_result = await loop.run_in_executor(
                         _email_executor,
@@ -1988,7 +2081,7 @@ async def sync_webmail_emails(
             
             # Buscar da pasta de Rascunhos (tentar vários nomes)
             drafts_folder_found = None
-            for drafts_folder in ["Drafts", "INBOX.Drafts", "Rascunhos", "INBOX.Rascunhos", "[Gmail]/Drafts", "[Gmail]/Rascunhos"]:
+            for drafts_folder in pastas_do_servidor["drafts"]:
                 try:
                     drafts_result = await loop.run_in_executor(
                         _email_executor,
@@ -2007,7 +2100,7 @@ async def sync_webmail_emails(
                     continue
             
             # Buscar da pasta de Lixo (tentar vários nomes)
-            for trash_folder in ["Trash", "INBOX.Trash", "[Gmail]/Trash", "[Gmail]/Lixo", "Lixo", "INBOX.Lixo", "Deleted Items", "INBOX.Deleted"]:
+            for trash_folder in pastas_do_servidor["trash"]:
                 try:
                     trash_result = await loop.run_in_executor(
                         _email_executor,
@@ -2405,9 +2498,10 @@ async def sync_user_emails(
         
         inbox_emails = inbox_result.get("emails", [])
         
-        # Buscar da pasta de Enviados
+        # Buscar da pasta de Enviados (descoberta no servidor primeiro, nomes habituais depois)
+        pastas_do_servidor = await pastas_candidatas(account)
         sent_emails = []
-        for sent_folder in ["Sent", "INBOX.Sent", "Sent Items", "Enviados", "[Gmail]/Sent Mail", "[Gmail]/E-mails enviados"]:
+        for sent_folder in pastas_do_servidor["sent"]:
             try:
                 sent_result = await loop.run_in_executor(
                     _email_executor,
@@ -2427,7 +2521,7 @@ async def sync_user_emails(
         
         # Buscar da pasta de Rascunhos
         drafts_emails = []
-        for drafts_folder in ["Drafts", "INBOX.Drafts", "Rascunhos", "[Gmail]/Drafts", "[Gmail]/Rascunhos"]:
+        for drafts_folder in pastas_do_servidor["drafts"]:
             try:
                 drafts_result = await loop.run_in_executor(
                     _email_executor,
@@ -2445,7 +2539,7 @@ async def sync_user_emails(
         
         # Buscar da pasta de Lixo
         trash_emails = []
-        for trash_folder in ["Trash", "INBOX.Trash", "[Gmail]/Trash", "[Gmail]/Lixo", "Lixo", "INBOX.Lixo", "Deleted Items", "INBOX.Deleted"]:
+        for trash_folder in pastas_do_servidor["trash"]:
             try:
                 trash_result = await loop.run_in_executor(
                     _email_executor,
@@ -2847,10 +2941,15 @@ async def sync_shared_role_emails(
                 logger.error(f"[Shared Role Sync] Erro ao guardar email INBOX: {e}")
                 total_errors += 1
 
-        sent_result = await loop.run_in_executor(
-            _email_executor,
-            lambda: _fetch_all_from_folder_sync(account, "Sent", days, max_emails)
-        )
+        sent_result: Dict[str, Any] = {"emails": []}
+        for pasta_enviados in (await pastas_candidatas(account))["sent"]:
+            sent_result = await loop.run_in_executor(
+                _email_executor,
+                lambda f=pasta_enviados: _fetch_all_from_folder_sync(account, f, days, max_emails)
+            )
+            if sent_result and sent_result.get("emails"):
+                break
+        sent_result = sent_result or {"emails": []}
 
         for email_data in sent_result.get("emails", []):
             # Explicitly set direction="sent" for emails from the Sent IMAP folder
@@ -3326,11 +3425,11 @@ async def imap_move_to_trash(
             msg_num = msg_nums[0].strip().decode()
             
             # Try common Trash folder names
-            trash_folders = [
-                "Trash", "INBOX.Trash", "[Gmail]/Trash", "[Gmail]/Lixo",
-                "Lixo", "INBOX.Lixo", "Deleted Items", "INBOX.Deleted",
+            trash_folders = list(dict.fromkeys([
+                *_pastas_especiais_do_servidor(mail, "trash"),
+                *NOMES_DA_PASTA_LIXO,
                 "&AMkAmQCX-",  # Some servers encode "Trash" differently
-            ]
+            ]))
             
             trash_found = None
             for tf in trash_folders:
@@ -3447,11 +3546,11 @@ def fetch_attachment_bytes_from_imap_sync(
         elif mid.startswith("<") and mid.endswith(">"):
             variants.append(mid[1:-1])
 
-        folders = [
-            "INBOX", "Sent", "INBOX.Sent", "Sent Items", "Enviados",
-            "[Gmail]/Sent Mail", "[Gmail]/E-mails enviados",
-            "Drafts", "INBOX.Drafts", "[Gmail]/Drafts",
-        ]
+        folders = list(dict.fromkeys([
+            "INBOX",
+            *_pastas_especiais_do_servidor(mail, "sent"), *NOMES_DA_PASTA_ENVIADOS,
+            *_pastas_especiais_do_servidor(mail, "drafts"), *NOMES_DA_PASTA_RASCUNHOS,
+        ]))
         target = filename.lower().strip()
 
         for folder in folders:

@@ -74,6 +74,7 @@ import {
   Plus,
 } from "lucide-react";
 import { toast } from "sonner";
+import { podeGerirConfiguracao } from "../utils/roleUtils";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { safeString } from "../utils/safeString";
 import SmartRichEditor from "./ui/SmartRichEditor";
@@ -483,7 +484,7 @@ const SendDocumentationModal = ({
 
   // Verificar permissões — Admin/CEO podem contornar destinatários bloqueados
 // Todos os utilizadores podem editar o corpo do email
-  const isAdminOrCEO = user?.role?.match(/admin|ceo/i);
+  const isAdminOrCEO = podeGerirConfiguracao(user);
 
   if (!config?.enabled) {
     return (

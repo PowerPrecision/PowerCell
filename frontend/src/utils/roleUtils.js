@@ -328,6 +328,14 @@ export const hasRole = (user, role) => {
   );
 };
 
+/**
+ * Pode gerir configuração (destinatários, envio para balcões…)? Master, Admin ou CEO.
+ * O Master NÃO fica de fora: uma expressão regular sobre o nome do papel, escrita à mão, recusava-o com «Apenas
+ * administradores podem configurar…» — o perfil global a falhar uma verificação local.
+ */
+export const podeGerirConfiguracao = (user) =>
+  ADMIN_PANEL_ROLES.some((papel) => hasRole(user, papel));
+
 /** O utilizador é Master (o único perfil global)? */
 export const isMaster = (user) => Boolean(user) && user.role === "master";
 
