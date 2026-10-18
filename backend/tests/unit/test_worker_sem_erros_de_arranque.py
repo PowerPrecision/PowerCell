@@ -195,3 +195,30 @@ class TestOJobLeadMatchingFoiRetirado:
         from services.job_heartbeat import JOBS_DECLARADOS
 
         assert set(EXECUTORES) == {j["chave"] for j in JOBS_DECLARADOS}
+
+
+class TestOWatchdogDeValidadeNaoEngoleOErro:
+    """`strptime` devolve uma data sem fuso e `today` tem-no: a subtracção levantava TypeError, o
+    `except` por documento engolia-o e NENHUM documento a expirar gerava alerta (visto nos logs
+    do Render de 2026-10-18: «[WATCHDOG] Erro ao processar documento … offset-naive»)."""
+
+    @pytest.mark.asyncio
+    async def test_documento_a_expirar_gera_a_notificacao(self, fake_async_db):
+        expira = (datetime.now(timezone.utc) + timedelta(days=10)).strftime("%Y-%m-%d")
+        await fake_async_db.processes.insert_one({
+            "id": "p1", "client_name": "Ana", "assigned_consultor_id": "u1",
+        })
+        await fake_async_db.document_metadata.insert_one({
+            "id": "d1", "process_id": "p1", "expiry_date": expira, "ai_category": "Cartão de Cidadão",
+        })
+        servico = ScheduledTasksService()
+        servico.db = fake_async_db
+
+        criadas = await servico.check_document_expirations_watchdog()
+
+        assert criadas == 1
+        aviso = await fake_async_db.notifications.find_one({"user_id": "u1"})
+        assert aviso["type"] == "document_expiry_watchdog"
+        assert "Ana" in aviso["message"]
+        marcado = await fake_async_db.document_metadata.find_one({"id": "d1"})
+        assert marcado["expiry_alert_sent"] is True

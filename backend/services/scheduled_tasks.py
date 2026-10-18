@@ -665,7 +665,9 @@ class ScheduledTasksService:
         
         for doc in expiring_docs:
             try:
-                expiry_date = datetime.strptime(doc["expiry_date"], "%Y-%m-%d")
+                # `today` tem fuso e `strptime` devolve uma data sem ele: subtrair as duas levantava
+                # TypeError e o `except` engolia-o — NENHUM documento gerava alerta de validade.
+                expiry_date = datetime.strptime(doc["expiry_date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
                 days_until = (expiry_date - today).days
                 
                 # Determinar urgência visual
