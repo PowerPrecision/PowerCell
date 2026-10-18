@@ -1125,6 +1125,21 @@ export const forceCreateS3Folder = (clientOrProcessId) =>
   api.post(`/documents/client/${clientOrProcessId}/init-folders`, null, {
     skipErrorToast: true,
   });
+/**
+ * A lista de mapeamentos paginada e filtrada NO SERVIDOR (`has_mapping=false` = só sem pasta).
+ * O filtro local só via os 50 processos da página, e «só sem mapeamento» mostrava 1 resultado
+ * quando havia dezenas.
+ */
+export const listClientS3Mappings = ({ search, hasMapping, page = 1, limit = 50 } = {}) =>
+  api.get("/admin/client-s3-mappings", {
+    params: {
+      page,
+      limit,
+      ...(search ? { search } : {}),
+      ...(typeof hasMapping === "boolean" ? { has_mapping: hasMapping } : {}),
+    },
+    skipErrorToast: true,
+  });
 export const saveClientS3Mapping = (processId, s3Folder) =>
   api.post("/admin/client-s3-mappings", null, {
     params: s3Folder
