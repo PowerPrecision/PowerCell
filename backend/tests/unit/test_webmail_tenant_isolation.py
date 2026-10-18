@@ -294,6 +294,28 @@ class TestCaixaGeralPorEmpresa:
 
         with patch.object(mod, "db", db_com_ucrs):
             condicao = await build_webmail_scope({"id": "u1"}, "power", box="personal")
+        # QA-8: a caixa PESSOAL admite também o que o próprio utilizador ENVIOU sem carimbo de
+        # empresa (senão o enviado sumia dos «Enviados»). O carimbo continua a ser o filtro.
+        assert condicao == {"$or": [
+            {"company_id": "power"},
+            {"$and": [
+                {"created_by": "u1"},
+                {"direction": "sent"},
+                {"company_id": {"$in": [None, ""]}},
+            ]},
+        ]}
+
+    @pytest.mark.asyncio
+    async def test_a_caixa_geral_nao_admite_o_enviado_sem_carimbo_do_utilizador(self, db_com_ucrs):
+        # Contraprova: a Caixa Geral é da empresa, não de uma pessoa — mantém só o carimbo.
+        import services.webmail_scope as mod
+
+        async def sem_caixa(_cid):
+            return None
+
+        with patch.object(mod, "db", db_com_ucrs), \
+                patch("services.email_config_resolver.load_caixa_geral_config", sem_caixa):
+            condicao = await build_webmail_scope({"id": "u1"}, "power", box="general")
         assert condicao == {"company_id": "power"}
 
 
