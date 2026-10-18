@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { opcoesDeMapeamento, temPastaGravada } from "./mapeamentoS3";
+import { opcoesDeMapeamento, rotuloDaPastaGravada, temPastaGravada } from "./mapeamentoS3";
 
 const RAIZ = "Documentação Clientes/";
 const UUID = "9f1c3a52-1111-4111-8111-aaaaaaaaaaaa";
@@ -50,4 +50,19 @@ describe("temPastaGravada", () => {
   it.each([[{ s3_folder: "a" }, true], [{ s3_folder: "" }, false], [{ s3_folder: ["a"] }, false], [{}, false]])(
     "%o → %s", (p, esperado) => expect(temPastaGravada(p)).toBe(esperado),
   );
+});
+
+describe("rotuloDaPastaGravada", () => {
+  it("prefere o legível do servidor", () => {
+    expect(rotuloDaPastaGravada(`${RAIZ}${UUID}`, "Ana Costa")).toBe("Ana Costa");
+  });
+  it("sem legível, um uuid nunca é mostrado", () => {
+    expect(rotuloDaPastaGravada(`${RAIZ}${UUID}/processos/${UUID}`, "")).toBe("Pasta do processo");
+  });
+  it("sem legível, um nome antigo perde os underscores", () => {
+    expect(rotuloDaPastaGravada(`${RAIZ}Joao_Silva`, null)).toBe("Joao Silva");
+  });
+  it("sem pasta, vazio", () => {
+    expect(rotuloDaPastaGravada(null, "")).toBe("");
+  });
 });

@@ -32,3 +32,18 @@ export const opcoesDeMapeamento = (pastas, processo) => {
 /** O ponteiro está gravado e é texto? (um valor de outro tipo conta como «sem pasta») */
 export const temPastaGravada = (processo) =>
   typeof processo?.s3_folder === "string" && processo.s3_folder.trim() !== "";
+
+const REGEX_DE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * O texto de uma pasta já gravada: o legível do servidor e, na falta dele, o último segmento
+ * SE for um nome (um uuid nunca se mostra: «Pasta do processo»).
+ */
+export const rotuloDaPastaGravada = (caminho, legivel) => {
+  const dado = (legivel || "").trim();
+  if (dado) return dado;
+  if (typeof caminho !== "string" || !caminho.trim()) return "";
+  const ultimo = caminho.split("/").filter(Boolean).pop() || "";
+  if (REGEX_DE_ID.test(ultimo)) return "Pasta do processo";
+  return ultimo.replace(/_/g, " ");
+};

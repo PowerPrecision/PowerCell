@@ -96,6 +96,7 @@ import ForcarPastaS3 from "./documents/ForcarPastaS3";
 import AvisoEmIndexacao from "./documents/AvisoEmIndexacao";
 import { quantosEmIndexacao, resumoDosEnvios } from "../utils/desvioInteligente";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { opcoesDeMapeamento, rotuloDaPastaGravada } from "../utils/mapeamentoS3";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
 // PACOTE DJ — Modal de revisão Human-in-the-Loop de sugestões IA por documento
 import DocumentReviewModal from "./DocumentReviewModal";
@@ -307,6 +308,7 @@ const S3FileManager = ({
   const [s3MappingOpen, setS3MappingOpen] = useState(false);
   const [s3Folders, setS3Folders] = useState([]);
   const [currentS3Mapping, setCurrentS3Mapping] = useState(null);
+  const [currentS3Display, setCurrentS3Display] = useState("");
   const [selectedS3Folder, setSelectedS3Folder] = useState("");
   const [savingS3Mapping, setSavingS3Mapping] = useState(false);
   const [loadingS3Folders, setLoadingS3Folders] = useState(false);
@@ -515,6 +517,7 @@ const S3FileManager = ({
       if (currentProcess) {
         // Backend retorna 's3_folder', não 's3_folder_mapping'
         setCurrentS3Mapping(currentProcess.s3_folder || null);
+        setCurrentS3Display(currentProcess.s3_folder_display || "");
         setSelectedS3Folder(currentProcess.s3_folder || "");
       }
     } catch (error) {
@@ -533,6 +536,9 @@ const S3FileManager = ({
       const { data } = await saveClientS3Mapping(processId, selectedS3Folder);
       toast.success(data.message || "Mapeamento guardado");
       setCurrentS3Mapping(selectedS3Folder);
+      setCurrentS3Display(
+        opcoesDeMapeamento(s3Folders, { s3_folder: selectedS3Folder }).find((o) => o.value === selectedS3Folder)?.label || "",
+      );
       setS3MappingOpen(false);
       // Recarregar ficheiros para mostrar os da nova pasta
       fetchFiles();
@@ -559,6 +565,7 @@ const S3FileManager = ({
     setS3MappingOpen(false);
     setS3Folders([]);
     setCurrentS3Mapping(pasta || null);
+    setCurrentS3Display("");
     setSelectedS3Folder(pasta);
     setSemPasta(false);
     await fetchFiles();
@@ -2137,7 +2144,7 @@ const S3FileManager = ({
                 <span className="font-medium">Mapeamento S3</span>
                 {currentS3Mapping && (
                   <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                    {currentS3Mapping.split('/').pop()}
+                    {rotuloDaPastaGravada(currentS3Mapping, currentS3Display)}
                   </span>
                 )}
               </div>
@@ -2164,9 +2171,9 @@ const S3FileManager = ({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__none__">-- Sem mapeamento --</SelectItem>
-                          {s3Folders.map((folder) => (
-                            <SelectItem key={folder.path} value={folder.path}>
-                              {folder.name}
+                          {opcoesDeMapeamento(s3Folders, { s3_folder: currentS3Mapping, s3_folder_display: currentS3Display }).map((opcao) => (
+                            <SelectItem key={opcao.value} value={opcao.value}>
+                              {opcao.label}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -2190,7 +2197,7 @@ const S3FileManager = ({
                     <div className="flex items-center gap-2 text-xs">
                       <Link className="h-3 w-3 text-green-600" />
                       <span className="text-green-700 dark:text-green-400">
-                        Mapeado para: <strong>{currentS3Mapping}</strong>
+                        Mapeado para: <strong>{rotuloDaPastaGravada(currentS3Mapping, currentS3Display)}</strong>
                       </span>
                     </div>
                   )}
