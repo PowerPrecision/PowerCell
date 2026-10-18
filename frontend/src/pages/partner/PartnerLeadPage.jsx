@@ -25,6 +25,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import ComprovativoObrigatorio from "@/components/partner/ComprovativoObrigatorio";
 import { usePartnerAuth } from "@/contexts/PartnerAuthContext";
 import { queryKeys } from "@/lib/queryClient";
 import { obterDestinos, submeterLead } from "@/services/partnerApi";
@@ -85,21 +86,30 @@ export default function PartnerLeadPage() {
   };
 
   if (criada) {
+    // O comprovativo envia-se AQUI, sem sair do ecrã: um botão que só navegava
+    // para a ficha obrigava o parceiro a procurar o cliente para o enviar.
+    const empresa = criada.empresa ? ` de ${criada.empresa}` : " da empresa de destino";
     return (
-      <Card className="mx-auto max-w-xl">
-        <CardHeader>
-          <CardTitle>{criada.repetida ? "Esta lead já tinha sido submetida" : "Lead criada — falta o comprovativo"}</CardTitle>
-          <CardDescription data-testid="lead-criada-aviso">
-            {criada.repetida
-              ? "Submeteu os mesmos dados há instantes — não criámos uma segunda."
-              : `Envie agora o Comprovativo de Pagamento: é ele que a faz seguir para a fila${criada.empresa ? ` de ${criada.empresa}` : " da empresa de destino"}. Até lá, a lead fica retida do seu lado.`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button asChild><Link to={caminhoDoCaso(criada.id)}>Enviar o comprovativo</Link></Button>
-          <Button type="button" variant="outline" onClick={() => setCriada(null)}>Submeter outra</Button>
-        </CardContent>
-      </Card>
+      <div className="mx-auto max-w-xl space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>{criada.repetida ? "Esta lead já tinha sido submetida" : "Lead criada — falta o comprovativo"}</CardTitle>
+            <CardDescription data-testid="lead-criada-aviso">
+              {criada.repetida
+                ? "Submeteu os mesmos dados há instantes — não criámos uma segunda."
+                : `Envie agora o Comprovativo de Pagamento: é ele que a faz seguir para a fila${empresa}. Até lá, a lead fica retida do seu lado.`}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Button asChild variant="outline"><Link to={caminhoDoCaso(criada.id)}>Abrir a ficha do cliente</Link></Button>
+            <Button type="button" variant="outline" onClick={() => setCriada(null)}>Submeter outra</Button>
+          </CardContent>
+        </Card>
+        <ComprovativoObrigatorio
+          caseId={criada.id}
+          descricao={`Obrigatório. Escolha o ficheiro (ou arraste-o) para a lead seguir para a fila${empresa}.`}
+        />
+      </div>
     );
   }
 

@@ -64,6 +64,7 @@ from services.partner_visibility import (
     etapa_de_um_estado,
     ficheiro_e_visivel,
     filtrar_casos,
+    notas_da_equipa,
     ordenar_por_actividade,
     quem_enviou,
     taxa_de_conversao,
@@ -473,6 +474,9 @@ async def run_get_case(partner: dict, case_id: str) -> dict:
             caso.process.get("status"), await carregar_fases(rede=rede_do_processo(caso.process)),
         )
         base = dto_do_processo(caso.process, etapa)
+        # As notas da equipa são só do DETALHE (e só de um processo: uma lead
+        # ainda não tem equipa a escrever nelas).
+        base["notas_da_equipa"] = notas_da_equipa(caso.process)
     else:
         base = dto_da_lead(caso.client)
 

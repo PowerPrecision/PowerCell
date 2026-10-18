@@ -11,17 +11,17 @@ import { Link, useParams } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, CheckCircle2, Clock, FileCheck2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ClientDataForm from "@/components/partner/ClientDataForm";
 import PartnerUploadBox from "@/components/partner/PartnerUploadBox";
+import ComprovativoObrigatorio from "@/components/partner/ComprovativoObrigatorio";
+import NotasDaEquipa from "@/components/partner/NotasDaEquipa";
 import PedidoDeDocumento from "@/components/partner/PedidoDeDocumento";
 import FicheiroDoCaso from "@/components/partner/FicheiroDoCaso";
 import { queryKeys } from "@/lib/queryClient";
 import { obterCaso } from "@/services/partnerApi";
 import {
-  CATEGORIA_DO_COMPROVATIVO,
   ETAPA_DEVOLVIDA,
   formatarData,
   leadExpirada,
@@ -68,31 +68,6 @@ function AvisoDaLead({ caso }) {
     <p className="rounded-md border border-border bg-secondary p-3 text-sm text-muted-foreground">
       Esta lead está a ser analisada pela nossa equipa. Pode já enviar os documentos que souber que vão ser pedidos.
     </p>
-  );
-}
-
-/** O Comprovativo de Pagamento: a única coisa que liberta uma lead retida. */
-function ComprovativoObrigatorio({ caseId }) {
-  return (
-    <Card data-testid="comprovativo-obrigatorio" className="border-destructive/40">
-      <CardContent className="space-y-3 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <p className="font-medium">Comprovativo de Pagamento</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Obrigatório. Enquanto não o enviar, a lead fica retida e a nossa equipa não a vê.
-            </p>
-          </div>
-          <Badge variant="destructive" className="gap-1"><Clock className="h-3 w-3" aria-hidden="true" />Obrigatório</Badge>
-        </div>
-        <PartnerUploadBox
-          caseId={caseId}
-          categoria={CATEGORIA_DO_COMPROVATIVO}
-          rotulo="Enviar comprovativo"
-          testId="comprovativo"
-        />
-      </CardContent>
-    </Card>
   );
 }
 
@@ -184,6 +159,8 @@ export default function PartnerCasePage() {
       </header>
 
       <AvisoDaLead caso={caso} />
+
+      {!eLead && <NotasDaEquipa notas={caso.notas_da_equipa} />}
 
       {eLead ? (
         <Tabs defaultValue="documentos" className="space-y-4">

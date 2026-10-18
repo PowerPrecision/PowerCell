@@ -97,6 +97,10 @@ export function normalizarCaso(resposta) {
       .filter((p) => p && typeof p === "object" && p.id)
       .map((p) => ({ ...p, ficheiros: ficheiros(p.ficheiros) })),
     ficheiros: ficheiros(r.ficheiros),
+    // As notas da equipa (só leitura): sempre uma lista, sem lixo.
+    notas_da_equipa: (Array.isArray(r.notas_da_equipa) ? r.notas_da_equipa : []).filter(
+      (n) => n && typeof n === "object" && texto(n.text)
+    ),
     // As categorias que o parceiro pode escolher (as do Portal do Cliente +
     // o Comprovativo de Pagamento), sempre uma lista.
     categorias: (Array.isArray(r.categorias) ? r.categorias : []).filter(
@@ -158,6 +162,26 @@ export function progressoDoPedido(pedido) {
 
 export function rotuloDeAutoria(by) {
   return by === "eu" ? "Enviado por si" : "Enviado pelo cliente";
+}
+
+/** O tipo de um ficheiro pelo nome: decide o ícone e a etiqueta (PDF, imagem, Word). */
+export function tipoDeFicheiro(nome) {
+  const m = /\.([a-z0-9]{1,5})$/i.exec(String(nome || "").trim());
+  const extensao = m ? m[1].toLowerCase() : "";
+  if (extensao === "pdf") return { tipo: "pdf", extensao: "PDF" };
+  if (["jpg", "jpeg", "png"].includes(extensao)) return { tipo: "imagem", extensao: extensao.toUpperCase() };
+  if (["doc", "docx"].includes(extensao)) return { tipo: "documento", extensao: extensao.toUpperCase() };
+  return { tipo: "outro", extensao: extensao ? extensao.toUpperCase() : "" };
+}
+
+/**
+ * A empresa a que um caso pertence, para a etiqueta da lista: onde o processo
+ * está agora (`empresa_actual`) ou, numa lead, a que o parceiro escolheu
+ * (`empresa_destino`). Sem nome conhecido, `null` — não se inventa.
+ */
+export function empresaDoCaso(caso) {
+  const nome = caso?.empresa_actual || caso?.empresa_destino;
+  return typeof nome === "string" && nome.trim() ? nome.trim() : null;
 }
 
 export function tamanhoLegivel(bytes) {
