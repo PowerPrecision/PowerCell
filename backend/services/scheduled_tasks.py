@@ -61,6 +61,21 @@ from services.email_sync_cadence import (  # noqa: F401
 from services.tenant_network import PROJECCAO_DO_CARIMBO
 
 
+
+def _data_iso_com_fuso(texto: Any) -> datetime:
+    """Lê uma data ISO e devolve-a SEMPRE com fuso (UTC se vier sem ele).
+
+    Os documentos misturam `2026-09-01` / `2026-09-01T10:00:00` (sem fuso) com
+    `...Z` / `+00:00`, e aqui compara-se tudo com `datetime.now(timezone.utc)`.
+    Subtrair uma data sem fuso a uma com fuso é `TypeError` — e, num ciclo que
+    corre tudo seguido, uma única ficha antiga parava as tarefas todas.
+    Levanta `ValueError`/`TypeError`/`AttributeError` para entrada ilegível
+    (os chamadores já os tratam).
+    """
+    valor = datetime.fromisoformat(texto.replace("Z", "+00:00"))
+    return valor if valor.tzinfo is not None else valor.replace(tzinfo=timezone.utc)
+
+
 class ScheduledTasksService:
     """Serviço de tarefas agendadas."""
     
@@ -134,7 +149,7 @@ class ScheduledTasksService:
                     continue
                 
                 try:
-                    expiry_date = datetime.fromisoformat(expiry_date_str.replace('Z', '+00:00'))
+                    expiry_date = _data_iso_com_fuso(expiry_date_str)
                 except (ValueError, TypeError):
                     continue
                 
@@ -479,7 +494,7 @@ class ScheduledTasksService:
                 continue
             
             try:
-                approval_date = datetime.fromisoformat(approval_date_str.replace('Z', '+00:00'))
+                approval_date = _data_iso_com_fuso(approval_date_str)
             except (ValueError, TypeError):
                 continue
             
@@ -1187,7 +1202,7 @@ class ScheduledTasksService:
                 extracted_at = extraction.get("extracted_at", "")
                 if extracted_at:
                     try:
-                        ext_date = datetime.fromisoformat(extracted_at.replace("Z", "+00:00"))
+                        ext_date = _data_iso_com_fuso(extracted_at)
                         if ext_date >= period_start:
                             this_period_extractions.append(extraction)
                         elif ext_date >= prev_period_start:
@@ -1584,7 +1599,7 @@ class ScheduledTasksService:
         for process in stale_processes:
             last_update = process.get("updated_at") or process.get("created_at", "")
             try:
-                last_date = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+                last_date = _data_iso_com_fuso(last_update)
                 days_since = (today - last_date).days
             except (ValueError, TypeError, AttributeError):
                 days_since = stale_days
@@ -1633,7 +1648,7 @@ class ScheduledTasksService:
         for process in urgent_processes:
             last_update = process.get("updated_at") or process.get("created_at", "")
             try:
-                last_date = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+                last_date = _data_iso_com_fuso(last_update)
                 days_since = (today - last_date).days
             except (ValueError, TypeError, AttributeError):
                 days_since = urgent_days
@@ -1682,21 +1697,35 @@ class ScheduledTasksService:
         try:
             await self.connect()
             
-            # Executar tarefas
-            docs_count = await self.check_expiring_documents()
-            deadlines_count = await self.check_upcoming_deadlines()
-            tasks_count = await self.check_tasks_due_soon()
-            countdown_count = await self.check_pre_approval_countdown()
-            waiting_count = await self.check_clients_waiting_too_long()
-            expired_partner_leads = await self.expire_stale_partner_leads()
-            watchdog_count = await self.check_document_expirations_watchdog()  # NOVA TAREFA
-            monthly_count = await self.send_monthly_document_reminder()
-            stale_count = await self.check_stale_processes()  # Processos atrasados
-            cleanup_count = await self.cleanup_old_notifications()
-            temp_files_count = await self.cleanup_temp_files()
-            cache_count = await self.cleanup_scraper_cache()
-            weekly_report_sent = await self.send_weekly_ai_report()
-            ceo_report_sent = await self.send_weekly_ceo_report()
+            # Cada tarefa é independente: uma ficha com dados fora do esperado
+            # numa delas não pode impedir as restantes (antes, um erro nos
+            # countdowns parava as 9 tarefas seguintes — limpezas e relatórios
+            # incluídos — em todas as passagens). As falhas juntam-se e o ciclo
+            # falha NO FIM, para o painel do Motor as mostrar.
+            falhas: List[str] = []
+
+            async def _tarefa(nome: str, execucao, omissao=0):
+                try:
+                    return await execucao()
+                except Exception as e:
+                    logger.error(f"Tarefa agendada '{nome}' falhou: {e}", exc_info=True)
+                    falhas.append(f"{nome}: {e}")
+                    return omissao
+
+            docs_count = await _tarefa("documentos a expirar", self.check_expiring_documents)
+            deadlines_count = await _tarefa("prazos", self.check_upcoming_deadlines)
+            tasks_count = await _tarefa("tarefas com prazo", self.check_tasks_due_soon)
+            countdown_count = await _tarefa("countdown de pré-aprovação", self.check_pre_approval_countdown)
+            waiting_count = await _tarefa("clientes em espera", self.check_clients_waiting_too_long)
+            expired_partner_leads = await _tarefa("leads de parceiros expiradas", self.expire_stale_partner_leads)
+            watchdog_count = await _tarefa("watchdog de validades", self.check_document_expirations_watchdog)
+            monthly_count = await _tarefa("lembretes mensais", self.send_monthly_document_reminder)
+            stale_count = await _tarefa("processos atrasados", self.check_stale_processes)
+            cleanup_count = await _tarefa("limpeza de notificações", self.cleanup_old_notifications)
+            temp_files_count = await _tarefa("limpeza de temporários", self.cleanup_temp_files)
+            cache_count = await _tarefa("limpeza da cache do scraper", self.cleanup_scraper_cache)
+            weekly_report_sent = await _tarefa("relatório semanal de IA", self.send_weekly_ai_report, False)
+            ceo_report_sent = await _tarefa("relatório semanal do CEO", self.send_weekly_ceo_report, False)
 
             logger.info("=" * 50)
             logger.info("RESUMO DAS TAREFAS")
@@ -1715,7 +1744,12 @@ class ScheduledTasksService:
             logger.info(f"- Relatório AI semanal: {'Enviado' if weekly_report_sent else 'Não enviado (não é segunda-feira)'}")
             logger.info(f"- Relatório CEO semanal: {'Enviado' if ceo_report_sent else 'Não enviado (não é segunda-feira ou sem destinatário)'}")
             logger.info("=" * 50)
-            
+
+            if falhas:
+                raise RuntimeError(
+                    f"{len(falhas)} tarefa(s) agendada(s) falharam: " + " | ".join(falhas)
+                )
+
         except Exception as e:
             logger.error(f"Erro nas tarefas agendadas: {e}")
             raise
