@@ -127,17 +127,19 @@ class TempLinkService:
         await db.temp_links.insert_one(link_doc)
 
         # Construir URL - usar base_url fornecido pelo frontend, env var, ou URL de produção
-        import os
-        effective_base_url = base_url or os.environ.get("FRONTEND_URL", "https://www.powercell.pt")
-        # Remover trailing slash se existir
-        effective_base_url = effective_base_url.rstrip("/")
+        # Sem base nem FRONTEND_URL o link sai RELATIVO (`/upload/<token>`): resolve-se contra o
+        # domínio onde for aberto, em vez de apontar para o de uma marca escrita no código.
+        from services.frontend_url import base_do_frontend
+        effective_base_url = base_do_frontend(base_url)
         if link_type == TempLinkType.UPLOAD:
             url = f"{effective_base_url}/upload/{token}"
         else:
             url = f"{effective_base_url}/download/{token}"
 
-        # Enviar email se solicitado
-        if notify_email and client_email:
+        # Enviar email se solicitado (um link relativo não serve num email: sem base, não sai)
+        if notify_email and client_email and not effective_base_url:
+            logger.error("[TempLink] FRONTEND_URL não definido: o email com o link não foi enviado.")
+        elif notify_email and client_email:
             await TempLinkService._send_notification_email(
                 link_doc, process, url
             )
@@ -349,8 +351,8 @@ class TempLinkService:
         ).sort("created_at", -1).to_list(100)
 
         # Adicionar URLs
-        import os
-        base_url = os.environ.get("FRONTEND_URL", "https://www.powercell.pt")
+        from services.frontend_url import base_do_frontend
+        base_url = base_do_frontend()
         for link in links:
             if link["link_type"] == TempLinkType.UPLOAD.value:
                 link["url"] = f"{base_url}/upload/{link['token']}"
