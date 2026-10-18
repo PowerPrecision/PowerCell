@@ -462,6 +462,11 @@ async def _entregar_magic_link(
         await _avisar_falha_do_envio(user, process_id, client_name, motivo)
         return
 
+    # O acesso SAIU: o alerta «Email de acesso não entregue» deixa de valer (QA-6).
+    from services.email_delivery_status import registar_acesso_entregue_do_processo
+
+    await registar_acesso_entregue_do_processo(process_id)
+
     # Bloco 3 (ponto 21): enviar acesso ao Portal fica no histórico (sem o link)
     # — só DEPOIS de o email ter saído: um registo de «enviou» não pode
     # descrever um envio que falhou.

@@ -129,10 +129,15 @@ class TestAListagemDeRegistosAplicaAPool:
         from services import client_registered as modulo
 
         condicao = build_pool_scope_condition(_scope(rede))
+        estrita = build_network_scope_condition(_scope(rede))
         with patch.object(modulo, "db", fake_async_db), \
                 patch.object(
                     modulo, "build_tenant_pool_condition",
                     AsyncMock(return_value=condicao),
+                ), \
+                patch.object(
+                    modulo, "build_tenant_condition",
+                    AsyncMock(return_value=estrita),
                 ):
             return await modulo.run_list_registered_clients(
                 {"id": "u-domus", "role": "consultor", "email": "d@x.pt"},
@@ -169,6 +174,121 @@ class TestAListagemDeRegistosAplicaAPool:
         resultado = await self._listar(fake_async_db, REDE_POWER)
         ids = {c.get("id") for c in (resultado.get("clients") or resultado)}
         assert {"c-power", "c-pool"} <= ids
+
+
+class TestUmClienteComProcessoJaNaoEDaPool:
+    """QA-6: o Registo de Clientes mostrava clientes de todas as empresas.
+
+    Clientes criados no CRM antes de o carimbo existir não têm rede; com a regra da Pool
+    («sem carimbo é de todos») apareciam a TODAS as redes, mesmo tendo já um processo.
+    A Pool é para o que ainda não foi reivindicado — o que tem processo segue o âmbito normal.
+    """
+
+    async def _ids(self, fake_async_db, rede):
+        from services import client_registered as modulo
+
+        pool = build_pool_scope_condition(_scope(rede))
+        estrita = build_network_scope_condition(_scope(rede))
+        with patch.object(modulo, "db", fake_async_db), \
+                patch.object(modulo, "build_tenant_pool_condition", AsyncMock(return_value=pool)), \
+                patch.object(modulo, "build_tenant_condition", AsyncMock(return_value=estrita)):
+            resultado = await modulo.run_list_registered_clients(
+                {"id": "u", "role": "consultor", "email": "u@x.pt"}, has_process=True,
+            )
+        return {c.get("id") for c in resultado["clients"]}
+
+    async def _semear(self, fake_async_db):
+        # cliente antigo, por carimbar, JÁ com processo (não é da Pool)
+        await fake_async_db.clients.insert_one({
+            "id": "c-antigo", "nome": "Antigo", "registration_completed": True,
+            "process_ids": ["p-1"],
+        })
+        await fake_async_db.processes.insert_one({"id": "p-1", "client_id": "c-antigo"})
+        # cliente com processo, carimbado na Power
+        await fake_async_db.clients.insert_one({
+            "id": "c-power", "nome": "Power", "registration_completed": True,
+            CAMPO_REDE: REDE_POWER, "process_ids": ["p-2"],
+        })
+        await fake_async_db.processes.insert_one({"id": "p-2", "client_id": "c-power"})
+
+    async def test_a_domus_nao_ve_clientes_com_processo_por_carimbar(self, fake_async_db):
+        await self._semear(fake_async_db)
+        assert "c-antigo" not in await self._ids(fake_async_db, REDE_DOMUS)
+
+    async def test_nem_o_carimbado_na_power(self, fake_async_db):
+        await self._semear(fake_async_db)
+        assert "c-power" not in await self._ids(fake_async_db, REDE_DOMUS)
+
+    async def test_a_power_continua_a_ver_o_seu(self, fake_async_db):
+        """Contraprova: sem ela, «a Domus não vê nada» passava."""
+        await self._semear(fake_async_db)
+        assert "c-power" in await self._ids(fake_async_db, REDE_POWER)
+
+    async def test_o_lead_sem_processo_continua_na_pool(self, fake_async_db):
+        from services import client_registered as modulo
+
+        await fake_async_db.clients.insert_one(
+            {"id": "c-lead", "nome": "Lead", "registration_completed": True}
+        )
+        pool = build_pool_scope_condition(_scope(REDE_DOMUS))
+        estrita = build_network_scope_condition(_scope(REDE_DOMUS))
+        with patch.object(modulo, "db", fake_async_db), \
+                patch.object(modulo, "build_tenant_pool_condition", AsyncMock(return_value=pool)), \
+                patch.object(modulo, "build_tenant_condition", AsyncMock(return_value=estrita)):
+            resultado = await modulo.run_list_registered_clients(
+                {"id": "u", "role": "consultor", "email": "u@x.pt"},
+            )
+        assert "c-lead" in {c["id"] for c in resultado["clients"]}
+
+
+class TestVerOProcessoEmVezDeCriarOutro:
+    """QA-6: o `process_ids` do cliente nem sempre está mantido. Um cliente com processo mas
+    sem a lista aparecia «Sem Processo» e só oferecia «Criar Processo»."""
+
+    async def _listar(self, fake_async_db, rede=REDE_POWER):
+        from services import client_registered as modulo
+
+        pool = build_pool_scope_condition(_scope(rede))
+        estrita = build_network_scope_condition(_scope(rede))
+        proc = build_network_scope_condition(_scope(rede))
+        with patch.object(modulo, "db", fake_async_db), \
+                patch.object(modulo, "build_tenant_pool_condition", AsyncMock(return_value=pool)), \
+                patch.object(modulo, "build_tenant_condition", AsyncMock(return_value=estrita)), \
+                patch.object(modulo, "build_tenant_process_condition", AsyncMock(return_value=proc)):
+            resultado = await modulo.run_list_registered_clients(
+                {"id": "u", "role": "consultor", "email": "u@x.pt"},
+            )
+        return {c["id"]: c for c in resultado["clients"]}
+
+    async def test_o_processo_recuperado_pelo_client_id_aparece(self, fake_async_db):
+        await fake_async_db.clients.insert_one({
+            "id": "c-1", "nome": "Sem lista", "registration_completed": True, CAMPO_REDE: REDE_POWER,
+        })
+        await fake_async_db.processes.insert_one({
+            "id": "p-1", "client_id": "c-1", "status": "pre_registo", "process_number": "PROC-9",
+            CAMPO_REDE: REDE_POWER,
+        })
+        cliente = (await self._listar(fake_async_db))["c-1"]
+        assert cliente["has_process"] is True
+        assert [p["id"] for p in cliente["processes"]] == ["p-1"]
+
+    async def test_um_processo_de_outra_rede_nao_e_recuperado(self, fake_async_db):
+        await fake_async_db.clients.insert_one({
+            "id": "c-2", "nome": "Outro", "registration_completed": True, CAMPO_REDE: REDE_POWER,
+        })
+        await fake_async_db.processes.insert_one({
+            "id": "p-2", "client_id": "c-2", "status": "pre_registo", CAMPO_REDE: REDE_DOMUS,
+        })
+        cliente = (await self._listar(fake_async_db))["c-2"]
+        assert cliente["has_process"] is False
+        assert cliente["processes"] == []
+
+    async def test_sem_processo_nenhum_continua_sem_processo(self, fake_async_db):
+        """Contraprova: a recuperação não inventa processos."""
+        await fake_async_db.clients.insert_one({
+            "id": "c-3", "nome": "Lead", "registration_completed": True, CAMPO_REDE: REDE_POWER,
+        })
+        assert (await self._listar(fake_async_db))["c-3"]["has_process"] is False
 
 
 class TestReivindicarCarimbaARede:

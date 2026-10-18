@@ -31,11 +31,11 @@ const comEmpresa = (nome) => ({
 });
 
 describe("o parceiro vê onde o caso está", () => {
-  it("a lista diz «Está em Empresa Z» no caso partilhado em cadeia", async () => {
+  it("a lista mostra a etiqueta da empresa «Empresa Z» no caso partilhado em cadeia", async () => {
     api.listarCasos.mockResolvedValue(comEmpresa("Empresa Z"));
     montar("/parceiro");
     const link = await screen.findByRole("link", { name: /Cliente a-novo/ });
-    expect(within(link).getByText(/Está em Empresa Z/)).toBeInTheDocument();
+    expect(within(link).getByTestId("empresa-do-caso")).toHaveTextContent("Empresa Z");
   });
 
   it("o detalhe também", async () => {
@@ -48,14 +48,26 @@ describe("o parceiro vê onde o caso está", () => {
     api.listarCasos.mockResolvedValue(comEmpresa("Empresa Z, Empresa K"));
     montar("/parceiro");
     const link = await screen.findByRole("link", { name: /Cliente a-novo/ });
-    expect(within(link).getByText(/Está em Empresa Z, Empresa K/)).toBeInTheDocument();
+    expect(within(link).getByTestId("empresa-do-caso")).toHaveTextContent("Empresa Z, Empresa K");
   });
 
   it("sem empresa conhecida não se inventa «Está em»", async () => {
     api.listarCasos.mockResolvedValue(comEmpresa(null));
     montar("/parceiro");
     const link = await screen.findByRole("link", { name: /Cliente a-novo/ });
+    expect(within(link).queryByTestId("empresa-do-caso")).toBeNull();
     expect(within(link).queryByText(/Está em/)).toBeNull();
+  });
+
+  it("uma lead mostra a empresa de destino que o parceiro escolheu", async () => {
+    api.listarCasos.mockResolvedValue({
+      ...FIXTURES.casos,
+      items: FIXTURES.casos.items.map((c) => (c.kind === "lead" ? { ...c, empresa_destino: "Power Real Estate" } : c)),
+    });
+    montar("/parceiro");
+    const etiquetas = await screen.findAllByTestId("empresa-do-caso");
+    expect(etiquetas.length).toBeGreaterThan(0);
+    expect(etiquetas.every((e) => e.textContent === "Power Real Estate")).toBe(true);
   });
 
   it("o parceiro não vê a linhagem: nem setas nem quem passou a quem", async () => {

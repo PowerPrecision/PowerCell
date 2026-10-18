@@ -149,6 +149,11 @@ export function TasksProvider({ children }) {
   const TOAST_DE_SYNC_SUCESSO_MS = 5_000;
   const temporizadoresDeSyncRef = useRef(new Map());
   const eSyncDeEmail = (task) => task?.task_type === TaskTypes.EMAIL_SYNC;
+  // Um envio de email que correu bem é rotina como a sincronização: o aviso de SUCESSO some
+  // sozinho (o de falha fica até o utilizador o fechar). Antes, cada «Email enviado» ficava
+  // colado ao ecrã até alguém clicar no X (QA-6).
+  const eSucessoDeRotina = (task) =>
+    task?.task_type === TaskTypes.EMAIL_SYNC || task?.task_type === TaskTypes.EMAIL_SEND;
   const largarTemporizadorDeSync = (id) => {
     const t = temporizadoresDeSyncRef.current.get(id);
     if (t) clearTimeout(t);
@@ -213,7 +218,7 @@ export function TasksProvider({ children }) {
         description: task.description || "A tarefa foi concluída com sucesso.",
         // A sincronização de email é rotina: o sucesso some sozinho (as outras tarefas ficam até
         // o utilizador fechar, que é o PACOTE DD).
-        duration: eSyncDeEmail(task) ? TOAST_DE_SYNC_SUCESSO_MS : Infinity,
+        duration: eSucessoDeRotina(task) ? TOAST_DE_SYNC_SUCESSO_MS : Infinity,
         closeButton: true, // PACOTE DD — utilizador pode fechar manualmente
         action: task.result_url
           ? {

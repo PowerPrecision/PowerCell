@@ -18,7 +18,12 @@ from fastapi import HTTPException, Request
 
 from database import db
 from services.sub35 import cliente_e_sub35
-from services.tenant_network import build_tenant_pool_condition, com_isolamento
+from services.tenant_network import (
+    build_tenant_condition,
+    build_tenant_pool_condition,
+    build_tenant_process_condition,
+    com_isolamento,
+)
 from models.client import (
     Client, ClientCreate, ClientUpdate,
     ClientContact, ClientPersonalData,
@@ -46,6 +51,30 @@ from utils.input_sanitization import (
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 
 logger = logging.getLogger(__name__)
+
+_SEM_PROCESSOS = {
+    "$or": [
+        {"process_ids": {"$exists": False}},
+        {"process_ids": []},
+        {"process_ids": None},
+    ]
+}
+
+
+async def condicao_de_isolamento_dos_registos(user: dict) -> dict:
+    """Quem vê um registo: a Pool só vale para o que AINDA não tem processo (QA-6).
+
+    A Pool («sem carimbo é de todos») existe para os registos públicos por reivindicar, que
+    ainda não têm processo. Um cliente que JÁ tem processo deixou de estar por reivindicar:
+    pertence à rede desse processo. Aplicar a Pool a todos fazia com que clientes antigos
+    (criados no CRM antes de o carimbo existir) com processo de uma empresa aparecessem no
+    Registo de Clientes de TODAS — a fuga que a QA viu. Para esses vale o âmbito normal, o
+    mesmo das restantes listagens (a pilha por carimbar é da rede de omissão).
+    """
+    pool = await build_tenant_pool_condition(user)
+    estrita = await build_tenant_condition(user)
+    return {"$or": [{"$and": [pool, _SEM_PROCESSOS]}, estrita]}
+
 
 async def run_list_registered_clients(
     user: dict,
@@ -316,7 +345,7 @@ async def run_list_registered_clients(
     # é remontada acima (cursor, $or da pesquisa, triagem) e uma condição
     # posta mais cedo seria sobreposta por uma dessas remontagens sem dar
     # erro nenhum.
-    query = com_isolamento(await build_tenant_pool_condition(user), query)
+    query = com_isolamento(await condicao_de_isolamento_dos_registos(user), query)
 
     # Buscar clientes
     clients = await db.clients.find(
@@ -337,6 +366,29 @@ async def run_list_registered_clients(
         ).to_list(length=50)
         assigned_users = {u["id"]: u["name"] for u in users}
     
+    # O `process_ids` do cliente nem sempre está mantido (processos criados por outros
+    # caminhos não o actualizam): um cliente com processo mas sem a lista aparecia «Sem
+    # Processo» e só oferecia «Criar Processo» — criar um segundo em vez de abrir o que
+    # existe. Recupera-se pelo `client_id` do processo, dentro do âmbito de PROCESSOS.
+    processos_por_cliente: dict = {}
+    sem_lista = [c.get("id") for c in clients if c.get("id") and not c.get("process_ids")]
+    if sem_lista:
+        try:
+            condicao_processos = com_isolamento(
+                await build_tenant_process_condition(user),
+                {"client_id": {"$in": sem_lista}, "is_deleted": {"$ne": True}},
+            )
+            recuperados = await db.processes.find(
+                condicao_processos,
+                {"_id": 0, "id": 1, "process_number": 1, "status": 1, "client_id": 1},
+            ).to_list(length=500)
+            for proc in recuperados:
+                processos_por_cliente.setdefault(proc.get("client_id"), []).append(
+                    {k: proc.get(k) for k in ("id", "process_number", "status")}
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[registos] Falha a recuperar processos por client_id: %s", exc)
+
     # Enriquecer dados dos clientes
     enriched_clients = []
     primary_ids_set = set(primary_client_ids) if primary_client_ids else None
@@ -360,12 +412,16 @@ async def run_list_registered_clients(
         # Buscar informação dos processos
         processes_info = []
         should_exclude = False
+        processes = []
         if process_ids:
             processes = await db.processes.find(
                 {"id": {"$in": process_ids}},
                 {"_id": 0, "id": 1, "process_number": 1, "status": 1}
             ).to_list(length=10)
+        elif processos_por_cliente.get(client_id_val):
+            processes = processos_por_cliente[client_id_val][:10]
 
+        if processes:
             for p in processes:
                 # PACOTE CK — REGRA estrita: Se tem um processo que já passou
                 # da fase inicial, desaparece dos Registos (Leads)
@@ -413,8 +469,8 @@ async def run_list_registered_clients(
             "nif": c.get("dados_pessoais", {}).get("nif"),
             "is_active": c.get("is_active", True),
             "is_ghost": is_ghost,  # Cliente fantasma (apenas 2º titular)
-            "has_process": has_process_flag,
-            "process_count": len(process_ids),
+            "has_process": has_process_flag or bool(processes_info),
+            "process_count": len(process_ids) or len(processes_info),
             "processes": processes_info,
             "assigned_to": c.get("assigned_to"),
             "assigned_to_name": assigned_users.get(c.get("assigned_to")),

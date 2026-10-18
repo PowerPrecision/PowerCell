@@ -220,6 +220,9 @@ PROJECCAO_DO_PROCESSO: dict[str, int] = {
     # Só para dizer ao parceiro ONDE o processo está (a cadeia de partilhas B2B). Entram
     # na leitura, nunca na saída: ele não vê redes, ids nem quem passou a quem.
     "partner_companies": 1,
+    # As notas da equipa (cartão «Observações» do Resumo): só o DETALHE do caso as
+    # devolve (`notas_da_equipa`), nunca a lista nem o painel.
+    "observation_notes": 1, "observations": 1, "notes": 1,
 }
 
 PROJECCAO_DA_LEAD: dict[str, int] = {
@@ -281,6 +284,48 @@ def dto_do_processo(proc: dict, etapa: str, *, pedidos_pendentes: int = 0) -> di
         "created_at": proc.get("created_at"),
         "updated_at": proc.get("updated_at") or proc.get("created_at"),
     }
+
+
+#: Tecto das notas que saem: uma nota é texto livre da equipa, não um documento.
+MAX_NOTAS_DA_EQUIPA = 50
+MAX_CARACTERES_DA_NOTA = 2000
+
+
+def notas_da_equipa(proc: dict) -> list[dict]:
+    """As notas que a equipa escreveu no processo, como o parceiro as vê (só leitura).
+
+    Mesma fonte e mesma ordem do cartão «Observações» do CRM
+    (`resolveProcessObservationNotes`): o feed `observation_notes` e os escalares
+    legados `observations` / `notes`, sem repetições. Saem só `id`, `text`,
+    `created_at` e o NOME de quem escreveu — nunca o `user_id`. Mais recentes primeiro.
+    """
+    notas: list[dict] = []
+    vistos: set[str] = set()
+
+    def acrescentar(id_: Any, texto: Any, criada_em: Any, autor: Any) -> None:
+        if not isinstance(texto, str) or not texto.strip():
+            return
+        chave = " ".join(texto.split()).lower()
+        if chave in vistos:
+            return
+        vistos.add(chave)
+        notas.append({
+            "id": str(id_) if id_ is not None else f"nota-{len(notas)}",
+            "text": texto.strip()[:MAX_CARACTERES_DA_NOTA],
+            "created_at": criada_em if isinstance(criada_em, str) else None,
+            "author_name": autor.strip() if isinstance(autor, str) and autor.strip() else None,
+        })
+
+    feed = proc.get("observation_notes")
+    for nota in feed if isinstance(feed, list) else []:
+        if isinstance(nota, dict):
+            acrescentar(nota.get("id"), nota.get("text"), nota.get("created_at"), nota.get("user_name"))
+    quando = proc.get("updated_at") or proc.get("created_at")
+    for campo in ("observations", "notes"):
+        acrescentar(f"legacy-{campo}", proc.get(campo), quando, None)
+
+    notas.sort(key=lambda n: str(n.get("created_at") or ""), reverse=True)
+    return notas[:MAX_NOTAS_DA_EQUIPA]
 
 
 def lead_fechada_ao_parceiro(client: Optional[dict]) -> bool:

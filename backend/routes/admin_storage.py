@@ -47,14 +47,14 @@ router = APIRouter(prefix="/admin", tags=["Admin - Storage"])
 logger = logging.getLogger(__name__)
 
 
-# ============== ALIAS PARA RETROCOMPATIBILIDADE ==============
-# O frontend usa "client-s3-mappings" mas o backend usa "process-s3-mappings"
-
+# ====== ALIAS: o frontend usa "client-s3-mappings", o backend "process-s3-mappings" ======
 @router.get("/client-s3-mappings")
 async def get_client_s3_mappings_alias(
+    request: Request,
     search: str = Query(None),
     process_id: str = Query(None),
     s3_folder: str = Query(None),
+    has_mapping: bool = Query(None, description="true = com pasta; false = sem pasta"),
     include_closed: bool = Query(False, description="Incluir processos concluídos e desistências"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
@@ -64,12 +64,13 @@ async def get_client_s3_mappings_alias(
     return await run_get_process_s3_mappings(
         search=search,
         status=None,
-        has_mapping=None,
+        has_mapping=has_mapping,
         include_closed=include_closed,
         include_deleted=False,
         page=page,
         limit=limit,
         user=user,
+        request=request,
     )
 
 
@@ -174,6 +175,7 @@ async def get_user_s3_mapping(
 
 @router.get("/process-s3-mappings")
 async def get_process_s3_mappings(
+    request: Request,
     search: str = Query(None, description="Pesquisar por nome ou email"),
     status: str = Query(None, description="Filtrar por status"),
     has_mapping: bool = Query(None, description="Filtrar por ter/não ter mapeamento"),
@@ -192,6 +194,7 @@ async def get_process_s3_mappings(
         page=page,
         limit=limit,
         user=user,
+        request=request,
     )
 
 

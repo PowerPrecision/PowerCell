@@ -4,7 +4,7 @@
  * Extraído de SystemConfigPage.js (tab "maintenance"): índices DB,
  * limpeza jobs/logs, migração de números, mapeamento S3 e sync Prod→Dev.
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
 import S3RelinkPanel from "../../components/admin/S3RelinkPanel";
 import { Button } from "../../components/ui/button";
@@ -15,6 +15,8 @@ import { hasRole } from "../../utils/roleUtils";
 import { safeString } from "../../utils/safeString";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
+import { listClientS3Mappings } from "../../services/api";
+import { opcoesDeMapeamento } from "../../utils/mapeamentoS3";
 import {
   Wrench,
   Database,
@@ -122,6 +124,7 @@ export default function MaintenanceSection({ token, user }) {
   const [selectedMappings, setSelectedMappings] = useState({});
   const [s3SearchTerm, setS3SearchTerm] = useState("");
   const [showUnmappedOnly, setShowUnmappedOnly] = useState(false);
+  const [s3Page, setS3Page] = useState(1);
   const [autoMapping, setAutoMapping] = useState(false);
   const [fixingNames, setFixingNames] = useState(false);
   
@@ -131,14 +134,10 @@ export default function MaintenanceSection({ token, user }) {
   const [syncStatus, setSyncStatus] = useState(null);
   const [syncPolling, setSyncPolling] = useState(false);
   
-  // Filtrar clientes para exibição
-  const filteredS3Clients = s3MappingData?.processes?.filter(p => {
-    const matchesSearch = !s3SearchTerm || 
-      p.client_name?.toLowerCase().includes(s3SearchTerm.toLowerCase());
-    const matchesUnmapped = !showUnmappedOnly || !p.s3_folder;
-    return matchesSearch && matchesUnmapped;
-  }) || [];
-  
+  // O filtro e a pesquisa são do SERVIDOR (todas as páginas): filtrar aqui só via os 50 processos
+  // carregados e «Apenas sem mapeamento» mostrava 1 resultado quando havia dezenas.
+  const filteredS3Clients = s3MappingData?.processes || [];
+
   const migrateProcessNumbers = async () => {
     setMigratingProcessNumbers(true);
     try {
@@ -160,21 +159,42 @@ export default function MaintenanceSection({ token, user }) {
   };
 
   // Carregar dados de mapeamento S3 (Clientes/Processos)
-  const loadS3MappingData = async () => {
+  const loadS3MappingData = async ({ pagina = s3Page, limparSelecoes = true } = {}) => {
     setLoadingS3Mapping(true);
     try {
-      const response = await fetch(`${API_URL}/api/admin/client-s3-mappings`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const { data } = await listClientS3Mappings({
+        search: s3SearchTerm.trim(),
+        hasMapping: showUnmappedOnly ? false : undefined,
+        page: pagina,
       });
-      const data = await response.json();
       setS3MappingData(data);
-      // Limpar selecções anteriores
-      setSelectedMappings({});
+      if (limparSelecoes) setSelectedMappings({});
     } catch {
       toast.error("Erro ao carregar mapeamentos S3");
     } finally {
       setLoadingS3Mapping(false);
     }
+  };
+
+  // Mudar a pesquisa ou o filtro volta à 1.ª página e pede ao servidor (com atraso na escrita).
+  // As alterações por guardar mantêm-se: mudar de página não é descartá-las.
+  const carregouUmaVez = useRef(false);
+  useEffect(() => {
+    if (s3MappingData) carregouUmaVez.current = true;
+  }, [s3MappingData]);
+  useEffect(() => {
+    if (!carregouUmaVez.current) return undefined;
+    const espera = setTimeout(() => {
+      setS3Page(1);
+      loadS3MappingData({ pagina: 1, limparSelecoes: false });
+    }, 300);
+    return () => clearTimeout(espera);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s3SearchTerm, showUnmappedOnly]);
+
+  const irParaPaginaS3 = (pagina) => {
+    setS3Page(pagina);
+    loadS3MappingData({ pagina, limparSelecoes: false });
   };
 
   // Guardar um mapeamento individual de cliente
@@ -521,11 +541,11 @@ export default function MaintenanceSection({ token, user }) {
                 Mapeamento Clientes/Processos → Pastas S3
               </h4>
               <p className="text-sm text-muted-foreground">
-                Associe cada cliente/processo à sua pasta de documentos no S3. Clientes sem mapeamento usarão a pasta baseada no nome.
+                Associe cada cliente/processo à sua pasta de documentos no S3. Um processo sem mapeamento não mostra documentos até ser ligado a uma pasta: o sistema já não a adivinha pelo nome.
               </p>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={loadS3MappingData} disabled={loadingS3Mapping}>
+              <Button variant="outline" onClick={() => loadS3MappingData()} disabled={loadingS3Mapping}>
                 {loadingS3Mapping ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : (
@@ -551,7 +571,7 @@ export default function MaintenanceSection({ token, user }) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
                     <div className="bg-white dark:bg-gray-900 rounded p-3 border text-center">
                       <p className="text-2xl font-bold text-purple-600">{safeString(s3MappingData.stats?.total ?? 0)}</p>
-                      <p className="text-xs text-muted-foreground">Total de Clientes</p>
+                      <p className="text-xs text-muted-foreground">Total de Processos</p>
                     </div>
                     <div className="bg-white dark:bg-gray-900 rounded p-3 border text-center">
                       <p className="text-2xl font-bold text-green-600">{safeString(s3MappingData.stats?.mapped ?? 0)}</p>
@@ -621,6 +641,11 @@ export default function MaintenanceSection({ token, user }) {
                               {p.process_number ? `#${p.process_number}` : ""} 
                               {p.status && <Badge variant="outline" className="text-[10px]">{p.status}</Badge>}
                             </span>
+                            {p.s3_folder_display ? (
+                              <span className="text-xs text-muted-foreground block truncate" data-testid="pasta-legivel">
+                                Pasta: {p.s3_folder_display}
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                         <Link className="h-4 w-4 text-muted-foreground" />
@@ -633,9 +658,9 @@ export default function MaintenanceSection({ token, user }) {
                           }))}
                         >
                           <option value="">-- Sem mapeamento --</option>
-                          {s3MappingData.available_folders?.map((folder) => (
-                            <option key={folder.path} value={folder.path}>
-                              {folder.name}
+                          {opcoesDeMapeamento(s3MappingData.available_folders, p).map((opcao) => (
+                            <option key={opcao.value} value={opcao.value}>
+                              {opcao.label}
                             </option>
                           ))}
                         </select>
@@ -657,10 +682,32 @@ export default function MaintenanceSection({ token, user }) {
                       <p className="text-center text-muted-foreground py-4">Nenhum cliente encontrado</p>
                     )}
                   </div>
+
+                  {(s3MappingData.pages || 1) > 1 && (
+                    <div className="flex items-center justify-between text-sm" data-testid="paginacao-mapeamento">
+                      <Button
+                        variant="outline" size="sm"
+                        disabled={loadingS3Mapping || s3Page <= 1}
+                        onClick={() => irParaPaginaS3(s3Page - 1)}
+                      >
+                        Anterior
+                      </Button>
+                      <span className="text-muted-foreground">
+                        Página {s3Page} de {s3MappingData.pages}
+                      </span>
+                      <Button
+                        variant="outline" size="sm"
+                        disabled={loadingS3Mapping || s3Page >= (s3MappingData.pages || 1)}
+                        onClick={() => irParaPaginaS3(s3Page + 1)}
+                      >
+                        Seguinte
+                      </Button>
+                    </div>
+                  )}
                   
                   <div className="flex justify-between items-center pt-2 border-t">
                     <p className="text-xs text-muted-foreground">
-                      {s3MappingData.available_folders?.length || 0} pastas S3 disponíveis • {s3MappingData.processes?.length || 0} clientes
+                      {s3MappingData.available_folders?.length || 0} pastas S3 disponíveis • {s3MappingData.total ?? s3MappingData.processes?.length ?? 0} processos
                     </p>
                     <Button onClick={saveAllClientS3Mappings} disabled={savingS3Mapping || Object.keys(selectedMappings).length === 0}>
                       {savingS3Mapping ? (

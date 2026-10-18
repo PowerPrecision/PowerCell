@@ -9,7 +9,7 @@
 import React, { useEffect, useState } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Inbox, Search } from "lucide-react";
+import { Building2, ChevronLeft, ChevronRight, Inbox, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import {
   mensagemDeErro,
   normalizarCasos,
   normalizarPainel,
+  empresaDoCaso,
   variantDaEtapa,
 } from "@/utils/partnerPortal";
 
@@ -142,11 +143,16 @@ export default function PartnerDashboardPage() {
                     <div className="min-w-0">
                       <p className="truncate font-medium">{c.client_name || "Sem nome"}</p>
                       <p className="text-xs text-muted-foreground">
-                        {[c.process_number, c.empresa_actual && `Está em ${c.empresa_actual}`, c.consultor_name && `Consultor: ${c.consultor_name}`, formatarData(c.updated_at)]
+                        {[c.process_number, c.consultor_name && `Consultor: ${c.consultor_name}`, formatarData(c.updated_at)]
                           .filter(Boolean).join(" · ")}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {empresaDoCaso(c) && (
+                        <Badge variant="outline" className="gap-1" aria-label={`Empresa: ${empresaDoCaso(c)}`} data-testid="empresa-do-caso">
+                          <Building2 className="h-3 w-3" aria-hidden="true" />{empresaDoCaso(c)}
+                        </Badge>
+                      )}
                       {c.pedidos_pendentes > 0 && (
                         <Badge variant="destructive" aria-label={`${c.pedidos_pendentes} pedidos pendentes`}>
                           {c.pedidos_pendentes} pendente{c.pedidos_pendentes > 1 ? "s" : ""}

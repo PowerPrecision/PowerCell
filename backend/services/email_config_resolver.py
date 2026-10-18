@@ -53,13 +53,18 @@ def _is_nested_email_config(raw_config: Dict[str, Any]) -> bool:
 
 
 def _extract_role_email_config(
-    raw_config: Dict[str, Any], active_role: Optional[str] = None
+    raw_config: Dict[str, Any], active_role: Optional[str] = None,
+    sem_chaves_de_empresa: bool = False,
 ) -> Dict[str, Any]:
     """
     Extract the correct per-role email config from a potentially nested structure.
 
     - If nested: look for active_role, then fall back to "default".
     - If flat (legacy): return as-is (backward compat).
+
+    ``sem_chaves_de_empresa``: quando o chamador já procurou a config da empresa pedida
+    (``company:<id>``) e não a encontrou, o último recurso («o primeiro dict com email»)
+    não pode devolver a ``company:<outra>`` — era a conta da Power a aparecer na Precision.
 
     Returns the flat config dict ready for downstream processing.
     """
@@ -74,10 +79,41 @@ def _extract_role_email_config(
     if isinstance(raw_config.get("default"), dict):
         return raw_config["default"]
     # Fallback: return first dict value
-    for v in raw_config.values():
+    for chave, v in raw_config.items():
+        if sem_chaves_de_empresa and str(chave).startswith("company:"):
+            continue
         if isinstance(v, dict) and v.get("email_address"):
             return v
     return {}
+
+
+async def _recurso_e_de_outra_empresa(user: Dict[str, Any], user_id: str, empresa_pedida: str) -> bool:
+    """A config genérica («default»/por cargo) do utilizador pertence a OUTRA empresa?
+
+    A config sem chave de empresa vem do tempo em que cada utilizador tinha uma só. Para
+    quem tem acesso a várias empresas (o Master), ela é a da empresa de origem dele
+    (`users.company`): usá-la para a Precision era enviar com as credenciais da Power e
+    mostrar a conta da Power no cartão da Precision. Quem tem uma só empresa mantém o recurso.
+    """
+    try:
+        ucrs = await db.user_company_roles.find(
+            {"user_id": user_id, "is_deleted": {"$ne": True}, "is_active": {"$ne": False}},
+            {"_id": 0, "company_id": 1},
+        ).to_list(100)
+        empresas = {u.get("company_id") for u in ucrs if u.get("company_id")}
+        if len(empresas) < 2:
+            return False
+        casa = str(user.get("company") or "").strip().lower()
+        if not casa:
+            return True
+        if casa == str(empresa_pedida).strip().lower():
+            return False
+        empresa = await db.companies.find_one({"id": empresa_pedida}, {"_id": 0, "name": 1})
+        nome = str((empresa or {}).get("name") or "").strip().lower()
+        return not (nome and nome == casa)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[EmailConfigResolver] Falha a decidir o recurso genérico: %s", exc)
+        return False
 
 
 async def resolve_email_config(
@@ -189,9 +225,16 @@ async def resolve_email_config(
                     f"email_config[\"{company_key}\"] para user={user_id}"
                 )
 
-    # CAMINHO 0c: Fallback para extração por role ou "default"
+    # CAMINHO 0c: Fallback para extração por role ou "default" — mas NUNCA com a config
+    # de outra empresa quando foi pedida uma empresa concreta.
     if not user_email_config:
-        user_email_config = _extract_role_email_config(raw_email_config, active_role)
+        empresa_concreta = bool(active_company_id) and str(active_company_id).strip().lower() != "default"
+        if empresa_concreta and await _recurso_e_de_outra_empresa(user, user_id, active_company_id):
+            user_email_config = {}
+        else:
+            user_email_config = _extract_role_email_config(
+                raw_email_config, active_role, sem_chaves_de_empresa=empresa_concreta,
+            )
 
     # ==================================================================
     # REGRAS PARA ROLES COM FORÇA PARTILHADA (indexacao, suporte, etc.)

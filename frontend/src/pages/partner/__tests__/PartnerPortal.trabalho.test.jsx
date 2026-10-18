@@ -228,9 +228,29 @@ describe("submeter uma lead", () => {
 
     expect(await screen.findByText("Lead criada — falta o comprovativo")).toBeInTheDocument();
     expect(screen.getByTestId("lead-criada-aviso")).toHaveTextContent(/fila de Power Real Estate/);
-    expect(screen.getByRole("link", { name: "Enviar o comprovativo" })).toHaveAttribute("href", "/parceiro/casos/lead-novo");
+    // O comprovativo envia-se NESTE ecrã (o botão antigo só navegava para a ficha).
+    expect(screen.getByTestId("comprovativo-obrigatorio")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Abrir a ficha do cliente" })).toHaveAttribute("href", "/parceiro/casos/lead-novo");
     await userEvent.click(screen.getByRole("button", { name: "Submeter outra" }));
     expect(await screen.findByLabelText("1. Empresa de destino *")).toHaveValue("");
+  });
+
+  it("o comprovativo enviado no ecrã de sucesso vai para a lead recém-criada, com a categoria certa", async () => {
+    api.submeterLead.mockResolvedValue(leadCriada);
+    api.enviarFicheiro.mockResolvedValue({ ...confirmacao, lead_submetida: true });
+    montar("/parceiro/novo-lead");
+    await preencherO_Essencial();
+    await userEvent.click(screen.getByRole("checkbox", { name: /autorização do cliente/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Submeter lead" }));
+    await screen.findByText("Lead criada — falta o comprovativo");
+
+    const ficheiro = new File(["%PDF-1.4"], "comprovativo.pdf", { type: "application/pdf" });
+    await userEvent.upload(screen.getByTestId("input-comprovativo"), ficheiro);
+
+    await waitFor(() => expect(api.enviarFicheiro).toHaveBeenCalledTimes(1));
+    expect(api.enviarFicheiro.mock.calls[0][0]).toBe("lead-novo");
+    expect(api.enviarFicheiro.mock.calls[0][2].category).toBe("Comprovativo_Pagamento");
+    expect(await screen.findByText(/A lead seguiu para a nossa equipa/)).toBeInTheDocument();
   });
 
   it("o duplo clique do próprio parceiro diz que já tinha sido submetida", async () => {
@@ -346,10 +366,36 @@ describe("o caso", () => {
     expect(screen.getByRole("link", { name: /Voltar ao painel/ })).toHaveAttribute("href", "/parceiro");
   });
 
-  it("não há notas internas nem dados financeiros na página", async () => {
+  it("não há dados financeiros na página (as notas da equipa SIM aparecem, só de leitura)", async () => {
     const { container } = montar("/parceiro/casos/a-novo");
     await screen.findByRole("heading", { name: "Cliente a-novo" });
-    expect(container.textContent).not.toMatch(/comiss|NOTA INTERNA|€|NIF|rendimento|prestação/i);
+    expect(container.textContent).not.toMatch(/comiss|€|NIF|rendimento|prestação/i);
+    const notas = screen.getByTestId("notas-da-equipa");
+    expect(notas).toHaveTextContent("NOTA INTERNA: cliente difícil");
+    // só de leitura: o cartão não tem nenhum campo nem botão
+    expect(within(notas).queryByRole("textbox")).toBeNull();
+    expect(within(notas).queryByRole("button")).toBeNull();
+  });
+
+  it("sem notas, o cartão di-lo em vez de desaparecer", async () => {
+    api.obterCaso.mockImplementation(async () => ({ ...structuredClone(FIXTURES.casoDeProcesso), notas_da_equipa: [] }));
+    montar("/parceiro/casos/a-novo");
+    expect(await screen.findByText("A equipa ainda não deixou notas neste processo.")).toBeInTheDocument();
+  });
+
+  it("uma lead não tem cartão de notas da equipa", async () => {
+    montar("/parceiro/casos/lead-1");
+    await screen.findByRole("tab", { name: /Documentos/ });
+    expect(screen.queryByTestId("notas-da-equipa")).toBeNull();
+  });
+
+  it("os cartões de documentos distinguem o estado e o tipo de ficheiro", async () => {
+    montar("/parceiro/casos/a-novo");
+    await screen.findByRole("heading", { name: "Cliente a-novo" });
+    const estados = Array.from(document.querySelectorAll("[data-estado]")).map((e) => e.getAttribute("data-estado"));
+    expect(estados).toEqual(expect.arrayContaining(["pendente", "recebido"]));
+    const tipos = Array.from(document.querySelectorAll("li[data-tipo]")).map((e) => e.getAttribute("data-tipo"));
+    expect(tipos).toEqual(expect.arrayContaining(["pdf", "imagem"]));
   });
 });
 

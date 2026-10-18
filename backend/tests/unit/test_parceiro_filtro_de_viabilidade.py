@@ -572,5 +572,7 @@ class TestExpiracaoAos60Dias:
 
     async def test_o_job_agendado_chama_a_expiracao(self):
         fonte = (BACKEND / "services" / "scheduled_tasks.py").read_text(encoding="utf-8")
-        assert "expire_stale_partner_leads()" in fonte, "o job não corre: a expiração seria código morto"
+        # Desde o isolamento das tarefas, o job passa-se ao `_tarefa(...)` em vez de
+        # ser chamado em linha: o que importa é que o ciclo o ligue.
+        assert "self.expire_stale_partner_leads" in fonte, "o job não corre: a expiração seria código morto"
         assert "expirar_leads_inactivas" in fonte

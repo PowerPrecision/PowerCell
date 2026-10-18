@@ -442,12 +442,23 @@ class TestSemDadosFinanceiros:
         _dono(com_bd)
         blob = repr([
             await ppr.run_list_cases(PT1),
+            await ppr.run_get_dashboard(PT1),
             await ppr.run_get_case(PT1, "a-novo"),
             await ppr.run_get_case(PT1, "lead-1"),
         ])
+        # As notas da equipa SAEM no detalhe do processo (decisão do dono do
+        # produto, Out 2026) — por isso já não estão nesta lista; a lista e o painel
+        # continuam a não as levar (testes abaixo).
         for segredo in ("250000", "3200", "310000", "Rua Secreta", "123456789", "cliente@x.pt", "912345678",
-                        "NOTA INTERNA", "segredo@x.pt", "987654321", "1500", "angariacao"):
+                        "segredo@x.pt", "987654321", "1500", "angariacao"):
             assert segredo not in blob, segredo
+
+    async def test_a_lista_e_o_painel_nunca_levam_as_notas_da_equipa(self, com_bd):
+        import services.partner_portal_read as ppr
+
+        _dono(com_bd)
+        blob = repr([await ppr.run_list_cases(PT1), await ppr.run_get_dashboard(PT1)])
+        assert "NOTA INTERNA" not in blob and "obs internas" not in blob and "interna" not in blob
 
     async def test_a_saida_do_processo_e_exactamente_a_lista_positiva(self, com_bd):
         import services.partner_portal_read as ppr
@@ -591,3 +602,77 @@ class TestPedidosEFicheiros:
         detalhe = await ppr.run_get_case(PT1, "lead-1")
         assert [p["id"] for p in detalhe["pedidos"]] == ["lr-1"]
         assert detalhe["kind"] == "lead"
+
+
+# ════════════════════════════════════════════════════════════════════
+#  NOTAS DA EQUIPA NO DETALHE (Out 2026)
+# ════════════════════════════════════════════════════════════════════
+@pytest.mark.asyncio
+class TestNotasDaEquipaNoDetalhe:
+    async def test_o_parceiro_dono_ve_as_notas_do_seu_processo(self, com_bd):
+        import services.partner_portal_read as ppr
+
+        _dono(com_bd)
+        com_bd.processes.docs[0]["observation_notes"] = [
+            {"id": "n1", "text": "Falta a declaração de IRS", "created_at": "2026-10-03T10:00:00+00:00",
+             "user_id": "USER-INTERNO-1", "user_name": "Carla Consultora"},
+            {"id": "n2", "text": "Banco pediu 2 meses de recibos", "created_at": "2026-10-05T10:00:00+00:00",
+             "user_id": "USER-INTERNO-2", "user_name": "Rui"},
+        ]
+        caso = await ppr.run_get_case(PT1, "a-novo")
+        textos = [n["text"] for n in caso["notas_da_equipa"]]
+        # mais recentes primeiro; o escalar legado também conta, sem repetir
+        assert textos[:2] == ["Banco pediu 2 meses de recibos", "Falta a declaração de IRS"]
+        assert "NOTA INTERNA: cliente difícil" in textos
+        assert {n["author_name"] for n in caso["notas_da_equipa"]} >= {"Carla Consultora", "Rui"}
+
+    async def test_nao_sai_o_id_de_quem_escreveu(self, com_bd):
+        import services.partner_portal_read as ppr
+
+        _dono(com_bd)
+        com_bd.processes.docs[0]["observation_notes"] = [
+            {"id": "n1", "text": "x", "created_at": "2026-10-03T10:00:00+00:00",
+             "user_id": "USER-INTERNO-1", "user_name": "Carla"},
+        ]
+        caso = await ppr.run_get_case(PT1, "a-novo")
+        assert "USER-INTERNO-1" not in repr(caso)
+        assert all(set(n) == {"id", "text", "created_at", "author_name"} for n in caso["notas_da_equipa"])
+
+    async def test_um_parceiro_que_nao_e_o_dono_nao_as_ve(self, com_bd):
+        import services.partner_portal_read as ppr
+
+        _dono(com_bd)
+        outro = {**PT1, "id": "outro-parceiro"}
+        with pytest.raises(HTTPException):
+            await ppr.run_get_case(outro, "a-novo")
+
+    async def test_a_lead_nao_tem_notas_da_equipa(self, com_bd):
+        import services.partner_portal_read as ppr
+
+        _dono(com_bd)
+        assert "notas_da_equipa" not in await ppr.run_get_case(PT1, "lead-1")
+
+    async def test_sem_notas_e_uma_lista_vazia(self, com_bd):
+        import services.partner_portal_read as ppr
+
+        _dono(com_bd)
+        for campo in ("notes", "observations", "observation_notes"):
+            com_bd.processes.docs[0].pop(campo, None)
+        assert (await ppr.run_get_case(PT1, "a-novo"))["notas_da_equipa"] == []
+
+    def test_o_tecto_de_notas_e_de_caracteres(self):
+        from services.partner_visibility import MAX_CARACTERES_DA_NOTA, MAX_NOTAS_DA_EQUIPA, notas_da_equipa
+
+        muitas = {"observation_notes": [
+            {"id": f"n{i}", "text": f"nota {i} " + "x" * 5000, "created_at": f"2026-10-01T10:{i % 60:02d}:00+00:00"}
+            for i in range(MAX_NOTAS_DA_EQUIPA + 20)
+        ]}
+        saida = notas_da_equipa(muitas)
+        assert len(saida) == MAX_NOTAS_DA_EQUIPA
+        assert all(len(n["text"]) <= MAX_CARACTERES_DA_NOTA for n in saida)
+
+    def test_lixo_na_fonte_nao_rebenta(self):
+        from services.partner_visibility import notas_da_equipa
+
+        assert notas_da_equipa({"observation_notes": "texto", "notes": 5, "observations": None}) == []
+        assert notas_da_equipa({"observation_notes": [None, 3, {"text": "  "}, {"text": "ok"}]})[0]["text"] == "ok"

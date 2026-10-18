@@ -64,9 +64,16 @@ class _IMAPFalso:
     def list(self):
         return "OK", list(type(self).lista)
 
+    respostas_por_pasta: dict = {}
+    criar_pasta = ("NO", [b"nao"])
+
+    def create(self, pasta):
+        type(self).chamadas.append(("create", pasta))
+        return type(self).criar_pasta
+
     def append(self, pasta, flags, data, mensagem):
         type(self).chamadas.append(("append", pasta, flags, mensagem))
-        return type(self).resposta_append
+        return type(self).respostas_por_pasta.get(pasta, type(self).resposta_append)
 
     def logout(self):
         type(self).chamadas.append(("logout",))
@@ -79,6 +86,8 @@ def mundo(monkeypatch):
     _IMAPFalso.lista = [b'(\\HasNoChildren) "." "INBOX"', b'(\\HasNoChildren \\Sent) "." "INBOX.Enviados-do-servidor"']
     _IMAPFalso.erro_no_login = None
     _IMAPFalso.resposta_append = ("OK", [b"APPEND completed"])
+    _IMAPFalso.respostas_por_pasta = {}
+    _IMAPFalso.criar_pasta = ("NO", [b"nao"])
     monkeypatch.setenv("IMAP_APPEND_ENABLED", "true")
     db = FakeAsyncDatabase()
     alvos = [
@@ -207,6 +216,33 @@ class TestACopiaNosEnviadosDoServidor:
         assert _appends() == []
         d = [x async for x in mundo.emails.find({})][0]
         assert d["imap_appended"] is False and "Enviados" in d["imap_append_error"]
+
+    async def test_pasta_marcada_recusada_tenta_a_seguinte(self, mundo):
+        """Uma pasta `\\Sent` só de leitura não deixa o email sem cópia se um nome habitual aceita."""
+        _IMAPFalso.lista = [
+            b'(\\HasNoChildren \\Sent) "." "Arquivo-Sent"', b'(\\HasNoChildren) "." "Sent"',
+        ]
+        _IMAPFalso.respostas_por_pasta = {'"Arquivo-Sent"': ("NO", [b"[READ-ONLY]"])}
+        await _enviar()
+        assert [a[1] for a in _appends()] == ['"Arquivo-Sent"', '"Sent"']
+        d = [x async for x in mundo.emails.find({})][0]
+        assert d["imap_appended"] is True and d["imap_folder"] == "Sent"
+
+    async def test_caixa_sem_enviados_cria_a_pasta(self, mundo):
+        _IMAPFalso.lista = [b'(\\HasNoChildren) "." "INBOX"']
+        _IMAPFalso.criar_pasta = ("OK", [b"created"])
+        await _enviar()
+        assert ("create", "Sent") in _IMAPFalso.chamadas
+        assert _appends()[0][1] == '"Sent"'
+        d = [x async for x in mundo.emails.find({})][0]
+        assert d["imap_appended"] is True
+
+    async def test_todas_as_pastas_recusadas_regista_o_motivo_de_cada_uma(self, mundo):
+        _IMAPFalso.resposta_append = ("NO", [b"quota"])
+        r = await _enviar()
+        assert r["success"] is True
+        d = [x async for x in mundo.emails.find({})][0]
+        assert d["imap_appended"] is False and "quota" in d["imap_append_error"]
 
     async def test_servidor_imap_em_baixo_nao_derruba_o_envio(self, mundo):
         _IMAPFalso.erro_no_login = OSError("ligação recusada")

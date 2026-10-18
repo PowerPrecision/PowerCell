@@ -5,11 +5,13 @@
  * servidor resolve-o entre os ficheiros que ele pode ver.
  */
 import React, { useState } from "react";
-import { Download, FileText, Loader2 } from "lucide-react";
+import { Download, File as FicheiroGenerico, FileImage, FileText, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { obterUrlDeDescarga } from "@/services/partnerApi";
-import { formatarData, mensagemDeErro, podeDescarregar, rotuloDeAutoria, tamanhoLegivel } from "@/utils/partnerPortal";
+import { formatarData, mensagemDeErro, podeDescarregar, rotuloDeAutoria, tamanhoLegivel, tipoDeFicheiro } from "@/utils/partnerPortal";
+
+const ICONE_POR_TIPO = { pdf: FileText, imagem: FileImage, documento: FileText, outro: FicheiroGenerico };
 
 export default function FicheiroDoCaso({ caseId, ficheiro }) {
   const [aObter, setAObter] = useState(false);
@@ -41,12 +43,21 @@ export default function FicheiroDoCaso({ caseId, ficheiro }) {
   // também o recusa; esconder o botão é só a cortesia).
   const comDescarga = podeDescarregar(ficheiro);
 
+  const { tipo, extensao } = tipoDeFicheiro(ficheiro.filename);
+  const Icone = ICONE_POR_TIPO[tipo];
+
   return (
-    <li className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
-      <div className="flex min-w-0 items-center gap-2">
-        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    <li
+      data-tipo={tipo}
+      className="flex items-center justify-between gap-3 rounded-md border-2 border-border bg-secondary/40 px-3 py-2"
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-md border border-border bg-background">
+          <Icone className="h-4 w-4 text-foreground" aria-hidden="true" />
+          {extensao ? <span className="text-[9px] font-bold leading-none text-muted-foreground">{extensao}</span> : null}
+        </span>
         <div className="min-w-0">
-          <p className="truncate text-sm">{ficheiro.filename || "Ficheiro"}</p>
+          <p className="truncate text-sm font-medium">{ficheiro.filename || "Ficheiro"}</p>
           <p className="text-xs text-muted-foreground">{detalhe}</p>
           {erro && <p role="alert" className="text-xs text-destructive">{erro}</p>}
         </div>

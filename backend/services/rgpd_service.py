@@ -816,7 +816,7 @@ async def send_rgpd_email(
         request_id: ID do pedido
         user_email: Email do utilizador que solicitou
         custom_message: Mensagem personalizada a incluir no email
-        base_url: URL base para o link (default: variável de ambiente ou www.powercell.pt)
+        base_url: URL base para o link (por omissão a variável de ambiente FRONTEND_URL; sem nenhuma, o email não é enviado)
         raise_on_error: Pacote FQ-4 — se True, propaga smtplib.SMTPAuthenticationError
             (ou smtplib.SMTPException genérico) em vez de engolir o erro e devolver
             False. Usado pelo endpoint de reenvio (`/admin/{id}/resend`) para poder
@@ -834,10 +834,14 @@ async def send_rgpd_email(
     Returns:
         True se enviado com sucesso
     """
-    import os
-    # PACOTE DI — URL de produção actualizada para Precision Crédito.
-    if base_url is None:
-        base_url = os.environ.get("FRONTEND_URL", "https://www.precisioncredito.pt")
+    from services.frontend_url import base_do_frontend
+
+    # Sem `base_url` nem `FRONTEND_URL` não se inventa um domínio de marca: o link iria para o
+    # site de outra rede. Sem base, o email não sai (e di-lo no log).
+    base_url = base_do_frontend(base_url)
+    if not base_url:
+        logger.error("[RGPD] FRONTEND_URL não definido e sem base no pedido: o email com o link não foi enviado.")
+        return False
     
     # Construir link temporário
     rgpd_link = f"{base_url}/rgpd/{token}"

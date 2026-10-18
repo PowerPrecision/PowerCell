@@ -504,6 +504,26 @@ describe("S3FileManager — «Forçar criação de pasta» (Lote 6)", () => {
     expect(screen.getByTestId("s3-mapping-toggle")).toHaveTextContent("proc-1");
   });
 
+  it("o painel «Mapeamento S3» mostra nomes legíveis e nunca o caminho com uuids (QA-6)", async () => {
+    const UUID = "9f1c3a52-1111-4111-8111-aaaaaaaaaaaa";
+    const gravada = `Documentação Clientes/${UUID}/processos/${UUID}`;
+    ligarRede({ carga: COM_PASTA });
+    axiosFalso.respostas.set("/admin/client-s3-mappings", {
+      available_folders: [{ path: `Documentação Clientes/${UUID}`, name: UUID, display_name: "Ana Costa" }],
+      processes: [{ id: "proc-1", s3_folder: gravada, s3_folder_display: "Ana Costa › Processo n.º 7" }],
+    });
+    const u = (await import("@testing-library/user-event")).default.setup();
+    montar(utilizador({ user: { id: "u-m", name: "Sistema", role: "master" }, effectiveRole: "master" }));
+    await aguardarCarregado();
+
+    await u.click(await screen.findByTestId("s3-mapping-toggle"));
+    await screen.findByTestId("s3-folder-select");
+
+    expect(screen.getByTestId("s3-mapping-toggle")).toHaveTextContent("Ana Costa › Processo n.º 7");
+    expect(screen.getByText(/Mapeado para/)).toHaveTextContent("Ana Costa › Processo n.º 7");
+    expect(document.body.textContent).not.toContain(UUID);
+  });
+
   it.each([
     ["com pasta (base_path preenchido)", COM_PASTA, {}],
     ["resposta sem base_path (contrato antigo)", RESPOSTA_FICHEIROS, {}],

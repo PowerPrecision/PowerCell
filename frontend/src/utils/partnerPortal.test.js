@@ -220,3 +220,23 @@ describe("a lead", () => {
     expect(p).toMatchObject({ name: "Ana", nif: "501964843", phone: "912", notes: "olá" });
   });
 });
+
+describe("tipoDeFicheiro e empresaDoCaso (Out 2026)", () => {
+  it("o tipo decide o ícone pela extensão, sem distinguir maiúsculas", async () => {
+    const { tipoDeFicheiro } = await import("./partnerPortal");
+    expect(tipoDeFicheiro("irs.PDF")).toEqual({ tipo: "pdf", extensao: "PDF" });
+    expect(tipoDeFicheiro("foto.jpeg")).toEqual({ tipo: "imagem", extensao: "JPEG" });
+    expect(tipoDeFicheiro("carta.docx")).toEqual({ tipo: "documento", extensao: "DOCX" });
+    expect(tipoDeFicheiro("sem-extensao")).toEqual({ tipo: "outro", extensao: "" });
+    expect(tipoDeFicheiro(null)).toEqual({ tipo: "outro", extensao: "" });
+  });
+
+  it("a empresa do caso é a de agora, ou a de destino da lead; nunca inventada", async () => {
+    const { empresaDoCaso } = await import("./partnerPortal");
+    expect(empresaDoCaso({ empresa_actual: "Z", empresa_destino: "Y" })).toBe("Z");
+    expect(empresaDoCaso({ empresa_destino: " Y " })).toBe("Y");
+    expect(empresaDoCaso({ empresa_actual: null })).toBeNull();
+    expect(empresaDoCaso({ empresa_actual: "   " })).toBeNull();
+    expect(empresaDoCaso(null)).toBeNull();
+  });
+});

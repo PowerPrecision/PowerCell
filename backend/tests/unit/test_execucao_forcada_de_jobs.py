@@ -101,7 +101,7 @@ class TestOQueNaoSeForca:
 
     def test_os_restantes_forcam_se(self):
         """Contraprova: sem ela, "nada se força" passava o teste acima."""
-        for chave in ("scheduled_tasks", "lead_matching", "background_job_monitor"):
+        for chave in ("scheduled_tasks", "webmail_worker_sync", "background_job_monitor"):
             assert je.pode_ser_forcado(chave) is True
 
     @pytest.mark.asyncio
@@ -133,10 +133,10 @@ class TestOEndpointDistingueOsDoisCaminhos:
         import services.task_queue_mongo as tqm
         monkeypatch.setattr(tqm, "pedir_execucao_de_job", falso_pedir)
 
-        resposta = await motor.run_forcar_execucao_de_job("lead_matching", user=ADMIN)
+        resposta = await motor.run_forcar_execucao_de_job("webmail_worker_sync", user=ADMIN)
         assert resposta["modo"] == "pedido_ao_worker"
         assert resposta["pedido_id"] == "pedido-1"
-        assert pedidos == ["lead_matching"]
+        assert pedidos == ["webmail_worker_sync"]
 
     @pytest.mark.asyncio
     async def test_a_mensagem_do_worker_DIZ_que_e_um_pedido(self, monkeypatch):
@@ -233,14 +233,13 @@ class TestOLacoEOBotaoUsamOMESMOTrabalho:
         horário que o laço não cumpre."""
         fonte = codigo_sem_comentarios((BACKEND / "worker.py").read_text(encoding="utf-8"))
         assert "JOBS_DECLARADOS" in fonte
-        for numero in ("3600", "1800", "600"):
+        for numero in ("3600", "600"):
             assert f'interval_seconds={numero}' not in fonte
 
     def test_CONTRAPROVA_o_registo_declarado_tem_mesmo_as_cadencias(self):
         jobs = _modulo_do_worker()._jobs_do_processador()
         assert jobs == {
             "scheduled_tasks": 3600,
-            "lead_matching": 1800,
             "webmail_worker_sync": 600,
         }
 

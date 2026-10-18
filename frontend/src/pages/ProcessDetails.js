@@ -223,6 +223,7 @@ import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithE
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateProcessDetailsQueries } from "../lib/queryClient";
+import { agendarRefrescoDosAlertas } from "../utils/refrescarAlertasDoProcesso";
 import { useProcessFullData } from "../hooks/queries/useProcessQuery";
 import { deriveProcessDetailsViewModel, resolveAssignedNames } from "./processDetails/processDetailsHydration";
 // Sub-componentes das abas — cada um é responsável apenas pelo seu domínio
@@ -2659,6 +2660,8 @@ const ProcessDetails = () => {
                         try {
                           await sendMagicLinkEmail(id);
                           toast.success("A enviar o email com o link do portal. Será avisado se não sair.");
+                          // A entrega é em segundo plano: o alerta «não entregue» só cai quando sai.
+                          agendarRefrescoDosAlertas(queryClient, id);
                         } catch (error) {
                           // 404 («processo eliminado»), 400 (sem remetente), 502 e 500: um
                           // só aviso, com o motivo do servidor — e o toast «retry agendado»

@@ -361,6 +361,14 @@ const EmailConfigForm = ({
   // O "Testar Ligação" autentica em IMAP e SMTP; isto envia mesmo, pelo
   // caminho de produção. Relay recusado, política de remetente e limites
   // do servidor só falham DEPOIS do login, e é essa a lacuna que fecha.
+  // O resultado de um envio de teste BEM SUCEDIDO é informação de um instante: limpa-se
+  // sozinho. Um erro fica até a próxima tentativa (é o que o utilizador precisa de ler).
+  useEffect(() => {
+    if (!sendTestResult?.success) return undefined;
+    const t = setTimeout(() => setSendTestResult(null), 12000);
+    return () => clearTimeout(t);
+  }, [sendTestResult]);
+
   const handleSendTest = async () => {
     setSendingTest(true);
     setSendTestResult(null);
@@ -369,7 +377,9 @@ const EmailConfigForm = ({
       // como tal — não mandam rever as credenciais, que podem estar certas.
       const response = await api.post(sendTestUrl(), null, { ...companyRequestConfig(), skipErrorToast: true });
       setSendTestResult({ success: true, ...response.data });
-      toast.success(response.data?.message || "Email de teste enviado");
+      // Duração explícita: o aviso de sucesso não pode ficar colado ao ecrã (QA-6). O resultado
+      // detalhado fica no cartão abaixo, que também se limpa sozinho.
+      toast.success(response.data?.message || "Email de teste enviado", { duration: 5000 });
     } catch (error) {
       const detail = mensagemDeFalha(error, "Não foi possível enviar o email de teste");
       setSendTestResult({ success: false, error: detail });

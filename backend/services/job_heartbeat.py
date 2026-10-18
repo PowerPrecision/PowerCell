@@ -14,7 +14,6 @@ PORQUE É QUE O ESTADO TEM DE SER PERSISTIDO
 
     processo worker (`powercell-worker`)
       · scheduler_loop → run_all_tasks (alertas) — 1 h
-      · lead matching — 30 min
       · sync webmail (rede de segurança) — 10 min
 
   O `last_runs` do `worker.py` é um DICIONÁRIO LOCAL DE UMA FUNÇÃO:
@@ -118,14 +117,6 @@ JOBS_DECLARADOS: list[dict[str, Any]] = [
             "(passam a Expirado) e limpeza de notificações antigas."
         ),
         "interval_seconds": 3600,
-        "processo": "worker",
-        "so_em_producao": True,
-    },
-    {
-        "chave": "lead_matching",
-        "nome": "Cruzamento automático de leads",
-        "descricao": "Procura imóveis compatíveis com as leads em aberto.",
-        "interval_seconds": 1800,
         "processo": "worker",
         "so_em_producao": True,
     },

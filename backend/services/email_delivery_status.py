@@ -79,6 +79,27 @@ async def _set_client_delivery_status(
         )
 
 
+async def registar_acesso_entregue_do_processo(process_id: Optional[str]) -> None:
+    """Um envio do acesso ao Portal SAIU: o estado de entrega do cliente passa a «sent».
+
+    O alerta «Email de acesso não entregue» lê ``portal_email_delivery.status``, que só o
+    envio de BOAS-VINDAS actualizava. Os outros dois caminhos que entregam o acesso — «Enviar
+    por Email» do link e «Reenviar acesso» — enviavam com sucesso e deixavam o estado a
+    ``failed``: o aviso ficava para sempre no processo (QA-6). Best-effort: o email já saiu.
+    """
+    if not process_id:
+        return
+    try:
+        processo = await db.processes.find_one(
+            {"id": process_id}, {"_id": 0, "client_id": 1, "second_client_id": 1}
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[PORTAL-EMAIL-DELIVERY] Falha a ler o processo %s: %s", process_id, exc)
+        return
+    # O link vai ao titular 1; o estado do 2.º titular não é desta tabela.
+    await _set_client_delivery_status((processo or {}).get("client_id"), DELIVERY_SENT)
+
+
 async def resolve_client_creator_user_id(
     client_id: Optional[str],
     fallback_user_id: Optional[str] = None,

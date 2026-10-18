@@ -106,6 +106,26 @@
   ],
   "id": "a-novo",
   "kind": "process",
+  "notas_da_equipa": [
+    {
+      "author_name": null,
+      "created_at": "2026-10-02T10:00:00+00:00",
+      "id": "legacy-observations",
+      "text": "obs internas"
+    },
+    {
+      "author_name": null,
+      "created_at": "2026-10-02T10:00:00+00:00",
+      "id": "legacy-notes",
+      "text": "NOTA INTERNA: cliente difícil"
+    },
+    {
+      "author_name": null,
+      "created_at": null,
+      "id": "nota-0",
+      "text": "interna"
+    }
+  ],
   "pedidos": [
     {
       "category": "Cartão de Cidadão",

@@ -21,7 +21,7 @@ Uso:
 """
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Iterable
 
 from arq import create_pool
 from arq.connections import ArqRedis
@@ -108,9 +108,22 @@ class TaskQueueService:
         from services import task_queue_mongo
         return await task_queue_mongo.add_task(task_type, payload, **kwargs)
 
-    async def get_next_task(self) -> Optional[Dict[str, Any]]:
+    async def get_next_task(
+        self,
+        *,
+        tipos: Optional[Iterable[str]] = None,
+        excluir_tipos: Optional[Iterable[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Reclama a próxima tarefa da fila Mongo.
+
+        Os filtros TÊM de atravessar este invólucro: o `worker_loop` passa
+        `excluir_tipos` e o `scheduler_loop` `tipos` (dois consumidores da mesma
+        fila). Sem eles aqui o worker rebentava com `TypeError` a cada 5 s.
+        """
         from services import task_queue_mongo
-        return await task_queue_mongo.get_next_task()
+        return await task_queue_mongo.get_next_task(
+            tipos=tipos, excluir_tipos=excluir_tipos
+        )
 
     async def complete_task(self, task_id: str, result: Any = None) -> bool:
         from services import task_queue_mongo

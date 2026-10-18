@@ -739,9 +739,10 @@ def _porta_imap(porta: Any) -> int:
     return 993 if valor <= 0 or valor in _PORTAS_QUE_NAO_SAO_IMAP else valor
 
 
-def _pasta_enviados_do_servidor(mail: "imaplib.IMAP4_SSL") -> Optional[str]:
-    """A pasta «Enviados» da caixa: a marcada `\\Sent` (RFC 6154) ou, na falta, um nome habitual."""
+def _pastas_enviados_do_servidor(mail: "imaplib.IMAP4_SSL") -> List[str]:
+    """As pastas «Enviados» possíveis, por ordem: a marcada `\\Sent` (RFC 6154) e depois os nomes habituais que existem."""
     existentes: list[str] = []
+    marcadas: list[str] = []
     try:
         tipo, linhas = mail.list()
     except Exception:  # noqa: BLE001 - sem LIST, tenta-se pelos nomes habituais
@@ -756,13 +757,20 @@ def _pasta_enviados_do_servidor(mail: "imaplib.IMAP4_SSL") -> Optional[str]:
             if nome.startswith('"') and nome.endswith('"'):
                 nome = nome[1:-1]
             existentes.append(nome)
-            if "\\sent" in m.group("flags").lower():
-                return nome
+            if "\\sent" in m.group("flags").lower() and nome not in marcadas:
+                marcadas.append(nome)
     por_minusculas = {n.lower(): n for n in existentes}
-    for candidato in NOMES_DA_PASTA_ENVIADOS:
-        if candidato.lower() in por_minusculas:
-            return por_minusculas[candidato.lower()]
-    return None
+    habituais = [
+        por_minusculas[c.lower()] for c in NOMES_DA_PASTA_ENVIADOS
+        if c.lower() in por_minusculas and por_minusculas[c.lower()] not in marcadas
+    ]
+    return [*marcadas, *habituais]
+
+
+def _pasta_enviados_do_servidor(mail: "imaplib.IMAP4_SSL") -> Optional[str]:
+    """A primeira pasta «Enviados» possível, ou `None`."""
+    pastas = _pastas_enviados_do_servidor(mail)
+    return pastas[0] if pastas else None
 
 
 def _imap_append_enviados_sync(account: "EmailAccount", password: str, mensagem: bytes, timeout: int = 20) -> Dict[str, Any]:
@@ -774,15 +782,31 @@ def _imap_append_enviados_sync(account: "EmailAccount", password: str, mensagem:
             account.imap_server, _porta_imap(account.imap_port), ssl_context=contexto, timeout=timeout,
         )
         mail.login(account.email, password)
-        pasta = _pasta_enviados_do_servidor(mail)
-        if not pasta:
-            return {"ok": False, "error": "A caixa não tem uma pasta «Enviados» reconhecível."}
-        tipo, resposta = mail.append(
-            f'"{pasta}"', "\\Seen", imaplib.Time2Internaldate(datetime.now(timezone.utc).timestamp()), mensagem,
-        )
-        if tipo != "OK":
-            return {"ok": False, "folder": pasta, "error": f"APPEND recusado: {resposta}"}
-        return {"ok": True, "folder": pasta}
+        pastas = _pastas_enviados_do_servidor(mail)
+        if not pastas:
+            # Caixa nova, sem «Enviados»: cria-se (é o que um cliente de email faz ao primeiro envio).
+            try:
+                tipo_criar, _ = mail.create("Sent")
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": f"A caixa não tem pasta «Enviados» e não foi possível criá-la: {exc}"}
+            if tipo_criar != "OK":
+                return {"ok": False, "error": "A caixa não tem uma pasta «Enviados» reconhecível."}
+            pastas = ["Sent"]
+        # Tenta cada pasta possível: uma marcada `\\Sent` pode estar só de leitura ou fora da
+        # subscrição, e um APPEND recusado numa não deve deixar o email sem cópia se a seguinte aceita.
+        recusas: List[str] = []
+        for pasta in pastas:
+            try:
+                tipo, resposta = mail.append(
+                    f'"{pasta}"', "\\Seen", imaplib.Time2Internaldate(datetime.now(timezone.utc).timestamp()), mensagem,
+                )
+            except Exception as exc:  # noqa: BLE001 - passa à pasta seguinte
+                recusas.append(f"{pasta}: {type(exc).__name__}: {exc}")
+                continue
+            if tipo == "OK":
+                return {"ok": True, "folder": pasta}
+            recusas.append(f"{pasta}: {resposta}")
+        return {"ok": False, "folder": pastas[0], "error": "APPEND recusado — " + " | ".join(recusas)}
     except Exception as exc:  # noqa: BLE001 - a cópia nunca faz falhar um envio que já saiu
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     finally:
@@ -812,6 +836,83 @@ async def _processo_do_email_pai(in_reply_to: Optional[str]) -> Optional[str]:
     except Exception:  # noqa: BLE001 - herdar o processo é um extra
         return None
     return (pai or {}).get("process_id") or None
+
+
+async def _ja_tenho_este_email(
+    db_,
+    *,
+    msg_id: str,
+    user_id: str,
+    company_id: Optional[str],
+    mailbox_addr: str,
+    conta_original: str,
+    assunto: str,
+    destinatarios: List[str],
+    sent_at: Optional[str],
+) -> bool:
+    """A sincronização pessoal já tem este email? (nunca o duplica)
+
+    Duas respostas, por esta ordem:
+
+    1. **Pelo Message-ID** (+ utilizador + endereço da caixa). A empresa só conta quando o
+       documento a TEM: o email que o próprio CRM enviou é arquivado com a empresa da sessão
+       (ou sem ela), e a sincronização conhece a da configuração — exigir igualdade estrita
+       deixava o mesmo email entrar duas vezes, uma «Enviado via …» e outra «User webmail sync».
+       O endereço compara-se em minúsculas e na forma original (os documentos antigos guardaram
+       a original).
+    2. **Pelo envio próprio**: alguns servidores SMTP reescrevem o Message-ID, e a cópia que
+       volta dos «Enviados» já não traz o nosso. Um email enviado por aqui (`synced: False`)
+       com o mesmo assunto e destinatários nos 30 minutos em volta é o mesmo email — e fica a
+       conhecer o id do servidor, para a próxima passagem o achar logo pela via 1.
+    """
+    enderecos = [e for e in {mailbox_addr, (conta_original or "").strip()} if e]
+    condicoes: List[Dict[str, Any]] = [
+        {"$or": [{"message_id": msg_id}, {"server_message_id": msg_id}]},
+        {"synced_for_user": user_id},
+    ]
+    if company_id:
+        condicoes.append({"$or": [
+            {"company_id": company_id},
+            {"company_id": {"$exists": False}},
+            {"company_id": None},
+        ]})
+    if enderecos:
+        condicoes.append({"account": {"$in": enderecos}})
+    if await db_.emails.find_one({"$and": condicoes}):
+        return True
+
+    if not assunto or not destinatarios or not enderecos:
+        return False
+    try:
+        referencia = datetime.fromisoformat((sent_at or "").replace("Z", "+00:00"))
+        if referencia.tzinfo is None:
+            referencia = referencia.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return False
+    alvo = sorted(str(e).strip().lower() for e in destinatarios if e)
+    proprios = await db_.emails.find({
+        "synced_for_user": user_id,
+        "synced": False,
+        "direction": "sent",
+        "subject": assunto,
+        "account": {"$in": enderecos},
+    }).sort("created_at", -1).to_list(10)
+    for proprio in proprios:
+        if sorted(str(e).strip().lower() for e in (proprio.get("to_emails") or []) if e) != alvo:
+            continue
+        try:
+            quando = datetime.fromisoformat(str(proprio.get("sent_at") or "").replace("Z", "+00:00"))
+            if quando.tzinfo is None:
+                quando = quando.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if abs((quando - referencia).total_seconds()) <= 30 * 60:
+            try:
+                await db_.emails.update_one({"id": proprio["id"]}, {"$set": {"server_message_id": msg_id}})
+            except Exception as exc:  # noqa: BLE001 - só acelera a próxima passagem
+                logger.debug("[User Email Sync] server_message_id não gravado: %s", exc)
+            return True
+    return False
 
 
 async def send_email(
@@ -2367,18 +2468,27 @@ async def sync_user_emails(
                 if not msg_id:
                     continue
                 
-                # Verificar se já existe (por message_id + user_id + empresa)
-                existing_query = {
-                    "message_id": msg_id,
-                    "synced_for_user": user_id,
-                }
-                if company_id:
-                    existing_query["company_id"] = company_id
+                # Verificar se já existe (message_id + utilizador + caixa; empresa quando o documento a tem)
                 mailbox_addr = (config.get("email_address") or "").strip().lower()
-                if mailbox_addr:
-                    existing_query["account"] = mailbox_addr
-                existing = await db.emails.find_one(existing_query)
-                
+                try:
+                    _data_para_dedupe = datetime.fromisoformat(
+                        str(em.get("date") or "").replace("Z", "+00:00")
+                    ).isoformat()
+                except (TypeError, ValueError):
+                    _data_para_dedupe = None
+                e_envio = em.get("direction") == "sent"
+                existing = await _ja_tenho_este_email(
+                    db,
+                    msg_id=msg_id,
+                    user_id=user_id,
+                    company_id=company_id,
+                    mailbox_addr=mailbox_addr,
+                    conta_original=config.get("email_address", ""),
+                    assunto=em.get("subject", "") if e_envio else "",
+                    destinatarios=(em.get("to_emails") or []) if e_envio else [],
+                    sent_at=_data_para_dedupe if e_envio else None,
+                )
+
                 if existing:
                     total_duplicates += 1
                     continue
@@ -2487,7 +2597,7 @@ async def sync_user_emails(
                     "created_by": user_id,
                     "notes": f"User webmail sync - {config.get('email_address', '')}",
                     "synced": True,
-                    "account": config.get("email_address", ""),
+                    "account": (config.get("email_address", "") or "").strip().lower(),
                     "synced_for_user": user_id,
                     "message_id": msg_id,
                     "is_read": em.get("direction") == "sent" or em.get("_is_draft", False),

@@ -104,12 +104,6 @@ async def _executar_tarefas_agendadas() -> None:
     await ScheduledTasksService().run_all_tasks()
 
 
-async def _executar_matching_de_leads() -> None:
-    from services.client_match import match_leads_to_clients
-
-    await match_leads_to_clients()
-
-
 async def _executar_sync_de_webmail_do_worker() -> None:
     from services.webmail_worker_sync import run_webmail_worker_sync
 
@@ -122,7 +116,6 @@ EXECUTORES: dict[str, Callable[[], Awaitable[Any]]] = {
     "backup_diario": _executar_backup,
     "cdc_audit": _executar_cdc,
     "scheduled_tasks": _executar_tarefas_agendadas,
-    "lead_matching": _executar_matching_de_leads,
     "webmail_worker_sync": _executar_sync_de_webmail_do_worker,
 }
 

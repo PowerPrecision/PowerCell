@@ -25,19 +25,22 @@
  * =====================
  * 1. **Carrega a pedido.** A listagem varre duas colecções e o bucket; abrir a
  *    página de Manutenção não tem de pagar isso.
- * 2. **O `<select>` é NATIVO**, como o do bloco acima: a lista de pastas pode
- *    ter milhares de entradas e um combobox com portal não é melhor nisso.
+ * 2. **A pasta é um `<select>` NATIVO** (a lista de pastas pode ter milhares de
+ *    entradas e um combobox com portal não é melhor nisso) mas a FICHA a religar
+ *    escolhe-se num COMBOBOX pesquisável (QA-6): não há caixa de texto livre. A
+ *    pesquisa só filtra — o valor que sai é o de uma ficha que existe — e vai ao
+ *    servidor, que é quem conhece todas (a lista carregada tem no máximo 100).
  * 3. **O aviso de partilha aparece como `toast.warning` e fica na linha.**
  *    Consolidar duas fichas na mesma pasta é legítimo; quem o faz tem de ver
  *    que vai partilhar, e não só no instante do clique.
  */
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, FolderSearch, Loader2, RefreshCw, Save } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import Combobox from "@/components/shared/Combobox";
 import { extractErrorMessage } from "@/utils/extractErrorMessage";
 import { getS3Relink, setS3Relink } from "@/services/api";
 import { nomeVisivel, temColisao } from "@/utils/pastaS3";
@@ -53,6 +56,9 @@ const S3RelinkPanel = () => {
   const [escolhas, setEscolhas] = useState({});
   const [avisos, setAvisos] = useState({});
   const [pesquisa, setPesquisa] = useState("");
+  // A ficha escolhida no combobox (objecto inteiro: continua a existir mesmo que uma nova
+  // pesquisa a tire da lista carregada).
+  const [fichaEscolhida, setFichaEscolhida] = useState(null);
   const [tipo, setTipo] = useState("");
   const [apenasPorResolver, setApenasPorResolver] = useState(false);
 
@@ -80,6 +86,23 @@ const S3RelinkPanel = () => {
   }, [pesquisa, tipo, apenasPorResolver]);
 
   const chave = (entidade) => `${entidade.tipo}:${entidade.id}`;
+
+  // A pesquisa do combobox vai ao servidor, com atraso na escrita. Só depois de a lista ter sido
+  // carregada uma vez (abrir o combobox é que a carrega).
+  const jaCarregou = useRef(false);
+  useEffect(() => {
+    if (dados) jaCarregou.current = true;
+  }, [dados]);
+  useEffect(() => {
+    if (!jaCarregou.current) return undefined;
+    const espera = setTimeout(() => carregar(), 300);
+    return () => clearTimeout(espera);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pesquisa]);
+
+  const aoAbrirOCombobox = () => {
+    if (!dados && !aCarregar) carregar();
+  };
 
   const gravar = async (entidade) => {
     const k = chave(entidade);
@@ -116,8 +139,22 @@ const S3RelinkPanel = () => {
     }
   };
 
-  const entidades = dados?.entidades || [];
+  const todasAsEntidades = dados?.entidades || [];
   const pastas = dados?.pastas || [];
+  // Com uma ficha escolhida mostra-se só ela (a versão mais recente, se a lista a ainda tem).
+  const entidades = fichaEscolhida
+    ? [todasAsEntidades.find((e) => chave(e) === chave(fichaEscolhida)) || fichaEscolhida]
+    : todasAsEntidades;
+  const opcoesDeFichas = [
+    ...(fichaEscolhida && !todasAsEntidades.some((e) => chave(e) === chave(fichaEscolhida))
+      ? [fichaEscolhida]
+      : []),
+    ...todasAsEntidades,
+  ].map((e) => ({
+    value: chave(e),
+    label: e.nome || `(sem nome) ${e.id}`,
+    hint: ROTULO_DO_TIPO[e.tipo] || e.tipo,
+  }));
 
   return (
     <div
@@ -147,12 +184,20 @@ const S3RelinkPanel = () => {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <Input
-          className="max-w-xs"
-          placeholder="Pesquisar por nome…"
-          value={pesquisa}
-          onChange={(e) => setPesquisa(e.target.value)}
-          aria-label="Pesquisar por nome"
+        <Combobox
+          ariaLabel="Ficha a religar"
+          placeholder="Escolher cliente ou processo…"
+          placeholderDaPesquisa="Pesquisar por nome…"
+          textoSemResultados="Nenhuma ficha corresponde."
+          opcoes={opcoesDeFichas}
+          value={fichaEscolhida ? chave(fichaEscolhida) : null}
+          onChange={(valor) => {
+            const encontrada = (dados?.entidades || []).find((e) => chave(e) === valor);
+            setFichaEscolhida(encontrada || null);
+          }}
+          aCarregar={aCarregar}
+          onPesquisar={setPesquisa}
+          onAbrir={aoAbrirOCombobox}
         />
         <select
           className="h-9 rounded-md border border-input bg-background px-2 text-sm"

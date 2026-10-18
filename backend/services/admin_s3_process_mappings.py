@@ -6,6 +6,7 @@ Extraído de `routes/admin_storage.py`.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -13,6 +14,7 @@ from fastapi import HTTPException
 
 from database import db
 from services.s3_document_root import RAIZ, e_id_gerado
+from services.s3_folder_display import caminho_legivel
 from services.process_status import ARCHIVED_STATUSES, DELETED_STATUS_VALUES
 from services.s3_document_root import (
     PastaGravadaInvalida,
@@ -65,6 +67,7 @@ async def run_get_process_s3_mappings(
     page: int,
     limit: int,
     user: dict,
+    request=None,
 ):
     """Lista mapeamentos de processos para pastas S3."""
     query = {}
@@ -86,25 +89,22 @@ async def run_get_process_s3_mappings(
         else:
             query["status"] = {"$nin": list(DELETED_STATUS_VALUES)}
 
+    # Condições que precisam de um `$or` próprio juntam-se por `$and`: a pesquisa e o filtro de
+    # «sem mapeamento» escreviam ambos em `query["$or"]` e o segundo apagava o primeiro.
+    condicoes_or: list = []
     if search:
-        query["$or"] = [
-            {"client_name": {"$regex": search, "$options": "i"}},
-            {"client_email": {"$regex": search, "$options": "i"}},
-            {"process_number": {"$regex": search, "$options": "i"}}
-        ]
+        procura = re.escape(search)
+        condicoes_or.append({"$or": [
+            {"client_name": {"$regex": procura, "$options": "i"}},
+            {"client_email": {"$regex": procura, "$options": "i"}},
+            {"process_number": {"$regex": procura, "$options": "i"}}
+        ]})
 
     if status:
         query["status"] = status
 
-    if has_mapping is not None:
-        if has_mapping:
-            query["s3_folder"] = {"$exists": True, "$nin": [None, ""]}
-        else:
-            query["$or"] = [
-                {"s3_folder": {"$exists": False}},
-                {"s3_folder": None},
-                {"s3_folder": ""}
-            ]
+    if condicoes_or:
+        query["$and"] = condicoes_or
 
     skip = (page - 1) * limit
 
@@ -114,14 +114,19 @@ async def run_get_process_s3_mappings(
 
     query = com_isolamento(await build_tenant_process_condition(user or {}), query)
 
+    # As contagens são SEMPRE sobre o conjunto sem o filtro de mapeamento: com «só sem pasta»
+    # ligado, o cartão «Com mapeamento» dizia 0 e o «Total» igualava o «Sem mapeamento».
+    com_pasta = {"s3_folder": {"$exists": True, "$nin": [None, ""]}}
+    sem_pasta = {"$or": [{"s3_folder": {"$exists": False}}, {"s3_folder": None}, {"s3_folder": ""}]}
     total = await db.processes.count_documents(query)
-
-    # Contar processos com e sem mapeamento S3
-    mapped_count = await db.processes.count_documents({
-        **query,
-        "s3_folder": {"$exists": True, "$nin": [None, ""]}
-    })
+    mapped_count = await db.processes.count_documents({"$and": [query, com_pasta]})
     unmapped_count = total - mapped_count
+
+    if has_mapping is True:
+        query = {"$and": [query, com_pasta]}
+    elif has_mapping is False:
+        query = {"$and": [query, sem_pasta]}
+    total_filtrado = await db.processes.count_documents(query) if has_mapping is not None else total
 
     processes = await db.processes.find(
         query,
@@ -133,9 +138,19 @@ async def run_get_process_s3_mappings(
             "client_email": 1,
             "status": 1,
             "s3_folder": 1,
+            "client_id": 1,
             "created_at": 1
         }
     ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+
+    # Só para o ECRÃ: o caminho cru (`…/<uuid>/processos/<uuid>`) não diz nada a quem mapeia.
+    # O `s3_folder` continua intacto — é ele que se compara e que se grava.
+    for processo in processes:
+        processo["s3_folder_display"] = caminho_legivel(
+            pasta_gravada(processo.get("s3_folder"), contexto=f"processo {processo.get('id')}"),
+            nome_do_cliente=processo.get("client_name"),
+            numero_do_processo=processo.get("process_number"),
+        )
 
     from services.s3_storage import s3_service
     available_folders = []
@@ -159,13 +174,15 @@ async def run_get_process_s3_mappings(
         except Exception as e:
             logger.warning(f"Erro ao listar pastas S3: {e}")
 
+        available_folders = await _pastas_visiveis_com_nome(available_folders, request, user)
+
     return {
         "processes": processes,
         "available_folders": available_folders,
-        "total": total,
+        "total": total_filtrado,
         "page": page,
         "limit": limit,
-        "pages": (total + limit - 1) // limit,
+        "pages": (total_filtrado + limit - 1) // limit,
         "s3_configured": s3_service.is_configured(),
         "stats": {
             "total": total,
@@ -173,6 +190,29 @@ async def run_get_process_s3_mappings(
             "unmapped": unmapped_count
         }
     }
+
+
+async def _pastas_visiveis_com_nome(pastas: list, request, user: dict) -> list:
+    """As pastas que quem pede pode ver, cada uma com o `display_name` (nome do cliente em vez do uuid).
+
+    Com `request` aplica a mesma parede do Explorador (`filtrar_subpastas`): a lista de pastas de
+    topo é a carteira de clientes do bucket inteiro e este endpoint também é lido por Admin/CEO/
+    Diretor, que só vêem a sua rede. Sem `request` (chamadores internos) só se acrescenta o nome.
+    Falha FECHADA: se a parede não consegue decidir, não se devolve nenhuma pasta.
+    """
+    if not pastas:
+        return []
+    try:
+        if request is not None:
+            from services.s3_explorer_scope import ambito_do_utilizador, filtrar_subpastas
+            scope, papel = await ambito_do_utilizador(request, user, vista=True)
+            return await filtrar_subpastas(pastas, scope, role=papel)
+        from services.s3_explorer_scope import carregar_pastas, nome_legivel
+        mapa = await carregar_pastas([p["path"] for p in pastas])
+        return [{**p, "display_name": nome_legivel(mapa.get(p["path"]), p.get("name") or "")} for p in pastas]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[S3-MAPPINGS] Não foi possível resolver as pastas visíveis (%s).", exc)
+        return [] if request is not None else pastas
 
 
 async def run_update_process_s3_mapping(process_id: str, s3_folder: Optional[str], user: dict):
