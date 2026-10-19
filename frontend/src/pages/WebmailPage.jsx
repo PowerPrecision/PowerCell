@@ -582,6 +582,8 @@ const WebmailPage = () => {
     data: webmailData,
     isLoading: emailsLoading,
     isFetched: emailsFetched,
+    isError: emailsIsError,
+    error: emailsError,
   } = useWebmailEmails({
     token,
     folder: activeCustomFolder ? "custom" : activeFolder,
@@ -685,6 +687,13 @@ const WebmailPage = () => {
     : selectedLabel
     ? labels.find((l) => l.id === selectedLabel)?.name || "Marcador"
     : FOLDERS.find((f) => f.id === activeFolder)?.label || "";
+
+  // QA-9 — uma falha a LER a lista (empresa fora do âmbito, caixa sem permissão) nunca se mostra como
+  // «pasta vazia»: o pedido da troca de perfil do Master era recusado em silêncio e o ecrã dizia
+  // «Sem emails nesta pasta». Só quando não há nada para mostrar (com cache, a lista antiga fica).
+  const erroDaLista = emailsIsError && emails.length === 0
+    ? (emailsError?.message || "Tente novamente dentro de instantes.")
+    : null;
 
   const listEmptyMessage = searchQuery
     ? "Nenhum email encontrado"
@@ -1921,6 +1930,7 @@ const WebmailPage = () => {
               loading={loading}
               headerTitle={listHeaderTitle}
               emptyMessage={listEmptyMessage}
+              erro={erroDaLista}
               totalEmails={emails.length}
               selectedEmailId={selectedEmail?.id || null}
               selectedEmails={selectedEmails}

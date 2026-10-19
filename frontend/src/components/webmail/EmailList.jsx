@@ -12,6 +12,7 @@
  * outro. `__tests__/EmailList.test.jsx` tranca esse contrato.
  */
 import {
+  AlertCircle,
   CheckSquare,
   ChevronDown,
   ChevronRight,
@@ -43,6 +44,8 @@ const nomeVisivel = (email) =>
  * @param {boolean} [props.loading]
  * @param {string} [props.headerTitle] Nome da pasta/marcador activo.
  * @param {string} [props.emptyMessage] Texto do estado vazio (decidido pelo contentor).
+ * @param {string|null} [props.erro] Falha a LER a lista. Nunca se apresenta como «vazia»: um pedido recusado
+ *   (empresa fora do âmbito, caixa sem permissão) e uma pasta sem emails não são a mesma coisa (QA-9).
  * @param {number} [props.totalEmails] Total da página — usado pelo "Selecionar tudo".
  * @param {string|null} [props.selectedEmailId]
  * @param {Set<string>} [props.selectedEmails]
@@ -62,6 +65,7 @@ const EmailList = ({
   loading = false,
   headerTitle = "",
   emptyMessage = "Sem emails nesta pasta",
+  erro = null,
   totalEmails = 0,
   selectedEmailId = null,
   selectedEmails = EMPTY_SET,
@@ -146,6 +150,16 @@ const EmailList = ({
                 <Skeleton className="h-3 w-[70%]" />
               </div>
             ))}
+          </div>
+        ) : threads.length === 0 && erro ? (
+          <div
+            role="alert"
+            data-testid="erro-da-lista-de-emails"
+            className="flex flex-col items-center justify-center h-full text-center p-6"
+          >
+            <AlertCircle className="h-10 w-10 text-destructive opacity-70 mb-3" aria-hidden="true" />
+            <p className="text-sm font-medium">Não foi possível carregar os emails</p>
+            <p className="text-xs text-muted-foreground mt-1">{erro}</p>
           </div>
         ) : threads.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-6">
