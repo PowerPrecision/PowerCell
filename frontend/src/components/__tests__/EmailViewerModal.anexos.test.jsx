@@ -57,6 +57,45 @@ describe("EmailViewerModal — scroll do corpo", () => {
   });
 });
 
+describe("EmailViewerModal — scroll: a causa estava na GRELHA do diálogo (QA-9)", () => {
+  /**
+   * O `overflow-y-auto` do QA-8 estava no sítio certo e o scroll continuava sem existir. Medido em
+   * Chromium real: o `DialogContent` é uma GRELHA de uma linha `auto`; o `min-height: auto` do filho
+   * faz a linha crescer até ao tamanho do conteúdo (2880px num diálogo de 680px), pelo que o corpo
+   * (2635px) nunca transbordava — o `overflow-hidden` do diálogo só cortava. Com
+   * `grid-rows-[minmax(0,1fr)]` a linha fica em 636px e o corpo faz scroll (scrollTop 0 → 600).
+   * O jsdom não calcula alturas, por isso afirma-se a REGRA em TODA a cadeia, do corpo ao diálogo:
+   * o teste do QA-8 só olhava para o corpo e passou com a produção partida.
+   */
+  it("o diálogo prende a linha da grelha à sua altura e cada elo da cadeia pode encolher", async () => {
+    montar();
+    const corpo = await screen.findByTestId("corpo-do-email");
+    const dialogo = corpo.closest('[role="dialog"]');
+    expect(dialogo.className).toMatch(/grid-rows-\[minmax\(0,1fr\)\]/);
+    expect(dialogo.className).toMatch(/overflow-hidden/);
+
+    // Do contentor do corpo até ao diálogo: cada elemento flex/grid intermédio tem de poder encolher.
+    let el = corpo.parentElement;
+    const semMinH0 = [];
+    while (el && el !== dialogo) {
+      if (/\b(flex|grid)\b/.test(el.className) && !/min-h-0/.test(el.className)) {
+        semMinH0.push(el.className);
+      }
+      el = el.parentElement;
+    }
+    // O invólucro `flex h-full` (filho directo do diálogo) e a coluna da direita.
+    expect(semMinH0.filter((c) => /\bh-full\b|flex-1/.test(c))).toEqual([]);
+  });
+
+  it("em ecrãs estreitos a lista lateral não existe: o corpo fica com a largura toda", async () => {
+    montar();
+    const corpo = await screen.findByTestId("corpo-do-email");
+    const lista = corpo.closest('[role="dialog"]').querySelector("div.w-72");
+    expect(lista.className).toMatch(/\bhidden\b/);
+    expect(lista.className).toMatch(/sm:flex/);
+  });
+});
+
 describe("EmailViewerModal — Guardar nos Documentos do Processo", () => {
   const botao = () => screen.queryByRole("button", { name: /guardar ir?s? ?2025\.pdf nos documentos do processo|guardar .* nos documentos do processo/i });
 
