@@ -152,10 +152,15 @@ async def test_o_registo_manual_de_um_email_sai_carimbado(db):
 def _chamadas_a_inserir_email(ficheiro: Path) -> list[tuple[str, ast.Call]]:
     arvore = ast.parse(ficheiro.read_text(encoding="utf-8"))
     achados = []
+    vistos = set()
     for funcao in ast.walk(arvore):
         if isinstance(funcao, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for no in ast.walk(funcao):
-                if isinstance(no, ast.Call) and getattr(no.func, "id", "") == "inserir_email":
+                # Uma função aninhada (`_gravar` dentro de `sync_user_emails`) aparece no `walk` da
+                # exterior E da interior: contava-se o mesmo ESCRITOR duas vezes. Conta-se a chamada.
+                if (isinstance(no, ast.Call) and getattr(no.func, "id", "") == "inserir_email"
+                        and (no.lineno, no.col_offset) not in vistos):
+                    vistos.add((no.lineno, no.col_offset))
                     achados.append((funcao.name, no))
     return achados
 
