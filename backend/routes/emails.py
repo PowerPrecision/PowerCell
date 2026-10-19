@@ -84,6 +84,7 @@ from services.email_process_crud import (
     run_sync_process_emails,
     run_get_sync_status,
     run_associate_email_to_client,
+    run_disassociate_email,
     run_search_emails,
     run_send_email,
     run_create_email_record,
@@ -602,6 +603,14 @@ async def associate_email_to_client(
     current_user: dict = Depends(get_current_user)
 ):
     return await run_associate_email_to_client(data, current_user)
+
+
+@router.post("/disassociate")
+async def disassociate_email_from_process(
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    return await run_disassociate_email(data, current_user)
 
 
 @router.get("/contacts")

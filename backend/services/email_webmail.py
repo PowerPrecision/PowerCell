@@ -635,11 +635,11 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     if folder == "inbox":
         and_conditions.append({"direction": "received"})
         and_conditions.append({"status": {"$ne": "draft"}})
-        and_conditions.append({"is_archived": False})
+        and_conditions.append({"is_archived": {"$ne": True}})
     elif folder == "sent":
         and_conditions.append({"direction": "sent"})
         and_conditions.append({"status": {"$ne": "draft"}})
-        and_conditions.append({"is_archived": False})
+        and_conditions.append({"is_archived": {"$ne": True}})
     elif folder == "starred":
         and_conditions.append({"is_starred": True})
     elif folder == "trash":
@@ -719,7 +719,7 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
             {"direction": "received"},
             {"status": {"$ne": "draft"}},
             {"is_read": False},
-            {"is_archived": False},
+            {"is_archived": {"$ne": True}},
         ]
         # Aplicar box filter ao unread_count
         if box == "personal":
@@ -854,16 +854,16 @@ async def run_webmail_stats(
     inbox_base = {
         "direction": "received",
         "status": {"$ne": "draft"},
-        "is_archived": False,
+        "is_archived": {"$ne": True},
     }
     sent_base = {
         "direction": "sent",
         "status": {"$ne": "draft"},
-        "is_archived": False,
+        "is_archived": {"$ne": True},
     }
     drafts_base = {
         "status": "draft",
-        "is_archived": False,
+        "is_archived": {"$ne": True},
     }
     
     # Apply box filter or default isolation
@@ -912,7 +912,7 @@ async def run_webmail_stats(
     inbox_query = _and_query(inbox_base, ucr_filter)
     sent_query = _and_query(sent_base, ucr_filter)
 
-    starred_base = {"is_starred": True, "is_archived": False}
+    starred_base = {"is_starred": True, "is_archived": {"$ne": True}}
     if box == "personal":
         starred_base["$or"] = [
             {"created_by": user_id},

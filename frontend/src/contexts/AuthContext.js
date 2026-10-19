@@ -744,6 +744,9 @@ export function AuthProvider({ children }) {
   );
 }
 
+/** O contexto, ou `null` fora de um `AuthProvider` — para componentes partilhados que só PIORAM sem ele. */
+export const useAuthOpcional = () => useContext(AuthContext);
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {

@@ -546,6 +546,49 @@ async def run_associate_email_to_client(data: dict, current_user: dict):
     }
 
 
+async def run_disassociate_email(data: dict, current_user: dict):
+    """Retira um email de um processo a que foi ligado por engano (QA-8, ponto 8).
+
+    Põe `process_id` a `None` — a lista do processo filtra estritamente por ele, logo o email sai
+    de lá e fica no Webmail — e deixa de onde veio e quem o fez no próprio registo. Não apaga nada.
+    Exige poder LER o email e VER o processo (404 igual ao de «não existe») e o processo aberto.
+    """
+    from services.email_access import exigir_leitura_do_email, exigir_processo_legivel
+    from services.process_closed_guard import exigir_processo_aberto_por_id
+
+    email_id = (data or {}).get("email_id")
+    if not email_id or not isinstance(email_id, str):
+        raise HTTPException(status_code=400, detail="email_id é obrigatório")
+
+    email = await db.emails.find_one({"$or": [{"id": email_id}, {"message_id": email_id}]}, {"_id": 0})
+    if not email:
+        raise HTTPException(status_code=404, detail="Email não encontrado")
+    await exigir_leitura_do_email(
+        email, current_user, detail="Sem permissão para desassociar este email",
+    )
+
+    process_id = email.get("process_id")
+    if not process_id:
+        return {"success": True, "message": "O email já não está associado a nenhum processo",
+                "email_id": email["id"]}
+
+    await exigir_processo_legivel(process_id, current_user)
+    await exigir_processo_aberto_por_id(process_id, current_user)
+
+    await db.emails.update_one(
+        {"id": email["id"]},
+        {"$set": {
+            "process_id": None,
+            "disassociated_from_process_id": process_id,
+            "disassociated_by": current_user["id"],
+            "disassociated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    logger.info(f"Email {email['id']} desassociado do processo {process_id} por {current_user.get('email')}")
+    return {"success": True, "message": "Email desassociado do processo",
+            "email_id": email["id"], "process_id": None}
+
+
 async def run_search_emails(q: str, current_user: dict, limit: int = 20):
     """Pesquisar emails para associação manual.
 

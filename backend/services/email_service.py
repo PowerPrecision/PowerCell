@@ -1362,8 +1362,10 @@ async def send_email(
         # Se o email está associado a um processo e o assunto ainda não tem a tag
         # Skip se skip_proc_tag=True (ex: envio de documentação para bancos)
         if process_id and not skip_proc_tag:
-            tag = f"[Proc-{process_id}]"
-            if tag not in subject:
+            from services.email_process_link import assunto_tem_a_etiqueta, etiqueta_do_processo
+
+            tag = etiqueta_do_processo(process_id)
+            if not assunto_tem_a_etiqueta(subject, process_id):
                 subject = f"{subject} {tag}"
                 logger.info(f"[Tag Mágica] Injetada tag {tag} no assunto do email")
         
@@ -1632,6 +1634,10 @@ async def send_email(
                 "in_reply_to": normalized_in_reply_to,
                 "references": reference_chain,
                 "is_read": True,
+                # Sem estes dois campos a listagem das pastas («is_archived» igual a falso) não via o
+                # email: ficava no histórico do processo e a pasta «Enviados» do Webmail vazia.
+                "is_archived": False,
+                "is_starred": False,
             }
             if active_company_id and active_company_id != "default":
                 email_doc["company_id"] = active_company_id
@@ -2170,21 +2176,16 @@ async def sync_webmail_emails(
                             resolved_process_id = parent_email["process_id"]
                             logger.info(f"[Smart Threading] Email {msg_id[:30]} herdou process_id={resolved_process_id} do pai {parent_email.get('message_id', '?')[:30]}")
                     
-                    # === TAG MÁGICA: Parsear [Proc-{id}] do assunto ===
+                    # === TAG MÁGICA: `[Ref: #id]` (ou o legado `[Proc-id]`) no assunto ===
                     subject = em.get("subject", "")
                     if not resolved_process_id and subject:
-                        tag_match = re.search(r'\[Proc-([^\]]+)\]', subject)
-                        if tag_match:
-                            tag_process_id = tag_match.group(1).strip()
-                            # Validar que o processo existe
-                            proc_exists = await db.processes.find_one(
-                                {"id": tag_process_id},
-                                {"_id": 0, "id": 1}
-                            )
-                            if proc_exists:
-                                resolved_process_id = tag_process_id
-                                logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id} via tag no assunto")
-                    
+                        from services.email_process_link import processo_da_etiqueta
+
+                        tag_process_id = await processo_da_etiqueta(db, subject)
+                        if tag_process_id:
+                            resolved_process_id = tag_process_id
+                            logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id} via tag no assunto")
+
                     # === CLIENT EMAIL MATCH: Associar por endereço de email do cliente ===
                     # Se Smart Threading e Tag Mágica não encontraram processo,
                     # procurar processo activo cujo client_email ou monitored_emails
@@ -2620,19 +2621,15 @@ async def sync_user_emails(
                         resolved_process_id = parent_email["process_id"]
                         logger.info(f"[Smart Threading] Email {msg_id[:30]} herdou process_id={resolved_process_id} do pai")
                 
-                # === TAG MÁGICA: Parsear [Proc-{id}] do assunto ===
+                # === TAG MÁGICA: `[Ref: #id]` (ou o legado `[Proc-id]`) no assunto ===
                 subject = em.get("subject", "")
                 if not resolved_process_id and subject:
-                    tag_match = re.search(r'\[Proc-([^\]]+)\]', subject)
-                    if tag_match:
-                        tag_process_id = tag_match.group(1).strip()
-                        proc_exists = await db.processes.find_one(
-                            {"id": tag_process_id},
-                            {"_id": 0, "id": 1}
-                        )
-                        if proc_exists:
-                            resolved_process_id = tag_process_id
-                            logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id}")
+                    from services.email_process_link import processo_da_etiqueta
+
+                    tag_process_id = await processo_da_etiqueta(db, subject)
+                    if tag_process_id:
+                        resolved_process_id = tag_process_id
+                        logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id}")
 
                 # === LOTE 7 — ASSOCIAÇÃO POR ENDEREÇO ===
                 # Isto NÃO EXISTIA nesta função. A sincronização pessoal — a
@@ -2891,14 +2888,12 @@ async def sync_shared_role_emails(
                     if parent_email:
                         resolved_process_id = parent_email["process_id"]
 
-                # Tag mágica
+                # Tag mágica: `[Ref: #id]` (ou o legado `[Proc-id]`)
                 subject = email_data.get("subject", "")
                 if not resolved_process_id and subject:
-                    tag_match = re.search(r'\[Proc-([^\]]+)\]', subject)
-                    if tag_match:
-                        tag_pid = tag_match.group(1).strip()
-                        if await db.processes.find_one({"id": tag_pid}, {"_id": 0, "id": 1}):
-                            resolved_process_id = tag_pid
+                    from services.email_process_link import processo_da_etiqueta
+
+                    resolved_process_id = await processo_da_etiqueta(db, subject)
 
                 email_doc = {
                     "id": str(uuid.uuid4()),
@@ -2983,13 +2978,12 @@ async def sync_shared_role_emails(
                     if parent_email:
                         resolved_process_id = parent_email["process_id"]
 
+                # Tag mágica: `[Ref: #id]` (ou o legado `[Proc-id]`)
                 subject = email_data.get("subject", "")
                 if not resolved_process_id and subject:
-                    tag_match = re.search(r'\[Proc-([^\]]+)\]', subject)
-                    if tag_match:
-                        tag_pid = tag_match.group(1).strip()
-                        if await db.processes.find_one({"id": tag_pid}, {"_id": 0, "id": 1}):
-                            resolved_process_id = tag_pid
+                    from services.email_process_link import processo_da_etiqueta
+
+                    resolved_process_id = await processo_da_etiqueta(db, subject)
 
                 email_doc = {
                     "id": str(uuid.uuid4()),
