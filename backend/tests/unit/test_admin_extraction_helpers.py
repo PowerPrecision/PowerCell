@@ -85,7 +85,9 @@ async def test_admin_get_users_includes_admin_index_and_inactive():
         result = await au.run_get_users({"id": "caller", "role": "admin"})
 
     query = mock_db.users.find.call_args[0][0]
-    assert query == {}
+    # QA-9: a lista de staff só exclui os parceiros (têm o seu separador); admin, indexação e
+    # inactivos continuam todos lá.
+    assert query == {"role": {"$nin": ["parceiro", "partner"]}}
     assert captured["limit"] >= 1000
     ids = [u.id for u in result]
     assert ids == ["u-admin", "u-index", "u-off", "u-ceo", "u-dir"]

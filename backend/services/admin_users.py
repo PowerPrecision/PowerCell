@@ -119,7 +119,9 @@ async def run_get_users(
 
     from services.admin_users_scope import (
         build_users_scope_query,
+        empresas_da_empresa_activa,
         empresas_do_ambito,
+        sem_parceiros,
     )
 
     query = {}
@@ -135,10 +137,17 @@ async def run_get_users(
     #
     # Aplica-se também ao `for_assignment`: atribuir um processo a
     # alguém de outra rede seria a mesma fuga pela porta do lado.
-    ambito = await empresas_do_ambito(user or {})
+    # QA-9: com uma empresa escolhida a lista é a DELA (e não a da rede), e os parceiros ficam no
+    # seu separador. As dropdowns de atribuição mantêm o âmbito de rede (Lote 6).
+    if for_assignment:
+        ambito = await empresas_do_ambito(user or {})
+    else:
+        ambito = await empresas_da_empresa_activa(user or {})
     scope_query = await build_users_scope_query(ambito)
     if scope_query:
         query = {"$and": [query, scope_query]} if query else scope_query
+    if not for_assignment:
+        query = sem_parceiros(query, role)
 
     users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(
         ADMIN_USERS_LIST_LIMIT
@@ -171,16 +180,21 @@ async def run_get_users_paginated(
     from services.admin_users_scope import (
         build_users_scope_query,
         build_users_search_condition,
-        empresas_do_ambito,
+        empresas_da_empresa_activa,
+        sem_parceiros,
     )
     from services.role_query import build_deep_role_query
 
     condicoes: list[dict] = []
 
-    ambito = await empresas_do_ambito(user or {})
+    # QA-9: a lista segue a EMPRESA escolhida (não a rede) e não mostra parceiros.
+    ambito = await empresas_da_empresa_activa(user or {})
     scope_query = await build_users_scope_query(ambito)
     if scope_query:
         condicoes.append(scope_query)
+    exclusao = sem_parceiros({}, role)
+    if exclusao:
+        condicoes.append(exclusao)
 
     if role:
         condicoes.append(build_deep_role_query({}, role=role))
