@@ -53,7 +53,19 @@ logger = logging.getLogger(__name__)
 CODIGO_SMTP_SEM_LIGACAO = "smtp_connection"
 
 # Thread pool para operações IMAP/SMTP bloqueantes
-_email_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="email_")
+# Threads IMAP: 4 no web; o worker (512 MB) põe `EMAIL_EXECUTOR_WORKERS=1` — cada thread segura um
+# email inteiro em bytes + a árvore MIME parseada (ver `services/memory_guard.py`).
+from services.memory_guard import (
+    concorrencia_da_sincronizacao,
+    em_lotes,
+    libertar_memoria,
+    tamanho_do_anexo,
+    tamanho_do_lote_imap,
+    tamanho_maximo_do_email,
+    threads_imap,
+)
+
+_email_executor = ThreadPoolExecutor(max_workers=threads_imap(), thread_name_prefix="email_")
 
 # Timeout da ligação SMTP, em segundos. Configurável porque o valor certo
 # depende do ambiente: em produção 30s é a margem para um servidor de email
@@ -1792,6 +1804,29 @@ async def test_email_connection(account_name: str = None) -> Dict[str, Any]:
 # SYNC GLOBAL PARA WEBMAIL (sem filtro de processo)
 # =====================================================================
 
+def _tamanho_anunciado(resposta_fetch) -> int:
+    """Tamanho (`RFC822.SIZE`) que o servidor IMAP anuncia para uma mensagem; 0 se não vier.
+
+    O `imaplib` devolve `('OK', [b'1 (RFC822.SIZE 4096)'])` — um elemento `bytes`, não um tuplo.
+    O código antigo fazia `size_data[0]` sobre esse `bytes` (um `int`, o 1.º byte), formatava-o
+    com `str()` e nunca encontrava `RFC822.SIZE`: **o tecto de 15 MB anti-OOM nunca disparou**.
+    """
+    try:
+        if not resposta_fetch or len(resposta_fetch) < 2 or not resposta_fetch[1]:
+            return 0
+        for item in resposta_fetch[1]:
+            if isinstance(item, tuple):  # resposta com literal: (cabeçalho, dados)
+                item = item[0]
+            if isinstance(item, (bytes, bytearray)):
+                item = bytes(item).decode("utf-8", errors="replace")
+            achado = re.search(r"RFC822\.SIZE\s+(\d+)", str(item))
+            if achado:
+                return int(achado.group(1))
+    except Exception:  # noqa: BLE001 — a pré-verificação nunca derruba a sincronização
+        return 0
+    return 0
+
+
 def _fetch_all_from_folder_sync(
     account: EmailAccount,
     folder: str = "INBOX",
@@ -1809,7 +1844,9 @@ def _fetch_all_from_folder_sync(
     Returns:
         Dict with 'emails' (list) and 'connection_error' (str or None).
     """
-    MAX_EMAIL_SIZE = 15 * 1024 * 1024  # 15 MB — limite para prevenir OOM
+    MAX_EMAIL_SIZE = tamanho_maximo_do_email()  # omissão 15 MB (IMAP_MAX_EMAIL_BYTES) — previne OOM
+    TAMANHO_PESADO = 1024 * 1024  # acima de 1 MB liberta-se a memória logo a seguir
+    LOTE = tamanho_do_lote_imap()  # omissão 20 (IMAP_BATCH_SIZE)
     
     emails_found = []
     connection_error = None
@@ -1837,26 +1874,23 @@ def _fetch_all_from_folder_sync(
         
         logger.info(f"[Webmail Sync] {len(nums)} emails para processar em {folder}")
         
-        for num in nums:
+        for indice, num in enumerate(nums, 1):
+            # Pesados de cada iteração: declarados antes do `try` para o `finally` os poder largar.
+            email_bytes = fetch_result = msg = None
+            email_size = 0
             try:
                 # === OTIMIZAÇÃO: Pré-verificação de tamanho (RFC822.SIZE) ===
                 # Antes de fazer fetch completo, verificar o tamanho do email.
                 # Isto evita carregar emails gigantes (>15MB) para a RAM.
-                size_result = mail.fetch(num, "(RFC822.SIZE)")
-                if size_result and len(size_result) >= 2 and size_result[1]:
-                    size_data = size_result[1][0]
-                    size_str = size_data[0].decode("utf-8", errors="replace") if isinstance(size_data[0], bytes) else str(size_data[0])
-                    size_match = re.search(r'RFC822\.SIZE\s+(\d+)', size_str)
-                    if size_match:
-                        email_size = int(size_match.group(1))
-                        if email_size > MAX_EMAIL_SIZE:
-                            num_label = num.decode() if isinstance(num, bytes) else str(num)
-                            logger.warning(
-                                f"[Webmail Sync] Email #{num_label} excede limite de "
-                                f"{MAX_EMAIL_SIZE // (1024*1024)}MB "
-                                f"({email_size / (1024*1024):.1f}MB) — a saltar para prevenir OOM"
-                            )
-                            continue
+                email_size = _tamanho_anunciado(mail.fetch(num, "(RFC822.SIZE)"))
+                if email_size > MAX_EMAIL_SIZE:
+                    num_label = num.decode() if isinstance(num, bytes) else str(num)
+                    logger.warning(
+                        f"[Webmail Sync] Email #{num_label} excede limite de "
+                        f"{MAX_EMAIL_SIZE / (1024*1024):.1f}MB "
+                        f"({email_size / (1024*1024):.1f}MB) — a saltar para prevenir OOM"
+                    )
+                    continue
                 
                 # === OTIMIZAÇÃO: BODY.PEEK[] em vez de RFC822 ===
                 # Usa BODY.PEEK[] para ler o email SEM marcar como \Seen
@@ -1907,7 +1941,9 @@ def _fetch_all_from_folder_sync(
                     if "attachment" in content_disposition:
                         filename = part.get_filename() or "anexo"
                         filename = decode_email_header(filename)
-                        size = len(part.get_payload(decode=True) or b"")
+                        # Sem descodificar: `get_payload(decode=True)` alocava uma cópia do anexo
+                        # inteiro só para lhe fazer `len()`.
+                        size = tamanho_do_anexo(part)
                         attachments.append({
                             "id": str(uuid.uuid4()),
                             "filename": filename,
@@ -1936,6 +1972,12 @@ def _fetch_all_from_folder_sync(
                 logger.warning(f"[Webmail Sync] Erro ao processar email: {e}")
                 logger.warning(f"[Webmail Sync] Traceback: {traceback.format_exc()}")
                 continue
+            finally:
+                # Larga o email cru e a árvore MIME desta iteração. Um email pesado liberta logo; os
+                # leves libertam no fim de cada lote (`gc.collect()` por mensagem seria caro).
+                del email_bytes, fetch_result, msg
+                if email_size > TAMANHO_PESADO or indice % LOTE == 0:
+                    libertar_memoria()
         
         logger.info(f"[Webmail Sync] {len(emails_found)} emails extraídos de {folder} ({account.name})")
         
@@ -2456,6 +2498,176 @@ async def sync_user_emails(
 
     try:
         loop = asyncio.get_event_loop()
+
+        async def _gravar(lista):
+            """Grava os emails de UMA pasta e liberta-os antes da pasta seguinte (limite de 512 MB do worker)."""
+            nonlocal total_synced, total_duplicates, total_errors
+            lote_gc = tamanho_do_lote_imap()
+            for indice, em in enumerate(lista, 1):
+                if indice % lote_gc == 0:
+                    libertar_memoria()
+                try:
+                    msg_id = em.get("message_id", "")
+                    if not msg_id:
+                        continue
+                
+                    # Verificar se já existe (message_id + utilizador + caixa; empresa quando o documento a tem)
+                    mailbox_addr = (config.get("email_address") or "").strip().lower()
+                    try:
+                        _data_para_dedupe = datetime.fromisoformat(
+                            str(em.get("date") or "").replace("Z", "+00:00")
+                        ).isoformat()
+                    except (TypeError, ValueError):
+                        _data_para_dedupe = None
+                    e_envio = em.get("direction") == "sent"
+                    existing = await _ja_tenho_este_email(
+                        db,
+                        msg_id=msg_id,
+                        user_id=user_id,
+                        company_id=company_id,
+                        mailbox_addr=mailbox_addr,
+                        conta_original=config.get("email_address", ""),
+                        assunto=em.get("subject", "") if e_envio else "",
+                        destinatarios=(em.get("to_emails") or []) if e_envio else [],
+                        sent_at=_data_para_dedupe if e_envio else None,
+                    )
+
+                    if existing:
+                        total_duplicates += 1
+                        continue
+                
+                    # Parsear data
+                    sent_at = em.get("date")
+                    try:
+                        if sent_at:
+                            sent_at = datetime.fromisoformat(sent_at.replace("Z", "+00:00")).isoformat()
+                        else:
+                            sent_at = datetime.now(timezone.utc).isoformat()
+                    except Exception:
+                        sent_at = datetime.now(timezone.utc).isoformat()
+                
+                    # === SMART THREADING: Herdar process_id do email "pai" ===
+                    resolved_process_id = None
+                    in_reply_to = em.get("in_reply_to")
+                    references = em.get("references", [])
+                
+                    parent_msg_ids = []
+                    if in_reply_to:
+                        parent_msg_ids.append(in_reply_to)
+                    if references:
+                        parent_msg_ids.extend(references)
+                
+                    if parent_msg_ids:
+                        parent_email = await db.emails.find_one(
+                            {
+                                "message_id": {"$in": parent_msg_ids},
+                                "process_id": {"$ne": None, "$exists": True},
+                            },
+                            {"_id": 0, "process_id": 1, "message_id": 1}
+                        )
+                        if parent_email:
+                            resolved_process_id = parent_email["process_id"]
+                            logger.info(f"[Smart Threading] Email {msg_id[:30]} herdou process_id={resolved_process_id} do pai")
+                
+                    # === TAG MÁGICA: `[Ref: #id]` (ou o legado `[Proc-id]`) no assunto ===
+                    subject = em.get("subject", "")
+                    if not resolved_process_id and subject:
+                        from services.email_process_link import processo_da_etiqueta
+
+                        tag_process_id = await processo_da_etiqueta(db, subject)
+                        if tag_process_id:
+                            resolved_process_id = tag_process_id
+                            logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id}")
+
+                    # === LOTE 7 — ASSOCIAÇÃO POR ENDEREÇO ===
+                    # Isto NÃO EXISTIA nesta função. A sincronização pessoal — a
+                    # caixa de cada consultor, que o worker corre de 10 em 10
+                    # minutos — só herdava o processo do email-pai de uma conversa
+                    # e lia a etiqueta `[Proc-xxx]` do assunto. Um email de um
+                    # cliente para o consultor só entrava na ficha se a conversa já
+                    # estivesse ligada ou se alguém tivesse posto a etiqueta à mão,
+                    # e eram esses dois caminhos a funcionar que escondiam o
+                    # terceiro em falta (a forma do `run_get_my_tasks`).
+                    if not resolved_process_id:
+                        from services.email_client_match import (
+                            resolver_processo_por_endereco,
+                        )
+
+                        enderecos_do_email = {
+                            (em.get("from_email") or "").lower().strip(),
+                            *[(e or "").lower().strip() for e in (em.get("to_emails") or [])],
+                            *[(e or "").lower().strip() for e in (em.get("cc_emails") or [])],
+                        }
+                        enderecos_do_email.discard("")
+                        if enderecos_do_email:
+                            resolucao = await resolver_processo_por_endereco(
+                                enderecos_do_email, network_id=rede_do_sincronizador,
+                            )
+                            if resolucao.process_id:
+                                resolved_process_id = resolucao.process_id
+                                logger.info(
+                                    "[Client Email Match] Email %s associado ao "
+                                    "processo %s via %s (caixa pessoal)",
+                                    msg_id[:30], resolved_process_id, resolucao.motivo,
+                                )
+                            elif resolucao.ambiguo:
+                                logger.info(
+                                    "[Client Email Match] Email %s com %d processos "
+                                    "candidatos — fica geral: %s",
+                                    msg_id[:30], len(resolucao.candidatos),
+                                    resolucao.candidatos[:5],
+                                )
+
+                    email_doc = {
+                        "id": str(uuid.uuid4()),
+                        "process_id": resolved_process_id,
+                        "direction": em.get("direction", "received"),
+                        "from_email": em.get("from_email", ""),
+                        "to_emails": [str(e) for e in (em.get("to_emails") or []) if e],
+                        "cc_emails": [str(e) for e in (em.get("cc_emails") or []) if e],
+                        "bcc_emails": [],
+                        "subject": subject,
+                        "body": em.get("body", ""),
+                        "body_html": em.get("body_html", ""),
+                        "attachments": em.get("attachments", []),
+                        "status": "draft" if em.get("_is_draft") else "synced",
+                        "sent_at": sent_at,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "created_by": user_id,
+                        "notes": f"User webmail sync - {config.get('email_address', '')}",
+                        "synced": True,
+                        "account": (config.get("email_address", "") or "").strip().lower(),
+                        "synced_for_user": user_id,
+                        "message_id": msg_id,
+                        "is_read": em.get("direction") == "sent" or em.get("_is_draft", False),
+                        "is_starred": False,
+                        "is_archived": em.get("_is_trash", False),
+                        "source": "user_webmail_sync",
+                        "in_reply_to": in_reply_to or None,
+                        "references": references or [],
+                    }
+                    if company_id:
+                        email_doc["company_id"] = company_id
+                    if email_doc.get("status") == "draft":
+                        from services.email_draft_service import stamp_draft_ttl_fields
+                        stamp_draft_ttl_fields(email_doc)
+                
+                    await inserir_email(db, email_doc)
+                    total_synced += 1
+
+                    # ── WebSocket: Notificar o dono da caixa pessoal em tempo real ──
+                    try:
+                        from services.email_realtime import notify_new_email
+                        await notify_new_email(user_id, email_doc, extra={"box": "personal"})
+                    except Exception as ws_err:
+                        logger.debug(f"[User Email Sync] WS NEW_EMAIL falhou (non-critical): {ws_err}")
+
+                except Exception as e:
+                    logger.warning(f"[User Email Sync] Erro ao guardar email: {e}")
+                    total_errors += 1
+            lista.clear()
+            libertar_memoria()
+
         
         # Buscar da INBOX
         inbox_result = await loop.run_in_executor(
@@ -2497,7 +2709,11 @@ async def sync_user_emails(
                 "error": conn_err,
             }
         
+        # Grava a INBOX e larga-a ANTES de ir buscar as outras pastas: as quatro listas juntas
+        # (com os corpos HTML) eram um dos picos que matava o worker.
         inbox_emails = inbox_result.get("emails", [])
+        await _gravar(inbox_emails)
+        del inbox_emails, inbox_result
         
         # Buscar da pasta de Enviados (descoberta no servidor primeiro, nomes habituais depois)
         pastas_do_servidor = await pastas_candidatas(account)
@@ -2519,6 +2735,8 @@ async def sync_user_emails(
                     break
             except Exception:
                 continue
+        await _gravar(sent_emails)
+        del sent_emails
         
         # Buscar da pasta de Rascunhos
         drafts_emails = []
@@ -2537,6 +2755,8 @@ async def sync_user_emails(
                     break
             except Exception:
                 continue
+        await _gravar(drafts_emails)
+        del drafts_emails
         
         # Buscar da pasta de Lixo
         trash_emails = []
@@ -2554,169 +2774,8 @@ async def sync_user_emails(
                     break
             except Exception:
                 continue
-        
-        all_emails = inbox_emails + sent_emails + drafts_emails + trash_emails
-        
-        for em in all_emails:
-            try:
-                msg_id = em.get("message_id", "")
-                if not msg_id:
-                    continue
-                
-                # Verificar se já existe (message_id + utilizador + caixa; empresa quando o documento a tem)
-                mailbox_addr = (config.get("email_address") or "").strip().lower()
-                try:
-                    _data_para_dedupe = datetime.fromisoformat(
-                        str(em.get("date") or "").replace("Z", "+00:00")
-                    ).isoformat()
-                except (TypeError, ValueError):
-                    _data_para_dedupe = None
-                e_envio = em.get("direction") == "sent"
-                existing = await _ja_tenho_este_email(
-                    db,
-                    msg_id=msg_id,
-                    user_id=user_id,
-                    company_id=company_id,
-                    mailbox_addr=mailbox_addr,
-                    conta_original=config.get("email_address", ""),
-                    assunto=em.get("subject", "") if e_envio else "",
-                    destinatarios=(em.get("to_emails") or []) if e_envio else [],
-                    sent_at=_data_para_dedupe if e_envio else None,
-                )
-
-                if existing:
-                    total_duplicates += 1
-                    continue
-                
-                # Parsear data
-                sent_at = em.get("date")
-                try:
-                    if sent_at:
-                        sent_at = datetime.fromisoformat(sent_at.replace("Z", "+00:00")).isoformat()
-                    else:
-                        sent_at = datetime.now(timezone.utc).isoformat()
-                except Exception:
-                    sent_at = datetime.now(timezone.utc).isoformat()
-                
-                # === SMART THREADING: Herdar process_id do email "pai" ===
-                resolved_process_id = None
-                in_reply_to = em.get("in_reply_to")
-                references = em.get("references", [])
-                
-                parent_msg_ids = []
-                if in_reply_to:
-                    parent_msg_ids.append(in_reply_to)
-                if references:
-                    parent_msg_ids.extend(references)
-                
-                if parent_msg_ids:
-                    parent_email = await db.emails.find_one(
-                        {
-                            "message_id": {"$in": parent_msg_ids},
-                            "process_id": {"$ne": None, "$exists": True},
-                        },
-                        {"_id": 0, "process_id": 1, "message_id": 1}
-                    )
-                    if parent_email:
-                        resolved_process_id = parent_email["process_id"]
-                        logger.info(f"[Smart Threading] Email {msg_id[:30]} herdou process_id={resolved_process_id} do pai")
-                
-                # === TAG MÁGICA: `[Ref: #id]` (ou o legado `[Proc-id]`) no assunto ===
-                subject = em.get("subject", "")
-                if not resolved_process_id and subject:
-                    from services.email_process_link import processo_da_etiqueta
-
-                    tag_process_id = await processo_da_etiqueta(db, subject)
-                    if tag_process_id:
-                        resolved_process_id = tag_process_id
-                        logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id}")
-
-                # === LOTE 7 — ASSOCIAÇÃO POR ENDEREÇO ===
-                # Isto NÃO EXISTIA nesta função. A sincronização pessoal — a
-                # caixa de cada consultor, que o worker corre de 10 em 10
-                # minutos — só herdava o processo do email-pai de uma conversa
-                # e lia a etiqueta `[Proc-xxx]` do assunto. Um email de um
-                # cliente para o consultor só entrava na ficha se a conversa já
-                # estivesse ligada ou se alguém tivesse posto a etiqueta à mão,
-                # e eram esses dois caminhos a funcionar que escondiam o
-                # terceiro em falta (a forma do `run_get_my_tasks`).
-                if not resolved_process_id:
-                    from services.email_client_match import (
-                        resolver_processo_por_endereco,
-                    )
-
-                    enderecos_do_email = {
-                        (em.get("from_email") or "").lower().strip(),
-                        *[(e or "").lower().strip() for e in (em.get("to_emails") or [])],
-                        *[(e or "").lower().strip() for e in (em.get("cc_emails") or [])],
-                    }
-                    enderecos_do_email.discard("")
-                    if enderecos_do_email:
-                        resolucao = await resolver_processo_por_endereco(
-                            enderecos_do_email, network_id=rede_do_sincronizador,
-                        )
-                        if resolucao.process_id:
-                            resolved_process_id = resolucao.process_id
-                            logger.info(
-                                "[Client Email Match] Email %s associado ao "
-                                "processo %s via %s (caixa pessoal)",
-                                msg_id[:30], resolved_process_id, resolucao.motivo,
-                            )
-                        elif resolucao.ambiguo:
-                            logger.info(
-                                "[Client Email Match] Email %s com %d processos "
-                                "candidatos — fica geral: %s",
-                                msg_id[:30], len(resolucao.candidatos),
-                                resolucao.candidatos[:5],
-                            )
-
-                email_doc = {
-                    "id": str(uuid.uuid4()),
-                    "process_id": resolved_process_id,
-                    "direction": em.get("direction", "received"),
-                    "from_email": em.get("from_email", ""),
-                    "to_emails": [str(e) for e in (em.get("to_emails") or []) if e],
-                    "cc_emails": [str(e) for e in (em.get("cc_emails") or []) if e],
-                    "bcc_emails": [],
-                    "subject": subject,
-                    "body": em.get("body", ""),
-                    "body_html": em.get("body_html", ""),
-                    "attachments": em.get("attachments", []),
-                    "status": "draft" if em.get("_is_draft") else "synced",
-                    "sent_at": sent_at,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "created_by": user_id,
-                    "notes": f"User webmail sync - {config.get('email_address', '')}",
-                    "synced": True,
-                    "account": (config.get("email_address", "") or "").strip().lower(),
-                    "synced_for_user": user_id,
-                    "message_id": msg_id,
-                    "is_read": em.get("direction") == "sent" or em.get("_is_draft", False),
-                    "is_starred": False,
-                    "is_archived": em.get("_is_trash", False),
-                    "source": "user_webmail_sync",
-                    "in_reply_to": in_reply_to or None,
-                    "references": references or [],
-                }
-                if company_id:
-                    email_doc["company_id"] = company_id
-                if email_doc.get("status") == "draft":
-                    from services.email_draft_service import stamp_draft_ttl_fields
-                    stamp_draft_ttl_fields(email_doc)
-                
-                await inserir_email(db, email_doc)
-                total_synced += 1
-
-                # ── WebSocket: Notificar o dono da caixa pessoal em tempo real ──
-                try:
-                    from services.email_realtime import notify_new_email
-                    await notify_new_email(user_id, email_doc, extra={"box": "personal"})
-                except Exception as ws_err:
-                    logger.debug(f"[User Email Sync] WS NEW_EMAIL falhou (non-critical): {ws_err}")
-
-            except Exception as e:
-                logger.warning(f"[User Email Sync] Erro ao guardar email: {e}")
-                total_errors += 1
+        await _gravar(trash_emails)
+        del trash_emails
         
         logger.info(f"[User Email Sync] User {user_id}: {total_synced} novos, {total_duplicates} duplicados")
 
@@ -3039,6 +3098,20 @@ async def sync_shared_role_emails(
     }
 
 
+async def _gather_limitado(corrotinas, limite: Optional[int] = None) -> list:
+    """`asyncio.gather(..., return_exceptions=True)` com no máximo `limite` corrotinas em curso.
+
+    Mantém a ordem dos resultados (quem chama mapeia por índice).
+    """
+    semaforo = asyncio.Semaphore(max(1, int(limite or concorrencia_da_sincronizacao())))
+
+    async def _uma(corrotina):
+        async with semaforo:
+            return await corrotina
+
+    return await asyncio.gather(*(_uma(c) for c in corrotinas), return_exceptions=True)
+
+
 async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
     """
     Sincronizar emails para TODOS os utilizadores com configuração ativa.
@@ -3088,7 +3161,7 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
             sync_shared_role_emails(role, days=days, network_id=rede)
             for role, rede in shared_roles
         ]
-        shared_results = await asyncio.gather(*shared_tasks, return_exceptions=True)
+        shared_results = await _gather_limitado(shared_tasks)
         total_synced = 0
         total_errors = 0
         for r in shared_results:
@@ -3170,8 +3243,9 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
     for role, rede in shared_roles:
         tasks.append(sync_shared_role_emails(role, days=days, network_id=rede))
 
-    # Executar concorrentemente
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    # Executar com concorrência LIMITADA: uma sincronização por caixa segura um email inteiro e a sua
+    # árvore MIME; 200 em simultâneo esgotavam os 512 MB do worker (IMAP_SYNC_CONCURRENCY, omissão 2).
+    results = await _gather_limitado(tasks)
 
     total_synced = 0
     total_errors = 0

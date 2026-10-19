@@ -1188,18 +1188,20 @@ class ScheduledTasksService:
             build_network_scope_condition(destino.scope) if destino.scope is not None
             else CONDICAO_IMPOSSIVEL
         )
-        processes = await self.db.processes.find(
+        # Por CURSOR e não `to_list(None)`: o histórico de extracções de TODOS os processos da rede
+        # (cada um com dezenas de entradas) ficava inteiro na memória do worker (512 MB).
+        cursor_de_processos = self.db.processes.find(
             {"$and": [
                 {"ai_extraction_history": {"$exists": True, "$ne": []}},
                 condicao_de_rede,
             ]},
             {"_id": 0, "ai_extraction_history": 1}
-        ).to_list(None)
+        ).batch_size(100)
 
         this_period_extractions = []
         prev_period_extractions = []
         
-        for proc in processes:
+        async for proc in cursor_de_processos:
             for extraction in proc.get("ai_extraction_history", []):
                 extracted_at = extraction.get("extracted_at", "")
                 if extracted_at:

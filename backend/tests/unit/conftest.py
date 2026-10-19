@@ -63,6 +63,10 @@ class FakeAsyncCursor:
         self._limit = n
         return self
 
+    def batch_size(self, n: int):
+        """O Motor aceita `batch_size` (tamanho do lote da rede); em memória é indiferente."""
+        return self
+
     async def to_list(self, length=None):
         docs = self._docs[self._skip:]
         if self._limit is not None:

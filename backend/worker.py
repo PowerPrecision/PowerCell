@@ -20,6 +20,10 @@ import time
 import tempfile
 from datetime import datetime, timezone, timedelta
 
+# Limite de 512 MB no Render (QA/OOM): uma só thread IMAP neste processo. TEM de ficar definido
+# antes de qualquer `services.*` ser importado — o executor é criado no import de `email_service`.
+os.environ.setdefault("EMAIL_EXECUTOR_WORKERS", "1")
+
 # Configurar logging (usar utils/logger.py para formato padronizado com Render)
 from utils.logger import get_logger
 logger = get_logger("worker")
@@ -46,6 +50,21 @@ except ImportError as e:
 
 # Flag para paragem graciosa
 shutdown_event = asyncio.Event()
+
+# Concorrência dos trabalhos PESADOS (tarefa da fila, job do agendador, execução forçada).
+# O laço da fila e o agendador correm no mesmo event loop e, sem isto, um `scrape_property` e uma
+# sincronização IMAP podiam estar a segurar memória ao mesmo tempo (`WORKER_MAX_CONCURRENCY`,
+# omissão 1; ver `services/memory_guard.py`). Criado ao primeiro uso, já dentro do event loop.
+_semaforo_pesado: "asyncio.Semaphore | None" = None
+
+
+def _semaforo() -> asyncio.Semaphore:
+    global _semaforo_pesado
+    if _semaforo_pesado is None:
+        from services.memory_guard import concorrencia_do_worker
+
+        _semaforo_pesado = asyncio.Semaphore(concorrencia_do_worker())
+    return _semaforo_pesado
 
 
 def _jobs_do_processador() -> dict:
@@ -152,11 +171,17 @@ async def worker_loop():
             # tarefas que não sabe tratar e gastava-lhes as tentativas.
             from services.task_queue_mongo import TIPO_FORCAR_JOB
 
-            task = await task_queue.get_next_task(excluir_tipos=[TIPO_FORCAR_JOB])
-            
-            if task:
-                await process_task(task)
-            else:
+            # A vaga reserva-se ANTES de reclamar a tarefa: reclamá-la e ficar à espera de vaga
+            # deixava-a "em processamento" na fila sem ninguém a tratar dela.
+            async with _semaforo():
+                task = await task_queue.get_next_task(excluir_tipos=[TIPO_FORCAR_JOB])
+                if task:
+                    await process_task(task)
+                    from services.memory_guard import libertar_memoria
+
+                    libertar_memoria()
+
+            if not task:
                 # Se não há tarefas, esperar um pouco
                 await asyncio.sleep(2)
                 
@@ -249,7 +274,11 @@ async def _correr_job(chave: str) -> None:
 
     logger.info("[Agendador] A correr %s...", chave)
     try:
-        await executar_job(chave)
+        async with _semaforo():
+            await executar_job(chave)
+            from services.memory_guard import libertar_memoria
+
+            libertar_memoria()
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -287,7 +316,8 @@ async def _atender_pedidos_de_execucao() -> None:
         try:
             from services.job_executors import executar_job
 
-            await executar_job(chave)
+            async with _semaforo():
+                await executar_job(chave)
             await complete_task(task_id, result={"chave": chave})
         except Exception as e:
             logger.error("[Agendador] Execução forçada de %s falhou: %s", chave, e)

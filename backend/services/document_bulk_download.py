@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import tempfile
 import zipfile
 from datetime import datetime
-from io import BytesIO
 from urllib.parse import quote
 
 from botocore.exceptions import ClientError
@@ -32,12 +32,24 @@ from services.tenant_network import processo_no_ambito, resolve_tenant_scope
 logger = logging.getLogger(__name__)
 
 
+#: Tamanho do bloco de cópia S3 → ZIP e ZIP → cliente. O ficheiro nunca está inteiro em memória.
+TAMANHO_DO_BLOCO = 1024 * 1024
+#: O ZIP vive em RAM até este tamanho e passa para disco a partir daí (SpooledTemporaryFile).
+ZIP_EM_MEMORIA_ATE = 8 * 1024 * 1024
+
+
 def _get_s3_file_content(key: str):
+    """Abre o objecto S3 e devolve `(corpo em streaming, content-type)`.
+
+    O corpo NÃO é lido aqui: `.read()` trazia cada ficheiro inteiro para a memória (até 50 por
+    pedido, mais o ZIP em `BytesIO`, mais a cópia do `getvalue()`). Quem recebe copia por blocos
+    (`_escrever_no_zip`) e fecha o corpo.
+    """
     try:
         response = s3_service.s3_client.get_object(
             Bucket=s3_service.bucket_name, Key=key
         )
-        return response["Body"].read(), response.get(
+        return response["Body"], response.get(
             "ContentType", "application/octet-stream"
         )
     except ClientError as e:
@@ -49,6 +61,29 @@ def _get_s3_file_content(key: str):
     except Exception as e:
         logger.error(f"[BULK-DOWNLOAD] Erro ao obter ficheiro {key}: {e}")
         return None, None
+
+
+def _escrever_no_zip(zip_file, filename: str, conteudo) -> None:
+    """Copia `conteudo` para dentro do ZIP por blocos. Aceita bytes (testes, ficheiros pequenos)
+    ou um corpo em streaming (boto `StreamingBody`, com `iter_chunks`/`read`). Fecha o corpo."""
+    if isinstance(conteudo, (bytes, bytearray)):
+        zip_file.writestr(filename, bytes(conteudo))
+        return
+    try:
+        with zip_file.open(filename, "w", force_zip64=True) as destino:
+            if hasattr(conteudo, "iter_chunks"):
+                for bloco in conteudo.iter_chunks(TAMANHO_DO_BLOCO):
+                    destino.write(bloco)
+            else:
+                while True:
+                    bloco = conteudo.read(TAMANHO_DO_BLOCO)
+                    if not bloco:
+                        break
+                    destino.write(bloco)
+    finally:
+        fechar = getattr(conteudo, "close", None)
+        if callable(fechar):
+            fechar()
 
 
 def _unique_zip_filename(filename: str, already: list[str]) -> str:
@@ -89,7 +124,7 @@ async def run_bulk_download_documents(data: dict, *, user: dict) -> StreamingRes
     if not s3_service.is_configured():
         raise HTTPException(status_code=500, detail=ERROR_S3_NOT_CONFIGURED)
 
-    zip_buffer = BytesIO()
+    zip_buffer = tempfile.SpooledTemporaryFile(max_size=ZIP_EM_MEMORIA_ATE)
     files_added: list[tuple[str, str]] = []
     errors: list[dict] = []
     loop = asyncio.get_event_loop()
@@ -143,7 +178,10 @@ async def run_bulk_download_documents(data: dict, *, user: dict) -> StreamingRes
                 filename = _unique_zip_filename(
                     filename, [f[0] for f in files_added]
                 )
-                zip_file.writestr(filename, content)
+                # Cópia por blocos, fora do event loop (o deflate é CPU e a leitura S3 é rede).
+                await loop.run_in_executor(
+                    None, _escrever_no_zip, zip_file, filename, content
+                )
                 files_added.append((filename, used_path))
                 logger.info(f"[BULK-DOWNLOAD] Adicionado ao ZIP: {filename}")
             except Exception as e:
@@ -174,7 +212,14 @@ async def run_bulk_download_documents(data: dict, *, user: dict) -> StreamingRes
     logger.info(f"[BULK-DOWNLOAD] ZIP criado com {len(files_added)} ficheiros")
 
     def iter_zip():
-        yield zip_buffer.getvalue()
+        try:
+            while True:
+                bloco = zip_buffer.read(TAMANHO_DO_BLOCO)
+                if not bloco:
+                    break
+                yield bloco
+        finally:
+            zip_buffer.close()
 
     encoded_filename = quote(zip_filename, safe="")
     headers = {
