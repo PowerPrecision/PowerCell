@@ -109,13 +109,32 @@ describe("EmailHistoryPanel — sem registo manual de emails (Lote 7.2)", () => 
     expect(screen.queryByRole("button", { name: /registar email/i })).not.toBeInTheDocument();
   });
 
-  it("contraprova: o painel continua a oferecer as acções que ficam (sincronizar, associar, emails monitorizados)", async () => {
+  it("contraprova: o painel continua a oferecer as acções que ficam (sincronizar, emails monitorizados)", async () => {
     montar();
     await screen.findByText("Documentos do crédito");
 
     expect(screen.getByRole("button", { name: /sync/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /associar/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^emails$/i })).toBeInTheDocument();
+  });
+
+  // QA-9: o botão global «Associar» (pesquisar QUALQUER email para o pôr neste processo) saiu do
+  // topo do painel. Associar a um processo faz-se com o email À FRENTE — no painel de leitura do
+  // Webmail — e nunca por uma pesquisa solta; os emails desta lista já estão ligados.
+  it("não há botão global «Associar» no topo do painel (nem diálogo de pesquisa)", async () => {
+    montar();
+    await screen.findByText("Documentos do crédito");
+
+    expect(screen.queryByRole("button", { name: /associar/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/associar email ao cliente/i)).not.toBeInTheDocument();
+    // …e a acção que sobra na linha é a inversa (desassociar), no menu de três pontos.
+    expect(api.searchEmailsToAssociate).not.toHaveBeenCalled();
+  });
+
+  it("o componente já não importa a pesquisa/associação global", () => {
+    const codigo = fs.readFileSync(
+      path.resolve(process.cwd(), "src/components/EmailHistoryPanel.js"), "utf-8",
+    ).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(codigo).not.toMatch(/searchEmailsToAssociate|associateEmailToProcess|isAssociateDialogOpen/);
   });
 
   it("a escrita manual saiu do componente (não há `createEmail` nem estado do diálogo)", () => {

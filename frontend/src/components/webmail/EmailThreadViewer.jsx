@@ -266,10 +266,10 @@ const EmailThreadViewer = ({
                       onClick={onLinkToProcess}
                     >
                       <Link2 className="h-3.5 w-3.5" />
-                      Ligar a Processo
+                      Associar a Processo
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Ligar a Processo</TooltipContent>
+                  <TooltipContent>Associar a Processo</TooltipContent>
                 </Tooltip>
               )}
               <Tooltip>
