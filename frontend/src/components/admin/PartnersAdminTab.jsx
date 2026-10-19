@@ -11,7 +11,7 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Loader2, MailPlus, RefreshCw, UserPlus } from "lucide-react";
+import { Copy, Loader2, MailPlus, MoreHorizontal, RefreshCw, UserCheck, UserPlus, UserX } from "lucide-react";
 import { toast } from "sonner";
 
 import { getCompanies, getPartners, invitePartner, resendPartnerInvite, updatePartner } from "../../services/api";
@@ -30,6 +30,12 @@ import {
 } from "../../utils/partnersAdmin";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -179,19 +185,36 @@ export default function PartnersAdminTab() {
                   <TableCell>{p.email}</TableCell>
                   <TableCell>{nomesDasEmpresas(p)}</TableCell>
                   <TableCell><Badge variant={estado.variant}>{estado.rotulo}</Badge></TableCell>
-                  <TableCell className="space-x-1 text-right">
-                    <Button
-                      type="button" size="sm" variant="ghost" disabled={reenviar.isPending}
-                      onClick={() => reenviar.mutate(p.id)} aria-label={`Novo convite para ${p.name}`}
-                    >
-                      <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                    </Button>
-                    <Button
-                      type="button" size="sm" variant="outline" disabled={suspender.isPending}
-                      onClick={() => suspender.mutate({ id: p.id, suspended: activo })}
-                    >
-                      {activo ? "Suspender" : "Reactivar"}
-                    </Button>
+                  <TableCell className="text-right">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button" size="sm" variant="ghost"
+                          aria-label={`Ações de ${p.name}`}
+                          data-testid={`btn-partner-actions-${p.id}`}
+                        >
+                          <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          disabled={reenviar.isPending}
+                          onClick={() => reenviar.mutate(p.id)}
+                        >
+                          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                          Reenviar Convite
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={suspender.isPending}
+                          onClick={() => suspender.mutate({ id: p.id, suspended: activo })}
+                        >
+                          {activo
+                            ? <UserX className="h-4 w-4" aria-hidden="true" />
+                            : <UserCheck className="h-4 w-4" aria-hidden="true" />}
+                          {activo ? "Suspender" : "Reactivar"}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               );

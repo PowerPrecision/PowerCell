@@ -119,7 +119,9 @@ async def run_get_users(
 
     from services.admin_users_scope import (
         build_users_scope_query,
+        empresas_da_empresa_activa,
         empresas_do_ambito,
+        sem_parceiros,
     )
 
     query = {}
@@ -135,10 +137,17 @@ async def run_get_users(
     #
     # Aplica-se também ao `for_assignment`: atribuir um processo a
     # alguém de outra rede seria a mesma fuga pela porta do lado.
-    ambito = await empresas_do_ambito(user or {})
+    # QA-9: com uma empresa escolhida a lista é a DELA (e não a da rede), e os parceiros ficam no
+    # seu separador. As dropdowns de atribuição mantêm o âmbito de rede (Lote 6).
+    if for_assignment:
+        ambito = await empresas_do_ambito(user or {})
+    else:
+        ambito = await empresas_da_empresa_activa(user or {})
     scope_query = await build_users_scope_query(ambito)
     if scope_query:
         query = {"$and": [query, scope_query]} if query else scope_query
+    if not for_assignment:
+        query = sem_parceiros(query, role)
 
     users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(
         ADMIN_USERS_LIST_LIMIT
@@ -171,16 +180,21 @@ async def run_get_users_paginated(
     from services.admin_users_scope import (
         build_users_scope_query,
         build_users_search_condition,
-        empresas_do_ambito,
+        empresas_da_empresa_activa,
+        sem_parceiros,
     )
     from services.role_query import build_deep_role_query
 
     condicoes: list[dict] = []
 
-    ambito = await empresas_do_ambito(user or {})
+    # QA-9: a lista segue a EMPRESA escolhida (não a rede) e não mostra parceiros.
+    ambito = await empresas_da_empresa_activa(user or {})
     scope_query = await build_users_scope_query(ambito)
     if scope_query:
         condicoes.append(scope_query)
+    exclusao = sem_parceiros({}, role)
+    if exclusao:
+        condicoes.append(exclusao)
 
     if role:
         condicoes.append(build_deep_role_query({}, role=role))
@@ -237,6 +251,218 @@ def url_de_acesso_ao_crm(frontend_url: Optional[str] = None) -> str:
         )
         return ""
     return f"{base}/login"
+
+
+async def enviar_email_de_acesso(
+    nome: str,
+    email: str,
+    role: str,
+    password: str,
+    *,
+    frontend_url: Optional[str] = None,
+    request: Optional[Request] = None,
+    reenvio: bool = False,
+) -> bool:
+    """Envia ao utilizador do CRM o email com os dados de acesso. Devolve se saiu.
+
+    Serve a criação da conta e o «Reenviar convite» (QA-9): o texto é o mesmo, muda a
+    introdução e o assunto. **Nunca levanta** — quem chama decide o que dizer a quem
+    pediu (a criação não falha por causa do email; o reenvio di-lo).
+    """
+    assunto = (
+        "Precision Crédito - Novos dados de acesso"
+        if reenvio
+        else "Bem-vindo ao Precision Crédito - Dados de Acesso"
+    )
+    intro = (
+        "Foi gerada uma nova palavra-passe para a sua conta. Seguem os dados de acesso:"
+        if reenvio
+        else "A sua conta foi criada com sucesso. Seguem os dados de acesso:"
+    )
+    try:
+        from services.email_service import send_email
+        
+        # Determinar o nome do cargo em português
+        role_names = {
+            UserRole.CONSULTOR: "Consultor",
+            UserRole.INTERMEDIARIO: "Intermediário",
+            UserRole.DIRETOR: "Diretor",
+            UserRole.ADMINISTRATIVO: "Administrativo",
+            UserRole.INDEXACAO: "Indexação",
+            UserRole.CEO: "CEO",
+            UserRole.ADMIN: "Administrador"
+        }
+        role_name = role_names.get(role, role)
+        
+        if not frontend_url and request is not None:
+            from services.rgpd_helpers import _frontend_base_url_from_request
+
+            frontend_url = _frontend_base_url_from_request(request, log_prefix="[USERS]")
+        _link_crm = url_de_acesso_ao_crm(frontend_url)
+        _linha_do_link = f"🔗 Aceda à plataforma em: {_link_crm}\n\n" if _link_crm else ""
+        _botao_do_link = (
+            f'''<div style="text-align: center; margin: 30px 0;">
+                    <a href="{_link_crm}" style="background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">
+                        Aceder à Plataforma
+                    </a>
+                </div>'''
+            if _link_crm else ""
+        )
+
+        # Criar corpo do email
+        # PACOTE DI — marca client-facing actualizada para Precision Crédito.
+        email_body = f"""Olá {nome},
+
+Bem-vindo(a) ao Precision Crédito!
+
+{intro}
+
+📧 Email: {email}
+🔑 Password: {password}
+
+Perfil: {role_name}
+
+{_linha_do_link}Recomendamos que altere a sua password após o primeiro acesso.
+
+Se tiver alguma dúvida, não hesite em contactar.
+
+Cumprimentos,
+Equipa Precision Crédito
+"""
+        
+        # PACOTE 11 (Eixo 2) — injectar o logo da empresa no header do
+        # email de boas-vindas (company.logo_url / system_config).
+        try:
+            from services.email_branding import (
+                build_email_header_logo_html,
+                resolve_company_logo_url,
+            )
+            _company_logo = await resolve_company_logo_url()
+        except Exception as _logo_err:  # pragma: no cover — degradação graciosa
+            logger.debug(f"Logo da empresa indisponível para o welcome email: {_logo_err}")
+            _company_logo = None
+        _welcome_logo_html = build_email_header_logo_html(
+            _company_logo, alt="Precision Crédito"
+        )
+        
+        email_html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0d253f 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+                {_welcome_logo_html}<h1 style="color: white; margin: 0;">Bem-vindo ao Precision Crédito</h1>
+            </div>
+            <div style="background: #f8fafc; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0; border-top: none;">
+                <p style="font-size: 16px; color: #334155;">Olá <strong>{nome}</strong>,</p>
+                <p style="font-size: 16px; color: #334155;">{intro}</p>
+                
+                <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #e2e8f0;">
+                    <p style="margin: 10px 0;"><strong>📧 Email:</strong> {email}</p>
+                    <p style="margin: 10px 0;"><strong>🔑 Password:</strong> <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">{password}</code></p>
+                    <p style="margin: 10px 0;"><strong>👤 Perfil:</strong> {role_name}</p>
+                </div>
+                
+                {_botao_do_link}
+                
+                <p style="font-size: 14px; color: #64748b; background: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+                    ⚠️ Recomendamos que altere a sua password após o primeiro acesso.
+                </p>
+                
+                <p style="font-size: 14px; color: #64748b; margin-top: 30px;">
+                    Se tiver alguma dúvida, não hesite em contactar.<br><br>
+                    Cumprimentos,<br>
+                    <strong>Equipa Precision Crédito</strong>
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # PACOTE DI — subject client-facing actualizado para Precision Crédito.
+        email_result = await send_email(
+            account_name="power",  # Usar conta Power Real Estate
+            to_emails=[email],
+            subject=assunto,
+            body=email_body,
+            body_html=email_html
+        )
+        
+        if email_result.get("success"):
+            logger.info(f"Email de acesso enviado para {email}")
+            return True
+        else:
+            logger.warning(f"Não foi possível enviar email para {email}: {email_result.get('error')}")
+            return False
+            
+    except Exception as e:
+        logger.warning(f"Erro ao enviar email de boas-vindas: {e}")
+        # Não falhar a operação de quem chama se o email falhar
+        return False
+    return False
+
+async def run_resend_user_access(
+    user_id: str, actor: dict, *, frontend_url: Optional[str] = None, request: Optional[Request] = None,
+) -> dict:
+    """«Reenviar convite» (QA-9): gera uma palavra-passe nova e envia os dados de acesso.
+
+    A palavra-passe guardada é um hash — não há «credenciais iniciais» para reenviar —, por isso
+    o reenvio cria uma nova e manda-a por email (como na criação da conta). Regras:
+
+    * o alvo tem de estar no âmbito de quem actua (404) e um perfil local nunca age sobre um
+      global (`carregar_utilizador_gerivel`, a mesma parede da edição);
+    * a conta de parceiro «fantasma» não tem acesso ao sistema: recusa-se (os parceiros do
+      Portal do Parceiro têm o seu próprio reenvio de convite);
+    * **a palavra-passe só muda se o email saiu** — trocá-la e falhar o envio deixava o
+      utilizador sem forma de entrar e sem saber a nova;
+    * a palavra-passe nunca volta na resposta nem vai para o rasto de auditoria; as sessões
+      anteriores são revogadas.
+    """
+    import secrets
+
+    alvo = await carregar_utilizador_gerivel(user_id, actor, projeccao={"_id": 0, "password": 0})
+    email = (alvo.get("email") or "").strip().lower()
+
+    if alvo.get("role") == UserRole.PARCEIRO or not email or email.endswith("@placeholder.internal"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Esta conta não tem acesso ao sistema (parceiro sem email). "
+                "Os parceiros com acesso são convidados no separador «Parceiros»."
+            ),
+        )
+    if alvo.get("id") == (actor or {}).get("id"):
+        raise HTTPException(
+            status_code=400,
+            detail="Não pode reenviar o convite a si próprio. Use «Alterar password» no seu perfil.",
+        )
+    if alvo.get("is_active") is False:
+        raise HTTPException(status_code=409, detail="A conta está desactivada. Reactive-a primeiro.")
+
+    nova = secrets.token_urlsafe(12)
+    enviado = await enviar_email_de_acesso(
+        alvo.get("name") or "", email, alvo.get("role") or "", nova,
+        frontend_url=frontend_url, request=request, reenvio=True,
+    )
+    if not enviado:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Não foi possível enviar o email. A palavra-passe do utilizador não foi alterada — "
+                "verifique a configuração de email do sistema e tente de novo."
+            ),
+        )
+
+    await db.users.update_one({"id": user_id}, {"$set": {"password": hash_password(nova)}})
+    try:
+        from services.refresh_token_service import revoke_all_user_tokens
+
+        await revoke_all_user_tokens(user_id)
+    except Exception as exc:  # observa, não intercepta: a palavra-passe nova já vale
+        logger.warning(f"[UTILIZADORES] Sessões de {user_id} não revogadas após o reenvio: {exc}")
+    await _audit_log(
+        "user_access_resent", "user", user_id, actor,
+        {"email": email, "role": alvo.get("role")},
+    )
+    return {"success": True, "email": email, "message": "Convite reenviado com uma palavra-passe nova."}
 
 
 async def run_create_user(
@@ -409,122 +635,11 @@ async def run_create_user(
 
     await _audit_log("user_created", "user", user_id, user, {"email": clean_email, "role": data.role, "additional_roles": data.additional_roles, "name": clean_name, "company": empresa_omissao, "acessos": len(acessos)})
     
-    # Enviar email de boas-vindas com dados de acesso
-    try:
-        from services.email_service import send_email
-        
-        # Determinar o nome do cargo em português
-        role_names = {
-            UserRole.CONSULTOR: "Consultor",
-            UserRole.INTERMEDIARIO: "Intermediário",
-            UserRole.DIRETOR: "Diretor",
-            UserRole.ADMINISTRATIVO: "Administrativo",
-            UserRole.INDEXACAO: "Indexação",
-            UserRole.CEO: "CEO",
-            UserRole.ADMIN: "Administrador"
-        }
-        role_name = role_names.get(data.role, data.role)
-        
-        if not frontend_url and request is not None:
-            from services.rgpd_helpers import _frontend_base_url_from_request
+    await enviar_email_de_acesso(
+        clean_name, clean_email, data.role, data.password,
+        frontend_url=frontend_url, request=request,
+    )
 
-            frontend_url = _frontend_base_url_from_request(request, log_prefix="[USERS]")
-        _link_crm = url_de_acesso_ao_crm(frontend_url)
-        _linha_do_link = f"🔗 Aceda à plataforma em: {_link_crm}\n\n" if _link_crm else ""
-        _botao_do_link = (
-            f'''<div style="text-align: center; margin: 30px 0;">
-                    <a href="{_link_crm}" style="background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">
-                        Aceder à Plataforma
-                    </a>
-                </div>'''
-            if _link_crm else ""
-        )
-
-        # Criar corpo do email
-        # PACOTE DI — marca client-facing actualizada para Precision Crédito.
-        email_body = f"""Olá {clean_name},
-
-Bem-vindo(a) ao Precision Crédito!
-
-A sua conta foi criada com sucesso. Seguem os dados de acesso:
-
-📧 Email: {clean_email}
-🔑 Password: {data.password}
-
-Perfil: {role_name}
-
-{_linha_do_link}Recomendamos que altere a sua password após o primeiro acesso.
-
-Se tiver alguma dúvida, não hesite em contactar.
-
-Cumprimentos,
-Equipa Precision Crédito
-"""
-        
-        # PACOTE 11 (Eixo 2) — injectar o logo da empresa no header do
-        # email de boas-vindas (company.logo_url / system_config).
-        try:
-            from services.email_branding import (
-                build_email_header_logo_html,
-                resolve_company_logo_url,
-            )
-            _company_logo = await resolve_company_logo_url()
-        except Exception as _logo_err:  # pragma: no cover — degradação graciosa
-            logger.debug(f"Logo da empresa indisponível para o welcome email: {_logo_err}")
-            _company_logo = None
-        _welcome_logo_html = build_email_header_logo_html(
-            _company_logo, alt="Precision Crédito"
-        )
-        
-        email_html = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0d253f 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-                {_welcome_logo_html}<h1 style="color: white; margin: 0;">Bem-vindo ao Precision Crédito</h1>
-            </div>
-            <div style="background: #f8fafc; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0; border-top: none;">
-                <p style="font-size: 16px; color: #334155;">Olá <strong>{data.name}</strong>,</p>
-                <p style="font-size: 16px; color: #334155;">A sua conta foi criada com sucesso. Seguem os dados de acesso:</p>
-                
-                <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #e2e8f0;">
-                    <p style="margin: 10px 0;"><strong>📧 Email:</strong> {data.email}</p>
-                    <p style="margin: 10px 0;"><strong>🔑 Password:</strong> <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">{data.password}</code></p>
-                    <p style="margin: 10px 0;"><strong>👤 Perfil:</strong> {role_name}</p>
-                </div>
-                
-                {_botao_do_link}
-                
-                <p style="font-size: 14px; color: #64748b; background: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
-                    ⚠️ Recomendamos que altere a sua password após o primeiro acesso.
-                </p>
-                
-                <p style="font-size: 14px; color: #64748b; margin-top: 30px;">
-                    Se tiver alguma dúvida, não hesite em contactar.<br><br>
-                    Cumprimentos,<br>
-                    <strong>Equipa Precision Crédito</strong>
-                </p>
-            </div>
-        </body>
-        </html>
-        """
-        
-        # PACOTE DI — subject client-facing actualizado para Precision Crédito.
-        email_result = await send_email(
-            account_name="power",  # Usar conta Power Real Estate
-            to_emails=[clean_email],
-            subject="Bem-vindo ao Precision Crédito - Dados de Acesso",
-            body=email_body,
-            body_html=email_html
-        )
-        
-        if email_result.get("success"):
-            logger.info(f"Email de boas-vindas enviado para {data.email}")
-        else:
-            logger.warning(f"Não foi possível enviar email para {data.email}: {email_result.get('error')}")
-            
-    except Exception as e:
-        logger.warning(f"Erro ao enviar email de boas-vindas: {e}")
-        # Não falhar a criação do utilizador se o email falhar
     
     # Trello member auto-association removed (Trello integration deprecated)
     

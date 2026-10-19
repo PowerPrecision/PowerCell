@@ -331,7 +331,8 @@ async def test_run_get_users_includes_admin_index_and_inactive():
         result = await ual.run_get_users(None, {"id": "caller", "role": "master"})
 
     query = mock_db.users.find.call_args[0][0]
-    assert query == {}
+    # QA-9: só os parceiros ficam de fora (têm o seu separador).
+    assert query == {"role": {"$nin": ["parceiro", "partner"]}}
     assert captured["limit"] >= 1000
     assert [u["id"] for u in result] == ["u-admin", "u-index", "u-off", "u-ceo"]
 

@@ -122,12 +122,12 @@ describe("EmailThreadViewer — acções", () => {
     expect(screen.getByRole("button", { name: /Marcar como lida/ })).toBeInTheDocument();
   });
 
-  it("sem processo associado oferece 'Ligar a Processo'", async () => {
+  it("sem processo associado oferece 'Associar a Processo'", async () => {
     const utilizador = userEvent.setup();
     const onLinkToProcess = vi.fn();
 
     render(<EmailThreadViewer {...props({ onLinkToProcess })} />);
-    await utilizador.click(screen.getByRole("button", { name: /Ligar a Processo/ }));
+    await utilizador.click(screen.getByRole("button", { name: /Associar a Processo/ }));
 
     expect(onLinkToProcess).toHaveBeenCalledTimes(1);
   });

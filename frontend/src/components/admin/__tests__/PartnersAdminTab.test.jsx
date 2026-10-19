@@ -21,6 +21,11 @@ import PartnersAdminTab from "../PartnersAdminTab";
 
 const EMPRESAS = [{ id: "cmp-power", name: "Power Real Estate" }, { id: "cmp-prec", name: "Precision" }];
 
+// QA-9 — as acções de cada parceiro vivem no menu de três pontos.
+const abrirMenu = async (linha) => {
+  await userEvent.click(within(linha).getByRole("button", { name: /^Ações de / }));
+};
+
 const montar = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return { queryClient, ...render(<QueryClientProvider client={queryClient}><PartnersAdminTab /></QueryClientProvider>) };
@@ -123,7 +128,8 @@ describe("PartnersAdminTab", () => {
   it("suspender envia `suspended: true` ao parceiro certo e recarrega", async () => {
     montar();
     const linha = await screen.findByTestId("parceiro-pt-2");
-    await userEvent.click(within(linha).getByRole("button", { name: "Suspender" }));
+    await abrirMenu(linha);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Suspender" }));
     await waitFor(() => expect(api.updatePartner).toHaveBeenCalledWith("pt-2", { suspended: true }));
     await waitFor(() => expect(api.getPartners.mock.calls.length).toBeGreaterThan(1));
   });
@@ -135,14 +141,16 @@ describe("PartnersAdminTab", () => {
     montar();
     const linha = await screen.findByTestId("parceiro-pt-1");
     expect(within(linha).getByText("Suspenso")).toBeInTheDocument();
-    await userEvent.click(within(linha).getByRole("button", { name: "Reactivar" }));
+    await abrirMenu(linha);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Reactivar" }));
     await waitFor(() => expect(api.updatePartner).toHaveBeenCalledWith("pt-1", { suspended: false }));
   });
 
   it("novo convite: pede ao servidor, nomeia o parceiro e mostra o link", async () => {
     montar();
     const linha = await screen.findByTestId("parceiro-parceiro-novo");
-    await userEvent.click(within(linha).getByRole("button", { name: "Novo convite para Rui Parceiro" }));
+    await abrirMenu(linha);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Reenviar Convite" }));
     await waitFor(() => expect(api.resendPartnerInvite).toHaveBeenCalledWith("parceiro-novo"));
     expect(await screen.findByLabelText("Link do convite")).toHaveValue(`${window.location.origin}/parceiro/convite/TOKEN-DO-CONVITE`);
     expect(screen.getByText("Rui Parceiro", { selector: "strong" })).toBeInTheDocument();

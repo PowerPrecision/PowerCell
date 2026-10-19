@@ -49,7 +49,7 @@ import { Checkbox } from "./ui/checkbox";
 import { 
   Mail, Send, Inbox, Plus, Loader2, Clock, 
   Paperclip, MoreVertical, Trash2, Eye, RefreshCw,
-  Settings, X, AtSign, ExternalLink, Link, Unlink, Search,
+  Settings, X, AtSign, ExternalLink, Unlink, Search,
   Star, StarOff,
   Filter, Calendar, FileText, Download,
   AlertCircle, CheckCircle, Copy,
@@ -62,7 +62,6 @@ import {
   getProcessEmails, deleteEmail, syncProcessEmails, getMonitoredEmails,
   addMonitoredEmail, removeMonitoredEmail, getEmailStats,
   markEmail as markEmailRequest, unmarkEmail as unmarkEmailRequest,
-  searchEmailsToAssociate, associateEmailToProcess,
   disassociateEmailFromProcess, getProcessEmailSyncStatus,
   downloadWebmailAttachment, readBlobErrorBody,
 } from "../services/api";
@@ -102,11 +101,6 @@ const EmailHistoryPanel = ({
   const [addingEmail, setAddingEmail] = useState(false);
   
   // Associação manual
-  const [isAssociateDialogOpen, setIsAssociateDialogOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState([]);
-  const [searching, setSearching] = useState(false);
-  const [associating, setAssociating] = useState(null);
   
   // Pesquisa local
   const [localSearchTerm, setLocalSearchTerm] = useState("");
@@ -357,23 +351,6 @@ const EmailHistoryPanel = ({
     }
   };
 
-  // Pesquisa para associação
-  const handleSearchEmails = async () => {
-    if (!searchQuery.trim() || searchQuery.length < 3) {
-      toast.error("Introduza pelo menos 3 caracteres");
-      return;
-    }
-    try {
-      setSearching(true);
-      const { data } = await searchEmailsToAssociate(searchQuery, 20);
-      setSearchResults(Array.isArray(data?.emails) ? data.emails : []);
-    } catch {
-      toast.error("Erro ao pesquisar emails");
-    } finally {
-      setSearching(false);
-    }
-  };
-
   // Desassociar: retira o email deste processo (fica no Webmail). Só tira a ligação, não apaga nada.
   const handleDisassociateEmail = async (emailId) => {
     try {
@@ -384,27 +361,6 @@ const EmailHistoryPanel = ({
     } catch (error) {
       const detalhe = error?.response?.data?.detail;
       toast.error(typeof detalhe === "string" ? detalhe : "Erro ao desassociar o email");
-    }
-  };
-
-  // Associar email
-  const handleAssociateEmail = async (emailId) => {
-    try {
-      setAssociating(emailId);
-      const { data: result } = await associateEmailToProcess({
-        email_id: emailId,
-        process_id: processId,
-      });
-      toast.success(result.message);
-      setIsAssociateDialogOpen(false);
-      setSearchQuery("");
-      setSearchResults([]);
-      fetchData();
-    } catch (error) {
-      const detalhe = error?.response?.data?.detail;
-      toast.error(typeof detalhe === "string" ? detalhe : "Erro ao associar email");
-    } finally {
-      setAssociating(null);
     }
   };
 
@@ -577,17 +533,6 @@ const EmailHistoryPanel = ({
                 <Mail className="h-4 w-4 sm:mr-1" />
                 <span className="text-xs hidden sm:inline">Power</span>
                 <ExternalLink className="h-3 w-3 ml-1 hidden sm:inline" />
-              </Button>
-              
-              <Button 
-                size="sm" 
-                variant="outline"
-                onClick={() => setIsAssociateDialogOpen(true)}
-                title="Associar email"
-                className="bg-blue-50 hover:bg-blue-100 border-blue-200 px-2 sm:px-3"
-              >
-                <Link className="h-4 w-4 sm:mr-1" />
-                <span className="text-xs hidden sm:inline">Associar</span>
               </Button>
               
               <Button 
@@ -1073,91 +1018,6 @@ const EmailHistoryPanel = ({
             <Button onClick={() => { setIsSettingsOpen(false); handleSyncEmails(); }} className="bg-teal-600 hover:bg-teal-700">
               <RefreshCw className="h-4 w-4 mr-2" />
               Sincronizar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal de Associação */}
-      <Dialog open={isAssociateDialogOpen} onOpenChange={setIsAssociateDialogOpen}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Link className="h-5 w-5" />
-              Associar Email ao Cliente
-            </DialogTitle>
-            <DialogDescription>
-              Pesquise um email existente para associar a este cliente.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="flex gap-2">
-              <Input
-                placeholder="Pesquisar por assunto ou remetente..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearchEmails()}
-              />
-              <Button onClick={handleSearchEmails} disabled={searching}>
-                {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              </Button>
-            </div>
-
-            <ScrollArea className="h-[300px] border rounded-md p-2">
-              {searchResults.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Search className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">
-                    {searchQuery.length > 0 ? "Nenhum resultado" : "Pesquise para ver resultados"}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {searchResults.map((email) => (
-                    <div key={email.id} className="p-3 border rounded-lg hover:bg-muted/50">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate">{email.subject}</p>
-                          <p className="text-xs text-muted-foreground truncate">De: {email.from_email}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs text-muted-foreground">
-                              {email.sent_at && safeFormat(email.sent_at, "dd/MM/yyyy")}
-                            </span>
-                            {email.client_name && (
-                              <Badge variant="outline" className="text-xs">
-                                Já: {email.client_name}
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                        <Button
-                          size="sm"
-                          onClick={() => handleAssociateEmail(email.id)}
-                          disabled={associating === email.id || email.process_id === processId}
-                        >
-                          {associating === email.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : email.process_id === processId ? (
-                            "Já associado"
-                          ) : (
-                            <>
-                              <Link className="h-4 w-4 mr-1" />
-                              Associar
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setIsAssociateDialogOpen(false); setSearchQuery(""); setSearchResults([]); }}>
-              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>

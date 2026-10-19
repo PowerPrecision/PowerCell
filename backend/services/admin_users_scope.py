@@ -105,6 +105,57 @@ async def empresas_do_ambito(user: dict, *, vista: bool = False) -> EmpresasDoAm
     return await empresas_do_scope(scope)
 
 
+#: Papéis que vivem no separador «Parceiros» e nunca na lista de staff.
+PAPEIS_DE_PARCEIRO: tuple[str, ...] = ("parceiro", "partner")
+
+
+def sem_parceiros(query: dict, role_pedido: str | None = None) -> dict:
+    """Junta à `query` a exclusão dos parceiros (conta fantasma de role `parceiro`).
+
+    A lista de Utilizadores/Staff nunca os mostra: têm o seu separador. Quem pede EXPLICITAMENTE
+    `role=parceiro` continua a poder ver essa lista (é o filtro, não a omissão).
+    """
+    if (role_pedido or "").strip().lower() in PAPEIS_DE_PARCEIRO:
+        return query
+    exclusao = {"role": {"$nin": list(PAPEIS_DE_PARCEIRO)}}
+    return {"$and": [query, exclusao]} if query else exclusao
+
+
+async def empresas_da_empresa_activa(user: dict) -> EmpresasDoAmbito:
+    """O âmbito ESTRITO de uma LISTAGEM de pessoas: a empresa escolhida no cabeçalho.
+
+    A lista de Utilizadores segue a EMPRESA em contexto (QA-9): com a Precision escolhida só
+    aparecem as pessoas da Precision — nem os colegas de outra empresa da mesma rede, nem as
+    contas sem empresa, nem outras redes. Sem empresa escolhida (o Master na vista «Sistema», ou
+    um pedido sem cabeçalho) vale o âmbito de rede de sempre (`empresas_do_ambito`).
+
+    O cabeçalho **nunca alarga**: só conta se `resolve_tenant_scope` o aceitou, isto é, se a
+    empresa estiver no âmbito de quem pergunta; uma empresa alheia cai no âmbito normal.
+    **Gestão por id** (editar, apagar, personificar) continua a seguir a REDE
+    (`carregar_utilizador_gerivel`): isto só estreita o que se LISTA.
+    """
+    from services.role_scope import CAMPO_VISTA
+
+    empresa = str((user or {}).get(CAMPO_VISTA) or "").strip()
+    if not empresa or empresa in VALORES_SEM_EMPRESA:
+        return await empresas_do_ambito(user or {})
+
+    scope = await resolve_tenant_scope(user or {})
+    if tuple(scope.company_ids or ()) != (empresa,):
+        return await empresas_do_ambito(user or {})
+
+    doc = await db.companies.find_one({"id": empresa}, {"_id": 0, "id": 1, "name": 1}) or {}
+    nome = str(doc.get("name") or "").strip()
+    return EmpresasDoAmbito(
+        ids=[empresa],
+        nomes=[nome] if nome else [],
+        fechado=True,
+        inclui_sem_empresa=False,
+        sem_fronteira=False,
+        redes=(),
+    )
+
+
 async def empresas_do_scope(scope) -> EmpresasDoAmbito:
     """Como `empresas_do_ambito`, mas a partir de um âmbito já resolvido.
 

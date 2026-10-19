@@ -78,6 +78,7 @@ from routes.voice_notes import router as voice_notes_router
 from routes.document_extraction import router as document_extraction_router
 from routes.partner_portal import router as partner_portal_router
 from routes.partners_admin import router as partners_admin_router
+from routes.admin_user_access import router as admin_user_access_router
 from routes.financial_validation import router as financial_validation_router
 from routes.emails import router as emails_router  # doc_router removido - rotas agora no router principal
 from routes.webmail import router as webmail_router
@@ -621,6 +622,7 @@ app.include_router(voice_notes_router, prefix="/api")
 app.include_router(document_extraction_router, prefix="/api")
 app.include_router(partner_portal_router, prefix="/api")
 app.include_router(partners_admin_router, prefix="/api")
+app.include_router(admin_user_access_router, prefix="/api")
 app.include_router(financial_validation_router, prefix="/api")
 # emails_doc_router removido — send-documentation e document-recipients agora no router principal (antes de /{email_id})
 app.include_router(emails_router, prefix="/api")

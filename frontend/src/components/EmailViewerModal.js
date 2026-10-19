@@ -334,15 +334,19 @@ const EmailViewerModal = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-6xl h-[100vh] sm:h-[85vh] sm:max-w-6xl sm:rounded-lg p-0 gap-0 overflow-hidden">
+      {/* O DialogContent é uma GRELHA de uma linha `auto`: a linha cresce até ao tamanho do conteúdo
+            (o `min-height: auto` do filho) e o corpo do email nunca transborda — o scroll
+            "desaparecia" mesmo com `overflow-y-auto` no sítio certo. `minmax(0,1fr)` prende a linha à
+            altura do diálogo (QA-9). */}
+      <DialogContent className="max-w-6xl h-[100vh] sm:h-[85vh] sm:max-w-6xl sm:rounded-lg p-0 gap-0 overflow-hidden grid-rows-[minmax(0,1fr)]">
         <VisuallyHidden>
           <DialogTitle>Visualização de Email</DialogTitle>
           <DialogDescription>{currentEmail?.subject || "Email"}</DialogDescription>
         </VisuallyHidden>
         
-        <div className="flex h-full">
+        <div className="flex h-full min-h-0">
           {/* Lista de emails - lado esquerdo */}
-          <div className="w-72 border-r bg-muted/30 flex flex-col shrink-0">
+          <div className="hidden sm:flex w-72 border-r bg-muted/30 flex-col shrink-0">
             <div className="p-3 border-b bg-background">
               <h3 className="font-semibold text-sm flex items-center gap-2">
                 <Mail className="h-4 w-4" />

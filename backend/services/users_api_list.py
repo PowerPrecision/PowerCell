@@ -47,17 +47,26 @@ async def run_get_users(
     # do painel de administração (rede → empresas → utilizadores).
     from services.admin_users_scope import (
         build_users_scope_query,
+        empresas_da_empresa_activa,
         empresas_do_ambito,
+        sem_parceiros,
     )
 
     # A equipa que o Master vê é SEMPRE a da EMPRESA que tem seleccionada (`X-Company-Id`), com ou
     # sem processo (Lote 6, «janela, não porta»): num processo partilhado, o operador da Domus
     # nunca vê nem atribui a um operador da Precision. Com um processo, o que ele alcança ainda
     # estreita a lista (abaixo): escolher a Domus num processo que não é dela não a abre.
-    ambito = await empresas_do_ambito(user or {}, vista=True)
+    # QA-9: a lista GERAL (não a de atribuição) segue a empresa escolhida e nunca traz parceiros;
+    # as dropdowns de atribuição mantêm o âmbito de rede + o alcance do processo.
+    if for_assignment:
+        ambito = await empresas_do_ambito(user or {}, vista=True)
+    else:
+        ambito = await empresas_da_empresa_activa(user or {})
     scope_query = await build_users_scope_query(ambito)
     if scope_query:
         query = {"$and": [query, scope_query]} if query else scope_query
+    if not for_assignment:
+        query = sem_parceiros(query, role)
 
     users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(
         USERS_LIST_LIMIT

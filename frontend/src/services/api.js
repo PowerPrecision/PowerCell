@@ -1315,6 +1315,10 @@ export const getAllAdminUsers = () => api.get("/admin/users");
 export const getAdminUsersPaginated = (params = {}) =>
   api.get("/admin/users/paginated", { params });
 export const createAdminUser = (data) => api.post("/admin/users", data);
+// QA-9 — gera uma palavra-passe nova e reenvia os dados de acesso por email (o servidor só a troca
+// se o email sair). `skipErrorToast`: o separador mostra a causa (502/409/400) num só aviso.
+export const resendUserInvite = (id) =>
+  api.post(`/admin/users/${id}/resend-invite`, null, { skipErrorToast: true });
 export const updateAdminUser = (id, data) => api.put(`/admin/users/${id}`, data);
 export const deleteAdminUser = (id) => api.delete(`/admin/users/${id}`);
 

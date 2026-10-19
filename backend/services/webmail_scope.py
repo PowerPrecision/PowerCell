@@ -89,6 +89,26 @@ def _endereco(valor: Any) -> str:
     return _texto(valor).lower()
 
 
+async def _empresa_da_vista_do_master(user: dict) -> str:
+    """Id da empresa que o Master escolheu no cabeçalho, se existir; senão `""`.
+
+    Uma empresa inexistente (cabeçalho velho) não cria separador: o cabeçalho é de quem o envia.
+    """
+    from services.role_scope import CAMPO_VISTA, conta_e_master
+
+    if not conta_e_master(user):
+        return ""
+    vista = _texto((user or {}).get(CAMPO_VISTA))
+    if not vista or vista in VALORES_SEM_EMPRESA:
+        return ""
+    try:
+        existe = await db.companies.find_one({"id": vista}, {"_id": 0, "id": 1})
+    except Exception as exc:
+        logger.warning("[WebmailScope] Falha a validar a empresa da vista %s: %s", vista, exc)
+        return ""
+    return vista if existe else ""
+
+
 async def empresas_do_webmail(user: dict) -> list[EmpresaDoWebmail]:
     """
     Empresas onde o utilizador tem um UCR válido — os separadores.
@@ -130,6 +150,15 @@ async def empresas_do_webmail(user: dict) -> list[EmpresaDoWebmail]:
         nome = _texto(ucr.get("company_name"))
         if nome and cid not in nomes:
             nomes[cid] = nome
+
+    # QA-9 — a VISTA do Master. Com uma empresa escolhida no cabeçalho, as CONTAS já mostram a
+    # caixa dessa empresa (`run_list_my_email_accounts`), mesmo sem ele ter UCR nela; os separadores
+    # e o âmbito da lista eram só por UCR, e o pedido `?company_id=<essa empresa>` levava 404 — o
+    # ecrã mostrava a caixa e a lista vinha vazia. Só a CONTA Master ganha a empresa por a ter
+    # escolhido (a fronteira de dados é dela levantar); um cabeçalho de um perfil local não alarga.
+    vista = await _empresa_da_vista_do_master(user)
+    if vista and vista not in por_empresa:
+        por_empresa[vista] = {"master"}
 
     if not por_empresa:
         return []

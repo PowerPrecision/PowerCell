@@ -208,6 +208,42 @@ describe("WebmailPage — as três colunas ligadas", () => {
   });
 });
 
+describe("WebmailPage — uma falha a LER a lista não se mostra como pasta vazia (QA-9)", () => {
+  it("o pedido recusado (empresa fora do âmbito) diz-se, em vez de «Sem emails nesta pasta»", async () => {
+    estadoDaLista.valor = {
+      ...respostaDaLista([]),
+      isError: true,
+      error: new Error("Empresa não encontrada"),
+    };
+    montar();
+
+    const alerta = await screen.findByTestId("erro-da-lista-de-emails");
+    expect(alerta).toHaveTextContent("Não foi possível carregar os emails");
+    expect(alerta).toHaveTextContent("Empresa não encontrada");
+    expect(screen.queryByText("Sem emails nesta pasta")).not.toBeInTheDocument();
+  });
+
+  it("contraprova: pasta realmente vazia continua a dizer «Sem emails nesta pasta»", async () => {
+    estadoDaLista.valor = respostaDaLista([]);
+    montar();
+
+    expect(await screen.findByText("Sem emails nesta pasta")).toBeInTheDocument();
+    expect(screen.queryByTestId("erro-da-lista-de-emails")).not.toBeInTheDocument();
+  });
+
+  it("com emails em cache o erro de um refetch não os esconde", async () => {
+    estadoDaLista.valor = {
+      ...respostaDaLista([email({ id: "a", subject: "Ainda aqui" })]),
+      isError: true,
+      error: new Error("Falha de rede"),
+    };
+    montar();
+
+    expect(await screen.findByText("Ainda aqui")).toBeInTheDocument();
+    expect(screen.queryByTestId("erro-da-lista-de-emails")).not.toBeInTheDocument();
+  });
+});
+
 describe("WebmailPage — abrir um email (lista → painel de leitura)", () => {
   it("clicar na conversa carrega o detalhe e mostra-o", async () => {
     const utilizador = userEvent.setup();
