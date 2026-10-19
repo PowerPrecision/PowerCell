@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   KeyRound,
   Lock,
+  Mail,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -30,6 +31,7 @@ import {
   getUserCompanyRoles,
   getUserRoles,
   getAdminUsersPaginated,
+  resendUserInvite,
   updateUser,
 } from "../../services/api";
 import { queryKeys } from "../../lib/queryClient";
@@ -53,6 +55,16 @@ import {
   UCR_ASSIGNABLE_ROLES,
   grantableRoles,
 } from "../../utils/roleUtils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -119,6 +131,8 @@ export default function UsersAccessAdminTab({ isMaster = false }) {
   const [newRole, setNewRole] = useState("");
   const [removeError, setRemoveError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [reenviarPara, setReenviarPara] = useState(null);
+  const [aReenviar, setAReenviar] = useState(false);
 
   // Ponto 11 — paginação e pesquisa SERVER-SIDE. A pesquisa era feita
   // em memória, sobre `name`/`email`, depois de trazer a tabela inteira
@@ -345,6 +359,28 @@ export default function UsersAccessAdminTab({ isMaster = false }) {
       return false;
     } finally {
       setSaving(false);
+    }
+  };
+
+  // QA-9 — «Reenviar Convite»: o servidor gera uma palavra-passe nova e manda os dados de acesso.
+  // Só a troca se o email sair; a palavra-passe nunca volta na resposta.
+  const handleReenviarConvite = async () => {
+    const alvo = reenviarPara;
+    if (!alvo?.id) return;
+    setAReenviar(true);
+    try {
+      const res = await resendUserInvite(alvo.id);
+      toast.success(`Convite reenviado para ${res?.data?.email || alvo.email}`);
+      setReenviarPara(null);
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(
+          err.response?.data?.detail || err.response?.data?.error,
+          "Não foi possível reenviar o convite",
+        ),
+      );
+    } finally {
+      setAReenviar(false);
     }
   };
 
@@ -593,6 +629,16 @@ export default function UsersAccessAdminTab({ isMaster = false }) {
                               Redefinir Password
                             </DropdownMenuItem>
                           ) : null}
+                          {user.role !== "parceiro" ? (
+                            <DropdownMenuItem
+                              disabled={!active}
+                              onClick={() => setReenviarPara(user)}
+                              data-testid={`btn-resend-invite-${user.id}`}
+                            >
+                              <Mail className="h-4 w-4" />
+                              Reenviar Convite
+                            </DropdownMenuItem>
+                          ) : null}
                           <DropdownMenuItem
                             disabled={active && ["master", "admin"].includes(user.role)}
                             onClick={() => handleToggleUserStatus(user)}
@@ -815,6 +861,37 @@ export default function UsersAccessAdminTab({ isMaster = false }) {
           </div>
         </SheetContent>
       </Sheet>
+
+      <AlertDialog
+        open={Boolean(reenviarPara)}
+        onOpenChange={(aberto) => {
+          if (!aberto && !aReenviar) setReenviarPara(null);
+        }}
+      >
+        <AlertDialogContent data-testid="dialogo-reenviar-convite">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reenviar convite</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vai ser gerada uma <strong>palavra-passe nova</strong> para {reenviarPara?.name} e
+              enviada para {reenviarPara?.email}. A palavra-passe actual deixa de funcionar e as
+              sessões abertas são terminadas. Se o email não sair, nada é alterado.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={aReenviar}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={aReenviar}
+              onClick={(e) => {
+                // O diálogo só fecha quando o envio termina (ou falha com o aviso).
+                e.preventDefault();
+                handleReenviarConvite();
+              }}
+            >
+              {aReenviar ? "A enviar..." : "Reenviar convite"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
