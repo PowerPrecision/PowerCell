@@ -99,6 +99,7 @@ import { API_BASE_URL } from "../utils/apiBaseUrl";
 import { usePortalRealtime } from "../hooks/usePortalRealtime";
 import PortalInativo from "../components/portal/PortalInativo";
 import NotaDoPedido from "../components/portal/NotaDoPedido";
+import { pedidosParaJuntarMais, rotuloDoBotao, textoDoConvite } from "../utils/pedidosDeDocumentos";
 import { eBloqueioDoPortal, limparSessaoDoPortal, mensagemDoBloqueio } from "../utils/portalInativo";
 
 // ====================================================================
@@ -397,6 +398,13 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
             {doc.label || doc.custom_name || doc.description || 'Documento'}
           </p>
           <NotaDoPedido nota={doc.notes} />
+          {/* A quantidade é uma RECOMENDAÇÃO (o 1.º ficheiro cumpre o pedido):
+              o convite diz que se pode juntar mais sem prometer que é preciso. */}
+          {textoDoConvite(doc) && (
+            <p className="mt-0.5 text-xs text-emerald-700" data-testid="convite-juntar-mais">
+              {textoDoConvite(doc)}
+            </p>
+          )}
         </div>
 
         {/* PACOTE DE — Botão de upload SEMPRE visível (permite uploads faseados).
@@ -410,9 +418,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
             <button onClick={() => fileInputRef.current?.click()}
               className="flex-shrink-0 px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1">
               <Upload className="w-3.5 h-3.5" />
-              {doc.attached_files && doc.attached_files.length > 0
-                ? '➕ Adicionar ficheiros'
-                : 'Submeter'}
+              {rotuloDoBotao(doc) === 'Adicionar mais' ? '➕ Adicionar mais' : 'Submeter'}
             </button>
           </>
         )}
@@ -1208,6 +1214,24 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
           <div className="text-center py-6">
             <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2" />
             <p className="text-sm text-emerald-700 font-medium">Todos os documentos foram submetidos</p>
+          </div>
+        )}
+
+        {/* Pedidos JÁ cumpridos com o 1.º ficheiro mas que recomendam mais
+            (ex.: «últimos 3 recibos»): continuam visíveis, a convidar. Não são
+            pendentes — o processo avança — por isso vivem numa secção própria. */}
+        {pedidosParaJuntarMais(received).length > 0 && (
+          <div className="mt-4 border-t border-gray-100 pt-4" data-testid="pedidos-para-juntar-mais">
+            <p className="text-sm font-semibold text-gray-700 mb-2">Pode juntar mais documentos</p>
+            <div className="space-y-2">
+              {pedidosParaJuntarMais(received).map((doc) => (
+                <DocumentUploadItem
+                  key={doc.id || doc.category}
+                  doc={{ ...doc, label: doc.category_label || doc.category }}
+                  onUploadSuccess={onUploadSuccess}
+                />
+              ))}
+            </div>
           </div>
         )}
 

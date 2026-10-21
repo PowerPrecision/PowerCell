@@ -15,6 +15,7 @@ from database import db
 # sempre (a armadilha da ordem de import, ver AGENTS.md). Aqui o módulo carrega
 # com o resto do serviço, antes de qualquer teste patchar o que quer que seja.
 from services import phase_automation
+from services.index_status import campos_ao_indexar, campos_ao_reverter
 from services.process_phase_clock import (
     montar_update,
     transicao_de_fase,
@@ -66,10 +67,8 @@ def build_indexacao_update_set(
 ) -> dict[str, Any]:
     """Campos $set ao marcar indexação concluída (+ opcional salto de status)."""
     update_set: dict[str, Any] = {
-        "is_indexed": True,
-        "indexed_at": now,
-        "indexed_by": user.get("id"),
-        "indexed_by_name": user.get("name", ""),
+        # Estado + `is_indexed` derivado: ponto único em `index_status`.
+        **campos_ao_indexar(user, now),
         "assigned_indexacao_id": None,
         "indexacao_name": None,
         "updated_at": now,
@@ -374,6 +373,20 @@ async def libertar_index_sem_falhar(process_id: str, user: dict) -> dict[str, An
         return {"executado": False, "movidos": 0, "erro": type(exc).__name__}
 
 
+async def agendar_finalizacao_sem_falhar(process: dict, user: dict) -> dict[str, Any]:
+    """Lança o job de fecho do Index sem nunca bloquear nem desfazer a indexação."""
+    try:
+        from services.index_finalize import agendar_finalizacao
+
+        return await agendar_finalizacao(process, user)
+    except Exception as exc:
+        logger.warning(
+            f"[INDEXACAO] Fecho do Index não agendado (não fatal) para o "
+            f"processo {process.get('id')}: {exc}"
+        )
+        return {"agendado": False, "task_id": None, "motivo": "erro"}
+
+
 async def trigger_financial_engine_safe(process: dict, user: dict) -> dict[str, Any]:
     """Dispara o Motor de Simulação Financeira sem nunca bloquear a indexação.
 
@@ -563,6 +576,10 @@ async def run_mark_indexed_side_effects(
 
     financial_engine = await trigger_financial_engine_safe(process, user)
 
+    # Lote 12 (Fase 3): o fecho do Index (analisar o que falta, PDF limpo, notificar) corre em
+    # background e NUNCA condiciona a indexação, que já está gravada.
+    index_finalize = await agendar_finalizacao_sem_falhar(process, user)
+
     resposta = build_mark_indexed_response(
         process=process,
         process_id=process_id,
@@ -575,6 +592,7 @@ async def run_mark_indexed_side_effects(
         financial_engine=financial_engine,
     )
     resposta["index_release"] = index_release
+    resposta["index_finalize"] = index_finalize
     return resposta
 
 
@@ -680,13 +698,16 @@ async def run_mark_process_indexed(
 #           com histórico e broadcast WS para actualizar a UI em tempo
 #           real nos outros operadores.
 
-def build_unindex_update_set(user: dict, now: str) -> dict[str, Any]:
-    """Campos $set ao REVERTER o estado de indexação (toggle OFF)."""
+def build_unindex_update_set(
+    user: dict, now: str, process: Optional[dict] = None
+) -> dict[str, Any]:
+    """Campos $set ao REVERTER o estado de indexação (toggle OFF).
+
+    `process` (o documento actual) decide se volta à fila ou continua dispensado
+    (`skip_index`); sem ele assume-se um processo normal (volta a `pending`).
+    """
     return {
-        "is_indexed": False,
-        "unindexed_at": now,
-        "unindexed_by": user.get("id"),
-        "unindexed_by_name": user.get("name", ""),
+        **campos_ao_reverter(process or {}, user, now),
         "updated_at": now,
     }
 
@@ -740,7 +761,7 @@ async def run_set_process_indexed_flag(
     now = datetime.now(timezone.utc).isoformat()
     result = await db.processes.update_one(
         {"id": process_id, "is_indexed": True},
-        {"$set": build_unindex_update_set(user, now)},
+        {"$set": build_unindex_update_set(user, now, process)},
     )
     if result.matched_count == 0:
         # Race: outro operador desligou primeiro — idempotente.

@@ -63,6 +63,7 @@ from typing import Any, Iterable, Optional
 
 from database import db
 from services.role_query import build_deep_role_query
+from services.index_status import aplicar_ao_documento, estado_apos
 from services.tenant_network import CAMPO_REDE, resolve_network_id
 
 logger = logging.getLogger(__name__)
@@ -228,19 +229,22 @@ async def aplicar_regime_de_indexacao(process_doc: dict) -> bool:
     `test_triagem_por_rede_de_destino.py` — um escritor novo que a esqueça
     falha). Devolve se escreveu. Nunca sobrescreve `skip_index` já ligado.
     """
+    escreveu = False
     try:
-        if not await rede_do_processo_sem_index(process_doc):
-            return False
+        if await rede_do_processo_sem_index(process_doc):
+            process_doc["skip_index"] = True
+            process_doc["index_dispensado_por"] = MARCA_SEM_INDEX
+            escreveu = True
     except Exception as exc:
         logger.warning(
             "[INDEX] Falha a decidir o regime de indexação (%s); o processo "
             "mantém o comportamento por omissão.", exc,
         )
-        return False
-
-    process_doc["skip_index"] = True
-    process_doc["index_dispensado_por"] = MARCA_SEM_INDEX
-    return True
+    # Lote 12: o `index_status` nasce AQUI, de todos os caminhos (com `skip_index`
+    # pedido pelo escritor, dispensado pela rede, ou normal). É o gancho que os
+    # cinco escritores de processos já têm — um sexto a esquecê-lo falha o inventário.
+    aplicar_ao_documento(process_doc)
+    return escreveu
 
 
 # ====================================================================
@@ -328,6 +332,7 @@ async def entrar_na_triagem_da_rede(
         # ficheiros continuavam a entrar nas pastas finais e a IA nunca corria.
         atualizacao["skip_index"] = False
         atualizacao["index_dispensado_por"] = None
+        atualizacao.update(estado_apos(processo, atualizacao))
 
     await db.processes.update_one({"id": process_id}, {"$set": atualizacao})
 

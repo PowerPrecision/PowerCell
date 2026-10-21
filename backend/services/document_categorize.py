@@ -28,6 +28,7 @@ from services.document_categorization import (
     extract_text_from_pdf,
 )
 from services.document_process_resolve import extract_second_client_name
+from services.process_ai_log import classificar_falha, registar_accao_ia
 from services.s3_storage import s3_service
 
 logger = logging.getLogger(__name__)
@@ -77,8 +78,12 @@ async def run_categorize_document(
     *,
     s3_path: str,
     filename: str,
+    user: dict | None = None,
 ) -> dict[str, Any]:
-    """Categoriza um documento S3 com IA e persiste metadados."""
+    """Categoriza um documento S3 com IA e persiste metadados.
+
+    ``user`` só serve para o autor no Log da IA (a PERMISSÃO é verificada na rota,
+    antes de aqui chegar)."""
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
@@ -111,6 +116,12 @@ async def run_categorize_document(
         existing_categories=existing_categories,
     )
     if not result.get("success"):
+        await registar_accao_ia(
+            process_id=process_id, accao="categorizar", estado="falha", gatilho="manual",
+            user=user, ficheiro=filename, s3_path=s3_path,
+            documento_id=existing.get("id") if existing else None,
+            motivo=classificar_falha(result.get("error")),
+        )
         raise HTTPException(
             status_code=500, detail=result.get("error", ERROR_CATEGORIZE_DOC)
         )
@@ -134,6 +145,13 @@ async def run_categorize_document(
         metadata["created_at"] = now
         await db.document_metadata.insert_one(metadata)
 
+    await registar_accao_ia(
+        process_id=process_id, accao="categorizar", estado="sucesso", gatilho="manual",
+        user=user, ficheiro=filename, s3_path=s3_path, documento_id=doc_id,
+        categoria=result.get("category"), confianca=result.get("confidence"),
+        motivo=None if extracted_text else "sem_contexto",
+    )
+
     return {
         "success": True,
         "id": doc_id,
@@ -146,8 +164,12 @@ async def run_categorize_document(
     }
 
 
-async def run_categorize_all_documents(process_id: str) -> dict[str, Any]:
-    """Categoriza todos os ficheiros S3 ainda não categorizados do processo."""
+async def run_categorize_all_documents(
+    process_id: str, user: dict | None = None
+) -> dict[str, Any]:
+    """Categoriza todos os ficheiros S3 ainda não categorizados do processo.
+
+    ``user`` só serve para o autor no Log da IA (a permissão é da rota)."""
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
@@ -208,6 +230,11 @@ async def run_categorize_all_documents(process_id: str) -> dict[str, Any]:
                 file_content = s3_service.get_file_content(s3_path)
                 if not file_content:
                     results["errors"] += 1
+                    await registar_accao_ia(
+                        process_id=process_id, accao="categorizar", estado="falha",
+                        gatilho="manual", user=user, ficheiro=filename, s3_path=s3_path,
+                        motivo="ilegivel",
+                    )
                     continue
 
                 extracted_text = ""
@@ -249,6 +276,13 @@ async def run_categorize_all_documents(process_id: str) -> dict[str, Any]:
                         existing_categories.append(result["category"])
 
                     results["categorized"] += 1
+                    await registar_accao_ia(
+                        process_id=process_id, accao="categorizar", estado="sucesso",
+                        gatilho="manual", user=user, ficheiro=filename, s3_path=s3_path,
+                        documento_id=doc_id, categoria=result.get("category"),
+                        confianca=result.get("confidence"),
+                        motivo=None if extracted_text else "sem_contexto",
+                    )
                     results["documents"].append(
                         {
                             "filename": filename,
@@ -260,6 +294,11 @@ async def run_categorize_all_documents(process_id: str) -> dict[str, Any]:
                     )
                 else:
                     results["errors"] += 1
+                    await registar_accao_ia(
+                        process_id=process_id, accao="categorizar", estado="falha",
+                        gatilho="manual", user=user, ficheiro=filename, s3_path=s3_path,
+                        motivo=classificar_falha(result.get("error")),
+                    )
                     results["documents"].append(
                         {
                             "filename": filename,
@@ -270,6 +309,11 @@ async def run_categorize_all_documents(process_id: str) -> dict[str, Any]:
             except (IOError, OSError, ValueError, KeyError, TypeError) as e:
                 logger.error("Erro ao categorizar documento")
                 results["errors"] += 1
+                await registar_accao_ia(
+                    process_id=process_id, accao="categorizar", estado="falha",
+                    gatilho="manual", user=user, ficheiro=filename, s3_path=s3_path,
+                    motivo=classificar_falha(e),
+                )
                 results["documents"].append(
                     {"filename": filename, "status": "error", "error": str(e)}
                 )

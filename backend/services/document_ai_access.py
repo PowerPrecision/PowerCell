@@ -80,3 +80,32 @@ async def exigir_ia_no_processo(request, user: dict, process: dict) -> None:
         (user or {}).get("id"), (process or {}).get("id"),
     )
     raise HTTPException(status_code=403, detail=DETALHE_SEM_PERMISSAO_DE_IA)
+
+
+async def exigir_ia_no_processo_por_id(request, user: dict, process_id: str) -> dict:
+    """Carrega o processo e aplica a regra da IA manual. 404 se não existe (a rota já
+    passou a fronteira de rede, por isso o 404 não revela nada que o utilizador
+    não pudesse saber); 403 se não é um alto perfil. Devolve o processo."""
+    from database import db
+
+    processo = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not processo:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    await exigir_ia_no_processo(request, user, processo)
+    return processo
+
+
+async def exigir_ia_no_documento(request, user: dict, doc_id: str) -> None:
+    """Idem, a partir do `id` de um `document_metadata` (a rota `{doc_id}/ai-analyze-review`
+    não leva o processo no caminho). Documento inexistente ou sem processo deixa passar
+    ao handler, que responde o 404/400 de sempre — recusar aqui seria inventar um 403
+    sobre algo que não existe."""
+    from database import db
+
+    doc = await db.document_metadata.find_one(
+        {"$or": [{"id": doc_id}, {"doc_id": doc_id}]}, {"_id": 0, "process_id": 1}
+    )
+    process_id = (doc or {}).get("process_id")
+    if not process_id:
+        return
+    await exigir_ia_no_processo_por_id(request, user, process_id)

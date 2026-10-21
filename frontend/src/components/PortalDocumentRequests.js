@@ -121,9 +121,16 @@ export default function PortalDocumentRequests({
   onDocumentsChange,
   // Processo fechado: os pedidos veem-se, não se criam nem se alteram.
   readOnly = false,
+  // `process.pode_ver_documentos`: a resposta do servidor a «posso ler os documentos
+  // deste processo?». `false` (processo por indexar e não atribuído a mim) não pede
+  // os pedidos — o servidor responderia 403 por desenho. `undefined` (servidor antigo
+  // ou pergunta falhada) pede à mesma: o servidor continua a ser a parede.
+  podeVerDocumentos,
 }) {
   const queryClient = useQueryClient();
-  const { documents, isLoading: loading } = usePortalRequestsQuery(processId);
+  const { documents, isLoading: loading } = usePortalRequestsQuery(processId, {
+    enabled: podeVerDocumentos !== false,
+  });
   const [actionLoading, setActionLoading] = useState(null); // track which action is loading
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newDoc, setNewDoc] = useState({ categories: [], notes: "", custom_label: "" });
@@ -246,6 +253,22 @@ export default function PortalDocumentRequests({
   const pendingCount = pendingDocs.length;
   const uploadedCount = uploadedDocs.length;
   const receivedCount = receivedDocs.length;
+
+  // Sem permissão para ler os documentos deste processo (por indexar e não atribuído a
+  // mim): diz-se, em vez de mostrar «sem pedidos» — que mentia, porque podem existir.
+  if (podeVerDocumentos === false) {
+    return (
+      <Card className="border-teal-200" data-testid="pedidos-do-portal-indisponiveis">
+        <CardContent className="py-4">
+          <p className="text-sm font-medium">Documentos do Portal</p>
+          <p className="text-xs text-muted-foreground">
+            Os pedidos de documentos ficam disponíveis depois de o processo ser indexado
+            ou de lhe ser atribuído.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <>

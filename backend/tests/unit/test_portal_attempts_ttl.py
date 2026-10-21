@@ -149,9 +149,13 @@ class TestOIndiceEstaDeclaradoEChegaAoDriver:
         """Uma terceira colecção com TTL em `expire_at` e sem backfill deixava
         os registos antigos para sempre; uma de mais no backfill escrevia onde
         o TTL não actua."""
+        # `process_ai_log` tem TTL em `expire_at` mas NÃO é uma colecção de tentativas
+        # de login: nasceu já com datetime nativo em todas as linhas (`montar_linha`),
+        # logo não há registos antigos (texto) a corrigir com o backfill.
+        sem_backfill_por_desenho = {"process_ai_log"}
         com_ttl = {
             i["collection"] for i in db_indexes.TTL_INDEXES if i["field"] == "expire_at"
-        }
+        } - sem_backfill_por_desenho
         assert set(COLECCOES_DE_TENTATIVAS) == com_ttl
 
     @pytest.mark.asyncio

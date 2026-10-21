@@ -101,6 +101,10 @@ export const queryKeys = {
     // debaixo do prefixo do detalhe, para que qualquer invalidação do processo
     // (gravar a ficha, prazos, atribuições) os refaça sem ninguém se lembrar.
     alerts: (id) => [...queryKeys.processes.detail(id), 'alerts'],
+    // Log da IA: desce do detalhe, logo a invalidação do processo também o refaz.
+    // A chave leva a página e o filtro: chaves iguais exigem valores iguais.
+    aiLog: (id, pagina = 1, estado = '') => [...queryKeys.processes.detail(id), 'ai-log', pagina, estado],
+    aiLogAll: (id) => [...queryKeys.processes.detail(id), 'ai-log'],
     origemFinanceira: (id) => [...queryKeys.processes.detail(id), 'origem-financeira'],
     candidatosOrigemFinanceira: (id) => [...queryKeys.processes.detail(id), 'origem-financeira', 'candidatos'],
     // Portal do Parceiro — o controlo «Serviço pago pelo parceiro». Desce do
@@ -109,6 +113,16 @@ export const queryKeys = {
     servicoDoParceiro: (id) => [...queryKeys.processes.detail(id), 'servico-do-parceiro'],
   },
   
+  // Módulo Index (Lote 12). A chave leva o separador, a página e a pesquisa: chaves iguais
+  // exigem valores iguais (uma fila «pending» e uma de «reviews» nunca partilham entrada).
+  index: {
+    all: ['index'],
+    queueAll: () => [...queryKeys.index.all, 'queue'],
+    queue: (tab = 'pending', pagina = 1, pesquisa = '') => [...queryKeys.index.queueAll(), tab, pagina, pesquisa],
+    workstation: (processId) => [...queryKeys.index.all, 'workstation', processId],
+    employers: (texto = '') => [...queryKeys.index.all, 'employers', texto],
+  },
+
   // Histórico/Timeline
   history: {
     all: ['history'],

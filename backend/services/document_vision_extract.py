@@ -227,7 +227,8 @@ async def run_extract_document_data(
     # `skip_analyzed=False`: o consultor carregou no botão DESTE ficheiro.
     # Devolver "já foi analisado" e nada mais seria incompreensível.
     resultado = await run_analysis_on_documents(
-        process_id, [documento], user=user, skip_analyzed=False
+        process_id, [documento], user=user, skip_analyzed=False,
+        accao="extrair_dados",
     )
 
     resultado["source_document"] = {

@@ -18,10 +18,14 @@ import PartnerUploadBox from "@/components/partner/PartnerUploadBox";
 import FicheiroDoCaso from "@/components/partner/FicheiroDoCaso";
 import { cn } from "@/lib/utils";
 import { progressoDoPedido } from "@/utils/partnerPortal";
+import { convidaAJuntarMais, textoDoConvite } from "@/utils/pedidosDeDocumentos";
 
 export default function PedidoDeDocumento({ caseId, pedido, desactivado = false }) {
   const pendente = pedido.estado === "pendente";
   const { enviados, esperados } = progressoDoPedido(pedido);
+  // A quantidade é uma recomendação: o 1.º ficheiro cumpre o pedido e o cartão
+  // continua a convidar a juntar mais (decisão da direcção, Out 2026).
+  const convite = textoDoConvite(pedido);
 
   return (
     <Card
@@ -60,7 +64,14 @@ export default function PedidoDeDocumento({ caseId, pedido, desactivado = false 
           </ul>
         )}
 
+        {convite && (
+          <p className="text-sm text-muted-foreground" data-testid={`convite-${pedido.id}`}>{convite}</p>
+        )}
+
         {pendente && !desactivado && <PartnerUploadBox caseId={caseId} requestId={pedido.id} rotulo="Enviar ficheiro" />}
+        {!pendente && !desactivado && convidaAJuntarMais(pedido) && (
+          <PartnerUploadBox caseId={caseId} requestId={pedido.id} rotulo="Adicionar mais" />
+        )}
       </CardContent>
     </Card>
   );

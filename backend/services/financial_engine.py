@@ -174,6 +174,10 @@ async def collect_financial_documents(process_id: str) -> list[dict]:
 
     financial = []
     for doc in docs:
+        # O PDF limpo do Index (Lote 12) é uma cópia do original que já aqui está: contá-lo
+        # extraía duas vezes o mesmo documento (chamada paga + rendimentos a dobrar).
+        if doc.get("is_clean_pdf"):
+            continue
         doc_type = classify_financial_document(doc)
         if not doc_type:
             continue

@@ -36,6 +36,9 @@ class TaskType(str, Enum):
     TEMPLATE_FILL = "TEMPLATE_FILL"        # Preenchimento de templates
     S3_UPLOAD = "S3_UPLOAD"                # Upload para S3
     VOICE_NOTE = "VOICE_NOTE"              # Nota de voz: transcrição + extracção IA
+    INDEX_ANALYSIS = "INDEX_ANALYSIS"      # Index: análise de documentos (categorizar + extrair + matriz)
+    INDEX_SANITIZE = "INDEX_SANITIZE"      # Index: PDF limpo (sem metadados do PDF)
+    INDEX_FINALIZE = "INDEX_FINALIZE"      # Index: pipeline depois de «Marcar como Indexado»
     CUSTOM = "CUSTOM"                      # Tarefa customizada
 
 

@@ -6,21 +6,29 @@ upload marcava logo o pedido como RECEIVED (concluído) — o cliente carregava
 1 de 3 e o pedido dava-se por satisfeito, desbloqueando prematuramente o
 auto-avanço do processo e o email de "documentação completa".
 
+REGRA REVISTA (Out 2026, decisão da direcção): a quantidade é uma
+RECOMENDAÇÃO, não um mínimo. «Últimos 3 recibos» não pode bloquear um
+cliente que só tem 1 à mão, mas o ecrã tem de deixar claro que pode juntar
+mais. A regra rígida de Set 2026 (só RECEIVED com `uploaded >= expected`)
+foi INVERTIDA — o que ela fazia, na prática, era deixar o pedido pendente
+sem o cliente perceber porquê.
+
 Regra canónica a partir deste módulo (usada pelo upload do cliente em
 `portal_upload_ops.py` e pelo fulfil de uploads da equipa em
 `document_portal_fulfill.py`):
 
-    Um pedido portal (REQUESTED/PENDING) só passa a completed/RECEIVED
-    quando o número de ficheiros carregados (uploaded_count =
-    len(attached_files)) for >= à quantidade pedida (expected_count).
+    Um pedido portal (REQUESTED/PENDING) passa a completed/RECEIVED no
+    PRIMEIRO ficheiro (uploaded_count = len(attached_files) >= 1).
+    `expected_count` mantém-se como a quantidade RECOMENDADA
+    (`suggested_count` no DTO) e só alimenta o convite do ecrã
+    «Pode juntar mais — recomendado: N».
 
 Origem do expected_count:
 - Pedidos novos: item da checklist SystemConfig (`mandatory_documents` /
   `mandatory_checklist` / `mandatory_checklist_optional`) com campo
   opcional `quantity` (int >= 1; default 1) — gravado como
-  `expected_count` no pedido no momento da geração.
-- Pedidos legados sem `expected_count`: default 1 (comportamento anterior
-  preservado — nenhum pedido existente regride).
+  `expected_count` no pedido no momento da geração (a recomendação).
+- Pedidos legados sem `expected_count`: default 1.
 """
 from __future__ import annotations
 
@@ -60,6 +68,11 @@ def parse_expected_count(source: Optional[dict]) -> int:
     return value if value >= 1 else 1
 
 
+#: Ficheiros necessários para dar o pedido por cumprido. UMA constante: o upload,
+#: o fulfil da equipa e a revogação (apagar no CRM) têm de concordar.
+FICHEIROS_PARA_CUMPRIR = 1
+
+
 def is_portal_request_completed(doc: Optional[dict]) -> bool:
     """True se o pedido existe e já está concluído (RECEIVED)."""
     if not doc:
@@ -89,10 +102,9 @@ async def apply_portal_request_upload(
     1. `$push` do file_entry para `attached_files` + `$set` dos campos
        neutros (filename, s3_path, uploaded_at, ... — SEM status).
     2. Re-lê o pedido actualizado e conta `len(attached_files)`.
-    3. Se uploaded_count >= expected_count → `$set status=completed_status`
-       (+ uploaded_count/updated_at); senão mantém o status actual
-       (REQUESTED/PENDING — o pedido continua pendente no Portal) e grava
-       apenas o progresso (uploaded_count).
+    3. Se uploaded_count >= FICHEIROS_PARA_CUMPRIR (1) → `$set
+       status=completed_status` (+ uploaded_count/updated_at). `expected_count`
+       NÃO decide: é só a quantidade recomendada devolvida ao ecrã.
 
     Args:
         match_query: filtro Mongo do pedido (id + process_id/client_id +
@@ -147,7 +159,7 @@ async def apply_portal_request_upload(
     current_status = doc.get("status")
 
     already_done = current_status in _COMPLETED_PORTAL_STATUSES
-    count_reached = uploaded >= expected
+    count_reached = uploaded >= FICHEIROS_PARA_CUMPRIR
     completed = already_done or count_reached
 
     if count_reached and not already_done:

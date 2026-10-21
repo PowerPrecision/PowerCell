@@ -701,6 +701,50 @@ class S3Service:
             logger.error(f"Erro inesperado ao ler o prefixo de {object_name}: {e}")
             return None
 
+    def put_object_exact(self, object_name: str, data: bytes, content_type: str = "application/pdf") -> bool:
+        """Grava `data` na chave EXACTA `object_name` (sem derivar pasta nem nome).
+
+        Para quem já decidiu a chave (o PDF limpo do Index vive ao lado do original). Nunca
+        sobrescreve às cegas: quem chama verifica antes que a chave está `ausente`.
+        """
+        if not self.is_configured() or not object_name or not isinstance(data, (bytes, bytearray)) or not data:
+            return False
+        try:
+            self.s3_client.put_object(
+                Bucket=self.bucket_name, Key=object_name, Body=bytes(data), ContentType=content_type,
+            )
+            return True
+        except ClientError as e:
+            logger.error(f"Erro ao gravar {object_name}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Erro inesperado ao gravar {object_name}: {e}")
+            return False
+
+    def get_object_exact(self, object_name: str, max_bytes: int) -> tuple[str, Optional[bytes]]:
+        """Conteúdo da chave EXACTA (nunca as variações underscore/espaço do `get_file_content`).
+
+        Estado de quatro valores, porque quem verifica uma cópia tem de distinguir:
+            ("ok", bytes) | ("ausente", None) | ("grande", None) | ("erro", None)
+        Inspeccionar uma chave e decidir sobre outra é a forma discreta de a verificação não valer nada.
+        """
+        if not self.is_configured():
+            return "erro", None
+        estado, meta = self.head_object_metadata(object_name)
+        if estado != "ok":
+            return estado, None
+        if isinstance(meta.get("tamanho"), int) and meta["tamanho"] > max_bytes:
+            return "grande", None
+        try:
+            resposta = self.s3_client.get_object(Bucket=self.bucket_name, Key=object_name)
+            return "ok", resposta["Body"].read()
+        except ClientError as e:
+            logger.error(f"Erro ao ler {object_name}: {e}")
+            return "erro", None
+        except Exception as e:
+            logger.error(f"Erro inesperado ao ler {object_name}: {e}")
+            return "erro", None
+
     def get_presigned_url(self, object_name: str, expiration: int = 3600) -> Optional[str]:
         """
         Gera um link temporário (1 hora por defeito) para download/visualização.

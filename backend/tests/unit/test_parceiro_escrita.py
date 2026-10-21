@@ -817,7 +817,7 @@ class TestRespostaAUmPedido:
             "category": "Identificação", "expected_count": 2, "created_at": "2026-10-04T10:00:00+00:00", **extra,
         })
 
-    async def test_satisfaz_pela_contagem_como_no_portal_do_cliente(self, com_bd):
+    async def test_o_primeiro_ficheiro_cumpre_e_a_quantidade_e_so_uma_recomendacao(self, com_bd):
         import services.partner_portal_read as ppr
         import services.partner_upload_ops as ops
 
@@ -825,7 +825,9 @@ class TestRespostaAUmPedido:
         self._pedido(com_bd)
         await ops.run_partner_confirm_upload(PT1, "a-novo", _confirmar(ops, key=CHAVE_BOA, request_id="req-1"))
         pedido = next(d for d in com_bd.documents.docs if d["id"] == "req-1")
-        assert pedido["status"] == "REQUESTED", "1 de 2: continua pendente"
+        # Regra revista (Out 2026): a quantidade é uma recomendação — o 1.º cumpre.
+        assert pedido["status"] == "RECEIVED", "1 de 2 recomendados: cumprido"
+        assert pedido["expected_count"] == 2
         assert pedido["attached_files"][0]["uploaded_by"] == "partner:pt-1"
 
         await ops.run_partner_confirm_upload(

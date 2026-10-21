@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from database import db
-from services.document_portal_counts import parse_expected_count
+from services.document_portal_counts import FICHEIROS_PARA_CUMPRIR
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +94,10 @@ def rebuild_after_removal(
     }
 
     # A mesma regra de contagem do upload (`document_portal_counts`): o
-    # pedido só está satisfeito com ficheiros suficientes.
-    esperados = parse_expected_count(pedido)
+    # pedido está satisfeito com UM ficheiro; a quantidade recomendada não
+    # reabre nada (apagar 1 de 3 recibos não faz voltar o pedido a pendente).
     estava_satisfeito = str(pedido.get("status") or "") in _SATISFEITO
-    if estava_satisfeito and len(sobreviventes) < esperados:
+    if estava_satisfeito and len(sobreviventes) < FICHEIROS_PARA_CUMPRIR:
         estado["status"] = _PENDENTE
     else:
         estado["status"] = pedido.get("status") or _PENDENTE

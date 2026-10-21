@@ -280,8 +280,10 @@ class TestBug3PortalDocumentCounts:
         assert parse_expected_count({"quantity": -2}) == 1
         assert parse_expected_count({"quantity": "abc"}) == 1
 
-    async def test_partial_upload_keeps_request_pending_until_count(self):
-        """Pedido de 3 recibos: 1º upload mantém REQUESTED; só o 3º conclui."""
+    async def test_first_file_fulfils_the_request_and_quantity_is_only_a_recommendation(self):
+        """Pedido de 3 recibos (regra revista, Out 2026): o 1.º ficheiro CUMPRE o
+        pedido; `expected_count` (3) fica como recomendação e os seguintes
+        acrescentam-se sem mudar o estado."""
         from services.document_portal_counts import apply_portal_request_upload
 
         fake_db = FakeAsyncDatabase()
@@ -296,7 +298,6 @@ class TestBug3PortalDocumentCounts:
         )
 
         with patch("services.document_portal_counts.db", fake_db):
-            # 1º upload → parcial
             r1 = await apply_portal_request_upload(
                 {"id": "req-1", "process_id": "proc-1"},
                 set_fields={"filename": "recibo1.pdf"},
@@ -304,34 +305,24 @@ class TestBug3PortalDocumentCounts:
                 now="2026-09-09T00:00:00",
             )
             doc = await fake_db.documents.find_one({"id": "req-1"})
-            assert r1["completed"] is False
+            assert r1["completed"] is True
             assert r1["uploaded_count"] == 1
-            assert doc["status"] == "REQUESTED"  # continua pendente
-            assert doc["uploaded_count"] == 1
-
-            # 2º upload → ainda parcial
-            r2 = await apply_portal_request_upload(
-                {"id": "req-1", "process_id": "proc-1"},
-                set_fields={"filename": "recibo2.pdf"},
-                file_entry={"file_id": "f2", "filename": "recibo2.pdf"},
-                now="2026-09-09T00:00:01",
-            )
-            assert r2["completed"] is False
-            assert r2["uploaded_count"] == 2
-
-            # 3º upload → contagem atingida → RECEIVED
-            r3 = await apply_portal_request_upload(
-                {"id": "req-1", "process_id": "proc-1"},
-                set_fields={"filename": "recibo3.pdf"},
-                file_entry={"file_id": "f3", "filename": "recibo3.pdf"},
-                now="2026-09-09T00:00:02",
-            )
-            doc = await fake_db.documents.find_one({"id": "req-1"})
-            assert r3["completed"] is True
-            assert r3["uploaded_count"] == 3
+            assert r1["expected_count"] == 3  # a recomendação não se perde
             assert doc["status"] == "RECEIVED"
-            # histórico preservado (PACOTE DE)
-            assert len(doc["attached_files"]) == 3
+            assert doc["expected_count"] == 3
+
+            # Os seguintes juntam-se ao mesmo pedido (sem o reabrir nem duplicar).
+            for n in (2, 3):
+                r = await apply_portal_request_upload(
+                    {"id": "req-1", "process_id": "proc-1"},
+                    set_fields={"filename": f"recibo{n}.pdf"},
+                    file_entry={"file_id": f"f{n}", "filename": f"recibo{n}.pdf"},
+                    now=f"2026-09-09T00:00:0{n}",
+                )
+                assert r["completed"] is True
+            doc = await fake_db.documents.find_one({"id": "req-1"})
+            assert doc["status"] == "RECEIVED"
+            assert len(doc["attached_files"]) == 3  # histórico preservado (PACOTE DE)
 
     async def test_legacy_request_without_expected_count_completes_first(self):
         """Pedidos legados (sem expected_count) → default 1 (comportamento anterior)."""

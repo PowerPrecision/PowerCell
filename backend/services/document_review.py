@@ -57,6 +57,7 @@ from services.document_categorization import (
     categorize_document_with_ai,
     extract_text_from_pdf,
 )
+from services.process_ai_log import classificar_falha, registar_accao_ia
 from services.s3_storage import s3_service
 
 logger = logging.getLogger(__name__)
@@ -161,9 +162,19 @@ async def run_analyze_document_for_review(doc_id: str, user: dict) -> dict:
         if not file_content:
             raise HTTPException(status_code=404, detail=ERROR_S3_FILE_NOT_FOUND)
     except HTTPException:
+        await registar_accao_ia(
+            process_id=doc.get("process_id"), accao="rever", estado="falha", gatilho="manual",
+            user=user, ficheiro=filename, s3_path=s3_path, documento_id=doc_id_resolved,
+            motivo="ilegivel",
+        )
         raise
     except (IOError, OSError, ValueError, KeyError, TypeError) as e:
         logger.error(f"[DJ-REVIEW] Erro ao obter ficheiro do S3: {e}")
+        await registar_accao_ia(
+            process_id=doc.get("process_id"), accao="rever", estado="falha", gatilho="manual",
+            user=user, ficheiro=filename, s3_path=s3_path, documento_id=doc_id_resolved,
+            motivo="ilegivel",
+        )
         raise HTTPException(status_code=500, detail=ERROR_S3_ACCESS)
 
     # 3. Extrair texto do PDF (se aplicável)
@@ -190,6 +201,11 @@ async def run_analyze_document_for_review(doc_id: str, user: dict) -> dict:
         )
     except Exception as cat_err:
         logger.error(f"[DJ-REVIEW] Erro na categorização IA: {cat_err}")
+        await registar_accao_ia(
+            process_id=doc.get("process_id"), accao="rever", estado="falha", gatilho="manual",
+            user=user, ficheiro=filename, s3_path=s3_path, documento_id=doc_id_resolved,
+            motivo=classificar_falha(cat_err),
+        )
         return {
             "success": False,
             "error": f"Erro na categorização IA: {type(cat_err).__name__}",
@@ -197,6 +213,11 @@ async def run_analyze_document_for_review(doc_id: str, user: dict) -> dict:
         }
 
     if not cat_result.get("success"):
+        await registar_accao_ia(
+            process_id=doc.get("process_id"), accao="rever", estado="falha", gatilho="manual",
+            user=user, ficheiro=filename, s3_path=s3_path, documento_id=doc_id_resolved,
+            motivo=classificar_falha(cat_result.get("error")),
+        )
         return {
             "success": False,
             "error": cat_result.get("error", "categorize_failed"),
@@ -326,6 +347,21 @@ async def run_analyze_document_for_review(doc_id: str, user: dict) -> dict:
             "error": f"Erro ao persistir sugestões: {type(db_err).__name__}",
             "doc_id": doc_id_resolved,
         }
+
+    # Log da IA: só NOMES do que foi proposto; o motivo diz se a IA só viu o nome do ficheiro.
+    propostos = ["categoria"]
+    if expiry_suggested:
+        propostos.append("validade")
+    if nome_extraido:
+        propostos.append("nome")
+    if cat_result.get("suggested_filename"):
+        propostos.append("filename")
+    await registar_accao_ia(
+        process_id=doc.get("process_id"), accao="rever", estado="sucesso", gatilho="manual",
+        user=user, ficheiro=filename, s3_path=s3_path, documento_id=doc_id_resolved,
+        categoria=ai_category or None, confianca=raw_confidence, campos=propostos,
+        motivo=None if extracted_text else "sem_contexto",
+    )
 
     # 7. Retornar sugestões + valores actuais + confidence_score + estado
     return {

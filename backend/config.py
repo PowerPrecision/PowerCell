@@ -427,6 +427,7 @@ AI_CONFIG_DEFAULTS = {
     "error_analysis": "gpt-4o-mini",           # Análise de erros
     "voice_note_extraction": "gpt-4o-mini",    # Notas de voz: resumo + tarefas
     "executive_report_analysis": "gpt-4o-mini",  # Análise opcional no PDF do relatório executivo
+    "index_analysis": "gpt-4o-mini",             # Módulo Index: recibos, extratos e identificação
 }
 
 # Log de configuração de IA

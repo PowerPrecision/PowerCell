@@ -2,7 +2,7 @@
  * PACOTE DU — Deep linking das tabs do processo (?tab=portal, etc.).
  */
 
-const MAIN_TABS = new Set(["resumo", "documentos", "historico"]);
+const MAIN_TABS = new Set(["resumo", "documentos", "historico", "ia"]);
 
 const INNER_TAB_ALIASES = {
   portal: "mensagens",

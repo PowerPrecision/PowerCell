@@ -139,6 +139,32 @@ async def anexar_permissao_de_ia(process: dict, user: dict, request) -> None:
         process.pop("pode_usar_ia_documentos", None)
 
 
+async def anexar_permissao_de_documentos(process: dict, user: dict) -> None:
+    """`pode_ver_documentos`: a resposta do SERVIDOR à pergunta «este utilizador pode
+    ler os documentos (e os pedidos do Portal) deste processo?», calculada ao servir.
+
+    É a MESMA guarda que as rotas de documentos aplicam
+    (`assert_can_view_process_documents`): um processo por indexar só mostra os
+    documentos a quem o indexa ou está atribuído. Sem isto, o ecrã pedia
+    `/documents/portal-requests/{id}` à mesma, levava o 403 que a regra manda dar
+    e deixava um erro vermelho na consola (e um aviso ao utilizador) por um pedido
+    que não devia ter sido feito. Nunca levanta; se a pergunta falha o campo FICA
+    POR PREENCHER e o ecrã pede à mesma (o servidor continua a ser a parede).
+    """
+    from fastapi import HTTPException
+
+    try:
+        from services.document_visibility import assert_can_view_process_documents
+
+        await assert_can_view_process_documents(user, process)
+        process["pode_ver_documentos"] = True
+    except HTTPException:
+        process["pode_ver_documentos"] = False
+    except Exception as exc:  # pragma: no cover — degradação graciosa
+        logger.warning("[DOCS] Não foi possível calcular a visibilidade dos documentos: %s", exc)
+        process.pop("pode_ver_documentos", None)
+
+
 async def run_get_process_detail(
     process_id: str,
     user: dict,
@@ -169,6 +195,7 @@ async def run_get_process_detail(
         casa_dona=str((process.get("empresa_dona") or {}).get("company_name") or ""),
     )
     await anexar_permissao_de_ia(process, user, request)
+    await anexar_permissao_de_documentos(process, user)
     return serialize_process_detail_response(process, process_id)
 
 

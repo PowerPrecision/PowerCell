@@ -18,6 +18,7 @@ from services.document_constants import (
     ERROR_NO_VALID_FILES,
     ERROR_PROCESS_NOT_FOUND,
 )
+from services.process_ai_log import classificar_falha, registar_accao_ia
 from services.s3_storage import s3_service
 
 logger = logging.getLogger(__name__)
@@ -502,12 +503,54 @@ async def run_ai_analyze_documents(
     return await run_analysis_on_documents(process_id, documents, user=user)
 
 
+async def _registar_no_log_da_ia(
+    process_id: str,
+    accao: str,
+    user: dict,
+    results: Optional[dict],
+    documents: list[dict],
+) -> None:
+    """Uma linha por documento no Log da IA: lido (sucesso) ou falhado, com o motivo
+    reduzido a um código (o texto do erro do fornecedor nunca é gravado). Só NOMES
+    de campos. Nunca levanta."""
+    caminhos = {d.get("name"): d.get("source_path") for d in documents}
+    if not results or not isinstance(results, dict):
+        for doc in documents:
+            await registar_accao_ia(
+                process_id=process_id, accao=accao, estado="falha", gatilho="manual",
+                user=user, ficheiro=doc.get("name"), s3_path=doc.get("source_path"),
+                motivo="erro_da_ia",
+            )
+        return
+    for lido in results.get("documents_analyzed") or []:
+        if not isinstance(lido, dict):
+            continue
+        nome = lido.get("file_name", "")
+        dados = lido.get("extracted_data")
+        await registar_accao_ia(
+            process_id=process_id, accao=accao, estado="sucesso", gatilho="manual",
+            user=user, ficheiro=nome, s3_path=caminhos.get(nome),
+            categoria=lido.get("tipo_documento") or lido.get("type") or lido.get("document_type"),
+            campos=list(dados.keys()) if isinstance(dados, dict) else [],
+        )
+    for falhou in results.get("documents_failed") or []:
+        if not isinstance(falhou, dict):
+            continue
+        nome = falhou.get("file_name", "")
+        await registar_accao_ia(
+            process_id=process_id, accao=accao, estado="falha", gatilho="manual",
+            user=user, ficheiro=nome, s3_path=caminhos.get(nome),
+            motivo=classificar_falha(falhou.get("error")),
+        )
+
+
 async def run_analysis_on_documents(
     process_id: str,
     documents: list[dict],
     *,
     user: dict,
     skip_analyzed: bool = True,
+    accao: str = "analisar",
 ) -> dict[str, Any]:
     """Analisa documentos já lidos para memória e devolve comparação/sugestões.
 
@@ -528,6 +571,8 @@ async def run_analysis_on_documents(
             extracção por ficheiro, onde o consultor pediu explicitamente
             aquele ficheiro (um silêncio seria incompreensível) e onde nada
             foi aplicado à ficha (marcar esconderia o documento do lote).
+        accao: Como aparece no Log da IA do processo (``analisar`` no lote,
+            ``extrair_dados`` na extracção por ficheiro).
     """
     start_time = time.time()
 
@@ -566,9 +611,17 @@ async def run_analysis_on_documents(
 
     skipped_analyzed = 0
     if skip_analyzed:
+        nomes_antes = [d.get("name") for d in documents]
         documents, skipped_analyzed = await _filter_already_analyzed_documents(
             process_id, documents
         )
+        mantidos = {d.get("name") for d in documents}
+        for nome in nomes_antes:
+            if nome not in mantidos:
+                await registar_accao_ia(
+                    process_id=process_id, accao=accao, estado="saltado", gatilho="manual",
+                    user=user, ficheiro=nome, motivo="ja_analisado",
+                )
 
     if not documents:
         if log_id and finalize_ai_import_log:
@@ -602,6 +655,12 @@ async def run_analysis_on_documents(
         )
     except Exception as e:
         logger.error(f"Erro na análise de documentos: {e}", exc_info=True)
+        for doc in documents:
+            await registar_accao_ia(
+                process_id=process_id, accao=accao, estado="falha", gatilho="manual",
+                user=user, ficheiro=doc.get("name"), s3_path=doc.get("source_path"),
+                motivo=classificar_falha(e),
+            )
         total_duration = int((time.time() - start_time) * 1000)
         if log_id and finalize_ai_import_log:
             try:
@@ -613,6 +672,7 @@ async def run_analysis_on_documents(
     extracted_data, conflicts, document_types = process_ai_analyze_results(
         results, documents
     )
+    await _registar_no_log_da_ia(process_id, accao, user, results, documents)
 
     # Match titular 1 vs 2 (2.º titular já definido no processo)
     titular_matches = await _build_titular_matches_for_analysis(

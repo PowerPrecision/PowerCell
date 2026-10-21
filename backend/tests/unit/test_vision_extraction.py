@@ -418,12 +418,13 @@ class FakeVLMService:
         self.payload = payload
         self.chamadas = []
 
-    async def __call__(self, process_id, documents, *, user, skip_analyzed=True):
+    async def __call__(self, process_id, documents, *, user, skip_analyzed=True, accao="analisar"):
         self.chamadas.append(
             {
                 "process_id": process_id,
                 "documents": documents,
                 "skip_analyzed": skip_analyzed,
+                "accao": accao,
             }
         )
         return dict(self.payload)
@@ -477,6 +478,8 @@ class TestExtraccaoComMotorSimulado:
             await run_extract_document_data("proc-1", CAMINHO, user=GESTOR)
 
         assert motor.chamadas[0]["skip_analyzed"] is False
+        # Log da IA: a extracção por ficheiro aparece como «Dados extraídos», não como análise em lote.
+        assert motor.chamadas[0]["accao"] == "extrair_dados"
 
     @pytest.mark.asyncio
     async def test_um_unico_documento_e_enviado_ao_motor(self):

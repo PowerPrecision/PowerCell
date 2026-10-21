@@ -27,7 +27,11 @@ from database import db
 from models.auth import UserRole
 from models.document import DocumentExpiryCreate, DocumentExpiryResponse
 from services.auth import get_current_user, require_roles, require_staff
-from services.document_ai_access import PAPEIS_DE_GESTAO_DA_IA
+from services.document_ai_access import (
+    PAPEIS_DE_GESTAO_DA_IA,
+    exigir_ia_no_documento,
+    exigir_ia_no_processo_por_id,
+)
 from services.by_id_scope import (
     exigir_alvo_do_documento_no_ambito,
     exigir_process_id_do_pedido_no_ambito,
@@ -758,8 +762,9 @@ from services.document_categorization import (
 )
 
 
-@router.post("/categorize/{process_id}", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@router.post("/categorize/{process_id}", responses={403: HTTP_403_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def categorize_document(
+    request: Request,
     process_id: str,
     s3_path: str = Form(...),
     filename: str = Form(...),
@@ -773,23 +778,30 @@ async def categorize_document(
     - Subcategoria (tipo específico)
     - Tags relevantes
     - Resumo do conteúdo
+
+    Chamada paga ao modelo: só os altos perfis (`document_ai_access`). Antes só o
+    ecrã escondia o botão; o servidor aceitava qualquer staff.
     """
+    await exigir_ia_no_processo_por_id(request, user, process_id)
     return await run_categorize_document(
-        process_id, s3_path=s3_path, filename=filename
+        process_id, s3_path=s3_path, filename=filename, user=user
     )
 
 
 
-@router.post("/categorize-all/{process_id}", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@router.post("/categorize-all/{process_id}", responses={403: HTTP_403_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def categorize_all_documents(
+    request: Request,
     process_id: str,
     user: dict = Depends(get_current_user)
 ):
     """
     Categorizar TODOS os documentos de um cliente/processo.
     Processa documentos que ainda não foram categorizados.
+    Só os altos perfis (chamada paga ao modelo) — `document_ai_access`.
     """
-    return await run_categorize_all_documents(process_id)
+    await exigir_ia_no_processo_por_id(request, user, process_id)
+    return await run_categorize_all_documents(process_id, user=user)
 
 
 
@@ -1049,8 +1061,9 @@ async def rename_all_documents_smart(
 # afectado — continua a escrever directamente em `ai_*` para uploads novos.
 # ====================================================================
 
-@router.post("/{doc_id}/ai-analyze-review", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@router.post("/{doc_id}/ai-analyze-review", responses={403: HTTP_403_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def analyze_document_for_review(
+    request: Request,
     doc_id: str,
     user: dict = Depends(require_staff()),
 ):
@@ -1063,6 +1076,8 @@ async def analyze_document_for_review(
     O consultor deve depois aprovar (`/apply-ai-review`) ou rejeitar
     (`/reject-ai-review`) as sugestões.
     """
+    # «Reanalisar com IA»: chamada paga, logo só os altos perfis (e dentro da rede).
+    await exigir_ia_no_documento(request, user, doc_id)
     from services.document_review import run_analyze_document_for_review
     return await run_analyze_document_for_review(doc_id, user)
 

@@ -12357,3 +12357,22 @@ Work Log:
 - **Por que ficou vazia:** não determinado (hipótese: entrada temporária expirada; ver Activity Feed do Atlas).
 - **Código:** `create_indexes` com `ping` prévio e disjuntor (commit `3795e6cf`); falha de ligação à BD → 503 no login e handler global; registo de erros com tecto de 2 s.
 - **Pendente (operação, não código):** substituir `0.0.0.0/0` pelos IPs de saída do Render (web e worker) e remover o `0.0.0.0/0`.
+
+
+---
+Task ID: lote-12-index-fases-3-a-5
+Agent: Cloud Agent
+Task: Módulo Index — API/RBAC, frontend, PDF limpo e purga
+
+Date: 2026-10-21
+
+Work Log:
+* Decisão final da direcção (21 Out 2026): **um PDF limpo por documento distinto** (só se funde o que é parte do mesmo documento: frente+verso do CC, páginas fotografadas do mesmo extrato), graça de **30 dias**; luz verde às Fases 3, 4 e 5.
+* Fase 3: `/api/index/*`, `PAPEIS_DE_IA_DO_INDEX`, fecho `INDEX_FINALIZE`, análise pós-indexação nos uploads do staff. Fase 4: `/index` e `/index/:processId`. Fase 5: `index_sanitize.py` (PDF limpo verificado, purga desligada por omissão).
+* Achados: pesquisa do directório com pontuação devolvia tudo; duas escritas funcionais seguidas ao URL pisam-se; o `scrub` do PyMuPDF deixa JavaScript do catálogo e o autor das anotações; um spread de outro grupo apagava um item literal do menu no guarda `App.rotasMenu.test.js`.
+* Testes: backend `test_index_api.py`, `test_index_sanitize.py`, `test_s3_primitivas_exactas_index.py`, `tests/integration/test_index_api_mongo.py`; frontend `indexRevisao`, `IndexDashboardPage`, `IndexWorkstationPage`. Mutações medidas nos dois lados; as que sobreviveram eram testes fracos (corrigidos) ou equivalentes (a relitura da verificação duplica a comparação de hash).
+
+Operação (pendente, do dono do produto):
+* **Não ligar `INDEX_PURGE_ENABLED` em produção** sem antes auditar as outras referências a um original (ficheiros do Parceiro por `file_id`, Origem Financeira, Explorador). O PDF limpo gera-se sem apagar nada.
+* `INDEX_SANITIZE_ENABLED` (omissão: ligado fora de testes) controla só a geração automática do PDF limpo no fecho.
+* Correr `python -m scripts.migrar_index_status [--aplicar]` é conveniência (a fila tolera o legado).

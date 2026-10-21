@@ -812,8 +812,15 @@ export const setUserHistoryTracking = (userId, enabled) =>
   api.put(`/admin/history-tracking/users/${encodeURIComponent(userId)}`, { enabled });
 
 // Deadlines
+// Leituras SECUNDÁRIAS do detalhe de um processo (prazos, pedidos do Portal, alertas, histórico):
+// o ecrã principal já abriu, e uma recusa 403/404 destas (processo por indexar e não atribuído a
+// quem vê; fora da janela do visitante) é uma negação POR DESENHO — o componente fica vazio ou
+// explica-se a si próprio. Um toast global «Acesso Negado» por cima contradiz o que o utilizador
+// está a ver. `skipErrorToast` cala SÓ o aviso; o erro continua a propagar para quem chama.
+const LEITURA_SECUNDARIA = { skipErrorToast: true };
+
 export const getDeadlines = (processId) => 
-  api.get("/deadlines", { params: { process_id: processId } });
+  api.get("/deadlines", { params: { process_id: processId }, ...LEITURA_SECUNDARIA });
 export const getAllDeadlines = () => api.get("/deadlines");
 export const getMyDeadlines = () => api.get("/deadlines/my-deadlines");
 export const getCalendarDeadlines = (consultorId, mediadorId) => 
@@ -933,7 +940,7 @@ export const getActivities = (processId, limit = 50) => {
   const params = {};
   if (processId) params.process_id = processId;
   params.limit = limit;
-  return api.get("/activities", { params });
+  return api.get("/activities", { params, ...(processId ? LEITURA_SECUNDARIA : {}) });
 };
 // PONTO 9 — `createActivity` foi removida: `POST /api/activities`
 // responde 410. O histórico é gerado pelo sistema; as notas do
@@ -944,9 +951,9 @@ export const deleteActivity = (id) => api.delete(`/activities/${id}`);
 
 // History
 export const getHistory = (processId) => 
-  api.get("/history", { params: { process_id: processId } });
+  api.get("/history", { params: { process_id: processId }, ...LEITURA_SECUNDARIA });
 export const getProcessTimeline = (processId, limit = 40) =>
-  api.get(`/processes/${processId}/timeline`, { params: { limit } });
+  api.get(`/processes/${processId}/timeline`, { params: { limit }, ...LEITURA_SECUNDARIA });
 
 // Workflow Statuses
 export const getWorkflowStatuses = () => api.get("/admin/workflow-statuses");
@@ -1294,7 +1301,38 @@ export const getNotifications = (unreadOnly = false) =>
 export const markNotificationRead = (id) => 
   api.put(`/alerts/notifications/${id}/read`);
 export const getProcessAlerts = (processId) => 
-  api.get(`/processes/${processId}/alerts`);
+  api.get(`/processes/${processId}/alerts`, LEITURA_SECUNDARIA);
+// Log da IA do processo (timeline do que o motor fez, quando e porque falhou). Só leitura.
+// `skipErrorToast`: o separador mostra o erro no sítio; um toast global por cima seria ruído.
+export const getProcessAiLog = (processId, params = {}) =>
+  api.get(`/processes/${processId}/ai-log`, { params, skipErrorToast: true });
+// ====================================================================
+// MÓDULO INDEX (Lote 12) — /api/index/*
+// ====================================================================
+// As leituras diagnosticam-se no ecrã (nunca um toast global por cima); as acções com recusa
+// esperada (403/422) também levam `skipErrorToast` para o ecrã dizer o motivo no sítio.
+export const getIndexQueue = (params = {}) =>
+  api.get("/index/queue", { params, skipErrorToast: true });
+export const getIndexWorkstation = (processId) =>
+  api.get(`/index/processes/${processId}`, { skipErrorToast: true });
+export const claimIndexProcess = (processId) =>
+  api.post(`/index/processes/${processId}/claim`, null, { skipErrorToast: true });
+export const releaseIndexProcess = (processId) =>
+  api.post(`/index/processes/${processId}/release`, null, { skipErrorToast: true });
+export const analyzeIndexProcess = (processId, force = false) =>
+  api.post(`/index/processes/${processId}/analyze`, { force }, { skipErrorToast: true });
+export const extractIndexProcess = (processId) =>
+  api.post(`/index/processes/${processId}/extract`, null, { skipErrorToast: true });
+export const sanitizeIndexProcess = (processId) =>
+  api.post(`/index/processes/${processId}/sanitize`, null, { skipErrorToast: true });
+export const editIndexJob = (processId, jobId, fields) =>
+  api.patch(`/index/processes/${processId}/professional-metadata/${jobId}`, { fields }, { skipErrorToast: true });
+export const dismissIndexAlert = (processId, alertId) =>
+  api.post(`/index/processes/${processId}/alerts/${alertId}/dismiss`, null, { skipErrorToast: true });
+export const markIndexProcessIndexed = (processId, employers = []) =>
+  api.post(`/index/processes/${processId}/mark-indexed`, { employers }, { skipErrorToast: true });
+export const searchIndexEmployers = (q) =>
+  api.get("/index/employers", { params: { q }, skipErrorToast: true });
 export const getAlertsByProcess = (processId) => 
   api.get(`/alerts/process/${processId}`);
 export const createDeedReminder = (processId, deedDate) => 
@@ -1736,7 +1774,8 @@ export const impersonateClientPortal = (processId) =>
   api.get(`/portal/impersonate/${processId}`);
 
 // ===== PORTAL DOCUMENT REQUESTS (Admin manages client doc requests) =====
-export const getPortalDocRequests = (processId) => api.get(`/documents/portal-requests/${processId}`);
+export const getPortalDocRequests = (processId) =>
+  api.get(`/documents/portal-requests/${processId}`, LEITURA_SECUNDARIA);
 export const createPortalDocRequest = (processId, data) => api.post(`/documents/portal-requests/${processId}`, data);
 export const updatePortalDocRequest = (processId, documentId, data) => api.put(`/documents/portal-requests/${processId}/${documentId}`, data);
 export const deletePortalDocRequest = (processId, documentId) => api.delete(`/documents/portal-requests/${processId}/${documentId}`);

@@ -80,6 +80,8 @@ from routes.partner_portal import router as partner_portal_router
 from routes.partners_admin import router as partners_admin_router
 from routes.partner_options import router as partner_options_router
 from routes.admin_user_access import router as admin_user_access_router
+from routes.process_ai_log import router as process_ai_log_router
+from routes.index_module import router as index_module_router
 from routes.financial_validation import router as financial_validation_router
 from routes.emails import router as emails_router  # doc_router removido - rotas agora no router principal
 from routes.webmail import router as webmail_router
@@ -625,6 +627,8 @@ app.include_router(partner_portal_router, prefix="/api")
 app.include_router(partners_admin_router, prefix="/api")
 app.include_router(partner_options_router, prefix="/api")
 app.include_router(admin_user_access_router, prefix="/api")
+app.include_router(process_ai_log_router, prefix="/api")
+app.include_router(index_module_router, prefix="/api")
 app.include_router(financial_validation_router, prefix="/api")
 # emails_doc_router removido — send-documentation e document-recipients agora no router principal (antes de /{email_id})
 app.include_router(emails_router, prefix="/api")

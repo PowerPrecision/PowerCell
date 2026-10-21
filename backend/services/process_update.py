@@ -25,6 +25,7 @@ from services.process_phase_clock import (
 from models.auth import UserRole
 from services.encryption import campo_esta_vazio, generate_nif_hash, generate_email_hash
 from services.auth import get_effective_role, resolve_concrete_role
+from services.index_status import estado_apos
 from services.process_status import INACTIVE_STATUSES
 from services.process_labels import normalizar_etiquetas
 from services.financial_bank_sync import sincronizar_contas_bancarias
@@ -1150,6 +1151,9 @@ async def run_update_process(
             valid_statuses=valid_statuses,
         )
 
+    if "skip_index" in update_data:
+        # Lote 12: `index_status` deriva do documento já com a alteração.
+        update_data.update(estado_apos(process, update_data))
     update_data = encrypt_process_update_payload(update_data, process_id)
     inject_cdc_fn(update_data, user)
     attach_field_metadata_if_present(update_data, process, raw_body)
