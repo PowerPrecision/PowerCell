@@ -252,7 +252,12 @@ jobs:
     # 5 min era curto demais: install (~55s) + flake8 (~30s) + ~3m20s de testes
     # já ocupavam 4m50s, e os testes novos empurraram o job para o limite
     # (cancelado em "Post Setup Python" com os testes a passar).
-    timeout-minutes: 10
+    # 10 min voltou a ser curto (Out 2026): ~10 900 testes demoram ~8m20s em série
+    # (7m08s uma semana de commits antes) e, com install + flake8, o job é cortado
+    # com TODOS os testes verdes — o log mostra «10900 passed» três segundos antes do
+    # «The operation was canceled». O tempo de um runner varia ±15%, por isso o tecto
+    # tem de ter folga e não de ser o prazo apertado. Mesmo valor do Backend CI — Full.
+    timeout-minutes: 20
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     
