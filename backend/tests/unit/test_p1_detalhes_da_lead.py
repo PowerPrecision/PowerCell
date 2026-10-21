@@ -121,3 +121,149 @@ class TestARota:
             if isinstance(n, ast.AsyncFunctionDef) and n.name == "get_lead_details"
         )
         assert "require_staff" in ast.unparse(funcao)
+
+
+# ════════════════════════════════════════════════════════════════════
+#  PRÉ-VISUALIZAR UM FICHEIRO DA LEAD
+# ════════════════════════════════════════════════════════════════════
+import io  # noqa: E402
+
+RAIZ_DOCS = "Documentação Clientes"
+
+
+def _s3(corpo=b"%PDF-1.4 conteudo", tamanho=None, erro=None):
+    """`s3_service` falso AO NÍVEL DA CHAMADA: o que sai para o S3 (chave, bucket) é o que se afirma."""
+    from unittest.mock import MagicMock
+
+    cliente = MagicMock()
+    if erro:
+        cliente.get_object.side_effect = erro
+    else:
+        cliente.get_object.return_value = {
+            "Body": io.BytesIO(corpo),
+            "ContentLength": len(corpo) if tamanho is None else tamanho,
+            "ContentType": "binary/octet-stream",  # o que o bucket diz NÃO manda
+        }
+    servico = MagicMock(is_configured=MagicMock(return_value=True), s3_client=cliente, bucket_name="bkt")
+    return servico, cliente
+
+
+async def _conteudo(mundo, file_id, user=DIRETORA_DA_POWER, item="c-lead", servico=None):
+    from unittest.mock import patch
+
+    from services.financial_validation import run_conteudo_do_ficheiro_da_lead
+
+    servico = servico or _s3()[0]
+    with tenant_db(mundo, *_modulos()), patch("services.s3_storage.s3_service", servico):
+        resposta = await run_conteudo_do_ficheiro_da_lead(item, file_id, user)
+        corpo = b"".join([b async for b in resposta.body_iterator]) if hasattr(resposta, "body_iterator") else b""
+    return resposta, corpo
+
+
+@pytest.fixture
+def com_ficheiros(mundo):
+    mundo.documents.docs.clear()
+    mundo.documents.docs.extend([
+        {"id": "f-pdf", "client_id": "c-lead", "comprovativo_de_pagamento": True, "original_filename": "pagamento.PDF",
+         "s3_path": f"{RAIZ_DOCS}/c-lead/Comprovativos/pagamento.PDF", "uploaded_at": "2026-10-02T10:00:00+00:00"},
+        {"id": "f-png", "client_id": "c-lead", "original_filename": "cc.png",
+         "s3_path": f"{RAIZ_DOCS}/c-lead/cc.png", "uploaded_at": "2026-10-03T10:00:00+00:00"},
+        {"id": "f-docx", "client_id": "c-lead", "original_filename": "contrato.docx",
+         "s3_path": f"{RAIZ_DOCS}/c-lead/contrato.docx", "uploaded_at": "2026-10-04T10:00:00+00:00"},
+        {"id": "f-veneno", "client_id": "c-lead", "original_filename": "x.pdf",
+         "s3_path": "backups/dump-2026-09-01.zip", "uploaded_at": "2026-10-04T10:00:00+00:00"},
+        {"id": "f-alheio", "client_id": "c-outro", "original_filename": "alheio.pdf",
+         "s3_path": f"{RAIZ_DOCS}/c-outro/alheio.pdf", "uploaded_at": "2026-10-04T10:00:00+00:00"},
+    ])
+    return mundo
+
+
+class TestAPrevisualizacao:
+    async def test_um_pdf_sai_inline_com_o_tipo_que_NOS_decidimos(self, com_ficheiros):
+        from unittest.mock import MagicMock
+
+        servico, cliente = _s3(b"%PDF-1.4 bytes")
+        resposta, corpo = await _conteudo(com_ficheiros, "f-pdf", servico=servico)
+        assert corpo == b"%PDF-1.4 bytes"
+        assert resposta.media_type == "application/pdf"  # o bucket dizia octet-stream
+        assert resposta.headers["content-disposition"].startswith("inline;")
+        assert resposta.headers["x-content-type-options"] == "nosniff"
+        assert "no-store" in resposta.headers["cache-control"]
+        # A chave que sai para o S3 é a do REGISTO, nunca uma que viaje no pedido.
+        cliente.get_object.assert_called_once_with(Bucket="bkt", Key=f"{RAIZ_DOCS}/c-lead/Comprovativos/pagamento.PDF")
+
+    async def test_uma_imagem_sai_com_o_tipo_da_extensao(self, com_ficheiros):
+        resposta, corpo = await _conteudo(com_ficheiros, "f-png", servico=_s3(b"\x89PNG....")[0])
+        assert resposta.media_type == "image/png" and corpo == b"\x89PNG...."
+
+    async def test_a_lista_diz_o_que_se_pode_visualizar(self, com_ficheiros):
+        r = await _detalhes(com_ficheiros)
+        por_nome = {f["filename"]: f["previsualizavel"] for f in r["ficheiros"]}
+        assert por_nome == {"pagamento.PDF": True, "cc.png": True, "contrato.docx": False, "x.pdf": True}
+
+    async def test_tipo_sem_previsualizacao_da_415_sem_ir_ao_s3(self, com_ficheiros):
+        servico, cliente = _s3()
+        with pytest.raises(HTTPException) as exc:
+            await _conteudo(com_ficheiros, "f-docx", servico=servico)
+        assert exc.value.status_code == 415
+        cliente.get_object.assert_not_called()
+
+    async def test_demasiado_grande_da_413_e_fecha_o_corpo(self, com_ficheiros):
+        from services.financial_validation import MAX_BYTES_DA_PREVISUALIZACAO
+
+        servico, cliente = _s3(b"x", tamanho=MAX_BYTES_DA_PREVISUALIZACAO + 1)
+        corpo = cliente.get_object.return_value["Body"]
+        with pytest.raises(HTTPException) as exc:
+            await _conteudo(com_ficheiros, "f-pdf", servico=servico)
+        assert exc.value.status_code == 413
+        assert corpo.closed
+
+    async def test_ficheiro_em_falta_no_bucket_da_404_e_s3_em_baixo_da_503(self, com_ficheiros):
+        from botocore.exceptions import ClientError
+
+        def erro(codigo):
+            return ClientError({"Error": {"Code": codigo}}, "GetObject")
+
+        with pytest.raises(HTTPException) as nao_ha:
+            await _conteudo(com_ficheiros, "f-pdf", servico=_s3(erro=erro("NoSuchKey"))[0])
+        assert nao_ha.value.status_code == 404
+        with pytest.raises(HTTPException) as em_baixo:
+            await _conteudo(com_ficheiros, "f-pdf", servico=_s3(erro=erro("InternalError"))[0])
+        assert em_baixo.value.status_code == 503
+
+
+class TestAParedeDaPrevisualizacao:
+    async def test_o_ataque_uma_chave_envenenada_no_registo_nao_abre_o_bucket(self, com_ficheiros):
+        servico, cliente = _s3()
+        with pytest.raises(HTTPException) as exc:
+            await _conteudo(com_ficheiros, "f-veneno", servico=servico)
+        assert exc.value.status_code == 403
+        cliente.get_object.assert_not_called()
+
+    async def test_o_ficheiro_de_outro_cliente_nao_se_alcanca_por_esta_lead(self, com_ficheiros):
+        servico, cliente = _s3()
+        with pytest.raises(HTTPException) as exc:
+            await _conteudo(com_ficheiros, "f-alheio", servico=servico)
+        assert exc.value.status_code == 404
+        cliente.get_object.assert_not_called()
+
+    async def test_outra_rede_recebe_404_igual_ao_de_nao_existe(self, com_ficheiros):
+        with pytest.raises(HTTPException) as alheio:
+            await _conteudo(com_ficheiros, "f-pdf", user=DIRETOR_DA_DOMUS)
+        with pytest.raises(HTTPException) as inexistente:
+            await _conteudo(com_ficheiros, "nao-existe")
+        assert alheio.value.status_code == inexistente.value.status_code == 404
+        assert alheio.value.detail == inexistente.value.detail
+
+    def test_a_rota_exige_staff_esta_limitada_e_devolve_response(self):
+        import ast
+        import pathlib
+
+        fonte = (pathlib.Path(__file__).resolve().parents[2] / "routes" / "financial_validation.py").read_text(encoding="utf-8")
+        funcao = next(
+            n for n in ast.walk(ast.parse(fonte))
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == "get_lead_file_content"
+        )
+        texto = ast.unparse(funcao)
+        assert "require_staff" in texto and "limiter.limit" in texto and "response: Response" in texto
+        assert "request: Request" in texto

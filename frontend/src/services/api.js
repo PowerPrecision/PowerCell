@@ -690,6 +690,12 @@ export const decidirValidacaoFinanceira = (tipo, id, body) =>
 export const obterComprovativoDaValidacao = (tipo, id) =>
   api.get(`/financial-validation/${encodeURIComponent(tipo)}/${encodeURIComponent(id)}/proof-url`).then((r) => r.data);
 /** «Ver Detalhes da Lead»: tudo o que o parceiro submeteu (dados, notas, ficheiros), para a equipa analisar. */
+/** Os bytes de um ficheiro da lead (PDF/imagem) para pré-visualizar na gaveta — por `file_id`, nunca por chave S3. */
+export const getLeadFileContent = (leadId, fileId) =>
+  api.get(
+    `/financial-validation/lead/${encodeURIComponent(leadId)}/files/${encodeURIComponent(fileId)}/content`,
+    { responseType: "blob", skipErrorToast: true },
+  );
 export const getLeadDetails = (id) =>
   api.get(`/financial-validation/lead/${encodeURIComponent(id)}/details`, { skipErrorToast: true }).then((r) => r.data);
 
