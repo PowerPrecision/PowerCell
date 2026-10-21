@@ -14,11 +14,17 @@ não tem de a conhecer.
 """
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from services.auth import get_current_user, require_staff
-from services.financial_validation import run_decidir, run_detalhes_da_lead, run_url_do_comprovativo
+from middleware.rate_limit import limiter
+from services.financial_validation import (
+    run_conteudo_do_ficheiro_da_lead,
+    run_decidir,
+    run_detalhes_da_lead,
+    run_url_do_comprovativo,
+)
 
 router = APIRouter(prefix="/financial-validation", tags=["Validação Financeira"])
 
@@ -56,3 +62,16 @@ async def get_financial_validation_proof(
 async def get_lead_details(item_id: str, user: dict = Depends(require_staff())):
     """O que o parceiro submeteu sobre a lead (staff do âmbito; 404 fora dele)."""
     return await run_detalhes_da_lead(item_id, user)
+
+
+@router.get("/lead/{item_id}/files/{file_id}/content")
+@limiter.limit("120/minute")
+async def get_lead_file_content(
+    request: Request,
+    response: Response,
+    item_id: str,
+    file_id: str,
+    user: dict = Depends(require_staff()),
+):
+    """Os bytes de um ficheiro da lead para pré-visualizar (PDF e imagens), por `file_id`."""
+    return await run_conteudo_do_ficheiro_da_lead(item_id, file_id, user)

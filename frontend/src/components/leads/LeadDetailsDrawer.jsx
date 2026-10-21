@@ -11,7 +11,7 @@
  * de leitura nunca se apresenta como «a lead não tem dados»).
  */
 import { useEffect, useState } from "react";
-import { CheckCircle2, FileSearch, FileText, Loader2, Paperclip, XCircle } from "lucide-react";
+import { CheckCircle2, Eye, FileSearch, FileText, Loader2, Paperclip, XCircle } from "lucide-react";
 
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -27,6 +27,8 @@ import { getLeadDetails } from "../../services/api";
 import { formatDateTime } from "../../lib/utils";
 import { safeString } from "../../utils/safeString";
 import { ficheirosDaLead, seccoesDaLead } from "../../utils/leadDetalhes";
+import { podePrevisualizar } from "../../utils/previsualizacao";
+import PreviewDoFicheiro from "./PreviewDoFicheiro";
 import { podeDecidir } from "../../utils/validacaoFinanceira";
 import { useValidacaoFinanceira } from "../validacao/useValidacaoFinanceira";
 
@@ -71,12 +73,16 @@ export default function LeadDetailsDrawer({
   const [detalhes, setDetalhes] = useState(null);
   const [erro, setErro] = useState("");
   const [aCarregar, setACarregar] = useState(false);
+  // O ficheiro aberto na pré-visualização (um de cada vez: duas áreas de scroll na mesma gaveta
+  // tornavam-na impossível de percorrer).
+  const [aVisualizar, setAVisualizar] = useState(null);
 
   useEffect(() => {
     if (!id) return undefined;
     let activo = true;
     setDetalhes(null);
     setErro("");
+    setAVisualizar(null);
     setACarregar(true);
     getLeadDetails(id)
       .then((d) => { if (activo) setDetalhes(d); })
@@ -171,14 +177,41 @@ export default function LeadDetailsDrawer({
                   <p className="text-sm text-muted-foreground">O parceiro ainda não enviou ficheiros.</p>
                 ) : (
                   <ul className="space-y-1.5">
-                    {ficheiros.map((f) => (
-                      <li key={f.file_id || f.filename} className="flex items-center gap-2 text-sm rounded-md border px-3 py-2">
-                        <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                        <span className="min-w-0 flex-1 truncate" title={safeString(f.filename)}>{safeString(f.filename)}</span>
-                        {f.category && <span className="text-xs text-muted-foreground shrink-0">{safeString(f.category)}</span>}
-                        {f.comprovativo && <Badge variant="secondary" className="shrink-0">Comprovativo</Badge>}
-                      </li>
-                    ))}
+                    {ficheiros.map((f) => {
+                      const chave = f.file_id || f.filename;
+                      const aberto = Boolean(f.file_id) && aVisualizar === f.file_id;
+                      return (
+                        <li key={chave} className="rounded-md border px-3 py-2 text-sm" data-testid={`lead-ficheiro-${chave}`}>
+                          <div className="flex items-center gap-2">
+                            <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                            <span className="min-w-0 flex-1 truncate" title={safeString(f.filename)}>{safeString(f.filename)}</span>
+                            {f.category && <span className="text-xs text-muted-foreground shrink-0">{safeString(f.category)}</span>}
+                            {f.comprovativo && <Badge variant="secondary" className="shrink-0">Comprovativo</Badge>}
+                            {podePrevisualizar(f) ? (
+                              <Button
+                                type="button"
+                                variant={aberto ? "secondary" : "outline"}
+                                size="sm"
+                                className="h-7 shrink-0 gap-1 px-2"
+                                aria-pressed={aberto}
+                                aria-label={`Visualizar ${safeString(f.filename)}`}
+                                onClick={() => setAVisualizar(aberto ? null : f.file_id)}
+                                data-testid={`visualizar-${f.file_id}`}
+                              >
+                                <Eye className="h-3.5 w-3.5" aria-hidden="true" />Visualizar
+                              </Button>
+                            ) : (
+                              <span className="shrink-0 text-xs text-muted-foreground" title="Este tipo de ficheiro não tem pré-visualização.">
+                                Sem pré-visualização
+                              </span>
+                            )}
+                          </div>
+                          {aberto && (
+                            <PreviewDoFicheiro leadId={id} ficheiro={f} onFechar={() => setAVisualizar(null)} />
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </section>
