@@ -84,7 +84,7 @@ def chave_do_trabalho(job: TrabalhoProfissional, document_id: Optional[str]) -> 
 
 
 def job_id_da_chave(chave: str) -> str:
-    return "job_" + hashlib.sha1(chave.encode()).hexdigest()[:12]
+    return "job_" + hashlib.sha1(chave.encode(), usedforsecurity=False).hexdigest()[:12]  # identificador estável, não é segurança
 
 
 def _mais_recente(a: Optional[str], b: Optional[str]) -> bool:
@@ -271,7 +271,7 @@ def chave_do_alerta(achado: dict) -> str:
         ",".join(sorted(str(r.get("document_id")) for r in achado.get("refs") or [])),
         str(achado.get("periodo") or ""),
     ])
-    return hashlib.sha1(base.encode()).hexdigest()[:16]
+    return hashlib.sha1(base.encode(), usedforsecurity=False).hexdigest()[:16]  # assinatura estável, não é segurança
 
 
 async def substituir_alertas(
