@@ -118,6 +118,13 @@ async def run_list_registered_clients(
         search = sanitize_string(search, max_length=200)
     sort_field = sanitize_string(sort_field, max_length=50)
 
+    # Tudo o que esta listagem lê de `db.processes` (triagem, titulares principais, os processos
+    # de cada linha) tem de ficar no âmbito de PROCESSOS de quem pergunta: uma linha que mostra um
+    # processo de outra rede leva a um `/process/{id}` que responde 404, e um processo alheio
+    # avançado fazia SUMIR da lista um lead que é nosso. Calcula-se UMA vez (falha fechada: se não
+    # se consegue calcular, a excepção sobe — nunca se lê «sem filtro»).
+    condicao_processos = await build_tenant_process_condition(user)
+
     # ==================================================================
     # PACOTE BN — SALA DE TRIAGEM
     # ==================================================================
@@ -138,13 +145,13 @@ async def run_list_registered_clients(
         # ao indexador). Excluímos processos eliminados e processos já com indexador atribuído.
         # PACOTE DB — incluímos status=None (novos registos do formulário público).
         triage_processes_cursor = db.processes.find(
-            {
+            com_isolamento(condicao_processos, {
                 "is_deleted": {"$ne": True},
                 "$or": [
                     {"status": {"$in": ["pre_registo", None]}},
                     {"assigned_indexacao_id": {"$in": [None, ""]}},
                 ],
-            },
+            }),
             {"_id": 0, "id": 1, "client_id": 1, "status": 1, "assigned_indexacao_id": 1}
         )
         triage_processes = await triage_processes_cursor.to_list(length=500)
@@ -196,11 +203,11 @@ async def run_list_registered_clients(
         # permanente e NÃO deve ser filtrado como fantasma.
         primary_client_ids = await db.processes.distinct(
             "client_id",
-            {
+            com_isolamento(condicao_processos, {
                 "client_id": {"$nin": [None, ""]},
                 # NÃO filtrar por is_active nem por status — um 1º titular
                 # mantém-se "vivo" mesmo que o processo seja cancelado/inactivado
-            }
+            })
         )
 
         # Um cliente deve aparecer na listagem SE:
@@ -373,20 +380,35 @@ async def run_list_registered_clients(
         ).to_list(length=50)
         assigned_users = {u["id"]: u["name"] for u in users}
     
+    # Os processos de cada linha: UM pedido, dentro do âmbito de PROCESSOS. Um id da lista do
+    # cliente que aponte para um processo de outra rede (por exemplo depois de «Alterar Empresa»,
+    # que move processos e não a ficha) não é visível — nem aparece, nem conta, nem esconde o lead.
+    todos_os_ids = list({pid for c in clients for pid in (c.get("process_ids") or []) if pid})
+    processos_por_id: dict = {}
+    if todos_os_ids:
+        visiveis_docs = await db.processes.find(
+            com_isolamento(condicao_processos, {"id": {"$in": todos_os_ids}}),
+            {"_id": 0, "id": 1, "process_number": 1, "status": 1},
+        ).to_list(length=len(todos_os_ids))
+        processos_por_id = {proc["id"]: proc for proc in visiveis_docs}
+
+    def _ids_visiveis(cliente: dict) -> list:
+        return [pid for pid in (cliente.get("process_ids") or []) if pid in processos_por_id]
+
     # O `process_ids` do cliente nem sempre está mantido (processos criados por outros
     # caminhos não o actualizam): um cliente com processo mas sem a lista aparecia «Sem
     # Processo» e só oferecia «Criar Processo» — criar um segundo em vez de abrir o que
-    # existe. Recupera-se pelo `client_id` do processo, dentro do âmbito de PROCESSOS.
+    # existe. Recupera-se pelo `client_id` do processo, dentro do âmbito de PROCESSOS — e
+    # também para quem tem lista mas nenhum dos processos dela é visível.
     processos_por_cliente: dict = {}
-    sem_lista = [c.get("id") for c in clients if c.get("id") and not c.get("process_ids")]
+    sem_lista = [c.get("id") for c in clients if c.get("id") and not _ids_visiveis(c)]
     if sem_lista:
         try:
-            condicao_processos = com_isolamento(
-                await build_tenant_process_condition(user),
-                {"client_id": {"$in": sem_lista}, "is_deleted": {"$ne": True}},
-            )
             recuperados = await db.processes.find(
-                condicao_processos,
+                com_isolamento(
+                    condicao_processos,
+                    {"client_id": {"$in": sem_lista}, "is_deleted": {"$ne": True}},
+                ),
                 {"_id": 0, "id": 1, "process_number": 1, "status": 1, "client_id": 1},
             ).to_list(length=500)
             for proc in recuperados:
@@ -401,7 +423,7 @@ async def run_list_registered_clients(
     primary_ids_set = set(primary_client_ids) if primary_client_ids else None
     for c in clients:
         # Verificar se tem processos
-        process_ids = c.get("process_ids", [])
+        process_ids = _ids_visiveis(c)
         has_process_flag = bool(process_ids)
         
         # Determinar se o cliente é "fantasma"
@@ -421,10 +443,7 @@ async def run_list_registered_clients(
         should_exclude = False
         processes = []
         if process_ids:
-            processes = await db.processes.find(
-                {"id": {"$in": process_ids}},
-                {"_id": 0, "id": 1, "process_number": 1, "status": 1}
-            ).to_list(length=10)
+            processes = [processos_por_id[pid] for pid in process_ids[:10]]
         elif processos_por_cliente.get(client_id_val):
             processes = processos_por_cliente[client_id_val][:10]
 
