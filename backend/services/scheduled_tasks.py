@@ -1691,6 +1691,16 @@ class ScheduledTasksService:
         logger.info(f"Processos atrasados: {len(stale_processes)} atrasados, {len(urgent_processes)} urgentes, {notifications_created} notificações criadas")
         return notifications_created
     
+    async def purge_index_originals(self) -> int:
+        """Elimina os originais do Index cuja graça acabou e cujo PDF limpo se confirma (Lote 12).
+
+        Desligada por omissão (`INDEX_PURGE_ENABLED`): sem a variável não apaga nada e devolve 0.
+        """
+        from services.index_sanitize import purgar_originais_vencidos
+
+        resumo = await purgar_originais_vencidos()
+        return int(resumo.get("purgados", 0))
+
     async def run_all_tasks(self):
         """Executar todas as tarefas agendadas."""
         logger.info("=" * 50)
@@ -1723,6 +1733,7 @@ class ScheduledTasksService:
             waiting_count = await _tarefa("clientes em espera", self.check_clients_waiting_too_long)
             expired_partner_leads = await _tarefa("leads de parceiros expiradas", self.expire_stale_partner_leads)
             watchdog_count = await _tarefa("watchdog de validades", self.check_document_expirations_watchdog)
+            purged_originals = await _tarefa("originais do Index vencidos", self.purge_index_originals, 0)
             monthly_count = await _tarefa("lembretes mensais", self.send_monthly_document_reminder)
             stale_count = await _tarefa("processos atrasados", self.check_stale_processes)
             cleanup_count = await _tarefa("limpeza de notificações", self.cleanup_old_notifications)
@@ -1740,6 +1751,7 @@ class ScheduledTasksService:
             logger.info(f"- Alertas clientes em espera: {waiting_count}")
             logger.info(f"- Leads de parceiros expiradas (60 dias): {expired_partner_leads}")
             logger.info(f"- Watchdog expiração docs: {watchdog_count}")  # NOVA LINHA
+            logger.info(f"- Originais do Index eliminados (graça vencida): {purged_originals}")
             logger.info(f"- Lembretes mensais: {monthly_count}")
             logger.info(f"- Processos atrasados/urgentes: {stale_count}")
             logger.info(f"- Notificações limpas: {cleanup_count}")

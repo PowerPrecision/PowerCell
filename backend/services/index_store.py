@@ -192,7 +192,8 @@ async def recalcular_metadados(process_id: str, network_id: Optional[str], impre
     """Recalcula os trabalhos a partir dos recibos que o processo TEM e grava."""
     entradas: list[tuple[str, TrabalhoProfissional]] = []
     cursor = db.document_metadata.find(
-        {"process_id": process_id, "file_state": {"$ne": "purgado"}, "index_job": {"$exists": True, "$ne": None}},
+        # um original eliminado (`purgado`) continua a contar: os dados lidos dele não deixaram de ser verdade
+        {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_job": {"$exists": True, "$ne": None}},
         {"_id": 0, "id": 1, "index_job": 1},
     )
     for doc in await cursor.to_list(500):
@@ -308,6 +309,26 @@ async def substituir_alertas(
         await db.process_index_alerts.insert_one(documento)
         inseridos += 1
     return {"abertos": inseridos, "dispensados": len(dispensados & produzidos), "inseridos": inseridos}
+
+
+async def acrescentar_alerta(process_id: str, network_id: Optional[str], achado: dict) -> bool:
+    """Acrescenta UM alerta sem tocar nos outros (a matriz, que SUBSTITUI, não é o único emissor).
+
+    Idempotente pela assinatura: se já existe (aberto OU dispensado) não se repete — um alerta
+    dispensado não ressuscita. Devolve `True` se inseriu.
+    """
+    chave = chave_do_alerta(achado)
+    if await db.process_index_alerts.find_one({"process_id": process_id, "key": chave}, {"_id": 0, "id": 1}):
+        return False
+    alerta = AlertaDaMatriz(
+        id=str(uuid.uuid4()), process_id=process_id, network_id=network_id, code=achado["code"],
+        refs=achado.get("refs") or [], run_id="avulso", key=chave,
+    )
+    documento = alerta.model_dump(mode="json")
+    documento["created_at"] = _agora()
+    documento["periodo"] = achado.get("periodo")
+    await db.process_index_alerts.insert_one(documento)
+    return True
 
 
 async def contar_alertas_abertos(process_id: str) -> int:
@@ -455,7 +476,7 @@ async def procurar_entidades(texto: str, limite: int = 20) -> list[dict]:
 async def factos_do_processo(process_id: str) -> list[dict]:
     """Os factos de TODOS os ficheiros do processo já analisados (incluindo os saltados nesta corrida)."""
     docs = await db.document_metadata.find(
-        {"process_id": process_id, "file_state": {"$ne": "purgado"}, "index_facts": {"$exists": True, "$ne": None}},
+        {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts": {"$exists": True, "$ne": None}},
         {"_id": 0, "index_facts": 1},
     ).to_list(500)
     return [d["index_facts"] for d in docs if isinstance(d.get("index_facts"), dict)]

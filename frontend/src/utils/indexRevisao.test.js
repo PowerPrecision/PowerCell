@@ -12,6 +12,9 @@ import {
   edicoesDoTrabalho,
   empregadoresParaMarcar,
   eventoDoIndex,
+  dataCurta,
+  estadoDoFicheiroEmTexto,
+  ficheiroPorLimpar,
   formatarDinheiro,
   formularioDoTrabalho,
   haJobActivo,
@@ -21,6 +24,7 @@ import {
   normalizarFila,
   ordenarAlertas,
   podeMarcarComoIndexado,
+  quantosPorLimpar,
   resumoDaAnalise,
   rotuloDoEstado,
   separadorValido,
@@ -233,5 +237,43 @@ describe("apresentação", () => {
       "2 analisado(s); 1 já analisado(s); 3 alerta(s); 4 campo(s) a rever",
     );
     expect(resumoDaAnalise(null)).toBe("");
+  });
+});
+
+describe("PDF limpo: o que está por limpar e o que o ecrã diz", () => {
+  const base = { id: "d", uploaded_by_index: true, file_state: "original", has_clean_pdf: false, is_clean_pdf: false };
+
+  it("só conta o que o Index carregou e ainda não tem PDF limpo", () => {
+    expect(ficheiroPorLimpar(base)).toBe(true);
+    expect(ficheiroPorLimpar({ ...base, uploaded_by_index: false })).toBe(false);
+    expect(ficheiroPorLimpar({ ...base, uploaded_by_index: undefined })).toBe(false);
+    expect(ficheiroPorLimpar({ ...base, file_state: "sanitizado" })).toBe(false);
+    expect(ficheiroPorLimpar({ ...base, has_clean_pdf: true })).toBe(false);
+    expect(ficheiroPorLimpar({ ...base, is_clean_pdf: true })).toBe(false);
+    expect(ficheiroPorLimpar(null)).toBe(false);
+  });
+
+  it("um ficheiro sem file_state conta como original", () => {
+    const { file_state, ...semEstado } = base;
+    expect(file_state).toBe("original");
+    expect(ficheiroPorLimpar(semEstado)).toBe(true);
+  });
+
+  it("quantosPorLimpar tolera o que não é lista", () => {
+    expect(quantosPorLimpar([base, base, { ...base, uploaded_by_index: false }])).toBe(2);
+    expect(quantosPorLimpar({ a: 1 })).toBe(0);
+  });
+
+  it("a data de eliminação do original vê-se, em dd/mm/aaaa", () => {
+    expect(dataCurta("2026-11-20T12:00:00+00:00")).toBe("20/11/2026");
+    expect(dataCurta("lixo")).toBeNull();
+    expect(dataCurta(null)).toBeNull();
+    expect(estadoDoFicheiroEmTexto({ file_state: "sanitizado", purge_after: "2026-11-20T12:00:00+00:00" })).toBe(
+      "Tem PDF limpo — o original é eliminado a partir de 20/11/2026",
+    );
+    expect(estadoDoFicheiroEmTexto({ file_state: "sanitizado" })).toBe("Tem PDF limpo");
+    expect(estadoDoFicheiroEmTexto({ is_clean_pdf: true })).toBe("PDF limpo (sem metadados)");
+    expect(estadoDoFicheiroEmTexto({ file_state: "original" })).toBeNull();
+    expect(estadoDoFicheiroEmTexto(null)).toBeNull();
   });
 });

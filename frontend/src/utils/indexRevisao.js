@@ -249,3 +249,35 @@ export function normalizarBancada(dados) {
 export function haJobActivo(jobsActivos) {
   return Boolean(jobsActivos && (jobsActivos.analysis || jobsActivos.finalize || jobsActivos.sanitize));
 }
+
+/** O ficheiro foi carregado pelo Index e ainda não tem PDF limpo? (é o que «Apagar metadados» trata.) */
+export function ficheiroPorLimpar(ficheiro) {
+  if (!ficheiro || ficheiro.is_clean_pdf) return false;
+  const estado = ficheiro.file_state || "original";
+  return ficheiro.uploaded_by_index === true && estado === "original" && !ficheiro.has_clean_pdf;
+}
+
+export function quantosPorLimpar(ficheiros) {
+  return listaDoServidor(ficheiros).filter(ficheiroPorLimpar).length;
+}
+
+/** «dd/mm/aaaa» de uma data ISO, ou `null` se não for uma data. */
+export function dataCurta(iso) {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(d);
+}
+
+/**
+ * O estado do ficheiro em palavras para o ecrã (ou `null` quando não há nada a dizer).
+ * Um original com PDF limpo diz QUANDO deixa de existir: a margem de segurança tem de ser visível.
+ */
+export function estadoDoFicheiroEmTexto(ficheiro) {
+  if (!ficheiro) return null;
+  if (ficheiro.is_clean_pdf) return "PDF limpo (sem metadados)";
+  if (ficheiro.file_state === "sanitizado") {
+    const quando = dataCurta(ficheiro.purge_after);
+    return quando ? `Tem PDF limpo — o original é eliminado a partir de ${quando}` : "Tem PDF limpo";
+  }
+  return null;
+}

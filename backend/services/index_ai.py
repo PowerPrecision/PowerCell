@@ -57,7 +57,7 @@ from services.process_ai_log import classificar_falha
 logger = logging.getLogger(__name__)
 
 #: Mudar o esquema ou os prompts invalida as impressões digitais (reanálise de tudo).
-ESQUEMA_VERSAO = "1"
+ESQUEMA_VERSAO = "2"  # 2: a identificação passou a dizer a FACE (frente/verso) — serve o PDF limpo (Fase 5)
 
 CHAVE_AI_CONFIG = "index_analysis"
 MODELO_OMISSAO = "gpt-4o-mini"
@@ -71,6 +71,7 @@ PROVIDERS_VALIDOS = frozenset({PROVIDER_OPENAI, PROVIDER_MOCK})
 TIPO_RECIBO = "recibo_vencimento"
 TIPO_EXTRATO = "extrato_bancario"
 TIPO_IDENTIFICACAO = "identificacao"
+FACES_DE_IDENTIFICACAO = ("frente", "verso", "ambas")
 TIPOS_ANALISADOS = (TIPO_RECIBO, TIPO_EXTRATO, TIPO_IDENTIFICACAO)
 
 #: Pasta/categoria de cada tipo. A identificação é UMA categoria só (decisão da direcção).
@@ -256,6 +257,11 @@ def definicao_da_ferramenta(tipo: str) -> dict:
             },
             "expiry_date": _campo("string", "Data de validade (YYYY-MM-DD)."),
             "legible": {"type": "boolean", "description": "O documento está legível?"},
+            "face": {
+                "type": "string",
+                "enum": [*FACES_DE_IDENTIFICACAO, "desconhecida"],
+                "description": "frente, verso, ou ambas (as duas faces na mesma imagem/página).",
+            },
         }
     else:
         raise ValueError(f"tipo de análise desconhecido: {tipo!r}")
@@ -502,10 +508,12 @@ def normalizar_identificacao(
     expirada = None
     if validade:
         expirada = date.fromisoformat(validade) < hoje
+    face = bruto.get("face") if bruto.get("face") in FACES_DE_IDENTIFICACAO else None
     factos = {
         "tipo": TIPO_IDENTIFICACAO,
         "document_id": document_id,
         "subtype": subtipo,
+        "face": face,  # só serve para decidir se duas fotos são as faces do MESMO cartão
         "expirada": expirada,  # None = validade desconhecida (não é «válida»)
         "legivel": bool(legivel) and subtipo is not None,
     }
@@ -558,6 +566,7 @@ def simular(tipo: str, filename: str, *, hoje: Optional[date] = None) -> dict:
             "subtype": subtipo_de_identificacao(filename) or "cc",
             "expiry_date": campo(hoje.replace(year=hoje.year + 3).isoformat()),
             "legible": True,
+            "face": "verso" if "verso" in _sem_acentos(filename or "") else "frente",
         }
     raise ValueError(f"tipo de análise desconhecido: {tipo!r}")
 

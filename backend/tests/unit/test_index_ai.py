@@ -269,10 +269,25 @@ class TestNormalizarIdentificacao:
     def test_so_subtipo_e_validade(self):
         r = ia.normalizar_identificacao(
             {"subtype": "passaporte", "expiry_date": campo("2030-01-31"), "legible": True,
-             "full_name": "Ana", "document_number": "X123"}, document_id="i", hoje=HOJE)
+             "full_name": "Ana", "document_number": "X123", "face": "frente"}, document_id="i", hoje=HOJE)
         assert r["subtype"] == "passaporte"
+        # nada pessoal: só o subtipo, a face (para decidir se duas fotos são do MESMO cartão) e a validade
         assert r["factos"] == {"tipo": "identificacao", "document_id": "i", "subtype": "passaporte",
-                               "expirada": False, "legivel": True}
+                               "face": "frente", "expirada": False, "legivel": True}
+
+    @pytest.mark.parametrize("face,esperado", [("frente", "frente"), ("verso", "verso"), ("ambas", "ambas"),
+                                               ("desconhecida", None), ("lado", None), (None, None), (3, None)])
+    def test_a_face_so_aceita_valores_conhecidos(self, face, esperado):
+        r = ia.normalizar_identificacao({"subtype": "cc", "face": face}, document_id="i", hoje=HOJE)
+        assert r["factos"]["face"] == esperado
+
+    def test_o_esquema_pede_a_face(self):
+        props = ia.definicao_da_ferramenta(ia.TIPO_IDENTIFICACAO)["function"]["parameters"]["properties"]
+        assert set(props["face"]["enum"]) == {"frente", "verso", "ambas", "desconhecida"}
+
+    def test_a_simulacao_distingue_frente_e_verso_pelo_nome(self):
+        assert ia.simular(ia.TIPO_IDENTIFICACAO, "cc_verso.jpg", hoje=HOJE)["face"] == "verso"
+        assert ia.simular(ia.TIPO_IDENTIFICACAO, "cc_frente.jpg", hoje=HOJE)["face"] == "frente"
 
     def test_expirada(self):
         r = ia.normalizar_identificacao({"subtype": "cc", "expiry_date": campo("2026-10-20")}, document_id="i", hoje=HOJE)

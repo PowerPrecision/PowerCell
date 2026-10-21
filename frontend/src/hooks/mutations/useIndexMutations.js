@@ -20,6 +20,7 @@ import {
   extractIndexProcess,
   markIndexProcessIndexed,
   releaseIndexProcess,
+  sanitizeIndexProcess,
 } from "../../services/api";
 import { mensagemDeErro } from "../../utils/indexRevisao";
 
@@ -60,6 +61,14 @@ export function useIndexMutations(processId) {
     },
     onError: falhou,
   });
+  const sanitizar = useMutation({
+    mutationFn: () => sanitizeIndexProcess(processId),
+    onSuccess: (resposta) => {
+      toast.info(resposta?.data?.message || "Os PDFs limpos estão a ser gerados em segundo plano.");
+      return refrescar();
+    },
+    onError: falhou,
+  });
   const editar = useMutation({
     mutationFn: ({ jobId, fields }) => editIndexJob(processId, jobId, fields),
     onSuccess: () => {
@@ -86,5 +95,5 @@ export function useIndexMutations(processId) {
     onError: falhou,
   });
 
-  return { claim, release, analisar, extrair, editar, dispensar, marcarIndexado };
+  return { claim, release, analisar, extrair, sanitizar, editar, dispensar, marcarIndexado };
 }

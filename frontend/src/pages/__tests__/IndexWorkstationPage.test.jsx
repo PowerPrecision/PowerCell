@@ -33,6 +33,7 @@ vi.mock("../../services/api", () => ({
   extractIndexProcess: vi.fn(),
   editIndexJob: vi.fn(),
   dismissIndexAlert: vi.fn(),
+  sanitizeIndexProcess: vi.fn(),
   markIndexProcessIndexed: vi.fn(),
   searchIndexEmployers: vi.fn(),
 }));
@@ -251,6 +252,65 @@ describe("edição humana no painel lateral", () => {
     const painel = await screen.findByTestId("painel-de-revisao");
     expect(within(within(painel).getByTestId("campo-job_a-job_title")).getByText("A rever")).toBeInTheDocument();
     expect(within(within(painel).getByTestId("campo-job_a-employer_name")).queryByText("A rever")).not.toBeInTheDocument();
+  });
+});
+
+describe("PDF limpo («Apagar metadados»)", () => {
+  const COM_FICHEIROS_DO_INDEX = {
+    ...BANCADA,
+    active_jobs: { analysis: null, finalize: null, sanitize: null },
+    files: [
+      { id: "d1", filename: "recibo.pdf", analysis_type: "recibo_vencimento", analysed: true, file_state: "original", uploaded_by_index: true },
+      { id: "d2", filename: "extrato.pdf", analysis_type: "extrato_bancario", analysed: true, file_state: "sanitizado",
+        has_clean_pdf: true, purge_after: "2026-11-20T12:00:00+00:00", uploaded_by_index: true },
+      { id: "d3", filename: "extrato_limpo.pdf", file_state: "original", is_clean_pdf: true, has_clean_pdf: false },
+    ],
+  };
+
+  it("com ficheiros do Index por limpar, o botão chama o servidor", async () => {
+    api.sanitizeIndexProcess.mockResolvedValue({ data: { success: true, message: "A gerar." } });
+    montar(COM_FICHEIROS_DO_INDEX);
+    await userEvent.click(await screen.findByRole("button", { name: "Apagar metadados" }));
+    await waitFor(() => expect(api.sanitizeIndexProcess).toHaveBeenCalledWith("proc-1"));
+    expect(toast.info).toHaveBeenCalledWith("A gerar.");
+  });
+
+  it("sem nada por limpar o botão está desligado e di-lo", async () => {
+    montar({ ...COM_FICHEIROS_DO_INDEX, files: COM_FICHEIROS_DO_INDEX.files.slice(1) });
+    const botao = await screen.findByRole("button", { name: "Apagar metadados" });
+    expect(botao).toBeDisabled();
+    expect(botao).toHaveAttribute("title", expect.stringContaining("por limpar"));
+  });
+
+  it("os ficheiros que o cliente carregou não contam", async () => {
+    montar({ ...COM_FICHEIROS_DO_INDEX, files: [{ ...COM_FICHEIROS_DO_INDEX.files[0], uploaded_by_index: false }] });
+    expect(await screen.findByRole("button", { name: "Apagar metadados" })).toBeDisabled();
+  });
+
+  it("enquanto há um job activo fica desligado", async () => {
+    montar({ ...COM_FICHEIROS_DO_INDEX, active_jobs: { analysis: null, finalize: null, sanitize: "t-5" } });
+    expect(await screen.findByRole("button", { name: "Apagar metadados" })).toBeDisabled();
+  });
+
+  it("a margem de segurança vê-se: quando o original deixa de existir", async () => {
+    montar(COM_FICHEIROS_DO_INDEX);
+    await screen.findByText("recibo.pdf");
+    const estados = screen.getAllByTestId("estado-do-ficheiro").map((e) => e.textContent);
+    expect(estados).toContain("Tem PDF limpo — o original é eliminado a partir de 20/11/2026");
+    expect(estados).toContain("PDF limpo (sem metadados)");
+  });
+
+  it("o PDF limpo não é «por analisar»", async () => {
+    montar({ ...COM_FICHEIROS_DO_INDEX, files: [{ ...COM_FICHEIROS_DO_INDEX.files[2], analysis_type: null }] });
+    await screen.findByText("extrato_limpo.pdf");
+    expect(screen.queryByText("Por analisar")).not.toBeInTheDocument();
+  });
+
+  it("uma recusa mostra o motivo", async () => {
+    api.sanitizeIndexProcess.mockRejectedValue({ response: { status: 403, data: { detail: "Sem permissão." } } });
+    montar(COM_FICHEIROS_DO_INDEX);
+    await userEvent.click(await screen.findByRole("button", { name: "Apagar metadados" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Sem permissão."));
   });
 });
 

@@ -373,6 +373,68 @@ Divergências e decisões:
    pasta `Index`), os endpoints `/api/index/*`, o RBAC do perfil Index nas rotas de IA, o frontend, a sanitização e a purga.
    `iniciar_analise(process_id, user, force=, gatilho=)` é o ponto de entrada que a Fase 3 liga.
 
-**Por resolver antes da Fase 5** (as respostas do dono contradizem-se): PDF limpo **um por ficheiro original** (resposta às
-perguntas, «só os carregados pelo Index precisam de ser limpos») ou **agrupado por categoria** (`recibos.pdf`, Luz Verde); e
-período de graça de **30 dias** ou **7**.
+### Fase 3 — API, RBAC e fecho (Out 2026)
+
+`routes/index_module.py` (`/api/index/*`, stubs finos) → `services/index_api.py` (fila, bancada, claim/release, analisar/extrair,
+edição humana, dispensar alertas, directório) e `services/index_finalize.py` («marcar como indexado» + job de fecho).
+
+Decisões e divergências:
+
+1. **RBAC:** `PAPEIS_DE_IA_DO_INDEX` = os altos perfis + Indexação (Master/Admin/CEO/Diretor/Indexação), pelo perfil EFECTIVO.
+   Consultor e Intermediário: 403 e o handler nunca corre. **A regra QA-5 não mudou** (`PAPEIS_DE_GESTAO_DA_IA` ainda não inclui a
+   Indexação): o Index só tem IA nestas rotas novas. Marcar como indexado mantém a lista de sempre (Master/Admin/CEO/Indexação).
+2. **Router:** rede (404) ANTES do estado fechado (403). Todas as rotas são limitadas e declaram `response: Response`.
+3. **A fila segue o âmbito de PROCESSOS** (dono + convidadas, `build_tenant_process_condition`) e não traz metadados
+   profissionais; a bancada traz-os. O directório de entidades é global PORQUE só tem NIF e nome.
+4. **«Marcar como Indexado» nunca é bloqueado** (IA em baixo, campos em dúvida, alertas abertos). O diálogo dos NIFs é opcional;
+   um NIF que não se aplica volta em `employers.rejected` e a indexação segue; a permissão vem ANTES de tocar nos metadados.
+5. **O fecho (`INDEX_FINALIZE`)** é lançado por `run_mark_indexed_side_effects`, DEPOIS de libertar a pasta `Index` e do motor
+   financeiro, e nunca condiciona a indexação: analisa o que falta (impressão digital), gera o PDF limpo, notifica.
+   Um job activo por processo (mesmo índice único).
+6. **Divergência assumida — a categorização à entrada da `Index` mantém-se.** O desenho dizia «a IA só corre ao marcar
+   indexado»; a categorização (barata, QA-5) alimenta a libertação da pasta e os pedidos do Portal e já está provada. O que passou
+   a ser condicional é a **extracção do Index** (a cara): só em «marcar como indexado», em uploads posteriores à indexação e a pedido.
+7. **Uploads depois de indexar** (`document_upload`, `document_direct_upload`) criam o registo mínimo em `document_metadata`
+   (um processo indexado não passa pela fila da IA, logo não havia registo) e lançam a análise; marcam `uploaded_by_index`.
+   Limite: a análise lê a categoria/subcategoria/nome do ficheiro — sem categorização, só os nomes reconhecíveis são analisados.
+8. **Achado:** `GET /index/employers` com pontuação («.*») devolvia o directório inteiro (a normalização tirava a pontuação e
+   uma expressão vazia casa com tudo).
+9. **Não feito (dito):** o cartão «Documentação validada» do Consultor (a rota seria nova, fora de `/api/index`, e o dono não
+   pediu ver dados do cliente) e o painel «Agente» do desenho.
+
+### Fase 4 — Frontend
+
+`/index` (`IndexDashboardPage`: abas «Fila de Espera» e «Revisões Pendentes», estado no URL) e `/index/:processId`
+(`IndexWorkstationPage`: documentos, metadados, matriz, painel lateral de revisão, diálogo de NIFs). Hooks com tempo real por
+eventos `task_*` (o polling só corre enquanto há job activo E o WebSocket está em baixo). O menu mostra «Indexação» ao Index e
+aos altos perfis; `App.rotasMenu.test.js` cruza menu e rotas (e o leitor passou a não deixar um spread de outro grupo apagar um
+item literal do bloco do perfil).
+Achado: **duas escritas funcionais seguidas ao URL pisam-se** (`setSeparador` + `setPagina(1)`): o react-router parte as duas do
+URL do render actual. A mudança de aba faz UMA escrita.
+
+### Fase 5 — PDF limpo e purga (decisão FINAL da direcção, 21 Out 2026)
+
+`services/index_sanitize.py`.
+
+1. **Um PDF limpo por documento distinto** — nunca `recibos.pdf` nem `extratos.pdf`. Só se funde o que se PROVA ser o mesmo
+   documento, e só imagens: extrato = mesmo IBAN e mês (fotos de páginas); identificação = exactamente UMA frente e UM verso do
+   mesmo tipo (a identificação passou a dizer a **face**, `ESQUEMA_VERSAO` = 2); recibos e PDFs nunca. Na dúvida, separado
+   (duas frentes e dois versos = duas pessoas). Limite honesto: uma foto de uma página de extrato sem cabeçalho (sem IBAN/mês) não
+   se consegue juntar às outras.
+2. **Só os ficheiros que o Index carregou** (`document_metadata.uploaded_by_index`).
+3. **Graça de 30 dias** (`INDEX_PURGE_GRACE_DAYS`; um valor inválido ou ≤0 cai nos 30 — nunca encurta).
+4. **Aditivo primeiro:** gravar o PDF limpo ao lado do original (chave exacta, nunca sobrescreve), **relê-lo** do S3 e só então
+   mudar o estado (`sanitizado`, `clean_pdf_path`, `clean_pdf_sha256`, `purge_after`). Qualquer falha deixa os originais intactos,
+   apaga a cópia má e deixa o alerta `sanitizacao_falhou` (aviso) e uma linha no Log da IA.
+5. **O PDF está mesmo limpo:** sem metadados, XMP, anexos, JavaScript (também ao nível do catálogo), EXIF (re-codifica a imagem)
+   nem autor das anotações. **Medido** — e dois achados: o `scrub` do PyMuPDF deixa `/OpenAction` JavaScript (copia-se só as
+   páginas para um documento novo) e deixa o autor de realces/comentários (apagam-se as notas adesivas e limpam-se as chaves
+   de autoria das visíveis). `verificar_pdf_limpo` lê o PDF como o leitor mais exigente o leria.
+6. **Purga DESLIGADA por omissão** (`INDEX_PURGE_ENABLED=true`, também em produção). Repete a verificação (hash + páginas +
+   limpeza) à cópia limpa ANTES de apagar, só purga grupos inteiros vencidos, repõe os pedidos do Portal (sem duplicados) e só
+   depois apaga o original do S3 (com repetição se o S3 falhar). Corre no `scheduled_tasks`.
+7. **`file_state: purgado`** deixa de significar «já não conta»: os DADOS lidos de um original eliminado continuam verdadeiros
+   (inverteu-se o teste da Fase 2); só os BYTES desapareceram, logo não se re-analisa. O PDF limpo é um registo próprio
+   (`is_clean_pdf`) que a análise e o motor financeiro ignoram (senão contava-se duas vezes).
+8. **Antes de ligar a purga em produção:** auditar as referências a um original que não sejam o `document_metadata` e os
+   pedidos do Portal (ficheiros do Parceiro por `file_id`, a Origem Financeira; o Explorador mostra ambos os ficheiros durante a graça).

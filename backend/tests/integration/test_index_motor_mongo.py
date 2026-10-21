@@ -430,11 +430,31 @@ class TestOQueSeAnalisa:
         r = await correr()
         assert (await tarefa(bd, r["task_id"]))["result_data"]["analisados"] == 3
 
-    async def test_ficheiros_purgados_nao_contam(self, bd):
+    async def test_ficheiros_purgados_nao_se_reanalisam(self, bd):
+        # um original eliminado já não tem bytes para ler: não vai ao modelo
         r_id, _, _ = await tres_documentos(bd)
         await bd.document_metadata.update_one({"id": r_id}, {"$set": {"file_state": "purgado"}})
         r = await correr()
         assert (await tarefa(bd, r["task_id"]))["result_data"]["analisados"] == 2
+
+    async def test_os_dados_de_um_original_purgado_continuam_a_contar(self, bd):
+        """Inverte a regra da Fase 2 («um purgado deixa de contar»): eliminar os BYTES do original não
+        torna falsos os dados que se leram dele — senão a purga apagava os metadados profissionais."""
+        r_id, _, _ = await tres_documentos(bd)
+        await correr()
+        await bd.document_metadata.update_one({"id": r_id}, {"$set": {"file_state": "purgado"}})
+        await correr()
+        meta = await bd.process_professional_metadata.find_one({"process_id": PID})
+        assert len(meta["jobs"]) == 1
+
+    async def test_o_pdf_limpo_nao_e_reanalisado_nem_conta_duas_vezes(self, bd):
+        r_id, _, _ = await tres_documentos(bd)
+        await correr()
+        await doc(bd, "recibo_vencimento_setembro_limpo.pdf", categoria="Rendimentos", sub="Recibo de Vencimento",
+                  is_clean_pdf=True, clean_of=[r_id])
+        r = await correr()
+        assert (await tarefa(bd, r["task_id"]))["result_data"]["analisados"] == 0
+        assert len((await bd.process_professional_metadata.find_one({"process_id": PID}))["jobs"]) == 1
 
     async def test_um_recibo_apagado_deixa_de_contar_nos_metadados(self, bd):
         r_id, _, _ = await tres_documentos(bd)

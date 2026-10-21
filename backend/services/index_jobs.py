@@ -184,8 +184,10 @@ async def analisar_ficheiros(
 ) -> dict[str, Any]:
     """Analisa os ficheiros do processo que o Index lê. Devolve `{analisados, saltados, falhas, falhados, ignorados}`."""
     process_id = process["id"]
+    # Só se analisa o que tem BYTES para ler: nem os originais já eliminados (`purgado`) nem o PDF
+    # limpo (`is_clean_pdf`, cujos factos vivem nos originais — contá-los duas vezes duplicava tudo).
     docs = await db.document_metadata.find(
-        {"process_id": process_id, "file_state": {"$ne": "purgado"}}, {"_id": 0}
+        {"process_id": process_id, "file_state": {"$ne": "purgado"}, "is_clean_pdf": {"$ne": True}}, {"_id": 0}
     ).to_list(500)
 
     resumo = {"analisados": 0, "saltados": 0, "falhas": 0, "ignorados": 0, "falhados": []}
@@ -240,8 +242,9 @@ async def analisar_ficheiros(
 async def concluir_resultados(process: dict, resumo: dict) -> dict[str, Any]:
     """Recalcula metadados, directório e matriz a partir de TUDO o que o processo tem analisado."""
     process_id, rede = process["id"], process.get("network_id")
+    # Os DADOS de um original eliminado continuam verdadeiros: contam (só os BYTES é que desapareceram).
     docs = await db.document_metadata.find(
-        {"process_id": process_id, "file_state": {"$ne": "purgado"}},
+        {"process_id": process_id, "is_clean_pdf": {"$ne": True}},
         {"_id": 0, "analysis_fingerprint": 1},
     ).to_list(500)
     impressao = impressao_do_conjunto([d.get("analysis_fingerprint") for d in docs])

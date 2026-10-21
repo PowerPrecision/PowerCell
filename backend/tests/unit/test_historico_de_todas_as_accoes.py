@@ -59,6 +59,7 @@ SEM_HISTORICO = {
     ("index_module.py", "claim_process"): "muda só o estado da fila do Index (in_review); o perfil Indexação não deixa rasto",
     ("index_module.py", "release_process"): "devolve o processo à fila do Index; o perfil Indexação não deixa rasto",
     ("index_module.py", "analyze_process"): "job de IA que escreve só nos metadados do Index (e no Log da IA); a ficha não muda",
+    ("index_module.py", "sanitize_process"): "gera o PDF limpo ao lado do original (aditivo, deixa rasto no Log da IA); o perfil Indexação não deixa rasto no histórico",
     ("index_module.py", "extract_process"): "idem `analyze_process`: extracção para os metadados do Index, nunca para a ficha",
 }
 

@@ -1323,6 +1323,8 @@ export const analyzeIndexProcess = (processId, force = false) =>
   api.post(`/index/processes/${processId}/analyze`, { force }, { skipErrorToast: true });
 export const extractIndexProcess = (processId) =>
   api.post(`/index/processes/${processId}/extract`, null, { skipErrorToast: true });
+export const sanitizeIndexProcess = (processId) =>
+  api.post(`/index/processes/${processId}/sanitize`, null, { skipErrorToast: true });
 export const editIndexJob = (processId, jobId, fields) =>
   api.patch(`/index/processes/${processId}/professional-metadata/${jobId}`, { fields }, { skipErrorToast: true });
 export const dismissIndexAlert = (processId, alertId) =>

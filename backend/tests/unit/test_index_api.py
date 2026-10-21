@@ -350,6 +350,36 @@ class TestAccoes:
         assert r["success"] is True and r["started"] is False and r["task_id"] == "t-0"
 
 
+class TestSanitizar:
+    @pytest.mark.asyncio
+    async def test_devolve_ja_com_o_task_id(self, fake_async_db):
+        from services import index_sanitize
+
+        await fake_async_db.processes.insert_one({"id": PID, "network_id": "r", "is_deleted": False})
+        iniciar = AsyncMock(return_value={"task_id": "t-7", "iniciado": True})
+        with _Contexto(fake_async_db), patch.object(index_sanitize, "iniciar_sanitizacao", iniciar):
+            r = await api.run_sanitize_process(INDEXADOR, PID)
+        assert r["task_id"] == "t-7" and r["started"] is True
+        assert "margem de segurança" in r["message"]
+
+    @pytest.mark.asyncio
+    async def test_ja_havia_uma_limpeza_a_correr_nao_e_erro(self, fake_async_db):
+        from services import index_sanitize
+
+        await fake_async_db.processes.insert_one({"id": PID, "network_id": "r", "is_deleted": False})
+        with _Contexto(fake_async_db), patch.object(
+                index_sanitize, "iniciar_sanitizacao", AsyncMock(return_value={"task_id": "t-0", "iniciado": False})):
+            r = await api.run_sanitize_process(INDEXADOR, PID)
+        assert r["success"] is True and r["started"] is False
+
+    @pytest.mark.asyncio
+    async def test_processo_inexistente_e_404(self, fake_async_db):
+        with _Contexto(fake_async_db):
+            with pytest.raises(HTTPException) as e:
+                await api.run_sanitize_process(INDEXADOR, "nao-existe")
+        assert e.value.status_code == 404
+
+
 # ====================================================================
 # 5. EDIÇÃO HUMANA
 # ====================================================================

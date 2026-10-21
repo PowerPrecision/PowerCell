@@ -54,6 +54,9 @@ ACCOES = {
     "extrair_dados": "Dados extraídos",
     "analisar": "Documento analisado",
     "rever": "Documento reanalisado",
+    # Módulo Index (Lote 12, Fase 5): o PDF limpo e a eliminação do original.
+    "sanitizar": "PDF limpo gerado",
+    "purgar": "Original eliminado",
 }
 
 ESTADOS = ("sucesso", "falha", "saltado")
@@ -73,6 +76,10 @@ MOTIVOS = {
     "formato_nao_suportado": "Formato de ficheiro não suportado pela IA.",
     "erro_da_ia": "A IA não conseguiu analisar este documento.",
     "erro_interno": "Falha interna ao analisar o documento.",
+    "pdf_limpo_invalido": "O PDF limpo não passou a verificação — o original foi mantido.",
+    "armazenamento_indisponivel": "Não foi possível gravar ou ler o PDF limpo no armazenamento — o original foi mantido.",
+    "formato_nao_sanitizavel": "Formato que não se converte em PDF limpo — o original foi mantido.",
+    "purga_adiada": "A eliminação do original foi adiada: o PDF limpo não pôde ser confirmado.",
 }
 
 #: Palavras (em minúsculas) → código. A ordem importa: o LIMITE antes da

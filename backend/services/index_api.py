@@ -46,12 +46,15 @@ PROJECCAO_DA_FILA = {
 PROJECCAO_DOS_FICHEIROS = {
     "_id": 0, "id": 1, "process_id": 1, "filename": 1, "s3_path": 1, "ai_category": 1,
     "ai_subcategory": 1, "ai_subtype": 1, "analysis_fingerprint": 1, "file_state": 1,
-    "in_index_queue": 1, "created_at": 1, "clean_pdf_path": 1, "purge_after": 1,
+    "in_index_queue": 1, "created_at": 1, "clean_pdf_path": 1, "purge_after": 1, "is_clean_pdf": 1,
+    "uploaded_by_index": 1,
 }
 
 
 def _ficheiro_dto(doc: dict) -> dict[str, Any]:
-    tipo = tipo_de_analise(doc.get("ai_category"), doc.get("ai_subcategory"), doc.get("filename"))
+    # o PDF limpo não se analisa: os factos vivem nos originais (senão contavam-se duas vezes)
+    tipo = None if doc.get("is_clean_pdf") else tipo_de_analise(
+        doc.get("ai_category"), doc.get("ai_subcategory"), doc.get("filename"))
     return {
         "id": doc.get("id"),
         "filename": doc.get("filename"),
@@ -64,6 +67,8 @@ def _ficheiro_dto(doc: dict) -> dict[str, Any]:
         "file_state": doc.get("file_state") or "original",
         "in_index_queue": bool(doc.get("in_index_queue")),
         "has_clean_pdf": bool(doc.get("clean_pdf_path")),
+        "is_clean_pdf": bool(doc.get("is_clean_pdf")),
+        "uploaded_by_index": bool(doc.get("uploaded_by_index")),
         "purge_after": doc.get("purge_after"),
         "created_at": doc.get("created_at"),
     }
@@ -208,6 +213,24 @@ async def run_analyze_process(user: dict, process_id: str, *, force: bool = Fals
         "message": (
             "A análise está a correr em segundo plano; recebe uma notificação no fim."
             if resultado["iniciado"] else "Já há uma análise a correr neste processo."
+        ),
+    }
+
+
+async def run_sanitize_process(user: dict, process_id: str) -> dict[str, Any]:
+    """«Apagar metadados do PDF»: PDF limpo dos ficheiros que o Index carregou. Corre em segundo plano."""
+    from services import index_sanitize
+
+    await _carregar_processo(process_id, user)
+    resultado = await index_sanitize.iniciar_sanitizacao(process_id, user)
+    return {
+        "success": True,
+        "task_id": resultado["task_id"],
+        "started": resultado["iniciado"],
+        "message": (
+            "Os PDFs limpos estão a ser gerados em segundo plano; recebe uma notificação no fim. "
+            "Os originais só são eliminados passada a margem de segurança."
+            if resultado["iniciado"] else "Já há uma limpeza de PDFs a correr neste processo."
         ),
     }
 

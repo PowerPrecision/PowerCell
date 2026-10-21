@@ -27,6 +27,7 @@ from services.index_api import (
     run_get_index_queue,
     run_get_index_workstation,
     run_release_process,
+    run_sanitize_process,
     run_search_employers,
 )
 from services.index_finalize import run_mark_indexed
@@ -138,6 +139,13 @@ async def analyze_process(
 async def extract_process(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
     """«Extrair dados»: volta a extrair TUDO (ignora a impressão digital)."""
     return await run_analyze_process(user, process_id, force=True)
+
+
+@router.post("/processes/{process_id}/sanitize", status_code=202)
+@limiter.limit("10/minute")
+async def sanitize_process(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
+    """«Apagar metadados»: gera o PDF limpo dos ficheiros carregados pelo Index (original mantido na graça)."""
+    return await run_sanitize_process(user, process_id)
 
 
 @router.patch("/processes/{process_id}/professional-metadata/{job_id}")

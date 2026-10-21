@@ -25,8 +25,10 @@ import { ProfessionalReviewPanel } from "../../components/index/ProfessionalRevi
 import { useIndexWorkstationQuery } from "../../hooks/queries/useIndexQueries";
 import { useIndexMutations } from "../../hooks/mutations/useIndexMutations";
 import {
+  estadoDoFicheiroEmTexto,
   formatarDinheiro,
   haJobActivo,
+  quantosPorLimpar,
   rotuloDoEstado,
   rotuloDoTipoDeAnalise,
   totalDeCamposARever,
@@ -51,6 +53,11 @@ function ListaDeFicheiros({ ficheiros }) {
             ) : (
               <Badge variant="outline">Por analisar</Badge>
             ))}
+          {estadoDoFicheiroEmTexto(f) && (
+            <span className="basis-full pl-6 text-xs text-muted-foreground" data-testid="estado-do-ficheiro">
+              {estadoDoFicheiroEmTexto(f)}
+            </span>
+          )}
         </li>
       ))}
     </ul>
@@ -146,9 +153,12 @@ export default function IndexWorkstationPage() {
           jobsActivos={jobsActivos}
           aAnalisar={m.analisar.isPending}
           aExtrair={m.extrair.isPending}
+          aSanitizar={m.sanitizar.isPending}
           aMarcar={m.marcarIndexado.isPending}
+          porLimpar={quantosPorLimpar(ficheiros)}
           onAnalisar={() => m.analisar.mutate({ force: false })}
           onExtrair={() => m.extrair.mutate()}
+          onSanitizar={() => m.sanitizar.mutate()}
           onMarcar={aoMarcar}
         />
 
