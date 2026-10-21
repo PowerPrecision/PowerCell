@@ -20,7 +20,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { CRIAR_PROCESSO, podeFazer } from "../utils/capacidades";
-import { deleteClient, getClient, getRegisteredClients } from "../services/api";
+import { deleteClient, getClient, getPartnerOptions, getRegisteredClients } from "../services/api";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -68,11 +68,15 @@ import {
   FileInput,
   ClipboardList,
   Trash2,
+  FileSearch,
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { safeString } from "../utils/safeString";
 import { formatFonteLabel } from "../utils/fonteLabels";
 import ValidacaoFinanceira from "../components/validacao/ValidacaoFinanceira";
+import AccoesDaLead from "../components/leads/AccoesDaLead";
+import LeadDetailsDrawer from "../components/leads/LeadDetailsDrawer";
+import Paginacao from "../components/shared/Paginacao";
 
 /**
  * As colunas da lista de registos (cabeçalho e linhas partilham-na: duas
@@ -80,7 +84,7 @@ import ValidacaoFinanceira from "../components/validacao/ValidacaoFinanceira";
  * `col-span-12`, porque a coluna «Parceiro» tornou o total 13.
  */
 const COLUNAS_DA_LISTA =
-  "md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,2fr)_minmax(0,1fr)]";
+  "md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_minmax(0,1.6fr)_minmax(0,1.8fr)_minmax(0,2.4fr)]";
 import CreateProcessModal from "../components/CreateProcessModal";
 import ProcessNavigator from "../components/processDetails/ProcessNavigator";
 import Sub35Badge from "../components/shared/Sub35Badge";
@@ -92,6 +96,9 @@ import {
 import { formatDate, formatDateTime } from "../lib/utils";
 import { formatCurrency } from "../utils/formatCurrency";
 
+
+/** Registos por página: o servidor pagina (`skip`/`limit`), a página nunca carrega a base inteira. */
+const TAMANHO_DA_PAGINA = 50;
 
 const ClientRegistrationsPage = () => {
   const { user, effectiveRole } = useAuth();
@@ -107,6 +114,10 @@ const ClientRegistrationsPage = () => {
   const [sortField, setSortField] = useState(() => searchParams.get("sort_field") || "created_at");
   const [sortOrder, setSortOrder] = useState(() => searchParams.get("sort_order") || "desc");
   const [assignedToMe, setAssignedToMe] = useState(() => searchParams.get("assigned_to_me") === "true");
+  // P4 — «Por Parceiro» e paginação no servidor. Mudar qualquer filtro volta à 1.ª página.
+  const [parceiroFiltro, setParceiroFiltro] = useState(() => searchParams.get("parceiro") || "all");
+  const [parceiros, setParceiros] = useState([]);
+  const [pagina, setPagina] = useState(1);
 
   // Debounce para pesquisa
   const searchTimeoutRef = React.useRef(null);
@@ -114,6 +125,7 @@ const ClientRegistrationsPage = () => {
   // Actualizar filtros na URL
   const updateSearch = useCallback((value) => {
     setSearch(value);
+    setPagina(1);
     // Debounce: só actualiza a URL após 300ms sem input
     clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(() => {
@@ -127,6 +139,7 @@ const ClientRegistrationsPage = () => {
 
   const updateHasProcessFilter = useCallback((value) => {
     setHasProcessFilter(value);
+    setPagina(1);
     setSearchParams(prev => {
       if (value === "all") prev.delete("has_process");
       else prev.set("has_process", value);
@@ -136,6 +149,7 @@ const ClientRegistrationsPage = () => {
 
   const updateSort = useCallback((value) => {
     const [field, order] = value.split('_');
+    setPagina(1);
     setSortField(field);
     setSortOrder(order);
     setSearchParams(prev => {
@@ -145,8 +159,19 @@ const ClientRegistrationsPage = () => {
     }, { replace: true });
   }, [setSearchParams]);
 
+  const updateParceiro = useCallback((value) => {
+    setParceiroFiltro(value);
+    setPagina(1);
+    setSearchParams(prev => {
+      if (value === "all") prev.delete("parceiro");
+      else prev.set("parceiro", value);
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   const updateAssignedToMe = useCallback((value) => {
     setAssignedToMe(value);
+    setPagina(1);
     setSearchParams(prev => {
       if (value) prev.set("assigned_to_me", "true");
       else prev.delete("assigned_to_me");
@@ -218,7 +243,9 @@ const ClientRegistrationsPage = () => {
       params.append("triage_mode", "true");
       params.append("sort_field", sortField);
       params.append("sort_order", sortOrder);
-      params.append("limit", "100");
+      if (parceiroFiltro && parceiroFiltro !== "all") params.append("parceiro", parceiroFiltro);
+      params.append("limit", String(TAMANHO_DA_PAGINA));
+      params.append("skip", String((pagina - 1) * TAMANHO_DA_PAGINA));
 
       const { data } = await getRegisteredClients(params);
       setClients(data.clients || []);
@@ -229,11 +256,26 @@ const ClientRegistrationsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, hasProcessFilter, sortField, sortOrder, assignedToMe, isIndexacao]);
+  }, [search, hasProcessFilter, sortField, sortOrder, assignedToMe, isIndexacao, parceiroFiltro, pagina]);
 
   useEffect(() => {
     fetchClients();
   }, [fetchClients]);
+
+  // Opções do filtro «Por Parceiro» (só id + nome, no âmbito de quem pergunta). Uma falha não
+  // estraga a página: o filtro fica sem opções, e diz-se (ver o seletor).
+  const [parceirosIndisponiveis, setParceirosIndisponiveis] = useState(false);
+  useEffect(() => {
+    let activo = true;
+    Promise.resolve()
+      .then(() => getPartnerOptions())
+      .then((r) => { if (activo) setParceiros(Array.isArray(r?.data?.partners) ? r.data.partners : []); })
+      .catch(() => { if (activo) setParceirosIndisponiveis(true); });
+    return () => { activo = false; };
+  }, []);
+
+  // «Ver Detalhes da Lead»: a gaveta abre sobre a linha escolhida.
+  const [leadAberta, setLeadAberta] = useState(null);
 
   const handleViewClientDetails = useCallback(async (clientId) => {
     setDetailsLoading(true);
@@ -258,11 +300,11 @@ const ClientRegistrationsPage = () => {
   // um pedido (o `getClient`) para o mostrar, que é o mesmo que o clique
   // no nome já fazia.
   //
-  // O `total` que vai para o contexto é o da LISTA CARREGADA e não o do
-  // filtro inteiro: a Pool pede `limit=100` sem paginação, e dizer
-  // "12 / 243" quando só 100 estão em mão prometia uma vizinhança que
-  // não existe (a seta pararia no 100 sem explicação). Com o total da
-  // lista, "100 / 100" é verdade e o botão desactivado é honesto.
+  // O `total` que vai para o contexto é o da PÁGINA CARREGADA e não o do
+  // filtro inteiro: o servidor pagina (50 por pedido), e dizer "12 / 243"
+  // quando só 50 estão em mão prometia uma vizinhança que não existe (a
+  // seta pararia no 50 sem explicação). Com o total da página, "50 / 50"
+  // é verdade e o botão desactivado é honesto.
   const contextoDaPool = useMemo(
     () =>
       construirContextoDeNavegacao({
@@ -379,14 +421,14 @@ const ClientRegistrationsPage = () => {
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-medium text-green-600">
-                    {total > 0 ? Math.round((clients.filter(c => c.has_process).length / total) * 100) : 0}%
+                    {clients.length > 0 ? Math.round((clients.filter(c => c.has_process).length / clients.length) * 100) : 0}%
                   </p>
                 </div>
               </div>
               <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
                 <div 
                   className="h-full bg-green-500 rounded-full transition-all duration-500"
-                  style={{ width: `${total > 0 ? (clients.filter(c => c.has_process).length / total) * 100 : 0}%` }}
+                  style={{ width: `${clients.length > 0 ? (clients.filter(c => c.has_process).length / clients.length) * 100 : 0}%` }}
                 />
               </div>
             </CardContent>
@@ -407,14 +449,14 @@ const ClientRegistrationsPage = () => {
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-medium text-orange-600">
-                    {total > 0 ? Math.round((clients.filter(c => !c.has_process).length / total) * 100) : 0}%
+                    {clients.length > 0 ? Math.round((clients.filter(c => !c.has_process).length / clients.length) * 100) : 0}%
                   </p>
                 </div>
               </div>
               <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
                 <div 
                   className="h-full bg-orange-500 rounded-full transition-all duration-500"
-                  style={{ width: `${total > 0 ? (clients.filter(c => !c.has_process).length / total) * 100 : 0}%` }}
+                  style={{ width: `${clients.length > 0 ? (clients.filter(c => !c.has_process).length / clients.length) * 100 : 0}%` }}
                 />
               </div>
             </CardContent>
@@ -457,6 +499,24 @@ const ClientRegistrationsPage = () => {
                 </SelectContent>
               </Select>
               
+              <Select value={parceiroFiltro} onValueChange={updateParceiro}>
+                <SelectTrigger className="w-full sm:w-[180px]" aria-label="Filtrar por parceiro" data-testid="filtro-parceiro">
+                  <Users className="h-4 w-4 mr-2" />
+                  <SelectValue placeholder="Parceiro" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os parceiros</SelectItem>
+                  {parceiros.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{safeString(p.name)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {parceirosIndisponiveis && (
+                <span className="text-xs text-muted-foreground" role="status" data-testid="filtro-parceiro-indisponivel">
+                  Lista de parceiros indisponível.
+                </span>
+              )}
+
               <Select value={`${sortField}_${sortOrder}`} onValueChange={updateSort}>
                 <SelectTrigger className="w-full sm:w-[155px]">
                   <ArrowUpDown className="h-4 w-4 mr-2" />
@@ -600,15 +660,14 @@ const ClientRegistrationsPage = () => {
                     </div>
 
                     <div className="space-y-2">
-                      {/* Lead de parceiro por validar: aviso + (CEO, Diretor,
-                          Administrativo) Validar/Rejeitar. Nunca bloqueia. */}
+                      {/* Lead de parceiro por validar: SÓ a badge do estado. As acções
+                          (Validar, Rejeitar, Ver comprovativo) vivem na coluna ACÇÕES. */}
                       {client.validacao_financeira && (
                         <ValidacaoFinanceira
                           registo={{ id: client.id, validacao_financeira: client.validacao_financeira }}
                           tipo="lead"
-                          compacto
+                          parte="selo"
                           papelEfectivo={papelActivo}
-                          onDecidido={fetchClients}
                         />
                       )}
                       {/* PACOTE BN — Badges de Sala de Triagem */}
@@ -676,7 +735,28 @@ const ClientRegistrationsPage = () => {
                       )}
                     </div>
                     
-                    <div className="flex justify-end gap-1">
+                    <div className="flex flex-wrap justify-end items-center gap-1">
+                      {/* P1/P2 — tudo o que o parceiro submeteu, para analisar antes de decidir. */}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setLeadAberta(client)}
+                        title="Ver Detalhes da Lead"
+                        aria-label={`Ver Detalhes da Lead — ${safeString(client.nome)}`}
+                        className="h-8 w-8 p-0"
+                        data-testid={`btn-detalhes-lead-${client.id}`}
+                      >
+                        <FileSearch className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                      {client.validacao_financeira && (
+                        <AccoesDaLead
+                          registo={{ id: client.id, validacao_financeira: client.validacao_financeira }}
+                          nome={safeString(client.nome)}
+                          papelEfectivo={papelActivo}
+                          onDecidido={fetchClients}
+                        />
+                      )}
                       {client.has_process && client.processes?.length > 0 && (
                         <Button
                           variant="default"
@@ -728,11 +808,25 @@ const ClientRegistrationsPage = () => {
                     </div>
                   </div>
                 ))}
+                <Paginacao total={total} page={pagina} size={TAMANHO_DA_PAGINA} onPageChange={setPagina} etiqueta="registos" />
               </div>
             )}
           </CardContent>
         </Card>
       </div>
+
+      {/* P1/P2 — Detalhes da Lead (gaveta) */}
+      <LeadDetailsDrawer
+        cliente={leadAberta}
+        registo={leadAberta?.validacao_financeira
+          ? { id: leadAberta.id, validacao_financeira: leadAberta.validacao_financeira }
+          : null}
+        papelEfectivo={papelActivo}
+        podeCriarProcesso={canAssign}
+        onAbertoChange={(aberto) => { if (!aberto) setLeadAberta(null); }}
+        onCriarProcesso={(c) => { setLeadAberta(null); setCreateProcessModal({ open: true, client: c }); }}
+        onDecidido={fetchClients}
+      />
 
       {/* CreateProcessModal — Triagem: Criar Processo a partir do Registo */}
       <CreateProcessModal

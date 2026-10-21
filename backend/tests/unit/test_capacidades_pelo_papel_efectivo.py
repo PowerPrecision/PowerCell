@@ -34,8 +34,11 @@ INDEXADOR = {"id": "u2", "role": "indexacao"}
 
 
 class TestOPapelEfectivoManda:
-    def test_o_indexador_NAO_cria_processos(self):
-        assert tem_capacidade(INDEXADOR, "PROCESS_CREATE") is False
+    def test_o_indexador_cria_processos(self):
+        # INVERTIDO (Out 2026): o Index passou a criar processos; o que continua negado são as
+        # capacidades que o registo lhe recusa (editar e eliminar processos).
+        assert tem_capacidade(INDEXADOR, "PROCESS_CREATE") is True
+        assert tem_capacidade(INDEXADOR, "PROCESS_DELETE") is False
 
     def test_o_consultor_cria_processos(self):
         assert tem_capacidade({"id": "u", "role": "consultor"}, "PROCESS_CREATE") is True
@@ -122,9 +125,10 @@ class TestARotaNaoFicaMaisLargaQueOBotao:
         from services import capability_gate as mod
 
         dependencia = mod.exigir_capacidade("PROCESS_CREATE")
-        with patch("services.auth.get_effective_role_async", AsyncMock(return_value="indexacao")):
+        # Um papel sem a capacidade continua a levar 403 (o Index já não é esse caso).
+        with patch("services.auth.get_effective_role_async", AsyncMock(return_value="parceiro")):
             with pytest.raises(HTTPException) as e:
-                await dependencia(request=object(), user=INDEXADOR)
+                await dependencia(request=object(), user={"id": "u9", "role": "parceiro"})
         assert e.value.status_code == 403
 
     @pytest.mark.asyncio

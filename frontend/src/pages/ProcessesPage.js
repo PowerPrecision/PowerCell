@@ -167,6 +167,8 @@ const ProcessesPage = () => {
   )
     ? searchParams.get("partilha")
     : "";
+  // P4 — «Por Parceiro» no URL, como os restantes: um link já filtrado é metade da utilidade.
+  const parceiroFilter = searchParams.get("parceiro") || "";
   const [etiquetasDisponiveis, setEtiquetasDisponiveis] = useState([]);
   useEffect(() => {
     let cancelado = false;
@@ -232,6 +234,7 @@ const ProcessesPage = () => {
       next.delete("labels_logic");
       next.delete("sub35");
       next.delete("partilha");
+      next.delete("parceiro");
       next.set("page", "1");
       return next;
     }, { replace: true });
@@ -277,6 +280,7 @@ const ProcessesPage = () => {
         ...(labelsFilter.length ? { labels: labelsFilter, labels_logic: labelsLogicFilter } : {}),
         ...(sub35Filter ? { sub35: true } : {}),
         ...(partilhaFilter ? { partilha: partilhaFilter } : {}),
+        ...(parceiroFilter ? { parceiro_id: parceiroFilter } : {}),
         ...(assignedUserIdsFilter.length
           ? {
               assigned_user_ids: assignedUserIdsFilter.join(","),
@@ -366,7 +370,7 @@ const ProcessesPage = () => {
     } finally {
       setExporting(false);
     }
-  }, [searchTerm, showCompleted, sortField, sortOrder, isGlobalView, indexStatusFilter, statusFilter, processTypeFilter, assignedUserIdsFilter, assignedLogicFilter, labelsParam, labelsFilter, labelsLogicFilter, sub35Filter, partilhaFilter, effectiveCompanyId]);
+  }, [searchTerm, showCompleted, sortField, sortOrder, isGlobalView, indexStatusFilter, statusFilter, processTypeFilter, assignedUserIdsFilter, assignedLogicFilter, labelsParam, labelsFilter, labelsLogicFilter, sub35Filter, partilhaFilter, parceiroFilter, effectiveCompanyId]);
 
   const handleMarkIndexed = useCallback(async (e, processId) => {
     e.stopPropagation();
@@ -480,6 +484,7 @@ const ProcessesPage = () => {
         ...(labelsFilter.length ? { labels: labelsFilter, labels_logic: labelsLogicFilter } : {}),
         ...(sub35Filter ? { sub35: true } : {}),
         ...(partilhaFilter ? { partilha: partilhaFilter } : {}),
+        ...(parceiroFilter ? { parceiro_id: parceiroFilter } : {}),
         ...(assignedUserIdsFilter.length
           ? {
               assigned_user_ids: assignedUserIdsFilter.join(","),
@@ -516,7 +521,7 @@ const ProcessesPage = () => {
         setLoading(false);
       }
     }
-  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveCompanyId, statusFilter, processTypeFilter, assignedUserIdsParam, assignedLogicFilter, labelsParam, labelsFilter, labelsLogicFilter, sub35Filter, partilhaFilter]);
+  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveCompanyId, statusFilter, processTypeFilter, assignedUserIdsParam, assignedLogicFilter, labelsParam, labelsFilter, labelsLogicFilter, sub35Filter, partilhaFilter, parceiroFilter]);
   
   /**
    * Ponto 16 — muda a fase de um processo a partir da listagem.
@@ -600,6 +605,7 @@ const ProcessesPage = () => {
         // processo que a lista não contém.
         ...(sub35Filter ? { sub35: true } : {}),
         ...(partilhaFilter ? { partilha: partilhaFilter } : {}),
+        ...(parceiroFilter ? { parceiro_id: parceiroFilter } : {}),
         ...(assignedUserIdsFilter.length
           ? {
               assigned_user_ids: assignedUserIdsFilter.join(","),
@@ -615,7 +621,7 @@ const ProcessesPage = () => {
     location.pathname, location.search, viewMode, sortField, sortOrder,
     isGlobalView, effectiveCompanyId, indexStatusFilter, statusFilter,
     processTypeFilter, labelsFilter, labelsLogicFilter, sub35Filter,
-    partilhaFilter,
+    partilhaFilter, parceiroFilter,
     assignedUserIdsFilter, assignedLogicFilter, navigate,
   ]);
 
@@ -1008,6 +1014,8 @@ const ProcessesPage = () => {
                 onPartilhaChange={(valor) =>
                   updateProcessFilter("partilha", valor || "all")
                 }
+                parceiro={parceiroFilter || "all"}
+                onParceiroChange={(valor) => updateProcessFilter("parceiro", valor || "all")}
                 onReset={resetProcessFilters}
               />
               {/* Ponto 15 — o mesmo filtro que o Kanban usa. */}

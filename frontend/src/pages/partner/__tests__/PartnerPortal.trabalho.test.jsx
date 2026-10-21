@@ -28,6 +28,7 @@ vi.mock("@/services/partnerApi", () => ({
   enviarFicheiro: vi.fn(),
   obterFormularioDoCliente: vi.fn(),
   guardarFormularioDoCliente: vi.fn(),
+  escreverNota: vi.fn(),
 }));
 
 import * as api from "@/services/partnerApi";
@@ -366,21 +367,20 @@ describe("o caso", () => {
     expect(screen.getByRole("link", { name: /Voltar ao painel/ })).toHaveAttribute("href", "/parceiro");
   });
 
-  it("não há dados financeiros na página (as notas da equipa SIM aparecem, só de leitura)", async () => {
+  it("não há dados financeiros na página (as notas da equipa SIM aparecem)", async () => {
     const { container } = montar("/parceiro/casos/a-novo");
     await screen.findByRole("heading", { name: "Cliente a-novo" });
     expect(container.textContent).not.toMatch(/comiss|€|NIF|rendimento|prestação/i);
     const notas = screen.getByTestId("notas-da-equipa");
     expect(notas).toHaveTextContent("NOTA INTERNA: cliente difícil");
-    // só de leitura: o cartão não tem nenhum campo nem botão
-    expect(within(notas).queryByRole("textbox")).toBeNull();
-    expect(within(notas).queryByRole("button")).toBeNull();
+    // INVERTIDO (Out 2026): o parceiro também ESCREVE notas no seu processo (ver PartnerPortal.notas.test.jsx).
+    expect(within(notas).getByRole("textbox", { name: "Nova nota" })).toBeInTheDocument();
   });
 
   it("sem notas, o cartão di-lo em vez de desaparecer", async () => {
     api.obterCaso.mockImplementation(async () => ({ ...structuredClone(FIXTURES.casoDeProcesso), notas_da_equipa: [] }));
     montar("/parceiro/casos/a-novo");
-    expect(await screen.findByText("A equipa ainda não deixou notas neste processo.")).toBeInTheDocument();
+    expect(await screen.findByText("Ainda não há notas neste processo.")).toBeInTheDocument();
   });
 
   it("uma lead não tem cartão de notas da equipa", async () => {

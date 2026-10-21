@@ -44,7 +44,8 @@ class TestACriacaoDeProcessoCarimbaOConjuntoCompleto:
     """`process_create.apply_creator_role_assignment` — o criador."""
 
     @pytest.mark.parametrize("papel", ["consultor", "diretor"])
-    def test_criador_consultor_nao_deixa_desfasamento(self, papel):
+    def test_criador_consultor_ja_nao_se_atribui_a_si_proprio(self, papel):
+        """INVERTIDO em P6: o processo nasce SEM consultor, seja quem for que o cria."""
         from services.process_create import apply_creator_role_assignment
 
         doc = {}
@@ -52,7 +53,7 @@ class TestACriacaoDeProcessoCarimbaOConjuntoCompleto:
             doc, {"id": "u-1", "name": "Ana", "effective_role": papel}
         )
 
-        assert doc["assigned_consultor_ids"] == ["u-1"]
+        assert doc == {}
         assert desfasamentos_do_processo(doc) == []
 
     def test_criador_intermediario_nao_deixa_desfasamento(self):
@@ -66,12 +67,9 @@ class TestACriacaoDeProcessoCarimbaOConjuntoCompleto:
         assert doc["assigned_mediador_ids"] == ["u-2"]
         assert desfasamentos_do_processo(doc) == []
 
-    def test_o_campo_que_faltava_e_mesmo_escrito(self):
-        """Contraprova dirigida: sem ela, um detector preguiçoso passa.
-
-        `consultant_id` é o campo que o escritor omitia, e é o que
-        `process_list_filters` usa em "Os Meus Processos".
-        """
+    def test_nenhum_campo_do_consultor_e_escrito_na_criacao(self):
+        """P6, contraprova dirigida: nem o singular legado `consultant_id` (o de «Os Meus
+        Processos») nem os restantes — um só campo escrito já seria um consultor à nascença."""
         from services.process_create import apply_creator_role_assignment
 
         doc = {}
@@ -79,7 +77,7 @@ class TestACriacaoDeProcessoCarimbaOConjuntoCompleto:
             doc, {"id": "u-1", "name": "Ana", "effective_role": "consultor"}
         )
         for campo in CONSULTOR_ID_FIELDS:
-            assert doc[campo] == "u-1", f"{campo} por escrever"
+            assert campo not in doc, f"{campo} escrito na criação"
 
     def test_o_campo_que_faltava_no_mediador_e_mesmo_escrito(self):
         from services.process_create import apply_creator_role_assignment
@@ -192,7 +190,15 @@ class TestODiretorTemOsMesmosDeveresDoConsultor:
             PAPEIS_COMO_MEDIADOR,
         )
 
-        for papel in (*PAPEIS_COMO_CONSULTOR, *PAPEIS_COMO_MEDIADOR):
+        # P6: o CRIADOR só se carimba como mediador (um intermediário que cria é o do crédito);
+        # nunca como consultor. A atribuição por alvo (manual) continua a conhecer os dois.
+        for papel in PAPEIS_COMO_CONSULTOR:
+            do_criador = {}
+            apply_creator_role_assignment(
+                do_criador, {"id": "u-1", "name": "Ana", "effective_role": papel}
+            )
+            assert do_criador == {}, f"{papel} não pode ficar como consultor à nascença"
+        for papel in PAPEIS_COMO_MEDIADOR:
             do_criador = {}
             apply_creator_role_assignment(
                 do_criador, {"id": "u-1", "name": "Ana", "effective_role": papel}

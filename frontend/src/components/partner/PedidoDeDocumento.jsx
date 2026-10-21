@@ -55,7 +55,7 @@ export default function PedidoDeDocumento({ caseId, pedido, desactivado = false 
         {pedido.ficheiros.length > 0 && (
           <ul className="space-y-2">
             {pedido.ficheiros.map((f) => (
-              <FicheiroDoCaso key={f.id} caseId={caseId} ficheiro={f} />
+              <FicheiroDoCaso key={f.id} caseId={caseId} ficheiro={f} dentroDoPedido />
             ))}
           </ul>
         )}

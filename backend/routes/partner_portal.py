@@ -35,6 +35,7 @@ from services.partner_portal_read import (
     run_get_dashboard,
     run_list_cases,
 )
+from services.partner_notes import PartnerNoteIn, run_partner_add_note
 from services.partner_security import get_current_partner
 from services.partner_upload_ops import (
     PartnerConfirmUploadIn,
@@ -158,6 +159,19 @@ async def partner_confirm_upload(
     partner: dict = Depends(get_current_partner),
 ):
     return await run_partner_confirm_upload(partner, case_id, data)
+
+
+# ── Notas: o parceiro escreve no seu processo ───────────────────────
+@router.post("/cases/{case_id}/notes")
+@limiter.limit("30/hour")
+async def partner_add_note(
+    request: Request,
+    response: Response,
+    case_id: str,
+    data: PartnerNoteIn,
+    partner: dict = Depends(get_current_partner),
+):
+    return await run_partner_add_note(partner, case_id, data)
 
 
 # ── Dados do cliente: a estrutura do registo público, com 2.º titular ──

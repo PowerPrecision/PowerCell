@@ -78,6 +78,7 @@ vi.mock("../../services/api", () => ({
   getKanbanBoard: vi.fn(),
   getKanbanCompleted: vi.fn(),
   getUsers: vi.fn(),
+  getPartnerOptions: vi.fn(() => Promise.resolve({ data: { partners: [] } })),
   getProcessLabels: vi.fn(),
   updateProcessStatus: vi.fn(),
   getProcesses: vi.fn(),

@@ -197,6 +197,9 @@ def _ficheiros_do_documento(doc: dict) -> list[dict]:
     return []
 
 
+ficheiros_do_documento = _ficheiros_do_documento  # nome público para quem lista os ficheiros de uma lead
+
+
 # ════════════════════════════════════════════════════════════════════
 #  LIBERTAR (rascunho → equipa)
 # ════════════════════════════════════════════════════════════════════

@@ -223,6 +223,8 @@ PROJECCAO_DO_PROCESSO: dict[str, int] = {
     # As notas da equipa (cartão «Observações» do Resumo): só o DETALHE do caso as
     # devolve (`notas_da_equipa`), nunca a lista nem o painel.
     "observation_notes": 1, "observations": 1, "notes": 1,
+    # O estado da validação financeira (só o ESTADO sai, no ficheiro do comprovativo).
+    "validacao_financeira": 1,
 }
 
 PROJECCAO_DA_LEAD: dict[str, int] = {
@@ -291,18 +293,22 @@ MAX_NOTAS_DA_EQUIPA = 50
 MAX_CARACTERES_DA_NOTA = 2000
 
 
-def notas_da_equipa(proc: dict) -> list[dict]:
+def notas_da_equipa(proc: dict, partner_id: Optional[str] = None) -> list[dict]:
     """As notas que a equipa escreveu no processo, como o parceiro as vê (só leitura).
 
     Mesma fonte e mesma ordem do cartão «Observações» do CRM
     (`resolveProcessObservationNotes`): o feed `observation_notes` e os escalares
     legados `observations` / `notes`, sem repetições. Saem só `id`, `text`,
     `created_at` e o NOME de quem escreveu — nunca o `user_id`. Mais recentes primeiro.
+
+    As notas escritas por PARCEIROS (`origem: "parceiro"`) saem marcadas `do_parceiro`; com o `partner_id`
+    de quem pergunta, as dele saem também `e_minha` (o ecrã diz «Você»). O id de outro parceiro nunca
+    sai: só o booleano.
     """
     notas: list[dict] = []
     vistos: set[str] = set()
 
-    def acrescentar(id_: Any, texto: Any, criada_em: Any, autor: Any) -> None:
+    def acrescentar(id_: Any, texto: Any, criada_em: Any, autor: Any, nota: Optional[dict] = None) -> None:
         if not isinstance(texto, str) or not texto.strip():
             return
         chave = " ".join(texto.split()).lower()
@@ -314,12 +320,17 @@ def notas_da_equipa(proc: dict) -> list[dict]:
             "text": texto.strip()[:MAX_CARACTERES_DA_NOTA],
             "created_at": criada_em if isinstance(criada_em, str) else None,
             "author_name": autor.strip() if isinstance(autor, str) and autor.strip() else None,
+            "do_parceiro": bool(nota and nota.get("origem") == "parceiro"),
+            "e_minha": bool(
+                nota and nota.get("origem") == "parceiro" and partner_id
+                and nota.get("partner_id") == partner_id
+            ),
         })
 
     feed = proc.get("observation_notes")
     for nota in feed if isinstance(feed, list) else []:
         if isinstance(nota, dict):
-            acrescentar(nota.get("id"), nota.get("text"), nota.get("created_at"), nota.get("user_name"))
+            acrescentar(nota.get("id"), nota.get("text"), nota.get("created_at"), nota.get("user_name"), nota)
     quando = proc.get("updated_at") or proc.get("created_at")
     for campo in ("observations", "notes"):
         acrescentar(f"legacy-{campo}", proc.get(campo), quando, None)

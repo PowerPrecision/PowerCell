@@ -8,34 +8,19 @@
  * Serve a ficha do processo (`tipo="process"`) e a lead na lista de registos
  * (`tipo="lead"`, em modo compacto).
  */
-import React, { useState } from "react";
+import React from "react";
 import { AlertTriangle, CheckCircle2, FileSearch, Loader2, XCircle } from "lucide-react";
-import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { decidirValidacaoFinanceira, obterComprovativoDaValidacao } from "@/services/api";
-import {
-  ESTADO_REJEITADO,
   ESTADO_VALIDADO,
-  MOTIVO_MAXIMO,
   TEXTO_DO_SELO,
-  estadoDaValidacao,
-  estaPorValidar,
   motivoDaRejeicao,
   podeDecidir,
-  validarMotivo,
 } from "@/utils/validacaoFinanceira";
 
-const mensagem = (erro, recuo) => {
-  const detail = erro?.response?.data?.detail;
-  return typeof detail === "string" && detail.trim() ? detail : recuo;
-};
+import { useValidacaoFinanceira } from "./useValidacaoFinanceira";
 
 export default function ValidacaoFinanceira({
   registo,
@@ -43,56 +28,18 @@ export default function ValidacaoFinanceira({
   papelEfectivo,
   onDecidido,
   compacto = false,
+  // «tudo» (a ficha e o modo compacto de sempre) ou «selo»: só a badge do estado, sem botões
+  // (a coluna ESTADO da lista de registos — as acções vivem na coluna ACÇÕES).
+  parte = "tudo",
 }) {
-  const [aDecidir, setADecidir] = useState(false);
-  const [aRejeitar, setARejeitar] = useState(false);
-  const [motivo, setMotivo] = useState("");
-  const [erroDoMotivo, setErroDoMotivo] = useState("");
-  const [aAbrirComprovativo, setAAbrirComprovativo] = useState(false);
+  const {
+    estado, porValidar, rejeitado, aDecidir, aAbrirComprovativo,
+    validar, pedirRejeicao, verComprovativo, dialogo,
+  } = useValidacaoFinanceira({ registo, tipo, onDecidido });
 
-  const estado = estadoDaValidacao(registo);
   if (estado === null) return null; // não passa por validação financeira (não veio de um parceiro)
 
-  const id = registo?.id;
   const decide = podeDecidir(papelEfectivo);
-  const porValidar = estaPorValidar(registo);
-
-  const decidir = async (decisao, razao) => {
-    if (aDecidir) return;
-    setADecidir(true);
-    try {
-      const r = await decidirValidacaoFinanceira(tipo, id, {
-        decision: decisao,
-        ...(razao ? { reason: razao } : {}),
-      });
-      toast.success(decisao === "validate" ? "Processo validado." : "Rejeitado — o parceiro foi avisado.");
-      setARejeitar(false);
-      setMotivo("");
-      await onDecidido?.(r);
-    } catch (erro) {
-      toast.error(mensagem(erro, "Não foi possível registar a decisão."));
-    } finally {
-      setADecidir(false);
-    }
-  };
-
-  const confirmarRejeicao = () => {
-    const erro = validarMotivo(motivo);
-    setErroDoMotivo(erro);
-    if (!erro) decidir("reject", motivo.trim());
-  };
-
-  const verComprovativo = async () => {
-    setAAbrirComprovativo(true);
-    try {
-      const r = await obterComprovativoDaValidacao(tipo, id);
-      window.open(r.url, "_blank", "noopener,noreferrer");
-    } catch (erro) {
-      toast.error(mensagem(erro, "Não foi possível abrir o comprovativo."));
-    } finally {
-      setAAbrirComprovativo(false);
-    }
-  };
 
   // Já validado: um selo discreto, sem alarme.
   if (!porValidar) {
@@ -103,15 +50,26 @@ export default function ValidacaoFinanceira({
     );
   }
 
-  const rejeitado = estado === ESTADO_REJEITADO;
+  if (parte === "selo") {
+    return rejeitado ? (
+      <Badge variant="destructive" className="gap-1" data-testid="validacao-rejeitada">
+        <XCircle className="h-3 w-3" aria-hidden="true" />Rejeitado
+      </Badge>
+    ) : (
+      <Badge variant="destructive" className="gap-1" data-testid="validacao-nao-validado">
+        <AlertTriangle className="h-3 w-3" aria-hidden="true" />Não validado
+      </Badge>
+    );
+  }
+
   const acoes = decide && (
     <div className="flex flex-wrap items-center gap-2">
-      <Button type="button" size="sm" onClick={() => decidir("validate")} disabled={aDecidir} data-testid="validar-processo">
+      <Button type="button" size="sm" onClick={validar} disabled={aDecidir} data-testid="validar-processo">
         {aDecidir ? <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="mr-1 h-4 w-4" aria-hidden="true" />}
         Validar Processo
       </Button>
       {!rejeitado && (
-        <Button type="button" size="sm" variant="destructive" onClick={() => setARejeitar(true)} disabled={aDecidir} data-testid="rejeitar-processo">
+        <Button type="button" size="sm" variant="destructive" onClick={pedirRejeicao} disabled={aDecidir} data-testid="rejeitar-processo">
           <XCircle className="mr-1 h-4 w-4" aria-hidden="true" />Rejeitar
         </Button>
       )}
@@ -120,40 +78,6 @@ export default function ValidacaoFinanceira({
         Ver comprovativo
       </Button>
     </div>
-  );
-
-  const dialogo = (
-    <Dialog open={aRejeitar} onOpenChange={setARejeitar}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Rejeitar validação financeira</DialogTitle>
-          <DialogDescription>
-            {tipo === "lead"
-              ? "A lead é devolvida ao parceiro e sai da vista da equipa."
-              : "O processo é fechado e sai da fila do Index. Pode ser reaberto mais tarde."}
-            {" "}O parceiro recebe o motivo por email.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-2">
-          <Label htmlFor="motivo-rejeicao">Motivo</Label>
-          <Textarea
-            id="motivo-rejeicao"
-            value={motivo}
-            maxLength={MOTIVO_MAXIMO}
-            onChange={(e) => { setMotivo(e.target.value); setErroDoMotivo(""); }}
-            placeholder="Ex.: o comprovativo está ilegível ou não corresponde ao serviço."
-            aria-invalid={Boolean(erroDoMotivo)}
-          />
-          {erroDoMotivo && <p role="alert" className="text-sm text-destructive">{erroDoMotivo}</p>}
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setARejeitar(false)} disabled={aDecidir}>Cancelar</Button>
-          <Button type="button" variant="destructive" onClick={confirmarRejeicao} disabled={aDecidir} data-testid="confirmar-rejeicao">
-            {aDecidir ? "A rejeitar…" : "Rejeitar"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 
   if (compacto) {

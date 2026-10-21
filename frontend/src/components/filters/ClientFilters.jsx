@@ -10,7 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
-import { Filter, RotateCcw } from "lucide-react";
+import { Filter, RotateCcw, Users } from "lucide-react";
+import { usePartnerOptionsQuery } from "../../hooks/queries/usePartnerOptionsQuery";
 
 export const CLIENT_FONTE_OPTIONS = [
   { value: "staff_created", label: "Criado pela equipa" },
@@ -44,12 +45,17 @@ export default function ClientFilters({
   onTipoChange,
   status = "all",
   onStatusChange,
+  parceiro = "all",
+  onParceiroChange,
   onReset,
 }) {
+  // P4 — o filtro «Por Parceiro» só existe se a página o ligar (`onParceiroChange`).
+  const { parceiros } = usePartnerOptionsQuery({ enabled: Boolean(onParceiroChange) });
   const hasActive =
     (fonte && fonte !== "all") ||
     (tipo && tipo !== "all") ||
-    (status && status !== "all");
+    (status && status !== "all") ||
+    (parceiro && parceiro !== "all");
 
   return (
     <div
@@ -116,6 +122,29 @@ export default function ClientFilters({
           ))}
         </SelectContent>
       </Select>
+
+      {onParceiroChange && (
+        <Select
+          value={parceiro || "all"}
+          onValueChange={(v) => onParceiroChange(v === "all" ? "" : v)}
+        >
+          <SelectTrigger
+            className="w-full sm:w-[170px]"
+            data-testid="client-parceiro-filter"
+          >
+            <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+            <SelectValue placeholder="Parceiro" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os parceiros</SelectItem>
+            {parceiros.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
 
       <Button
         type="button"

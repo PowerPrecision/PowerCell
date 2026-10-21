@@ -7,13 +7,24 @@
 import React, { useState } from "react";
 import { Download, File as FicheiroGenerico, FileImage, FileText, Loader2 } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { obterUrlDeDescarga } from "@/services/partnerApi";
 import { formatarData, mensagemDeErro, podeDescarregar, rotuloDeAutoria, tamanhoLegivel, tipoDeFicheiro } from "@/utils/partnerPortal";
 
+/** O estado de cada ficheiro, na linguagem do parceiro. «Recebido» é o de todos; o comprovativo de
+ *  pagamento segue a validação financeira da equipa. Um estado que o servidor não conheça cai em
+ *  «Recebido» em vez de inventar um rótulo. */
+export const ROTULO_DO_ESTADO = {
+  recebido: "Recebido",
+  em_validacao: "Em validação",
+  validado: "Validado",
+  rejeitado: "Rejeitado",
+};
+
 const ICONE_POR_TIPO = { pdf: FileText, imagem: FileImage, documento: FileText, outro: FicheiroGenerico };
 
-export default function FicheiroDoCaso({ caseId, ficheiro }) {
+export default function FicheiroDoCaso({ caseId, ficheiro, dentroDoPedido = false }) {
   const [aObter, setAObter] = useState(false);
   const [erro, setErro] = useState("");
 
@@ -43,6 +54,10 @@ export default function FicheiroDoCaso({ caseId, ficheiro }) {
   // também o recusa; esconder o botão é só a cortesia).
   const comDescarga = podeDescarregar(ficheiro);
 
+  const estado = ROTULO_DO_ESTADO[ficheiro.estado] ? ficheiro.estado : "recebido";
+  // Dentro de um pedido o cartão já diz «Recebido»: repetir o mesmo rótulo em cada ficheiro era
+  // ruído. Só se acrescenta quando o ficheiro tem um estado PRÓPRIO (o comprovativo).
+  const mostrarEstado = !dentroDoPedido || estado !== "recebido";
   const { tipo, extensao } = tipoDeFicheiro(ficheiro.filename);
   const Icone = ICONE_POR_TIPO[tipo];
 
@@ -62,6 +77,16 @@ export default function FicheiroDoCaso({ caseId, ficheiro }) {
           {erro && <p role="alert" className="text-xs text-destructive">{erro}</p>}
         </div>
       </div>
+      {mostrarEstado && (
+        <Badge
+          variant={estado === "rejeitado" ? "destructive" : "outline"}
+          data-testid="estado-do-ficheiro"
+          data-estado={estado}
+          className="shrink-0"
+        >
+          {ROTULO_DO_ESTADO[estado]}
+        </Badge>
+      )}
       {comDescarga && (
         <Button type="button" size="sm" variant="ghost" onClick={descarregar} disabled={aObter} aria-label={`Descarregar ${ficheiro.filename || "ficheiro"}`}>
           {aObter ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}

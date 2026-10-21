@@ -884,6 +884,27 @@ _definir(
     }],
 )
 
+# P4 — AS LISTAGENS DE CLIENTES E PROCESSOS. Toda a listagem abre com a condição de tenant
+# (`network_id` e/ou `company_id`, ver `tenant_network.build_network_scope_condition`) e ordena por
+# data ou nome; `clients` não tinha índice nenhum nessas chaves — cada abertura da lista de
+# clientes varria a colecção inteira. A ordem das chaves é do prefixo mais presente para o menos
+# (rede/empresa → não eliminado → chave de ordenação), para o mesmo índice servir o filtro e o
+# `sort` sem um passo de ordenação em memória.
+_definir(
+    "clients",
+    [
+        {"keys": [("network_id", 1), ("is_deleted", 1), ("created_at", -1)], "name": "idx_client_rede_activos"},
+        {"keys": [("company_id", 1), ("is_deleted", 1), ("created_at", -1)], "name": "idx_client_empresa_activos"},
+    ],
+)
+_definir(
+    "processes",
+    [
+        {"keys": [("company_id", 1), ("is_deleted", 1), ("status", 1)], "name": "idx_proc_empresa_estado"},
+        {"keys": [("network_id", 1), ("is_deleted", 1), ("client_name", 1)], "name": "idx_proc_rede_cliente"},
+    ],
+)
+
 # Workflow POR REDE: `carregar_fases(rede)` lê as fases de UMA rede por
 # `order`, e a edição procura por (rede, nome). Não é único de propósito
 # (o `scripts/migrar_workflow_por_rede.py` cria o único depois de provar

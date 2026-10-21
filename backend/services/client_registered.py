@@ -88,7 +88,8 @@ async def run_list_registered_clients(
     limit: int = 50,
     skip: int = 0,
     cursor: Optional[str] = None,
-    cursor_id: Optional[str] = None
+    cursor_id: Optional[str] = None,
+    parceiro: Optional[str] = None,
 ):
     """
     Listar clientes registados via formulário público.
@@ -100,6 +101,7 @@ async def run_list_registered_clients(
     - search: Pesquisar por nome, email ou NIF
     - has_process: True = com processo, False = sem processo
     - assigned_to_me: Mostrar apenas clientes atribuídos ao utilizador atual (para INDEXACAO)
+    - parceiro (P4): só as leads submetidas por esse parceiro
     - triage_mode: PACOTE BN — Sala de Triagem. Alarga a query para incluir:
       (a) Leads normais pendentes de triagem (lead_status="new" sem processo)
       (b) Clientes com processo em status "pre_registo" (cliente ainda a preencher no Portal)
@@ -301,6 +303,11 @@ async def run_list_registered_clients(
     # Filtro para assigned_to_me - opcional para qualquer role
     if assigned_to_me:
         query["assigned_to"] = user_id
+
+    # P4 — «Por Parceiro»: as leads que ESSE parceiro submeteu. («Todos»/vazio não filtram.)
+    parceiro_id = str(parceiro or "").strip()
+    if parceiro_id and parceiro_id not in ("all", "none"):
+        query["submitted_by_partner_id"] = parceiro_id
     
     # Construir ordenação
     sort_order_int = -1 if sort_order.lower() == "desc" else 1

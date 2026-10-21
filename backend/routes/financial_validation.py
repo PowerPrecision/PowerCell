@@ -17,8 +17,8 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from services.auth import get_current_user
-from services.financial_validation import run_decidir, run_url_do_comprovativo
+from services.auth import get_current_user, require_staff
+from services.financial_validation import run_decidir, run_detalhes_da_lead, run_url_do_comprovativo
 
 router = APIRouter(prefix="/financial-validation", tags=["Validação Financeira"])
 
@@ -50,3 +50,9 @@ async def get_financial_validation_proof(
     user: dict = Depends(get_current_user),
 ):
     return await run_url_do_comprovativo(kind, item_id, user, request=request)
+
+
+@router.get("/lead/{item_id}/details")
+async def get_lead_details(item_id: str, user: dict = Depends(require_staff())):
+    """O que o parceiro submeteu sobre a lead (staff do âmbito; 404 fora dele)."""
+    return await run_detalhes_da_lead(item_id, user)

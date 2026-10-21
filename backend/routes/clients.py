@@ -80,6 +80,7 @@ async def list_registered_clients(
     skip: int = Query(0),
     cursor: Optional[str] = Query(None, description="Cursor para paginação (valor do campo de ordenação do último item)"),
     cursor_id: Optional[str] = Query(None, description="ID do último item (para desempate na paginação por cursor)"),
+    parceiro: Optional[str] = Query(None, description="P4 — Só as leads submetidas por um parceiro (id do parceiro)"),
     user: dict = Depends(get_current_user)
 ):
     return await run_list_registered_clients(
@@ -95,6 +96,7 @@ async def list_registered_clients(
         skip=skip,
         cursor=cursor,
         cursor_id=cursor_id,
+        parceiro=parceiro,
     )
 
 
@@ -121,6 +123,11 @@ async def list_clients(
     tipo: Optional[str] = Query(None, description="PACOTE FK — Tipo de cliente: particular, dois_titulares, empresa"),
     status: Optional[str] = Query(None, description="PACOTE FK — Estado da ficha: active, inactive, deleted"),
     historico: Optional[bool] = Query(False, description="Lote 4 — False: só clientes com trabalho em curso (sem os de processos todos terminados); True: só o histórico"),
+    parceiro: Optional[str] = Query(None, description="P4 — Só os clientes de um parceiro (id do parceiro)"),
+    page: Optional[int] = Query(None, ge=1, description="P4 — Página (1…). Com `page` a resposta traz page/size/pages"),
+    size: Optional[int] = Query(None, ge=1, le=200, description="P4 — Itens por página (tecto 200)"),
+    sort_field: Optional[str] = Query(None, description="P4 — Ordenar por: nome, contacto, nif, process_count, created_at, updated_at"),
+    sort_order: Optional[str] = Query("asc", description="P4 — asc ou desc"),
     limit: Optional[int] = Query(100, le=500),
     skip: Optional[int] = Query(0),
     user: dict = Depends(get_current_user)
@@ -139,6 +146,11 @@ async def list_clients(
         tipo=tipo,
         status=status,
         historico=historico,
+        parceiro=parceiro,
+        page=page,
+        size=size,
+        sort_field=sort_field,
+        sort_order=sort_order,
         limit=limit,
         skip=skip,
     )

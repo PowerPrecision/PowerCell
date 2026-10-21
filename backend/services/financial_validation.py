@@ -416,6 +416,81 @@ async def run_url_do_comprovativo(
     }
 
 
+# ════════════════════════════════════════════════════════════════════
+#  DETALHES DA LEAD (para analisar antes de validar / criar processo)
+# ════════════════════════════════════════════════════════════════════
+SECCOES_DA_LEAD = ("dados_pessoais", "dados_financeiros", "dados_imobiliarios", "titular2_data")
+
+
+def _sem_indices_nem_vazios(seccao: Any) -> dict:
+    """A secção para o ecrã: sem os índices cegos (`*_hash`) e sem valores vazios."""
+    if not isinstance(seccao, dict):
+        return {}
+    return {
+        k: v for k, v in seccao.items()
+        if not str(k).endswith("_hash") and v not in (None, "", [], {})
+        and isinstance(v, (str, int, float, bool, list))
+    }
+
+
+async def _ficheiros_da_lead(client_id: str) -> list[dict]:
+    """Os ficheiros que o parceiro enviou: nome, categoria e data — nunca a chave S3."""
+    from services.partner_drafts import ficheiros_do_documento
+
+    docs = await db.documents.find({"client_id": client_id}, {"_id": 0}).to_list(200)
+    saida: list[dict] = []
+    for doc in docs:
+        categoria = doc.get("declared_category") or doc.get("category") or doc.get("storage_category")
+        for ficheiro in ficheiros_do_documento(doc):
+            saida.append({
+                "file_id": ficheiro.get("file_id"),
+                "filename": ficheiro.get("filename"),
+                "category": categoria,
+                "uploaded_at": ficheiro.get("uploaded_at"),
+                "comprovativo": bool(doc.get("comprovativo_de_pagamento")),
+            })
+    saida.sort(key=lambda f: _texto(f.get("uploaded_at")), reverse=True)
+    return saida
+
+
+async def run_detalhes_da_lead(item_id: str, utilizador: dict) -> dict:
+    """Tudo o que o parceiro submeteu sobre uma lead, para a equipa analisar.
+
+    Lista POSITIVA (nunca o documento): sem índices cegos, sem chaves S3 e sem
+    `portal_access_code`. A fronteira de rede é a de `_carregar` (404 igual ao
+    de «não existe»). Serve qualquer lead do âmbito — não só as que passam por
+    validação financeira —, porque quem vai criar o processo precisa de ver o
+    que veio, venha de onde vier.
+    """
+    from services.encryption import decrypt_client_data
+
+    doc = decrypt_client_data(await _carregar("lead", item_id, utilizador))
+    validacao = doc.get(CAMPO_VALIDACAO) if isinstance(doc.get(CAMPO_VALIDACAO), dict) else None
+    contacto = doc.get("contacto") if isinstance(doc.get("contacto"), dict) else {}
+    return {
+        "id": doc.get("id"),
+        "nome": doc.get("nome"),
+        "fonte": doc.get("fonte"),
+        "created_at": doc.get("created_at"),
+        "lead_status": doc.get("lead_status", "new"),
+        "tipo_de_pedido": doc.get("pending_process_type"),
+        "tem_imovel": doc.get("has_property"),
+        "contacto": {"email": contacto.get("email"), "telefone": contacto.get("telefone")},
+        **{seccao: _sem_indices_nem_vazios(doc.get(seccao)) for seccao in SECCOES_DA_LEAD},
+        "notas_do_parceiro": doc.get("notas_do_parceiro"),
+        "parceiro": {"id": doc.get("submitted_by_partner_id"), "nome": doc.get("submitted_by_partner_name")}
+        if doc.get("submitted_by_partner_id") else None,
+        "empresa_destino": doc.get("company_name"),
+        "validacao": {
+            "estado": validacao.get("estado"),
+            "motivo": validacao.get("motivo"),
+            "decidido_em": validacao.get("decidido_em"),
+            "decidido_por_nome": validacao.get("decidido_por_nome"),
+        } if validacao else None,
+        "ficheiros": await _ficheiros_da_lead(_texto(doc.get("id"))),
+    }
+
+
 __all__ = [
     "DECISAO_REJEITAR",
     "DECISAO_VALIDAR",
@@ -428,6 +503,7 @@ __all__ = [
     "esta_por_validar",
     "pode_decidir",
     "run_decidir",
+    "run_detalhes_da_lead",
     "run_url_do_comprovativo",
     "validar_motivo",
 ]

@@ -21,9 +21,7 @@ from services.encryption import decrypt_client_data
 from services.partner_attribution import aplicar_parceiro_do_cliente
 from services.network_triage import aplicar_regime_de_indexacao
 from services.process_staff_assignment import (
-    PAPEIS_COMO_CONSULTOR,
     PAPEIS_COMO_MEDIADOR,
-    build_set_consultor_fields,
     build_set_mediador_fields,
 )
 
@@ -165,7 +163,15 @@ def build_staff_process_doc(
 
 def apply_creator_role_assignment(process_doc: dict, user: dict) -> None:
     """
-    Atribui mediador/consultor ao CRIADOR (mutação in-place).
+    Atribui o CRIADOR ao processo, só quando é um intermediário (mutação in-place).
+
+    P6 (Out 2026): **o processo nasce SEM consultor.** Antes, quem criava com o perfil de
+    consultor ou diretor ficava logo como consultor do processo — o sistema "escolhia" o
+    consultor por quem calhava a carregar no botão. A distribuição é manual (Atribuição /
+    Sala de Triagem) ou, depois da Index, pela automação da fase; criar não atribui.
+
+    O intermediário criador continua como mediador: é o papel que trata do crédito e não o
+    consultor que este pedido manda deixar vazio.
 
     PACOTE 9:
     - Cargo EFECTIVO (``user["effective_role"]``, resolvido em
@@ -173,23 +179,14 @@ def apply_creator_role_assignment(process_doc: dict, user: dict) -> None:
       do JWT — corrigido para utilizadores multi-perfil (ex.: admin com
       perfil activo de consultor).
     - Preenche também os campos multi-assignee (listas) em sincronia
-      com os singulars de compatibilidade, tal como o fluxo manual
-      (``build_staff_assign_update``), garantindo que o processo aparece
-      de imediato em "Os Meus Clientes" do criador.
+      com os singulars de compatibilidade (``build_staff_assign_update``).
 
-    LOTE 6 — os campos deixaram de ser escritos à mão. A lista estava
-    aqui copiada e faltava-lhe ``consultant_id`` (consultor) e
-    ``mediador_id`` (mediador): **cada processo criado nascia
-    desfasado**, e foi isso que o diagnóstico em produção contou como
-    ``em_falta`` (297 campos em 333 processos). A regra do Lote 5 — o
-    ``set`` e o ``clear`` derivam da MESMA constante — só vale se quem
-    atribui usar os construtores em vez de repetir a lista.
+    LOTE 6 — os campos deixaram de ser escritos à mão: o ``set`` e o ``clear`` derivam da
+    MESMA constante (``build_set_mediador_fields``), senão cada processo nascia desfasado.
     """
     effective = (user.get("effective_role") or user.get("role") or "")
     if effective in PAPEIS_COMO_MEDIADOR:
         process_doc.update(build_set_mediador_fields([user["id"]], [user["name"]]))
-    elif effective in PAPEIS_COMO_CONSULTOR:
-        process_doc.update(build_set_consultor_fields([user["id"]], [user["name"]]))
 
 
 async def attach_second_client_on_create(
@@ -289,13 +286,19 @@ async def link_clients_after_process_create(
         )
 
 
-def assert_can_create_staff_process(role: str) -> None:
-    """Roles permitidos em POST /create-client (role EFECTIVA — Pacote 9)."""
-    allowed = [
-        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
-        UserRole.INTERMEDIARIO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR,
-    ]
-    if role not in allowed:
+def assert_can_create_staff_process(role: str, user: Optional[dict] = None) -> None:
+    """Quem pode criar um processo de staff (role EFECTIVA — Pacote 9).
+
+    A pergunta é a MESMA da rota (`exigir_capacidade("PROCESS_CREATE")`): ao registo de capacidades.
+    Esta função tinha a sua própria lista de papéis escrita à mão e as duas portas divergiram — o
+    Index passou a poder criar na rota e continuaria a levar 403 aqui. Com `user`, os overrides
+    pessoais valem como na rota; sem ele, valem as omissões do cargo.
+    """
+    from services.capability_gate import tem_capacidade
+
+    papel = str(getattr(role, "value", role) or "").strip().lower()
+    sujeito = user if user is not None else {}
+    if not papel or not tem_capacidade(sujeito or {"id": "?"}, "PROCESS_CREATE", papel=papel):
         raise HTTPException(
             status_code=403,
             detail="Não tem permissão para criar clientes/processos.",
@@ -325,7 +328,7 @@ async def maybe_auto_assign_indexer_on_create(
 
     PACOTE 5 (Fast-Track / Via Verde): quando ``process_doc['skip_index']`` é
     True, o processo NÃO é atribuído ao Indexador — salta diretamente para a
-    equipa comercial via ``assign_to_least_busy_consultant`` (Via Verde).
+    equipa comercial — e fica por atribuir (P6: a criação nunca escolhe consultor).
     """
     try:
         if is_lead:
@@ -335,31 +338,14 @@ async def maybe_auto_assign_indexer_on_create(
             )
             return
 
-        # PACOTE 5 — Via Verde: ignorar a fase de Indexação e atribuir ao
-        # consultor com menor carga (equipa comercial) em vez do indexador.
+        # PACOTE 5 — Via Verde: ignorar a fase de Indexação. P6: o processo NÃO ganha consultor à
+        # nascença (antes ia para o de menor carga): fica por distribuir até alguém o atribuir.
         if process_doc.get("skip_index"):
             logger.info(
                 f"[CREATE-PROCESS][VIA-VERDE] skip_index=True — processo "
-                f"{process_id} salta a fase de Indexação; a atribuir consultor..."
+                f"{process_id} salta a fase de Indexação e nasce sem consultor "
+                f"(atribuição manual)"
             )
-            from services.process_assignment import assign_to_least_busy_consultant
-
-            success, data, msg = await assign_to_least_busy_consultant(process_id)
-            if success and data.get("assigned"):
-                process_doc["assigned_consultor_id"] = data.get("assigned_consultor_id")
-                process_doc["consultant_id"] = data.get("consultant_id")
-                process_doc["consultor_name"] = data.get("consultor_name")
-                logger.info(
-                    f"[CREATE-PROCESS][VIA-VERDE] Consultor auto-atribuído: "
-                    f"{data.get('consultor_name')} para processo {process_id} "
-                    f"(status mantém: {initial_status})"
-                )
-            else:
-                logger.warning(
-                    f"[CREATE-PROCESS][VIA-VERDE] Sem consultor disponível para "
-                    f"processo {process_id}: {msg} (fica sem atribuição até "
-                    f"atribuição manual)"
-                )
             return
 
         from services.process_assignment import assign_to_indexer
@@ -388,11 +374,8 @@ async def maybe_auto_assign_indexer_on_create(
 
 def build_create_broadcast_names(user: dict) -> tuple[list, list]:
     """Nomes consultor/mediador para broadcast PROCESS_CREATED."""
-    consultor_names = (
-        [user["name"]]
-        if user["role"] in [UserRole.CONSULTOR, UserRole.DIRETOR]
-        else []
-    )
+    # P6: o processo nasce sem consultor.
+    consultor_names: list = []
     mediador_names = (
         [user["name"]] if user["role"] == UserRole.INTERMEDIARIO else []
     )
@@ -576,7 +559,7 @@ async def assemble_staff_create_bundle(
     from services.tenant_network import resolve_tenant_stamp
 
     # PACOTE 9 — validar com o cargo EFECTIVO (multi-perfil).
-    assert_can_create_staff_process(user.get("effective_role") or user.get("role", ""))
+    assert_can_create_staff_process(user.get("effective_role") or user.get("role", ""), user=user)
     assert_client_id_required(getattr(data, "client_id", None))
 
     is_lead = bool(getattr(data, "is_lead", False))

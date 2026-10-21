@@ -122,6 +122,7 @@ async def run_get_process_neighbours(
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
     partilha: Optional[str] = None,
+    parceiro_id: Optional[str] = None,
 ) -> dict:
     """
     Orquestra GET /processes/{id}/neighbours.
@@ -164,6 +165,7 @@ async def run_get_process_neighbours(
         # processo que a lista filtrada não contém.
         sub35=sub35,
         partilha=partilha,
+        parceiro_id=parceiro_id,
         terminais=nomes_terminais(await fases_do_utilizador(user)),
     )
 

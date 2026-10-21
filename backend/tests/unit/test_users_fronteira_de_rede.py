@@ -298,10 +298,10 @@ class TestADropdownDoMaster:
         com = _ids(await _lista(casa, ANA, process_id="p-7"))
         assert sem == com
         assert "u-nuno" not in com
-        # E o processo nem é lido: quem tem fronteira não precisa dele, e
-        # ler um processo alheio só para o ignorar é trabalho (e superfície)
-        # que não devia existir.
-        assert lidos == []
+        # P5: o processo é lido para manter na lista quem já o trata, mas a consulta leva a
+        # condição de ÂMBITO — um processo de outra rede nunca é devolvido (nem lido, na prática).
+        assert all("$and" in q and any("network_id" in str(c) or "$or" in str(c) for c in q["$and"])
+                   for q in lidos), lidos
 
     @pytest.mark.asyncio
     async def test_o_processo_e_lido_so_com_o_que_a_pergunta_precisa(self, casa):

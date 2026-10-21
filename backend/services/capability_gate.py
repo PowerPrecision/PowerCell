@@ -4,7 +4,8 @@ O QUE ESTAVA MAL
 ================
 O sistema tem um registo canónico de capacidades por cargo
 (`models/permissions.ROLE_CAPABILITY_DEFAULTS`), e lá está escrito que o perfil
-`indexacao` **não** cria processos (`PROCESS_CREATE: False`). O ecrã não o
+`indexacao` não criava processos (`PROCESS_CREATE: False` — desde Out 2026 cria, como o
+consultor e o diretor; o exemplo conta pelo mecanismo). O ecrã não o
 consultava: o botão "Novo Processo" aparecia a todos, e quem não podia descobria
 pelo erro. Um botão que não funciona é pior do que um botão que não existe — e
 pior ainda do que um desactivado, porque não diz porquê.

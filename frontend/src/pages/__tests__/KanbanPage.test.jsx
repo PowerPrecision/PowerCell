@@ -79,6 +79,7 @@ vi.mock("../../services/api", () => ({
   getKanbanBoard: vi.fn(),
   getKanbanCompleted: vi.fn(),
   getUsers: vi.fn(),
+  getPartnerOptions: vi.fn(() => Promise.resolve({ data: { partners: [] } })),
   getProcessLabels: vi.fn(),
   updateProcessStatus: vi.fn(),
   getProcesses: vi.fn(),
@@ -188,6 +189,32 @@ beforeEach(() => {
   api.getKanbanBoard.mockResolvedValue(QUADRO);
   api.getKanbanCompleted.mockResolvedValue({ data: { columns: [] } });
   api.getProcessLabels.mockResolvedValue({ data: { labels: ["urgente"] } });
+});
+
+describe("KanbanPage — filtro «Por Parceiro» (P4)", () => {
+  it("lista os parceiros do Portal (de /partners/options), não os da lista de utilizadores", async () => {
+    // A lista de utilizadores não traz parceiros (têm o seu separador) — era por isso que o
+    // filtro aparecia vazio. Os nomes têm de vir do endpoint próprio.
+    api.getPartnerOptions.mockResolvedValue({
+      data: { partners: [{ id: "pt-1", name: "Rui Parceiro" }, { id: "pt-2", name: "Sara Parceira" }] },
+    });
+    montar();
+    await screen.findByText("Ana Martins");
+    const filtro = screen.getByText("Filtrar por Parceiro").parentElement.querySelector("[role=combobox]");
+    await userEvent.click(filtro);
+    expect(await screen.findByRole("option", { name: "Rui Parceiro" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Sara Parceira" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Nenhum (sem parceiro)" })).toBeInTheDocument();
+  });
+
+  it("sem parceiros o filtro continua a oferecer «Todos» e «Nenhum», sem rebentar", async () => {
+    api.getPartnerOptions.mockResolvedValue({ data: { partners: [] } });
+    montar();
+    await screen.findByText("Ana Martins");
+    const filtro = screen.getByText("Filtrar por Parceiro").parentElement.querySelector("[role=combobox]");
+    await userEvent.click(filtro);
+    expect(await screen.findByRole("option", { name: "Todos os Parceiros" })).toBeInTheDocument();
+  });
 });
 
 describe("KanbanPage — montar e sobreviver", () => {

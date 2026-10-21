@@ -320,6 +320,7 @@ async def get_processes(
         "'partilhados': só os partilhados com outra rede. Qualquer "
         "outro valor NÃO filtra: ver services/process_sharing.py"
     )),
+    parceiro_id: Optional[str] = Query(None, description="P4 — Filtrar por parceiro (id do parceiro; 'none' = sem parceiro)"),
     company_id: Optional[str] = Query(None, description="PACOTE FN — Empresa activa seleccionada no ContextSwitcher (Header); limita a Lista Global à empresa explicitamente enviada"),
     user: dict = Depends(get_current_user)
 ):
@@ -349,6 +350,7 @@ async def get_processes(
         labels_logic=labels_logic,
         sub35=sub35,
         partilha=partilha,
+        parceiro_id=parceiro_id,
     )
 
 
@@ -375,6 +377,7 @@ async def get_my_processes(
         "'partilhados': só os partilhados com outra rede. Qualquer "
         "outro valor NÃO filtra: ver services/process_sharing.py"
     )),
+    parceiro_id: Optional[str] = Query(None, description="P4 — Filtrar por parceiro (id do parceiro; 'none' = sem parceiro)"),
     company_id: Optional[str] = Query(None, description="PACOTE FN — Empresa activa seleccionada no ContextSwitcher (Header); tem prioridade sobre o header X-Company-Id quando enviada explicitamente"),
     user: dict = Depends(get_current_user),
 ):
@@ -424,6 +427,7 @@ async def get_my_processes(
         labels_logic=labels_logic,
         sub35=sub35,
         partilha=partilha,
+        parceiro_id=parceiro_id,
     )
 
 
@@ -448,6 +452,7 @@ async def get_processes_paginated(
         "'partilhados': só os partilhados com outra rede. Qualquer "
         "outro valor NÃO filtra: ver services/process_sharing.py"
     )),
+    parceiro_id: Optional[str] = Query(None, description="P4 — Filtrar por parceiro (id do parceiro; 'none' = sem parceiro)"),
     user: dict = Depends(get_current_user)
 ):
     """Listar processos com paginação cursor-based."""
@@ -471,6 +476,7 @@ async def get_processes_paginated(
         labels_logic=labels_logic,
         sub35=sub35,
         partilha=partilha,
+        parceiro_id=parceiro_id,
     )
 
 
@@ -696,6 +702,7 @@ async def get_process_neighbours(
         "'partilhados': só os partilhados com outra rede. Qualquer "
         "outro valor NÃO filtra: ver services/process_sharing.py"
     )),
+    parceiro_id: Optional[str] = Query(None, description="P4 — Filtrar por parceiro (id do parceiro; 'none' = sem parceiro)"),
     company_id: Optional[str] = Query(None, description="Empresa activa do ContextSwitcher"),
     user: dict = Depends(get_current_user),
 ):
@@ -734,6 +741,7 @@ async def get_process_neighbours(
         labels_logic=labels_logic,
         sub35=sub35,
         partilha=partilha,
+        parceiro_id=parceiro_id,
     )
 
 
