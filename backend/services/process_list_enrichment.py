@@ -336,6 +336,7 @@ async def run_get_processes(
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
     partilha: Optional[str] = None,
+    parceiro_id: Optional[str] = None,
 ) -> dict:
     """Orquestra GET /processes (offset pagination)."""
     from services.process_list_filters import build_process_list_query
@@ -367,6 +368,7 @@ async def run_get_processes(
         labels_logic=labels_logic,
         sub35=sub35,
         partilha=partilha,
+        parceiro_id=parceiro_id,
         terminais=nomes_terminais(await fases_do_utilizador(user)),
     )
 
@@ -425,6 +427,7 @@ async def run_get_processes_paginated(
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
     partilha: Optional[str] = None,
+    parceiro_id: Optional[str] = None,
 ) -> dict:
     """Orquestra GET /processes/paginated (cursor-based)."""
     from services.cursor_pagination import CursorPaginator
@@ -448,6 +451,7 @@ async def run_get_processes_paginated(
         labels_logic=labels_logic,
         sub35=sub35,
         partilha=partilha,
+        parceiro_id=parceiro_id,
         terminais=nomes_terminais(await fases_do_utilizador(user)),
     )
 

@@ -715,6 +715,39 @@ async def run_list_partners(actor: dict) -> dict:
     return {"partners": [publico(p) for p in visiveis], "total": len(visiveis)}
 
 
+async def run_list_partner_options(actor: dict) -> dict:
+    """Parceiros para os FILTROS «Por Parceiro» (P4): ``id`` + ``nome``, e mais nada.
+
+    Os dropdowns liam-nos da lista de utilizadores (`role == parceiro`), que desde o QA-9 não os traz
+    (têm o seu separador) — e os parceiros do Portal nunca estiveram lá, vivem em `db.partners`: o
+    filtro do Dashboard ficava vazio. Aqui sai quem o actor VÊ (a mesma regra da lista de gestão),
+    aberto a todo o staff: um consultor filtra por parceiro sem poder ver o email nem as ligações
+    dele. Contas antigas (utilizadores de role `parceiro`) entram se ainda forem referidas por
+    processos, deduplicadas por id.
+    """
+    from services.role_scope import utilizador_e_global
+    from services.tenant_network import resolve_tenant_scope
+
+    eglobal = utilizador_e_global(actor)
+    scope = None if eglobal else await resolve_tenant_scope(actor or {})
+    docs = await db.partners.find({}, {"_id": 0, "id": 1, "name": 1, "redes": 1, "convidado_pela_rede": 1}).to_list(2000)
+    opcoes: dict[str, str] = {
+        str(p["id"]): str(p.get("name") or "").strip() or "Parceiro"
+        for p in docs if p.get("id") and (eglobal or _no_ambito_do_actor(p, scope))
+    }
+    from services.admin_users_scope import build_users_scope_query, empresas_da_empresa_activa
+
+    consulta = {"role": {"$in": ["parceiro", "partner"]}}
+    ambito = await build_users_scope_query(await empresas_da_empresa_activa(actor or {}))
+    if ambito:
+        consulta = {"$and": [consulta, ambito]}
+    for u in await db.users.find(consulta, {"_id": 0, "id": 1, "name": 1}).to_list(2000):
+        if u.get("id") and str(u["id"]) not in opcoes:
+            opcoes[str(u["id"])] = str(u.get("name") or "").strip() or "Parceiro"
+    lista = sorted(({"id": i, "name": n} for i, n in opcoes.items()), key=lambda o: o["name"].lower())
+    return {"partners": lista, "total": len(lista)}
+
+
 async def run_get_partner(partner_id: str, actor: dict) -> dict:
     return publico(await carregar_parceiro_gerivel(partner_id, actor))
 

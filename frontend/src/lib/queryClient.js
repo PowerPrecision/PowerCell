@@ -190,6 +190,12 @@ export const queryKeys = {
     forAssignment: () => [...queryKeys.users.all, 'list', { for_assignment: true }],
   },
   
+  // Parceiros (opções dos filtros «Por Parceiro»)
+  partners: {
+    all: ['partners'],
+    options: () => [...queryKeys.partners.all, 'options'],
+  },
+
   // Leads
   leads: {
     all: ['leads'],

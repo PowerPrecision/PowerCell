@@ -212,7 +212,9 @@ class TestS3MappingOnCreate:
 class TestAssignmentGuards:
 
     def test_creator_role_assignment_uses_effective_role(self):
-        """Multi-perfil: admin com perfil ACTIVO consultor fica atribuído."""
+        """Multi-perfil: o perfil ACTIVO é o que conta. INVERTIDO em P6: admin com perfil activo
+        consultor já NÃO fica atribuído — o processo nasce sem consultor; o intermediário activo
+        continua a ficar como mediador."""
         from services.process_create import apply_creator_role_assignment
 
         doc = {}
@@ -220,11 +222,17 @@ class TestAssignmentGuards:
             doc,
             {"id": "u1", "name": "Zé", "role": "admin", "effective_role": "consultor"},
         )
-        assert doc["assigned_consultor_id"] == "u1"
-        assert doc["consultor_id"] == "u1"
+        assert doc == {}
+
+        doc = {}
+        apply_creator_role_assignment(
+            doc,
+            {"id": "u1", "name": "Zé", "role": "admin", "effective_role": "intermediario"},
+        )
         # PACOTE 9 — plural em sincronia com o singular (multi-assignee)
-        assert doc["assigned_consultor_ids"] == ["u1"]
-        assert doc["consultor_names"] == ["Zé"]
+        assert doc["assigned_mediador_id"] == "u1"
+        assert doc["assigned_mediador_ids"] == ["u1"]
+        assert doc["mediador_names"] == ["Zé"]
 
     def test_creator_role_assignment_intermediario_plural(self):
         from services.process_create import apply_creator_role_assignment

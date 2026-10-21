@@ -347,7 +347,8 @@ class TestAListaDeAtribuiveis:
         from services import users_api_list
 
         fonte = codigo_da_funcao_sem_comentarios(users_api_list.run_get_users)
-        assert "empresas_do_ambito" in fonte
+        # P5: o âmbito é o da EMPRESA activa (que cai no de rede quando não há cabeçalho válido).
+        assert "empresas_da_empresa_activa" in fonte
         assert "build_users_scope_query" in fonte
         assert "run_get_users(" in codigo_da_funcao_sem_comentarios(
             users_api_list.run_get_staff_users

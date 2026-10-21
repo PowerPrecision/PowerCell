@@ -23,12 +23,14 @@ import {
   RotateCcw,
   Sparkles,
   UserCheck,
+  Users,
 } from "lucide-react";
 import { PROCESS_TYPE_LABELS } from "../SmartClientSearch";
 import {
   useAssignmentUsersQuery,
   useWorkflowStatusesQuery,
 } from "../../hooks/queries/useUsersQuery";
+import { usePartnerOptionsQuery } from "../../hooks/queries/usePartnerOptionsQuery";
 import {
   PARTILHA_EXCLUSIVOS,
   PARTILHA_PARTILHADOS,
@@ -66,9 +68,13 @@ export default function ProcessFilters({
   onSub35Change,
   partilha = "",
   onPartilhaChange,
+  parceiro = "all",
+  onParceiroChange,
   onReset,
 }) {
   const { users, isLoading: usersLoading } = useAssignmentUsersQuery();
+  // P4 — o filtro «Por Parceiro» só existe se a página o ligar.
+  const { parceiros } = usePartnerOptionsQuery({ enabled: Boolean(onParceiroChange) });
   const { statuses } = useWorkflowStatusesQuery();
 
   const selectedIds = toIdList(
@@ -111,6 +117,7 @@ export default function ProcessFilters({
     // filtro activo com o "Limpar Filtros" desactivado deixa o
     // utilizador preso numa lista reduzida sem ver porquê.
     Boolean(partilha) ||
+    (parceiro && parceiro !== "all") ||
     selectedIds.length > 0;
 
   return (
@@ -238,6 +245,29 @@ export default function ProcessFilters({
         <Sparkles className="h-4 w-4" />
         Sub35
       </Button>
+
+      {/* P4 — Por Parceiro: as opções vêm de /partners/options (os parceiros do Portal não estão na
+          lista de utilizadores). «Sem parceiro» = processos que ninguém trouxe. */}
+      {onParceiroChange && (
+        <Select
+          value={parceiro || "all"}
+          onValueChange={(v) => onParceiroChange(v === "all" ? "" : v)}
+        >
+          <SelectTrigger className="w-full sm:w-[190px]" data-testid="process-parceiro-filter">
+            <Users className="h-4 w-4 mr-2 text-muted-foreground" />
+            <SelectValue placeholder="Parceiro" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os parceiros</SelectItem>
+            <SelectItem value="none">Sem parceiro</SelectItem>
+            {parceiros.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
 
       {/* D-25 — partilha. TRÊS estados e por isso um `ToggleGroup` de
           selecção única em vez de um interruptor: ao contrário do

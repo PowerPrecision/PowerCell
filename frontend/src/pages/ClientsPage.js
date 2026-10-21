@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 // PACOTE DG — removido import `safeLabel` (dropdown de Fase removido; clientes não têm fase).
 import { useAuth } from "../contexts/AuthContext";
@@ -69,6 +69,7 @@ import CreateClientModal from "../components/kanban/CreateClientModal";
 import { cabecalhosDeContexto, getExportPermission } from "../services/api";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import ClientFilters from "../components/filters/ClientFilters";
+import Paginacao from "../components/shared/Paginacao";
 import { formatFonteLabel } from "../utils/fonteLabels";
 import { API_BASE_URL } from "../utils/apiBaseUrl";
 
@@ -102,6 +103,11 @@ export default function ClientsPage() {
   // (Concluído, Desistência…). O ecrã de trabalho não os mostra.
   const verHistorico = searchParams.get("vista") === "historico";
   const [totalHistorico, setTotalHistorico] = useState(0);
+  // P4 — paginação e ordenação são do SERVIDOR: a página aberta vive no URL (voltar atrás regressa
+  // à mesma página) e o filtro «Por Parceiro» também.
+  const parceiroFilter = searchParams.get("parceiro") || "all";
+  const pagina = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
+  const [total, setTotal] = useState(0);
   
   const updateParam = (key, value) => {
     setSearchParams(prev => {
@@ -111,6 +117,8 @@ export default function ClientsPage() {
       } else {
         next.delete(key);
       }
+      // Mudar um filtro ou a pesquisa volta à primeira página (a 3.ª da lista antiga não existe na nova).
+      if (key !== "page") next.delete("page");
       return next;
     }, { replace: true });
   };
@@ -119,6 +127,8 @@ export default function ClientsPage() {
   const setFonteFilter = (v) => updateParam("fonte", v);
   const setTipoFilter = (v) => updateParam("tipo", v);
   const setStatusFilter = (v) => updateParam("status", v);
+  const setParceiroFilter = (v) => updateParam("parceiro", v);
+  const setPagina = (n) => updateParam("page", n > 1 ? String(n) : "");
   const resetClientFilters = () => {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
@@ -128,6 +138,8 @@ export default function ClientsPage() {
       next.delete("assignment");
       next.delete("indexacao");
       next.delete("show_deleted");
+      next.delete("parceiro");
+      next.delete("page");
       return next;
     }, { replace: true });
   };
@@ -162,28 +174,43 @@ export default function ClientsPage() {
     ? userActions.includes("create_client")
     : true); // Por defeito todos podem criar
 
+  const TAMANHO_DA_PAGINA = 50;
+
+  // Os parâmetros da lista; `pagina`/`tamanho` são os únicos que a exportação muda.
+  const parametrosDaLista = useCallback((numero, tamanho) => {
+    const params = new URLSearchParams();
+    params.append("show_all", "true"); // Mostrar todos os clientes da empresa
+    params.append("page", String(numero));
+    params.append("size", String(tamanho));
+    params.append("sort_field", sortField);
+    params.append("sort_order", sortOrder);
+    if (searchTerm) params.append("search", searchTerm);
+    // PACOTE FK — filtros da entidade Cliente (não da fase/atribuição do processo).
+    if (fonteFilter && fonteFilter !== "all") params.append("fonte", fonteFilter);
+    if (tipoFilter && tipoFilter !== "all") params.append("tipo", tipoFilter);
+    if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
+    if (parceiroFilter && parceiroFilter !== "all") params.append("parceiro", parceiroFilter);
+    // Hide deleted clients by default unless the status filter is "eliminados"
+    if (!showDeleted) params.append("exclude_deleted", "true");
+    if (verHistorico) params.append("historico", "true");
+    return params;
+  }, [searchTerm, fonteFilter, tipoFilter, statusFilter, parceiroFilter, showDeleted, verHistorico, sortField, sortOrder]);
+
+  const pedirClientes = useCallback(async (numero, tamanho) => {
+    const token = localStorage.getItem("token");
+    return fetch(`${API_URL}/clients?${parametrosDaLista(numero, tamanho)}`, {
+      headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() },
+    });
+  }, [parametrosDaLista]);
+
   const fetchClients = useCallback(async () => {
     try {
-      const token = localStorage.getItem("token");
-      const params = new URLSearchParams();
-      params.append("show_all", "true"); // Mostrar todos os clientes da empresa
-      params.append("limit", "500"); // Aumentar limite para ver todos
-      if (searchTerm) params.append("search", searchTerm);
-      // PACOTE FK — filtros da entidade Cliente (não da fase/atribuição do processo).
-      if (fonteFilter && fonteFilter !== "all") params.append("fonte", fonteFilter);
-      if (tipoFilter && tipoFilter !== "all") params.append("tipo", tipoFilter);
-      if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
-      // Hide deleted clients by default unless the status filter is "eliminados"
-      if (!showDeleted) params.append("exclude_deleted", "true");
-      if (verHistorico) params.append("historico", "true");
-
-      const response = await fetch(`${API_URL}/clients?${params}`, {
-        headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() },
-      });
+      const response = await pedirClientes(pagina, TAMANHO_DA_PAGINA);
 
       if (response.ok) {
         const data = await response.json();
         setClients(data.clients || []);
+        setTotal(Number.isFinite(data.total) ? data.total : (data.clients || []).length);
         setTotalHistorico(Number.isFinite(data.total_historico) ? data.total_historico : 0);
         // PACOTE DG — removido `setAvailablePhases(data.available_statuses || [])` (dropdown de Fase removido).
       } else {
@@ -196,8 +223,7 @@ export default function ClientsPage() {
     } finally {
       setLoading(false);
     }
-  // PACOTE DG — deps array: removidos `statusFilter` e `phaseFilter` (filtros removidos).
-  }, [searchTerm, fonteFilter, tipoFilter, statusFilter, showDeleted, verHistorico]);
+  }, [pedirClientes, pagina]);
 
   useEffect(() => {
     fetchClients();
@@ -216,73 +242,8 @@ export default function ClientsPage() {
     checkExportPermission();
   }, []);
 
-  // Aplicar filtros e ordenação (useMemo — reativo e sem render extra)
-  const filteredClients = useMemo(() => {
-    let result = [...clients];
-
-    // Peso de prioridade (alta=3, urgente tag=3, media=2, baixa=1, sem=0)
-    const getPriorityWeight = (c) => {
-      const raw = (c.prioridade || c.priority || "").toLowerCase();
-      if (raw === "alta" || raw === "high") return 3;
-      if (raw === "media" || raw === "medium") return 2;
-      if (raw === "baixa" || raw === "low") return 1;
-      return 0;
-    };
-
-    // Determinar valores de ordenação para cada item
-    const getSortValue = (c) => {
-      if (sortField === "contacto") {
-        return (c.contacto?.email || c.contacto?.telefone || "").toLowerCase();
-      }
-      if (sortField === "nif") {
-        return (c.dados_pessoais?.nif || "").toLowerCase();
-      }
-      // PACOTE DG — removido case `fase` (clientes não têm fase). Sort por `process_count`
-      // agora usa `process_ids.length` (total de processos), alinhado com a nova coluna "Processos".
-      if (sortField === "process_count") {
-        return c.process_ids?.length || 0;
-      }
-      if (sortField === "nome") {
-        return (c.nome || "").toLowerCase();
-      }
-      // Campo genérico (ex: created_at, updated_at)
-      const val = c[sortField];
-      if (sortField === "created_at" || sortField === "updated_at") {
-        // Use Infinity for null dates to sort them to the end, avoiding 01/01/1970 epoch
-        if (!val) return sortOrder === "asc" ? Infinity : -Infinity;
-        const parsed = new Date(safeDateStr(val));
-        return isNaN(parsed.getTime()) ? (sortOrder === "asc" ? Infinity : -Infinity) : parsed.getTime();
-      }
-      return typeof val === "string" ? val.toLowerCase() : val;
-    };
-
-    result.sort((a, b) => {
-      // 1ª chave: prioridade SEMPRE no topo (descendente — alta primeiro)
-      const pa = getPriorityWeight(a);
-      const pb = getPriorityWeight(b);
-      if (pa !== pb) return pb - pa;
-
-      // 2ª chave: campo de ordenação seleccionado pelo utilizador
-      const aVal = getSortValue(a);
-      const bVal = getSortValue(b);
-
-      // Tipos mistos: converter para string como fallback
-      if (typeof aVal !== typeof bVal) {
-        const aStr = String(aVal || "");
-        const bStr = String(bVal || "");
-        return sortOrder === "asc"
-          ? aStr.localeCompare(bStr)
-          : bStr.localeCompare(aStr);
-      }
-
-      if (sortOrder === "asc") {
-        return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
-      }
-      return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
-    });
-
-    return result;
-  }, [clients, sortField, sortOrder]);
+  // P4 — a ordenação é do servidor (a lista vem paginada: ordenar aqui ordenava só a página aberta).
+  const filteredClients = clients;
 
   const toggleSort = (field) => {
     const newOrder = sortField === field
@@ -292,6 +253,7 @@ export default function ClientsPage() {
       const next = new URLSearchParams(prev);
       next.set("sort", field);
       next.set("order", newOrder);
+      next.delete("page");
       return next;
     }, { replace: true });
   };
@@ -345,13 +307,31 @@ export default function ClientsPage() {
     setShowProcessDialog(true);
   };
 
-  const handleExportExcel = () => {
+  // P4 — a lista está paginada: exportar só o que está no ecrã entregava 50 linhas. Percorre todas as
+  // páginas do mesmo filtro (200 de cada vez, o tecto do servidor) e exporta o conjunto inteiro.
+  const obterTodosParaExportar = async () => {
+    const todos = [];
+    let numero = 1;
+    let paginas = 1;
+    do {
+      const resposta = await pedirClientes(numero, 200);
+      if (!resposta.ok) throw new Error("Falha a obter os clientes para exportar");
+      const dados = await resposta.json();
+      todos.push(...(dados.clients || []));
+      paginas = Number.isFinite(dados.pages) ? dados.pages : 1;
+      numero += 1;
+    } while (numero <= paginas);
+    return todos;
+  };
+
+  const handleExportExcel = async () => {
     if (filteredClients.length === 0) {
       toast.error('Nenhum cliente para exportar');
       return;
     }
     try {
-      const rows = filteredClients.map(c => ({
+      const todos = await obterTodosParaExportar();
+      const rows = todos.map(c => ({
         'Nome': c.nome || '',
         'NIF': c.dados_pessoais?.nif || '',
         'Email': c.contacto?.email || '',
@@ -498,6 +478,8 @@ export default function ClientsPage() {
                   onTipoChange={setTipoFilter}
                   status={statusFilter}
                   onStatusChange={setStatusFilter}
+                  parceiro={parceiroFilter}
+                  onParceiroChange={setParceiroFilter}
                   onReset={resetClientFilters}
                 />
                 <Select value={`${sortField}_${sortOrder}`} onValueChange={(v) => {
@@ -509,6 +491,7 @@ export default function ClientsPage() {
                     const next = new URLSearchParams(prev);
                     next.set("sort", field);
                     next.set("order", order);
+                    next.delete("page");
                     return next;
                   }, { replace: true });
                 }}>
@@ -878,6 +861,9 @@ export default function ClientsPage() {
               </div>
               </>
             )}
+            <div className="px-4 pb-4">
+              <Paginacao total={total} page={pagina} size={TAMANHO_DA_PAGINA} onPageChange={setPagina} etiqueta="clientes" />
+            </div>
           </CardContent>
         </Card>
 

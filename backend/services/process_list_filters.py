@@ -489,6 +489,25 @@ def build_process_search_condition(
     return {"$or": search_or_conditions}
 
 
+def condicao_do_parceiro(parceiro_id: Optional[str]) -> Optional[dict]:
+    """O filtro «Por Parceiro» (P4) — UMA definição para a lista e para o quadro Kanban.
+
+    ``None``/vazio/«all» não filtram; ``"none"`` é «sem parceiro» (campo ausente, nulo ou vazio, que
+    o Mongo trata pelo mesmo ``$in: [None, ""]``); qualquer outro valor é o id do parceiro.
+    """
+    valor = str(parceiro_id or "").strip()
+    if not valor or valor == "all":
+        return None
+    if valor == "none":
+        return {
+            "$or": [
+                {"assigned_parceiro_id": {"$in": [None, ""]}},
+                {"assigned_parceiro_id": {"$exists": False}},
+            ]
+        }
+    return {"assigned_parceiro_id": valor}
+
+
 def build_process_list_query(
     user: dict,
     role: str,
@@ -510,6 +529,7 @@ def build_process_list_query(
     labels_logic: Optional[str] = "OR",
     sub35: Optional[bool] = None,
     partilha: Optional[str] = None,
+    parceiro_id: Optional[str] = None,
     tenant_condition: Optional[dict] = None,
     terminais: Optional[list[str]] = None,
 ) -> dict[str, Any]:
@@ -610,6 +630,12 @@ def build_process_list_query(
     partilha_cond = condicao_de_filtro_de_partilha(partilha)
     if partilha_cond:
         and_conditions.append(partilha_cond)
+
+    # P4 — filtro «Por Parceiro». A mesma condição do quadro Kanban (que tem construtor SEPARADO):
+    # num só sítio, para a lista e o quadro nunca discordarem sobre «de que parceiro é este processo».
+    parceiro_cond = condicao_do_parceiro(parceiro_id)
+    if parceiro_cond:
+        and_conditions.append(parceiro_cond)
 
     search_cond = build_process_search_condition(search, mode=search_mode)
     if search_cond:
@@ -732,16 +758,9 @@ def build_kanban_assignee_filters(
         else:
             filter_conditions.append({"assigned_indexacao_id": indexacao_id})
 
-    if parceiro_id:
-        if parceiro_id == "none":
-            filter_conditions.append({
-                "$or": [
-                    {"assigned_parceiro_id": {"$in": [None, ""]}},
-                    {"assigned_parceiro_id": {"$exists": False}},
-                ]
-            })
-        else:
-            filter_conditions.append({"assigned_parceiro_id": parceiro_id})
+    parceiro_cond = condicao_do_parceiro(parceiro_id)
+    if parceiro_cond:
+        filter_conditions.append(parceiro_cond)
 
     return filter_conditions
 

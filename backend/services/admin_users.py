@@ -120,7 +120,6 @@ async def run_get_users(
     from services.admin_users_scope import (
         build_users_scope_query,
         empresas_da_empresa_activa,
-        empresas_do_ambito,
         sem_parceiros,
     )
 
@@ -138,11 +137,9 @@ async def run_get_users(
     # Aplica-se também ao `for_assignment`: atribuir um processo a
     # alguém de outra rede seria a mesma fuga pela porta do lado.
     # QA-9: com uma empresa escolhida a lista é a DELA (e não a da rede), e os parceiros ficam no
-    # seu separador. As dropdowns de atribuição mantêm o âmbito de rede (Lote 6).
-    if for_assignment:
-        ambito = await empresas_do_ambito(user or {})
-    else:
-        ambito = await empresas_da_empresa_activa(user or {})
+    # seu separador. P5: as dropdowns de atribuição seguem a mesma regra — a rede é a fronteira de
+    # segurança, a empresa é a pergunta «quem trabalha aqui?».
+    ambito = await empresas_da_empresa_activa(user or {})
     scope_query = await build_users_scope_query(ambito)
     if scope_query:
         query = {"$and": [query, scope_query]} if query else scope_query

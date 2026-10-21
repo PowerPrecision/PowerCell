@@ -149,10 +149,13 @@ class TestContraprovas:
         assert ids == {"u-parc"}
 
     @pytest.mark.asyncio
-    async def test_a_dropdown_de_atribuicao_mantem_o_ambito_de_rede(self, equipa):
-        """Atribuir a quem é da mesma REDE continua possível: a Power e a Precision partilham-na."""
+    async def test_a_dropdown_de_atribuicao_segue_a_empresa_escolhida(self, equipa):
+        """INVERTIDO em P5. Antes mantinha o âmbito de REDE («a Power e a Precision partilham-na»);
+        mas uma dropdown responde a «quem trabalha nesta empresa?»: com a Precision escolhida não
+        aparece gente da Power nem da Domus, mesmo que as empresas partilhem a rede."""
         ids = await _admin_lista(equipa, _ator("cmp-precision"), for_assignment=True)
-        assert "u-ceo-power" in ids and "u-ceo-domus" not in ids
+        assert "u-ceo-precision" in ids
+        assert "u-ceo-power" not in ids and "u-ceo-domus" not in ids
 
 
 class TestSemParceiros:

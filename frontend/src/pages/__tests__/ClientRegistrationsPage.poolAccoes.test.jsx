@@ -51,6 +51,8 @@ vi.mock("../../services/api", () => ({
   getRegisteredClients: vi.fn(),
   getClient: vi.fn(),
   deleteClient: vi.fn(),
+  getPartnerOptions: vi.fn(),
+  getLeadDetails: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -103,6 +105,7 @@ function responder(linhas = LINHAS) {
   api.getRegisteredClients.mockResolvedValue({
     data: { clients: linhas, total: linhas.length },
   });
+  api.getPartnerOptions.mockResolvedValue({ data: { partners: [], total: 0 } });
 }
 
 async function montar() {

@@ -225,6 +225,74 @@ def _so_processos_terminados(cliente: dict, terminais: set, ids_terminados: froz
     )
 
 
+#: Tamanho de página por omissão e tecto (P4). O tecto existe porque a lista agrupa processos em
+#: memória e desencripta a página: uma página enorme é a lista lenta de volta.
+TAMANHO_DA_PAGINA = 50
+TAMANHO_MAXIMO = 200
+
+#: Colunas por que o utilizador pode ordenar a lista (P4). O que não esteja aqui é ignorado.
+CAMPOS_ORDENAVEIS = frozenset({"nome", "contacto", "nif", "process_count", "created_at", "updated_at"})
+#: Das anteriores, as que vivem cifradas até à desencriptação da página.
+CAMPOS_CIFRADOS_ORDENAVEIS = frozenset({"nif", "contacto"})
+
+_PESO_DA_PRIORIDADE = {"alta": 3, "high": 3, "media": 2, "medium": 2, "baixa": 1, "low": 1}
+
+
+def _valor_de_ordenacao(cliente: dict, campo: str):
+    """O valor por que se ordena, ou ``None`` quando o cliente não tem nada nesse campo."""
+    if campo == "nome":
+        return (cliente.get("nome") or "").lower() or None
+    if campo == "contacto":
+        contacto = cliente.get("contacto") or {}
+        return (str(contacto.get("email") or contacto.get("telefone") or "")).lower() or None
+    if campo == "nif":
+        pessoais = cliente.get("dados_pessoais") or {}
+        return (str(pessoais.get("nif") or cliente.get("nif") or "")).lower() or None
+    if campo == "process_count":
+        return len(cliente.get("process_ids") or [])
+    valor = cliente.get(campo)
+    return str(valor) if valor else None
+
+
+def ordenar_clientes(clients: list[dict], sort_field: Optional[str], sort_order: Optional[str]) -> list[dict]:
+    """Ordena por prioridade (alta primeiro) e, dentro dela, pelo campo pedido.
+
+    Sem campo válido devolve a lista como veio (já ordenada por prioridade/fase/nome). Quem não
+    tem valor no campo vai SEMPRE para o fim, seja a ordem ascendente ou descendente: «sem NIF»
+    no topo de uma ordenação descendente seria ruído.
+    """
+    campo = str(sort_field or "").strip()
+    if campo not in CAMPOS_ORDENAVEIS:
+        return clients
+    descendente = str(sort_order or "asc").lower() == "desc"
+    com_valor = [c for c in clients if _valor_de_ordenacao(c, campo) is not None]
+    sem_valor = [c for c in clients if _valor_de_ordenacao(c, campo) is None]
+    com_valor.sort(key=lambda c: _valor_de_ordenacao(c, campo), reverse=descendente)
+    ordenados = com_valor + sem_valor
+    # Estável: a prioridade manda, o campo desempata.
+    ordenados.sort(key=lambda c: -_PESO_DA_PRIORIDADE.get(str(c.get("prioridade") or "").lower(), 0))
+    return ordenados
+
+
+async def _condicao_do_parceiro_nos_clientes(parceiro_id: Optional[str], tenant_condition: dict) -> Optional[dict]:
+    """Condição sobre ``clients`` para «os clientes deste parceiro» (P4), ou ``None`` se não filtra.
+
+    Dois caminhos, porque o parceiro entra por dois: a lead que ele submeteu
+    (``submitted_by_partner_id``, no cliente) e o processo atribuído a ele
+    (``assigned_parceiro_id``, no processo — por vezes posto à mão, sem passar pela lead). Só
+    contam processos da rede de quem pergunta e não eliminados.
+    """
+    valor = str(parceiro_id or "").strip()
+    if not valor or valor in ("all", "none"):
+        return None
+    processos = await db.processes.find(
+        com_isolamento(tenant_condition, {"assigned_parceiro_id": valor, "is_deleted": {"$ne": True}}),
+        {"_id": 0, "client_id": 1},
+    ).to_list(length=None)
+    ids = sorted({p["client_id"] for p in processos if p.get("client_id")})
+    return {"$or": [{"submitted_by_partner_id": valor}, {"id": {"$in": ids}}]}
+
+
 async def run_list_clients(
     user: dict,
     search: Optional[str] = None,
@@ -241,6 +309,11 @@ async def run_list_clients(
     tipo: Optional[str] = None,
     status: Optional[str] = None,
     historico: Optional[bool] = False,
+    parceiro: Optional[str] = None,
+    page: Optional[int] = None,
+    size: Optional[int] = None,
+    sort_field: Optional[str] = None,
+    sort_order: Optional[str] = "asc",
 ):
     """
     Listar clientes.
@@ -257,6 +330,13 @@ async def run_list_clients(
     - status_filter: Filtrar por fase do processo
     - assignment_filter: 'both' (consultor+intermediario), 'consultor', 'intermediario', 'none'
     
+    - parceiro (P4): só os clientes de UM parceiro — os que ele trouxe (`submitted_by_partner_id`)
+      e os que têm um processo atribuído a esse parceiro. «Todos»/vazio/«none» não filtram.
+    - page/size (P4): paginação. Com `page` a resposta traz também `page`, `size` e `pages`;
+      sem ele vale o `limit`/`skip` de sempre. O tamanho da página tem tecto (`TAMANHO_MAXIMO`).
+    - sort_field/sort_order (P4): a ordenação é do SERVIDOR — com a lista paginada, ordenar no
+      browser ordenava só a página aberta. A prioridade continua a vir primeiro.
+
     Nota: Todos podem ver a lista de clientes para referência,
     mas apenas têm acesso total a processos que lhes estão atribuídos.
     """
@@ -266,6 +346,11 @@ async def run_list_clients(
     deleted_only = deleted_only if deleted_only is not None else False
     limit = limit if limit is not None else 100
     skip = skip if skip is not None else 0
+    if page is not None:
+        page = max(1, int(page))
+        size = max(1, min(int(size or TAMANHO_DA_PAGINA), TAMANHO_MAXIMO))
+        limit = size
+        skip = (page - 1) * size
 
     user_role = user.get("role", "")
     user_id = user.get("id", "")
@@ -300,6 +385,11 @@ async def run_list_clients(
     # partilhado continua visível onde é um processo (Kanban, lista de processos, detalhe); aqui
     # só entra o que é da minha rede.
     tenant_condition_processos = tenant_condition
+    cond_parceiro = await _condicao_do_parceiro_nos_clientes(parceiro, tenant_condition)
+    if cond_parceiro:
+        client_entity_query = (
+            {"$and": [client_entity_query, cond_parceiro]} if client_entity_query else cond_parceiro
+        )
     matching_client_ids = None
     extra_client_docs: list[dict] = []
     if client_entity_query:
@@ -630,24 +720,37 @@ async def run_list_clients(
 
         clients = _merge_entity_client_docs(clients, extra_client_docs, search)
         clients = await _enrich_clients_fonte(clients)
-        
+
+        # P4 — ordenar no servidor. NIF e contacto estão cifrados em repouso: ordenar por eles
+        # exige desencriptar a lista INTEIRA (opt-in, é a coluna que o utilizador escolheu); nos
+        # restantes campos desencripta-se só a página, como sempre.
+        ja_desencriptados = False
+        if (sort_field or "") in CAMPOS_CIFRADOS_ORDENAVEIS:
+            clients = decrypt_clients_list(clients)
+            ja_desencriptados = True
+        clients = ordenar_clientes(clients, sort_field, sort_order)
+
         # Aplicar paginação ao resultado final (clientes, não processos)
         total_count = len(clients)
         clients = clients[skip:skip + limit]
-        
+
         # Desencriptar dados sensíveis
-        clients = decrypt_clients_list(clients)
-        
+        if not ja_desencriptados:
+            clients = decrypt_clients_list(clients)
+
         # Adicionar lista de fases disponíveis para o filtro
         available_statuses = [{"name": s["name"], "label": s.get("label", s["name"])} for s in workflow_statuses]
-        
-        return {
+
+        resposta = {
             "clients": clients,
             "total": total_count,
             "total_historico": total_historico,
             "showing_all": True,
             "available_statuses": available_statuses
         }
+        if page is not None:
+            resposta.update({"page": page, "size": limit, "pages": max(1, -(-total_count // limit))})
+        return resposta
     
     # show_all=False - Mostrar apenas clientes do utilizador
     # Construir query baseada no papel do utilizador

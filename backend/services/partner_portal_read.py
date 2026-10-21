@@ -431,8 +431,32 @@ async def ficheiros_internos(partner: dict, caso: Caso) -> list[dict]:
     return resultado
 
 
-def _dto_do_ficheiro(f: dict, partner_id: str) -> dict:
+#: Estado de aprovação que o parceiro vê, por estado da validação financeira do caso.
+ESTADO_DE_APROVACAO = {
+    "pendente": "em_validacao",
+    "validado": "validado",
+    "rejeitado": "rejeitado",
+}
+
+
+def estado_de_aprovacao_do_caso(caso: "Caso") -> Optional[str]:
+    """O estado da validação financeira do caso, na linguagem do parceiro (ou ``None``).
+
+    Só o ESTADO: o parceiro já recebe o motivo de uma rejeição por email e o `dto_da_lead` leva o
+    da devolução; nada do documento da validação (quem decidiu, quando) sai daqui.
+    """
+    origem = caso.process if caso.e_processo else caso.client
+    validacao = (origem or {}).get("validacao_financeira")
+    estado = validacao.get("estado") if isinstance(validacao, dict) else None
+    return ESTADO_DE_APROVACAO.get(str(estado or ""))
+
+
+def _dto_do_ficheiro(f: dict, partner_id: str, aprovacao: Optional[str] = None) -> dict:
+    # A «aprovação» só existe para o comprovativo de pagamento — é o único ficheiro que passa por
+    # uma decisão da equipa (a validação financeira). Os outros estão simplesmente recebidos.
+    e_comprovativo = e_comprovativo_de_pagamento(f.get("category") or "")
     return {
+        "estado": (aprovacao if e_comprovativo and aprovacao else "recebido"),
         "id": f["id"],
         "category": f.get("category"),
         "category_label": _rotulo_da_categoria(f.get("category")),
@@ -444,7 +468,7 @@ def _dto_do_ficheiro(f: dict, partner_id: str) -> dict:
     }
 
 
-def _dto_do_pedido(doc: dict, partner_id: str) -> dict:
+def _dto_do_pedido(doc: dict, partner_id: str, aprovacao: Optional[str] = None) -> dict:
     categoria = _categoria_em_texto(doc)
     info = DOCUMENT_CATEGORY_MAP.get(categoria, {"label": categoria, "icon": "📎"})
     pendente = doc.get("status") in ESTADOS_PENDENTES
@@ -458,7 +482,7 @@ def _dto_do_pedido(doc: dict, partner_id: str) -> dict:
         "uploaded_count": len(doc.get("attached_files") or []) or doc.get("uploaded_count") or 0,
         "created_at": doc.get("created_at"),
         "updated_at": doc.get("updated_at"),
-        "ficheiros": [_dto_do_ficheiro(f, partner_id) for f in _ficheiros_de(doc, partner_id)],
+        "ficheiros": [_dto_do_ficheiro(f, partner_id, aprovacao) for f in _ficheiros_de(doc, partner_id)],
     }
 
 
@@ -480,10 +504,11 @@ async def run_get_case(partner: dict, case_id: str) -> dict:
     else:
         base = dto_da_lead(caso.client)
 
-    pedidos = [_dto_do_pedido(d, partner["id"]) for d in documentos if _e_pedido(d)]
+    aprovacao = estado_de_aprovacao_do_caso(caso)
+    pedidos = [_dto_do_pedido(d, partner["id"], aprovacao) for d in documentos if _e_pedido(d)]
     pedidos.sort(key=lambda p: str(p.get("created_at") or ""))
     soltos = [
-        _dto_do_ficheiro(f, partner["id"])
+        _dto_do_ficheiro(f, partner["id"], aprovacao)
         for d in documentos if not _e_pedido(d)
         for f in _ficheiros_de(d, partner["id"])
     ]

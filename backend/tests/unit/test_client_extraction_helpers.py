@@ -41,4 +41,6 @@ def test_client_router_is_thin_stubs_only():
     assert text.count("return await run_") >= 15
     # 280: o endpoint `active-processes` (Bloco 1, ponto 5) é um stub legítimo
     # com docstring; o que o guarda protege é a lógica no router, não as linhas.
-    assert len(text.splitlines()) < 280
+    # 300: P4 acrescentou cinco parâmetros de Query (parceiro, page, size, sort_*) à listagem —
+    # declarações, não lógica (o `return await run_` continua a ser a única instrução).
+    assert len(text.splitlines()) < 300

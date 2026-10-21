@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { filterByAnyRole, filterByRole, hasRole } from "../utils/roleUtils";
 import { BACKEND_URL as RESOLVED_BACKEND_URL } from "../utils/apiBaseUrl";
+import { usePartnerOptionsQuery } from "../hooks/queries/usePartnerOptionsQuery";
 
 const BACKEND_URL = RESOLVED_BACKEND_URL;
 const KanbanPage = () => {
@@ -43,7 +44,9 @@ const KanbanPage = () => {
   const consultors = useMemo(() => filterByAnyRole(users, ["consultor", "diretor"]), [users]);
   const intermediarios = useMemo(() => filterByAnyRole(users, ["intermediario", "diretor"]), [users]);
   const indexacaoUsers = useMemo(() => filterByRole(users, "indexacao"), [users]);
-  const parceiros = useMemo(() => filterByRole(users, "parceiro"), [users]);
+  // P4 — os parceiros vêm de /partners/options: os do Portal vivem em `db.partners` e a lista de
+  // utilizadores (`role === "parceiro"`) já não os traz — o filtro aparecia VAZIO.
+  const { parceiros } = usePartnerOptionsQuery();
 
   useEffect(() => {
     fetchUsers();

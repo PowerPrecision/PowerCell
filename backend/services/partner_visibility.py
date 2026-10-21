@@ -223,6 +223,8 @@ PROJECCAO_DO_PROCESSO: dict[str, int] = {
     # As notas da equipa (cartão «Observações» do Resumo): só o DETALHE do caso as
     # devolve (`notas_da_equipa`), nunca a lista nem o painel.
     "observation_notes": 1, "observations": 1, "notes": 1,
+    # O estado da validação financeira (só o ESTADO sai, no ficheiro do comprovativo).
+    "validacao_financeira": 1,
 }
 
 PROJECCAO_DA_LEAD: dict[str, int] = {

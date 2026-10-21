@@ -689,6 +689,9 @@ export const decidirValidacaoFinanceira = (tipo, id, body) =>
   api.post(`/financial-validation/${encodeURIComponent(tipo)}/${encodeURIComponent(id)}/decision`, body);
 export const obterComprovativoDaValidacao = (tipo, id) =>
   api.get(`/financial-validation/${encodeURIComponent(tipo)}/${encodeURIComponent(id)}/proof-url`).then((r) => r.data);
+/** «Ver Detalhes da Lead»: tudo o que o parceiro submeteu (dados, notas, ficheiros), para a equipa analisar. */
+export const getLeadDetails = (id) =>
+  api.get(`/financial-validation/lead/${encodeURIComponent(id)}/details`, { skipErrorToast: true }).then((r) => r.data);
 
 export const reopenProcess = (processId, newStatus) =>
   api.post(`/processes/${processId}/reopen`, { new_status: newStatus });
@@ -833,6 +836,9 @@ export const getUsers = (role, { forAssignment, processId, skipErrorToast } = {}
       ...(processId ? { process_id: processId } : {}),
     },
   });
+/** Parceiros para os FILTROS «Por Parceiro» (P4): `{partners: [{id, name}], total}`. Os parceiros do
+ *  Portal vivem em `db.partners` e já não vêm da lista de utilizadores. */
+export const getPartnerOptions = () => api.get("/partners/options", { skipErrorToast: true });
 /** Staff para dropdowns de atribuição (sem admin/indexação). Pacote DT. */
 export const getStaffUsers = ({ processId } = {}) =>
   api.get("/users/staff", {

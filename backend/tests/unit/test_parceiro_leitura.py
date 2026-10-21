@@ -676,3 +676,81 @@ class TestNotasDaEquipaNoDetalhe:
 
         assert notas_da_equipa({"observation_notes": "texto", "notes": 5, "observations": None}) == []
         assert notas_da_equipa({"observation_notes": [None, 3, {"text": "  "}, {"text": "ok"}]})[0]["text"] == "ok"
+
+
+# ════════════════════════════════════════════════════════════════════
+#  ESTADO DE APROVAÇÃO DOS FICHEIROS (P3, Out 2026)
+# ════════════════════════════════════════════════════════════════════
+@pytest.mark.asyncio
+class TestEstadoDeAprovacaoDosFicheiros:
+    """O parceiro vê, em cada ficheiro, o estado: «recebido» para todos e, no comprovativo de
+    pagamento — o único que passa por uma decisão da equipa —, o da validação financeira."""
+
+    def _comprovativo(self, com_bd, client_id, **doc):
+        com_bd.documents.docs.append({
+            "id": "solto-comprovativo", "client_id": client_id, "source": "partner_portal", "status": "RECEIVED",
+            "uploaded_by": "partner:pt-1", "declared_category": "Comprovativo de Pagamento",
+            "category": "Index", "s3_path": f"Documentação Clientes/{client_id}/c.pdf",
+            "filename": "c.pdf", "original_filename": "c.pdf", "uploaded_at": "2026-10-05T10:00:00+00:00",
+            **doc,
+        })
+        com_bd.documents.docs.append({
+            "id": "solto-irs", "client_id": client_id, "source": "partner_portal", "status": "RECEIVED",
+            "uploaded_by": "partner:pt-1", "declared_category": "IRS", "category": "Index",
+            "s3_path": f"Documentação Clientes/{client_id}/irs.pdf", "filename": "irs.pdf",
+            "original_filename": "irs.pdf", "uploaded_at": "2026-10-05T11:00:00+00:00",
+        })
+
+    @pytest.mark.parametrize("estado, esperado", [
+        ("pendente", "em_validacao"), ("validado", "validado"), ("rejeitado", "rejeitado"),
+    ])
+    async def test_o_comprovativo_de_uma_lead_leva_o_estado_da_validacao(self, com_bd, estado, esperado):
+        import services.partner_portal_read as ppr
+
+        com_bd.clients.docs.append(_lead("lead-v", "pt-1", validacao_financeira={
+            "estado": estado, "decidido_por": "u-secreto", "decidido_por_nome": "Chefe Interno",
+        }))
+        self._comprovativo(com_bd, "lead-v")
+        detalhe = await ppr.run_get_case(PT1, "lead-v")
+
+        por_id = {f["id"]: f for f in detalhe["ficheiros"]}
+        assert por_id["solto-comprovativo"]["estado"] == esperado
+        # Os outros ficheiros estão simplesmente recebidos: a «aprovação» é só do comprovativo.
+        assert por_id["solto-irs"]["estado"] == "recebido"
+        # E nada da decisão (quem, quando) chega ao parceiro.
+        blob = repr(detalhe)
+        assert "u-secreto" not in blob and "Chefe Interno" not in blob
+
+    async def test_depois_de_nascer_o_processo_o_estado_vem_do_processo(self, com_bd):
+        import services.partner_portal_read as ppr
+
+        com_bd.processes.docs.append(_proc(
+            "a-val", "pt-1", client_id="lead-p", validacao_financeira={"estado": "validado"},
+        ))
+        self._comprovativo(com_bd, "lead-p")
+        detalhe = await ppr.run_get_case(PT1, "a-val")
+        por_id = {f["id"]: f for f in detalhe["ficheiros"]}
+        assert por_id["solto-comprovativo"]["estado"] == "validado"
+
+    async def test_sem_validacao_financeira_o_comprovativo_e_apenas_recebido(self, com_bd):
+        import services.partner_portal_read as ppr
+
+        com_bd.clients.docs.append(_lead("lead-s", "pt-1"))
+        self._comprovativo(com_bd, "lead-s")
+        detalhe = await ppr.run_get_case(PT1, "lead-s")
+        assert {f["estado"] for f in detalhe["ficheiros"]} == {"recebido"}
+
+    async def test_o_estado_chega_tambem_aos_ficheiros_dentro_de_um_pedido(self, com_bd):
+        import services.partner_portal_read as ppr
+
+        com_bd.clients.docs.append(_lead("lead-r", "pt-1", validacao_financeira={"estado": "rejeitado"}))
+        com_bd.documents.docs.append({
+            "id": "req-c", "client_id": "lead-r", "status": "RECEIVED", "source": "mandatory_checklist",
+            "category": "Comprovativo de Pagamento", "attached_files": [{
+                "file_id": "ff-1", "s3_path": "Documentação Clientes/lead-r/c.pdf", "filename": "c.pdf",
+                "uploaded_by": "partner:pt-1", "uploaded_at": "2026-10-05T10:00:00+00:00",
+            }],
+        })
+        detalhe = await ppr.run_get_case(PT1, "lead-r")
+        ficheiros = [f for p in detalhe["pedidos"] for f in p["ficheiros"]]
+        assert [f["estado"] for f in ficheiros] == ["rejeitado"]

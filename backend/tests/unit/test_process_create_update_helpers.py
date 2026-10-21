@@ -136,7 +136,8 @@ class TestBuildStaffProcessDoc:
         assert doc["notes"] == ""
         assert doc["observation_notes"] == []
 
-    def test_consultor_assignment(self):
+    def test_consultor_nao_fica_atribuido_na_criacao(self):
+        """INVERTIDO em P6: o processo nasce sem consultor."""
         doc = build_staff_process_doc(
             process_id="p1", process_number="1", now="t",
             client_id="c1", client_name="A", client_email="a@x.com",
@@ -146,8 +147,8 @@ class TestBuildStaffProcessDoc:
         apply_creator_role_assignment(doc, {
             "id": "u1", "name": "João", "role": UserRole.CONSULTOR,
         })
-        assert doc["assigned_consultor_id"] == "u1"
-        assert doc["consultor_name"] == "João"
+        assert not doc.get("assigned_consultor_id")
+        assert not doc.get("consultor_name")
 
 
 class TestCreateClientGuards:
@@ -175,7 +176,7 @@ class TestCreateClientGuards:
         c, m = build_create_broadcast_names({
             "name": "Ana", "role": UserRole.CONSULTOR,
         })
-        assert c == ["Ana"] and m == []
+        assert c == [] and m == []  # P6: o processo nasce sem consultor
         c, m = build_create_broadcast_names({
             "name": "Bruno", "role": UserRole.INTERMEDIARIO,
         })

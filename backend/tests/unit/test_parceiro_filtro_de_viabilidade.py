@@ -456,6 +456,8 @@ class TestNuncaBloqueia:
             "financial_validation.py", "partner_drafts.py", "partner_attribution.py",
             # Apresentação / projecção de dados (listas da equipa e o DTO):
             "partner_visibility.py", "client_registered.py", "process_service.py",
+            # P3: o parceiro vê o ESTADO da validação no ficheiro do comprovativo (só leitura).
+            "partner_portal_read.py",
         }
         leem = []
         for caminho in sorted((BACKEND / "services").glob("*.py")):

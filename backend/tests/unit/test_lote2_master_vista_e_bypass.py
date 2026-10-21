@@ -287,9 +287,11 @@ class TestADropdownDoMasterSegueAEmpresaEscolhida:
         assert {"u-bruno", "u-carla"} <= ids
         assert "u-ana" not in ids
 
-    async def test_com_a_power_escolhida_aparece_a_equipa_da_rede_incumbente(self, equipa):
+    async def test_com_a_power_escolhida_aparece_a_equipa_da_power(self, equipa):
+        # P5 (invertido): a dropdown segue a EMPRESA e não a rede — a Carla é da Precision (e da
+        # Domus), logo não aparece com a Power escolhida, apesar de a rede ser a mesma.
         ids = await self._lista(equipa, _sessao(MASTER, vista="cmp-power"))
-        assert {"u-ana", "u-carla"} <= ids and "u-bruno" not in ids
+        assert "u-ana" in ids and not ids & {"u-bruno", "u-carla"}
 
     async def test_sem_empresa_escolhida_o_master_ve_toda_a_equipa(self, equipa):
         # Contraprova: a vista global continua a listar tudo.
@@ -300,7 +302,7 @@ class TestADropdownDoMasterSegueAEmpresaEscolhida:
         # O Master só tem UCR de Admin na Domus; escolhe a Power: a equipa da Power
         # tem de aparecer (antes ficava com o âmbito do chapéu, a Domus).
         ids = await self._lista(equipa, _sessao(MASTER, efectivo="admin", vista="cmp-power"))
-        assert {"u-ana", "u-carla"} <= ids
+        assert "u-ana" in ids and "u-bruno" not in ids
 
     async def test_com_um_processo_a_vista_e_o_alcance_do_processo_JUNTAM_SE(self, equipa):
         # INVERTIDO no Lote 6 («janela, não porta»). Antes mandava só o alcance do processo: com a
@@ -312,8 +314,8 @@ class TestADropdownDoMasterSegueAEmpresaEscolhida:
 
     async def test_contraprova_escolhida_a_empresa_do_processo_vê_se_a_equipa_dela(self, equipa):
         ids = await self._lista(equipa, _sessao(MASTER, vista="cmp-power"), process_id="p-power")
-        assert "u-bruno" not in ids
-        assert {"u-ana", "u-carla"} <= ids
+        assert "u-bruno" not in ids and "u-carla" not in ids
+        assert "u-ana" in ids
 
 
 # ════════════════════════════════════════════════════════════════════
