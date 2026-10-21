@@ -101,6 +101,10 @@ export const queryKeys = {
     // debaixo do prefixo do detalhe, para que qualquer invalidação do processo
     // (gravar a ficha, prazos, atribuições) os refaça sem ninguém se lembrar.
     alerts: (id) => [...queryKeys.processes.detail(id), 'alerts'],
+    // Log da IA: desce do detalhe, logo a invalidação do processo também o refaz.
+    // A chave leva a página e o filtro: chaves iguais exigem valores iguais.
+    aiLog: (id, pagina = 1, estado = '') => [...queryKeys.processes.detail(id), 'ai-log', pagina, estado],
+    aiLogAll: (id) => [...queryKeys.processes.detail(id), 'ai-log'],
     origemFinanceira: (id) => [...queryKeys.processes.detail(id), 'origem-financeira'],
     candidatosOrigemFinanceira: (id) => [...queryKeys.processes.detail(id), 'origem-financeira', 'candidatos'],
     // Portal do Parceiro — o controlo «Serviço pago pelo parceiro». Desce do

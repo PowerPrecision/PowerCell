@@ -47,6 +47,7 @@ from typing import Optional
 from database import db
 from services.background_tasks import spawn_background_task
 from services.document_intake import registar_na_fila_da_ia
+from services.process_ai_log import registar_accao_ia
 from services.s3_storage import s3_service
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ async def correr_ia_da_entrada(
     filename: str,
     tamanho: Optional[int] = None,
     satisfazer_pedidos: bool = True,
+    origem: Optional[str] = None,
 ) -> str:
     """Lê o ficheiro e corre a categorização. Devolve o que fez (para o log e os testes):
     ``"categorizado"`` | ``"ja_categorizado"`` | ``"demasiado_grande"`` | ``"ilegivel"`` | ``"erro"``.
@@ -95,6 +97,10 @@ async def correr_ia_da_entrada(
     try:
         if await _ja_foi_categorizado(s3_path):
             logger.info("[IA-AUTO] %s já categorizado — sem nova chamada ao modelo", s3_path)
+            await registar_accao_ia(
+                process_id=process_id, accao="categorizar", estado="saltado", gatilho="automatico",
+                ficheiro=filename, s3_path=s3_path, origem=origem, motivo="ja_categorizado",
+            )
             return "ja_categorizado"
 
         if tamanho is None:
@@ -105,11 +111,19 @@ async def correr_ia_da_entrada(
                 "[IA-AUTO] %s tem %s bytes (> %s): fica na fila sem IA",
                 s3_path, tamanho, TAMANHO_MAXIMO_PARA_IA,
             )
+            await registar_accao_ia(
+                process_id=process_id, accao="categorizar", estado="saltado", gatilho="automatico",
+                ficheiro=filename, s3_path=s3_path, origem=origem, motivo="demasiado_grande",
+            )
             return "demasiado_grande"
 
         conteudo = await asyncio.to_thread(s3_service.get_file_content, s3_path)
         if not conteudo:
             logger.warning("[IA-AUTO] Não foi possível ler %s para a IA", s3_path)
+            await registar_accao_ia(
+                process_id=process_id, accao="categorizar", estado="falha", gatilho="automatico",
+                ficheiro=filename, s3_path=s3_path, origem=origem, motivo="ilegivel",
+            )
             return "ilegivel"
 
         from services.document_auto_categorize import auto_categorize_document_background
@@ -121,10 +135,15 @@ async def correr_ia_da_entrada(
             filename=filename,
             file_content=conteudo,
             satisfazer_pedidos=satisfazer_pedidos,
+            origem=origem,
         )
         return "categorizado"
     except Exception as exc:
         logger.error("[IA-AUTO] Falha na IA de %s: %s: %s", s3_path, type(exc).__name__, exc)
+        await registar_accao_ia(
+            process_id=process_id, accao="categorizar", estado="falha", gatilho="automatico",
+            ficheiro=filename, s3_path=s3_path, origem=origem, motivo="erro_interno",
+        )
         return "erro"
 
 
@@ -162,6 +181,7 @@ async def agendar_ia_da_entrada(
                 filename=filename,
                 tamanho=tamanho,
                 satisfazer_pedidos=satisfazer_pedidos,
+                origem=origem,
             ),
             name=f"ia-da-entrada:{filename}",
         )

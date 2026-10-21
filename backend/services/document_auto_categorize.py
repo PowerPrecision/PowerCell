@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from database import db
 from services.document_constants import DEFAULT_FILE_PREFIX, MIME_TYPE_PDF
+from services.process_ai_log import classificar_falha, registar_accao_ia
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,7 @@ async def auto_categorize_document_background(
     filename: str,
     file_content: bytes,
     satisfazer_pedidos: bool = True,
+    origem: str | None = None,
 ):
     """
     Categoriza automaticamente um documento com IA em background,
@@ -188,6 +190,12 @@ async def auto_categorize_document_background(
 
         if not result.get("success"):
             logger.warning("[AUTO-CAT] Falha ao categorizar documento")
+            await registar_accao_ia(
+                process_id=process_id, accao="categorizar", estado="falha", gatilho="automatico",
+                ficheiro=filename, s3_path=s3_path, origem=origem,
+                documento_id=existing.get("id") if existing else None,
+                motivo=classificar_falha(result.get("error")),
+            )
             return
 
         now = datetime.now(timezone.utc).isoformat()
@@ -257,6 +265,16 @@ async def auto_categorize_document_background(
             await db.document_metadata.insert_one(metadata)
             logger.info("[AUTO-CAT] Metadados criados")
 
+        # Log da IA do processo: só NOMES de campos, nunca valores. Sem texto extraível
+        # a IA só viu o nome do ficheiro — diz-se, porque explica uma classificação fraca.
+        await registar_accao_ia(
+            process_id=process_id, accao="categorizar", estado="sucesso", gatilho="automatico",
+            ficheiro=filename, s3_path=s3_path, origem=origem, documento_id=doc_id,
+            categoria=ai_category or None, confianca=result.get("confidence"),
+            campos=list((extracted_data or {}).keys()),
+            motivo=None if extracted_text else "sem_contexto",
+        )
+
         # Após categorização IA, tentar satisfazer pedido portal pendente
         # (útil quando o upload staff foi para Index/Outros e só agora há categoria)
         try:
@@ -291,4 +309,8 @@ async def auto_categorize_document_background(
     except Exception as e:
         logger.error(
             f"[AUTO-CAT] Erro ao categorizar documento: {type(e).__name__}: {e}"
+        )
+        await registar_accao_ia(
+            process_id=process_id, accao="categorizar", estado="falha", gatilho="automatico",
+            ficheiro=filename, s3_path=s3_path, origem=origem, motivo=classificar_falha(e),
         )

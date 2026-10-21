@@ -221,6 +221,16 @@ TTL_INDEXES = [
         "name": "ttl_portal_login_attempts",
         "description": "Purga tentativas de login do Portal por email na data de expiração do registo",
     },
+    {
+        # Log da IA do processo (`process_ai_log`): 12 meses. `expire_at` é um
+        # datetime NATIVO gravado em cada linha (o TTL ignora strings ISO);
+        # o prazo vive em `process_ai_log.RETENCAO_DIAS`.
+        "collection": "process_ai_log",
+        "field": "expire_at",
+        "seconds": 0,
+        "name": "ttl_process_ai_log",
+        "description": "Purga o Log da IA do processo na data de expiração da linha (12 meses)",
+    },
 ]
 
 
@@ -285,6 +295,12 @@ def _definir(colecao: str, indices: list[dict]) -> None:
     """Acrescenta índices à colecção (várias declarações da mesma colecção somam-se)."""
     INDEX_DEFINITIONS.setdefault(colecao, []).extend(indices)
 
+
+# Log da IA do processo: a única leitura é por `process_id`, mais recente primeiro.
+_definir(
+    "process_ai_log",
+    [{"keys": [("process_id", 1), ("created_at", -1)], "name": "idx_process_ai_log_processo"}],
+)
 
 # ====================================================================
 # ÍNDICES PARA COLECÇÃO 'processes'

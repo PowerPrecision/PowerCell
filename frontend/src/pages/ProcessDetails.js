@@ -238,6 +238,7 @@ import VisitasTab from "../components/processDetails/tabs/VisitasTab";
 import PortalMessagesTab from "../components/processDetails/tabs/PortalMessagesTab";
 import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
 import HistoryTab from "../components/processDetails/tabs/HistoryTab";
+import AiLogTab from "../components/processDetails/tabs/AiLogTab";
 import ProcessObservationsCard from "../components/processDetails/ProcessObservationsCard";
 import VoiceNoteRecorder from "../components/processDetails/VoiceNoteRecorder";
 import ProcessLabelsEditor from "../components/processDetails/ProcessLabelsEditor";
@@ -2842,7 +2843,7 @@ const ProcessDetails = () => {
               setMainTab(v);
               writeTabQuery(v, activeTab);
             }}>
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="grid w-full grid-cols-4">
                 <TabsTrigger value="resumo" className="gap-1.5">
                   <ClipboardList className="h-4 w-4" />
                   Resumo
@@ -2854,6 +2855,10 @@ const ProcessDetails = () => {
                 <TabsTrigger value="historico" className="gap-1.5">
                   <History className="h-4 w-4" />
                   Histórico
+                </TabsTrigger>
+                <TabsTrigger value="ia" className="gap-1.5">
+                  <Sparkles className="h-4 w-4" />
+                  Log da IA
                 </TabsTrigger>
               </TabsList>
 
@@ -3202,6 +3207,16 @@ const ProcessDetails = () => {
                   activities={activities}
                   handleDeleteComment={handleDeleteComment}
                   user={user}
+                />
+              </TabsContent>
+
+              {/* ── Separador: Log da IA — o que o motor fez, quando e porque falhou (só leitura) ── */}
+              <TabsContent value="ia" className="mt-4">
+                <AiLogTab
+                  processId={id}
+                  effectiveRole={effectiveRole}
+                  processoFechado={isProcessLocked}
+                  onReanalisado={() => setDocumentsRefreshKey((k) => k + 1)}
                 />
               </TabsContent>
             </Tabs>

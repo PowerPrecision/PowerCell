@@ -41,6 +41,17 @@ vi.mock("../../services/api", async (importOriginal) => ({
   // Forma REAL do servidor (fixture gerada pelo serviço), não uma inventada.
   getServicoDoParceiro: vi.fn(() => Promise.resolve({ data: servicoPorPagar })),
   reopenProcess: vi.fn(() => Promise.resolve({ data: { reopened: true } })),
+  // Log da IA: forma REAL do servidor (`GET /processes/{id}/ai-log`).
+  getProcessAiLog: vi.fn(() => Promise.resolve({ data: {
+    items: [{
+      id: "l-1", accao: "categorizar", accao_rotulo: "Documento classificado", estado: "sucesso",
+      gatilho: "automatico", origem: "portal", ficheiro: "extracto-bancario.pdf", documento_id: "d-9",
+      motivo: null, motivo_mensagem: null, categoria: "Financeiros", campos: ["iban"], confianca: 0.91,
+      utilizador_nome: null, created_at: "2026-10-21T13:07:00+00:00",
+    }],
+    total: 1, page: 1, size: 30, pode_reanalisar: true,
+  } })),
+  analyzeDocumentForReview: vi.fn(() => Promise.resolve({ data: { success: true, auto_approved: true, confidence_score: 90 } })),
 }));
 
 vi.mock("../../contexts/AuthContext", () => ({
@@ -214,14 +225,49 @@ describe("ProcessDetails — a página monta", () => {
   });
 });
 
-describe("ProcessDetails — os três separadores de topo", () => {
-  it("Resumo, Documentos e Histórico existem", async () => {
+describe("ProcessDetails — o Log da IA", () => {
+  it("é o quarto separador de topo e abre a timeline do processo", async () => {
+    const utilizador = userEvent.setup();
+    sessao.papel = "diretor";
+    montar();
+    await screen.findByTestId("layout");
+
+    await utilizador.click(screen.getByRole("tab", { name: /Log da IA/i }));
+
+    expect(await screen.findByText("Documento classificado — extracto-bancario.pdf")).toBeInTheDocument();
+    expect(screen.getByText(/Campos lidos: iban/)).toBeInTheDocument();
+    sessao.papel = "consultor";
+  });
+
+  it("a gestão vê «Reanalisar»; o consultor vê o log mas não o botão", async () => {
+    const utilizador = userEvent.setup();
+
+    sessao.papel = "diretor";
+    const gestao = montar();
+    await screen.findByTestId("layout");
+    await utilizador.click(screen.getByRole("tab", { name: /Log da IA/i }));
+    await screen.findByText("Documento classificado — extracto-bancario.pdf");
+    expect(screen.getByRole("button", { name: /Reanalisar extracto-bancario\.pdf/i })).toBeInTheDocument();
+    gestao.unmount();
+
+    sessao.papel = "consultor";
+    montar();
+    await screen.findByTestId("layout");
+    await utilizador.click(screen.getByRole("tab", { name: /Log da IA/i }));
+    await screen.findByText("Documento classificado — extracto-bancario.pdf");
+    expect(screen.queryByRole("button", { name: /Reanalisar/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("ProcessDetails — os separadores de topo", () => {
+  it("Resumo, Documentos, Histórico e Log da IA existem", async () => {
     montar();
     await screen.findByTestId("layout");
 
     expect(screen.getByRole("tab", { name: /Resumo/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Documentos/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Histórico/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Log da IA/i })).toBeInTheDocument();
   });
 
   it("o Resumo abre por omissão", async () => {

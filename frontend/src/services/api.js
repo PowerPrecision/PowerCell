@@ -1295,6 +1295,10 @@ export const markNotificationRead = (id) =>
   api.put(`/alerts/notifications/${id}/read`);
 export const getProcessAlerts = (processId) => 
   api.get(`/processes/${processId}/alerts`);
+// Log da IA do processo (timeline do que o motor fez, quando e porque falhou). Só leitura.
+// `skipErrorToast`: o separador mostra o erro no sítio; um toast global por cima seria ruído.
+export const getProcessAiLog = (processId, params = {}) =>
+  api.get(`/processes/${processId}/ai-log`, { params, skipErrorToast: true });
 export const getAlertsByProcess = (processId) => 
   api.get(`/alerts/process/${processId}`);
 export const createDeedReminder = (processId, deedDate) => 
