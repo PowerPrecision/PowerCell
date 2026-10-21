@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
@@ -37,6 +38,7 @@ from models.index_module import (
     CampoRevisavel,
     ProfessionalMetadata,
     TrabalhoProfissional,
+    decimal_do_valor,
     nif_e_valido,
     normalizar_nif,
 )
@@ -340,6 +342,114 @@ def campos_do_ficheiro(resultado: ResultadoDaAnalise, impressao: str) -> dict[st
 
 async def registar_ficheiro(document_id: str, resultado: ResultadoDaAnalise, impressao: str) -> None:
     await db.document_metadata.update_one({"id": document_id}, {"$set": campos_do_ficheiro(resultado, impressao)})
+
+
+# ====================================================================
+# EDIÇÃO HUMANA, ALERTAS E DIRECTÓRIO (leitura/escrita para a API)
+# ====================================================================
+CAMPOS_EDITAVEIS = ("employer_nif", "employer_name", "job_title", "net_salary", "contract_type")
+
+
+class EdicaoInvalida(ValueError):
+    """O pedido de edição não é aplicável (job inexistente, campo desconhecido, valor sem forma)."""
+
+
+def aplicar_edicao(
+    trabalhos: list[dict], job_id: str, alteracoes: dict[str, Any]
+) -> list[TrabalhoProfissional]:
+    """Aplica `alteracoes` (`{campo: valor|None}`) ao trabalho `job_id`. Função PURA.
+
+    Um campo editado por uma pessoa fica `edited_by_human=True` e, tendo valor,
+    `needs_review=False` — a pessoa dispôs. Vazio de propósito (`None`) também
+    conta como revisto. O CÓDIGO continua a reforçar: um NIF sem dígito de controlo
+    volta a ficar `needs_review` (a pessoa pode ter escrito uma gralha).
+    Levanta `EdicaoInvalida` para campo desconhecido, job inexistente ou valor sem forma.
+    """
+    desconhecidos = sorted(set(alteracoes) - set(CAMPOS_EDITAVEIS))
+    if desconhecidos:
+        raise EdicaoInvalida(f"Campo não editável: {desconhecidos[0]}")
+    if not alteracoes:
+        raise EdicaoInvalida("Nada para alterar.")
+    modelos = [TrabalhoProfissional.model_validate(t) for t in trabalhos]
+    alvo = next((t for t in modelos if t.job_id == job_id), None)
+    if alvo is None:
+        raise EdicaoInvalida("Trabalho não encontrado.")
+    for nome, valor in alteracoes.items():
+        actual = getattr(alvo, nome)
+        if nome == "net_salary" and valor is not None:
+            valor = decimal_do_valor(valor)
+            if valor is None or valor < 0:
+                raise EdicaoInvalida("O vencimento líquido não é um valor válido.")
+        if nome == "employer_nif" and valor is not None:
+            valor = normalizar_nif(valor)
+        if isinstance(valor, str):
+            valor = " ".join(valor.split()) or None
+        novo = CampoRevisavel.model_validate({
+            **actual.model_dump(mode="json"),
+            "value": None if valor is None else (str(valor) if nome == "net_salary" else valor),
+            "needs_review": False,
+            "confidence": actual.confidence,
+            "edited_by_human": True,
+        })
+        setattr(alvo, nome, novo)
+    try:
+        # volta a validar tudo (NIF reforçado, contrato dentro dos valores permitidos)
+        validado = TrabalhoProfissional.model_validate(alvo.model_dump(mode="json"))
+    except ValueError as exc:
+        raise EdicaoInvalida("Valor inválido.") from exc
+    return [validado if t.job_id == job_id else t for t in modelos]
+
+
+async def editar_trabalho(
+    process_id: str, network_id: Optional[str], job_id: str, alteracoes: dict[str, Any]
+) -> ProfessionalMetadata:
+    """Grava a edição de uma pessoa e recalcula o directório. `EdicaoInvalida` se não se aplica."""
+    existente = await carregar_metadados(process_id)
+    if not existente:
+        raise EdicaoInvalida("Ainda não há metadados profissionais neste processo.")
+    trabalhos = aplicar_edicao(existente.get("jobs") or [], job_id, alteracoes)
+    modelo = await gravar_metadados(process_id, network_id, trabalhos, existente.get("analysis_fingerprint"))
+    await registar_entidades(modelo.jobs)
+    return modelo
+
+
+async def alertas_do_processo(process_id: str) -> list[dict]:
+    """Os alertas do processo (abertos primeiro). Mensagem e severidade vêm da tabela."""
+    docs = await db.process_index_alerts.find({"process_id": process_id}, {"_id": 0}).to_list(200)
+    ordem = {"alerta": 0, "aviso": 1, "info": 2}
+    docs.sort(key=lambda a: (bool(a.get("dismissed_by_human")), ordem.get(a.get("severity"), 3)))
+    return docs
+
+
+async def dispensar_alerta(process_id: str, alert_id: str, user_id: Optional[str]) -> Optional[dict]:
+    """Dispensa um alerta DESTE processo (idempotente). `None` se não existe neste processo."""
+    alerta = await db.process_index_alerts.find_one({"id": alert_id, "process_id": process_id}, {"_id": 0})
+    if not alerta:
+        return None
+    if not alerta.get("dismissed_by_human"):
+        await db.process_index_alerts.update_one(
+            {"id": alert_id, "process_id": process_id},
+            {"$set": {"dismissed_by_human": True, "dismissed_by": user_id, "dismissed_at": _agora()}},
+        )
+    return {**alerta, "dismissed_by_human": True}
+
+
+async def procurar_entidades(texto: str, limite: int = 20) -> list[dict]:
+    """Directório GLOBAL de entidades patronais (`{nif, name}`). Sem dados de clientes."""
+    texto = (texto or "").strip()
+    if len(texto) < 2:
+        return []
+    digitos = normalizar_nif(texto)
+    if digitos and len(digitos) >= 3 and digitos == texto.replace(" ", ""):
+        filtro: dict[str, Any] = {"nif": {"$regex": f"^{re.escape(digitos)}"}}
+    else:
+        normal = nome_normalizado_da_entidade(texto)
+        # a normalização tira a pontuação: «.*» fica vazio, e uma expressão vazia casa com TUDO
+        if len(normal) < 2:
+            return []
+        filtro = {"name_normalizado": {"$regex": re.escape(normal)}}
+    docs = await db.employers.find(filtro, {"_id": 0, "nif": 1, "name": 1}).to_list(max(1, min(limite, 50)))
+    return [{"nif": d["nif"], "name": d["name"]} for d in docs]
 
 
 async def factos_do_processo(process_id: str) -> list[dict]:

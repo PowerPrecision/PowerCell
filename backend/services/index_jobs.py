@@ -265,11 +265,23 @@ async def concluir_resultados(process: dict, resumo: dict) -> dict[str, Any]:
             "entidades_novas": novas, "run_id": run_id}
 
 
+async def analisar_e_concluir(
+    process: dict, *, force: bool, gatilho: str, user: Optional[dict], progresso=None
+) -> dict[str, Any]:
+    """Analisa os ficheiros e recalcula metadados/matriz. Devolve o resumo PÚBLICO (sem ids de falhados).
+
+    Partilhada pela análise manual e pelo fecho da indexação (`index_finalize`): são dois
+    jobs diferentes sobre o mesmo trabalho, e duas cópias do corpo divergiriam.
+    """
+    resumo = await analisar_ficheiros(process, force=force, gatilho=gatilho, user=user, progresso=progresso)
+    resumo.update(await concluir_resultados(process, resumo))
+    return {k: v for k, v in resumo.items() if k != "falhados"}
+
+
 async def correr_analise(
     task_id: str, process_id: str, user: Optional[dict], *, force: bool, gatilho: str
 ) -> dict[str, Any]:
     """O trabalho do job. Termina SEMPRE o TaskLog e liberta a chave; nunca levanta."""
-    resumo: dict[str, Any] = {}
     try:
         await TaskLogService.update_task(task_id, status=TaskStatus.PROCESSING, progress=1,
                                          progress_message="A preparar a análise…")
@@ -281,10 +293,7 @@ async def correr_analise(
         async def progresso(pct: int, msg: str) -> None:
             await TaskLogService.update_task(task_id, progress=max(1, min(95, pct)), progress_message=msg)
 
-        resumo = await analisar_ficheiros(process, force=force, gatilho=gatilho, user=user, progresso=progresso)
-        resumo.update(await concluir_resultados(process, resumo))
-
-        publico = {k: v for k, v in resumo.items() if k != "falhados"}
+        publico = await analisar_e_concluir(process, force=force, gatilho=gatilho, user=user, progresso=progresso)
         await TaskLogService.update_task(task_id, status=TaskStatus.COMPLETED, progress=100,
                                          progress_message="Análise concluída.", result_data=publico)
         await notificar_fim(process, (user or {}).get("id"), publico)

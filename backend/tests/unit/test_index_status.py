@@ -297,7 +297,9 @@ def _chaves_de_dicts_com(nome: str, fonte: str) -> list[int]:
 
 class TestUmSoEscritor:
     #: Quem pode ESCREVER `index_status`: o próprio módulo (e o `$set` da migração vem dele).
-    PERMITIDOS = {"index_status.py"}
+    #: `index_api.py` monta o DTO de RESPOSTA (`{"index_status": ...}` lê o estado derivado, não o escreve);
+    #: não escreve em `db.processes` — há guarda disso em `test_index_guardas.py`.
+    PERMITIDOS = {"index_status.py", "index_api.py"}
 
     def test_ninguem_fora_do_modulo_escreve_index_status_a_mao(self):
         intrusos = []

@@ -52,6 +52,7 @@ import {
   TrendingUp,
   FileSignature,
   Shield,
+  ClipboardCheck,
   ClipboardList,
   Mail,
   Eye,
@@ -275,6 +276,16 @@ const DashboardLayout = ({ children, title }) => {
         // { label: "Imóveis", icon: Search, href: "/imoveis" },
         { label: "Visitas", icon: Calendar, href: "/visitas" },
         { label: "Calendário", icon: CalendarDays, href: "/calendario" },
+        // Lote 12: o módulo Index (fila de indexação e revisões). Esta lista TEM de casar com as
+        // `allowedRoles` da rota `/index` em App.js e com `PAPEIS_DE_IA_DO_INDEX` do servidor
+        // (o administrativo não entra; o Index tem o seu próprio grupo mais abaixo).
+        ...(["master", "admin", "ceo", "diretor"].includes(userRole)
+          ? [{
+              label: "Indexação",
+              icon: ClipboardCheck,
+              href: "/index",
+            }]
+          : []),
         // { label: "Financeiro", icon: DollarSign, href: "/financeiro" },
       ],
     };
@@ -416,6 +427,8 @@ const DashboardLayout = ({ children, title }) => {
             icon: ClipboardList,
             items: [
               // "Registos de Clientes" REMOVIDO para role indexacao — não necessita de acesso a registos de clientes
+              // Lote 12: a fila de trabalho do Index é o primeiro item da sua lista.
+              { label: "Indexação", icon: ClipboardCheck, href: "/index" },
               { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
               { label: "Os Meus Processos", icon: FileText, href: "/processos" },
               { label: "Documentos Pendentes", icon: FileText, href: "/validades" },

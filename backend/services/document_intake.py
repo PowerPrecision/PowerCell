@@ -239,6 +239,7 @@ async def registar_na_fila_da_ia(
     s3_path: str,
     filename: str,
     origem: str,
+    carregado_pelo_index: bool = False,
 ) -> None:
     """Marca o ficheiro como «à espera da IA» — a fila da estação de Indexação.
 
@@ -256,7 +257,8 @@ async def registar_na_fila_da_ia(
         if existente:
             await db.document_metadata.update_one(
                 {"s3_path": s3_path},
-                {"$set": {"in_index_queue": True, "queued_at": agora, "queue_source": origem}},
+                {"$set": {"in_index_queue": True, "queued_at": agora, "queue_source": origem,
+                          "uploaded_by_index": bool(carregado_pelo_index)}},
             )
             return
         await db.document_metadata.insert_one({
@@ -269,6 +271,7 @@ async def registar_na_fila_da_ia(
             "in_index_queue": True,
             "queued_at": agora,
             "queue_source": origem,
+            "uploaded_by_index": bool(carregado_pelo_index),
             "created_at": agora,
             "updated_at": agora,
         })

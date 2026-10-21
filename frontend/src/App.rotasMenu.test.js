@@ -70,9 +70,12 @@ function hrefsDoPerfil(fonte, perfil) {
   const fim = fonte.indexOf("if (", inicio + 30);
   const bloco = fonte.slice(inicio, fim === -1 ? undefined : fim);
 
-  const hrefs = new Set(
-    [...bloco.matchAll(/href:\s*"([^"]+)"/g)].map((x) => x[1]),
-  );
+  // Os itens escritos NO PRÓPRIO bloco do perfil (literais) contam sempre; só os que chegam por
+  // um grupo partilhado podem ser tirados por um spread condicional. Sem esta distinção, o spread
+  // do grupo «O Meu Negócio» (`["master","admin","ceo","diretor"]`) apagava o item `/index` que o
+  // bloco do Index declara para si — e o guarda acusava uma divergência que não existe (Lote 12).
+  const literais = [...bloco.matchAll(/href:\s*"([^"]+)"/g)].map((x) => x[1]);
+  const hrefs = new Set();
 
   // Grupos referenciados por nome (ex.: `meuNegocioGroup`) — as entradas
   // deles contam como visíveis para este perfil.
@@ -103,6 +106,7 @@ function hrefsDoPerfil(fonte, perfil) {
     }
   }
 
+  for (const href of literais) hrefs.add(href);
   return [...hrefs];
 }
 
@@ -213,6 +217,44 @@ describe("Webmail: o perfil Index não entra (Lote 7.1)", () => {
         hrefsDoPerfil(LAYOUT, perfil).includes("/webmail"),
         `${perfil} deixou de ver o Webmail no menu`,
       );
+    }
+  });
+});
+
+describe("Módulo Index (Lote 12): o menu e a rota concordam com o servidor", () => {
+  // `PAPEIS_DE_IA_DO_INDEX` (backend/services/index_access.py): a gestão e a Indexação.
+  const COM_INDEX = ["master", "admin", "ceo", "diretor", "indexacao"];
+  const SEM_INDEX = ["consultor", "intermediario", "administrativo", "parceiro"];
+
+  it("as duas rotas aceitam exactamente os perfis do servidor", () => {
+    for (const caminho of ["/index", "/index/:processId"]) {
+      const papeis = ROTAS.get(caminho);
+      assert.ok(papeis, `${caminho} perdeu as allowedRoles literais (o guarda ficou cego)`);
+      assert.deepEqual([...papeis].sort(), [...COM_INDEX].sort(), caminho);
+    }
+  });
+
+  it("quem tem Index vê «Indexação» no menu", () => {
+    for (const perfil of COM_INDEX.filter((p) => p !== "master")) {
+      assert.ok(
+        hrefsDoPerfil(LAYOUT, perfil).includes("/index"),
+        `${perfil} pode abrir /index mas o menu não o mostra`,
+      );
+    }
+  });
+
+  it("quem não o tem NÃO o vê no menu (contraprova: o leitor não pôs tudo)", () => {
+    for (const perfil of ["consultor", "intermediario", "administrativo"]) {
+      assert.ok(
+        !hrefsDoPerfil(LAYOUT, perfil).includes("/index"),
+        `${perfil} vê «Indexação» mas o servidor responde 403`,
+      );
+    }
+  });
+
+  it("nenhum perfil sem Index entra na rota", () => {
+    for (const perfil of SEM_INDEX) {
+      assert.ok(!ROTAS.get("/index").includes(perfil), perfil);
     }
   });
 });

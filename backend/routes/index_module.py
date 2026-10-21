@@ -1,0 +1,182 @@
+"""
+MÓDULO INDEX — `/api/index/*` (Lote 12, Fase 3)
+================================================
+Router fino; a lógica vive em `services/index_api.py` e `services/index_finalize.py`.
+
+* Quem entra: Master, Admin, CEO, Diretor e Indexação (`PAPEIS_DE_IA_DO_INDEX`), pelo perfil
+  EFECTIVO. Consultor e Intermediário recebem 403 e o handler nunca corre.
+* Dependências do router, por ordem: a REDE (404 igual ao de «não existe») e depois o estado
+  fechado do processo (403, só em escritas). A ordem importa: «está fechado» não pode ser um
+  oráculo sobre um processo de outra rede.
+* Cada rota limitada declara `request` e `response: Response` (o slowapi precisa dele no sucesso).
+* Nenhum endpoint bloqueia a indexação: «mark-indexed» responde sempre (salvo permissão).
+"""
+from typing import Optional
+
+from fastapi import APIRouter, Body, Depends, Query, Request, Response
+from pydantic import BaseModel, ConfigDict, Field
+
+from middleware.rate_limit import limiter
+from services.auth import get_all_user_roles, get_effective_role, require_roles
+from services.index_access import PAPEIS_DE_IA_DO_INDEX
+from services.index_api import (
+    run_analyze_process,
+    run_claim_process,
+    run_dismiss_alert,
+    run_edit_professional_job,
+    run_get_index_queue,
+    run_get_index_workstation,
+    run_release_process,
+    run_search_employers,
+)
+from services.index_finalize import run_mark_indexed
+from services.process_broadcast import broadcast_process_delta
+from services.process_closed_guard import exigir_processo_editavel
+from services.process_scope_guard import exigir_processo_no_ambito
+
+router = APIRouter(
+    prefix="/index",
+    tags=["Index"],
+    dependencies=[Depends(exigir_processo_no_ambito), Depends(exigir_processo_editavel)],
+)
+
+_acesso = require_roles(PAPEIS_DE_IA_DO_INDEX)
+
+
+class AnalyzeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    force: bool = False
+
+
+class EditJobBody(BaseModel):
+    """Só os campos do trabalho: o resto (job_id, origem, confiança) nunca vem do cliente."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fields: dict = Field(default_factory=dict)
+
+
+class EmployerNif(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    nif: str
+
+
+class MarkIndexedBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    employers: list[EmployerNif] = Field(default_factory=list, max_length=20)
+
+
+@router.get("/queue")
+@limiter.limit("120/minute")
+async def get_index_queue(
+    request: Request,
+    response: Response,
+    tab: str = Query("pending"),
+    page: int = Query(1, ge=1),
+    size: int = Query(25, ge=1, le=100),
+    q: Optional[str] = Query(None, max_length=100),
+    user: dict = Depends(_acesso),
+):
+    """Duas abas: `pending` («Fila de Espera») e `reviews` («Revisões Pendentes»)."""
+    return await run_get_index_queue(user, tab=tab, page=page, size=size, q=q)
+
+
+@router.get("/employers")
+@limiter.limit("120/minute")
+async def search_employers(
+    request: Request,
+    response: Response,
+    q: str = Query("", max_length=100),
+    user: dict = Depends(_acesso),
+):
+    """Directório GLOBAL de entidades patronais (NIF + nome; nunca dados de clientes)."""
+    return await run_search_employers(user, q)
+
+
+@router.get("/processes/{process_id}")
+@limiter.limit("120/minute")
+async def get_index_workstation(
+    request: Request,
+    response: Response,
+    process_id: str,
+    user: dict = Depends(_acesso),
+):
+    return await run_get_index_workstation(user, process_id)
+
+
+@router.post("/processes/{process_id}/claim")
+@limiter.limit("60/minute")
+async def claim_process(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
+    return await run_claim_process(user, process_id)
+
+
+@router.post("/processes/{process_id}/release")
+@limiter.limit("60/minute")
+async def release_process(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
+    return await run_release_process(user, process_id)
+
+
+@router.post("/processes/{process_id}/analyze", status_code=202)
+@limiter.limit("20/minute")
+async def analyze_process(
+    request: Request,
+    response: Response,
+    process_id: str,
+    data: AnalyzeBody = Body(default_factory=AnalyzeBody),
+    user: dict = Depends(_acesso),
+):
+    """«Analisar»: corre em segundo plano e devolve já; o resultado chega como notificação."""
+    return await run_analyze_process(user, process_id, force=data.force)
+
+
+@router.post("/processes/{process_id}/extract", status_code=202)
+@limiter.limit("20/minute")
+async def extract_process(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
+    """«Extrair dados»: volta a extrair TUDO (ignora a impressão digital)."""
+    return await run_analyze_process(user, process_id, force=True)
+
+
+@router.patch("/processes/{process_id}/professional-metadata/{job_id}")
+@limiter.limit("60/minute")
+async def edit_professional_job(
+    request: Request,
+    response: Response,
+    process_id: str,
+    job_id: str,
+    data: EditJobBody,
+    user: dict = Depends(_acesso),
+):
+    """Edição humana de campos de um trabalho: fica `edited_by_human` e sobrevive à reanálise."""
+    return await run_edit_professional_job(user, process_id, job_id, data.fields)
+
+
+@router.post("/processes/{process_id}/alerts/{alert_id}/dismiss")
+@limiter.limit("60/minute")
+async def dismiss_alert(
+    request: Request, response: Response, process_id: str, alert_id: str, user: dict = Depends(_acesso)
+):
+    return await run_dismiss_alert(user, process_id, alert_id)
+
+
+@router.post("/processes/{process_id}/mark-indexed")
+@limiter.limit("30/minute")
+async def mark_indexed(
+    request: Request,
+    response: Response,
+    process_id: str,
+    data: MarkIndexedBody = Body(default_factory=MarkIndexedBody),
+    user: dict = Depends(_acesso),
+):
+    """Marcar como indexado — SEMPRE possível (a IA, os campos em dúvida e os alertas só avisam)."""
+    return await run_mark_indexed(
+        process_id,
+        user,
+        user_role=get_effective_role(request, user).lower(),
+        all_roles=get_all_user_roles(user),
+        broadcast_fn=broadcast_process_delta,
+        employers=[e.model_dump() for e in data.employers],
+    )

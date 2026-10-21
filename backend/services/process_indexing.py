@@ -373,6 +373,20 @@ async def libertar_index_sem_falhar(process_id: str, user: dict) -> dict[str, An
         return {"executado": False, "movidos": 0, "erro": type(exc).__name__}
 
 
+async def agendar_finalizacao_sem_falhar(process: dict, user: dict) -> dict[str, Any]:
+    """Lança o job de fecho do Index sem nunca bloquear nem desfazer a indexação."""
+    try:
+        from services.index_finalize import agendar_finalizacao
+
+        return await agendar_finalizacao(process, user)
+    except Exception as exc:
+        logger.warning(
+            f"[INDEXACAO] Fecho do Index não agendado (não fatal) para o "
+            f"processo {process.get('id')}: {exc}"
+        )
+        return {"agendado": False, "task_id": None, "motivo": "erro"}
+
+
 async def trigger_financial_engine_safe(process: dict, user: dict) -> dict[str, Any]:
     """Dispara o Motor de Simulação Financeira sem nunca bloquear a indexação.
 
@@ -562,6 +576,10 @@ async def run_mark_indexed_side_effects(
 
     financial_engine = await trigger_financial_engine_safe(process, user)
 
+    # Lote 12 (Fase 3): o fecho do Index (analisar o que falta, PDF limpo, notificar) corre em
+    # background e NUNCA condiciona a indexação, que já está gravada.
+    index_finalize = await agendar_finalizacao_sem_falhar(process, user)
+
     resposta = build_mark_indexed_response(
         process=process,
         process_id=process_id,
@@ -574,6 +592,7 @@ async def run_mark_indexed_side_effects(
         financial_engine=financial_engine,
     )
     resposta["index_release"] = index_release
+    resposta["index_finalize"] = index_finalize
     return resposta
 
 

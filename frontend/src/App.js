@@ -41,6 +41,8 @@ const ConsultorDashboard = React.lazy(() => import("./pages/ConsultorDashboard")
 const PartnerPortalRoutes = React.lazy(() => import("./pages/partner/PartnerPortalRoutes"));
 const KanbanPage = React.lazy(() => import("./pages/KanbanPage"));
 const ProcessDetails = React.lazy(() => import("./pages/ProcessDetails"));
+const IndexDashboardPage = React.lazy(() => import("./pages/index/IndexDashboardPage"));
+const IndexWorkstationPage = React.lazy(() => import("./pages/index/IndexWorkstationPage"));
 
 // ====================================================================
 // PÁGINAS COM CODE SPLITTING (lazy loading)
@@ -517,6 +519,29 @@ function App() {
             }
           />
           
+          {/* Módulo Index (Lote 12): fila + bancada. Os mesmos perfis que o servidor aceita em /api/index
+              (`PAPEIS_DE_IA_DO_INDEX`); consultor e intermediário nunca. */}
+          <Route
+            path="/index"
+            element={
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "diretor", "indexacao"]}>
+                <RouteBoundary name="Indexação">
+                  <IndexDashboardPage />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/index/:processId"
+            element={
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "diretor", "indexacao"]}>
+                <RouteBoundary name="Indexação do processo">
+                  <IndexWorkstationPage />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+
           {/* Visits Page - Staff and Admin */}
           <Route
             path="/visitas"

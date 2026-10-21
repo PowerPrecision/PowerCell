@@ -52,6 +52,7 @@ def _modulos_dos_routers():
     import routes.document_extraction as extraccao
     import routes.documents as documentos
     import routes.emails as emails
+    import routes.index_module as index_module
     import routes.onedrive as onedrive
     import routes.processes as processos
     import routes.storage as storage
@@ -64,6 +65,8 @@ def _modulos_dos_routers():
         # D-34 (fecho): comunicação, modelos e IA sobre o processo.
         "emails": emails, "templates": templates, "ai_analysis": ai_analysis,
         "document_extraction": extraccao,
+        # Lote 12 (Fase 3): o módulo Index escreve em `{process_id}` (analisar, editar, indexar).
+        "index_module": index_module,
     }
 
 

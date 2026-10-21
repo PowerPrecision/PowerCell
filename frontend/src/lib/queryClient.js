@@ -113,6 +113,16 @@ export const queryKeys = {
     servicoDoParceiro: (id) => [...queryKeys.processes.detail(id), 'servico-do-parceiro'],
   },
   
+  // Módulo Index (Lote 12). A chave leva o separador, a página e a pesquisa: chaves iguais
+  // exigem valores iguais (uma fila «pending» e uma de «reviews» nunca partilham entrada).
+  index: {
+    all: ['index'],
+    queueAll: () => [...queryKeys.index.all, 'queue'],
+    queue: (tab = 'pending', pagina = 1, pesquisa = '') => [...queryKeys.index.queueAll(), tab, pagina, pesquisa],
+    workstation: (processId) => [...queryKeys.index.all, 'workstation', processId],
+    employers: (texto = '') => [...queryKeys.index.all, 'employers', texto],
+  },
+
   // Histórico/Timeline
   history: {
     all: ['history'],

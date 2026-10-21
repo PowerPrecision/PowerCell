@@ -35,6 +35,8 @@ from services.s3_content_quarantine import exigir_conteudo_valido
 from services.document_upload import _auto_fulfill_portal_request
 from services.document_visibility import assert_can_upload_to_process
 from services.history import log_history
+from services.index_access import e_upload_do_index
+from services.index_finalize import agendar_analise_pos_indexacao
 from services.s3_storage import s3_service
 
 logger = logging.getLogger(__name__)
@@ -208,6 +210,11 @@ async def run_confirm_upload(
     category = plano.categoria
 
     file_content = None
+    if not plano.passa_pela_ia:
+        # Lote 12: upload a um processo JÁ indexado → análise do Index em background.
+        await agendar_analise_pos_indexacao(
+            process_id, user, s3_path=file_key, filename=normalized_filename,
+            client_name=client_name, categoria=category)
     if plano.passa_pela_ia:
         await registar_na_fila_da_ia(
             process_id=process_id,
@@ -215,6 +222,7 @@ async def run_confirm_upload(
             s3_path=file_key,
             filename=normalized_filename,
             origem="upload_directo",
+            carregado_pelo_index=e_upload_do_index(user),
         )
         try:
             file_content = await asyncio.to_thread(s3_service.get_file_content, file_key)

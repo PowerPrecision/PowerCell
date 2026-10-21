@@ -31,6 +31,8 @@ from services.document_filenames import (
     sanitize_for_log,
 )
 from services.document_visibility import assert_can_upload_to_process
+from services.index_access import e_upload_do_index
+from services.index_finalize import agendar_analise_pos_indexacao
 from services.document_process_resolve import (
     extract_second_client_name,
     resolve_process_from_flexible_id,
@@ -314,6 +316,13 @@ async def run_upload_file_s3(
         logger.warning(f"[UPLOAD] Erro ao gerar URL temporário: {e}")
         temporary_url = ""
 
+    if not plano.passa_pela_ia:
+        # Lote 12: um upload a um processo JÁ indexado lança a análise do Index (em background,
+        # sem nunca falhar o upload); só gasta IA em tipos analisáveis ainda não analisados.
+        await agendar_analise_pos_indexacao(
+            client_id, user, s3_path=s3_path, filename=normalized_filename,
+            client_name=client_name, categoria=category)
+
     if plano.passa_pela_ia:
         await registar_na_fila_da_ia(
             process_id=client_id,
@@ -321,6 +330,7 @@ async def run_upload_file_s3(
             s3_path=s3_path,
             filename=normalized_filename,
             origem=origem,
+            carregado_pelo_index=e_upload_do_index(user),
         )
         try:
             file_content_copy = bytes(file_content)

@@ -1306,6 +1306,31 @@ export const getProcessAlerts = (processId) =>
 // `skipErrorToast`: o separador mostra o erro no sítio; um toast global por cima seria ruído.
 export const getProcessAiLog = (processId, params = {}) =>
   api.get(`/processes/${processId}/ai-log`, { params, skipErrorToast: true });
+// ====================================================================
+// MÓDULO INDEX (Lote 12) — /api/index/*
+// ====================================================================
+// As leituras diagnosticam-se no ecrã (nunca um toast global por cima); as acções com recusa
+// esperada (403/422) também levam `skipErrorToast` para o ecrã dizer o motivo no sítio.
+export const getIndexQueue = (params = {}) =>
+  api.get("/index/queue", { params, skipErrorToast: true });
+export const getIndexWorkstation = (processId) =>
+  api.get(`/index/processes/${processId}`, { skipErrorToast: true });
+export const claimIndexProcess = (processId) =>
+  api.post(`/index/processes/${processId}/claim`, null, { skipErrorToast: true });
+export const releaseIndexProcess = (processId) =>
+  api.post(`/index/processes/${processId}/release`, null, { skipErrorToast: true });
+export const analyzeIndexProcess = (processId, force = false) =>
+  api.post(`/index/processes/${processId}/analyze`, { force }, { skipErrorToast: true });
+export const extractIndexProcess = (processId) =>
+  api.post(`/index/processes/${processId}/extract`, null, { skipErrorToast: true });
+export const editIndexJob = (processId, jobId, fields) =>
+  api.patch(`/index/processes/${processId}/professional-metadata/${jobId}`, { fields }, { skipErrorToast: true });
+export const dismissIndexAlert = (processId, alertId) =>
+  api.post(`/index/processes/${processId}/alerts/${alertId}/dismiss`, null, { skipErrorToast: true });
+export const markIndexProcessIndexed = (processId, employers = []) =>
+  api.post(`/index/processes/${processId}/mark-indexed`, { employers }, { skipErrorToast: true });
+export const searchIndexEmployers = (q) =>
+  api.get("/index/employers", { params: { q }, skipErrorToast: true });
 export const getAlertsByProcess = (processId) => 
   api.get(`/alerts/process/${processId}`);
 export const createDeedReminder = (processId, deedDate) => 
