@@ -303,11 +303,59 @@ _definir(
 )
 
 # ====================================================================
+# MÓDULO INDEX (Lote 12) — metadados profissionais, entidades, alertas, jobs
+# ====================================================================
+# Um documento de metadados por processo; a pesquisa por entidade fecha na rede
+# (`network_id`) — o trabalhador nunca atravessa redes, só a entidade (Decisão A).
+_definir(
+    "process_professional_metadata",
+    [
+        {"keys": [("process_id", 1)], "name": "idx_prof_meta_processo", "unique": True},
+        {"keys": [("network_id", 1), ("jobs.employer_nif.value", 1)], "name": "idx_prof_meta_rede_nif"},
+        {"keys": [("network_id", 1), ("has_pending_review", 1)], "name": "idx_prof_meta_rede_revisao"},
+    ],
+)
+# Directório global de entidades patronais: o NIF é a chave.
+_definir(
+    "employers",
+    [
+        {"keys": [("nif", 1)], "name": "idx_employers_nif", "unique": True},
+        {"keys": [("name_normalizado", 1)], "name": "idx_employers_nome"},
+    ],
+)
+# Alertas da matriz: um documento por alerta; lidos por processo, e substituídos por `run_id`.
+_definir(
+    "process_index_alerts",
+    [
+        {"keys": [("process_id", 1), ("created_at", -1)], "name": "idx_index_alerts_processo"},
+        {"keys": [("process_id", 1), ("run_id", 1)], "name": "idx_index_alerts_run"},
+    ],
+)
+# Um job do Index activo por (processo, tipo) — a lição do D-29. `index_job_key` só existe
+# enquanto o job corre (é retirado ao terminar), logo o índice parcial só vê os activos.
+_definir(
+    "task_logs",
+    [
+        {
+            "keys": [("index_job_key", 1)],
+            "name": "idx_index_job_activo_unico",
+            "unique": True,
+            "partialFilterExpression": {"index_job_key": {"$type": "string"}},
+        },
+    ],
+)
+
+# ====================================================================
 # ÍNDICES PARA COLECÇÃO 'processes'
 # ====================================================================
 _definir(
     "processes",
     [
+        # Módulo Index (Lote 12): as duas abas do dashboard («Fila de Espera» e «Revisões Pendentes»).
+        # Prefixo mais presente primeiro: a rede abre sempre a consulta.
+        {"keys": [("network_id", 1), ("index_status", 1), ("created_at", -1)], "name": "idx_index_fila"},
+        {"keys": [("network_id", 1), ("has_pending_review", 1), ("indexed_at", -1)], "name": "idx_index_revisoes"},
+
         # Índice no status - muito usado em filtros e dashboard
         {"keys": [("status", 1)], "name": "idx_status"},
         

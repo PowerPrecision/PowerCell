@@ -1,7 +1,8 @@
 # Módulo Index (Lote 12) — Arquitetura técnica
 
-Estado: **proposta para aprovação** (nada disto está implementado). Escrita sobre o código que existe hoje; onde o pedido
-colide com ele, está assinalado em **⚠ Decisão** e as perguntas que bloqueiam estão na secção 9.
+Estado: **aprovada (Out 2026). Fases 1 (Dados) e 2 (Motor) implementadas; 3 (Endpoints+RBAC), 4 (Frontend) e 5
+(Sanitização+purga) por fazer.** Escrita sobre o código que existe hoje; onde o pedido colide com ele, está assinalado em
+**⚠ Decisão**. As divergências entre o desenho inicial e o que ficou implementado estão na secção 10.
 
 ## 0. Princípios (vindos do pedido e das respostas anteriores)
 
@@ -323,3 +324,55 @@ devolve metadados da rede B; o consultor e o intermediário recebem 403 nas rota
 4. **Retenção** dos metadados profissionais (salário líquido, cargo): prazo? *Proposta: o mesmo do processo; TTL por `expire_at`.*
 5. **Identificação sem NIF** (passaporte, título de residência): quando o NIF do titular só vier do recibo/ficha, a IA
    propõe-o com `needs_review=true`, correcto?
+
+## 10. O que ficou implementado nas Fases 1 e 2 — e onde divergiu do desenho (Out 2026)
+
+**Fase 1 — Dados.** `services/index_status.py` (ponto único, derivação pura `derivar_estado`/`estado_apos`, `reivindicar`/
+`devolver_a_fila`, `condicao_da_fila`, contadores), `models/index_module.py` (`CampoRevisavel`, `TrabalhoProfissional`,
+`ProfessionalMetadata`, `Entidade`, `AlertaDaMatriz`, tabela `ALERTAS`), colecções e índices em `db_indexes.py`,
+`scripts/migrar_index_status.py` (omissão só lê; `--aplicar`; idempotente; concorrência optimista). Os escritores de
+`skip_index` (`aplicar_regime_de_indexacao` — o gancho dos cinco escritores de processos —, `process_update`, a triagem B2B) e de
+`is_indexed` (`process_indexing`) passam todos pelo ponto único; guarda por AST proíbe um `index_status` escrito à mão.
+
+Divergências:
+
+1. **`is_indexed` NÃO é `index_status == "indexed"` para os dispensados.** O desenho dizia-o; aplicado aos processos de Via
+   Verde / rede sem Index viraria `is_indexed` para `True` em todos e mudava, sem erro, o que as listas de «por indexar», o
+   filtro e a fila do indexador devolvem. Fica `indexed` + `index_skipped=True` e `is_indexed` só é verdadeiro quando uma
+   PESSOA indexou.
+2. **Datas em ISO-8601 (texto)** nos campos de `processes` (como o resto da colecção), `datetime` nas colecções novas.
+3. **Legado sem `index_status` lê-se como a derivação dá** (`condicao_da_fila` tolera o campo ausente): a migração é
+   conveniência, não pré-requisito do deploy.
+4. **Job activo único** por `task_logs.index_job_key` (índice único parcial `idx_index_job_activo_unico`), retirado ao terminar;
+   um job morto liberta-se passados 30 minutos. Não há colecção nova de jobs.
+
+**Fase 2 — Motor.** `services/index_ai.py` (esquemas por tipo, normalizadores, impressão digital, simulação),
+`index_matrix.py` (pura), `index_store.py` (persistência), `index_jobs.py` (job + notificação).
+
+Divergências e decisões:
+
+1. **Nada pessoal do cliente é pedido ao modelo nem guardado** (decisão do dono do produto: «não preciso que os dados pessoais
+   do cliente fiquem guardados»). Da identificação só saem o subtipo (`cc`/`bi`/`passaporte`/`titulo_residencia`, sempre na
+   categoria «Identificação») e se está expirada; do recibo, a entidade patronal (NIF e nome), o cargo, o tipo de contrato e o
+   líquido; do extrato, números e datas — a contraparte de um movimento reduz-se a uma impressão digital de 12 hex (para
+   detectar «a mesma pessoa várias vezes») e o texto morre à entrada. **Consequência:** o ponto 5 da Luz Verde («identificação
+   sem NIF → null + needs_review») aplica-se ao «Extrair dados» para a ficha (que já revê tudo), não aos metadados do Index.
+2. **Os factos numéricos de cada ficheiro vivem em `document_metadata.index_facts`** (e o trabalho em `index_job`), não só em
+   memória: a matriz cruza recibos com extratos e um ficheiro saltado por impressão digital continua a ter de contar. Os
+   metadados profissionais são **recalculados** a partir deles em cada corrida (idempotente; um recibo apagado deixa de contar),
+   e as edições humanas (`edited_by_human`) sobrevivem, casando por `job_id` OU documentos de origem em comum.
+3. **A impressão digital é do CONTEÚDO**, não do caminho: o ficheiro lê-se do S3 (barato) e é o `sha256` que decide se há
+   chamada paga. Um ficheiro substituído no mesmo caminho volta a ser analisado.
+4. **Só entra no directório global de entidades** um NIF válido (dígito de controlo), com nome, e sem dúvida (ou confirmado por
+   uma pessoa): um NIF mal lido não pode poluir o que todos os Index pesquisam. O primeiro nome ganha.
+5. **Códigos de alerta acrescentados à tabela:** `saldo_nao_bate`, `extrato_em_falta` (informativo — falta de prova não é
+   prova de falta), `analise_falhou` (informativo). Os achados da IA sobre extratos só valem se o valor (e a data) existirem num
+   movimento; recorrência e saldo recalculam-se em código.
+6. **Modelo:** tarefa `index_analysis` no painel de IA (`config.AI_CONFIG_DEFAULTS`); dev simula (`INDEX_AI_PROVIDER`).
+7. **Ainda NÃO ligado:** os gatilhos automáticos (`mark-indexed` e upload depois de indexado — hoje a IA corre à entrada na
+   pasta `Index`), os endpoints `/api/index/*`, o RBAC do perfil Index nas rotas de IA, o frontend, a sanitização e a purga.
+   `iniciar_analise(process_id, user, force=, gatilho=)` é o ponto de entrada que a Fase 3 liga.
+
+**Por resolver antes da Fase 5** (as respostas do dono contradizem-se): PDF limpo **um por ficheiro original** (resposta às
+perguntas, «só os carregados pelo Index precisam de ser limpos») ou **agrupado por categoria** (`recibos.pdf`, Luz Verde); e
+período de graça de **30 dias** ou **7**.
