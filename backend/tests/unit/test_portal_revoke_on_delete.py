@@ -59,7 +59,9 @@ class TestReconstrucaoDoPedido:
         assert estado["status"] == "REQUESTED"
         assert estado["attached_files"] == []
 
-    def test_pedido_de_tres_com_um_apagado_volta_a_pendente(self):
+    def test_pedido_de_tres_com_um_apagado_continua_recebido(self):
+        # Regra revista (Out 2026): a quantidade é uma RECOMENDAÇÃO. Apagar 1
+        # de 3 recibos não reabre o pedido — só ficar SEM ficheiros o reabre.
         estado = rebuild_after_removal(
             {
                 "status": "RECEIVED",
@@ -72,7 +74,7 @@ class TestReconstrucaoDoPedido:
             },
             removidos=[CAMINHO],
         )
-        assert estado["status"] == "REQUESTED"
+        assert estado["status"] == "RECEIVED"
         assert estado["uploaded_count"] == 2
 
     def test_pedido_ainda_satisfeito_mantem_se_recebido(self):

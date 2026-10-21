@@ -97,6 +97,7 @@ async def run_get_portal_status(client_data: dict):
                     # um nome. Este `entry` serve as DUAS listas.
                     "attached_files": d.get("attached_files") or [],
                     "expected_count": parse_expected_count(d),
+                    "suggested_count": parse_expected_count(d),
                     "uploaded_count": len(d.get("attached_files") or []),
                 }
                 if status in ("REQUESTED", "PENDING"):
@@ -259,6 +260,7 @@ async def run_get_portal_status(client_data: dict):
             # O progresso pedido/entregue, pela MESMA regra do resto do
             # sistema (nunca uma contagem escrita à mão aqui).
             "expected_count": parse_expected_count(doc),
+            "suggested_count": parse_expected_count(doc),
             "uploaded_count": len(doc.get("attached_files") or []),
         })
 
@@ -295,6 +297,7 @@ async def run_get_portal_status(client_data: dict):
             # RECENTE. Sem o array, um pedido com 5 ficheiros mostrava um.
             "attached_files": doc.get("attached_files") or [],
             "expected_count": parse_expected_count(doc),
+            "suggested_count": parse_expected_count(doc),
             "uploaded_count": len(doc.get("attached_files") or []),
         })
 
@@ -334,6 +337,7 @@ async def run_get_portal_status(client_data: dict):
             # saber de que lista veio para decidir se pode ler estes campos
             # é a bifurcação que produz o próximo esquecimento.
             "expected_count": parse_expected_count(doc),
+            "suggested_count": parse_expected_count(doc),
             "uploaded_count": len(doc.get("attached_files") or []),
         })
 
@@ -399,6 +403,7 @@ async def run_get_portal_status(client_data: dict):
                         # poupa à UI a distinção entre "não há" e "não sei".
                         "attached_files": [],
                         "expected_count": parse_expected_count(item),
+                        "suggested_count": parse_expected_count(item),
                         "uploaded_count": 0,
                     })
 

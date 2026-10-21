@@ -428,8 +428,8 @@ async def _generate_document_requests_for_list(
             continue
         # BUGFIX (E2E — lógica de quantidade, Set 2026): grava a quantidade
         # pedida (checklist SystemConfig, campo opcional `quantity`, int>=1)
-        # como `expected_count` — o pedido só fica RECEIVED quando o número
-        # de ficheiros carregados atingir esta quantidade.
+        # como `expected_count`. Desde Out 2026 é só a quantidade RECOMENDADA:
+        # o pedido fica RECEIVED no 1.º ficheiro (ver `document_portal_counts`).
         expected_count = parse_expected_count(item)
         doc = {
             "id": str(uuid.uuid4()),

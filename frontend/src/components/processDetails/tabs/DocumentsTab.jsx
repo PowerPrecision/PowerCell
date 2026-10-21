@@ -154,6 +154,7 @@ export default function DocumentsTab({
         clientName={process?.client_name}
         onDocumentsChange={() => setDocumentsRefreshKey(k => k + 1)}
         readOnly={processoFechado}
+        podeVerDocumentos={process?.pode_ver_documentos}
       />
     </div>
   );
