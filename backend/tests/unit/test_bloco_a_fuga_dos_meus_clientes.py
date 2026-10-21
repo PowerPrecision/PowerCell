@@ -410,6 +410,7 @@ SEM_CONDICAO_DE_REDE_POR_DESENHO = {
     "partner_portal_read.py": "âmbito do parceiro por relação ∧ rede",
     "ai_bulk_cache_ops.py": "cache de NIF; a lista de revisões pendentes aplica a rede",
     "document_expiry_crud.py": "criação por id; as listagens aplicam a rede",
+    "index_status_migration.py": "migração de operações (script, corre contra produção de propósito): lê o estado de TODOS os processos para o derivar; só escreve estado de indexação e nunca devolve dados a ninguém",
 }
 
 
