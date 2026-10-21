@@ -152,10 +152,15 @@ class TestBuildStaffProcessDoc:
 
 
 class TestCreateClientGuards:
-    def test_role_blocks_indexacao(self):
+    def test_role_allows_indexacao(self):
+        # INVERTIDO (Out 2026): o Index é um perfil interno de data entry e cria processos como o
+        # consultor e o diretor. A porta do serviço pergunta ao registo de capacidades.
+        assert_can_create_staff_process(UserRole.INDEXACAO)
+
+    def test_role_blocks_parceiro(self):
         from fastapi import HTTPException
         try:
-            assert_can_create_staff_process(UserRole.INDEXACAO)
+            assert_can_create_staff_process(UserRole.PARCEIRO)
             assert False
         except HTTPException as e:
             assert e.status_code == 403

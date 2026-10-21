@@ -240,3 +240,26 @@ describe("tipoDeFicheiro e empresaDoCaso (Out 2026)", () => {
     expect(empresaDoCaso(null)).toBeNull();
   });
 });
+
+describe("notas do parceiro", () => {
+  it("só se escreve num processo aberto", async () => {
+    const { podeEscreverNotas } = await import("./partnerPortal");
+    expect(podeEscreverNotas({ kind: "process", etapa: "novo" })).toBe(true);
+    expect(podeEscreverNotas({ kind: "process", etapa: "analise" })).toBe(true);
+    expect(podeEscreverNotas({ kind: "process", etapa: "concluido" })).toBe(false);
+    expect(podeEscreverNotas({ kind: "process", etapa: "perdido" })).toBe(false);
+    expect(podeEscreverNotas({ kind: "lead", etapa: "lead" })).toBe(false);
+    expect(podeEscreverNotas(null)).toBe(false);
+    expect(podeEscreverNotas({})).toBe(false);
+  });
+
+  it("validarNota: vazia e comprida são recusadas, o resto passa", async () => {
+    const { MAX_CARACTERES_DA_NOTA, validarNota } = await import("./partnerPortal");
+    expect(validarNota("")).not.toBe("");
+    expect(validarNota("   \n ")).not.toBe("");
+    expect(validarNota(undefined)).not.toBe("");
+    expect(validarNota("x".repeat(MAX_CARACTERES_DA_NOTA + 1))).not.toBe("");
+    expect(validarNota("x".repeat(MAX_CARACTERES_DA_NOTA))).toBe("");
+    expect(validarNota(" olá ")).toBe("");
+  });
+});

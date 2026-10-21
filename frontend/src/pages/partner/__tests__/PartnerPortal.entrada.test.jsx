@@ -28,6 +28,7 @@ vi.mock("@/services/partnerApi", () => ({
   enviarFicheiro: vi.fn(),
   obterFormularioDoCliente: vi.fn(),
   guardarFormularioDoCliente: vi.fn(),
+  escreverNota: vi.fn(),
 }));
 
 import * as api from "@/services/partnerApi";

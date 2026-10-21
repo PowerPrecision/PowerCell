@@ -500,7 +500,7 @@ async def run_get_case(partner: dict, case_id: str) -> dict:
         base = dto_do_processo(caso.process, etapa)
         # As notas da equipa são só do DETALHE (e só de um processo: uma lead
         # ainda não tem equipa a escrever nelas).
-        base["notas_da_equipa"] = notas_da_equipa(caso.process)
+        base["notas_da_equipa"] = notas_da_equipa(caso.process, partner["id"])
     else:
         base = dto_da_lead(caso.client)
 

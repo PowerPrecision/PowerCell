@@ -286,13 +286,19 @@ async def link_clients_after_process_create(
         )
 
 
-def assert_can_create_staff_process(role: str) -> None:
-    """Roles permitidos em POST /create-client (role EFECTIVA — Pacote 9)."""
-    allowed = [
-        UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
-        UserRole.INTERMEDIARIO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR,
-    ]
-    if role not in allowed:
+def assert_can_create_staff_process(role: str, user: Optional[dict] = None) -> None:
+    """Quem pode criar um processo de staff (role EFECTIVA — Pacote 9).
+
+    A pergunta é a MESMA da rota (`exigir_capacidade("PROCESS_CREATE")`): ao registo de capacidades.
+    Esta função tinha a sua própria lista de papéis escrita à mão e as duas portas divergiram — o
+    Index passou a poder criar na rota e continuaria a levar 403 aqui. Com `user`, os overrides
+    pessoais valem como na rota; sem ele, valem as omissões do cargo.
+    """
+    from services.capability_gate import tem_capacidade
+
+    papel = str(getattr(role, "value", role) or "").strip().lower()
+    sujeito = user if user is not None else {}
+    if not papel or not tem_capacidade(sujeito or {"id": "?"}, "PROCESS_CREATE", papel=papel):
         raise HTTPException(
             status_code=403,
             detail="Não tem permissão para criar clientes/processos.",
@@ -553,7 +559,7 @@ async def assemble_staff_create_bundle(
     from services.tenant_network import resolve_tenant_stamp
 
     # PACOTE 9 — validar com o cargo EFECTIVO (multi-perfil).
-    assert_can_create_staff_process(user.get("effective_role") or user.get("role", ""))
+    assert_can_create_staff_process(user.get("effective_role") or user.get("role", ""), user=user)
     assert_client_id_required(getattr(data, "client_id", None))
 
     is_lead = bool(getattr(data, "is_lead", False))

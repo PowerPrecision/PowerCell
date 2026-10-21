@@ -636,7 +636,7 @@ class TestNotasDaEquipaNoDetalhe:
         ]
         caso = await ppr.run_get_case(PT1, "a-novo")
         assert "USER-INTERNO-1" not in repr(caso)
-        assert all(set(n) == {"id", "text", "created_at", "author_name"} for n in caso["notas_da_equipa"])
+        assert all(set(n) == {"id", "text", "created_at", "author_name", "do_parceiro", "e_minha"} for n in caso["notas_da_equipa"])
 
     async def test_um_parceiro_que_nao_e_o_dono_nao_as_ve(self, com_bd):
         import services.partner_portal_read as ppr

@@ -88,6 +88,9 @@ export const pedirUrlDeEnvio = (caseId, body) =>
   dados(partnerHttp.post(`/cases/${encodeURIComponent(caseId)}/upload-url`, body));
 export const confirmarEnvio = (caseId, body) =>
   dados(partnerHttp.post(`/cases/${encodeURIComponent(caseId)}/confirm-upload`, body));
+/** O parceiro escreve uma nota no SEU processo (entra no feed «Observações» da equipa). */
+export const escreverNota = (caseId, text) =>
+  dados(partnerHttp.post(`/cases/${encodeURIComponent(caseId)}/notes`, { text }));
 export const obterUrlDeDescarga = (caseId, fileId) =>
   dados(
     partnerHttp.get(

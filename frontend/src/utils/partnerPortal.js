@@ -21,6 +21,10 @@ export const TIPOS_ACEITES_NO_PARCEIRO = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
 export const ETAPA_LEAD = "lead";
 export const ETAPA_CONCLUIDO = "concluido";
 export const ETAPA_PERDIDO = "perdido";
+/** O processo fechou (escriturado ou perdido): o servidor já não aceita notas. */
+export const ETAPAS_DE_PROCESSO_FECHADO = ["concluido", "perdido"];
+/** Tecto da nota — o mesmo do servidor (`MAX_CARACTERES_DA_NOTA`). */
+export const MAX_CARACTERES_DA_NOTA = 2000;
 // O filtro de viabilidade: a lead fica RETIDA do lado do parceiro até haver
 // um Comprovativo de Pagamento.
 export const ETAPA_PENDENTE = "pendente";
@@ -107,6 +111,19 @@ export function normalizarCaso(resposta) {
       (c) => c && typeof c === "object" && texto(c.value)
     ),
   };
+}
+
+/** O parceiro pode escrever uma nota neste caso? Só num processo (não numa lead) e enquanto aberto. */
+export function podeEscreverNotas(caso) {
+  return caso?.kind === "process" && !ETAPAS_DE_PROCESSO_FECHADO.includes(caso?.etapa);
+}
+
+/** Erro de uma nota antes de a enviar; vazio = pode enviar (a validação real é a do servidor). */
+export function validarNota(textoDaNota) {
+  const t = texto(textoDaNota).trim();
+  if (!t) return "Escreva a nota.";
+  if (t.length > MAX_CARACTERES_DA_NOTA) return `A nota não pode ter mais de ${MAX_CARACTERES_DA_NOTA} caracteres.`;
+  return "";
 }
 
 /** A lead está retida (pendente ou devolvida): falta o Comprovativo de Pagamento. */

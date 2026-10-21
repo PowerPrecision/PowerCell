@@ -187,7 +187,9 @@ ROLE_CAPABILITY_DEFAULTS: Dict[str, Dict[str, bool]] = {
     },
     
     "indexacao": {
-        "PROCESS_CREATE": False, "PROCESS_EDIT": False,      "PROCESS_DELETE": False,
+        # Out 2026: o Index é um perfil interno (data entry) e cria processos como o consultor e o
+        # diretor — a rota `POST /processes/create-client` e o serviço perguntam a ESTE registo.
+        "PROCESS_CREATE": True,  "PROCESS_EDIT": False,      "PROCESS_DELETE": False,
         "PROCESS_VIEW_ALL": True, "PROCESS_EXPORT": False,   "PROCESS_ASSIGN": True,
         "CLIENT_CREATE": True,   "CLIENT_EDIT": True,        "CLIENT_DELETE": False,
         "CLIENT_VIEW_ALL": True, "CLIENT_EXPORT": False,

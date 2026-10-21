@@ -30,6 +30,7 @@ import {
   normalizarCaso,
   separarDocumentos,
   variantDaEtapa,
+  podeEscreverNotas,
 } from "@/utils/partnerPortal";
 
 /** O aviso do estado da lead — o que o parceiro tem de fazer a seguir. */
@@ -160,7 +161,7 @@ export default function PartnerCasePage() {
 
       <AvisoDaLead caso={caso} />
 
-      {!eLead && <NotasDaEquipa notas={caso.notas_da_equipa} />}
+      {!eLead && <NotasDaEquipa notas={caso.notas_da_equipa} caseId={caso.id} podeEscrever={podeEscreverNotas(caso)} />}
 
       {eLead ? (
         <Tabs defaultValue="documentos" className="space-y-4">
