@@ -7,6 +7,7 @@
  *
  * Um erro de LEITURA nunca se apresenta como «fila vazia»: diz-se, com «Tentar de novo».
  */
+import { useMemo } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ClipboardCheck, RefreshCw, Search } from "lucide-react";
 
@@ -19,10 +20,23 @@ import { Tabs, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Skeleton } from "../../components/ui/skeleton";
 import { PageHeader } from "../../components/shared/PageHeader";
 import Paginacao from "../../components/shared/Paginacao";
+import { FiltrosDaFila } from "../../components/index/FiltrosDaFila";
 import { IndexQueueTable } from "../../components/index/IndexQueueTable";
 import { CODEC_NUMERO, useEstadoNaUrl, useTextoNaUrl } from "../../hooks/useEstadoNaUrl";
 import { useIndexQueueQuery } from "../../hooks/queries/useIndexQueries";
-import { SEPARADORES, SEPARADOR_OMISSAO, separadorValido } from "../../utils/indexRevisao";
+import {
+  ORDENACAO_POR_OMISSAO,
+  SEPARADORES,
+  SEPARADOR_OMISSAO,
+  filtrosDaFila,
+  ordenacaoValida,
+  proximaOrdenacao,
+  separadorValido,
+  totalDeFiltrosLigados,
+} from "../../utils/indexRevisao";
+
+/** Campo do ecrã → parâmetro do URL. */
+const PARAMETRO_DO_URL = { ordem: "idx_sort", estado: "idx_status", empresa: "idx_company", origem: "idx_origin" };
 
 export default function IndexDashboardPage() {
   const navigate = useNavigate();
@@ -34,7 +48,36 @@ export default function IndexDashboardPage() {
   // a consulta usa o valor já ASSENTE no URL, não o que se está a escrever
   const [pesquisa] = useEstadoNaUrl("idx_q", "");
 
-  const fila = useIndexQueueQuery({ tab: separador, page: pagina, q: pesquisa });
+  // ordem e filtros vivem no URL: «Voltar» a partir da bancada devolve a lista como estava
+  const [ordemCrua] = useEstadoNaUrl(PARAMETRO_DO_URL.ordem, "");
+  const [estadoCru] = useEstadoNaUrl(PARAMETRO_DO_URL.estado, "");
+  const [empresaCrua] = useEstadoNaUrl(PARAMETRO_DO_URL.empresa, "");
+  const [origemCrua] = useEstadoNaUrl(PARAMETRO_DO_URL.origem, "");
+  const ordem = ordenacaoValida(separador, ordemCrua);
+  const filtros = useMemo(
+    () => filtrosDaFila(separador, { estado: estadoCru, empresa: empresaCrua, origem: origemCrua }),
+    [separador, estadoCru, empresaCrua, origemCrua],
+  );
+
+  const fila = useIndexQueueQuery({ tab: separador, page: pagina, q: pesquisa, ordem, filtros });
+
+  // UMA só escrita no URL (ver `mudarSeparador`): `alteracoes` = `{ordem?, estado?, empresa?, origem?}`.
+  // O valor por omissão (a ordem da aba, «todos») não vai para o URL, e outra lista começa na página 1.
+  const escrever = (alteracoes) =>
+    setParametros(
+      (anterior) => {
+        const seguinte = new URLSearchParams(anterior);
+        for (const [campo, valor] of Object.entries(alteracoes)) {
+          const chave = PARAMETRO_DO_URL[campo];
+          const omissao = campo === "ordem" ? ORDENACAO_POR_OMISSAO[separador] : "";
+          if (!valor || valor === omissao) seguinte.delete(chave);
+          else seguinte.set(chave, valor);
+        }
+        seguinte.delete("idx_p");
+        return seguinte;
+      },
+      { replace: true },
+    );
 
   // UMA só escrita no URL: duas chamadas funcionais seguidas (`setSeparador` e `setPagina(1)`)
   // partem ambas do URL do render actual e a segunda pisava a primeira — o separador nunca mudava.
@@ -45,6 +88,9 @@ export default function IndexDashboardPage() {
         if (valor === SEPARADOR_OMISSAO) seguinte.delete("idx_tab");
         else seguinte.set("idx_tab", valor);
         seguinte.delete("idx_p"); // outra lista começa na página 1
+        // a ordem e o estado são de cada aba (`indexed_*` só existe nas Revisões; os estados diferem)
+        seguinte.delete(PARAMETRO_DO_URL.ordem);
+        seguinte.delete(PARAMETRO_DO_URL.estado);
         return seguinte;
       },
       { replace: true },
@@ -76,6 +122,15 @@ export default function IndexDashboardPage() {
             ))}
           </TabsList>
         </Tabs>
+
+        <FiltrosDaFila
+          separador={separador}
+          ordem={ordem}
+          filtros={filtros}
+          empresas={fila.empresas}
+          onMudar={(campo, valor) => escrever({ [campo]: valor })}
+          onLimpar={() => escrever({ estado: "", empresa: "", origem: "" })}
+        />
 
         <Input
           value={pesquisaEscrita}
@@ -112,6 +167,9 @@ export default function IndexDashboardPage() {
                 <IndexQueueTable
                   itens={fila.itens}
                   separador={separador}
+                  ordem={ordem}
+                  onOrdenar={(coluna) => escrever({ ordem: proximaOrdenacao(separador, ordem, coluna) })}
+                  comFiltros={totalDeFiltrosLigados(filtros) > 0 || Boolean(pesquisa)}
                   onAbrir={(id) => navigate(`/index/${id}`)}
                 />
                 <Paginacao

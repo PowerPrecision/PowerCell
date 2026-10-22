@@ -221,11 +221,116 @@ export function rotuloDoTipoDeAnalise(tipo) {
   return TIPO_DE_ANALISE_ROTULO[tipo] || null;
 }
 
+// ====================================================================
+// ORDENAÇÃO E FILTROS DA FILA (Out 2026) — iguais às listas fechadas do servidor (`index_queue_query`)
+// ====================================================================
+/** Ordem por omissão de cada aba: o que o ecrã mostrava antes de haver ordenação. */
+export const ORDENACAO_POR_OMISSAO = Object.freeze({ pending: "created_asc", reviews: "indexed_desc" });
+
+const ROTULOS_DA_ORDENACAO = Object.freeze({
+  created: ["Entrada · mais antigos primeiro", "Entrada · mais recentes primeiro"],
+  indexed: ["Indexado em · mais antigos primeiro", "Indexado em · mais recentes primeiro"],
+  client: ["Cliente · A → Z", "Cliente · Z → A"],
+  number: ["Nº do processo · crescente", "Nº do processo · decrescente"],
+  company: ["Empresa · A → Z", "Empresa · Z → A"],
+  status: ["Estado · A → Z", "Estado · Z → A"],
+  alerts: ["Alertas · menos primeiro", "Alertas · mais primeiro"],
+});
+
+/** `indexed` só existe nas Revisões (os processos por indexar não têm data de indexação). */
+function camposDaAba(aba) {
+  const comuns = ["client", "number", "company", "status", "alerts"];
+  return aba === "reviews" ? ["indexed", ...comuns] : ["created", ...comuns];
+}
+
+/** As opções do seletor «Ordenar por»: `[{valor: "client_asc", rotulo}]`. */
+export function opcoesDeOrdenacao(aba) {
+  return camposDaAba(aba).flatMap((campo) => [
+    { valor: `${campo}_asc`, rotulo: ROTULOS_DA_ORDENACAO[campo][0] },
+    { valor: `${campo}_desc`, rotulo: ROTULOS_DA_ORDENACAO[campo][1] },
+  ]);
+}
+
+/** Uma ordem que a aba não aceita (URL escrito à mão, aba trocada) cai na por omissão — nunca num 422. */
+export function ordenacaoValida(aba, valor) {
+  const omissao = ORDENACAO_POR_OMISSAO[aba] || ORDENACAO_POR_OMISSAO.pending;
+  return opcoesDeOrdenacao(aba).some((o) => o.valor === valor) ? valor : omissao;
+}
+
+/** A coluna → o campo de ordenação (a coluna da data muda de campo com a aba). */
+export function campoDaColuna(aba, coluna) {
+  if (coluna === "data") return aba === "reviews" ? "indexed" : "created";
+  return { processo: "client", empresa: "company", estado: "status", alertas: "alerts" }[coluna] || null;
+}
+
+/** `aria-sort` de uma coluna, dada a ordem em vigor. */
+export function sentidoDaColuna(aba, ordem, coluna) {
+  const campo = campoDaColuna(aba, coluna);
+  const [atual, sentido] = String(ordem || "").split("_");
+  if (!campo || atual !== campo) return "none";
+  return sentido === "desc" ? "descending" : "ascending";
+}
+
+/**
+ * A ordem a pedir quando se carrega no cabeçalho de uma coluna: noutra coluna começa pelo sentido natural
+ * (alertas: os mais primeiro; datas e texto: ascendente), na mesma coluna inverte.
+ */
+export function proximaOrdenacao(aba, ordem, coluna) {
+  const campo = campoDaColuna(aba, coluna);
+  if (!campo) return ordenacaoValida(aba, ordem);
+  const [atual, sentido] = String(ordem || "").split("_");
+  if (atual === campo) return `${campo}_${sentido === "asc" ? "desc" : "asc"}`;
+  return `${campo}_${campo === "alerts" ? "desc" : "asc"}`;
+}
+
+/** Estados que cada aba pode ter (o servidor recusa os outros com 422). */
+export const ESTADOS_DA_ABA = Object.freeze({ pending: ["pending", "in_review"], reviews: ["indexed"] });
+export const ORIGENS_DA_FILA = Object.freeze([
+  { valor: "own", rotulo: "Da minha rede" },
+  { valor: "shared", rotulo: "Partilhados por outra" },
+]);
+
+/** Os filtros do URL, saneados para a aba: o que a aba não aceita desaparece (nunca vai ao servidor). */
+export function filtrosDaFila(aba, { estado = "", empresa = "", origem = "" } = {}) {
+  return {
+    estado: (ESTADOS_DA_ABA[aba] || []).includes(estado) ? estado : "",
+    empresa: typeof empresa === "string" ? empresa.trim().slice(0, 64) : "",
+    origem: ORIGENS_DA_FILA.some((o) => o.valor === origem) ? origem : "",
+  };
+}
+
+/** Quantos filtros estão ligados (a ordem não conta: não esconde linhas). */
+export function totalDeFiltrosLigados(filtros) {
+  return ["estado", "empresa", "origem"].filter((k) => Boolean(filtros?.[k])).length;
+}
+
+/**
+ * Os parâmetros do pedido da fila. Só leva o que se afasta da omissão (`sort_by` por omissão é o do servidor):
+ * um URL limpo é o estado limpo.
+ */
+export function parametrosDaFila({ tab, page, q, ordem, filtros }) {
+  const params = { tab, page, q: q || undefined };
+  if (ordem && ordem !== ORDENACAO_POR_OMISSAO[tab]) params.sort_by = ordem;
+  if (filtros?.estado) params.index_status = filtros.estado;
+  if (filtros?.empresa) params.company_id = filtros.empresa;
+  if (filtros?.origem) params.origin = filtros.origem;
+  return params;
+}
+
 /** A fila do servidor, com a forma garantida. `total` e `itens` derivam do que chegou. */
 export function normalizarFila(dados) {
   const itens = listaDoServidor(dados?.items);
   const total = Number.isFinite(Number(dados?.total)) ? Number(dados.total) : itens.length;
-  return { itens, total, pagina: Number(dados?.page) || 1, tamanho: Number(dados?.size) || itens.length };
+  const empresas = listaDoServidor(dados?.facets?.companies)
+    .filter((e) => e && typeof e.id === "string" && e.id)
+    .map((e) => ({ id: e.id, nome: e.name || e.id, total: Number(e.count) || 0 }));
+  return {
+    itens,
+    total,
+    pagina: Number(dados?.page) || 1,
+    tamanho: Number(dados?.size) || itens.length,
+    empresas,
+  };
 }
 
 /** A bancada do servidor, com a forma garantida (listas `Array.isArray`, objectos com recuo). */

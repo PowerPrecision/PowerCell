@@ -600,6 +600,97 @@ async def reconstruir_documentos_do_index(process_id: str, network_id: Optional[
         return 0
 
 
+# ====================================================================
+# ARQUIVO HISTÓRICO (importação de ZIPs, Out 2026)
+# ====================================================================
+#: Prefixo do `process_id` ARTIFICIAL das linhas históricas: não há processo nem cliente por detrás.
+PREFIXO_DO_PROCESSO_HISTORICO = "historical_import_"
+
+
+def processo_historico(import_id: str) -> str:
+    return f"{PREFIXO_DO_PROCESSO_HISTORICO}{import_id}"
+
+
+def linha_historica(
+    resultado: ResultadoDaAnalise, *, document_id: str, import_id: str, network_id: str, label: Optional[str] = None
+) -> Optional[dict]:
+    """A linha pesquisável de UM documento do arquivo histórico, ou `None` (não é um tipo pesquisável). PURA.
+
+    Passa pela MESMA `projectar_documento` dos documentos do CRM: o que a pesquisa lê não pode divergir entre
+    os dois mundos. Acrescenta só o que distingue o arquivo — `historical`, `import_id` e a etiqueta — e **nada
+    pessoal**: nem o nome do ficheiro nem o caminho no ZIP (levam o nome do cliente), nem o IBAN. Sem rede não
+    há linha: uma linha histórica sem rede não teria quem a visse e, pior, daria vontade de a «tolerar».
+    """
+    if not network_id:
+        return None
+    pseudo = {
+        "id": document_id,
+        "index_facts": resultado.factos,
+        "index_job": resultado.job.model_dump(mode="json") if resultado.job is not None else None,
+    }
+    linha = projectar_documento(pseudo, process_id=processo_historico(import_id), network_id=network_id)
+    if linha is None:
+        return None
+    linha.update(historical=True, import_id=import_id, import_label=(label or None))
+    return linha
+
+
+async def ids_historicos_existentes(ids: Iterable[str]) -> set[str]:
+    """Dos ids dados, os que JÁ estão no arquivo (para não pagar duas vezes a leitura do mesmo ficheiro)."""
+    ids = [i for i in ids if i]
+    if not ids:
+        return set()
+    achados = await db.process_index_documents.find(
+        {"id": {"$in": ids}, "historical": True}, {"_id": 0, "id": 1}
+    ).to_list(len(ids))
+    return {a["id"] for a in achados}
+
+
+async def gravar_documento_historico(linha: dict) -> bool:
+    """Grava a linha se ainda não existe (idempotente). `True` se foi INSERIDA. Nunca sobrescreve uma existente."""
+    if not linha.get("historical") or not linha.get("network_id") or not linha.get("import_id"):
+        raise ValueError("só se gravam linhas históricas com rede e com importação (sem ela não se desfaz)")
+    linha = {**linha, "updated_at": _agora()}
+    r = await db.process_index_documents.update_one({"id": linha["id"]}, {"$setOnInsert": linha}, upsert=True)
+    return r.matched_count == 0
+
+
+async def ids_historicos_conhecidos(ids: Iterable[str]) -> dict[str, str]:
+    """`{id: estado}` do que o arquivo já sabe: `importado` (há linha) ou o veredicto negativo já pago
+    (`identificacao`, `outro`, `sem_dados`) — para uma reexecução não voltar a pagar a leitura do mesmo ficheiro."""
+    ids = [i for i in ids if i]
+    if not ids:
+        return {}
+    conhecidos: dict[str, str] = {}
+    for a in await db.index_historical_seen.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "estado": 1}).to_list(len(ids)):
+        conhecidos[a["id"]] = str(a.get("estado") or "visto")
+    for i in await ids_historicos_existentes(ids):
+        conhecidos[i] = "importado"
+    return conhecidos
+
+
+async def marcar_visto_no_arquivo(document_id: str, import_id: str, estado: str) -> None:
+    """Regista um veredicto NEGATIVO já pago. Só o estado e o id: nada do ficheiro."""
+    await db.index_historical_seen.update_one(
+        {"id": document_id},
+        {"$setOnInsert": {"id": document_id, "import_id": import_id, "estado": estado, "em": _agora()}},
+        upsert=True,
+    )
+
+
+async def contar_documentos_historicos(import_id: str) -> int:
+    return await db.process_index_documents.count_documents({"historical": True, "import_id": import_id})
+
+
+async def apagar_importacao_historica(import_id: str) -> int:
+    """Desfaz UMA importação: apaga as suas linhas. O directório `employers` não se toca (é global e partilhado)."""
+    if not import_id:
+        return 0
+    r = await db.process_index_documents.delete_many({"historical": True, "import_id": import_id})
+    await db.index_historical_seen.delete_many({"import_id": import_id})
+    return r.deleted_count
+
+
 def entidades_das_declaracoes(factos: Iterable[dict]) -> list[tuple[str, str]]:
     """`(nif, nome)` das declarações que podem alimentar o directório: NIF válido, nome e sem dúvida."""
     saida: list[tuple[str, str]] = []

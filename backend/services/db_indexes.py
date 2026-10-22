@@ -326,6 +326,17 @@ _definir(
         {"keys": [("doc_type", 1), ("net_salary_num", 1)], "name": "idx_index_docs_valor"},
         {"keys": [("doc_type", 1), ("bank_key", 1)], "name": "idx_index_docs_banco"},
         {"keys": [("doc_type", 1), ("period", -1)], "name": "idx_index_docs_periodo"},
+        # arquivo histórico (importação de ZIPs): a pesquisa filtra por rede, o «desfazer» por importação
+        {"keys": [("historical", 1), ("network_id", 1), ("doc_type", 1)], "name": "idx_index_docs_historico"},
+        {"keys": [("import_id", 1)], "name": "idx_index_docs_importacao", "sparse": True},
+    ],
+)
+# Veredictos negativos já pagos do arquivo histórico (para uma reexecução não repetir a chamada à IA).
+_definir(
+    "index_historical_seen",
+    [
+        {"keys": [("id", 1)], "name": "idx_hist_seen_id", "unique": True},
+        {"keys": [("import_id", 1)], "name": "idx_hist_seen_importacao"},
     ],
 )
 # Directório global de entidades patronais: o NIF é a chave.

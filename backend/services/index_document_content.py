@@ -19,6 +19,11 @@ REGRAS QUE NÃO SE PODEM PERDER
    DEPOIS vem a visibilidade dos documentos do processo (403), que já só diz respeito a quem o vê.
 4. Um original `purgado` serve o PDF limpo que o substituiu (o `s3_path` já aponta para ele) e o tipo
    decide-se pela CHAVE, não pelo nome antigo.
+5. **`?download=true` é o MESMO caminho com `Content-Disposition: attachment`** (Out 2026): mesma fronteira,
+   mesma visibilidade, mesma posse da chave, mesmos três tipos — nada se afrouxa para descarregar. Serve o que
+   o registo diz (o original; o PDF limpo depois de o original ser purgado). Uma descarga deixa RASTO no trilho de
+   auditoria (só ids e o papel efectivo, nunca o nome do ficheiro) e esse rasto nunca faz a descarga falhar:
+   levar para casa o documento de um cliente é mais do que olhar para ele.
 """
 from __future__ import annotations
 
@@ -58,8 +63,24 @@ async def _processo_no_ambito_ou_404(process_id: str, user: dict) -> dict:
     return processo
 
 
-async def run_conteudo_do_documento(user: dict, document_id: str):
-    """Os bytes do documento, em `inline`, para o ecrã o mostrar sem sair da pesquisa."""
+async def _auditar_descarga(user: dict, processo: dict, document_id: str, request=None) -> None:
+    """Rasto SÓ com ids e o papel efectivo. Nunca levanta (observa, não intercepta)."""
+    try:
+        from services.audit_trail_service import log_audit_event
+        from services.tenant_access_context import resolver_papel_efectivo
+
+        papel = await resolver_papel_efectivo(user, request)
+        await log_audit_event(
+            process_id=processo["id"], user=user, action="Descarregou um documento (pesquisa do Index)",
+            field="documento", request=request,
+            metadata={"origem": "index", "document_id": document_id, "papel_efectivo": papel},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX] Auditoria da descarga não gravada: %s", type(exc).__name__)
+
+
+async def run_conteudo_do_documento(user: dict, document_id: str, *, descarregar: bool = False, request=None):
+    """Os bytes do documento: `inline` para o ecrã o mostrar sem sair da pesquisa, ou `attachment` (`descarregar`)."""
     documento: Optional[dict] = await db.document_metadata.find_one(
         {"id": _texto(document_id)},
         {"_id": 0, "id": 1, "process_id": 1, "s3_path": 1, "filename": 1, "index_facts.tipo": 1},
@@ -76,10 +97,14 @@ async def run_conteudo_do_documento(user: dict, document_id: str):
 
     await _exigir_posse_do_comprovativo(documento["s3_path"], "process", processo, processo.get("client_id"))
 
-    return await servir_ficheiro_do_s3(
+    resposta = await servir_ficheiro_do_s3(
         documento["s3_path"], documento.get("filename") or documento["s3_path"].rsplit("/", 1)[-1],
-        referencia=_texto(document_id), tipo_pelo=documento["s3_path"],
+        referencia=_texto(document_id), tipo_pelo=documento["s3_path"], descarregar=descarregar,
     )
+    if descarregar:
+        # depois de o ficheiro existir (um 404/503/413 não é uma descarga) e antes de os bytes saírem
+        await _auditar_descarga(user, processo, _texto(document_id), request)
+    return resposta
 
 
 __all__ = ["TIPOS_QUE_A_PESQUISA_MOSTRA", "run_conteudo_do_documento"]

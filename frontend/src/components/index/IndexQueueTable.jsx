@@ -8,26 +8,54 @@
  * A coluna «Empresa/Origem» diz de que empresa é o processo (`company`, calculada ao servir) e, quando
  * o processo foi PARTILHADO por outra rede, di-lo — quem trata a fila precisa de saber de onde vem.
  * Sem empresa determinável mostra «—»: nunca se inventa uma.
+ *
+ * ORDENAÇÃO (Out 2026): os cabeçalhos de Processo, Empresa/Origem, Estado, Alertas e da data são botões que
+ * pedem a ordem (`onOrdenar(coluna)`); `ordem` diz a que está em vigor e cada `<th>` leva `aria-sort`. A
+ * tabela não ordena nada: a ordem é do servidor (a página seguinte tem de continuar a mesma lista).
  */
-import { AlertTriangle, FileSearch } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, FileSearch } from "lucide-react";
 
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { EmptyState } from "../ui/EmptyState";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { formatDateTime } from "../../lib/utils";
-import { rotuloDoEstado } from "../../utils/indexRevisao";
+import { rotuloDoEstado, sentidoDaColuna } from "../../utils/indexRevisao";
 
-export function IndexQueueTable({ itens, separador, onAbrir, mensagemVazia }) {
+const ICONE_DO_SENTIDO = { ascending: ArrowUp, descending: ArrowDown, none: ArrowUpDown };
+
+/** Cabeçalho que ordena: botão com o nome da coluna, o sentido em vigor e `aria-sort` no `<th>`. */
+function ColunaOrdenavel({ coluna, rotulo, separador, ordem, onOrdenar, className }) {
+  const sentido = sentidoDaColuna(separador, ordem, coluna);
+  const Icone = ICONE_DO_SENTIDO[sentido];
+  if (!onOrdenar) return <TableHead className={className}>{rotulo}</TableHead>;
+  return (
+    <TableHead className={className} aria-sort={sentido}>
+      <button
+        type="button"
+        onClick={() => onOrdenar(coluna)}
+        className="inline-flex items-center gap-1 font-medium hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-testid={`ordenar-${coluna}`}
+      >
+        {rotulo}
+        <Icone className={`h-3.5 w-3.5 ${sentido === "none" ? "opacity-40" : ""}`} aria-hidden="true" />
+      </button>
+    </TableHead>
+  );
+}
+
+export function IndexQueueTable({ itens, separador, onAbrir, mensagemVazia, ordem, onOrdenar, comFiltros = false }) {
   if (!itens.length) {
     return (
       <EmptyState
         icon={FileSearch}
-        title={mensagemVazia || "Nada por tratar"}
+        title={mensagemVazia || (comFiltros ? "Nenhum processo com estes filtros" : "Nada por tratar")}
         message={
-          separador === "reviews"
-            ? "Quando um processo indexado ficar com campos por rever, aparece aqui."
-            : "Os processos que esperam indexação aparecem aqui."
+          comFiltros
+            ? "Experimente tirar um filtro ou limpar a pesquisa."
+            : separador === "reviews"
+              ? "Quando um processo indexado ficar com campos por rever, aparece aqui."
+              : "Os processos que esperam indexação aparecem aqui."
         }
       />
     );
@@ -37,12 +65,18 @@ export function IndexQueueTable({ itens, separador, onAbrir, mensagemVazia }) {
     <Table data-testid="index-queue-table">
       <TableHeader>
         <TableRow>
-          <TableHead>Processo</TableHead>
-          <TableHead>Empresa/Origem</TableHead>
-          <TableHead>Estado</TableHead>
+          <ColunaOrdenavel coluna="processo" rotulo="Processo" separador={separador} ordem={ordem} onOrdenar={onOrdenar} />
+          <ColunaOrdenavel coluna="empresa" rotulo="Empresa/Origem" separador={separador} ordem={ordem} onOrdenar={onOrdenar} />
+          <ColunaOrdenavel coluna="estado" rotulo="Estado" separador={separador} ordem={ordem} onOrdenar={onOrdenar} />
           <TableHead className="text-right">Documentos</TableHead>
-          <TableHead className="text-right">Alertas</TableHead>
-          <TableHead>{separador === "reviews" ? "Indexado em" : "Entrada"}</TableHead>
+          <ColunaOrdenavel coluna="alertas" rotulo="Alertas" separador={separador} ordem={ordem} onOrdenar={onOrdenar} className="text-right" />
+          <ColunaOrdenavel
+            coluna="data"
+            rotulo={separador === "reviews" ? "Indexado em" : "Entrada"}
+            separador={separador}
+            ordem={ordem}
+            onOrdenar={onOrdenar}
+          />
           <TableHead className="sr-only">Acções</TableHead>
         </TableRow>
       </TableHeader>

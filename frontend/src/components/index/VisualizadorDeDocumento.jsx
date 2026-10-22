@@ -9,47 +9,71 @@
  * «Documento 2 de 5». Apresentação pura: quem decide quando abre e fecha é a página.
  */
 import { useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Loader2 } from "lucide-react";
 
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
 import PrevisualizadorDeFicheiro from "../shared/PrevisualizadorDeFicheiro";
 import { getIndexDocumentContent } from "../../services/api";
 
-function Conteudo({ documentos }) {
+function Conteudo({ documentos, onDescarregar, emCurso }) {
   const [indice, setIndice] = useState(0);
   const total = documentos.length;
   const actual = documentos[Math.min(indice, total - 1)];
 
+  const aDescarregar = emCurso?.has(`visualizador:${actual.id}`) === true;
+
   return (
     <>
-      {total > 1 && (
-        <div className="flex items-center justify-between gap-2" data-testid="visualizador-navegacao">
+      <div className="flex flex-wrap items-center justify-between gap-2" data-testid="visualizador-barra">
+        {total > 1 ? (
+          <div className="flex flex-1 items-center justify-between gap-2" data-testid="visualizador-navegacao">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={indice === 0}
+              onClick={() => setIndice((i) => Math.max(0, i - 1))}
+              aria-label="Documento anterior"
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />Anterior
+            </Button>
+            <span className="text-sm text-muted-foreground" aria-live="polite" data-testid="visualizador-posicao">
+              Documento {indice + 1} de {total}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={indice >= total - 1}
+              onClick={() => setIndice((i) => Math.min(total - 1, i + 1))}
+              aria-label="Documento seguinte"
+            >
+              Seguinte<ChevronRight className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+        ) : (
+          <span />
+        )}
+        {onDescarregar && (
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={indice === 0}
-            onClick={() => setIndice((i) => Math.max(0, i - 1))}
-            aria-label="Documento anterior"
+            disabled={aDescarregar}
+            onClick={() => onDescarregar(`visualizador:${actual.id}`, [actual])}
+            aria-label={`Download do documento ${actual.rotulo || ""}`.trim()}
+            data-testid="visualizador-download"
           >
-            <ChevronLeft className="h-4 w-4" aria-hidden="true" />Anterior
+            {aDescarregar ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Download className="mr-1.5 h-4 w-4" aria-hidden="true" />
+            )}
+            Download
           </Button>
-          <span className="text-sm text-muted-foreground" aria-live="polite" data-testid="visualizador-posicao">
-            Documento {indice + 1} de {total}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={indice >= total - 1}
-            onClick={() => setIndice((i) => Math.min(total - 1, i + 1))}
-            aria-label="Documento seguinte"
-          >
-            Seguinte<ChevronRight className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        </div>
-      )}
+        )}
+      </div>
       <div className="rounded-md border bg-muted/30" data-testid="visualizador-corpo">
         <PrevisualizadorDeFicheiro
           chave={actual.id}
@@ -68,8 +92,10 @@ function Conteudo({ documentos }) {
  * @param {Array<{id: string, rotulo: string}>} props.documentos — vazio/ausente = fechado
  * @param {string} [props.titulo]
  * @param {Function} props.onFechar
+ * @param {(chave: string, documentos: Array<{id: string, rotulo: string}>) => void} [props.onDescarregar]
+ * @param {Set<string>} [props.emCurso]
  */
-export default function VisualizadorDeDocumento({ documentos, titulo, onFechar }) {
+export default function VisualizadorDeDocumento({ documentos, titulo, onFechar, onDescarregar, emCurso }) {
   const lista = Array.isArray(documentos) ? documentos.filter((d) => d && d.id) : [];
   const aberto = lista.length > 0;
 
@@ -80,11 +106,11 @@ export default function VisualizadorDeDocumento({ documentos, titulo, onFechar }
           <DialogHeader>
             <DialogTitle>{titulo || "Documento"}</DialogTitle>
             <DialogDescription>
-              Pré-visualização: nada é descarregado nem guardado, e a pesquisa fica como estava.
+              Pré-visualização: nada é guardado até carregar em «Download», e a pesquisa fica como estava.
             </DialogDescription>
           </DialogHeader>
           {/* a chave junta os ids: outra linha reinicia a navegação */}
-          <Conteudo key={lista.map((d) => d.id).join(",")} documentos={lista} />
+          <Conteudo key={lista.map((d) => d.id).join(",")} documentos={lista} onDescarregar={onDescarregar} emCurso={emCurso} />
         </DialogContent>
       )}
     </Dialog>

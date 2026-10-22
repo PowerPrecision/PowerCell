@@ -237,6 +237,8 @@ export function rotuloDoDocumento(item) {
  */
 export function documentosDoResultado(item, vista) {
   if (!item || typeof item !== "object") return [];
+  // o arquivo histórico guarda os DADOS, não o ficheiro: não há nada a abrir nem a descarregar
+  if (item.historical === true) return [];
   if (vista === "documents") {
     return typeof item.document_id === "string" && item.document_id ? [{ id: item.document_id, rotulo: rotuloDoDocumento(item) }] : [];
   }

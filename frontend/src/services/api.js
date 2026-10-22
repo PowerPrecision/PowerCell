@@ -1332,8 +1332,13 @@ export const dismissIndexAlert = (processId, alertId) =>
 export const markIndexProcessIndexed = (processId, employers = []) =>
   api.post(`/index/processes/${processId}/mark-indexed`, { employers }, { skipErrorToast: true });
 /** Os bytes de um documento que a pesquisa devolveu (recibo, declaração, extrato) — por id, nunca por chave S3. */
-export const getIndexDocumentContent = (documentId) =>
-  api.get(`/index/documents/${encodeURIComponent(documentId)}/content`, { responseType: "blob", skipErrorToast: true });
+// `download: true` → o servidor responde com `Content-Disposition: attachment` (e deixa rasto de auditoria).
+export const getIndexDocumentContent = (documentId, { download = false } = {}) =>
+  api.get(`/index/documents/${encodeURIComponent(documentId)}/content`, {
+    responseType: "blob",
+    skipErrorToast: true,
+    ...(download ? { params: { download: true } } : {}),
+  });
 export const searchIndexEmployers = (q) =>
   api.get("/index/employers", { params: { q }, skipErrorToast: true });
 // Pesquisa avançada de metadados profissionais (recibos por valor, entidades por zona, tipo de contrato…).

@@ -31,6 +31,7 @@ from fastapi import HTTPException
 from database import db
 from models.task_log import TaskType
 from services import index_jobs
+from services import index_queue_query as consulta_da_fila
 from services import index_status as estado_do_index
 from services import index_store as store
 from services.index_ai import TIPOS_ANALISADOS, tipo_de_analise
@@ -162,21 +163,49 @@ async def _empresas_da_fila(processos: list[dict], scope) -> dict[str, Optional[
     return saida
 
 
+async def _empresas_para_filtrar(base: dict) -> list[dict]:
+    """As empresas que a fila TEM (id + nome + quantos), para o filtro do ecrã. Da fila inteira, sem filtros:
+    as opções não encolhem à medida que se escolhe uma. Nunca levanta (é um enfeite de leitura)."""
+    try:
+        linhas = await db.processes.aggregate(
+            [
+                {"$match": {**base, "company_id": {"$nin": [None, ""]}}},
+                {"$group": {"_id": "$company_id", "name": {"$first": "$company_name"}, "n": {"$sum": 1}}},
+                {"$sort": {"name": 1, "_id": 1}},
+                {"$limit": 100},
+            ],
+            maxTimeMS=5000,
+        ).to_list(100)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX] Empresas da fila não listadas: %s", type(exc).__name__)
+        return []
+    return [{"id": str(l["_id"]), "name": l.get("name") or str(l["_id"]), "count": int(l.get("n") or 0)} for l in linhas]
+
+
 async def run_get_index_queue(
-    user: dict, *, tab: str, page: int = 1, size: int = 25, q: Optional[str] = None
+    user: dict, *, tab: str, page: int = 1, size: int = 25, q: Optional[str] = None,
+    sort_by: Optional[str] = None, index_status: Optional[str] = None,
+    company_id: Optional[str] = None, origin: Optional[str] = None,
 ) -> dict[str, Any]:
     if tab not in ABAS:
         raise HTTPException(status_code=400, detail="Separador inválido")
+    # tudo o que vem do pedido valida-se ANTES de tocar na base de dados (422, nunca «lista vazia»)
+    campo, sentido, e_texto, ordem_normalizada = consulta_da_fila.validar_ordenacao(tab, sort_by)
+    filtros = consulta_da_fila.validar_filtros(tab, index_status=index_status, company_id=company_id, origin=origin)
     # o âmbito resolve-se UMA vez: serve a condição da fila e o «é de outra rede» de cada linha
     scope = await tenant_network.resolve_vista_scope(user)
     rede = build_process_scope_condition(scope)
-    consulta = com_isolamento(rede, {
+    base = com_isolamento(rede, {
         "$and": [
             {"is_deleted": {"$ne": True}},
             estado_do_index.condicao_da_fila(tab),
             await condicao_de_processo_activo(),
         ],
     })
+    consulta = base
+    dos_filtros = consulta_da_fila.condicao_dos_filtros(tab, filtros, scope)
+    if dos_filtros:
+        consulta = {"$and": [consulta, dos_filtros]}
     texto = (q or "").strip()
     if texto:
         import re
@@ -185,13 +214,13 @@ async def run_get_index_queue(
             {"client_name": {"$regex": re.escape(texto), "$options": "i"}},
             {"process_number": {"$regex": re.escape(texto), "$options": "i"}},
         ]}]}
-    ordem = [("created_at", 1)] if tab == "pending" else [("indexed_at", -1)]
     total = await db.processes.count_documents(consulta)
     pagina = max(1, page)
     tamanho = max(1, min(size, 100))
-    processos = await (
-        db.processes.find(consulta, PROJECCAO_DA_FILA).sort(ordem).skip((pagina - 1) * tamanho).limit(tamanho)
-    ).to_list(tamanho)
+    cursor = db.processes.find(consulta, PROJECCAO_DA_FILA).sort(consulta_da_fila.ordem_mongo(campo, sentido))
+    if e_texto:
+        cursor = cursor.collation(consulta_da_fila.COLACAO)
+    processos = await cursor.skip((pagina - 1) * tamanho).limit(tamanho).to_list(tamanho)
 
     ids = [p["id"] for p in processos]
     por_processo: dict[str, list[dict]] = {i: [] for i in ids}
@@ -211,6 +240,12 @@ async def run_get_index_queue(
         "page": pagina,
         "size": tamanho,
         "tab": tab,
+        "sort_by": ordem_normalizada,
+        "filters": {k: v for k, v in filtros.items() if v},
+        "facets": {
+            "companies": await _empresas_para_filtrar(base),
+            "statuses": list(consulta_da_fila.ESTADOS_POR_ABA[tab]),
+        },
     }
 
 

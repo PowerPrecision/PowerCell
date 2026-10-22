@@ -12426,3 +12426,19 @@ Work Log:
 * Verificado com `mongod` real e mutações: 20 no backend (19 mortas, 1 equivalente), 12 no frontend (2 sobreviveram à 1.ª passagem = testes fracos, reforçados e mortas).
 * Dito: PDF não pintado em jsdom — confirmar à mão num browser; backfill é passo do dono após o deploy e a precedência aplica-se na próxima análise/recálculo de cada processo.
 
+
+
+---
+Task ID: index-operacoes-ficheiros-fila-arquivo-out2026
+Agent: Cloud Agent
+Task: Index — download directo, ordenação/filtros da fila, reanálise lenta (banco/localidade) e importação de arquivo histórico por ZIP
+
+Date: 2026-10-22
+
+Work Log:
+* Download: `?download=true` no endpoint de conteúdo (`attachment`, nome saneado, tecto 50 MB, octet-stream para extensão desconhecida, rasto no trilho só com ids + papel efectivo); `descarregarFicheiro.js` + `useDescarregarDocumentos` (sequencial, anti duplo clique) e botão em `ResultadosDaPesquisa` e no `VisualizadorDeDocumento`. `Content-Disposition` não é exposto pelo CORS: o ecrã nomeia o ficheiro pelo rótulo + extensão do tipo.
+* Fila: `index_queue_query` (puro; lista fechada de campos, desempate por `id`, collation `pt` só em texto, `origin=shared` = `$nor` da condição de rede, filtros só estreitam); facetas de empresas/estados calculadas sobre a base sem filtros; frontend com `FiltrosDaFila`, cabeçalhos clicáveis (`aria-sort`) e estado no URL.
+* `index_slow_backfill` + `scripts/slow_backfill_ia.py`: lote contido (20), marca por documento (sem ciclos), patch de UM campo, impressão digital intocada, reserva atómica, recusa o motor simulado, recalcula os processos tocados por `concluir_resultados`.
+* `index_historical_import` + `scripts/import_historico_zip.py`: ZIP lido membro a membro (sem descomprimir), tecto real de 20 MB, `--rede` obrigatória e validada, linhas `historical` com `process_id` artificial, id por conteúdo+rede (idempotente), veredictos negativos lembrados (`index_historical_seen`), identificação ignorada, nome do ficheiro nunca chega ao modelo (`documento.<ext>`), `--limite-ia`, `--desfazer`. `index_ai.classificar_documento` (lista fechada; simulado devolve «não sei»). Pesquisa por documento ganhou o ramo do arquivo (marca E rede no âmbito; falha fechada) e DTO `historical`/`import_label` com `process_id: null`; vista por emprego intacta.
+* Decisões/limites ditos: os ficheiros do arquivo NÃO são guardados (só os factos) — não há «Ver documento»/«Download» para eles; nome/caminho do ZIP não ficam registados (levam nomes de clientes); documentos já existentes no CRM não são detectados (sem índice por `analysis_fingerprint`), podem aparecer duas vezes; a reanálise lenta e o arquivo exigem `INDEX_AI_PROVIDER=openai`.
+* Verificado com `mongod` real. Mutações medidas: backend 22 (20 mortas à 1.ª passagem; sobreviveram `$setOnInsert`→`$set` — o fluxo verifica a existência antes, e só um teste directo à gravação o apanha — e o `import_id` vazio no «desfazer», que passou a ser impossível porque a gravação recusa linhas sem `import_id`: mutação equivalente), frontend 11 (a guarda do duplo clique do hook sobrevivia porque o botão fica desactivado: só um teste ao hook a mata).

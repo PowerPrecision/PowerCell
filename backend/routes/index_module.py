@@ -83,10 +83,22 @@ async def get_index_queue(
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=100),
     q: Optional[str] = Query(None, max_length=100),
+    sort_by: Optional[str] = Query(
+        None, max_length=30,
+        description="«<campo>_<asc|desc>»: created, indexed (só Revisões), number, client, company, status, alerts."),
+    index_status: Optional[str] = Query(None, max_length=20, description="pending | in_review (Fila) · indexed (Revisões)."),
+    company_id: Optional[str] = Query(None, max_length=64, description="Só os processos desta empresa."),
+    origin: Optional[str] = Query(None, max_length=10, description="own (da minha rede) | shared (partilhados por outra)."),
     user: dict = Depends(_acesso),
 ):
-    """Duas abas: `pending` («Fila de Espera») e `reviews` («Revisões Pendentes»)."""
-    return await run_get_index_queue(user, tab=tab, page=page, size=size, q=q)
+    """Duas abas: `pending` («Fila de Espera») e `reviews` («Revisões Pendentes»).
+
+    Ordenação e filtros só estreitam a fila (o âmbito de rede vem primeiro); valores fora das listas são 422.
+    """
+    return await run_get_index_queue(
+        user, tab=tab, page=page, size=size, q=q,
+        sort_by=sort_by, index_status=index_status, company_id=company_id, origin=origin,
+    )
 
 
 @router.get("/advanced-search")
@@ -132,13 +144,16 @@ async def get_document_content(
     request: Request,
     response: Response,
     document_id: str,
+    download: bool = Query(
+        False, description="true → `Content-Disposition: attachment` (guardar o ficheiro em vez de o mostrar)."),
     user: dict = Depends(_acesso),
 ):
-    """Os bytes de um documento que a pesquisa devolveu (recibo, declaração, extrato), para o ver no ecrã.
+    """Os bytes de um documento que a pesquisa devolveu (recibo, declaração, extrato), para o ver no ecrã
+    (`inline`) ou para o descarregar (`?download=true`, `attachment`, com rasto de auditoria).
 
     404 igual ao de «não existe» fora do âmbito de rede; a chave S3 sai do registo, nunca do pedido.
     """
-    return await run_conteudo_do_documento(user, document_id)
+    return await run_conteudo_do_documento(user, document_id, descarregar=download, request=request)
 
 
 @router.get("/employers")
