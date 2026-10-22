@@ -115,6 +115,8 @@ def calcular_trabalhos(entradas: Iterable[tuple[str, TrabalhoProfissional]]) -> 
             TrabalhoProfissional(
                 job_id=job_id_da_chave(chave),
                 period=membros[0][1].period,
+                # a localidade vem do recibo mais recente que a tem (como os restantes campos)
+                employer_location=next((j.employer_location for _, j in membros if j.employer_location), None),
                 source_document_ids=sorted({d for d, _ in grupos[chave] if d}),
                 **campos,
             )
@@ -301,7 +303,7 @@ async def substituir_alertas(
             continue
         alerta = AlertaDaMatriz(
             id=str(uuid.uuid4()), process_id=process_id, network_id=network_id, code=achado["code"],
-            refs=achado.get("refs") or [], run_id=run_id, key=chave,
+            refs=achado.get("refs") or [], run_id=run_id, key=chave, detail=achado.get("detalhe"),
         )
         documento = alerta.model_dump(mode="json")
         documento["created_at"] = _agora()
@@ -322,7 +324,7 @@ async def acrescentar_alerta(process_id: str, network_id: Optional[str], achado:
         return False
     alerta = AlertaDaMatriz(
         id=str(uuid.uuid4()), process_id=process_id, network_id=network_id, code=achado["code"],
-        refs=achado.get("refs") or [], run_id="avulso", key=chave,
+        refs=achado.get("refs") or [], run_id="avulso", key=chave, detail=achado.get("detalhe"),
     )
     documento = alerta.model_dump(mode="json")
     documento["created_at"] = _agora()
@@ -473,6 +475,28 @@ async def procurar_entidades(texto: str, limite: int = 20) -> list[dict]:
     return [{"nif": d["nif"], "name": d["name"]} for d in docs]
 
 
+async def nifs_das_entidades_pelo_nome(nome_normalizado: str, limite: int) -> list[str]:
+    """NIFs do directório global cujo nome (normalizado) contém o texto. LEITURA para a pesquisa avançada.
+
+    Levanta se o directório falhar: quem chama decide o degradado (é um reforço, não uma condição).
+    """
+    docs = await db.employers.find(
+        {"name_normalizado": {"$regex": re.escape(nome_normalizado)}}, {"_id": 0, "nif": 1},
+    ).to_list(max(1, min(limite, 200)))
+    return [d["nif"] for d in docs if d.get("nif")]
+
+
+async def agregar_metadados_profissionais(pipeline: list[dict], *, tempo_maximo_ms: int) -> list[dict]:
+    """Corre um pipeline de LEITURA sobre `process_professional_metadata` (a pesquisa avançada).
+
+    O pipeline é construído (e a fronteira de processos aplicada) por `index_advanced_search`; aqui só
+    se executa, com o tecto de tempo — o único sítio, além da escrita, que toca na colecção.
+    """
+    return await db.process_professional_metadata.aggregate(
+        pipeline, maxTimeMS=tempo_maximo_ms, allowDiskUse=True,
+    ).to_list(1)
+
+
 async def factos_do_processo(process_id: str) -> list[dict]:
     """Os factos de TODOS os ficheiros do processo já analisados (incluindo os saltados nesta corrida)."""
     docs = await db.document_metadata.find(
@@ -486,4 +510,5 @@ __all__ = [
     "ALERTAS", "calcular_trabalhos", "aplicar_edicoes_humanas", "recalcular_metadados",
     "registar_entidades", "entidades_conhecidas", "substituir_alertas", "campos_do_ficheiro",
     "registar_ficheiro", "factos_do_processo", "contar_alertas_abertos",
+    "nifs_das_entidades_pelo_nome", "agregar_metadados_profissionais",
 ]

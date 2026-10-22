@@ -193,6 +193,11 @@ def definicao_da_ferramenta(tipo: str) -> dict:
             "scratch": _SCRATCH,
             "employer_nif": _campo("string", "NIF da entidade patronal (9 dígitos). null se não estiver visível."),
             "employer_name": _campo("string", "Designação da entidade patronal."),
+            "employer_location": _campo(
+                "string",
+                "Localidade, concelho ou distrito da SEDE da entidade patronal, como consta do recibo "
+                "(só o nome do local, sem rua nem código postal). null se não constar.",
+            ),
             "job_title": _campo("string", "Categoria profissional / função."),
             "contract_type": {
                 **_campo("string", "Tipo de contrato, se constar."),
@@ -230,6 +235,15 @@ def definicao_da_ferramenta(tipo: str) -> dict:
                 "amount": {"type": ["number", "string", "null"]},
                 "date": {"type": ["string", "null"], "description": "YYYY-MM-DD"},
                 "page": {"type": ["integer", "null"]},
+                "description": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Justificação factual e curta (até 160 caracteres): o que é o movimento, o valor e a data, "
+                        "e porque merece confirmação. Ex.: 'Levantamento em numerário de 1.500 € a 12/03, sem "
+                        "levantamentos semelhantes nos outros meses'. SEM nomes de pessoas ou empresas, NIFs, "
+                        "IBANs nem números de conta."
+                    ),
+                },
             },
             "required": ["type"],
         }
@@ -291,7 +305,11 @@ PROMPTS_POR_TIPO = {
     TIPO_EXTRATO: PROMPT_BASE + (
         " Documento: EXTRATO BANCÁRIO. Lista todos os movimentos (créditos e débitos) e assinala em 'findings' "
         "apenas o que existe de facto no extrato: levantamentos/depósitos em numerário atípicos, "
-        "transferências recorrentes para a mesma contraparte, ou um saldo incoerente."
+        "transferências recorrentes para a mesma contraparte, ou um saldo incoerente. Em CADA finding indica "
+        "'amount', 'date' e 'page' do movimento e uma 'description' factual e curta (o que é, quanto, quando e "
+        "porque merece confirmação), nunca genérica — por exemplo 'Transferência de 500 € a 12/03, a segunda "
+        "do mês para o mesmo destino' ou 'Diferença de 150 € entre o saldo final e a soma dos movimentos'. "
+        "Na 'description' não ponhas nomes de pessoas ou empresas, NIFs, IBANs nem números de conta."
     ),
     TIPO_IDENTIFICACAO: PROMPT_BASE + (
         " Documento: IDENTIFICAÇÃO (Cartão de Cidadão, Bilhete de Identidade, Passaporte ou Título de Residência). "
@@ -417,6 +435,7 @@ def normalizar_recibo(bruto: dict, *, document_id: Optional[str] = None) -> dict
         job_id="pendente",  # o `index_store` atribui o id estável ao agrupar
         employer_nif=_revisavel(bruto.get("employer_nif"), nif, document_id),
         employer_name=_revisavel(bruto.get("employer_name"), nome, document_id),
+        employer_location=_texto(_valor(bruto.get("employer_location")), 80),
         job_title=_revisavel(bruto.get("job_title"), cargo, document_id),
         net_salary=_revisavel(bruto.get("net_salary"), liquido, document_id),
         contract_type=_revisavel(bruto.get("contract_type"), contrato, document_id),
@@ -437,6 +456,31 @@ def normalizar_recibo(bruto: dict, *, document_id: Optional[str] = None) -> dict
         "employer_name": nome,
     }
     return {"job": job, "factos": factos}
+
+
+_PADRAO_DE_URL = re.compile(r"(https?://|www\.)\S+", re.IGNORECASE)
+_PADRAO_DE_IBAN = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9 ]{10,30}\b")
+_PADRAO_DE_NUMERO_LONGO = re.compile(r"\d[\d ]{7,}\d")
+TECTO_DA_NOTA_DA_IA = 160
+
+
+def nota_da_ia(texto: Any) -> Optional[str]:
+    """A justificação que o modelo deu a um achado, SANEADA: texto simples, curto e sem identificadores.
+
+    O modelo não é uma parede: mesmo avisado, pode devolver um IBAN, um NIF ou um endereço. Tira-se
+    tudo o que parece um identificador (sequências de 9+ dígitos, IBAN, URL) em vez de confiar no
+    pedido, e corta-se ao tecto. Vale como COMENTÁRIO: os valores e as datas do alerta saem do
+    movimento verificado, nunca desta nota.
+    """
+    if not isinstance(texto, str):
+        return None
+    t = _PADRAO_DE_URL.sub("…", texto)
+    t = _PADRAO_DE_IBAN.sub("…", t)
+    t = _PADRAO_DE_NUMERO_LONGO.sub("…", t)
+    t = " ".join(re.sub(r"[<>`]", "", t).split())
+    if len(t) < 8:
+        return None
+    return t[:TECTO_DA_NOTA_DA_IA].rstrip()
 
 
 def impressao_da_contraparte(texto: Any) -> Optional[str]:
@@ -479,6 +523,7 @@ def normalizar_extrato(bruto: dict, *, document_id: Optional[str] = None) -> dic
                 "v": str(abs(v).quantize(Decimal("0.01"))) if v is not None else None,
                 "d": data_iso(a.get("date")),
                 "page": _pagina(a),
+                "nota": nota_da_ia(a.get("description")),
             })
     abertura = _dinheiro(bruto.get("opening_balance"), positivo=False)
     fecho = _dinheiro(bruto.get("closing_balance"), positivo=False)
@@ -543,6 +588,7 @@ def simular(tipo: str, filename: str, *, hoje: Optional[date] = None) -> dict:
         return {
             "scratch": "simulado",
             "employer_nif": campo(nif), "employer_name": campo("Empresa Simulada, Lda"),
+            "employer_location": campo("Lisboa"),
             "job_title": campo("Técnico"), "contract_type": campo("efetivo"),
             "net_salary": campo(liquido), "gross_salary": campo(1180.0),
             "total_deductions": campo(180.0), "social_security": campo(129.8),

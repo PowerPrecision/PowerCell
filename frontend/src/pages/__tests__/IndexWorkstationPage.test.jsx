@@ -68,7 +68,7 @@ const BANCADA = {
     has_pending_review: true,
   },
   alerts: [
-    { id: "al-1", code: "contas_nao_batem", severity: "aviso", message: "As contas de um recibo não batem certo (bruto, descontos e líquido).", dismissed: false, period: "2026-09" },
+    { id: "al-1", code: "contas_nao_batem", severity: "aviso", message: "As contas de um recibo não batem certo (bruto, descontos e líquido).", detail: "Recibo de 09/2026: ilíquido 2.100,00 € − descontos 200,00 € dá 1.900,00 €, mas o líquido indicado é 1.873,45 € (diferença de 26,55 €).", dismissed: false, period: "2026-09" },
     { id: "al-2", code: "nif_invalido", severity: "alerta", message: "O NIF da entidade patronal não é válido.", dismissed: false },
   ],
   active_jobs: { analysis: "t-9", finalize: null, sanitize: null },
@@ -103,7 +103,7 @@ describe("a bancada monta e mostra o estado do servidor", () => {
   it("cabeçalho, documentos, metadados e matriz", async () => {
     montar();
     expect(await screen.findByRole("heading", { name: /Marta Quintela/ })).toBeInTheDocument();
-    expect(screen.getByText("Processo #4711")).toBeInTheDocument();
+    expect(screen.getByTestId("ligacao-numero")).toHaveTextContent("#4711");
     expect(screen.getAllByTestId("ficheiro-do-index")).toHaveLength(3);
     expect(screen.getByText("recibo_setembro.pdf")).toBeInTheDocument();
     // o recibo está analisado, o extrato não, a foto nem é analisável
@@ -390,5 +390,75 @@ describe("estado do processo", () => {
     montar({ ...BANCADA, process: { ...BANCADA.process, index_status: "in_review" } });
     expect(await screen.findByRole("button", { name: "Devolver à fila" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reivindicar" })).not.toBeInTheDocument();
+  });
+});
+
+
+describe("atalho para o processo original (QA Index, Out 2026)", () => {
+  it("o nome do cliente e o número abrem o detalhe do processo NUM NOVO separador", async () => {
+    montar();
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    for (const id of ["ligacao-cliente", "ligacao-numero"]) {
+      const ligacao = screen.getByTestId(id);
+      expect(ligacao.tagName).toBe("A");
+      expect(ligacao).toHaveAttribute("href", "/processo/proc-1");
+      expect(ligacao).toHaveAttribute("target", "_blank");
+      // sem `noopener` o separador aberto pode mexer na bancada (window.opener)
+      expect(ligacao.getAttribute("rel")).toMatch(/noopener/);
+      expect(ligacao.getAttribute("rel")).toMatch(/noreferrer/);
+    }
+  });
+
+  it("diz a quem usa um leitor de ecrã que abre noutro separador", async () => {
+    montar();
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.getByRole("link", { name: /Marta Quintela.*novo separador/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /#4711.*novo separador/ })).toBeInTheDocument();
+  });
+
+  it("sem número de processo não há ligação do número (nem texto solto)", async () => {
+    montar({ ...BANCADA, process: { ...BANCADA.process, process_number: null } });
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.queryByTestId("ligacao-numero")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ligacao-cliente")).toBeInTheDocument();
+  });
+
+  it("clicar na ligação não navega esta página (o separador é outro)", async () => {
+    montar();
+    await userEvent.click(await screen.findByTestId("ligacao-cliente"));
+    expect(screen.getByRole("heading", { name: /Marta Quintela/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("fila")).not.toBeInTheDocument();
+  });
+});
+
+describe("a justificação exacta de cada alerta", () => {
+  it("aparece debaixo da mensagem, com o valor e a diferença", async () => {
+    montar();
+    const matriz = await screen.findByTestId("alert-matrix");
+    const alertas = within(matriz).getAllByTestId("alerta-do-index");
+    const comDetalhe = alertas.find((a) => within(a).queryByTestId("alerta-detalhe"));
+    expect(comDetalhe).toBeDefined();
+    const detalhe = within(comDetalhe).getByTestId("alerta-detalhe");
+    expect(detalhe).toHaveTextContent("diferença de 26,55 €");
+    // por baixo da mensagem genérica, não no lugar dela
+    expect(within(comDetalhe).getByText(/As contas de um recibo não batem certo/)).toBeInTheDocument();
+    expect(comDetalhe.textContent.indexOf("As contas de um recibo")).toBeLessThan(comDetalhe.textContent.indexOf("diferença de"));
+  });
+
+  it("um alerta sem justificação (histórico) continua a mostrar-se, sem caixa vazia", async () => {
+    montar();
+    const matriz = await screen.findByTestId("alert-matrix");
+    const alertas = within(matriz).getAllByTestId("alerta-do-index");
+    const sem = alertas.find((a) => !within(a).queryByTestId("alerta-detalhe"));
+    expect(sem).toBeDefined();
+    expect(sem).toHaveTextContent("O NIF da entidade patronal não é válido.");
+  });
+
+  it("o texto do servidor é texto: um detalhe com HTML não se interpreta", async () => {
+    const bancada = { ...BANCADA, alerts: [{ ...BANCADA.alerts[0], detail: "<img src=x onerror=alert(1)> 100 €" }] };
+    montar(bancada);
+    const detalhe = await screen.findByTestId("alerta-detalhe");
+    expect(detalhe.querySelector("img")).toBeNull();
+    expect(detalhe.textContent).toContain("<img src=x");
   });
 });

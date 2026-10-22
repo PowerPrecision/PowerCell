@@ -12,7 +12,8 @@ import pytest
 RAIZ = Path(__file__).resolve().parents[2]
 SERVICOS = RAIZ / "services"
 ROTAS = RAIZ / "routes"
-MODULOS_DO_INDEX = ("index_ai.py", "index_matrix.py", "index_store.py", "index_jobs.py", "index_api.py", "index_finalize.py")
+MODULOS_DO_INDEX = ("index_ai.py", "index_matrix.py", "index_store.py", "index_jobs.py", "index_api.py", "index_finalize.py",
+                    "index_advanced_search.py")
 ESCRITAS = {"insert_one", "insert_many", "update_one", "update_many", "replace_one", "delete_one", "delete_many",
             "find_one_and_update", "find_one_and_delete", "find_one_and_replace", "bulk_write"}
 COLECCOES_DO_INDEX = ("process_professional_metadata", "employers", "process_index_alerts")

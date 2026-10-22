@@ -72,6 +72,7 @@ import { invalidateEmailQueries } from "../hooks/useNewEmailRealtime";
 import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS, canAccessOrgAdmin } from "../utils/roleUtils";
 import { resolveActiveCompanyName } from "../utils/userProfiles";
 import { classesDoCabecalhoFixo } from "../utils/stickyHeader";
+import { abrirSeccoes, gravarSeccoesAbertas, lerSeccoesAbertas, seccoesComRotaActiva } from "../utils/seccoesDoMenu";
 import ErrorBoundary from "../components/ErrorBoundary";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -189,23 +190,21 @@ const DashboardLayout = ({ children, title }) => {
     };
   }, [location.pathname, effectiveRole]);
   
-  const [openSections, setOpenSections] = useState({});
+  // O layout é montado POR PÁGINA: cada navegação monta um menu novo. Começar de `{}` fazia
+  // todos os grupos recolherem a cada clique numa ligação — o que a pessoa abriu à mão
+  // lembra-se (por separador) em `utils/seccoesDoMenu`.
+  const [openSections, setOpenSections] = useState(() => lerSeccoesAbertas());
+
+  useEffect(() => {
+    gravarSeccoesAbertas(openSections);
+  }, [openSections]);
   
   // Sync openSections with computed values when path or role changes
   // Only EXPAND sections (never collapse) — o utilizador pode fechar manualmente,
   // mas ao navegar para uma rota filha, a secção respectiva abre-se automaticamente.
   useEffect(() => {
-    setOpenSections(prev => {
-      const next = { ...prev };
-      let changed = false;
-      for (const [section, shouldOpen] of Object.entries(computedOpenSections)) {
-        if (shouldOpen && !prev[section]) {
-          next[section] = true;
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
+    const abrir = Object.entries(computedOpenSections).filter(([, deveAbrir]) => deveAbrir).map(([id]) => id);
+    setOpenSections(prev => abrirSeccoes(prev, abrir));
   }, [computedOpenSections]);
 
   // Detectar scroll para minimizar header
@@ -582,6 +581,16 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const navData = getNavItems();
+
+  // O grupo que contém a ligação da rota actual abre-se, qualquer que seja o perfil: decide-se a
+  // partir do PRÓPRIO menu, não de uma lista de rotas à parte (o `/index` e o `/validades` do
+  // perfil Index não estavam em nenhuma). A chave em texto é a dependência: `navData` é um objecto
+  // novo em cada render e um efeito sobre ele correria sempre.
+  const gruposDaRotaActiva = seccoesComRotaActiva(navData.groups, location.pathname).join(",");
+  useEffect(() => {
+    if (!gruposDaRotaActiva) return;
+    setOpenSections(prev => abrirSeccoes(prev, gruposDaRotaActiva.split(",")));
+  }, [gruposDaRotaActiva]);
   // Impersonate offset (isImpersonating already consumed above)
   const impersonateOffset = isImpersonating ? 'top-12' : 'top-0';
 

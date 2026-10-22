@@ -438,3 +438,16 @@ URL do render actual. A mudança de aba faz UMA escrita.
    (`is_clean_pdf`) que a análise e o motor financeiro ignoram (senão contava-se duas vezes).
 8. **Antes de ligar a purga em produção:** auditar as referências a um original que não sejam o `document_metadata` e os
    pedidos do Portal (ficheiros do Parceiro por `file_id`, a Origem Financeira; o Explorador mostra ambos os ficheiros durante a graça).
+
+### Afinações (Out 2026)
+
+Resumo; o detalhe e as lições estão no `AGENTS.md` («Afinações do Index»).
+
+1. **Fila:** só processos activos (fase não terminal no workflow da rede dona) e coluna «Empresa/Origem» (`company`).
+2. **Documentos:** o Index lê os pedidos do Portal (`GET /documents/portal-requests/{id}`); escritas continuam fechadas.
+3. **Saída da Index sem consultor forçado:** a omissão deixou de atribuir; só a configuração explícita da fase atribui.
+4. **Menu lateral:** o grupo da rota activa abre-se a partir do próprio menu e o estado sobrevive à navegação.
+5. **Bancada:** nome e nº do processo são ligações para o detalhe (novo separador); cada alerta tem `detail` calculado pelo código
+   (a IA só dá uma nota saneada, anexada a um movimento verificado). A contraparte continua sem ser guardada.
+6. **Pesquisa avançada:** `GET /api/index/advanced-search` (um resultado por emprego; salário numérico; fronteira de processos
+   no `$lookup`). Novo campo opcional `employer_location`. Declarações de efetividade: fora (não são analisadas).

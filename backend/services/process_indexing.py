@@ -351,7 +351,9 @@ def build_mark_indexed_response(
         } if next_status and next_status != current_status else None,
         "indexer_cleared": process.get("assigned_indexacao_id") is not None,
         "consultant_auto_assigned": consultant_result,
-        "dual_auto_assigned": is_pre_registo_transition,
+        # Só é verdade se alguém foi mesmo atribuído: sem configuração da fase a saída da Index
+        # já não atribui (Out 2026) e dizer o contrário seria o ecrã a anunciar um consultor.
+        "dual_auto_assigned": bool(consultant_result) and is_pre_registo_transition,
         "assignment": consultant_result if is_pre_registo_transition else None,
         "is_data_confirmed": True,
         "financial_engine": financial_engine

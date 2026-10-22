@@ -4,6 +4,10 @@
  * Diz o que aconteceu (`onAbrir(processId)`); quem decide o que isso implica é a página.
  * Nunca mostra dados do cliente além do nome e do nº do processo, e a fila nem os recebe
  * (o servidor só devolve a lista positiva).
+ *
+ * A coluna «Empresa/Origem» diz de que empresa é o processo (`company`, calculada ao servir) e, quando
+ * o processo foi PARTILHADO por outra rede, di-lo — quem trata a fila precisa de saber de onde vem.
+ * Sem empresa determinável mostra «—»: nunca se inventa uma.
  */
 import { AlertTriangle, FileSearch } from "lucide-react";
 
@@ -34,6 +38,7 @@ export function IndexQueueTable({ itens, separador, onAbrir, mensagemVazia }) {
       <TableHeader>
         <TableRow>
           <TableHead>Processo</TableHead>
+          <TableHead>Empresa/Origem</TableHead>
           <TableHead>Estado</TableHead>
           <TableHead className="text-right">Documentos</TableHead>
           <TableHead className="text-right">Alertas</TableHead>
@@ -49,6 +54,20 @@ export function IndexQueueTable({ itens, separador, onAbrir, mensagemVazia }) {
               <div className="text-xs text-muted-foreground">
                 {p.process_number ? `#${p.process_number}` : String(p.id).slice(0, 8)}
               </div>
+            </TableCell>
+            <TableCell data-testid="index-queue-origem">
+              {p.company?.name ? (
+                <div className="text-sm">
+                  {p.company.name}
+                  {p.company.other_network === true && (
+                    <Badge variant="secondary" className="ml-1">
+                      Partilhado
+                    </Badge>
+                  )}
+                </div>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
             </TableCell>
             <TableCell>
               <Badge variant={p.index_status === "in_review" ? "default" : "outline"}>

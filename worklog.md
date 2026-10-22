@@ -12376,3 +12376,20 @@ Operação (pendente, do dono do produto):
 * **Não ligar `INDEX_PURGE_ENABLED` em produção** sem antes auditar as outras referências a um original (ficheiros do Parceiro por `file_id`, Origem Financeira, Explorador). O PDF limpo gera-se sem apagar nada.
 * `INDEX_SANITIZE_ENABLED` (omissão: ligado fora de testes) controla só a geração automática do PDF limpo no fecho.
 * Correr `python -m scripts.migrar_index_status [--aplicar]` é conveniência (a fila tolera o legado).
+
+---
+Task ID: index-afinacoes-out2026
+Agent: Cloud Agent
+Task: Index — fila (activos + origem), Documentos, sem consultor forçado, menu lateral, justificação dos alertas e pesquisa avançada
+
+Date: 2026-10-22
+
+Work Log:
+* Fila: `condicao_de_processo_activo` (workflow da rede DONA) + `company` por linha; âmbito de processos resolvido uma vez. Não reproduzi «processos de outra rede» com dados carimbados.
+* Documentos: `GET /documents/portal-requests/{id}` não incluía `indexacao` na lista de papéis (a guarda de visibilidade sempre o admitiu).
+* `phase_automation`: omissão da saída da Index = ninguém (testes invertidos). **Operação:** configurar `auto_assign_roles` na fase de destino se se quiser a atribuição automática.
+* Menu: `utils/seccoesDoMenu.js`; o layout é montado por página e o estado dos grupos recolhia a cada clique.
+* Alertas: `AlertaDaMatriz.detail` calculado em `index_matrix`; nota da IA saneada; `ESQUEMA_VERSAO` mantida (reanálise em massa evitada).
+* Pesquisa avançada `/api/index/advanced-search`; `employer_location` novo e opcional.
+* Verificado com `mongod` real (7.0.14) e mutações; declarações de efetividade fora de âmbito.
+

@@ -1187,10 +1187,20 @@ async def bulk_download_documents(
 # PORTAL DOCUMENT REQUESTS — Admin manages what the client sees
 # ====================================================================
 
+#: Quem LÊ os pedidos do Portal de um processo. O Index (`indexacao`) entra só na LEITURA:
+#: é quem trata os documentos e o separador Documentos do processo pede esta lista — sem ele
+#: aqui o ecrã abria com um 403 que a guarda de visibilidade (que já o admite) nunca daria.
+#: Criar, editar e apagar pedidos continuam sem o Index.
+PAPEIS_QUE_LEEM_OS_PEDIDOS_DO_PORTAL = [
+    UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
+    UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO,
+]
+
+
 @router.get("/portal-requests/{process_id}")
 async def get_portal_document_requests(
     process_id: str,
-    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+    user: dict = Depends(require_roles(PAPEIS_QUE_LEEM_OS_PEDIDOS_DO_PORTAL))
 ):
     """
     Lista todos os pedidos de documentos do portal para um processo.

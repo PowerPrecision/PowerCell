@@ -132,7 +132,9 @@ def db():
     ])
     fake.workflow_statuses.docs.extend([
         {"name": "pre_registo", "order": 1},
-        {"name": "analise", "order": 2},
+        # A atribuição à saída da Index já não é por omissão (Out 2026): a fase de destino pede-a
+        # EXPLICITAMENTE, e é esse caminho que este cenário cobre (campos canónicos + broadcast).
+        {"name": "analise", "order": 2, "auto_assign_roles": ["consultor", "intermediario"]},
     ])
     return fake
 
@@ -415,6 +417,24 @@ class TestCaminhoFeliz:
 # ====================================================================
 # CENÁRIO 2 — FALHA DE OCR / DADOS
 # ====================================================================
+
+
+class TestSemAtribuicaoPorOmissao:
+    """Out 2026: marcar como indexado NÃO força um consultor — a fase tem de o pedir."""
+
+    async def test_a_indexacao_conclui_sem_atribuir_ninguem(self, db, eventos):
+        await db.workflow_statuses.update_one({"name": "analise"}, {"$unset": {"auto_assign_roles": ""}})
+        from services.workflow_phases import invalidar_cache_de_fases
+
+        invalidar_cache_de_fases()
+        resposta, _ = await _marcar_indexado(db)
+
+        assert resposta["success"] is True and resposta["dual_auto_assigned"] is False
+        processo = await db.processes.find_one({"id": PROCESS_ID})
+        assert processo["is_indexed"] is True and processo["status"] == "analise"  # o pipeline conclui
+        for campo in ("consultor_names", "assigned_consultor_ids", "assigned_consultor_id", "consultant_id",
+                      "mediador_names", "assigned_mediador_ids", "assigned_mediador_id"):
+            assert not processo.get(campo), campo
 
 
 class TestFalhaDeExtracao:
