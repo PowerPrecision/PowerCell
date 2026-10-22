@@ -2,7 +2,9 @@
  * AlertMatrix — a Matriz de Verificação do processo: avisos que NUNCA bloqueiam a indexação.
  *
  * A mensagem e a severidade vêm do servidor (tabela fechada no código); o ecrã não interpreta
- * códigos nem mostra texto de modelos. Dispensar um alerta não o apaga — fica registado e não
+ * códigos nem mostra texto de modelos. A JUSTIFICAÇÃO (`detail`: o valor, a data, a diferença) vem
+ * do servidor também — calculada pelo código a partir dos factos — e aparece debaixo da mensagem:
+ * sem ela «há movimentos que merecem confirmação» não diz o que confirmar. Dispensar um alerta não o apaga — fica registado e não
  * ressuscita quando a matriz volta a correr.
  */
 import { AlertTriangle, CheckCircle2, Info, ShieldAlert } from "lucide-react";
@@ -54,6 +56,11 @@ export function AlertMatrix({ alertas, onDispensar, aDispensar = null, podeDispe
                       {a.dismissed && <span className="text-xs text-muted-foreground">Dispensado</span>}
                     </div>
                     <p className="mt-1 text-sm">{a.message}</p>
+                    {a.detail && (
+                      <p className="mt-1 text-sm text-muted-foreground" data-testid="alerta-detalhe">
+                        {a.detail}
+                      </p>
+                    )}
                   </div>
                   {podeDispensar && !a.dismissed && (
                     <Button

@@ -11,6 +11,7 @@ Router fino; a lógica vive em `services/index_api.py` e `services/index_finaliz
 * Cada rota limitada declara `request` e `response: Response` (o slowapi precisa dele no sucesso).
 * Nenhum endpoint bloqueia a indexação: «mark-indexed» responde sempre (salvo permissão).
 """
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Query, Request, Response
@@ -19,6 +20,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from middleware.rate_limit import limiter
 from services.auth import get_all_user_roles, get_effective_role, require_roles
 from services.index_access import PAPEIS_DE_IA_DO_INDEX
+from services.index_advanced_search import TAMANHO_MAXIMO_DA_PAGINA, run_advanced_search
+from services.index_document_content import run_conteudo_do_documento
 from services.index_api import (
     run_analyze_process,
     run_claim_process,
@@ -84,6 +87,58 @@ async def get_index_queue(
 ):
     """Duas abas: `pending` («Fila de Espera») e `reviews` («Revisões Pendentes»)."""
     return await run_get_index_queue(user, tab=tab, page=page, size=size, q=q)
+
+
+@router.get("/advanced-search")
+@limiter.limit("60/minute")
+async def advanced_search(
+    request: Request,
+    response: Response,
+    min_salary: Optional[Decimal] = Query(None, ge=0, description="Líquido mínimo do recibo (EUR)."),
+    max_salary: Optional[Decimal] = Query(None, ge=0, description="Líquido máximo do recibo (EUR)."),
+    contract_type: Optional[list[str]] = Query(
+        None, description="efetivo | termo_certo | termo_incerto | outro (repetível)."),
+    employer_nif: Optional[str] = Query(None, max_length=20, description="NIF da entidade (prefixo, ≥3 dígitos)."),
+    employer_name: Optional[str] = Query(None, max_length=100),
+    employer_location: Optional[str] = Query(None, max_length=100, description="Localidade/concelho/distrito da sede."),
+    job_title: Optional[str] = Query(None, max_length=100),
+    period_from: Optional[str] = Query(None, description="YYYY-MM"),
+    period_to: Optional[str] = Query(None, description="YYYY-MM"),
+    sort: str = Query("period_desc", description="period_desc | salary_desc | salary_asc"),
+    document_type: Optional[str] = Query(
+        None, description="recibo | declaracao_efetividade | extrato — pesquisa por DOCUMENTO em vez de por emprego."),
+    bank: Optional[str] = Query(None, max_length=80, description="Banco do extrato (só com document_type=extrato)."),
+    page: int = Query(1, ge=1),
+    size: int = Query(25, ge=1, le=TAMANHO_MAXIMO_DA_PAGINA),
+    user: dict = Depends(_acesso),
+):
+    """Pesquisa os metadados profissionais extraídos pela IA — um resultado por emprego.
+
+    Sem `document_type`: um resultado por emprego, todos os filtros valem para o MESMO emprego.
+    Com `document_type`: um resultado por DOCUMENTO (recibos isolados por valor, declarações de efetividade
+    por localidade, extratos por banco). Só aparecem processos do âmbito de quem pergunta.
+    """
+    return await run_advanced_search(
+        user, min_salary=min_salary, max_salary=max_salary, contract_type=contract_type,
+        employer_nif=employer_nif, employer_name=employer_name, employer_location=employer_location,
+        job_title=job_title, period_from=period_from, period_to=period_to, sort=sort, page=page, size=size,
+        document_type=document_type, bank=bank,
+    )
+
+
+@router.get("/documents/{document_id}/content")
+@limiter.limit("120/minute")
+async def get_document_content(
+    request: Request,
+    response: Response,
+    document_id: str,
+    user: dict = Depends(_acesso),
+):
+    """Os bytes de um documento que a pesquisa devolveu (recibo, declaração, extrato), para o ver no ecrã.
+
+    404 igual ao de «não existe» fora do âmbito de rede; a chave S3 sai do registo, nunca do pedido.
+    """
+    return await run_conteudo_do_documento(user, document_id)
 
 
 @router.get("/employers")

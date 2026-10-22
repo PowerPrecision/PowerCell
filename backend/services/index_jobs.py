@@ -250,9 +250,10 @@ async def concluir_resultados(process: dict, resumo: dict) -> dict[str, Any]:
     impressao = impressao_do_conjunto([d.get("analysis_fingerprint") for d in docs])
 
     metadados = await store.recalcular_metadados(process_id, rede, impressao)
-    novas = await store.registar_entidades(metadados.jobs)
-
     factos = await store.factos_do_processo(process_id)
+    # as declarações de efetividade também alimentam o directório de entidades (NIF válido, nome, sem dúvida)
+    novas = await store.registar_entidades(metadados.jobs, store.entidades_das_declaracoes(factos))
+    await store.reconstruir_documentos_do_index(process_id, rede)  # a pesquisa por documento (nunca levanta)
     conhecidas = await store.entidades_conhecidas(f.get("employer_name") for f in factos)
     achados = avaliar(factos, entidades=conhecidas)
     if resumo.get("falhados"):

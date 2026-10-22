@@ -438,3 +438,45 @@ URL do render actual. A mudança de aba faz UMA escrita.
    (`is_clean_pdf`) que a análise e o motor financeiro ignoram (senão contava-se duas vezes).
 8. **Antes de ligar a purga em produção:** auditar as referências a um original que não sejam o `document_metadata` e os
    pedidos do Portal (ficheiros do Parceiro por `file_id`, a Origem Financeira; o Explorador mostra ambos os ficheiros durante a graça).
+
+### Afinações (Out 2026)
+
+Resumo; o detalhe e as lições estão no `AGENTS.md` («Afinações do Index»).
+
+1. **Fila:** só processos activos (fase não terminal no workflow da rede dona) e coluna «Empresa/Origem» (`company`).
+2. **Documentos:** o Index lê os pedidos do Portal (`GET /documents/portal-requests/{id}`); escritas continuam fechadas.
+3. **Saída da Index sem consultor forçado:** a omissão deixou de atribuir; só a configuração explícita da fase atribui.
+4. **Menu lateral:** o grupo da rota activa abre-se a partir do próprio menu e o estado sobrevive à navegação.
+5. **Bancada:** nome e nº do processo são ligações para o detalhe (novo separador); cada alerta tem `detail` calculado pelo código
+   (a IA só dá uma nota saneada, anexada a um movimento verificado). A contraparte continua sem ser guardada.
+6. **Pesquisa avançada:** `GET /api/index/advanced-search` (um resultado por emprego; salário numérico; fronteira de processos
+   no `$lookup`). Novo campo opcional `employer_location`. (As declarações de efetividade entraram depois: ver abaixo.)
+
+### Pesquisa por documento: declarações, recibos isolados e extratos por banco (Out 2026)
+
+Resumo; o detalhe e as lições estão no `AGENTS.md` («Pesquisa avançada por DOCUMENTO»).
+
+1. **Tipo novo `declaracao_efetividade`:** só dados da entidade e do vínculo (NIF, nome, localidade, `admission_date`, contrato
+   certificado). Não gera «emprego»; alimenta o directório `employers`. `ai_subtype` = slug, `ai_subcategory` = rótulo.
+2. **Extrato:** `bank_name` obrigatório no esquema; `services/index_banks.py` canonicaliza (chave estável, palavras inteiras,
+   banco desconhecido guardado como lido, IBAN só como recurso e nunca guardado).
+3. **Colecção `process_index_documents`:** uma linha por ficheiro analisado (líquido numérico), reconstruída — não acumulada —
+   no fim de cada análise e em cada correcção humana; nada pessoal.
+4. **`GET /index/advanced-search?document_type=recibo|declaracao_efetividade|extrato&bank=…`:** vista por documento
+   (`view: "documents"`); sem `document_type` a vista por emprego fica igual. Filtro que não existe no tipo = 422.
+5. **Sem reanálise retroactiva:** `ESQUEMA_VERSAO` não mudou. `scripts/backfill_index_documentos.py` reconstrói a projecção
+   do que já foi analisado, sem IA.
+
+### Precedência da declaração e «Ver documento» (Out 2026)
+
+Detalhe e lições no `AGENTS.md` («Declaração de Efetividade manda no emprego…»).
+
+1. **Precedência absoluta:** `contract_type` e `admission_date` da declaração mandam sobre os recibos no emprego
+   (`index_store.aplicar_declaracoes`). Só enriquece empregos existentes; casa por NIF válido e depois por nome; a mais
+   recente ganha; confiança «baixa» → `needs_review` / admissão não propagada; a edição humana vence. Novos campos do emprego:
+   `admission_date`, `certified_by_declaration`.
+2. **`GET /index/documents/{document_id}/content`:** pré-visualização por id (recibo/extrato/declaração), 404 uniforme fora do
+   âmbito, posse da chave S3, streaming partilhado com o da lead (`previsualizacao_de_ficheiros`).
+3. **`/index/pesquisa`:** ecrã da pesquisa avançada com o «Ver documento» num `Dialog` sobreposto; o payload leva
+   `document_id` (vista por documento) / `document_ids` (vista por emprego), nunca nomes de ficheiro.
+

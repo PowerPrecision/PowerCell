@@ -16,7 +16,7 @@ Princípios (ver `INDEX_MODULE_ARCHITECTURE.md`):
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Generic, Literal, Optional, TypeVar
 
@@ -115,6 +115,16 @@ class TrabalhoProfissional(BaseModel):
     job_title: CampoRevisavel[str] = Field(default_factory=campo_em_falta)
     net_salary: CampoRevisavel[Decimal] = Field(default_factory=campo_em_falta)
     contract_type: CampoRevisavel[TipoDeContrato] = Field(default_factory=campo_em_falta)
+    #: Localidade/concelho/distrito da sede da entidade patronal (dado da EMPRESA, não do cliente).
+    #: Opcional e NÃO revisável: serve a pesquisa avançada por zona e nunca põe um trabalho «a rever».
+    #: Análises anteriores à pesquisa avançada não a têm até serem extraídas outra vez.
+    employer_location: Optional[str] = Field(default=None, max_length=80)
+    #: Data de admissão (YYYY-MM-DD). Só vem de uma Declaração de Efetividade (um recibo não a traz) e
+    #: não é revisável por pessoas (sem editor): se a declaração a leu com dúvida, não chega aqui.
+    admission_date: Optional[str] = None
+    #: O tipo de contrato (e a admissão) vêm da Declaração de Efetividade, que tem precedência
+    #: absoluta sobre os recibos (decisão da direcção, Out 2026). Nunca editável: é um facto derivado.
+    certified_by_declaration: bool = False
     period: Optional[str] = None
     source_document_ids: list[str] = Field(default_factory=list)
 
@@ -126,6 +136,25 @@ class TrabalhoProfissional(BaseModel):
         if not _PERIODO.match(v):
             raise ValueError("período tem de ser YYYY-MM")
         return v
+
+    @field_validator("admission_date")
+    @classmethod
+    def _admissao(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        try:
+            return date.fromisoformat(v).isoformat()
+        except ValueError as exc:
+            raise ValueError("a data de admissão tem de ser YYYY-MM-DD") from exc
+
+    @field_validator("employer_location", mode="before")
+    @classmethod
+    def _localidade(cls, v: Any) -> Optional[str]:
+        """Texto simples numa linha, ou `None`: um texto longo ou vazio não é uma localidade."""
+        if v is None:
+            return None
+        texto = " ".join(str(v).split())[:80]
+        return texto or None
 
     @model_validator(mode="after")
     def _reforcar_nif(self) -> "TrabalhoProfissional":
@@ -294,6 +323,10 @@ class AlertaDaMatriz(BaseModel):
     code: str
     severity: Severidade = "aviso"
     message: str = ""
+    #: A JUSTIFICAÇÃO exacta do achado (valores, datas, diferenças), calculada pelo código a partir dos
+    #: factos — a mensagem da tabela é genérica e, sozinha, não diz à pessoa o que confirmar. Não entra
+    #: na assinatura (`key`): reescrevê-la nunca ressuscita um alerta dispensado. Nada pessoal.
+    detail: Optional[str] = Field(default=None, max_length=600)
     refs: list[RefDocumento] = Field(default_factory=list)
     dismissed_by_human: bool = False
     created_at: Optional[datetime] = None
@@ -301,6 +334,15 @@ class AlertaDaMatriz(BaseModel):
     #: Assinatura estável do achado (código + documentos + período): é o que faz um alerta
     #: dispensado NÃO ressuscitar quando a matriz corre outra vez.
     key: Optional[str] = None
+
+    @field_validator("detail", mode="before")
+    @classmethod
+    def _detalhe_limpo(cls, valor: Any) -> Optional[str]:
+        """Texto simples, numa linha e com tecto: nunca HTML nem um texto longo vindo de fora."""
+        if valor is None:
+            return None
+        texto = " ".join(str(valor).split())[:600]
+        return texto or None
 
     @model_validator(mode="after")
     def _da_tabela(self) -> "AlertaDaMatriz":

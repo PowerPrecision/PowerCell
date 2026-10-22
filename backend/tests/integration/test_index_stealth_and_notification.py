@@ -177,14 +177,21 @@ class TestPostIndexingAutoTasks:
 
     @pytest.mark.asyncio
     async def test_creates_two_tasks_per_assigned_user(self, qa_process, qa_users):
-        """A saída da Index sem configuração faz o que sempre fez: duas
-        tarefas de arranque para o consultor e duas para o intermediário."""
+        """Com a atribuição PEDIDA pela fase (Out 2026: já não é por omissão), a saída da Index
+        dá duas tarefas de arranque ao consultor e duas ao intermediário."""
         from services.phase_automation import ORIGEM_INDEXACAO, ao_entrar_na_fase
+        from services.workflow_phases import invalidar_cache_de_fases
 
         company_id, consultor_id, mediador_id = qa_users
         await db.processes.update_one(
             {"id": qa_process}, {"$set": {"company_id": company_id}}
         )
+        await db.workflow_statuses.delete_many({"name": "fase_documental", "network_id": {"$in": [None, ""]}})
+        await db.workflow_statuses.insert_one({
+            "name": "fase_documental", "order": 99, "is_active": True,
+            "auto_assign_roles": ["consultor", "intermediario"], "qa_marca": "stealth-test",
+        })
+        invalidar_cache_de_fases()
         with patch(
             "services.notification_service.send_notification_with_preference_check",
             new_callable=AsyncMock,
@@ -197,6 +204,8 @@ class TestPostIndexingAutoTasks:
                 actor={"id": "idx-qa", "role": "indexacao"},
             )
 
+        await db.workflow_statuses.delete_many({"qa_marca": "stealth-test"})
+        invalidar_cache_de_fases()
         assigned_consultant_id = resultado.atribuicao["consultant_id"]
         assigned_mediador_id = resultado.atribuicao["mediador_id"]
 

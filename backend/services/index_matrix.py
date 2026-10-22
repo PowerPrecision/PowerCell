@@ -25,7 +25,7 @@ from __future__ import annotations
 import calendar
 from collections import defaultdict
 from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Optional
 
 from models.index_module import nif_e_valido, normalizar_nif
@@ -72,8 +72,52 @@ def _ref(documento: Optional[str], pagina: Optional[int] = None) -> dict:
     return {"document_id": documento, "page": pagina}
 
 
-def _achado(code: str, refs: list[dict], periodo: Optional[str] = None) -> dict:
-    return {"code": code, "refs": [r for r in refs if r.get("document_id")], "periodo": periodo}
+def _achado(code: str, refs: list[dict], periodo: Optional[str] = None, detalhe: Optional[str] = None) -> dict:
+    """`detalhe` é a justificação exacta, em texto, calculada aqui a partir dos factos (ver `_eur`)."""
+    return {
+        "code": code, "refs": [r for r in refs if r.get("document_id")], "periodo": periodo,
+        "detalhe": detalhe,
+    }
+
+
+# --------------------------------------------------------------------
+# a JUSTIFICAÇÃO de cada achado (Out 2026)
+# --------------------------------------------------------------------
+# «Há movimentos que merecem confirmação» não diz o que confirmar. Cada achado leva agora o motivo
+# exacto — o valor, a data, a diferença — e leva-o do CÓDIGO, que é quem faz as contas: um texto
+# escrito pelo modelo podia dizer um valor que não existe. Nada pessoal: nunca o texto da contraparte
+# (só se guarda a impressão), nunca nomes nem números de conta.
+MAXIMO_DE_ITENS_NA_JUSTIFICACAO = 3
+
+
+def _eur(valor: Decimal) -> str:
+    """`1.234,56 €` (formato português)."""
+    texto = f"{valor.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
+    return texto.replace(",", "\0").replace(".", ",").replace("\0", ".") + " €"
+
+
+def _pct(valor: Decimal, casas: int) -> str:
+    return f"{valor.quantize(Decimal(1).scaleb(-casas))}".replace(".", ",") + " %"
+
+
+def _dia(valor: Any) -> str:
+    d = _data(valor)
+    return d.strftime("%d/%m/%Y") if d else "data desconhecida"
+
+
+def _mes(periodo: Optional[str]) -> str:
+    return f"{periodo[5:7]}/{periodo[:4]}" if periodo else "?"
+
+
+def _lista(itens: list[str]) -> str:
+    """Os primeiros itens por extenso e «e mais N» para o resto — nunca um parágrafo."""
+    visiveis = itens[:MAXIMO_DE_ITENS_NA_JUSTIFICACAO]
+    resto = len(itens) - len(visiveis)
+    return "; ".join(visiveis) + (f"; e mais {resto}" if resto > 0 else "")
+
+
+def _pagina(m: dict) -> str:
+    return f" (pág. {m['page']})" if m.get("page") else ""
 
 
 def _nome_normal(nome: Any) -> str:
@@ -117,45 +161,73 @@ def _verificar_recibo(r: dict, extratos: list[dict], entidades: dict[str, str], 
 
     nif = normalizar_nif(r.get("employer_nif"))
     if nif and not nif_e_valido(nif):
-        achados.append(_achado("nif_invalido", ref, periodo))
+        achados.append(_achado(
+            "nif_invalido", ref, periodo,
+            f"NIF {nif} da entidade patronal falha o dígito de controlo (recibo de {_mes(periodo)}).",
+        ))
     nome = _nome_normal(r.get("employer_name"))
     if nif and nome and entidades.get(nome) and entidades[nome] != nif:
-        achados.append(_achado("nif_entidade_incoerente", ref, periodo))
+        achados.append(_achado(
+            "nif_entidade_incoerente", ref, periodo,
+            f"O recibo de {_mes(periodo)} indica o NIF {nif}, mas a entidade já conhecida com este nome tem o NIF {entidades[nome]}.",
+        ))
 
     liquido, bruto = _dec(r.get("net")), _dec(r.get("gross"))
     descontos, ss, irs = _dec(r.get("deductions")), _dec(r.get("ss")), _dec(r.get("irs"))
 
     # contas do recibo (três verificações independentes; o dedup junta as repetidas)
     if None not in (bruto, descontos, liquido) and abs(bruto - descontos - liquido) > TOLERANCIA_CONTAS:
-        achados.append(_achado("contas_nao_batem", ref, periodo))
+        diferenca = abs(bruto - descontos - liquido)
+        achados.append(_achado(
+            "contas_nao_batem", ref, periodo,
+            f"Recibo de {_mes(periodo)}: ilíquido {_eur(bruto)} − descontos {_eur(descontos)} dá "
+            f"{_eur(bruto - descontos)}, mas o líquido indicado é {_eur(liquido)} (diferença de {_eur(diferenca)}).",
+        ))
     if bruto and bruto > 0 and ss is not None:
         taxa = ss / bruto
         if not any(abs(taxa - t) <= MARGEM_SS for t in TAXAS_SS):
-            achados.append(_achado("contas_nao_batem", ref, periodo))
+            achados.append(_achado(
+                "contas_nao_batem", ref, periodo,
+                f"Recibo de {_mes(periodo)}: a Segurança Social ({_eur(ss)}) é {_pct(taxa * 100, 2)} do ilíquido "
+                f"({_eur(bruto)}); o esperado é 11 % ou 23,75 %.",
+            ))
     if bruto and bruto > 0 and irs is not None and irs / bruto > IRS_MAXIMO_PLAUSIVEL:
-        achados.append(_achado("contas_nao_batem", ref, periodo))
+        achados.append(_achado(
+            "contas_nao_batem", ref, periodo,
+            f"Recibo de {_mes(periodo)}: a retenção de IRS ({_eur(irs)}) é "
+            f"{_pct(irs / bruto * 100, 1)} do ilíquido ({_eur(bruto)}), acima do plausível.",
+        ))
 
-    # realidade
-    irreal = False
+    # realidade — cada motivo diz-se; vários motivos juntam-se numa só justificação
+    motivos: list[str] = []
     if periodo and (int(periodo[:4]), int(periodo[5:7])) > (hoje.year, hoje.month):
-        irreal = True  # recibo de um mês que ainda não existe
+        motivos.append(f"o período {_mes(periodo)} ainda não existe")
     if not nif and not r.get("employer_name"):
-        irreal = True  # sem entidade nenhuma
+        motivos.append("não indica entidade patronal")
     if bruto is not None and liquido is not None and liquido > bruto:
-        irreal = True  # líquido acima do ilíquido
+        motivos.append(f"o líquido ({_eur(liquido)}) é superior ao ilíquido ({_eur(bruto)})")
     cobrem = _extratos_que_cobrem(periodo, extratos)
     iban = r.get("iban")
     if iban and cobrem and all(e.get("iban") for e in cobrem) and not any(e["iban"] == iban for e in cobrem):
-        irreal = True  # o ordenado iria para um IBAN que não é o das contas apresentadas
-    if irreal:
-        achados.append(_achado("recibo_irreal", ref, periodo))
+        motivos.append("o IBAN do ordenado não é o de nenhuma das contas dos extratos do período")
+    if motivos:
+        achados.append(_achado("recibo_irreal", ref, periodo, f"Recibo de {_mes(periodo)}: " + "; ".join(motivos) + "."))
 
     # o crédito no extrato
     if liquido is not None and periodo:
         if not cobrem:
-            achados.append(_achado("extrato_em_falta", ref, periodo))
+            achados.append(_achado(
+                "extrato_em_falta", ref, periodo,
+                f"Não há extrato que cubra {_mes(periodo)} (nem o mês seguinte) para confirmar o líquido de {_eur(liquido)}.",
+            ))
         elif not _ha_credito(liquido, periodo, cobrem):
-            achados.append(_achado("recibo_sem_credito", ref + [_ref(e.get("document_id")) for e in cobrem], periodo))
+            tolerancia = max(TOLERANCIA_CREDITO_ABSOLUTA, liquido * TOLERANCIA_CREDITO_RELATIVA)
+            achados.append(_achado(
+                "recibo_sem_credito", ref + [_ref(e.get("document_id")) for e in cobrem], periodo,
+                f"Líquido de {_eur(liquido)} do recibo de {_mes(periodo)}: não há crédito de valor semelhante "
+                f"(±{_eur(tolerancia)}) nos extratos entre {_dia(_intervalo_do_mes_e_seguinte(periodo)[0])} "
+                f"e {_dia(_intervalo_do_mes_e_seguinte(periodo)[1])}.",
+            ))
     return achados
 
 
@@ -208,15 +280,25 @@ def _verificar_extrato(e: dict) -> list[dict]:
     if None not in (abertura, fecho) and movimentos and len(movimentos) < TECTO_DE_MOVIMENTOS:
         creditos = sum((_dec(m["v"]) or Decimal(0) for m in movimentos if m.get("k") == "c"), Decimal(0))
         debitos = sum((_dec(m["v"]) or Decimal(0) for m in movimentos if m.get("k") == "d"), Decimal(0))
-        if abs((abertura + creditos - debitos) - fecho) > TOLERANCIA_SALDO:
-            achados.append(_achado("saldo_nao_bate", ref))
+        esperado = abertura + creditos - debitos
+        if abs(esperado - fecho) > TOLERANCIA_SALDO:
+            achados.append(_achado(
+                "saldo_nao_bate", ref, None,
+                f"Saldo inicial {_eur(abertura)} + créditos {_eur(creditos)} − débitos {_eur(debitos)} dá "
+                f"{_eur(esperado)}, mas o saldo final indicado é {_eur(fecho)} (diferença de {_eur(abs(esperado - fecho))}).",
+            ))
 
     estranho: list[dict] = []
+    razoes: list[str] = []
+    por_movimento: dict[tuple, int] = {}  # (valor, data) → posição em `razoes`: o mesmo movimento diz-se UMA vez
     # numerário alto (código)
     for m in movimentos:
         v = _dec(m.get("v"))
         if m.get("canal") == "numerario" and v is not None and v >= NUMERARIO_ATIPICO:
             estranho.append(_ref(doc, m.get("page")))
+            sentido = "Depósito" if m.get("k") == "c" else "Levantamento"
+            por_movimento[(v, m.get("d"))] = len(razoes)
+            razoes.append(f"{sentido} em numerário de {_eur(v)} a {_dia(m.get('d'))}{_pagina(m)}")
     # a IA aponta numerário atípico: só vale se existe mesmo um movimento assim
     for a in e.get("achados") or []:
         if a.get("tipo") != "numerario_atipico":
@@ -228,17 +310,31 @@ def _verificar_extrato(e: dict) -> list[dict]:
             mv = _dec(m.get("v"))
             if mv is not None and abs(mv - v) <= Decimal("0.01") and (not a.get("d") or a["d"] == m.get("d")):
                 estranho.append(_ref(doc, m.get("page") or a.get("page")))
+                # o valor, a data e a página saem do MOVIMENTO (verificado); a nota é só a leitura do modelo
+                nota = f" — nota da IA: {a['nota']}" if a.get("nota") else ""
+                existente = por_movimento.get((mv, m.get("d")))
+                if existente is not None:
+                    razoes[existente] += nota  # o código já o apontou: só se junta a nota
+                else:
+                    por_movimento[(mv, m.get("d"))] = len(razoes)
+                    razoes.append(f"Movimento atípico de {_eur(mv)} a {_dia(m.get('d'))}{_pagina(m)}{nota}")
                 break
     # mesma contraparte várias vezes (código, pela impressão — o texto não existe aqui)
-    por_contraparte: dict[str, int] = defaultdict(int)
+    por_contraparte: dict[str, list[Decimal]] = defaultdict(list)
     for m in movimentos:
         v = _dec(m.get("v"))
         if m.get("cp") and v is not None and v >= RECORRENCIA_VALOR_MINIMO and m.get("canal") != "debito_direto":
-            por_contraparte[m["cp"]] += 1
-    if any(n >= RECORRENCIA_MINIMA for n in por_contraparte.values()):
+            por_contraparte[m["cp"]].append(v)
+    recorrentes = [vs for vs in por_contraparte.values() if len(vs) >= RECORRENCIA_MINIMA]
+    if recorrentes:
         estranho.append(_ref(doc))
+        for vs in recorrentes:
+            razoes.append(
+                f"{len(vs)} movimentos de {_eur(RECORRENCIA_VALOR_MINIMO)} ou mais para a mesma contraparte, "
+                f"no total de {_eur(sum(vs, Decimal(0)))}"
+            )
     if estranho:
-        achados.append(_achado("movimento_estranho", estranho))
+        achados.append(_achado("movimento_estranho", estranho, None, _lista(razoes) + "." if razoes else None))
     return achados
 
 
@@ -248,9 +344,15 @@ def _verificar_extrato(e: dict) -> list[dict]:
 def _verificar_identificacao(i: dict) -> list[dict]:
     ref = [_ref(i.get("document_id"))]
     if i.get("legivel") is False:
-        return [_achado("identificacao_ilegivel", ref)]
+        return [_achado(
+            "identificacao_ilegivel", ref, None,
+            "Não se reconheceu o tipo do documento (cartão, bilhete, passaporte ou título) ou a imagem está ilegível.",
+        )]
     if i.get("expirada") is True:
-        return [_achado("identificacao_expirada", ref)]
+        return [_achado(
+            "identificacao_expirada", ref, None,
+            "A data de validade lida no documento é anterior à data de hoje.",
+        )]
     return []
 
 
@@ -281,11 +383,14 @@ def avaliar(
     for i in identificacoes:
         achados.extend(_verificar_identificacao(i))
 
-    vistos: set = set()
-    unicos: list[dict] = []
+    # Sem repetições. Quando o mesmo achado nasce de duas verificações (as três contas de um recibo dão
+    # todas `contas_nao_batem`), as justificações JUNTAM-SE: descartar a segunda escondia o motivo.
+    por_chave: dict[tuple, dict] = {}
     for a in achados:
         chave = (a["code"], tuple(r["document_id"] for r in a["refs"]), a.get("periodo"))
-        if chave not in vistos:
-            vistos.add(chave)
-            unicos.append(a)
-    return unicos
+        existente = por_chave.get(chave)
+        if existente is None:
+            por_chave[chave] = a
+        elif a.get("detalhe") and a["detalhe"] not in (existente.get("detalhe") or ""):
+            existente["detalhe"] = " ".join(filter(None, [existente.get("detalhe"), a["detalhe"]]))
+    return list(por_chave.values())

@@ -27,6 +27,7 @@ import {
   quantosPorLimpar,
   resumoDaAnalise,
   rotuloDoEstado,
+  rotuloDoTipoDeAnalise,
   separadorValido,
   totalDeCamposARever,
   trabalhosSemNifConfirmado,
@@ -275,5 +276,19 @@ describe("PDF limpo: o que está por limpar e o que o ecrã diz", () => {
     expect(estadoDoFicheiroEmTexto({ is_clean_pdf: true })).toBe("PDF limpo (sem metadados)");
     expect(estadoDoFicheiroEmTexto({ file_state: "original" })).toBeNull();
     expect(estadoDoFicheiroEmTexto(null)).toBeNull();
+  });
+});
+
+describe("rotuloDoTipoDeAnalise", () => {
+  it("dá nome a todos os tipos que o servidor analisa, a declaração de efetividade incluída", () => {
+    expect(rotuloDoTipoDeAnalise("declaracao_efetividade")).toBe("Declaração de efetividade");
+    expect(rotuloDoTipoDeAnalise("recibo_vencimento")).toBe("Recibo de vencimento");
+    expect(rotuloDoTipoDeAnalise("extrato_bancario")).toBe("Extrato bancário");
+    expect(rotuloDoTipoDeAnalise("identificacao")).toBe("Identificação");
+  });
+
+  it("um tipo desconhecido não tem rótulo (o ecrã não inventa)", () => {
+    expect(rotuloDoTipoDeAnalise("contrato")).toBeNull();
+    expect(rotuloDoTipoDeAnalise(undefined)).toBeNull();
   });
 });

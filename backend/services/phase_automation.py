@@ -12,10 +12,14 @@ O QUE FAZ
 `None` NÃO É `[]`
   Fase SEM configuração (`None`) herda o comportamento por omissão; fase
   configurada como `[]` quer dizer «nada». O por-omissão existe SÓ para a
-  saída da Index (`origem="indexacao"`) e reproduz o que o sistema já fazia:
-  consultor + intermediário e as duas tarefas de arranque. Qualquer outra
-  fase sem configuração não faz nada — uma fase nova nunca atribui por
-  acidente.
+  saída da Index (`origem="indexacao"`) e, desde Out 2026, **já não atribui
+  ninguém**: marcar como indexado não obriga (nem força) a escolher um
+  consultor — o processo transita e fecha o pipeline sem dono, e a gestão
+  atribui quando quiser. Mantêm-se as duas tarefas de arranque (nascem sem
+  responsável, visíveis a quem gere). Quem quiser a atribuição automática
+  configura-a na fase de destino (`auto_assign_roles`, editor de fases do
+  Admin/CEO): só uma configuração EXPLÍCITA atribui. Qualquer outra fase sem
+  configuração não faz nada — uma fase nova nunca atribui por acidente.
 
 IDEMPOTÊNCIA
   Cada tarefa leva `phase_template = {fase, template_id}` e só se cria UMA
@@ -70,8 +74,9 @@ ORIGEM_ENTRADA_NO_FLUXO = "entrada_no_fluxo"
 #: Papéis que uma regra de fase atribui, pela ordem em que se atribuem.
 PAPEIS_ATRIBUIVEIS = ("consultor", "intermediario")
 
-#: Por omissão, e SÓ na saída da Index: o que o sistema já fazia.
-PAPEIS_POR_OMISSAO_DA_SAIDA_DA_INDEX = PAPEIS_ATRIBUIVEIS
+#: Por omissão, e SÓ na saída da Index: ninguém. (Era consultor + intermediário; a direcção
+#: desacoplou a atribuição do «Marcar como Indexado» — ver o cabeçalho do módulo.)
+PAPEIS_POR_OMISSAO_DA_SAIDA_DA_INDEX: tuple[str, ...] = ()
 
 #: As duas tarefas de arranque de sempre. Vivem aqui (e não numa lista
 #: escondida em `process_assignment`) para o editor poder MOSTRAR o que a

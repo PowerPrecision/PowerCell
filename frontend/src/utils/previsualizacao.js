@@ -25,6 +25,19 @@ export function tipoDaPrevisualizacao(nome) {
 }
 
 /**
+ * `{mime, forma}` do que o SERVIDOR declarou (`Content-Type`), ou `null`.
+ *
+ * Quando a chave servida não tem o nome que se mostra (um original `.jpg` substituído pelo PDF limpo),
+ * a extensão do nome mentiria: o tipo que conta é o do que chegou. O servidor só declara tipos da sua
+ * lista fechada, e aqui só se aceitam esses (um `text/html` nunca vira `<iframe>`).
+ */
+export function tipoDaResposta(contentType) {
+  const mime = typeof contentType === "string" ? contentType.split(";")[0].trim().toLowerCase() : "";
+  const conhecido = Object.values(TIPOS_COM_PREVISUALIZACAO).find((t) => t.mime === mime);
+  return conhecido || null;
+}
+
+/**
  * O ficheiro tem botão «Visualizar»? Manda o servidor (`previsualizavel`); só um servidor anterior,
  * que não envia o campo, cai na extensão — e mesmo assim exige `file_id` (sem ele não há como pedir).
  */

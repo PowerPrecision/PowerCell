@@ -8,6 +8,7 @@ import {
   mensagemDaFalhaDePrevisualizacao,
   podePrevisualizar,
   tipoDaPrevisualizacao,
+  tipoDaResposta,
 } from "./previsualizacao";
 
 describe("tipoDaPrevisualizacao", () => {
@@ -58,10 +59,13 @@ describe("mensagemDaFalhaDePrevisualizacao", () => {
 
 describe("concordância com o servidor", () => {
   const python = readFileSync(
-    fileURLToPath(new URL("../../../backend/services/financial_validation.py", import.meta.url)),
+    fileURLToPath(new URL("../../../backend/services/previsualizacao_de_ficheiros.py", import.meta.url)),
     "utf-8",
   );
-  const bloco = python.slice(python.indexOf("TIPOS_COM_PREVISUALIZACAO"), python.indexOf("MAX_BYTES_DA_PREVISUALIZACAO"));
+  // a tabela, e só ela: do literal `TIPOS_COM_PREVISUALIZACAO = {` ao `}` que a fecha (o módulo também
+  // menciona o nome na documentação, por isso não se corta pela primeira ocorrência do texto)
+  const inicio = python.indexOf("TIPOS_COM_PREVISUALIZACAO = {");
+  const bloco = python.slice(inicio, python.indexOf("}", inicio));
   const doServidor = Object.fromEntries([...bloco.matchAll(/"(\.[a-z]+)"\s*:\s*"([a-z/]+)"/g)].map((m) => [m[1], m[2]]));
 
   it("contraprova: o leitor leu mesmo a tabela do Python", () => {
@@ -73,4 +77,20 @@ describe("concordância com o servidor", () => {
     const doEcra = Object.fromEntries(Object.entries(TIPOS_COM_PREVISUALIZACAO).map(([e, t]) => [e, t.mime]));
     expect(doEcra).toEqual(doServidor);
   });
+});
+
+describe("tipoDaResposta", () => {
+  it.each([
+    ["application/pdf", "pdf"],
+    ["application/pdf; charset=binary", "pdf"],
+    ["IMAGE/PNG", "imagem"],
+    ["image/jpeg", "imagem"],
+  ])("%s → %s", (cabecalho, forma) => {
+    expect(tipoDaResposta(cabecalho).forma).toBe(forma);
+  });
+
+  it.each(["text/html", "application/octet-stream", "image/svg+xml", "", null, undefined, 7])(
+    "%s nunca vira pré-visualização (um HTML não é um <iframe>)",
+    (cabecalho) => expect(tipoDaResposta(cabecalho)).toBeNull(),
+  );
 });

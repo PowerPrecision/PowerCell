@@ -121,6 +121,7 @@ export const queryKeys = {
     queue: (tab = 'pending', pagina = 1, pesquisa = '') => [...queryKeys.index.queueAll(), tab, pagina, pesquisa],
     workstation: (processId) => [...queryKeys.index.all, 'workstation', processId],
     employers: (texto = '') => [...queryKeys.index.all, 'employers', texto],
+    search: (chave = '') => [...queryKeys.index.all, 'search', chave],
   },
 
   // Histórico/Timeline

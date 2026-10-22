@@ -1331,8 +1331,23 @@ export const dismissIndexAlert = (processId, alertId) =>
   api.post(`/index/processes/${processId}/alerts/${alertId}/dismiss`, null, { skipErrorToast: true });
 export const markIndexProcessIndexed = (processId, employers = []) =>
   api.post(`/index/processes/${processId}/mark-indexed`, { employers }, { skipErrorToast: true });
+/** Os bytes de um documento que a pesquisa devolveu (recibo, declaração, extrato) — por id, nunca por chave S3. */
+export const getIndexDocumentContent = (documentId) =>
+  api.get(`/index/documents/${encodeURIComponent(documentId)}/content`, { responseType: "blob", skipErrorToast: true });
 export const searchIndexEmployers = (q) =>
   api.get("/index/employers", { params: { q }, skipErrorToast: true });
+// Pesquisa avançada de metadados profissionais (recibos por valor, entidades por zona, tipo de contrato…).
+// `contract_type` repete-se na query (`contract_type=a&contract_type=b`): sem `indexes: null` o axios
+// escreve `contract_type[]=a`, que o servidor não reconhece e ignora em silêncio — a pesquisa corria sem o filtro.
+// Filtros vazios não vão (um `min_salary=` vazio seria um 422).
+export const searchIndexAdvanced = (filtros = {}) =>
+  api.get("/index/advanced-search", {
+    params: Object.fromEntries(
+      Object.entries(filtros).filter(([, v]) => v !== "" && v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0)),
+    ),
+    paramsSerializer: { indexes: null },
+    skipErrorToast: true,
+  });
 export const getAlertsByProcess = (processId) => 
   api.get(`/alerts/process/${processId}`);
 export const createDeedReminder = (processId, deedDate) => 

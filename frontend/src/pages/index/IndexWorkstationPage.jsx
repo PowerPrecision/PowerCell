@@ -8,8 +8,8 @@
  * «Marcar sem confirmar NIF» está sempre à mão.
  */
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, FileText, Loader2, PenLine } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, ExternalLink, FileText, Loader2, PenLine } from "lucide-react";
 
 import DashboardLayout from "../../layouts/DashboardLayout";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
@@ -35,6 +35,29 @@ import {
   trabalhosSemNifConfirmado,
   valorDoCampo,
 } from "../../utils/indexRevisao";
+
+/**
+ * Atalho para o processo original (QA Index, Out 2026): o nome do cliente e o número abrem o detalhe
+ * do processo NUM SEPARADO — quem está a analisar documentos não perde a bancada. `rel` fecha o
+ * `window.opener` (um separador aberto por `_blank` sem ele pode mexer na página de origem).
+ */
+const CLASSE_DA_LIGACAO = "underline-offset-4 hover:underline hover:text-primary focus-visible:underline";
+
+function LigacaoAoProcesso({ processoId, children, ...resto }) {
+  return (
+    <Link
+      to={`/processo/${processoId}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={CLASSE_DA_LIGACAO}
+      {...resto}
+    >
+      {children}
+      <ExternalLink className="ml-1 inline h-3.5 w-3.5 align-baseline opacity-60" aria-hidden="true" />
+      <span className="sr-only"> (abre num novo separador)</span>
+    </Link>
+  );
+}
 
 function ListaDeFicheiros({ ficheiros }) {
   if (ficheiros.length === 0) {
@@ -125,9 +148,22 @@ export default function IndexWorkstationPage() {
       <div className="space-y-6">
         <PageHeader
           icon={FileText}
-          title={processo.client_name || "Processo"}
+          title={
+            <LigacaoAoProcesso processoId={processo.id} data-testid="ligacao-cliente">
+              {processo.client_name || "Processo"}
+            </LigacaoAoProcesso>
+          }
           titleBadge={<Badge variant="outline">{rotuloDoEstado(processo.index_status, processo.index_skipped)}</Badge>}
-          description={processo.process_number ? `Processo #${processo.process_number}` : undefined}
+          description={
+            processo.process_number ? (
+              <span>
+                Processo{" "}
+                <LigacaoAoProcesso processoId={processo.id} data-testid="ligacao-numero">
+                  #{processo.process_number}
+                </LigacaoAoProcesso>
+              </span>
+            ) : undefined
+          }
           actions={
             <>
               <Button variant="ghost" onClick={voltar}>

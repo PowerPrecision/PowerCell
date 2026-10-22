@@ -11,7 +11,10 @@ REGRAS QUE NÃO SE PODEM PERDER
 2. **Listas POSITIVAS** (DTO): a fila e a bancada mostram o que o ecrã precisa, nunca o
    documento do processo (`extra="allow"`, já vazou dados por aí). A fila NÃO leva os
    metadados profissionais; a bancada leva-os, porque é quem os revê.
-3. **A fila segue o âmbito de PROCESSOS** (dono + convidadas, `build_tenant_process_condition`):
+3. **A fila só lista processos ACTIVOS** (Out 2026): fase não terminal NO WORKFLOW DA REDE
+   DONA (`condicao_de_processo_activo`) — um processo concluído ou desistido não é trabalho
+   de indexação. A fila mostra a empresa de origem (`company`), calculada ao servir.
+   **A fila segue o âmbito de PROCESSOS** (dono + convidadas, `build_tenant_process_condition`):
    um Index da rede A nunca lista nem abre um processo da rede B, e o directório de entidades
    patronais é global PORQUE não leva dados de clientes (só NIF e nome da empresa).
 4. **O estado lê-se do documento** (`index_status.derivar_estado`), nunca de um diff.
@@ -31,7 +34,10 @@ from services import index_jobs
 from services import index_status as estado_do_index
 from services import index_store as store
 from services.index_ai import TIPOS_ANALISADOS, tipo_de_analise
-from services.tenant_network import build_tenant_process_condition, com_isolamento
+from services.process_owner import calcular_empresa_dona
+from services import tenant_network
+from services.tenant_network import CAMPO_REDE, build_process_scope_condition, com_isolamento, rede_de_omissao
+from services.workflow_phases import carregar_fases, nomes_terminais, redes_com_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +48,7 @@ PROJECCAO_DA_FILA = {
     "updated_at": 1, "index_status": 1, "index_skipped": 1, "is_indexed": 1, "skip_index": 1,
     "assigned_indexacao_id": 1, "has_pending_review": 1, "index_alerts_open": 1,
     "indexed_at": 1, "indexed_by_name": 1,
+    "company_id": 1, "company_name": 1, CAMPO_REDE: 1,
 }
 PROJECCAO_DOS_FICHEIROS = {
     "_id": 0, "id": 1, "process_id": 1, "filename": 1, "s3_path": 1, "ai_category": 1,
@@ -114,13 +121,62 @@ async def _carregar_processo(process_id: str, user: dict) -> dict:
 # ====================================================================
 # A FILA
 # ====================================================================
+async def condicao_de_processo_activo() -> dict:
+    """Só processos activos: fase NÃO terminal no workflow da rede DONA.
+
+    O workflow é por rede e um mesmo nome pode fechar numa e não noutra, pelo que a condição
+    é um `$or` por rede dona (e não um `$nin` com a união). Os processos por carimbar são da
+    rede de omissão (`rede_do_processo`); sem ela, do modelo. `is_active: False` também
+    exclui (campo legado, tolerante a ausente: a autoridade é a fase).
+    """
+    redes = [r for r in await redes_com_workflow() if r]
+    omissao = rede_de_omissao()
+    ramos: list[dict] = []
+    for rede in redes:
+        terminais = nomes_terminais(await carregar_fases(rede=rede))
+        dona = {CAMPO_REDE: rede}
+        if omissao == rede:
+            dona = {"$or": [{CAMPO_REDE: rede}, {CAMPO_REDE: {"$in": [None, ""]}}]}
+        ramos.append({"$and": [dona, {"status": {"$nin": terminais}}]})
+    # as redes sem workflow próprio usam o MODELO (`rede=None`, dito de propósito: o inventário exige a rede)
+    resto_terminais = nomes_terminais(await carregar_fases(rede=None))
+    resto = {CAMPO_REDE: {"$nin": redes}}
+    if omissao in redes:
+        resto = {CAMPO_REDE: {"$nin": [*redes, None, ""]}}
+    ramos.append({"$and": [resto, {"status": {"$nin": resto_terminais}}]})
+    return {"$and": [{"is_active": {"$ne": False}}, {"$or": ramos}]}
+
+
+async def _empresas_da_fila(processos: list[dict], scope) -> dict[str, Optional[dict]]:
+    """`empresa` (nome + «é de outra rede») por processo, sem ids nem redes no DTO."""
+    saida: dict[str, Optional[dict]] = {}
+    for p in processos:
+        try:
+            dona = await calcular_empresa_dona(p, scope)
+        except Exception as exc:  # noqa: BLE001 - enfeite de leitura: nunca derruba a fila
+            logger.warning("[INDEX] empresa dona de %s: %s", p.get("id"), exc)
+            dona = None
+        saida[p["id"]] = (
+            {"name": dona["company_name"], "other_network": bool(dona["e_de_outra_rede"])} if dona else None
+        )
+    return saida
+
+
 async def run_get_index_queue(
     user: dict, *, tab: str, page: int = 1, size: int = 25, q: Optional[str] = None
 ) -> dict[str, Any]:
     if tab not in ABAS:
         raise HTTPException(status_code=400, detail="Separador inválido")
-    rede = await build_tenant_process_condition(user)
-    consulta = com_isolamento(rede, {"is_deleted": {"$ne": True}, **estado_do_index.condicao_da_fila(tab)})
+    # o âmbito resolve-se UMA vez: serve a condição da fila e o «é de outra rede» de cada linha
+    scope = await tenant_network.resolve_vista_scope(user)
+    rede = build_process_scope_condition(scope)
+    consulta = com_isolamento(rede, {
+        "$and": [
+            {"is_deleted": {"$ne": True}},
+            estado_do_index.condicao_da_fila(tab),
+            await condicao_de_processo_activo(),
+        ],
+    })
     texto = (q or "").strip()
     if texto:
         import re
@@ -145,8 +201,12 @@ async def run_get_index_queue(
         ).to_list(5000)
         for d in docs:
             por_processo.setdefault(d.get("process_id"), []).append(_ficheiro_dto(d))
+    empresas = await _empresas_da_fila(processos, scope)
     return {
-        "items": [_processo_dto(p, por_processo.get(p["id"], [])) for p in processos],
+        "items": [
+            {**_processo_dto(p, por_processo.get(p["id"], [])), "company": empresas.get(p["id"])}
+            for p in processos
+        ],
         "total": total,
         "page": pagina,
         "size": tamanho,
@@ -180,7 +240,7 @@ async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, An
         },
         "alerts": [
             {"id": a.get("id"), "code": a.get("code"), "severity": a.get("severity"), "message": a.get("message"),
-             "refs": a.get("refs") or [], "dismissed": bool(a.get("dismissed_by_human")), "period": a.get("periodo")}
+             "detail": a.get("detail"), "refs": a.get("refs") or [], "dismissed": bool(a.get("dismissed_by_human")), "period": a.get("periodo")}
             for a in alertas
         ],
         "active_jobs": jobs,

@@ -46,9 +46,11 @@ def _modelo(titulo="Pedir IRS", papel="todos", ident="t-1", **extra):
 # ─────────────────────────────────────────────────────────────────────
 
 class TestONaoConfiguradoNaoEOVazio:
-    def test_saida_da_index_sem_configuracao_herda_o_que_sempre_se_fez(self):
+    def test_saida_da_index_sem_configuracao_ja_nao_atribui_ninguem(self):
+        """Out 2026 (direcção): «Marcar como Indexado» não força um consultor. A omissão da
+        saída da Index deixou de atribuir; as duas tarefas de arranque mantêm-se."""
         plano = pa.plano_da_fase({"name": "x"}, pa.ORIGEM_INDEXACAO)
-        assert plano.papeis == ("consultor", "intermediario")
+        assert plano.papeis == ()
         assert [m["title"] for m in plano.modelos] == [
             "Analisar documentação inicial",
             "Agendar contacto inicial com o cliente",
@@ -63,8 +65,14 @@ class TestONaoConfiguradoNaoEOVazio:
         assert plano.origem_da_config == "nenhuma"
 
     def test_fase_inexistente_comporta_se_como_nao_configurada(self):
-        assert pa.plano_da_fase(None, pa.ORIGEM_INDEXACAO).papeis == pa.PAPEIS_ATRIBUIVEIS
+        assert pa.plano_da_fase(None, pa.ORIGEM_INDEXACAO).papeis == ()
         assert pa.plano_da_fase(None, pa.ORIGEM_MOVIMENTO).papeis == ()
+
+    def test_so_uma_configuracao_explicita_atribui_na_saida_da_index(self):
+        """A atribuição automática continua possível — mas por escolha do Admin/CEO na fase."""
+        plano = pa.plano_da_fase({"auto_assign_roles": ["consultor", "intermediario"]}, pa.ORIGEM_INDEXACAO)
+        assert plano.papeis == ("consultor", "intermediario")
+        assert plano.origem_da_config == "fase"
 
     def test_lista_vazia_configurada_vence_o_por_omissao(self):
         """`[]` = «não fazer nada». Se fosse tratado como `None`, o Admin
@@ -287,12 +295,24 @@ class TestCriarTarefas:
 
 
 class TestEntrarNaFase:
-    async def test_saida_da_index_sem_configuracao_faz_o_que_sempre_fez(self, mundo):
+    async def test_saida_da_index_sem_configuracao_nao_atribui_e_o_processo_transita(self, mundo):
+        """Desacoplado (Out 2026): sem configuração da fase ninguém é atribuído, o pipeline conclui
+        e as duas tarefas de arranque nascem sem responsável (visíveis a quem gere)."""
+        r = await pa.ao_entrar_na_fase("p-1", "fase_documental", origem=pa.ORIGEM_INDEXACAO,
+                                       actor={"id": "ix", "role": "indexacao"})
+        proc = await mundo.processes.find_one({"id": "p-1"})
+        assert not proc.get("consultant_id") and not proc.get("mediador_id")
+        assert not proc.get("assigned_consultor_ids") and not proc.get("assigned_mediador_ids")
+        assert not r.atribuicao
+        assert r.tarefas_criadas == 2
+        assert all(t["assigned_to"] == [] for t in await _tarefas(mundo))
+
+    async def test_configurada_na_fase_a_saida_da_index_continua_a_atribuir(self, mundo):
+        await _configurar(mundo, "fase_documental", auto_assign_roles=["consultor", "intermediario"])
         r = await pa.ao_entrar_na_fase("p-1", "fase_documental", origem=pa.ORIGEM_INDEXACAO,
                                        actor={"id": "ix", "role": "indexacao"})
         proc = await mundo.processes.find_one({"id": "p-1"})
         assert proc["consultant_id"] == "u-cons" and proc["mediador_id"] == "u-med"
-        assert r.tarefas_criadas == 4  # 2 modelos × 2 responsáveis
         assert r.atribuicao["mediador_id"] == "u-med"
 
     async def test_so_o_intermediario_quando_a_fase_o_diz(self, mundo):

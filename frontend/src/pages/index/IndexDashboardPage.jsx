@@ -7,8 +7,8 @@
  *
  * Um erro de LEITURA nunca se apresenta como «fila vazia»: diz-se, com «Tentar de novo».
  */
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { ClipboardCheck, RefreshCw } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { ClipboardCheck, RefreshCw, Search } from "lucide-react";
 
 import DashboardLayout from "../../layouts/DashboardLayout";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
@@ -58,6 +58,13 @@ export default function IndexDashboardPage() {
           title="Indexação"
           description="Processos à espera de indexação e indexações com campos por rever."
           onRefresh={() => fila.refetch()}
+          actions={
+            <Button asChild variant="outline">
+              <Link to="/index/pesquisa">
+                <Search className="mr-2 h-4 w-4" aria-hidden="true" />Pesquisa avançada
+              </Link>
+            </Button>
+          }
         />
 
         <Tabs value={separador} onValueChange={mudarSeparador}>

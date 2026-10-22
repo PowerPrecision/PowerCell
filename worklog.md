@@ -12376,3 +12376,53 @@ Operação (pendente, do dono do produto):
 * **Não ligar `INDEX_PURGE_ENABLED` em produção** sem antes auditar as outras referências a um original (ficheiros do Parceiro por `file_id`, Origem Financeira, Explorador). O PDF limpo gera-se sem apagar nada.
 * `INDEX_SANITIZE_ENABLED` (omissão: ligado fora de testes) controla só a geração automática do PDF limpo no fecho.
 * Correr `python -m scripts.migrar_index_status [--aplicar]` é conveniência (a fila tolera o legado).
+
+---
+Task ID: index-afinacoes-out2026
+Agent: Cloud Agent
+Task: Index — fila (activos + origem), Documentos, sem consultor forçado, menu lateral, justificação dos alertas e pesquisa avançada
+
+Date: 2026-10-22
+
+Work Log:
+* Fila: `condicao_de_processo_activo` (workflow da rede DONA) + `company` por linha; âmbito de processos resolvido uma vez. Não reproduzi «processos de outra rede» com dados carimbados.
+* Documentos: `GET /documents/portal-requests/{id}` não incluía `indexacao` na lista de papéis (a guarda de visibilidade sempre o admitiu).
+* `phase_automation`: omissão da saída da Index = ninguém (testes invertidos). **Operação:** configurar `auto_assign_roles` na fase de destino se se quiser a atribuição automática.
+* Menu: `utils/seccoesDoMenu.js`; o layout é montado por página e o estado dos grupos recolhia a cada clique.
+* Alertas: `AlertaDaMatriz.detail` calculado em `index_matrix`; nota da IA saneada; `ESQUEMA_VERSAO` mantida (reanálise em massa evitada).
+* Pesquisa avançada `/api/index/advanced-search`; `employer_location` novo e opcional.
+* Verificado com `mongod` real (7.0.14) e mutações; declarações de efetividade fora de âmbito.
+
+---
+Task ID: index-pesquisa-por-documento-out2026
+Agent: Cloud Agent
+Task: Index — declarações de efetividade por região, recibos isolados por valor, extratos por banco
+
+Date: 2026-10-22
+
+Work Log:
+* Análise prévia pedida pela direcção: o que existia (recibos/extratos, pesquisa por emprego, `employer_location`, directório `employers`) vs. lacunas (declaração não analisada, extrato sem banco, nada pesquisável por documento, factos em texto no `document_metadata`).
+* `index_ai`: `TIPO_DECLARACAO` (esquema, prompt, `normalizar_declaracao`, simulação) e `bank_name` obrigatório no extrato; `index_banks` (puro): chave por banco, palavras inteiras, IBAN só de recurso e para 7 códigos certos.
+* `index_store`: colecção `process_index_documents` (índices em `db_indexes.py`), `projectar_documento` (pura) e `reconstruir_documentos_do_index` (upsert + apagar o que sobra; nunca levanta); chamada em `concluir_resultados` e `editar_trabalho`; declarações alimentam `employers`.
+* `index_advanced_search`: vista por documento (`document_type`, `bank`), 422 para filtro fora do tipo; vista por emprego intacta.
+* `scripts/backfill_index_documentos.py` (omissão só lê; sem IA, sem S3).
+* Decisões: `ESQUEMA_VERSAO` mantida (sem reanálise retroactiva); contraparte não guardada; a declaração não funde no emprego (precedência vs. recibos fica por decidir).
+* Verificado com `mongod` real e 19 mutações, todas mortas (banco só por nome, sem doc_type, sem fronteira de rede, eliminados, não apagar o que sobra, sobreposição humana, PDF limpo, ligações da conclusão e da edição, filtro fora do tipo, substring, IBAN adivinhado…).
+
+Operação (opcional): `python -m scripts.backfill_index_documentos --aplicar` depois do deploy, para a pesquisa por documento valer para os processos já analisados. O índice da colecção nova nasce no arranque.
+
+---
+Task ID: index-precedencia-e-ver-documento-out2026
+Agent: Cloud Agent
+Task: Index — precedência da Declaração de Efetividade no emprego e atalho «Ver documento» na pesquisa avançada
+
+Date: 2026-10-22
+
+Work Log:
+* Precedência (decisão da direcção): `index_store.aplicar_declaracoes` — contrato e admissão da declaração mandam sobre os recibos; só enriquece empregos existentes; NIF válido, depois nome; a mais recente ganha; confiança «baixa» → a rever / admissão não propagada; edição humana vence. `TrabalhoProfissional` ganhou `admission_date` e `certified_by_declaration`.
+* `GET /api/index/documents/{id}/content` (o endpoint de leads serve ficheiros de leads, não de processos): âmbito 404 uniforme, visibilidade, posse da chave, só os 3 tipos da pesquisa; streaming extraído para `previsualizacao_de_ficheiros` e partilhado com a lead.
+* Payload da pesquisa: `document_ids` (≤12) por emprego; `document_id` já existia por documento. Nunca nomes de ficheiro.
+* Frontend: `/index/pesquisa` (não existia ecrã), `ResultadosDaPesquisa`, `PesquisaAvancadaFiltros`, `VisualizadorDeDocumento` (Dialog), `PrevisualizadorDeFicheiro` partilhado com a gaveta da lead.
+* Verificado com `mongod` real e mutações: 20 no backend (19 mortas, 1 equivalente), 12 no frontend (2 sobreviveram à 1.ª passagem = testes fracos, reforçados e mortas).
+* Dito: PDF não pintado em jsdom — confirmar à mão num browser; backfill é passo do dono após o deploy e a precedência aplica-se na próxima análise/recálculo de cada processo.
+
