@@ -50,13 +50,19 @@ from models.index_module import (
     CampoRevisavel,
     TrabalhoProfissional,
     decimal_do_valor,
+    nif_e_valido,
     normalizar_nif,
 )
+from services.index_banks import banco_do_extrato
 from services.process_ai_log import classificar_falha
 
 logger = logging.getLogger(__name__)
 
 #: Mudar o esquema ou os prompts invalida as impressões digitais (reanálise de tudo).
+#: NÃO se mudou ao acrescentar a declaração de efetividade, o banco do extrato e a localidade: mudar a versão
+#: invalida a impressão de TODOS os ficheiros já analisados (milhares de chamadas pagas), e a direcção decidiu
+#: (Out 2026) que não há reanálise retroactiva. Um ficheiro já analisado fica sem o banco/localidade até alguém o
+#: extrair outra vez; um documento NOVO (ou ainda não analisado, como as declarações) traz tudo.
 ESQUEMA_VERSAO = "2"  # 2: a identificação passou a dizer a FACE (frente/verso) — serve o PDF limpo (Fase 5)
 
 CHAVE_AI_CONFIG = "index_analysis"
@@ -71,14 +77,17 @@ PROVIDERS_VALIDOS = frozenset({PROVIDER_OPENAI, PROVIDER_MOCK})
 TIPO_RECIBO = "recibo_vencimento"
 TIPO_EXTRATO = "extrato_bancario"
 TIPO_IDENTIFICACAO = "identificacao"
+TIPO_DECLARACAO = "declaracao_efetividade"
+SUBTIPO_DA_DECLARACAO = "declaracao_efetividade"
 FACES_DE_IDENTIFICACAO = ("frente", "verso", "ambas")
-TIPOS_ANALISADOS = (TIPO_RECIBO, TIPO_EXTRATO, TIPO_IDENTIFICACAO)
+TIPOS_ANALISADOS = (TIPO_RECIBO, TIPO_EXTRATO, TIPO_IDENTIFICACAO, TIPO_DECLARACAO)
 
 #: Pasta/categoria de cada tipo. A identificação é UMA categoria só (decisão da direcção).
 CATEGORIA_DO_TIPO = {
     TIPO_RECIBO: "Financeiros",
     TIPO_EXTRATO: "Bancários",
     TIPO_IDENTIFICACAO: CATEGORIA_IDENTIFICACAO,
+    TIPO_DECLARACAO: "Financeiros",  # prova de rendimento/vínculo: a mesma pasta dos recibos
 }
 
 #: Abaixo disto o texto de um PDF não chega (digitalização): lê-se a página como imagem.
@@ -144,6 +153,8 @@ def tipo_de_analise(categoria: Optional[str], subcategoria: Optional[str], filen
         return TIPO_RECIBO
     if re.search(r"recibo\s*de\s*vencimento|recibo_vencimento|payslip", pistas):
         return TIPO_RECIBO
+    if re.search(r"efetividade|efectividade|declaracao\s+(d[aeo]s?\s+)?(entidade\s+)?patronal|declaracao\s+d[eo]\s+(vinculo|trabalho)", pistas):
+        return TIPO_DECLARACAO
     if re.search(r"extrato|extracto|movimentos", pistas):
         return TIPO_EXTRATO
     return None
@@ -249,6 +260,12 @@ def definicao_da_ferramenta(tipo: str) -> dict:
         }
         props = {
             "scratch": _SCRATCH,
+            "bank_name": _campo(
+                "string",
+                "Nome da INSTITUIÇÃO BANCÁRIA que emitiu o extrato, como aparece no cabeçalho ou rodapé "
+                "(ex.: Caixa Geral de Depósitos, Millennium bcp, Santander, ActivoBank, BPI, Novo Banco). "
+                "É obrigatório procurá-lo; só devolve null se o documento não o disser em lado nenhum.",
+            ),
             "iban": _campo("string", "IBAN da conta."),
             "period_start": _campo("string", "Início do período (YYYY-MM-DD)."),
             "period_end": _campo("string", "Fim do período (YYYY-MM-DD)."),
@@ -259,6 +276,28 @@ def definicao_da_ferramenta(tipo: str) -> dict:
                 "type": "array", "items": achado,
                 "description": "Movimentos estranhos (numerário atípico, transferências recorrentes). Só os que existem no extrato.",
             },
+        }
+    elif tipo == TIPO_DECLARACAO:
+        nome, descricao = "extrair_declaracao_efetividade", "Extrai os dados de uma declaração de efetividade."
+        props = {
+            "scratch": _SCRATCH,
+            "employer_nif": _campo("string", "NIF da entidade patronal (9 dígitos). null se não estiver visível."),
+            "employer_name": _campo("string", "Designação da entidade patronal que emite a declaração."),
+            "employer_location": _campo(
+                "string",
+                "Localidade, concelho ou distrito da SEDE da entidade patronal, como consta da declaração "
+                "(só o nome do local, sem rua nem código postal). null se não constar.",
+            ),
+            "admission_date": _campo("string", "Data de admissão do trabalhador (YYYY-MM-DD)."),
+            "contract_type": {
+                **_campo("string", "Tipo de contrato que a declaração CERTIFICA."),
+                "properties": {
+                    **_campo("string")["properties"],
+                    "value": {"type": ["string", "null"], "enum": [*_CONTRATOS, None]},
+                },
+            },
+            "job_title": _campo("string", "Categoria profissional / função, se constar."),
+            "issue_date": _campo("string", "Data de emissão da declaração (YYYY-MM-DD)."),
         }
     elif tipo == TIPO_IDENTIFICACAO:
         nome, descricao = "classificar_identificacao", "Classifica um documento de identificação e a sua validade."
@@ -309,7 +348,13 @@ PROMPTS_POR_TIPO = {
         "'amount', 'date' e 'page' do movimento e uma 'description' factual e curta (o que é, quanto, quando e "
         "porque merece confirmação), nunca genérica — por exemplo 'Transferência de 500 € a 12/03, a segunda "
         "do mês para o mesmo destino' ou 'Diferença de 150 € entre o saldo final e a soma dos movimentos'. "
-        "Na 'description' não ponhas nomes de pessoas ou empresas, NIFs, IBANs nem números de conta."
+        "Na 'description' não ponhas nomes de pessoas ou empresas, NIFs, IBANs nem números de conta. "
+        "É OBRIGATÓRIO identificar em 'bank_name' a instituição bancária que emitiu o extrato."
+    ),
+    TIPO_DECLARACAO: PROMPT_BASE + (
+        " Documento: DECLARAÇÃO DE EFETIVIDADE (declaração da entidade patronal sobre o vínculo do trabalhador). "
+        "O NIF e o nome pedidos são os da ENTIDADE PATRONAL, não os do trabalhador — não devolvas o nome do "
+        "trabalhador. Indica a data de admissão, o tipo de contrato que a declaração certifica e a localidade da sede."
     ),
     TIPO_IDENTIFICACAO: PROMPT_BASE + (
         " Documento: IDENTIFICAÇÃO (Cartão de Cidadão, Bilhete de Identidade, Passaporte ou Título de Residência). "
@@ -527,16 +572,57 @@ def normalizar_extrato(bruto: dict, *, document_id: Optional[str] = None) -> dic
             })
     abertura = _dinheiro(bruto.get("opening_balance"), positivo=False)
     fecho = _dinheiro(bruto.get("closing_balance"), positivo=False)
+    iban = _iban(_valor(bruto.get("iban")))
+    # o banco é o que a IA leu (reconhecido ou como veio) e, só sem ele, o código do IBAN
+    banco = banco_do_extrato(_valor(bruto.get("bank_name")), iban)
     factos = {
         "tipo": TIPO_EXTRATO,
         "document_id": document_id,
-        "iban": _iban(_valor(bruto.get("iban"))),
+        "iban": iban,
+        "bank": banco["nome"],
+        "bank_key": banco["chave"],
         "period_start": data_iso(_valor(bruto.get("period_start"))),
         "period_end": data_iso(_valor(bruto.get("period_end"))),
         "opening": str(abertura) if abertura is not None else None,
         "closing": str(fecho) if fecho is not None else None,
         "movimentos": movimentos,
         "achados": achados,
+    }
+    return {"factos": factos}
+
+
+def normalizar_declaracao(bruto: dict, *, document_id: Optional[str] = None) -> dict:
+    """`{"factos": {...}}` de uma declaração de efetividade. Só dados da ENTIDADE e do vínculo.
+
+    Não gera um `TrabalhoProfissional`: a declaração é prova própria (pesquisável por documento) e a
+    precedência entre ela e os recibos, no «emprego», é uma decisão de produto que não se tomou.
+    O trabalhador não é pedido ao modelo nem guardado; a data de admissão é a do vínculo.
+    """
+    bruto = bruto if isinstance(bruto, dict) else {}
+    nif = normalizar_nif(_valor(bruto.get("employer_nif")))
+    nome = _texto(_valor(bruto.get("employer_name")))
+    admissao = data_iso(_valor(bruto.get("admission_date")))
+    emissao = data_iso(_valor(bruto.get("issue_date")))
+    # a admissão não pode ser posterior à emissão: uma das duas está mal lida, e nenhuma é «certa»
+    if admissao and emissao and admissao > emissao:
+        admissao = None
+    # um valor lido com confiança «baixa» OU que o código não valida vai a rever
+    campos_em_duvida = (
+        _confianca(bruto.get("employer_nif")) == "baixa" or (nif is not None and not nif_e_valido(nif)),
+        _confianca(bruto.get("employer_name")) == "baixa",
+    )
+    factos = {
+        "tipo": TIPO_DECLARACAO,
+        "document_id": document_id,
+        "employer_nif": nif,
+        "nif_valido": bool(nif and nif_e_valido(nif)),
+        "employer_name": nome,
+        "employer_location": _texto(_valor(bruto.get("employer_location")), 80),
+        "admission_date": admissao,
+        "contract_type": _contrato(_valor(bruto.get("contract_type"))),
+        "job_title": _texto(_valor(bruto.get("job_title"))),
+        "period": periodo_iso(emissao),
+        "needs_review": any(campos_em_duvida),
     }
     return {"factos": factos}
 
@@ -595,10 +681,20 @@ def simular(tipo: str, filename: str, *, hoje: Optional[date] = None) -> dict:
             "irs_withheld": campo(50.2), "period": campo(periodo),
             "credit_iban": campo(None, "media"),
         }
+    if tipo == TIPO_DECLARACAO:
+        return {
+            "scratch": "simulado",
+            "employer_nif": campo(nif), "employer_name": campo("Empresa Simulada, Lda"),
+            "employer_location": campo("Lisboa"),
+            "admission_date": campo(hoje.replace(year=hoje.year - 3, day=1).isoformat()),
+            "contract_type": campo("efetivo"), "job_title": campo("Técnico"),
+            "issue_date": campo(hoje.isoformat()),
+        }
     if tipo == TIPO_EXTRATO:
         dia = mes_anterior.replace(day=28).isoformat()
         return {
             "scratch": "simulado",
+            "bank_name": campo("Caixa Geral de Depósitos"),
             "iban": campo(None, "media"),
             "period_start": campo(mes_anterior.isoformat()), "period_end": campo(dia),
             "opening_balance": campo(500.0), "closing_balance": campo(1500.0),
@@ -710,6 +806,9 @@ def normalizar(tipo: str, bruto: dict, *, document_id: Optional[str], hoje: Opti
     if tipo == TIPO_EXTRATO:
         r = normalizar_extrato(bruto, document_id=document_id)
         return ResultadoDaAnalise(ok=True, tipo=tipo, factos=r["factos"])
+    if tipo == TIPO_DECLARACAO:
+        r = normalizar_declaracao(bruto, document_id=document_id)
+        return ResultadoDaAnalise(ok=True, tipo=tipo, subtype=SUBTIPO_DA_DECLARACAO, factos=r["factos"])
     r = normalizar_identificacao(bruto, document_id=document_id, hoje=hoje)
     return ResultadoDaAnalise(ok=True, tipo=tipo, subtype=r["subtype"], factos=r["factos"])
 

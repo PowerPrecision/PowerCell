@@ -44,6 +44,9 @@ from models.index_module import (
 )
 from services.index_ai import (
     CATEGORIA_DO_TIPO,
+    SUBTIPO_DA_DECLARACAO,
+    TIPO_DECLARACAO,
+    TIPO_EXTRATO,
     TIPO_IDENTIFICACAO,
     TIPO_RECIBO,
     ResultadoDaAnalise,
@@ -56,7 +59,8 @@ CAMPOS_DO_TRABALHO = ("employer_nif", "employer_name", "job_title", "net_salary"
 
 SUBCATEGORIAS = {
     TIPO_RECIBO: "Recibo de Vencimento",
-    "extrato_bancario": "Extrato Bancário",
+    TIPO_EXTRATO: "Extrato Bancário",
+    TIPO_DECLARACAO: "Declaração de Efetividade",
     "cc": "Cartão de Cidadão",
     "bi": "Bilhete de Identidade",
     "passaporte": "Passaporte",
@@ -230,10 +234,17 @@ def entidades_a_registar(trabalhos: list[TrabalhoProfissional]) -> list[tuple[st
     return saida
 
 
-async def registar_entidades(trabalhos: list[TrabalhoProfissional]) -> int:
-    """Upsert no directório; o primeiro nome ganha. Devolve quantas entidades NOVAS."""
+async def registar_entidades(trabalhos: list[TrabalhoProfissional], extra: Iterable[tuple[str, str]] = ()) -> int:
+    """Upsert no directório; o primeiro nome ganha. Devolve quantas entidades NOVAS.
+
+    `extra` são pares `(nif, nome)` já validados de outras fontes (as declarações de efetividade).
+    """
     novas = 0
-    for nif, nome in entidades_a_registar(trabalhos):
+    vistos: set[str] = set()
+    for nif, nome in [*entidades_a_registar(trabalhos), *extra]:
+        if nif in vistos:
+            continue
+        vistos.add(nif)
         try:
             resultado = await db.employers.update_one(
                 {"nif": nif},
@@ -345,11 +356,16 @@ async def contar_alertas_abertos(process_id: str) -> int:
 def campos_do_ficheiro(resultado: ResultadoDaAnalise, impressao: str) -> dict[str, Any]:
     """`$set` de `document_metadata` depois de uma análise bem sucedida. Nada pessoal."""
     sub = resultado.subtype if resultado.tipo == TIPO_IDENTIFICACAO else None
+    if resultado.tipo == TIPO_DECLARACAO:
+        # o subtipo pesquisável da declaração; a identificação mantém o seu (cc, bi…) e a categoria dela
+        subtipo_gravado = SUBTIPO_DA_DECLARACAO
+    else:
+        subtipo_gravado = sub
     campos: dict[str, Any] = {
         "analysis_fingerprint": impressao,
         "ai_category": CATEGORIA_DO_TIPO[resultado.tipo],
         "ai_subcategory": SUBCATEGORIAS.get(sub or resultado.tipo),
-        "ai_subtype": sub,
+        "ai_subtype": subtipo_gravado,
         "index_facts": resultado.factos,
         "index_job": resultado.job.model_dump(mode="json") if resultado.job is not None else None,
         "index_analyzed_at": _agora().isoformat(),
@@ -365,6 +381,138 @@ def campos_do_ficheiro(resultado: ResultadoDaAnalise, impressao: str) -> dict[st
 
 async def registar_ficheiro(document_id: str, resultado: ResultadoDaAnalise, impressao: str) -> None:
     await db.document_metadata.update_one({"id": document_id}, {"$set": campos_do_ficheiro(resultado, impressao)})
+
+
+# ====================================================================
+# PROJECÇÃO POR DOCUMENTO (a pesquisa avançada de recibos, declarações e extratos)
+# ====================================================================
+#: Valores de `doc_type` na projecção (o que a API aceita em `document_type`).
+DOC_TYPE_RECIBO = "recibo"
+DOC_TYPE_DECLARACAO = "declaracao_efetividade"
+DOC_TYPE_EXTRATO = "extrato"
+DOC_TYPES_PESQUISAVEIS = (DOC_TYPE_RECIBO, DOC_TYPE_DECLARACAO, DOC_TYPE_EXTRATO)
+_DOC_TYPE_DO_TIPO = {TIPO_RECIBO: DOC_TYPE_RECIBO, TIPO_DECLARACAO: DOC_TYPE_DECLARACAO, TIPO_EXTRATO: DOC_TYPE_EXTRATO}
+
+
+def _numero_do_texto(valor: Any) -> Optional[float]:
+    """O líquido guardado como texto (`Decimal`) como número, para a pesquisa comparar valores."""
+    d = decimal_do_valor(valor)
+    return float(d) if d is not None else None
+
+
+def projectar_documento(
+    doc: dict, *, process_id: str, network_id: Optional[str], trabalho_do_documento: Optional[dict] = None
+) -> Optional[dict]:
+    """A linha pesquisável de UM ficheiro analisado, ou `None` (não é um tipo pesquisável). Função PURA.
+
+    Lê só o que a análise guardou (`index_facts`, e no recibo o `index_job`): nunca chama a IA, nunca
+    o ficheiro. **Nada pessoal**: nem o nome do ficheiro (leva o do cliente), nem o IBAN, nem a contraparte.
+
+    `trabalho_do_documento` é o emprego (já com as edições humanas) a que o recibo/declaração pertence: se
+    uma pessoa corrigiu o NIF ou o nome da entidade, a pesquisa vê o que ela validou — não o que a IA leu
+    mal. Só as correcções humanas se sobrepõem; o resto vem do documento.
+    """
+    factos = doc.get("index_facts")
+    if not isinstance(factos, dict):
+        return None
+    doc_type = _DOC_TYPE_DO_TIPO.get(factos.get("tipo"))
+    if doc_type is None or not doc.get("id"):
+        return None
+
+    linha: dict[str, Any] = {
+        "id": doc["id"], "process_id": process_id, "network_id": network_id, "doc_type": doc_type,
+        "period": None, "net_salary": None, "net_salary_num": None,
+        "employer_nif": None, "employer_name": None, "employer_location": None,
+        "job_title": None, "contract_type": None, "admission_date": None,
+        "bank": None, "bank_key": None, "needs_review": False,
+    }
+    if doc_type == DOC_TYPE_RECIBO:
+        job = doc.get("index_job") if isinstance(doc.get("index_job"), dict) else {}
+        liquido = (job.get("net_salary") or {}).get("value") if job else None
+        liquido = liquido if liquido is not None else factos.get("net")
+        linha.update(
+            period=factos.get("period") or job.get("period"),
+            net_salary=None if _numero_do_texto(liquido) is None else str(liquido),
+            net_salary_num=_numero_do_texto(liquido),
+            employer_nif=factos.get("employer_nif") or (job.get("employer_nif") or {}).get("value"),
+            employer_name=factos.get("employer_name") or (job.get("employer_name") or {}).get("value"),
+            employer_location=job.get("employer_location"),
+            job_title=(job.get("job_title") or {}).get("value"),
+            contract_type=(job.get("contract_type") or {}).get("value"),
+            needs_review=any((job.get(c) or {}).get("needs_review") for c in CAMPOS_DO_TRABALHO),
+        )
+    elif doc_type == DOC_TYPE_DECLARACAO:
+        linha.update(
+            period=factos.get("period"), employer_nif=factos.get("employer_nif"),
+            employer_name=factos.get("employer_name"), employer_location=factos.get("employer_location"),
+            job_title=factos.get("job_title"), contract_type=factos.get("contract_type"),
+            admission_date=factos.get("admission_date"), needs_review=bool(factos.get("needs_review")),
+        )
+    else:
+        inicio = str(factos.get("period_start") or "")
+        linha.update(
+            period=inicio[:7] if re.match(r"^\d{4}-\d{2}", inicio) else None,
+            bank=factos.get("bank"), bank_key=factos.get("bank_key"),
+        )
+
+    if trabalho_do_documento and doc_type != DOC_TYPE_EXTRATO:
+        for campo, destino in (("employer_nif", "employer_nif"), ("employer_name", "employer_name")):
+            revisto = trabalho_do_documento.get(campo) or {}
+            if revisto.get("edited_by_human") and revisto.get("value"):
+                linha[destino] = revisto["value"]
+    return linha
+
+
+async def reconstruir_documentos_do_index(process_id: str, network_id: Optional[str]) -> int:
+    """Reconstrói a projecção pesquisável do processo a partir dos ficheiros já analisados. Devolve quantas linhas.
+
+    **Recalcula, não acumula** (como os metadados profissionais): um ficheiro apagado deixa de constar e uma
+    reanálise é idempotente. Faz-se por UPSERT de cada linha e só depois se apagam as que sobram — nunca um
+    «apagar tudo e inserir», que deixaria a pesquisa sem estes documentos durante a escrita. Nunca levanta:
+    a pesquisa é um reforço, e uma falha aqui não pode derrubar a análise (vira `warning`).
+    """
+    try:
+        metadados = await carregar_metadados(process_id)
+        trabalhos = (metadados or {}).get("jobs") or []
+        # os originais eliminados (`purgado`) contam: os DADOS lidos deles não deixaram de ser verdade
+        docs = await db.document_metadata.find(
+            {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts": {"$exists": True, "$ne": None}},
+            {"_id": 0, "id": 1, "index_facts": 1, "index_job": 1},
+        ).to_list(500)
+        agora = _agora()
+        ids: list[str] = []
+        for doc in docs:
+            trabalho = next((t for t in trabalhos if doc.get("id") in (t.get("source_document_ids") or [])), None)
+            linha = projectar_documento(doc, process_id=process_id, network_id=network_id, trabalho_do_documento=trabalho)
+            if linha is None:
+                continue
+            linha["updated_at"] = agora
+            await db.process_index_documents.update_one({"id": linha["id"]}, {"$set": linha}, upsert=True)
+            ids.append(linha["id"])
+        await db.process_index_documents.delete_many({"process_id": process_id, "id": {"$nin": ids}})
+        return len(ids)
+    except Exception as exc:  # noqa: BLE001 — um reforço de pesquisa não derruba a análise
+        logger.warning("[INDEX] Projecção pesquisável do processo %s não reconstruída: %s", process_id, type(exc).__name__)
+        return 0
+
+
+def entidades_das_declaracoes(factos: Iterable[dict]) -> list[tuple[str, str]]:
+    """`(nif, nome)` das declarações que podem alimentar o directório: NIF válido, nome e sem dúvida."""
+    saida: list[tuple[str, str]] = []
+    for f in factos:
+        if f.get("tipo") != TIPO_DECLARACAO or f.get("needs_review") or not f.get("nif_valido"):
+            continue
+        nif, nome = normalizar_nif(f.get("employer_nif")), " ".join(str(f.get("employer_name") or "").split())
+        if nif and nif_e_valido(nif) and nome:
+            saida.append((nif, nome))
+    return saida
+
+
+async def agregar_documentos_do_index(pipeline: list[dict], *, tempo_maximo_ms: int) -> list[dict]:
+    """Corre um pipeline de LEITURA sobre `process_index_documents` (pesquisa avançada por documento)."""
+    return await db.process_index_documents.aggregate(
+        pipeline, maxTimeMS=tempo_maximo_ms, allowDiskUse=True,
+    ).to_list(1)
 
 
 # ====================================================================
@@ -433,6 +581,8 @@ async def editar_trabalho(
     trabalhos = aplicar_edicao(existente.get("jobs") or [], job_id, alteracoes)
     modelo = await gravar_metadados(process_id, network_id, trabalhos, existente.get("analysis_fingerprint"))
     await registar_entidades(modelo.jobs)
+    # a pesquisa por documento vê o que a pessoa validou (NIF/nome da entidade), não o que a IA leu mal
+    await reconstruir_documentos_do_index(process_id, network_id)
     return modelo
 
 
@@ -511,4 +661,6 @@ __all__ = [
     "registar_entidades", "entidades_conhecidas", "substituir_alertas", "campos_do_ficheiro",
     "registar_ficheiro", "factos_do_processo", "contar_alertas_abertos",
     "nifs_das_entidades_pelo_nome", "agregar_metadados_profissionais",
+    "projectar_documento", "reconstruir_documentos_do_index", "entidades_das_declaracoes",
+    "agregar_documentos_do_index", "DOC_TYPES_PESQUISAVEIS",
 ]

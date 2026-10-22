@@ -213,6 +213,7 @@ export function eventoDoIndex(payload, processId) {
 export const TIPO_DE_ANALISE_ROTULO = Object.freeze({
   recibo_vencimento: "Recibo de vencimento",
   extrato_bancario: "Extrato bancário",
+  declaracao_efetividade: "Declaração de efetividade",
   identificacao: "Identificação",
 });
 

@@ -12393,3 +12393,21 @@ Work Log:
 * Pesquisa avançada `/api/index/advanced-search`; `employer_location` novo e opcional.
 * Verificado com `mongod` real (7.0.14) e mutações; declarações de efetividade fora de âmbito.
 
+---
+Task ID: index-pesquisa-por-documento-out2026
+Agent: Cloud Agent
+Task: Index — declarações de efetividade por região, recibos isolados por valor, extratos por banco
+
+Date: 2026-10-22
+
+Work Log:
+* Análise prévia pedida pela direcção: o que existia (recibos/extratos, pesquisa por emprego, `employer_location`, directório `employers`) vs. lacunas (declaração não analisada, extrato sem banco, nada pesquisável por documento, factos em texto no `document_metadata`).
+* `index_ai`: `TIPO_DECLARACAO` (esquema, prompt, `normalizar_declaracao`, simulação) e `bank_name` obrigatório no extrato; `index_banks` (puro): chave por banco, palavras inteiras, IBAN só de recurso e para 7 códigos certos.
+* `index_store`: colecção `process_index_documents` (índices em `db_indexes.py`), `projectar_documento` (pura) e `reconstruir_documentos_do_index` (upsert + apagar o que sobra; nunca levanta); chamada em `concluir_resultados` e `editar_trabalho`; declarações alimentam `employers`.
+* `index_advanced_search`: vista por documento (`document_type`, `bank`), 422 para filtro fora do tipo; vista por emprego intacta.
+* `scripts/backfill_index_documentos.py` (omissão só lê; sem IA, sem S3).
+* Decisões: `ESQUEMA_VERSAO` mantida (sem reanálise retroactiva); contraparte não guardada; a declaração não funde no emprego (precedência vs. recibos fica por decidir).
+* Verificado com `mongod` real e 19 mutações, todas mortas (banco só por nome, sem doc_type, sem fronteira de rede, eliminados, não apagar o que sobra, sobreposição humana, PDF limpo, ligações da conclusão e da edição, filtro fora do tipo, substring, IBAN adivinhado…).
+
+Operação (opcional): `python -m scripts.backfill_index_documentos --aplicar` depois do deploy, para a pesquisa por documento valer para os processos já analisados. O índice da colecção nova nasce no arranque.
+

@@ -315,6 +315,19 @@ _definir(
         {"keys": [("network_id", 1), ("has_pending_review", 1)], "name": "idx_prof_meta_rede_revisao"},
     ],
 )
+# Projecção pesquisável por DOCUMENTO (recibos, declarações de efetividade, extratos): uma linha por
+# ficheiro analisado. A pesquisa avançada filtra primeiro aqui (tipo + valor/banco/período) e só depois
+# resolve o processo e a fronteira de rede, por isso os índices começam sempre pelo `doc_type`.
+_definir(
+    "process_index_documents",
+    [
+        {"keys": [("id", 1)], "name": "idx_index_docs_id", "unique": True},
+        {"keys": [("process_id", 1)], "name": "idx_index_docs_processo"},
+        {"keys": [("doc_type", 1), ("net_salary_num", 1)], "name": "idx_index_docs_valor"},
+        {"keys": [("doc_type", 1), ("bank_key", 1)], "name": "idx_index_docs_banco"},
+        {"keys": [("doc_type", 1), ("period", -1)], "name": "idx_index_docs_periodo"},
+    ],
+)
 # Directório global de entidades patronais: o NIF é a chave.
 _definir(
     "employers",

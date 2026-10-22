@@ -25,6 +25,22 @@ REGRAS QUE NÃO SE PODEM PERDER
 6. **Tectos**: página ≤ 50, `maxTimeMS`, e no máximo `MAXIMO_DE_NIFS_DO_DIRECTORIO` entidades
    resolvidas pelo nome — uma pesquisa por «a» não varre a colecção.
 7. Faltar um filtro é «sem filtro»; um intervalo invertido (`min > max`) é 422, nunca «nada».
+
+DUAS VISTAS (Out 2026)
+----------------------
+* **Sem `document_type`: por EMPREGO** (o que acima se descreve — o último recibo de cada entidade).
+* **Com `document_type`: por DOCUMENTO** — `recibo`, `declaracao_efetividade` ou `extrato`. Lê
+  `process_index_documents` (uma linha por ficheiro analisado, ver `index_store.projectar_documento`) e serve
+  três perguntas que o agregado do emprego não responde: *recibos isolados* de um valor (um recibo antigo de 1.200 €
+  não aparece no emprego, cujo líquido é o do recibo mais recente), *declarações de efetividade por região* e
+  *extratos por banco*.
+8. **Um filtro que não se aplica ao tipo é 422, nunca «nada».** `bank` só existe nos extratos; o salário e o cargo
+   só nos recibos; `employer_*` e `contract_type` não existem num extrato. Devolver uma lista vazia diria «não há»
+   quando a verdade é «a pergunta não faz sentido» — e ninguém repara numa lista vazia.
+9. **Valor exacto = `min_salary == max_salary`.** O líquido está guardado como número e as duas pontas passam
+   pelo mesmo `float(Decimal)`, logo a igualdade é exacta (não há `0.1 + 0.2`).
+10. **O banco compara-se pela CHAVE** (`index_banks`): «cgd», «caixa geral» e «Caixa Geral de Depósitos, S.A.» são
+    o mesmo banco. Um banco fora da tabela pesquisa-se pelo nome.
 """
 from __future__ import annotations
 
@@ -38,6 +54,7 @@ from fastapi import HTTPException
 
 from models.index_module import TipoDeContrato, nif_e_valido, normalizar_nif
 from services import index_store as store
+from services.index_banks import chave_do_filtro
 from services.index_matrix import nome_normalizado_da_entidade
 from services.tenant_network import build_tenant_process_condition
 
@@ -101,8 +118,16 @@ def validar_filtros(
     period_from: Optional[str],
     period_to: Optional[str],
     sort: str,
+    document_type: Optional[str] = None,
+    bank: Optional[str] = None,
 ) -> dict[str, Any]:
     """Valida e normaliza os filtros. 422 com motivo; nunca um 500 nem «nada» por um intervalo trocado."""
+    if document_type is not None and document_type not in store.DOC_TYPES_PESQUISAVEIS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"«document_type» desconhecido (válidos: {', '.join(store.DOC_TYPES_PESQUISAVEIS)})",
+        )
+    banco = _texto_valido(bank, "bank")
     if min_salary is not None and min_salary < 0 or max_salary is not None and max_salary < 0:
         raise HTTPException(status_code=422, detail="O salário não pode ser negativo")
     if min_salary is not None and max_salary is not None and min_salary > max_salary:
@@ -126,14 +151,49 @@ def validar_filtros(
         nif = normalizar_nif(employer_nif)
         if not nif or len(nif) < 3:
             raise HTTPException(status_code=422, detail="«employer_nif» precisa de pelo menos 3 dígitos")
-    return {
+    filtros = {
         "min_salary": min_salary, "max_salary": max_salary, "contract_type": contratos,
         "employer_nif": nif,
         "employer_name": _texto_valido(employer_name, "employer_name"),
         "employer_location": _texto_valido(employer_location, "employer_location"),
         "job_title": _texto_valido(job_title, "job_title"),
         "period_from": period_from, "period_to": period_to, "sort": sort,
+        "document_type": document_type, "bank": banco,
     }
+    _exigir_filtros_do_tipo(filtros)
+    return filtros
+
+
+#: filtro → tipos de documento em que existe. Um filtro fora do seu tipo é 422 (regra 8).
+_FILTROS_POR_TIPO: dict[str, tuple[str, ...]] = {
+    "min_salary": (store.DOC_TYPE_RECIBO,),
+    "max_salary": (store.DOC_TYPE_RECIBO,),
+    "job_title": (store.DOC_TYPE_RECIBO, store.DOC_TYPE_DECLARACAO),
+    "contract_type": (store.DOC_TYPE_RECIBO, store.DOC_TYPE_DECLARACAO),
+    "employer_nif": (store.DOC_TYPE_RECIBO, store.DOC_TYPE_DECLARACAO),
+    "employer_name": (store.DOC_TYPE_RECIBO, store.DOC_TYPE_DECLARACAO),
+    "employer_location": (store.DOC_TYPE_RECIBO, store.DOC_TYPE_DECLARACAO),
+    "bank": (store.DOC_TYPE_EXTRATO,),
+}
+
+
+def _filtro_esta_ligado(filtros: dict[str, Any], nome: str) -> bool:
+    return filtros.get(nome) not in (None, [], "")
+
+
+def _exigir_filtros_do_tipo(filtros: dict[str, Any]) -> None:
+    """422 para um filtro que não existe no tipo pedido (ou, sem tipo, para o `bank`, que só vive nos documentos)."""
+    tipo = filtros.get("document_type")
+    if tipo is None:
+        if _filtro_esta_ligado(filtros, "bank"):
+            raise HTTPException(status_code=422, detail="«bank» exige «document_type=extrato»")
+        return
+    for nome, tipos in _FILTROS_POR_TIPO.items():
+        if _filtro_esta_ligado(filtros, nome) and tipo not in tipos:
+            raise HTTPException(
+                status_code=422,
+                detail=f"«{nome}» não se aplica a «{tipo}» (aplica-se a: {', '.join(tipos)})",
+            )
 
 
 async def _nifs_do_directorio(nome: str) -> list[str]:
@@ -212,6 +272,109 @@ def construir_pipeline(
     ]
 
 
+# ====================================================================
+# A VISTA POR DOCUMENTO
+# ====================================================================
+ORDENACOES_DE_DOCUMENTOS = {
+    "period_desc": [("period", -1), ("net_salary_num", -1), ("id", 1)],
+    "salary_desc": [("net_salary_num", -1), ("period", -1), ("id", 1)],
+    "salary_asc": [("net_salary_num", 1), ("period", -1), ("id", 1)],
+}
+
+
+def _condicoes_do_documento(filtros: dict[str, Any], nifs_do_nome: list[str]) -> list[dict]:
+    """O `$match` sobre a projecção por documento. Puro. Começa SEMPRE pelo tipo (os índices são por tipo)."""
+    condicoes: list[dict] = [{"doc_type": filtros["document_type"]}]
+    if filtros["min_salary"] is not None or filtros["max_salary"] is not None:
+        intervalo: dict[str, Any] = {"$ne": None}
+        if filtros["min_salary"] is not None:
+            intervalo["$gte"] = float(filtros["min_salary"])
+        if filtros["max_salary"] is not None:
+            intervalo["$lte"] = float(filtros["max_salary"])
+        condicoes.append({"net_salary_num": intervalo})
+    if filtros["contract_type"]:
+        condicoes.append({"contract_type": {"$in": filtros["contract_type"]}})
+    if filtros["employer_nif"]:
+        condicoes.append({"employer_nif": {"$regex": f"^{re.escape(filtros['employer_nif'])}"}})
+    if filtros["employer_name"]:
+        por_nome = {"employer_name": {"$regex": regex_sem_acentos(filtros["employer_name"]), "$options": "i"}}
+        condicoes.append({"$or": [por_nome, {"employer_nif": {"$in": nifs_do_nome}}]} if nifs_do_nome else por_nome)
+    if filtros["employer_location"]:
+        condicoes.append({"employer_location": {"$regex": regex_sem_acentos(filtros["employer_location"]), "$options": "i"}})
+    if filtros["job_title"]:
+        condicoes.append({"job_title": {"$regex": regex_sem_acentos(filtros["job_title"]), "$options": "i"}})
+    if filtros["bank"]:
+        chave = chave_do_filtro(filtros["bank"])
+        por_nome = {"bank": {"$regex": regex_sem_acentos(filtros["bank"]), "$options": "i"}}
+        # um banco da tabela compara-se pela chave (cgd = caixa geral = Caixa Geral de Depósitos, S.A.)
+        condicoes.append({"$or": [{"bank_key": chave}, por_nome]} if chave else por_nome)
+    if filtros["period_from"]:
+        condicoes.append({"period": {"$gte": filtros["period_from"]}})
+    if filtros["period_to"]:
+        condicoes.append({"period": {"$lte": filtros["period_to"], "$ne": None}})
+    return condicoes
+
+
+def construir_pipeline_de_documentos(
+    filtros: dict[str, Any], nifs_do_nome: list[str], condicao_de_processos: dict, *, pagina: int, tamanho: int
+) -> list[dict]:
+    """O pipeline da vista por documento. Pura. O `$match` vem antes do `$lookup`: filtra-se barato primeiro."""
+    return [
+        {"$match": {"$and": _condicoes_do_documento(filtros, nifs_do_nome)}},
+        # a fronteira: só processos do âmbito e não eliminados (regra 3)
+        {"$lookup": {
+            "from": "processes", "localField": "process_id", "foreignField": "id", "as": "proc",
+            "pipeline": [
+                {"$match": {"$and": [{"is_deleted": {"$ne": True}}, condicao_de_processos]}},
+                {"$project": {"_id": 0, "id": 1, "process_number": 1, "status": 1, "company_name": 1}},
+            ],
+        }},
+        {"$match": {"proc.0": {"$exists": True}}},
+        {"$facet": {
+            "items": [
+                {"$sort": dict(ORDENACOES_DE_DOCUMENTOS[filtros["sort"]])},
+                {"$skip": (pagina - 1) * tamanho},
+                {"$limit": tamanho},
+                {"$project": {"_id": 0, "proc": {"$arrayElemAt": ["$proc", 0]}, **{c: 1 for c in _CAMPOS_DO_DOCUMENTO}}},
+            ],
+            "total": [{"$count": "n"}],
+        }},
+    ]
+
+
+_CAMPOS_DO_DOCUMENTO = (
+    "id", "process_id", "doc_type", "period", "net_salary_num", "employer_nif", "employer_name",
+    "employer_location", "job_title", "contract_type", "admission_date", "bank", "needs_review",
+)
+
+
+def resultado_do_documento(doc: dict) -> dict[str, Any]:
+    """O DTO de UM documento: lista positiva (regra 4). Só o que o TIPO tem — o resto nem aparece."""
+    proc = doc.get("proc") or {}
+    tipo = doc.get("doc_type")
+    saida: dict[str, Any] = {
+        "document_id": doc.get("id"),
+        "document_type": tipo,
+        "process_id": doc.get("process_id"),
+        "process_number": proc.get("process_number"),
+        "company_name": proc.get("company_name"),
+        "period": doc.get("period"),
+        "needs_review": bool(doc.get("needs_review")),
+    }
+    if tipo == store.DOC_TYPE_EXTRATO:
+        saida["bank"] = doc.get("bank")
+        return saida
+    saida["employer"] = {"nif": doc.get("employer_nif"), "name": doc.get("employer_name"),
+                         "location": doc.get("employer_location")}
+    saida["job_title"] = doc.get("job_title")
+    saida["contract_type"] = doc.get("contract_type")
+    if tipo == store.DOC_TYPE_RECIBO:
+        saida["net_salary"] = _numero(doc.get("net_salary_num"))
+    else:
+        saida["admission_date"] = doc.get("admission_date")
+    return saida
+
+
 def _numero(valor: Any) -> Optional[float]:
     return float(valor) if isinstance(valor, (int, float)) and not isinstance(valor, bool) else None
 
@@ -261,27 +424,37 @@ async def run_advanced_search(
     sort: str = "period_desc",
     page: int = 1,
     size: int = 25,
+    document_type: Optional[str] = None,
+    bank: Optional[str] = None,
 ) -> dict[str, Any]:
     filtros = validar_filtros(
         min_salary=min_salary, max_salary=max_salary, contract_type=contract_type,
         employer_nif=employer_nif, employer_name=employer_name, employer_location=employer_location,
         job_title=job_title, period_from=period_from, period_to=period_to, sort=sort,
+        document_type=document_type, bank=bank,
     )
+    por_documento = filtros["document_type"] is not None
     pagina = max(1, page)
     tamanho = max(1, min(size, TAMANHO_MAXIMO_DA_PAGINA))
     nifs = await _nifs_do_directorio(filtros["employer_name"]) if filtros["employer_name"] else []
     # a condição de processos FALHA FECHADA: se não se calcula, a excepção sobe (nunca «sem filtro»)
     condicao = await build_tenant_process_condition(user)
-    pipeline = construir_pipeline(filtros, nifs, condicao, pagina=pagina, tamanho=tamanho)
     try:
-        saida = await store.agregar_metadados_profissionais(pipeline, tempo_maximo_ms=TEMPO_MAXIMO_MS)
+        if por_documento:
+            pipeline = construir_pipeline_de_documentos(filtros, nifs, condicao, pagina=pagina, tamanho=tamanho)
+            saida = await store.agregar_documentos_do_index(pipeline, tempo_maximo_ms=TEMPO_MAXIMO_MS)
+        else:
+            pipeline = construir_pipeline(filtros, nifs, condicao, pagina=pagina, tamanho=tamanho)
+            saida = await store.agregar_metadados_profissionais(pipeline, tempo_maximo_ms=TEMPO_MAXIMO_MS)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[INDEX-SEARCH] Pesquisa falhou: %s: %s", type(exc).__name__, exc)
         raise HTTPException(status_code=503, detail="A pesquisa não terminou a tempo. Estreite os filtros e tente de novo.")
     bloco = (saida or [{}])[0]
     total = ((bloco.get("total") or [{}])[0]).get("n", 0)
+    montar = resultado_do_documento if por_documento else resultado_do_trabalho
     return {
-        "items": [resultado_do_trabalho(d) for d in bloco.get("items") or []],
+        "view": "documents" if por_documento else "jobs",
+        "items": [montar(d) for d in bloco.get("items") or []],
         "total": total,
         "page": pagina,
         "size": tamanho,
@@ -289,4 +462,5 @@ async def run_advanced_search(
     }
 
 
-__all__ = ["run_advanced_search", "validar_filtros", "construir_pipeline", "regex_sem_acentos"]
+__all__ = ["run_advanced_search", "validar_filtros", "construir_pipeline", "construir_pipeline_de_documentos",
+           "regex_sem_acentos"]

@@ -45,4 +45,19 @@ describe("searchIndexAdvanced", () => {
     await searchIndexAdvanced({ min_salary: 0, max_salary: "", employer_name: null, job_title: undefined, contract_type: [] });
     expect(get.mock.calls[0][1].params).toEqual({ min_salary: 0 });
   });
+
+  it("a pesquisa por documento leva o tipo e o banco (extratos por banco)", async () => {
+    const get = vi.spyOn(api, "get").mockResolvedValue({ data: { view: "documents", items: [] } });
+    await searchIndexAdvanced({ document_type: "extrato", bank: "CGD", period_from: "2026-09" });
+    expect(get.mock.calls[0][1].params).toEqual({ document_type: "extrato", bank: "CGD", period_from: "2026-09" });
+    expect(urlDoPedido(get.mock.calls[0][1])).toContain("document_type=extrato&bank=CGD");
+  });
+
+  it("um valor exacto são os dois limites iguais — e as declarações por localidade", async () => {
+    const get = vi.spyOn(api, "get").mockResolvedValue({ data: {} });
+    await searchIndexAdvanced({ document_type: "recibo", min_salary: 1234.56, max_salary: 1234.56 });
+    expect(get.mock.calls[0][1].params).toEqual({ document_type: "recibo", min_salary: 1234.56, max_salary: 1234.56 });
+    await searchIndexAdvanced({ document_type: "declaracao_efetividade", employer_location: "Lisboa" });
+    expect(get.mock.calls[1][1].params).toEqual({ document_type: "declaracao_efetividade", employer_location: "Lisboa" });
+  });
 });

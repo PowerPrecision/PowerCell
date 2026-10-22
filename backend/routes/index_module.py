@@ -104,18 +104,24 @@ async def advanced_search(
     period_from: Optional[str] = Query(None, description="YYYY-MM"),
     period_to: Optional[str] = Query(None, description="YYYY-MM"),
     sort: str = Query("period_desc", description="period_desc | salary_desc | salary_asc"),
+    document_type: Optional[str] = Query(
+        None, description="recibo | declaracao_efetividade | extrato — pesquisa por DOCUMENTO em vez de por emprego."),
+    bank: Optional[str] = Query(None, max_length=80, description="Banco do extrato (só com document_type=extrato)."),
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=TAMANHO_MAXIMO_DA_PAGINA),
     user: dict = Depends(_acesso),
 ):
     """Pesquisa os metadados profissionais extraídos pela IA — um resultado por emprego.
 
-    Todos os filtros valem para o MESMO emprego; só aparecem processos do âmbito de quem pergunta.
+    Sem `document_type`: um resultado por emprego, todos os filtros valem para o MESMO emprego.
+    Com `document_type`: um resultado por DOCUMENTO (recibos isolados por valor, declarações de efetividade
+    por localidade, extratos por banco). Só aparecem processos do âmbito de quem pergunta.
     """
     return await run_advanced_search(
         user, min_salary=min_salary, max_salary=max_salary, contract_type=contract_type,
         employer_nif=employer_nif, employer_name=employer_name, employer_location=employer_location,
         job_title=job_title, period_from=period_from, period_to=period_to, sort=sort, page=page, size=size,
+        document_type=document_type, bank=bank,
     )
 
 

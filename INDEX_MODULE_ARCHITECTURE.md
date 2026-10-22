@@ -450,4 +450,19 @@ Resumo; o detalhe e as lições estão no `AGENTS.md` («Afinações do Index»)
 5. **Bancada:** nome e nº do processo são ligações para o detalhe (novo separador); cada alerta tem `detail` calculado pelo código
    (a IA só dá uma nota saneada, anexada a um movimento verificado). A contraparte continua sem ser guardada.
 6. **Pesquisa avançada:** `GET /api/index/advanced-search` (um resultado por emprego; salário numérico; fronteira de processos
-   no `$lookup`). Novo campo opcional `employer_location`. Declarações de efetividade: fora (não são analisadas).
+   no `$lookup`). Novo campo opcional `employer_location`. (As declarações de efetividade entraram depois: ver abaixo.)
+
+### Pesquisa por documento: declarações, recibos isolados e extratos por banco (Out 2026)
+
+Resumo; o detalhe e as lições estão no `AGENTS.md` («Pesquisa avançada por DOCUMENTO»).
+
+1. **Tipo novo `declaracao_efetividade`:** só dados da entidade e do vínculo (NIF, nome, localidade, `admission_date`, contrato
+   certificado). Não gera «emprego»; alimenta o directório `employers`. `ai_subtype` = slug, `ai_subcategory` = rótulo.
+2. **Extrato:** `bank_name` obrigatório no esquema; `services/index_banks.py` canonicaliza (chave estável, palavras inteiras,
+   banco desconhecido guardado como lido, IBAN só como recurso e nunca guardado).
+3. **Colecção `process_index_documents`:** uma linha por ficheiro analisado (líquido numérico), reconstruída — não acumulada —
+   no fim de cada análise e em cada correcção humana; nada pessoal.
+4. **`GET /index/advanced-search?document_type=recibo|declaracao_efetividade|extrato&bank=…`:** vista por documento
+   (`view: "documents"`); sem `document_type` a vista por emprego fica igual. Filtro que não existe no tipo = 422.
+5. **Sem reanálise retroactiva:** `ESQUEMA_VERSAO` não mudou. `scripts/backfill_index_documentos.py` reconstrói a projecção
+   do que já foi analisado, sem IA.
