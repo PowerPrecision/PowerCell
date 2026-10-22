@@ -138,7 +138,8 @@ async def condicao_de_processo_activo() -> dict:
         if omissao == rede:
             dona = {"$or": [{CAMPO_REDE: rede}, {CAMPO_REDE: {"$in": [None, ""]}}]}
         ramos.append({"$and": [dona, {"status": {"$nin": terminais}}]})
-    resto_terminais = nomes_terminais(await carregar_fases())
+    # as redes sem workflow próprio usam o MODELO (`rede=None`, dito de propósito: o inventário exige a rede)
+    resto_terminais = nomes_terminais(await carregar_fases(rede=None))
     resto = {CAMPO_REDE: {"$nin": redes}}
     if omissao in redes:
         resto = {CAMPO_REDE: {"$nin": [*redes, None, ""]}}
