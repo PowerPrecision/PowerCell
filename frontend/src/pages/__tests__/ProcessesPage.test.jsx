@@ -342,6 +342,31 @@ describe("ProcessesPage — interacção", () => {
     });
   });
 
+  it("o Index abre a BANCADA do processo (/index/:id), sem contexto de navegação", async () => {
+    papelActivo = "indexacao";
+    caminho = "/processos";
+    const utilizador = userEvent.setup();
+    montar();
+    const linha = (await screen.findByText("Ana Martins")).closest("tr");
+    await utilizador.click(linha);
+    await waitFor(() => expect(navegar).toHaveBeenCalled());
+    expect(navegar).toHaveBeenCalledWith("/index/p1");
+    expect(navegar.mock.calls.some(([d]) => String(d).startsWith("/process/"))).toBe(false);
+  });
+
+  it("contraprova: os outros perfis continuam a abrir o detalhe do processo", async () => {
+    papelActivo = "consultor";
+    caminho = "/processos";
+    const utilizador = userEvent.setup();
+    montar();
+    const linha = (await screen.findByText("Ana Martins")).closest("tr");
+    await utilizador.click(linha);
+    await waitFor(() => expect(navegar).toHaveBeenCalled());
+    expect(navegar.mock.calls[0][0]).toBe("/process/p1");
+    expect(navegar.mock.calls[0][1]).toHaveProperty("state.contextoDeNavegacao");
+    expect(navegar.mock.calls.some(([d]) => String(d).startsWith("/index/"))).toBe(false);
+  });
+
   it("escrever na pesquisa não rebenta a página", async () => {
     const utilizador = userEvent.setup();
     montar();

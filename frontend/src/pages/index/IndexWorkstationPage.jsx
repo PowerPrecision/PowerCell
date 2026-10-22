@@ -9,7 +9,8 @@
  */
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ExternalLink, FileText, Loader2, PenLine } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Download, ExternalLink, Eye, FileText, Loader2, PenLine } from "lucide-react";
 
 import DashboardLayout from "../../layouts/DashboardLayout";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
@@ -22,8 +23,14 @@ import { AlertMatrix } from "../../components/index/AlertMatrix";
 import { EmployerNifDialog } from "../../components/index/EmployerNifDialog";
 import { IndexActionsBar } from "../../components/index/IndexActionsBar";
 import { ProfessionalReviewPanel } from "../../components/index/ProfessionalReviewPanel";
+import { UploadNaBancada } from "../../components/index/UploadNaBancada";
+import VisualizadorDeDocumento from "../../components/index/VisualizadorDeDocumento";
+import { useAuthOpcional } from "../../contexts/AuthContext";
 import { useIndexWorkstationQuery } from "../../hooks/queries/useIndexQueries";
 import { useIndexMutations } from "../../hooks/mutations/useIndexMutations";
+import { useDescarregarDocumentos } from "../../hooks/useDescarregarDocumentos";
+import { useIniciarTratamento } from "../../hooks/useIniciarTratamento";
+import { queryKeys } from "../../lib/queryClient";
 import {
   estadoDoFicheiroEmTexto,
   formatarDinheiro,
@@ -59,30 +66,66 @@ function LigacaoAoProcesso({ processoId, children, ...resto }) {
   );
 }
 
-function ListaDeFicheiros({ ficheiros }) {
+function ListaDeFicheiros({ ficheiros, processoId, onVer, onDescarregar, emCurso }) {
   if (ficheiros.length === 0) {
     return <p className="text-sm text-muted-foreground">Este processo ainda não tem documentos.</p>;
   }
   return (
     <ul className="divide-y divide-border">
-      {ficheiros.map((f) => (
-        <li key={f.id} className="flex flex-wrap items-center gap-2 py-2" data-testid="ficheiro-do-index">
-          <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span className="min-w-0 flex-1 break-words text-sm">{f.filename || "Documento"}</span>
-          {f.category && <Badge variant="outline">{f.category}</Badge>}
-          {rotuloDoTipoDeAnalise(f.analysis_type) &&
-            (f.analysed ? (
-              <Badge variant="secondary">Analisado</Badge>
-            ) : (
-              <Badge variant="outline">Por analisar</Badge>
-            ))}
-          {estadoDoFicheiroEmTexto(f) && (
-            <span className="basis-full pl-6 text-xs text-muted-foreground" data-testid="estado-do-ficheiro">
-              {estadoDoFicheiroEmTexto(f)}
+      {ficheiros.map((f) => {
+        const nome = f.filename || "Documento";
+        const documento = { id: f.id, rotulo: nome, processId: processoId };
+        const aDescarregar = emCurso?.has(`ficheiro:${f.id}`) === true;
+        return (
+          <li key={f.id} className="flex flex-wrap items-center gap-2 py-2" data-testid="ficheiro-do-index">
+            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="min-w-0 flex-1 break-words text-sm">{nome}</span>
+            {f.category && <Badge variant="outline">{f.category}</Badge>}
+            {rotuloDoTipoDeAnalise(f.analysis_type) &&
+              (f.analysed ? (
+                <Badge variant="secondary">Analisado</Badge>
+              ) : (
+                <Badge variant="outline">Por analisar</Badge>
+              ))}
+            <span className="flex items-center gap-1">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8 gap-1"
+                onClick={() => onVer([documento], nome)}
+                aria-label={`Ver documento — ${nome}`}
+                data-testid="ficheiro-ver"
+              >
+                <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                Ver
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8 gap-1"
+                disabled={aDescarregar}
+                onClick={() => onDescarregar(`ficheiro:${f.id}`, [documento])}
+                aria-label={`Download — ${nome}`}
+                data-testid="ficheiro-download"
+              >
+                {aDescarregar ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                Download
+              </Button>
             </span>
-          )}
-        </li>
-      ))}
+            {estadoDoFicheiroEmTexto(f) && (
+              <span className="basis-full pl-6 text-xs text-muted-foreground" data-testid="estado-do-ficheiro">
+                {estadoDoFicheiroEmTexto(f)}
+              </span>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -92,11 +135,26 @@ export default function IndexWorkstationPage() {
   const navigate = useNavigate();
   const { bancada, isLoading, isError, error, refetch } = useIndexWorkstationQuery(processId);
   const m = useIndexMutations(processId);
+  const queryClient = useQueryClient();
+  const auth = useAuthOpcional();
+  const { descarregar, emCurso } = useDescarregarDocumentos();
 
   const [painelAberto, setPainelAberto] = useState(false);
   const [dialogoAberto, setDialogoAberto] = useState(false);
+  const [aVer, setAVer] = useState({ documentos: [], titulo: "" });
 
-  const voltar = () => navigate("/index");
+  // Abrir a bancada é começar a trabalhar (já não há «Reivindicar»): só o indexador a quem o processo está
+  // atribuído e enquanto está por começar; o servidor volta a decidir.
+  useIniciarTratamento(
+    processId,
+    bancada?.processo?.assigned_to_me === true && bancada?.processo?.index_status === "pending",
+  );
+
+  // A equipa do Index trabalha a partir de «Os Meus Processos»; a gestão supervisiona a partir da fila.
+  const papel = auth?.effectiveRole || auth?.user?.role;
+  const daEquipa = papel === "indexacao";
+  const voltar = () => navigate(daEquipa ? "/processos" : "/index");
+  const aoAdicionar = () => queryClient.invalidateQueries({ queryKey: queryKeys.index.workstation(processId) });
 
   if (isLoading) {
     return (
@@ -153,7 +211,16 @@ export default function IndexWorkstationPage() {
               {processo.client_name || "Processo"}
             </LigacaoAoProcesso>
           }
-          titleBadge={<Badge variant="outline">{rotuloDoEstado(processo.index_status, processo.index_skipped)}</Badge>}
+          titleBadge={
+            <span className="flex flex-wrap items-center gap-1.5">
+              <Badge variant="outline">{rotuloDoEstado(processo.index_status, processo.index_skipped)}</Badge>
+              {processo.stagnant === true && (
+                <Badge variant="secondary" data-testid="badge-estagnado" title="Sem actividade há vários dias — a chefia foi avisada">
+                  Sem actividade
+                </Badge>
+              )}
+            </span>
+          }
           description={
             processo.process_number ? (
               <span>
@@ -168,18 +235,8 @@ export default function IndexWorkstationPage() {
             <>
               <Button variant="ghost" onClick={voltar}>
                 <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                Voltar à fila
+                {daEquipa ? "Os meus processos" : "Voltar à fila"}
               </Button>
-              {processo.index_status === "pending" && (
-                <Button variant="outline" disabled={m.claim.isPending} onClick={() => m.claim.mutate()}>
-                  Reivindicar
-                </Button>
-              )}
-              {processo.index_status === "in_review" && (
-                <Button variant="outline" disabled={m.release.isPending} onClick={() => m.release.mutate()}>
-                  Devolver à fila
-                </Button>
-              )}
             </>
           }
         />
@@ -214,8 +271,19 @@ export default function IndexWorkstationPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Documentos</CardTitle>
             </CardHeader>
-            <CardContent>
-              <ListaDeFicheiros ficheiros={ficheiros} />
+            <CardContent className="space-y-4">
+              <UploadNaBancada
+                processId={processo.id}
+                nomesExistentes={ficheiros.map((f) => f.filename)}
+                onConcluido={aoAdicionar}
+              />
+              <ListaDeFicheiros
+                ficheiros={ficheiros}
+                processoId={processo.id}
+                onVer={(documentos, titulo) => setAVer({ documentos, titulo })}
+                onDescarregar={descarregar}
+                emCurso={emCurso}
+              />
             </CardContent>
           </Card>
 
@@ -258,6 +326,13 @@ export default function IndexWorkstationPage() {
         />
       </div>
 
+      <VisualizadorDeDocumento
+        documentos={aVer.documentos}
+        titulo={aVer.titulo}
+        onFechar={() => setAVer({ documentos: [], titulo: "" })}
+        onDescarregar={descarregar}
+        emCurso={emCurso}
+      />
       <ProfessionalReviewPanel
         aberto={painelAberto}
         onFechar={() => setPainelAberto(false)}

@@ -48,7 +48,7 @@ PROJECCAO_DA_FILA = {
     "_id": 0, "id": 1, "process_number": 1, "client_name": 1, "status": 1, "created_at": 1,
     "updated_at": 1, "index_status": 1, "index_skipped": 1, "is_indexed": 1, "skip_index": 1,
     "assigned_indexacao_id": 1, "has_pending_review": 1, "index_alerts_open": 1,
-    "indexed_at": 1, "indexed_by_name": 1,
+    "indexed_at": 1, "indexed_by_name": 1, "index_stagnation_alerted_at": 1,
     "company_id": 1, "company_name": 1, CAMPO_REDE: 1,
 }
 PROJECCAO_DOS_FICHEIROS = {
@@ -97,6 +97,8 @@ def _processo_dto(proc: dict, ficheiros: Optional[list[dict]] = None) -> dict[st
         "index_alerts_open": int(proc.get("index_alerts_open") or 0),
         "indexed_at": proc.get("indexed_at"),
         "indexed_by_name": proc.get("indexed_by_name"),
+        # o SLA do Index avisou que este processo estagnou (sem actividade); limpa-se quando o indexador volta a mexer
+        "stagnant": bool(proc.get("index_stagnation_alerted_at")) and estado["index_status"] == estado_do_index.IN_REVIEW,
     }
     if ficheiros is not None:
         saida["documents_total"] = len(ficheiros)
@@ -112,7 +114,7 @@ async def _carregar_processo(process_id: str, user: dict) -> dict:
         {"id": process_id, "is_deleted": {"$ne": True}}, {"_id": 0, **{k: 1 for k in (
             "id", "process_number", "client_name", "status", "created_at", "updated_at", "index_status",
             "index_skipped", "is_indexed", "skip_index", "assigned_indexacao_id", "has_pending_review",
-            "index_alerts_open", "indexed_at", "indexed_by_name", "network_id")}},
+            "index_alerts_open", "indexed_at", "indexed_by_name", "network_id", "index_stagnation_alerted_at")}},
     )
     if not proc:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -265,8 +267,11 @@ async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, An
                        ("sanitize", TaskType.INDEX_SANITIZE)):
         activo = await index_jobs.job_activo(process_id, tipo)
         jobs[nome] = (activo or {}).get("task_id")
+    processo_dto = _processo_dto(proc, ficheiros)
+    # o ecrã só arranca o tratamento se o processo é DELE (o servidor volta a decidir ao receber o pedido)
+    processo_dto["assigned_to_me"] = bool(proc.get("assigned_indexacao_id")) and proc.get("assigned_indexacao_id") == (user or {}).get("id")
     return {
-        "process": _processo_dto(proc, ficheiros),
+        "process": processo_dto,
         "files": ficheiros,
         "professional_metadata": {
             "jobs": (metadados or {}).get("jobs") or [],
@@ -285,22 +290,28 @@ async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, An
 # ====================================================================
 # ACÇÕES
 # ====================================================================
-async def run_claim_process(user: dict, process_id: str) -> dict[str, Any]:
+async def run_start_work(user: dict, process_id: str) -> dict[str, Any]:
+    """O indexador abriu a bancada: arranca o tratamento (`pending → in_review`) se o processo é DELE.
+
+    Substitui o «Reivindicar» manual: a atribuição é automática e o estado «em tratamento» nasce de
+    o indexador atribuído começar mesmo a trabalhar. Quem não é o atribuído (um diretor a espreitar)
+    recebe `iniciado=False` e nada muda — ver `index_status.registar_trabalho`.
+    """
     await _carregar_processo(process_id, user)
-    resultado = await estado_do_index.reivindicar(process_id)
+    resultado = await estado_do_index.registar_trabalho(process_id, user.get("id"))
     return {"success": True, **resultado}
 
 
-async def run_release_process(user: dict, process_id: str) -> dict[str, Any]:
-    await _carregar_processo(process_id, user)
-    resultado = await estado_do_index.devolver_a_fila(process_id)
-    return {"success": True, **resultado}
+async def _trabalhou(user: dict, process_id: str) -> None:
+    """Uma acção de escrita do Index: carimba a actividade (relógio da estagnação). Nunca levanta."""
+    await estado_do_index.registar_trabalho(process_id, (user or {}).get("id"))
 
 
 async def run_analyze_process(user: dict, process_id: str, *, force: bool = False) -> dict[str, Any]:
     """«Analisar» (`force=False`: só o que é novo ou mudou) e «Extrair dados» (`force=True`: tudo)."""
     await _carregar_processo(process_id, user)
     resultado = await index_jobs.iniciar_analise(process_id, user, force=force, gatilho="manual")
+    await _trabalhou(user, process_id)
     return {
         "success": True,
         "task_id": resultado["task_id"],
@@ -318,6 +329,7 @@ async def run_sanitize_process(user: dict, process_id: str) -> dict[str, Any]:
 
     await _carregar_processo(process_id, user)
     resultado = await index_sanitize.iniciar_sanitizacao(process_id, user)
+    await _trabalhou(user, process_id)
     return {
         "success": True,
         "task_id": resultado["task_id"],
@@ -340,6 +352,7 @@ async def run_edit_professional_job(
         raise HTTPException(status_code=422, detail=str(exc))
     await estado_do_index.gravar_contadores(process_id, has_pending_review=modelo.has_pending_review)
     await _auditar(user, process_id, "Metadados profissionais editados", sorted(alteracoes))
+    await _trabalhou(user, process_id)
     alvo = next((j for j in modelo.jobs if j.job_id == job_id), None)
     return {
         "success": True,
@@ -356,6 +369,7 @@ async def run_dismiss_alert(user: dict, process_id: str, alert_id: str) -> dict[
     abertos = await store.contar_alertas_abertos(process_id)
     await estado_do_index.gravar_contadores(process_id, index_alerts_open=abertos)
     await _auditar(user, process_id, "Alerta do Index dispensado", [alerta.get("code") or ""])
+    await _trabalhou(user, process_id)
     return {"success": True, "alerts_open": abertos}
 
 

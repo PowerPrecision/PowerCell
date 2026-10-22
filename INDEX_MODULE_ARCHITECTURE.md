@@ -22,7 +22,7 @@ Hoje há `is_indexed` (bool), `skip_index` (Via Verde) e `hub_triage.state` (fil
 (`document_visibility`, `document_intake`, `network_triage`, `process_assignment`, `email_archive`…).
 
 ```
-pending ──claim/abrir workstation──▶ in_review ──mark-indexed──▶ indexed
+pending ──o indexador atribuído abre/trabalha a bancada──▶ in_review ──mark-indexed──▶ indexed
    ▲                                     │                          │
    └─────────── devolver à fila ─────────┘            set-indexed OFF (reabre; os originais purgados não regressam)
 ```
@@ -171,7 +171,7 @@ rotas com `{process_id}`: `exigir_processo_no_ambito` (404 uniforme) e `exigir_p
 |---|---|---|
 | `GET /index/queue?tab=pending\|reviews&page=` | Index, gestão | **Dashboard.** `pending` = `index_status ∈ {pending,in_review}`; `reviews` = `indexed ∧ has_pending_review`. Só a rede do utilizador. DTO positivo: nº do processo, nome do cliente, nº de ficheiros, nº de alertas — **sem** metadados profissionais. |
 | `GET /index/processes/{id}` | Index, gestão | **Workstation.** Estado, jobs activos, metadados profissionais, alertas, ficheiros e estado de cada um. |
-| `POST /index/processes/{id}/claim` | Index | `pending → in_review` (idempotente). |
+| `POST /index/processes/{id}/start` | Index | `pending → in_review` SÓ para o indexador atribuído (idempotente; substitui o antigo `claim`; `release` foi apagado). |
 | `POST /index/processes/{id}/analyze` | Index, gestão | Cria o job de análise (categoriza, extrai metadados, matriz). **202 + `task_id`.** `force=false` salta ficheiros com a mesma impressão digital. |
 | `POST /index/processes/{id}/extract` | Index, gestão | O «Extrair dados» que já existe (`/processes/{id}/documents/extract`): devolve propostas para a ficha, **não grava**. Mantém-se tal como está. |
 | `POST /index/processes/{id}/sanitize` | Index, gestão | Job que gera os PDF limpos (sem metadados do PDF). Idempotente. |
@@ -375,7 +375,7 @@ Divergências e decisões:
 
 ### Fase 3 — API, RBAC e fecho (Out 2026)
 
-`routes/index_module.py` (`/api/index/*`, stubs finos) → `services/index_api.py` (fila, bancada, claim/release, analisar/extrair,
+`routes/index_module.py` (`/api/index/*`, stubs finos) → `services/index_api.py` (fila, bancada, start, analisar/extrair,
 edição humana, dispensar alertas, directório) e `services/index_finalize.py` («marcar como indexado» + job de fecho).
 
 Decisões e divergências:
@@ -529,3 +529,24 @@ um ficheiro; disco = nada). Idempotente e retomável (id da linha = conteúdo + 
 chamadas ao modelo e repetir o comando continua. Saída: `[import-historico] n/N → estado` e
 `PROGRESSO: importacao=<id> membros=… importados=… ja_importados=… identificacao=… …`. Códigos de saída: 0 ok · 2 ZIP
 ilegível · 3 motor simulado · 4 rede em falta/desconhecida · 130 interrompido.
+
+
+### Fusão de menus, atribuição automática e SLA de dois níveis (Out 2026)
+
+Detalhe e lições no `AGENTS.md` («Index: fusão de menus, atribuição automática e SLA de inactividade em dois níveis»).
+
+1. **Sem menu isolado «Indexação» para a equipa.** O Index e o Intermediário vêem o seu trabalho em «Os Meus Processos»
+   (`/processos`); um clique de um indexador abre direto a bancada (`/index/:processId`, `utils/destinoDoProcesso.js`). A fila
+   `/index` fica como «Supervisão do Index» (gestão); a «Pesquisa Avançada» ganhou item no menu do Index.
+2. **Estar atribuído ≠ estar em tratamento.** `pending → in_review` só acontece quando o indexador ATRIBUÍDO trabalha
+   (`index_status.registar_trabalho`: abrir a bancada, analisar, editar, dispensar alertas, carregar ficheiros). `claim`/`release`
+   foram apagados.
+3. **Atribuição à entrada:** indexador por carga (`assign_to_indexer`, já existia) **e** intermediário por carga
+   (`auto_assign_intermediario_on_entry`, só se estiver vazio). Os dois carimbam/derivam do pool da rede do processo.
+4. **SLA em dois níveis** (`services/index_sla.py`, no job horário `scheduled_tasks`): nível 1 reatribui o processo atribuído
+   que ninguém começou em `INDEX_SLA_UNTOUCHED_HOURS` (48 h); nível 2 NÃO retira a atribuição de um processo em tratamento sem
+   actividade há `INDEX_SLA_STALE_DAYS` (5 dias): avisa o indexador e a chefia da rede, repetindo de 5 em 5 dias.
+   `INDEX_SLA_ENABLED=false` desliga os dois.
+5. **Bancada:** cada ficheiro tem «Ver documento» e «Download»
+   (`GET /index/processes/{id}/files/{doc_id}/content[?download=true]`, qualquer tipo do dossier, só do processo do caminho) e
+   há upload direto sem sair do ecrã (nunca sobrepõe: nome repetido → ` (2)`).

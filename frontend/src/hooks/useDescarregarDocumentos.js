@@ -9,7 +9,7 @@
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { getIndexDocumentContent, readBlobErrorBody } from "../services/api";
+import { getIndexDocumentContent, getIndexProcessFileContent, readBlobErrorBody } from "../services/api";
 import { guardarBlob, mensagemDaFalhaDeDescarga, nomeDaDescarga } from "../utils/descarregarFicheiro";
 
 export function useDescarregarDocumentos() {
@@ -26,7 +26,9 @@ export function useDescarregarDocumentos() {
     try {
       for (const doc of lista) {
         try {
-          const resposta = await getIndexDocumentContent(doc.id, { download: true });
+          const resposta = doc.processId
+            ? await getIndexProcessFileContent(doc.processId, doc.id, { download: true })
+            : await getIndexDocumentContent(doc.id, { download: true });
           const nome = nomeDaDescarga({
             rotulo: doc.rotulo,
             contentType: resposta.headers?.["content-type"] || resposta.data?.type,

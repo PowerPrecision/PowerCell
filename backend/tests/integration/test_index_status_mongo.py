@@ -95,22 +95,32 @@ class TestAFilaApanhaOLegado:
 
 
 class TestTransicoesAtomicas:
-    async def test_claim_corrida_so_um_ganha(self, bd):
+    async def test_corrida_de_varios_pedidos_arranca_uma_so_vez(self, bd):
         import asyncio
         from unittest.mock import patch
 
-        await bd.processes.insert_one({"id": "p", "index_status": "pending"})
+        await bd.processes.insert_one({"id": "p", "index_status": "pending", "assigned_indexacao_id": "u1"})
         with patch.object(ist, "db", bd):
-            r = await asyncio.gather(*(ist.reivindicar("p") for _ in range(6)))
-        assert sum(1 for x in r if x["alterado"]) == 1
-        assert (await bd.processes.find_one({"id": "p"}))["index_status"] == "in_review"
+            r = await asyncio.gather(*(ist.registar_trabalho("p", "u1") for _ in range(6)))
+        assert sum(1 for x in r if x["iniciado"]) == 1
+        assert all(x["registado"] for x in r)
+        doc = await bd.processes.find_one({"id": "p"})
+        assert doc["index_status"] == "in_review" and doc["index_work_started_at"] and doc["index_last_activity_at"]
 
-    async def test_claim_sobre_legado_sem_campo(self, bd):
+    async def test_sobre_legado_sem_campo_de_estado(self, bd):
         from unittest.mock import patch
 
-        await bd.processes.insert_one({"id": "p"})
+        await bd.processes.insert_one({"id": "p", "assigned_indexacao_id": "u1"})
         with patch.object(ist, "db", bd):
-            assert (await ist.reivindicar("p"))["alterado"] is True
+            assert (await ist.registar_trabalho("p", "u1"))["iniciado"] is True
+
+    async def test_so_o_atribuido_conta(self, bd):
+        from unittest.mock import patch
+
+        await bd.processes.insert_one({"id": "p", "index_status": "pending", "assigned_indexacao_id": "u1"})
+        with patch.object(ist, "db", bd):
+            assert (await ist.registar_trabalho("p", "u2"))["registado"] is False
+        assert (await bd.processes.find_one({"id": "p"}))["index_status"] == "pending"
 
 
 class TestMigracaoReal:

@@ -1315,10 +1315,9 @@ export const getIndexQueue = (params = {}) =>
   api.get("/index/queue", { params, skipErrorToast: true });
 export const getIndexWorkstation = (processId) =>
   api.get(`/index/processes/${processId}`, { skipErrorToast: true });
-export const claimIndexProcess = (processId) =>
-  api.post(`/index/processes/${processId}/claim`, null, { skipErrorToast: true });
-export const releaseIndexProcess = (processId) =>
-  api.post(`/index/processes/${processId}/release`, null, { skipErrorToast: true });
+// O indexador atribuído abriu a bancada: `pending → in_review` (substitui o «Reivindicar» manual).
+export const startIndexWork = (processId) =>
+  api.post(`/index/processes/${processId}/start`, null, { skipErrorToast: true });
 export const analyzeIndexProcess = (processId, force = false) =>
   api.post(`/index/processes/${processId}/analyze`, { force }, { skipErrorToast: true });
 export const extractIndexProcess = (processId) =>
@@ -1335,6 +1334,13 @@ export const markIndexProcessIndexed = (processId, employers = []) =>
 // `download: true` → o servidor responde com `Content-Disposition: attachment` (e deixa rasto de auditoria).
 export const getIndexDocumentContent = (documentId, { download = false } = {}) =>
   api.get(`/index/documents/${encodeURIComponent(documentId)}/content`, {
+    responseType: "blob",
+    skipErrorToast: true,
+    ...(download ? { params: { download: true } } : {}),
+  });
+/** Um ficheiro da BANCADA de um processo (qualquer tipo que a aba Documentos lista) — por ids, nunca por chave S3. */
+export const getIndexProcessFileContent = (processId, documentId, { download = false } = {}) =>
+  api.get(`/index/processes/${encodeURIComponent(processId)}/files/${encodeURIComponent(documentId)}/content`, {
     responseType: "blob",
     skipErrorToast: true,
     ...(download ? { params: { download: true } } : {}),

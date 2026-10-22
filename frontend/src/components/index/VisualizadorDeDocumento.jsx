@@ -14,7 +14,7 @@ import { ChevronLeft, ChevronRight, Download, Loader2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
 import PrevisualizadorDeFicheiro from "../shared/PrevisualizadorDeFicheiro";
-import { getIndexDocumentContent } from "../../services/api";
+import { getIndexDocumentContent, getIndexProcessFileContent } from "../../services/api";
 
 function Conteudo({ documentos, onDescarregar, emCurso }) {
   const [indice, setIndice] = useState(0);
@@ -77,7 +77,10 @@ function Conteudo({ documentos, onDescarregar, emCurso }) {
       <div className="rounded-md border bg-muted/30" data-testid="visualizador-corpo">
         <PrevisualizadorDeFicheiro
           chave={actual.id}
-          carregar={() => getIndexDocumentContent(actual.id)}
+          carregar={() =>
+            // um ficheiro da bancada diz o processo (qualquer tipo do dossier); o da pesquisa vai por id
+            actual.processId ? getIndexProcessFileContent(actual.processId, actual.id) : getIndexDocumentContent(actual.id)
+          }
           nome={actual.rotulo}
           alturaDoPdf="h-[65vh]"
           alturaMaxima="max-h-[65vh]"
@@ -89,7 +92,8 @@ function Conteudo({ documentos, onDescarregar, emCurso }) {
 
 /**
  * @param {Object} props
- * @param {Array<{id: string, rotulo: string}>} props.documentos — vazio/ausente = fechado
+ * @param {Array<{id: string, rotulo: string, processId?: string}>} props.documentos — vazio/ausente = fechado;
+ *   com `processId` o ficheiro é da bancada de um processo (qualquer tipo), sem ele é um resultado da pesquisa
  * @param {string} [props.titulo]
  * @param {Function} props.onFechar
  * @param {(chave: string, documentos: Array<{id: string, rotulo: string}>) => void} [props.onDescarregar]

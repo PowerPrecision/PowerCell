@@ -64,6 +64,7 @@ import { VALORES_DE_PARTILHA } from "../utils/kanbanFiltros";
 import PartilhaBadge from "../components/shared/PartilhaBadge";
 import Sub35Badge from "../components/shared/Sub35Badge";
 import { notifyFinancialEngine } from "../utils/financialEngineFeedback";
+import { abreABancada, destinoDoProcesso } from "../utils/destinoDoProcesso";
 
 const roleLabels = {
   consultor: "Consultor",
@@ -614,9 +615,14 @@ const ProcessesPage = () => {
           : {}),
       },
     });
+    // O Index abre a bancada (`/index/:id`), que não tem setas Anterior/Seguinte: sem contexto de navegação.
+    if (abreABancada(effectiveRole)) {
+      navigate(destinoDoProcesso(effectiveRole, processId));
+      return;
+    }
     guardarContexto(contexto);
     navigate(`/process/${processId}`, { state: { contextoDeNavegacao: contexto } });
-  }, [
+  }, [effectiveRole, 
     sortedProcesses, pagination.page, pagination.size, pagination.total,
     location.pathname, location.search, viewMode, sortField, sortOrder,
     isGlobalView, effectiveCompanyId, indexStatusFilter, statusFilter,
@@ -1302,7 +1308,7 @@ const ProcessesPage = () => {
         open={clientDetailsModal.open}
         clientId={clientDetailsModal.clientId}
         onClose={() => setClientDetailsModal({ open: false, clientId: null })}
-        onNavigateToProcess={(pid) => navigate(`/process/${pid}`)}
+        onNavigateToProcess={(pid) => navigate(destinoDoProcesso(effectiveRole, pid))}
       />
 
       {/* «Marcar como Pago» — confirmação: é uma escrita financeira num processo fechado */}

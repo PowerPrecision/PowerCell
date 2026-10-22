@@ -480,6 +480,9 @@ async def build_staff_assign_update(
             clear_action="Removeu indexação",
             set_action="Atribuiu indexação",
         )
+        if update_data.get("assigned_indexacao_id"):
+            # o relógio do SLA do Index (nível 1) conta a partir da atribuição
+            update_data["index_assigned_at"] = update_data["updated_at"]
     if parceiro_id is not None:
         await apply_single_assignee_param(
             process_id=process_id,

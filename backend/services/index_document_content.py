@@ -107,4 +107,38 @@ async def run_conteudo_do_documento(user: dict, document_id: str, *, descarregar
     return resposta
 
 
-__all__ = ["TIPOS_QUE_A_PESQUISA_MOSTRA", "run_conteudo_do_documento"]
+async def run_conteudo_do_ficheiro_do_processo(
+    user: dict, process_id: str, document_id: str, *, descarregar: bool = False, request=None
+):
+    """Os bytes de UM ficheiro da bancada de um processo (qualquer tipo que o Index lista), para ver ou descarregar.
+
+    `GET /api/index/processes/{process_id}/files/{document_id}/content`. É o «Ver documento» e o «Download» de cada
+    linha da aba Documentos: ao contrário do atalho da pesquisa (só recibo/extrato/declaração), a bancada lista
+    TODO o dossier do processo — a identificação incluída, que o Index precisa de abrir para limpar —, por isso
+    aqui não há filtro de tipo. **O resto da parede é a mesma**: o processo tem de ser do âmbito (404 uniforme), o
+    ficheiro tem de ser DESSE processo (um `document_id` de outro processo é 404, não 403: não se confirma que
+    existe), visibilidade dos documentos, posse da chave S3 por segmento, tecto e rasto de auditoria na descarga.
+    """
+    documento: Optional[dict] = await db.document_metadata.find_one(
+        {"id": _texto(document_id), "process_id": _texto(process_id), "file_state": {"$ne": "purgado"}},
+        {"_id": 0, "id": 1, "process_id": 1, "s3_path": 1, "filename": 1},
+    )
+    processo = await _processo_no_ambito_ou_404(_texto(process_id), user)
+    if not documento or not documento.get("s3_path"):
+        raise HTTPException(status_code=404, detail=ERRO_NAO_ENCONTRADO)
+    await assert_can_view_process_documents(user, processo)
+
+    from services.financial_validation import _exigir_posse_do_comprovativo
+
+    await _exigir_posse_do_comprovativo(documento["s3_path"], "process", processo, processo.get("client_id"))
+
+    resposta = await servir_ficheiro_do_s3(
+        documento["s3_path"], documento.get("filename") or documento["s3_path"].rsplit("/", 1)[-1],
+        referencia=_texto(document_id), tipo_pelo=documento["s3_path"], descarregar=descarregar,
+    )
+    if descarregar:
+        await _auditar_descarga(user, processo, _texto(document_id), request)
+    return resposta
+
+
+__all__ = ["TIPOS_QUE_A_PESQUISA_MOSTRA", "run_conteudo_do_documento", "run_conteudo_do_ficheiro_do_processo"]

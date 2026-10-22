@@ -21,15 +21,14 @@ from middleware.rate_limit import limiter
 from services.auth import get_all_user_roles, get_effective_role, require_roles
 from services.index_access import PAPEIS_DE_IA_DO_INDEX
 from services.index_advanced_search import TAMANHO_MAXIMO_DA_PAGINA, run_advanced_search
-from services.index_document_content import run_conteudo_do_documento
+from services.index_document_content import run_conteudo_do_documento, run_conteudo_do_ficheiro_do_processo
 from services.index_api import (
     run_analyze_process,
-    run_claim_process,
     run_dismiss_alert,
     run_edit_professional_job,
     run_get_index_queue,
     run_get_index_workstation,
-    run_release_process,
+    run_start_work,
     run_sanitize_process,
     run_search_employers,
 )
@@ -156,6 +155,25 @@ async def get_document_content(
     return await run_conteudo_do_documento(user, document_id, descarregar=download, request=request)
 
 
+@router.get("/processes/{process_id}/files/{document_id}/content")
+@limiter.limit("120/minute")
+async def get_process_file_content(
+    request: Request,
+    response: Response,
+    process_id: str,
+    document_id: str,
+    download: bool = Query(
+        False, description="true → `Content-Disposition: attachment` (guardar o ficheiro em vez de o mostrar)."),
+    user: dict = Depends(_acesso),
+):
+    """Um ficheiro da bancada de um processo, para ver (`inline`) ou descarregar (`?download=true`).
+
+    Serve qualquer tipo que a bancada lista; o ficheiro tem de ser do processo do caminho (404 igual ao de
+    «não existe» fora do âmbito de rede ou de outro processo). A chave S3 sai do registo, nunca do pedido.
+    """
+    return await run_conteudo_do_ficheiro_do_processo(user, process_id, document_id, descarregar=download, request=request)
+
+
 @router.get("/employers")
 @limiter.limit("120/minute")
 async def search_employers(
@@ -179,16 +197,11 @@ async def get_index_workstation(
     return await run_get_index_workstation(user, process_id)
 
 
-@router.post("/processes/{process_id}/claim")
+@router.post("/processes/{process_id}/start")
 @limiter.limit("60/minute")
-async def claim_process(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
-    return await run_claim_process(user, process_id)
-
-
-@router.post("/processes/{process_id}/release")
-@limiter.limit("60/minute")
-async def release_process(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
-    return await run_release_process(user, process_id)
+async def start_work(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
+    """O indexador atribuído abriu a bancada: `pending → in_review` (substitui o «Reivindicar» manual)."""
+    return await run_start_work(user, process_id)
 
 
 @router.post("/processes/{process_id}/analyze", status_code=202)

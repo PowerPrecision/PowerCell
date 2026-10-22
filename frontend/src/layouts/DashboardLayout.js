@@ -280,7 +280,9 @@ const DashboardLayout = ({ children, title }) => {
         // (o administrativo não entra; o Index tem o seu próprio grupo mais abaixo).
         ...(["master", "admin", "ceo", "diretor"].includes(userRole)
           ? [{
-              label: "Indexação",
+              // A fila é de SUPERVISÃO (quem atribui, reordena e vê o que estagnou): o trabalho da equipa do
+              // Index vive em «Os Meus Processos». Por isso já não se chama «Indexação».
+              label: "Supervisão do Index",
               icon: ClipboardCheck,
               href: "/index",
             }]
@@ -426,10 +428,11 @@ const DashboardLayout = ({ children, title }) => {
             icon: ClipboardList,
             items: [
               // "Registos de Clientes" REMOVIDO para role indexacao — não necessita de acesso a registos de clientes
-              // Lote 12: a fila de trabalho do Index é o primeiro item da sua lista.
-              { label: "Indexação", icon: ClipboardCheck, href: "/index" },
               { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
               { label: "Os Meus Processos", icon: FileText, href: "/processos" },
+              // O Index perdeu a fila própria (o trabalho chega-lhe atribuído, em «Os Meus Processos»); a
+              // pesquisa avançada fica à mão, senão deixava de haver caminho até ela.
+              { label: "Pesquisa Avançada", icon: Search, href: "/index/pesquisa" },
               { label: "Documentos Pendentes", icon: FileText, href: "/validades" },
             ],
           },

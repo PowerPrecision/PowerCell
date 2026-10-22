@@ -94,6 +94,7 @@ def apply_target_role_assignment(process_doc: dict, target_user: dict) -> None:
         process_doc.update(build_set_consultor_fields([target_user_id], [target_name]))
     elif target_role == UserRole.INDEXACAO:
         process_doc["assigned_indexacao_id"] = target_user_id
+        process_doc["index_assigned_at"] = datetime.now(timezone.utc).isoformat()
 
 
 async def run_assign_client_to_user(
@@ -374,6 +375,12 @@ async def run_assign_client_to_user(
                     )
             except Exception as e:
                 logger.warning(f"[ASSIGN-CLIENT] Erro na auto-atribuição de indexador para processo {process_id}: {e}")
+
+        # o intermediário de crédito entra com o processo (só se estiver vazio; nunca levanta)
+        if target_role != "indexacao" and process_id:
+            from services.process_assignment import auto_assign_intermediario_on_entry
+
+            await auto_assign_intermediario_on_entry(process_id)
     
     # Actualizar cliente + marcar lead como convertido
     #

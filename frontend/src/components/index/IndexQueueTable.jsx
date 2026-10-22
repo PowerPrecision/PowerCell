@@ -112,6 +112,11 @@ export function IndexQueueTable({ itens, separador, onAbrir, mensagemVazia, orde
                   A rever
                 </Badge>
               )}
+              {p.stagnant === true && (
+                <Badge variant="secondary" className="ml-1" data-testid="fila-estagnado" title="Em tratamento mas sem actividade há vários dias">
+                  Sem actividade
+                </Badge>
+              )}
             </TableCell>
             <TableCell className="text-right tabular-nums">
               {p.documents_total ?? 0}

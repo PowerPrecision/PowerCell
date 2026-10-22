@@ -257,10 +257,13 @@ async def assign_indexacao_to_process(
         return False, {}, error
     
     # Actualizar processo
+    agora = datetime.now(timezone.utc).isoformat()
     update_data = {
         "assigned_indexacao_id": indexacao_id,
         "indexacao_name": indexacao_user.get("name", ""),
-        "updated_at": datetime.now(timezone.utc).isoformat()
+        # o relógio do SLA do Index (nível 1) conta a partir daqui
+        "index_assigned_at": agora,
+        "updated_at": agora,
     }
     
     result = await db.processes.update_one(
@@ -487,6 +490,58 @@ async def _count_active_processes_for_indexer(indexer_id: str) -> int:
     return count
 
 
+async def _indexadores_da_equipa(process: dict, network_id: Optional[str] = None) -> list[dict]:
+    """Os indexadores activos que podem receber este processo: a EQUIPA do processo (ou a rede pedida), nunca o mundo."""
+    from services import network_triage
+    from services.role_query import build_deep_role_query
+
+    query = build_deep_role_query({"is_active": True}, role="indexacao")
+    membros = await network_triage.user_ids_da_rede(
+        network_id or network_triage.rede_da_equipa(process)
+    )
+    if membros is not None:
+        query = {"$and": [query, {"id": {"$in": sorted(membros)}}]}
+    cursor = db.users.find(
+        query,
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "additional_roles": 1}
+    )
+    return await cursor.to_list(length=100)
+
+
+async def _cargas_dos_indexadores(indexers: list[dict]) -> list[dict]:
+    """Cada indexador com a sua carga activa (`active_count`)."""
+    cargas: List[Dict] = []
+    for indexer in indexers:
+        active_count = await _count_active_processes_for_indexer(indexer["id"])
+        cargas.append({
+            "id": indexer["id"],
+            "name": indexer.get("name", ""),
+            "email": indexer.get("email", ""),
+            "active_count": active_count,
+        })
+        logger.debug(
+            f"[ASSIGN-INDEXER] Indexador {indexer.get('name')} "
+            f"({indexer['id'][:8]}): {active_count} processos ativos"
+        )
+    return cargas
+
+
+async def indexadores_disponiveis(
+    process: dict, *, excluir: Optional[set] = None, network_id: Optional[str] = None
+) -> list[dict]:
+    """Os indexadores com vaga (carga < máximo), do menos para o mais ocupado, sem os `excluir`.
+
+    É o MESMO pool e a MESMA carga de `assign_to_indexer`: uma reatribuição (SLA do Index) que escolhesse
+    por outra regra divergiria da atribuição normal sem dar erro.
+    """
+    excluir = excluir or set()
+    indexers = [i for i in await _indexadores_da_equipa(process, network_id) if i["id"] not in excluir]
+    cargas = await _cargas_dos_indexadores(indexers)
+    livres = [c for c in cargas if c["active_count"] < MAX_ACTIVE_PROCESSES_PER_INDEXER]
+    livres.sort(key=lambda c: c["active_count"])
+    return livres
+
+
 async def assign_to_indexer(
     process_id: str,
     update_status: bool = True,
@@ -539,7 +594,6 @@ async def assign_to_indexer(
     Returns:
         Tuple com (sucesso, dados atualizados, mensagem)
     """
-    from services.role_query import build_deep_role_query
     from services.notification_service import send_notification_with_preference_check
     from services.realtime_notifications import send_realtime_notification
     from services.history import log_history
@@ -567,18 +621,7 @@ async def assign_to_indexer(
         )
 
     # ── 2. Encontrar todos os indexadores ativos ──
-    query = build_deep_role_query({"is_active": True}, role="indexacao")
-    # Pool = a equipa do processo (ou a rede pedida), nunca o mundo.
-    membros = await network_triage.user_ids_da_rede(
-        network_id or network_triage.rede_da_equipa(process)
-    )
-    if membros is not None:
-        query = {"$and": [query, {"id": {"$in": sorted(membros)}}]}
-    indexers_cursor = db.users.find(
-        query,
-        {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "additional_roles": 1}
-    )
-    indexers = await indexers_cursor.to_list(length=100)
+    indexers = await _indexadores_da_equipa(process, network_id)
 
     if not indexers:
         # Sem indexadores no sistema
@@ -614,21 +657,8 @@ async def assign_to_indexer(
         }, "Nenhum indexador disponível no sistema — processo colocado na fila de espera"
 
     # ── 3. Contar processos ativos por indexador ──
-    indexer_loads: List[Dict] = []
-    for indexer in indexers:
-        active_count = await _count_active_processes_for_indexer(indexer["id"])
-        indexer_loads.append({
-            "id": indexer["id"],
-            "name": indexer.get("name", ""),
-            "email": indexer.get("email", ""),
-            "active_count": active_count,
-        })
-        logger.debug(
-            f"[ASSIGN-INDEXER] Indexador {indexer.get('name')} "
-            f"({indexer['id'][:8]}): {active_count} processos ativos"
-        )
-
     # ── 4. Filtrar indexadores disponíveis (menos de 15 processos) ──
+    indexer_loads = await _cargas_dos_indexadores(indexers)
     available_indexers = [
         ix for ix in indexer_loads
         if ix["active_count"] < MAX_ACTIVE_PROCESSES_PER_INDEXER
@@ -710,6 +740,8 @@ async def assign_to_indexer(
     update_data = {
         "assigned_indexacao_id": chosen["id"],
         "indexacao_name": chosen["name"],
+        # o relógio do SLA do Index (nível 1) conta a partir daqui
+        "index_assigned_at": now,
         "updated_at": now,
     }
     if update_status:
@@ -1173,6 +1205,7 @@ async def process_queue_for_freed_indexer(indexer_id: str) -> int:
         update_data = {
             "assigned_indexacao_id": indexer_id,
             "indexacao_name": indexer.get("name", ""),
+            "index_assigned_at": now,
             "status": "fase_documental",
             "updated_at": now,
         }
@@ -1615,6 +1648,27 @@ async def dual_auto_assign_on_pre_registo_transition(
     )
 
     return result_data
+
+
+async def auto_assign_intermediario_on_entry(
+    process_id: str, *, company_id: Optional[str] = None
+) -> Dict:
+    """Atribui o intermediário de crédito MENOS OCUPADO da equipa do processo, na ENTRADA (Out 2026).
+
+    A entrada de um processo no pipeline dá-lhe, sem ninguém escolher, um indexador (`assign_to_indexer`) e
+    um intermediário. É a dupla auto-atribuição restrita a esse papel, logo com as mesmas garantias: **só
+    preenche o que está vazio** (o intermediário que criou o processo mantém-se), a equipa é a da rede do
+    processo, o histórico e a notificação saem pelo mesmo caminho. O consultor continua a NÃO ser tocado
+    (P6: atribui-se à mão ou pela fase). **Nunca levanta**: a atribuição é um reforço da entrada, e um
+    erro aqui não pode fazer falhar a criação do processo.
+    """
+    try:
+        return await dual_auto_assign_on_pre_registo_transition(
+            process_id, company_id=company_id, papeis=("intermediario",),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[ASSIGN-INTERMEDIARIO] Processo %s sem intermediário automático: %s", process_id, exc)
+        return {}
 
 
 async def _notify_newly_assigned_users(

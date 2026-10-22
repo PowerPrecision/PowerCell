@@ -346,6 +346,10 @@ async def maybe_auto_assign_indexer_on_create(
                 f"{process_id} salta a fase de Indexação e nasce sem consultor "
                 f"(atribuição manual)"
             )
+            # sem Index, o intermediário é quem recebe o processo à entrada
+            from services.process_assignment import auto_assign_intermediario_on_entry
+
+            await auto_assign_intermediario_on_entry(process_id)
             return
 
         from services.process_assignment import assign_to_indexer
@@ -365,6 +369,10 @@ async def maybe_auto_assign_indexer_on_create(
                 f"[CREATE-PROCESS] Sem indexador disponível para processo "
                 f"{process_id}: {assign_msg} (status mantém: {initial_status})"
             )
+        # o intermediário de crédito entra ao mesmo tempo que o indexador (só se estiver vazio)
+        from services.process_assignment import auto_assign_intermediario_on_entry
+
+        await auto_assign_intermediario_on_entry(process_id)
     except Exception as e:
         logger.warning(
             f"[CREATE-PROCESS] Erro na auto-atribuição de indexador "

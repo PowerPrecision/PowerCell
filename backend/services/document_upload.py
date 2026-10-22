@@ -323,6 +323,11 @@ async def run_upload_file_s3(
             client_id, user, s3_path=s3_path, filename=normalized_filename,
             client_name=client_name, categoria=category)
 
+    if e_upload_do_index(user):
+        # carregar um ficheiro é trabalhar: o indexador atribuído arranca o tratamento / adia o alarme de estagnação
+        from services.index_status import registar_trabalho
+
+        await registar_trabalho(client_id, user.get("id"))
     if plano.passa_pela_ia:
         await registar_na_fila_da_ia(
             process_id=client_id,
