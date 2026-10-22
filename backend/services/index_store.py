@@ -36,6 +36,7 @@ from models.index_module import (
     CATEGORIA_IDENTIFICACAO,
     AlertaDaMatriz,
     CampoRevisavel,
+    FonteDoCampo,
     ProfessionalMetadata,
     TrabalhoProfissional,
     decimal_do_valor,
@@ -96,13 +97,93 @@ def _mais_recente(a: Optional[str], b: Optional[str]) -> bool:
     return (a or "") > (b or "")
 
 
-def calcular_trabalhos(entradas: Iterable[tuple[str, TrabalhoProfissional]]) -> list[TrabalhoProfissional]:
+def _chaves_da_entidade(nif: Any, nome: Any) -> set[str]:
+    """As identidades por que uma entidade se reconhece: `nif:<válido>` e `nome:<normalizado>`."""
+    chaves: set[str] = set()
+    normal = normalizar_nif(nif)
+    if normal and nif_e_valido(normal):
+        chaves.add(f"nif:{normal}")
+    nome_normal = nome_normalizado_da_entidade(nome)
+    if nome_normal:
+        chaves.add(f"nome:{nome_normal}")
+    return chaves
+
+
+def _declaracao_e_desta_entidade(declaracao: dict, membros: list[tuple[str, TrabalhoProfissional]]) -> bool:
+    """A declaração é da entidade deste grupo? NIF válido primeiro; o nome só quando o NIF não discorda.
+
+    Dois NIFs válidos DIFERENTES são duas entidades, mesmo que o nome coincida (uma sucursal, um grupo
+    com a mesma designação): a identidade forte vence a fraca, senão uma declaração mandava no emprego errado.
+    """
+    nifs_da_declaracao = {c for c in _chaves_da_entidade(declaracao.get("employer_nif"), None)}
+    nifs_do_grupo: set[str] = set()
+    nomes_do_grupo: set[str] = set()
+    for _, job in membros:
+        for chave in _chaves_da_entidade(job.employer_nif.value, job.employer_name.value):
+            (nifs_do_grupo if chave.startswith("nif:") else nomes_do_grupo).add(chave)
+    if nifs_da_declaracao & nifs_do_grupo:
+        return True
+    if nifs_da_declaracao and nifs_do_grupo:
+        return False  # os dois têm NIF e não é o mesmo
+    nomes_da_declaracao = {c for c in _chaves_da_entidade(None, declaracao.get("employer_name"))}
+    return bool(nomes_da_declaracao & nomes_do_grupo)
+
+
+def aplicar_declaracoes(
+    job: TrabalhoProfissional,
+    membros: list[tuple[str, TrabalhoProfissional]],
+    declaracoes: list[tuple[str, dict]],
+) -> TrabalhoProfissional:
+    """A Declaração de Efetividade tem PRECEDÊNCIA ABSOLUTA sobre os recibos (decisão da direcção, Out 2026).
+
+    O tipo de contrato e a data de admissão que ela certifica sobrepõem-se a tudo o que se leu ou inferiu
+    dos recibos. Regras que não se podem perder:
+
+    * **só o que a declaração DIZ**: um campo que ela não traz (nulo) não apaga o dos recibos;
+    * **a mais recente ganha** (período de emissão; sem data é a mais antiga; desempate pelo id);
+    * **uma leitura com confiança «baixa» entra, mas a rever** (`needs_review`): vence os recibos e pede
+      uma pessoa; a **admissão** não tem editor, logo uma leitura duvidosa dela não se propaga;
+    * **uma pessoa vence tudo**: `aplicar_edicoes_humanas` corre depois e repõe o que ela escreveu.
+    """
+    candidatas = [(d, f) for d, f in declaracoes if _declaracao_e_desta_entidade(f, membros)]
+    if not candidatas:
+        return job
+    documento, factos = max(candidatas, key=lambda par: (par[1].get("period") or "", par[0] or ""))
+    certificou = False
+
+    contrato = factos.get("contract_type")
+    if contrato:
+        confianca = factos.get("contract_confidence")
+        job.contract_type = CampoRevisavel(
+            value=contrato, needs_review=(confianca == "baixa"), confidence=confianca,
+            source=FonteDoCampo(document_id=documento),
+        )
+        certificou = True
+    if factos.get("admission_date") and factos.get("admission_confidence") != "baixa":
+        job.admission_date = factos["admission_date"]
+        certificou = True
+    if certificou:
+        job.certified_by_declaration = True
+        if documento and documento not in job.source_document_ids:
+            job.source_document_ids = sorted({*job.source_document_ids, documento})
+    return job
+
+
+def calcular_trabalhos(
+    entradas: Iterable[tuple[str, TrabalhoProfissional]],
+    declaracoes: Iterable[tuple[str, dict]] = (),
+) -> list[TrabalhoProfissional]:
     """Agrupa os recibos por entidade. Em cada campo ganha o recibo MAIS RECENTE que o tem.
 
     Um salário muda ao longo do tempo (o último recibo é o que conta); um campo
     que o recibo mais recente não trouxe (cargo em falta) vem do anterior em
     vez de ficar vazio. Determinístico: não depende da ordem de entrada.
+
+    As `declaracoes` (`(document_id, index_facts)`) de efetividade mandam no tipo de contrato e na
+    admissão (`aplicar_declaracoes`); só enriquecem empregos que já existem por recibos — uma declaração
+    sozinha não cria um emprego sem salário (continua pesquisável por documento).
     """
+    declaracoes = list(declaracoes)
     grupos: dict[str, list[tuple[str, TrabalhoProfissional]]] = {}
     for document_id, job in entradas:
         grupos.setdefault(chave_do_trabalho(job, document_id), []).append((document_id, job))
@@ -115,16 +196,15 @@ def calcular_trabalhos(entradas: Iterable[tuple[str, TrabalhoProfissional]]) -> 
         for nome in CAMPOS_DO_TRABALHO:
             escolhido = next((getattr(j, nome) for _, j in membros if getattr(j, nome).value is not None), None)
             campos[nome] = (escolhido or getattr(membros[0][1], nome)).model_copy(deep=True)
-        resultado.append(
-            TrabalhoProfissional(
-                job_id=job_id_da_chave(chave),
-                period=membros[0][1].period,
-                # a localidade vem do recibo mais recente que a tem (como os restantes campos)
-                employer_location=next((j.employer_location for _, j in membros if j.employer_location), None),
-                source_document_ids=sorted({d for d, _ in grupos[chave] if d}),
-                **campos,
-            )
+        job = TrabalhoProfissional(
+            job_id=job_id_da_chave(chave),
+            period=membros[0][1].period,
+            # a localidade vem do recibo mais recente que a tem (como os restantes campos)
+            employer_location=next((j.employer_location for _, j in membros if j.employer_location), None),
+            source_document_ids=sorted({d for d, _ in grupos[chave] if d}),
+            **campos,
         )
+        resultado.append(aplicar_declaracoes(job, membros, declaracoes))
     return resultado
 
 
@@ -159,6 +239,9 @@ def aplicar_edicoes_humanas(
             campo_velho = velho.get(nome) or {}
             if campo_velho.get("edited_by_human"):
                 setattr(novo, nome, CampoRevisavel.model_validate(campo_velho))
+        if (velho.get("contract_type") or {}).get("edited_by_human"):
+            # o contrato é agora o que uma pessoa escreveu, já não o da declaração (a admissão continua dela)
+            novo.certified_by_declaration = bool(novo.admission_date)
         novo.job_id = velho.get("job_id") or novo.job_id
         # o código reforça mesmo o que uma pessoa escreveu (NIF sem dígito de controlo)
         resultado.append(TrabalhoProfissional.model_validate(novo.model_dump(mode="json")))
@@ -207,9 +290,30 @@ async def recalcular_metadados(process_id: str, network_id: Optional[str], impre
             entradas.append((doc.get("id"), TrabalhoProfissional.model_validate(doc["index_job"])))
         except Exception as exc:  # noqa: BLE001 — um documento mal gravado não derruba os outros
             logger.warning("[INDEX] index_job ilegível em %s: %s", doc.get("id"), type(exc).__name__)
+    declaracoes = await _declaracoes_do_processo(process_id)
     existente = await carregar_metadados(process_id)
-    trabalhos = aplicar_edicoes_humanas((existente or {}).get("jobs") or [], calcular_trabalhos(entradas))
+    trabalhos = aplicar_edicoes_humanas(
+        (existente or {}).get("jobs") or [], calcular_trabalhos(entradas, declaracoes)
+    )
     return await gravar_metadados(process_id, network_id, trabalhos, impressao)
+
+
+async def _declaracoes_do_processo(process_id: str) -> list[tuple[str, dict]]:
+    """`(document_id, factos)` das declarações de efetividade analisadas do processo.
+
+    Um original `purgado` conta (os DADOS não deixaram de ser verdade); o PDF limpo não (os factos
+    vivem nos originais). Uma falha a ler NÃO derruba o recalcular: sem declarações o emprego fica como
+    os recibos o dizem — e di-lo o log.
+    """
+    try:
+        docs = await db.document_metadata.find(
+            {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts.tipo": TIPO_DECLARACAO},
+            {"_id": 0, "id": 1, "index_facts": 1},
+        ).to_list(100)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX] Declarações do processo %s não lidas: %s", process_id, type(exc).__name__)
+        return []
+    return [(d["id"], d["index_facts"]) for d in docs if d.get("id") and isinstance(d.get("index_facts"), dict)]
 
 
 # ====================================================================

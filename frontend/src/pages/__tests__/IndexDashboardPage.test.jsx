@@ -176,3 +176,13 @@ describe("IndexDashboardPage", () => {
     expect(await screen.findByText("Nada por tratar")).toBeInTheDocument();
   });
 });
+
+describe("o atalho para a pesquisa avançada", () => {
+  it("a fila tem uma ligação para /index/pesquisa", async () => {
+    getIndexQueue.mockResolvedValue({ data: FILA });
+    montar();
+    const ligacao = await screen.findByRole("link", { name: /Pesquisa avançada/ });
+    expect(ligacao).toHaveAttribute("href", "/index/pesquisa");
+  });
+});
+

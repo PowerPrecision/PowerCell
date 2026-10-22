@@ -16,7 +16,7 @@ Princípios (ver `INDEX_MODULE_ARCHITECTURE.md`):
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Generic, Literal, Optional, TypeVar
 
@@ -119,6 +119,12 @@ class TrabalhoProfissional(BaseModel):
     #: Opcional e NÃO revisável: serve a pesquisa avançada por zona e nunca põe um trabalho «a rever».
     #: Análises anteriores à pesquisa avançada não a têm até serem extraídas outra vez.
     employer_location: Optional[str] = Field(default=None, max_length=80)
+    #: Data de admissão (YYYY-MM-DD). Só vem de uma Declaração de Efetividade (um recibo não a traz) e
+    #: não é revisável por pessoas (sem editor): se a declaração a leu com dúvida, não chega aqui.
+    admission_date: Optional[str] = None
+    #: O tipo de contrato (e a admissão) vêm da Declaração de Efetividade, que tem precedência
+    #: absoluta sobre os recibos (decisão da direcção, Out 2026). Nunca editável: é um facto derivado.
+    certified_by_declaration: bool = False
     period: Optional[str] = None
     source_document_ids: list[str] = Field(default_factory=list)
 
@@ -130,6 +136,16 @@ class TrabalhoProfissional(BaseModel):
         if not _PERIODO.match(v):
             raise ValueError("período tem de ser YYYY-MM")
         return v
+
+    @field_validator("admission_date")
+    @classmethod
+    def _admissao(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        try:
+            return date.fromisoformat(v).isoformat()
+        except ValueError as exc:
+            raise ValueError("a data de admissão tem de ser YYYY-MM-DD") from exc
 
     @field_validator("employer_location", mode="before")
     @classmethod

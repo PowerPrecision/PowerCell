@@ -313,3 +313,52 @@ class TestBackfill:
         r = resumir(docs)
         assert r["por_tipo"] == {"recibo": 5, "declaracao_efetividade": 5, "extrato": 4}  # a identificação não conta
         assert r["linhas"] == 14 and r["extratos_com_banco"] == 4 and r["recibos_com_localidade"] == 5
+
+
+class TestAPrecedenciaDaDeclaracaoPonta_a_Ponta:
+    """Da análise ao resultado da pesquisa por emprego, sem fixtures escritos na colecção pesquisada."""
+
+    async def _concluir(self, bd, monkeypatch, processo="a1", rede="rede-A"):
+        from services import index_jobs
+
+        monkeypatch.setattr(index_jobs, "store", store)
+        monkeypatch.setattr(index_jobs, "db", bd)
+        with patch.object(index_jobs, "gravar_contadores", AsyncMock()):
+            await index_jobs.concluir_resultados({"id": processo, "network_id": rede}, {})
+
+    async def test_a_declaracao_manda_no_contrato_e_na_admissao_do_emprego(self, bd, monkeypatch):
+        await _semear(bd)  # os recibos de a1 dizem «efetivo»; a declaração de a2 diz «termo_certo»
+        await self._concluir(bd, monkeypatch, "a2")
+        job = (await store.carregar_metadados("a2"))["jobs"][0]
+        assert job["contract_type"]["value"] == "termo_certo"            # o recibo de a2 dizia «efetivo»
+        assert job["admission_date"] == "2021-05-03" and job["certified_by_declaration"] is True
+
+    async def test_a_pesquisa_por_emprego_filtra_pelo_contrato_certificado(self, bd, monkeypatch):
+        await _semear(bd)
+        await self._concluir(bd, monkeypatch, "a2")
+        por_contrato = await _procurar(contract_type=["termo_certo"])
+        assert [i["process_id"] for i in por_contrato["items"]] == ["a2"]
+        item = por_contrato["items"][0]
+        assert item["admission_date"] == "2021-05-03" and item["certified_by_declaration"] is True
+        # a referência exacta dos documentos que sustentam o emprego («Ver documento»)
+        assert set(item["document_ids"]) == {"r-a2", "d-a2"}
+
+    async def test_a_correccao_de_uma_pessoa_sobrevive_a_nova_analise(self, bd, monkeypatch):
+        await _semear(bd)
+        await self._concluir(bd, monkeypatch, "a2")
+        job_id = (await store.carregar_metadados("a2"))["jobs"][0]["job_id"]
+        await store.editar_trabalho("a2", "rede-A", job_id, {"contract_type": "outro"})
+        await self._concluir(bd, monkeypatch, "a2")  # reanálise
+        job = (await store.carregar_metadados("a2"))["jobs"][0]
+        assert job["contract_type"]["value"] == "outro" and job["contract_type"]["edited_by_human"] is True
+        assert job["admission_date"] == "2021-05-03"
+
+    async def test_apagar_a_declaracao_devolve_o_emprego_aos_recibos(self, bd, monkeypatch):
+        await _semear(bd)
+        await self._concluir(bd, monkeypatch, "a2")
+        await bd.document_metadata.delete_one({"id": "d-a2"})
+        await self._concluir(bd, monkeypatch, "a2")
+        job = (await store.carregar_metadados("a2"))["jobs"][0]
+        assert job["contract_type"]["value"] == "efetivo" and job["certified_by_declaration"] is False
+        assert job["admission_date"] is None
+

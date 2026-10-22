@@ -112,7 +112,9 @@ class TestAFronteira:
         assert "Segredo" not in str(r) and "client_name" not in str(r)
         item = r["items"][0]
         assert set(item) == {"process_id", "process_number", "company_name", "job_id", "employer", "job_title",
-                             "net_salary", "contract_type", "period", "needs_review", "source_documents"}
+                             "net_salary", "contract_type", "period", "needs_review", "source_documents",
+                             # Out 2026: a precedência da declaração e a referência exacta dos documentos
+                             "admission_date", "certified_by_declaration", "document_ids"}
 
 
 class TestOSalarioEUmNumero:

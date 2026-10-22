@@ -12411,3 +12411,18 @@ Work Log:
 
 Operação (opcional): `python -m scripts.backfill_index_documentos --aplicar` depois do deploy, para a pesquisa por documento valer para os processos já analisados. O índice da colecção nova nasce no arranque.
 
+---
+Task ID: index-precedencia-e-ver-documento-out2026
+Agent: Cloud Agent
+Task: Index — precedência da Declaração de Efetividade no emprego e atalho «Ver documento» na pesquisa avançada
+
+Date: 2026-10-22
+
+Work Log:
+* Precedência (decisão da direcção): `index_store.aplicar_declaracoes` — contrato e admissão da declaração mandam sobre os recibos; só enriquece empregos existentes; NIF válido, depois nome; a mais recente ganha; confiança «baixa» → a rever / admissão não propagada; edição humana vence. `TrabalhoProfissional` ganhou `admission_date` e `certified_by_declaration`.
+* `GET /api/index/documents/{id}/content` (o endpoint de leads serve ficheiros de leads, não de processos): âmbito 404 uniforme, visibilidade, posse da chave, só os 3 tipos da pesquisa; streaming extraído para `previsualizacao_de_ficheiros` e partilhado com a lead.
+* Payload da pesquisa: `document_ids` (≤12) por emprego; `document_id` já existia por documento. Nunca nomes de ficheiro.
+* Frontend: `/index/pesquisa` (não existia ecrã), `ResultadosDaPesquisa`, `PesquisaAvancadaFiltros`, `VisualizadorDeDocumento` (Dialog), `PrevisualizadorDeFicheiro` partilhado com a gaveta da lead.
+* Verificado com `mongod` real e mutações: 20 no backend (19 mortas, 1 equivalente), 12 no frontend (2 sobreviveram à 1.ª passagem = testes fracos, reforçados e mortas).
+* Dito: PDF não pintado em jsdom — confirmar à mão num browser; backfill é passo do dono após o deploy e a precedência aplica-se na próxima análise/recálculo de cada processo.
+

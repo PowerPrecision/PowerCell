@@ -64,6 +64,7 @@ TAMANHO_MAXIMO_DA_PAGINA = 50
 TEMPO_MAXIMO_MS = 15_000
 MAXIMO_DE_NIFS_DO_DIRECTORIO = 50
 TAMANHO_MINIMO_DO_TEXTO = 2
+MAXIMO_DE_DOCUMENTOS_POR_EMPREGO = 12
 ORDENACOES = {
     "period_desc": [("jobs.period", -1), ("net_salary_num", -1), ("process_id", 1)],
     "salary_desc": [("net_salary_num", -1), ("jobs.period", -1), ("process_id", 1)],
@@ -405,7 +406,11 @@ def resultado_do_trabalho(doc: dict) -> dict[str, Any]:
             (job.get(c) or {}).get("needs_review")
             for c in ("employer_nif", "employer_name", "job_title", "net_salary", "contract_type")
         ),
+        "admission_date": job.get("admission_date"),
+        "certified_by_declaration": bool(job.get("certified_by_declaration")),
         "source_documents": len(job.get("source_document_ids") or []),
+        # a referência exacta dos documentos que sustentam este emprego («Ver documento» na pesquisa)
+        "document_ids": [d for d in (job.get("source_document_ids") or []) if isinstance(d, str)][:MAXIMO_DE_DOCUMENTOS_POR_EMPREGO],
     }
 
 

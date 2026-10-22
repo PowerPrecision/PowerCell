@@ -10,7 +10,7 @@ import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../../lib/queryClient";
-import { getIndexQueue, getIndexWorkstation, searchIndexEmployers } from "../../services/api";
+import { getIndexQueue, getIndexWorkstation, searchIndexAdvanced, searchIndexEmployers } from "../../services/api";
 import { TASK_SOURCE, useTaskEvents } from "../useTaskEvents";
 import {
   eventoDoIndex,
@@ -19,6 +19,7 @@ import {
   normalizarBancada,
   normalizarFila,
 } from "../../utils/indexRevisao";
+import { chaveDaPesquisa, normalizarResultado } from "../../utils/pesquisaIndex";
 
 const INTERVALO_DE_RECUO_MS = 4000;
 
@@ -99,4 +100,14 @@ export function useIndexEmployersQuery(texto, { enabled = true } = {}) {
     staleTime: 60_000,
   });
   return { entidades: query.data ?? [], isLoading: query.isLoading, isError: query.isError };
+}
+
+/** A pesquisa avançada: o pedido é a CHAVE (filtros iguais → a mesma cache), e só corre com `enabled`. */
+export function useIndexSearchQuery(pedido, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: queryKeys.index.search(chaveDaPesquisa(pedido || {})),
+    queryFn: async () => normalizarResultado((await searchIndexAdvanced(pedido)).data),
+    enabled: enabled && Boolean(pedido),
+    placeholderData: (anterior) => anterior,
+  });
 }

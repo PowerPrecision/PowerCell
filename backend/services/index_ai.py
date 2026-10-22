@@ -620,6 +620,9 @@ def normalizar_declaracao(bruto: dict, *, document_id: Optional[str] = None) -> 
         "employer_location": _texto(_valor(bruto.get("employer_location")), 80),
         "admission_date": admissao,
         "contract_type": _contrato(_valor(bruto.get("contract_type"))),
+        # a confiança com que a declaração foi lida decide se o que ela certifica chega ao emprego
+        "contract_confidence": _confianca(bruto.get("contract_type")),
+        "admission_confidence": _confianca(bruto.get("admission_date")),
         "job_title": _texto(_valor(bruto.get("job_title"))),
         "period": periodo_iso(emissao),
         "needs_review": any(campos_em_duvida),

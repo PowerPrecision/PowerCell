@@ -466,3 +466,17 @@ Resumo; o detalhe e as lições estão no `AGENTS.md` («Pesquisa avançada por 
    (`view: "documents"`); sem `document_type` a vista por emprego fica igual. Filtro que não existe no tipo = 422.
 5. **Sem reanálise retroactiva:** `ESQUEMA_VERSAO` não mudou. `scripts/backfill_index_documentos.py` reconstrói a projecção
    do que já foi analisado, sem IA.
+
+### Precedência da declaração e «Ver documento» (Out 2026)
+
+Detalhe e lições no `AGENTS.md` («Declaração de Efetividade manda no emprego…»).
+
+1. **Precedência absoluta:** `contract_type` e `admission_date` da declaração mandam sobre os recibos no emprego
+   (`index_store.aplicar_declaracoes`). Só enriquece empregos existentes; casa por NIF válido e depois por nome; a mais
+   recente ganha; confiança «baixa» → `needs_review` / admissão não propagada; a edição humana vence. Novos campos do emprego:
+   `admission_date`, `certified_by_declaration`.
+2. **`GET /index/documents/{document_id}/content`:** pré-visualização por id (recibo/extrato/declaração), 404 uniforme fora do
+   âmbito, posse da chave S3, streaming partilhado com o da lead (`previsualizacao_de_ficheiros`).
+3. **`/index/pesquisa`:** ecrã da pesquisa avançada com o «Ver documento» num `Dialog` sobreposto; o payload leva
+   `document_id` (vista por documento) / `document_ids` (vista por emprego), nunca nomes de ficheiro.
+

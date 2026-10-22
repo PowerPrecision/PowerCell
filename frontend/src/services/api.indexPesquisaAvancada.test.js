@@ -9,7 +9,7 @@
 import axios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import api, { searchIndexAdvanced } from "./api";
+import api, { getIndexDocumentContent, searchIndexAdvanced } from "./api";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -59,5 +59,21 @@ describe("searchIndexAdvanced", () => {
     expect(get.mock.calls[0][1].params).toEqual({ document_type: "recibo", min_salary: 1234.56, max_salary: 1234.56 });
     await searchIndexAdvanced({ document_type: "declaracao_efetividade", employer_location: "Lisboa" });
     expect(get.mock.calls[1][1].params).toEqual({ document_type: "declaracao_efetividade", employer_location: "Lisboa" });
+  });
+});
+
+describe("getIndexDocumentContent — o «Ver documento» da pesquisa", () => {
+  it("pede o conteúdo POR ID ao endpoint do Index, em blob e sem toast", async () => {
+    const get = vi.spyOn(api, "get").mockResolvedValue({ data: new Blob(["x"]) });
+    await getIndexDocumentContent("doc-9");
+    const [url, config] = get.mock.calls[0];
+    expect(url).toBe("/index/documents/doc-9/content");
+    expect(config).toMatchObject({ responseType: "blob", skipErrorToast: true });
+  });
+
+  it("o id é escapado (nunca parte do caminho)", async () => {
+    const get = vi.spyOn(api, "get").mockResolvedValue({ data: new Blob(["x"]) });
+    await getIndexDocumentContent("a/b?c");
+    expect(get.mock.calls[0][0]).toBe("/index/documents/a%2Fb%3Fc/content");
   });
 });

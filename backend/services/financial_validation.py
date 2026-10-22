@@ -433,27 +433,14 @@ def _sem_indices_nem_vazios(seccao: Any) -> dict:
     }
 
 
-#: O que se pré-visualiza dentro da gaveta, por extensão. Lista POSITIVA e fechada: o tipo que o
-#: servidor declara vem daqui e não do que está no bucket (com `nosniff`, o browser não adivinha outro).
-TIPOS_COM_PREVISUALIZACAO = {
-    ".pdf": "application/pdf",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".webp": "image/webp",
-    ".gif": "image/gif",
-}
-#: Acima disto não se serve (a gaveta carrega o ficheiro inteiro para o browser).
-MAX_BYTES_DA_PREVISUALIZACAO = 15 * 1024 * 1024
-
-
-def tipo_de_previsualizacao(nome: Any) -> Optional[str]:
-    """O `Content-Type` com que o ficheiro se pré-visualiza, ou ``None`` se não se consegue."""
-    texto = _texto(nome).lower()
-    for extensao, tipo in TIPOS_COM_PREVISUALIZACAO.items():
-        if texto.endswith(extensao):
-            return tipo
-    return None
+# A pré-visualização (tipos permitidos, tecto, streaming) vive em `previsualizacao_de_ficheiros`:
+# a gaveta da lead e o «Ver documento» da pesquisa do Index servem ficheiros pelas MESMAS regras.
+from services.previsualizacao_de_ficheiros import (  # noqa: E402
+    MAX_BYTES_DA_PREVISUALIZACAO,
+    TIPOS_COM_PREVISUALIZACAO,
+    servir_ficheiro_do_s3,
+    tipo_de_previsualizacao,
+)
 
 
 async def _ficheiros_da_lead(client_id: str) -> list[dict]:
@@ -542,68 +529,13 @@ async def run_conteudo_do_ficheiro_da_lead(item_id: str, file_id: str, utilizado
       `nosniff` e um tecto de tamanho — o resto (Word, Excel…) responde 415;
     * os bytes saem em blocos (nunca o ficheiro inteiro em memória).
     """
-    import asyncio
-    from urllib.parse import quote
-
-    from botocore.exceptions import BotoCoreError, ClientError
-    from fastapi.responses import StreamingResponse
-
-    from services.s3_storage import s3_service
-
     doc = await _carregar("lead", item_id, utilizador)
     ficheiro = await _ficheiro_da_lead(_texto(doc.get("id")), _texto(file_id))
     if not ficheiro or not ficheiro.get("s3_path"):
         raise HTTPException(status_code=404, detail=ERRO_NAO_ENCONTRADO)
 
     await _exigir_posse_do_comprovativo(ficheiro["s3_path"], "lead", doc, doc.get("id"))
-    tipo = tipo_de_previsualizacao(ficheiro.get("filename"))
-    if tipo is None:
-        raise HTTPException(status_code=415, detail="Este tipo de ficheiro não tem pré-visualização.")
-    if not s3_service.is_configured():
-        raise HTTPException(status_code=503, detail="Serviço de armazenamento indisponível.")
-
-    try:
-        resposta = await asyncio.to_thread(
-            lambda: s3_service.s3_client.get_object(Bucket=s3_service.bucket_name, Key=ficheiro["s3_path"])
-        )
-    except ClientError as exc:
-        codigo = exc.response.get("Error", {}).get("Code", "")
-        if codigo in ("NoSuchKey", "404", "NotFound"):
-            raise HTTPException(status_code=404, detail="Ficheiro não encontrado.")
-        logger.error("[LEAD-PREVIEW] erro S3 (%s) em %s", codigo, item_id)
-        raise HTTPException(status_code=503, detail="Serviço de armazenamento indisponível.")
-    except BotoCoreError:
-        raise HTTPException(status_code=503, detail="Serviço de armazenamento indisponível.")
-
-    tamanho = int(resposta.get("ContentLength") or 0)
-    corpo = resposta["Body"]
-    if tamanho > MAX_BYTES_DA_PREVISUALIZACAO:
-        corpo.close()
-        raise HTTPException(
-            status_code=413, detail="O ficheiro é demasiado grande para pré-visualizar.",
-        )
-
-    def blocos():
-        try:
-            while True:
-                bloco = corpo.read(64 * 1024)
-                if not bloco:
-                    break
-                yield bloco
-        finally:
-            corpo.close()
-
-    nome = _texto(ficheiro.get("filename")) or "ficheiro"
-    return StreamingResponse(
-        blocos(),
-        media_type=tipo,
-        headers={
-            "Content-Disposition": f"inline; filename*=UTF-8''{quote(nome, safe='')}",
-            "Content-Length": str(tamanho),
-            "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "private, no-store",
-        },
-    )
+    return await servir_ficheiro_do_s3(ficheiro["s3_path"], ficheiro.get("filename"), referencia=item_id)
 
 
 __all__ = [
