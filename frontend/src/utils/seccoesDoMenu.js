@@ -23,11 +23,16 @@ function eRotaDoItem(pathname, href) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/** Uma ligação pode declarar outras rotas que lhe pertencem (`tambem`): a bancada do Index (`/index/:id`) pertence a «Os Meus Processos». */
+function itemTemARota(item, pathname) {
+  return eRotaDoItem(pathname, item?.href) || (Array.isArray(item?.tambem) && item.tambem.some((h) => eRotaDoItem(pathname, h)));
+}
+
 /** Ids dos grupos que têm uma ligação para a rota actual (ou para um pai dela). */
 export function seccoesComRotaActiva(grupos, pathname) {
   if (!Array.isArray(grupos)) return [];
   return grupos
-    .filter((g) => g && g.id && Array.isArray(g.items) && g.items.some((i) => eRotaDoItem(pathname, i?.href)))
+    .filter((g) => g && g.id && Array.isArray(g.items) && g.items.some((i) => itemTemARota(i, pathname)))
     .map((g) => g.id);
 }
 

@@ -429,7 +429,8 @@ const DashboardLayout = ({ children, title }) => {
             items: [
               // "Registos de Clientes" REMOVIDO para role indexacao — não necessita de acesso a registos de clientes
               { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
-              { label: "Os Meus Processos", icon: FileText, href: "/processos" },
+              // `tambem`: a bancada do Index (`/index/:id`) é o destino dos cliques desta lista, logo pertence-lhe.
+              { label: "Os Meus Processos", icon: FileText, href: "/processos", tambem: ["/index"] },
               // O Index perdeu a fila própria (o trabalho chega-lhe atribuído, em «Os Meus Processos»); a
               // pesquisa avançada fica à mão, senão deixava de haver caminho até ela.
               { label: "Pesquisa Avançada", icon: Search, href: "/index/pesquisa" },

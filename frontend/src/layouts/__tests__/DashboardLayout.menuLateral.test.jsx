@@ -56,7 +56,7 @@ function Espiao() {
 // UMA instância do layout por rota, como em App.js: cada página é um COMPONENTE DIFERENTE e monta o seu
 // layout. Com o mesmo componente em todas as rotas o React reaproveitava a instância (e o estado dos
 // grupos) entre páginas — e o teste passava com o defeito presente.
-const ROTAS = ["/staff", "/index", "/index/:id", "/validades", "/kanban", "/processos", "/clientes", "/ficheiros"];
+const ROTAS = ["/staff", "/index", "/index/pesquisa", "/index/:id", "/validades", "/kanban", "/processos", "/clientes", "/ficheiros"];
 const PAGINAS = Object.fromEntries(
   ROTAS.map((rota) => [
     rota,
@@ -109,11 +109,12 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 describe("o grupo da rota activa abre-se, qualquer que seja a rota", () => {
-  it("Index em /index: «Listas de Trabalho» aberto e a ligação à vista (antes: recolhido)", async () => {
-    montar("/index", "indexacao");
+  it("Index na pesquisa avançada: «Listas de Trabalho» aberto e a ligação à vista (antes: recolhido)", async () => {
+    montar("/index/pesquisa", "indexacao");
     await pronto("indexacao");
     expect(cabecalhoDoGrupo("Listas de Trabalho")).toHaveAttribute("aria-expanded", "true");
-    expect(ligacaoNaBarra("Indexação")).toBeInTheDocument();
+    expect(ligacaoNaBarra("Pesquisa Avançada")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Indexação" })).not.toBeInTheDocument(); // o menu isolado saiu
   });
 
   it("Index em /validades (rota que nenhuma lista à mão conhecia)", async () => {
@@ -123,7 +124,7 @@ describe("o grupo da rota activa abre-se, qualquer que seja a rota", () => {
     expect(ligacaoNaBarra("Documentos Pendentes")).toBeInTheDocument();
   });
 
-  it("uma rota filha (/index/:id) abre o grupo do pai", async () => {
+  it("a bancada do Index (/index/:id) abre o grupo de «Os Meus Processos», a que pertence", async () => {
     montar("/index/p-1", "indexacao");
     await pronto("indexacao");
     expect(cabecalhoDoGrupo("Listas de Trabalho")).toHaveAttribute("aria-expanded", "true");
@@ -198,7 +199,7 @@ describe("clicar numa ligação NÃO recolhe o menu", () => {
   });
 
   it("clicar numa ligação de dentro do grupo não o fecha na própria página", async () => {
-    montar("/index", "indexacao");
+    montar("/index/pesquisa", "indexacao");
     await pronto("indexacao");
     await userEvent.click(ligacaoNaBarra("Quadro Geral"));
     await waitFor(() => expect(screen.getByTestId("pagina")).toHaveTextContent("/kanban"));
@@ -213,7 +214,7 @@ describe("o armazenamento é opcional", () => {
       if (chave === "menu-seccoes-abertas") throw new Error("bloqueado");
       return original.call(this, chave);
     });
-    montar("/index", "indexacao");
+    montar("/index/pesquisa", "indexacao");
     await pronto("indexacao");
     expect(cabecalhoDoGrupo("Listas de Trabalho")).toHaveAttribute("aria-expanded", "true");
     vi.restoreAllMocks();
