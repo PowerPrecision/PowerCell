@@ -1033,7 +1033,7 @@ class TestORemetenteNuncaEscolheOUtilizador:
         assert not _processo(db).get("assigned_consultor_ids")
 
     @pytest.mark.asyncio
-    async def test_a_triagem_normal_continua_a_dar_so_o_indexador_do_destino(self, fake_async_db):
+    async def test_a_triagem_normal_da_o_indexador_e_o_intermediario_do_destino_nunca_o_consultor(self, fake_async_db):
         import services.process_sharing as ps
 
         db = _com_intermediario_na_precision(_mundo(fake_async_db))
@@ -1042,8 +1042,9 @@ class TestORemetenteNuncaEscolheOUtilizador:
             await ps.partilhar_com_rede("p-domus", REDE_INCUMBENTE)
         p = _processo(db)
         assert p["assigned_indexacao_id"] == "u-ivo"
-        assert not p.get("assigned_consultor_ids") and not p.get("assigned_mediador_ids"), \
-            "o consultor só vem depois do Index"
+        # o intermediário de crédito entra ao mesmo tempo (Out 2026), da equipa de DESTINO; o consultor não
+        assert p["assigned_mediador_ids"] == ["u-ines"]
+        assert not p.get("assigned_consultor_ids"), "o consultor só vem depois do Index"
 
     @pytest.mark.asyncio
     async def test_a_distribuicao_e_uma_ordem_do_servico_nao_do_pedido(self, fake_async_db):

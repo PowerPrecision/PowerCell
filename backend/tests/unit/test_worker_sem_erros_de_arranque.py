@@ -133,7 +133,7 @@ class TestUmaTarefaQueFalhaNaoParaAsOutras:
             "check_clients_waiting_too_long", "expire_stale_partner_leads",
             "check_document_expirations_watchdog", "send_monthly_document_reminder",
             "check_stale_processes", "cleanup_old_notifications", "cleanup_temp_files",
-            "cleanup_scraper_cache", "send_weekly_ai_report", "send_weekly_ceo_report",
+            "cleanup_scraper_cache", "send_weekly_ai_report", "send_weekly_ceo_report", "run_index_sla",
         ]
         for nome in nomes:
             setattr(servico, nome, _ok(nome))
@@ -144,7 +144,7 @@ class TestUmaTarefaQueFalhaNaoParaAsOutras:
         with pytest.raises(RuntimeError, match="countdown de pré-aprovação"):
             await servico.run_all_tasks()
 
-        # as 13 restantes correram, incluindo as que vêm DEPOIS da que falhou
+        # as 14 restantes correram, incluindo as que vêm DEPOIS da que falhou
         assert set(nomes) <= set(chamadas)
         assert "send_weekly_ceo_report" in chamadas
 
@@ -157,7 +157,7 @@ class TestUmaTarefaQueFalhaNaoParaAsOutras:
             "expire_stale_partner_leads", "check_document_expirations_watchdog",
             "send_monthly_document_reminder", "check_stale_processes", "cleanup_old_notifications",
             "cleanup_temp_files", "cleanup_scraper_cache", "send_weekly_ai_report",
-            "send_weekly_ceo_report",
+            "send_weekly_ceo_report", "run_index_sla",
         ]:
             setattr(servico, nome, AsyncMock(return_value=0))
         servico.connect = AsyncMock()

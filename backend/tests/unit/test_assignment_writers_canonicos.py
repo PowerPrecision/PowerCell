@@ -134,7 +134,9 @@ class TestAAtribuicaoDeClienteCarimbaOConjuntoCompleto:
             doc, {"id": "u-5", "name": "Índice", "role": "indexacao"}
         )
 
-        assert doc == {"assigned_indexacao_id": "u-5"}
+        # o carimbo do relógio do SLA do Index (nível 1) acompanha a atribuição
+        assert set(doc) == {"assigned_indexacao_id", "index_assigned_at"}
+        assert doc["assigned_indexacao_id"] == "u-5" and doc["index_assigned_at"]
         assert desfasamentos_do_processo(doc) == []
 
 

@@ -51,7 +51,7 @@ HORAS_SEM_PEGAR_POR_OMISSAO = 48
 DIAS_SEM_ACTIVIDADE_POR_OMISSAO = 5
 TECTO_POR_CICLO = 200
 CATEGORIA_DO_ALERTA = "index_stagnation"
-ROLES_DA_CHEFIA = ("diretor", "ceo", "admin")
+ROLES_DA_CHEFIA = ("diretor", "ceo", "admin", "master")
 
 
 def _agora() -> datetime:
