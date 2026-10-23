@@ -1081,10 +1081,9 @@ async def assign_to_least_busy_consultant(process_id: str) -> Tuple[bool, dict, 
 
     # ── 5. Atribuir processo ao consultor ──
     now = datetime.now(timezone.utc).isoformat()
+    # Conjunto CANÓNICO (os seis campos): só três deixavam o processo «desfasado» (`assignment_drift`).
     update_data = {
-        "assigned_consultor_id": chosen["id"],
-        "consultant_id": chosen["id"],
-        "consultor_name": chosen["name"],
+        **build_set_consultor_fields([chosen["id"]], [chosen["name"]]),
         "updated_at": now,
     }
 
@@ -1671,6 +1670,37 @@ async def auto_assign_intermediario_on_entry(
         return {}
 
 
+async def auto_assign_consultor_on_entry(
+    process_id: str, *, company_id: Optional[str] = None
+) -> Dict:
+    """Atribui o consultor MENOS OCUPADO da equipa, na ENTRADA de um processo de uma rede SEM Index.
+
+    Uma rede sem Index (ex.: a Domus) não tem quem triar o processo nem quem lho passe: se a entrada não lhe
+    der um consultor, o processo nasce sem dono e ninguém repara que ninguém lhe pega. Numa rede COM Index a
+    regra mantém-se (P6: o consultor atribui-se à mão ou pela fase), e por isso esta função **não faz nada**
+    quando o processo não foi dispensado do Index *pela rede* (`index_dispensado_por`): a Via Verde pedida à mão
+    também não conta — é uma escolha de quem cria, não uma propriedade da rede. Decide pelo DOCUMENTO gravado e
+    não por um argumento, para os cinco escritores de processos não poderem discordar.
+
+    É a dupla auto-atribuição restrita ao consultor, logo com as mesmas garantias: só preenche o que está vazio,
+    equipa da rede do processo, conjunto canónico de campos, histórico e notificação. **Nunca levanta.**
+    """
+    try:
+        from services.network_triage import MARCA_SEM_INDEX
+
+        processo = await db.processes.find_one(
+            {"id": process_id}, {"_id": 0, "id": 1, "index_dispensado_por": 1},
+        )
+        if not processo or processo.get("index_dispensado_por") != MARCA_SEM_INDEX:
+            return {}
+        return await dual_auto_assign_on_pre_registo_transition(
+            process_id, company_id=company_id, papeis=("consultor",),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[ASSIGN-CONSULTOR] Processo %s sem consultor automático: %s", process_id, exc)
+        return {}
+
+
 async def _notify_newly_assigned_users(
     process: dict,
     process_id: str,
@@ -1687,11 +1717,18 @@ async def _notify_newly_assigned_users(
     process_number = process.get("process_number", "")
     process_ref = f"#{process_number}" if process_number else process_id[:8]
     title = "Novo Processo Atribuído"
-    message = (
-        f"O processo {process_ref} — {client_name} foi-lhe atribuído. "
-        f"A documentação já foi validada pelo Índice e o cliente está "
-        f"pronto para avançar."
-    )
+    if process.get("skip_index") is True and process.get("is_indexed") is not True:
+        # Rede sem Index / Via Verde: ninguém validou nada, o processo chega direto à equipa.
+        message = (
+            f"O processo {process_ref} — {client_name} foi-lhe atribuído. "
+            f"Chegou diretamente à equipa (sem passar pelo Index)."
+        )
+    else:
+        message = (
+            f"O processo {process_ref} — {client_name} foi-lhe atribuído. "
+            f"A documentação já foi validada pelo Índice e o cliente está "
+            f"pronto para avançar."
+        )
 
     for assignee in newly_assigned:
         uid = assignee.get("id")

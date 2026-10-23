@@ -270,12 +270,17 @@ async def run_create_process_for_client(
     }
     
     # Auto-assign based on creator role
+    # Conjunto CANÓNICO (a lista e os singulares): escrever só `assigned_*_id` deixava o processo
+    # «desfasado» (`assignment_drift`) e a auto-atribuição à entrada a achá-lo sem dono.
+    from services.process_staff_assignment import (
+        build_set_consultor_fields,
+        build_set_mediador_fields,
+    )
+
     if user["role"] == "intermediario":
-        new_process["assigned_mediador_id"] = user["id"]
-        new_process["mediador_name"] = user["name"]
+        new_process.update(build_set_mediador_fields([user["id"]], [user["name"]]))
     elif user["role"] in ["consultor", "diretor"]:
-        new_process["assigned_consultor_id"] = user["id"]
-        new_process["consultor_name"] = user["name"]
+        new_process.update(build_set_consultor_fields([user["id"]], [user["name"]]))
 
     aplicar_parceiro_do_cliente(new_process, client)
 
@@ -290,6 +295,12 @@ async def run_create_process_for_client(
         new_process.update(carimbo)
     await aplicar_regime_de_indexacao(new_process)
     await db.processes.insert_one(new_process)
+
+    # Rede SEM Index: o processo nasce já a andar e o consultor entra com ele (nunca levanta;
+    # numa rede com Index não faz nada, P6).
+    from services.process_assignment import auto_assign_consultor_on_entry
+
+    await auto_assign_consultor_on_entry(process_id)
 
     # O convite do Portal nasce com o processo (Lote 4) — idempotente por cliente.
     from services.client_portal_email import agendar_convite_do_portal

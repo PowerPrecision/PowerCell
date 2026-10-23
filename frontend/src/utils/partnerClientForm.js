@@ -12,9 +12,25 @@ const PASSO_DO_SEGUNDO_TITULAR = 2;
 
 const lista = (v) => (Array.isArray(v) ? v : []);
 
-/** O 2.º titular está ligado nestes valores? */
-export function segundoTitularLigado(valores) {
-  return valores?.[CHAVE_DO_SEGUNDO_TITULAR] === VALOR_LIGADO;
+const preenchido = (v) =>
+  v !== undefined && v !== null && !(typeof v === "string" && v.trim() === "") && !(Array.isArray(v) && v.length === 0);
+
+/** Algum campo do 2.º titular tem valor? Precisa do esquema, que diz quais são. */
+export function temDadosDoSegundoTitular(valores, passos) {
+  const campos = lista(passoDoSegundoTitular(passos)?.fields);
+  return campos.some((f) => preenchido(valores?.[f.field_key]));
+}
+
+/**
+ * O 2.º titular está ligado nestes valores?
+ *
+ * Com o esquema (`passos`) o formulário é INTELIGENTE: dados do 2.º titular preenchidos implicam «com outra pessoa»
+ * mesmo que o campo `compra_tipo` não o diga (ficha antiga, opção configurada com outro valor). Sem esquema vale só o
+ * campo, como sempre.
+ */
+export function segundoTitularLigado(valores, passos) {
+  if (valores?.[CHAVE_DO_SEGUNDO_TITULAR] === VALOR_LIGADO) return true;
+  return passos ? temDadosDoSegundoTitular(valores, passos) : false;
 }
 
 /**
@@ -55,6 +71,10 @@ export function camposAlterados(inicial, actuais, passos, { ligado }) {
     if (!igual(inicial?.[chave], actuais?.[chave])) {
       alterados[chave] = actuais?.[chave] ?? "";
     }
+  }
+  // Ligado (pelo interruptor ou porque há dados do 2.º titular) tem de o dizer ao servidor, que é quem decide.
+  if (ligado && actuais?.[CHAVE_DO_SEGUNDO_TITULAR] !== VALOR_LIGADO) {
+    alterados[CHAVE_DO_SEGUNDO_TITULAR] = VALOR_LIGADO;
   }
   return alterados;
 }

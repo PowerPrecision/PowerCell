@@ -12500,3 +12500,22 @@ Work Log:
 Stage Summary:
 * **Operação:** nenhuma migração. Para a matriz ganhar o saldo linha a linha, os extratos já analisados têm de ser extraídos outra vez (`Extrair dados`), ou esperar pelo preenchimento lento; sem isso ficam na conferência dos totais (agora com o aviso de que não localiza).
 * **Por validar com o negócio:** o limiar de 250 € (`ATIPICO_DA_IA_MINIMO`) e a regra do numerário fraccionado (3 movimentos / 7 dias / 1.000 €) são pressupostos meus, não calibrados.
+
+
+---
+Task ID: caso-domus-sem-index-formulario-parceiro-out2026
+Agent: Cloud Agent
+Task: Caso Domus (rede sem Index: bypass, consultor à entrada, menu), formulário do Parceiro (2.º titular) e instruções do Render/Atlas
+
+Date: 2026-10-23
+
+Work Log:
+* **Bypass de estado:** já existia (`aplicar_regime_de_indexacao`); faltava prová-lo com DUAS redes na mesma base. `network_triage.rede_sem_index` passou a ser a regra pura e única (regime dos processos + `has_index` do ecrã).
+* **Consultor à entrada em rede sem Index:** `process_assignment.auto_assign_consultor_on_entry` (decide pelo documento: `index_dispensado_por`), ligada a `process_create` (ramo skip), `client_assign` e `client_process_ops.create_process`. Rede com Index: nada muda (P6). Achados laterais: `assign_to_least_busy_consultant` escrevia 3 dos 6 campos canónicos e o `create_process` do cliente só os singulares — corrigidos.
+* **Menu:** `/auth/me` → `capabilities.has_index` da rede da empresa em vigor; «Supervisão do Index» sai do menu (mesmo para o Master) e `/index` redirecciona (`RequerModuloIndex`).
+* **Formulário do Parceiro:** `compra_tipo` aceita sempre `individual`/`outra_pessoa`; dados do 2.º titular ligam-no no servidor; o ecrã decide o interruptor uma vez na hidratação. Causa do erro de produção é HIPÓTESE (configuração de opções do administrador) — não reproduzida com dados reais.
+* **Atlas/Render (Ponto 1):** ver `DEPLOY_RUNBOOK.md` Parte D e `scripts/diagnosticar_saida_para_atlas.py`. **D-13:** a fotografia continua POR PREENCHER (sem acesso a produção).
+
+Stage Summary:
+* **Operação:** nenhuma migração. Deploy dos DOIS serviços; no Atlas, acrescentar os IPs de saída do painel do Render (web e worker) antes de depender de `0.0.0.0/0` apagado; correr `diagnosticar_saida_para_atlas.py` em cada Shell.
+* **Por validar:** se a Domus tem mesmo ZERO utilizadores `indexacao` activos (é isso que a faz «sem Index»); a causa do erro do formulário na configuração real da rede do parceiro.

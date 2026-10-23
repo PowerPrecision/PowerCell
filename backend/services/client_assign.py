@@ -378,9 +378,14 @@ async def run_assign_client_to_user(
 
         # o intermediário de crédito entra com o processo (só se estiver vazio; nunca levanta)
         if target_role != "indexacao" and process_id:
-            from services.process_assignment import auto_assign_intermediario_on_entry
+            from services.process_assignment import (
+                auto_assign_consultor_on_entry,
+                auto_assign_intermediario_on_entry,
+            )
 
             await auto_assign_intermediario_on_entry(process_id)
+            # rede SEM Index: o consultor entra com o processo (nunca sobrepõe o que a Sala de Triagem escolheu)
+            await auto_assign_consultor_on_entry(process_id)
     
     # Actualizar cliente + marcar lead como convertido
     #

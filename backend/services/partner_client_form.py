@@ -83,6 +83,8 @@ DATA_PATHS = ("root", "personal_data", "titular2_data")
 #: O campo que liga o 2.º titular no formulário público, e o valor que o liga.
 CAMPO_DO_SEGUNDO_TITULAR = "compra_tipo"
 VALOR_DO_SEGUNDO_TITULAR = "outra_pessoa"
+VALOR_SEM_SEGUNDO_TITULAR = "individual"
+VALORES_DO_TIPO_DE_COMPRA = (VALOR_SEM_SEGUNDO_TITULAR, VALOR_DO_SEGUNDO_TITULAR)
 
 #: Campos de raiz → onde caem no documento do cliente.
 _RAIZ_PARA_FICHA = {"name": ("nome", None), "email": ("contacto", "email"), "phone": ("contacto", "telefone")}
@@ -247,7 +249,13 @@ def validar_valor(campo: dict, valor: Any) -> Any:
         return texto
     if tipo in ("select", "radio"):
         texto = str(valor).strip()
-        if texto not in [o["value"] for o in campo.get("options", [])]:
+        validos = [o["value"] for o in campo.get("options", [])]
+        if chave == CAMPO_DO_SEGUNDO_TITULAR:
+            # Os dois valores que o ECRÃ envia pelo interruptor «Adicionar 2.º titular» são sempre válidos:
+            # o administrador pode ter configurado o campo com outras opções (ou nenhuma) e o interruptor
+            # não as conhece — recusá-los dava «escolha uma das opções» a quem estava a preencher o 2.º titular.
+            validos = [*validos, *VALORES_DO_TIPO_DE_COMPRA]
+        if texto not in validos:
             raise erro("escolha uma das opções.")
         return texto
     if tipo == "number":
@@ -361,11 +369,25 @@ async def run_save_client_form(partner: dict, case_id: str, data: ClientFormIn) 
 
     ligado = segundo_titular_ligado(cliente)
     pedidos_do_segundo = {k: v for k, v in limpos.items() if campos[k]["data_path"] == "titular2_data"}
-    if pedidos_do_segundo and not ligado:
-        raise HTTPException(
-            status_code=400,
-            detail="Active «com outra pessoa» antes de preencher o 2.º titular.",
-        )
+    com_dados_do_segundo = any(not _vazio(v) for v in pedidos_do_segundo.values())
+    if com_dados_do_segundo and not ligado:
+        # O parceiro está a preencher o 2.º titular: a escolha «com outra pessoa» é consequência disso,
+        # não um passo à parte que se possa esquecer. Só se recusa quando ele disse EXPRESSAMENTE o contrário
+        # neste mesmo pedido (individual + dados de outra pessoa é uma contradição, não um esquecimento).
+        escolhido = limpos.get(CAMPO_DO_SEGUNDO_TITULAR)
+        if not _vazio(escolhido) and escolhido != VALOR_DO_SEGUNDO_TITULAR:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Indicou compra individual mas preencheu dados do 2.º titular. "
+                    "Escolha «com outra pessoa» ou retire os dados do 2.º titular."
+                ),
+            )
+        cliente.setdefault("dados_pessoais", {})[CAMPO_DO_SEGUNDO_TITULAR] = VALOR_DO_SEGUNDO_TITULAR
+        ligado = True
+    elif pedidos_do_segundo and not ligado:
+        # Só limpezas de campos de um 2.º titular que não está ligado: nada a escrever, nada a recusar.
+        pedidos_do_segundo = {}
     if tinha_segundo and not ligado:
         # Desligar apaga os dados do 2.º titular — explicitamente.
         cliente["titular2_data"] = {}
