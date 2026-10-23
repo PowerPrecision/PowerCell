@@ -153,7 +153,9 @@ export default function IndexWorkstationPage() {
   // A equipa do Index trabalha a partir de «Os Meus Processos»; a gestão supervisiona a partir da fila.
   const papel = auth?.effectiveRole || auth?.user?.role;
   const daEquipa = papel === "indexacao";
-  const voltar = () => navigate(daEquipa ? "/processos" : "/index");
+  // «Voltar à fila» foi extinto com a fila-pool: quem trabalha como Index regressa a «Os meus processos»;
+  // os outros perfis voltam pelo menu (ou pelo «Voltar» do browser, que devolve a lista como estava).
+  const irParaOsMeus = () => navigate("/processos");
   const aoAdicionar = () => queryClient.invalidateQueries({ queryKey: queryKeys.index.workstation(processId) });
 
   if (isLoading) {
@@ -181,9 +183,11 @@ export default function IndexWorkstationPage() {
                   Tentar de novo
                 </Button>
               )}
-              <Button size="sm" variant="outline" onClick={voltar}>
-                Voltar à fila
-              </Button>
+              {daEquipa && (
+                <Button size="sm" variant="outline" onClick={irParaOsMeus}>
+                  Os meus processos
+                </Button>
+              )}
             </span>
           </AlertDescription>
         </Alert>
@@ -232,12 +236,12 @@ export default function IndexWorkstationPage() {
             ) : undefined
           }
           actions={
-            <>
-              <Button variant="ghost" onClick={voltar}>
+            daEquipa ? (
+              <Button variant="ghost" onClick={irParaOsMeus}>
                 <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                {daEquipa ? "Os meus processos" : "Voltar à fila"}
+                Os meus processos
               </Button>
-            </>
+            ) : undefined
           }
         />
 
@@ -321,6 +325,10 @@ export default function IndexWorkstationPage() {
 
         <AlertMatrix
           alertas={alertas}
+          ficheiros={ficheiros}
+          onVerDocumento={(documentos, titulo) =>
+            setAVer({ documentos: documentos.map((d) => ({ ...d, processId: processo.id })), titulo })
+          }
           aDispensar={m.dispensar.isPending ? m.dispensar.variables : null}
           onDispensar={(id) => m.dispensar.mutate(id)}
         />

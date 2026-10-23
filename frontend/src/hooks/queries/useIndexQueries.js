@@ -24,6 +24,10 @@ import { chaveDaPesquisa, normalizarResultado } from "../../utils/pesquisaIndex"
 
 const INTERVALO_DE_RECUO_MS = 4000;
 
+/**
+ * `filtros.mine === true` pede só os processos atribuídos a quem pergunta («Os Meus Processos» do Index);
+ * entra nos parâmetros E na chave de cache (senão a lista de toda a rede e a minha partilhavam entrada).
+ */
 export function useIndexQueueQuery({ tab = "pending", page = 1, q = "", ordem = "", filtros = {}, enabled = true } = {}) {
   const queryClient = useQueryClient();
 

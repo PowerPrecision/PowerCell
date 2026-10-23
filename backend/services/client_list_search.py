@@ -74,6 +74,44 @@ PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM = {
 }
 
 
+#: A mesma projecção SEM `personal_data`: ver `run_list_clients` (os dados pessoais só se lêem para a página).
+PROJECCAO_LEVE_DOS_PROCESSOS_DA_LISTAGEM = {
+    chave: valor for chave, valor in PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM.items() if chave != "personal_data"
+}
+
+
+def _por_nome_do_cliente(processo: dict):
+    """A ordem do `sort("client_name", 1)` do Mongo: sem nome primeiro, depois por ordem binária."""
+    nome = processo.get("client_name")
+    return (nome is not None, nome if isinstance(nome, str) else "")
+
+
+#: Marca de trabalho numa linha: o processo cujos dados pessoais ainda estão por ler. Nunca sai da função.
+CHAVE_DO_PROCESSO_DOS_DADOS = "_processo_dos_dados_pessoais"
+
+
+async def _preencher_dados_pessoais(clients: list) -> list:
+    """Lê os dados pessoais (UMA consulta) só dos processos de que as linhas da PÁGINA ainda precisam.
+
+    Equivale ao que a linha sempre levou — o `personal_data` do primeiro processo do cliente —, mas
+    sem trazer da base de dados o de todos os outros. As linhas com os dados já presentes (titulares
+    secundários, que vêm do documento do cliente) não passam por aqui. Tira a marca de trabalho.
+    """
+    pendentes = {c[CHAVE_DO_PROCESSO_DOS_DADOS]: c for c in clients if c.get(CHAVE_DO_PROCESSO_DOS_DADOS)}
+    if pendentes:
+        docs = await db.processes.find(
+            {"id": {"$in": list(pendentes)}}, {"_id": 0, "id": 1, "personal_data": 1},
+        ).to_list(length=len(pendentes))
+        por_id = {d["id"]: d.get("personal_data") or {} for d in docs if d.get("id")}
+        for processo_id, linha in pendentes.items():
+            pessoais = por_id.get(processo_id, {})
+            linha["dados_pessoais"] = pessoais
+            linha["nif"] = pessoais.get("nif")
+    for c in clients:
+        c.pop(CHAVE_DO_PROCESSO_DOS_DADOS, None)
+    return clients
+
+
 def _merge_entity_client_docs(
     clients: list,
     extra_docs: list,
@@ -199,12 +237,22 @@ async def _predicado_de_processo_activo(processos: list):
         logger.warning("[CLIENTES] Motor de workflow ilegível (%s): a usar a lista legada de fases fechadas.", exc)
         fases = None
 
+    # `estado_e_terminal` reconstrói o conjunto de fases terminais a CADA chamada; com 20 mil processos
+    # (duas chamadas cada) isso era mais de meio segundo só em fases. A resposta é uma função pura de
+    # (fases da rede, estado): calcula-se uma vez por par — são meia dúzia de estados em duas ou três redes.
+    memoria: dict[tuple, bool] = {}
+
     def e_activo(proc: dict) -> bool:
         if proc.get("is_deleted", False):
             return False
         if fases is None:
             return proc.get("status") not in INACTIVE_STATUSES
-        return not estado_e_terminal(proc.get("status"), fases[chave_da_rede(rede_do_processo(proc))])
+        chave = (chave_da_rede(rede_do_processo(proc)), proc.get("status"))
+        terminal = memoria.get(chave)
+        if terminal is None:
+            terminal = estado_e_terminal(proc.get("status"), fases[chave[0]])
+            memoria[chave] = terminal
+        return not terminal
 
     return e_activo
 
@@ -577,10 +625,22 @@ async def run_list_clients(
         # o número de clientes únicos. A paginação aplica-se ao resultado final.
         # FIX (Pacote K): adicionado is_deleted à projection para o cálculo de
         # "cliente ativo" poder filtrar processos eliminados.
+        #
+        # PERFORMANCE (Out 2026): esta lista agrupa TODOS os processos em memória e só depois pagina,
+        # logo o que cada documento traz multiplica pelo tamanho da carteira. Dois cortes, sem mudar o
+        # resultado: (1) os dados pessoais (`personal_data`, o bloco mais pesado do processo) só se lêem
+        # para os clientes da PÁGINA — salvo se se ordena por NIF/contacto, que são cifrados e exigem a
+        # lista inteira; (2) a ordem por nome faz-se aqui, estável, em vez de um sort do Mongo sobre a
+        # colecção toda (sem índice, sobre documentos grandes).
+        ordena_pelos_dados_pessoais = (sort_field or "") in CAMPOS_CIFRADOS_ORDENAVEIS
+        projeccao = (
+            PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM if ordena_pelos_dados_pessoais
+            else PROJECCAO_LEVE_DOS_PROCESSOS_DA_LISTAGEM
+        )
         processes = await db.processes.find(
-            com_isolamento(tenant_condition_processos, process_query),
-            PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM,
-        ).sort("client_name", 1).to_list(length=None)
+            com_isolamento(tenant_condition_processos, process_query), projeccao,
+        ).to_list(length=None)
+        processes.sort(key=_por_nome_do_cliente)
         processes = await so_o_que_a_janela_deixa_ver(processes, user)
 
         # Quem é 2.º titular ou co-titular também é cliente: cada processo com
@@ -590,7 +650,8 @@ async def run_list_clients(
             tenant_condition_processos=tenant_condition_processos,
             tenant_condition_clientes=tenant_condition,
             filtros_de_processo=filtros_de_processo,
-            projeccao_do_processo=PROJECCAO_DOS_PROCESSOS_DA_LISTAGEM,
+            # os dados pessoais destas linhas vêm do CLIENTE (o `personal_data` do processo é trocado)
+            projeccao_do_processo=PROJECCAO_LEVE_DOS_PROCESSOS_DA_LISTAGEM,
             search=search,
             ids_permitidos=matching_client_ids,
         ))
@@ -620,6 +681,9 @@ async def run_list_clients(
                     },
                     "dados_pessoais": proc.get("personal_data", {}),
                     "nif": proc.get("personal_data", {}).get("nif"),
+                    # Projecção leve: os dados pessoais deste processo lêem-se depois, só se o cliente
+                    # estiver na página (ver `_preencher_dados_pessoais`).
+                    **({} if "personal_data" in proc else {CHAVE_DO_PROCESSO_DOS_DADOS: proc.get("id")}),
                     "process_ids": [],
                     "active_processes_count": 0,
                     "processes": [],  # Lista de processos com fase
@@ -719,7 +783,6 @@ async def run_list_clients(
             clients = [c for c in clients if (c["active_processes_count"] > 0) == has_active_process]
 
         clients = _merge_entity_client_docs(clients, extra_client_docs, search)
-        clients = await _enrich_clients_fonte(clients)
 
         # P4 — ordenar no servidor. NIF e contacto estão cifrados em repouso: ordenar por eles
         # exige desencriptar a lista INTEIRA (opt-in, é a coluna que o utilizador escolheu); nos
@@ -733,6 +796,12 @@ async def run_list_clients(
         # Aplicar paginação ao resultado final (clientes, não processos)
         total_count = len(clients)
         clients = clients[skip:skip + limit]
+
+        # Só a PÁGINA precisa da origem/tipo (`fonte`, `tipo_cliente`, parceiro) e dos dados pessoais:
+        # nenhum deles entra na ordenação nem nos filtros (que são do Mongo). Antes, a origem lia-se
+        # com um `$in` de TODOS os ids da carteira.
+        clients = await _enrich_clients_fonte(clients)
+        clients = await _preencher_dados_pessoais(clients)
 
         # Desencriptar dados sensíveis
         if not ja_desencriptados:

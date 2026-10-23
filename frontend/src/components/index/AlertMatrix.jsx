@@ -6,8 +6,12 @@
  * do servidor também — calculada pelo código a partir dos factos — e aparece debaixo da mensagem:
  * sem ela «há movimentos que merecem confirmação» não diz o que confirmar. Dispensar um alerta não o apaga — fica registado e não
  * ressuscita quando a matriz volta a correr.
+ *
+ * DE QUE FICHEIRO: cada alerta traz `refs` (`{document_id, page}`) e o ecrã mostra-os — o nome do ficheiro
+ * (da lista do próprio processo; o servidor nunca o repete no alerta), as páginas e um «Ver» que abre o
+ * documento. Sem isto, «O saldo de um extrato não bate certo» não dizia de QUAL dos extratos.
  */
-import { AlertTriangle, CheckCircle2, Info, ShieldAlert } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Eye, FileText, Info, ShieldAlert } from "lucide-react";
 
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -20,7 +24,25 @@ const ICONE = {
   info: { Icone: Info, classe: "text-muted-foreground" },
 };
 
-export function AlertMatrix({ alertas, onDispensar, aDispensar = null, podeDispensar = true }) {
+/** Os ficheiros a que um alerta se refere, sem repetições: `[{id, nome, paginas: [2, 3]}]`. */
+export function ficheirosDoAlerta(alerta, ficheiros = []) {
+  const refs = Array.isArray(alerta?.refs) ? alerta.refs : [];
+  const porId = new Map();
+  for (const r of refs) {
+    if (!r || typeof r.document_id !== "string" || !r.document_id) continue;
+    const actual = porId.get(r.document_id) || { id: r.document_id, paginas: [] };
+    if (Number.isInteger(r.page) && !actual.paginas.includes(r.page)) actual.paginas.push(r.page);
+    porId.set(r.document_id, actual);
+  }
+  const lista = Array.isArray(ficheiros) ? ficheiros : [];
+  return [...porId.values()].map((f) => ({
+    ...f,
+    nome: lista.find((x) => x?.id === f.id)?.filename || "Documento",
+    paginas: [...f.paginas].sort((a, b) => a - b),
+  }));
+}
+
+export function AlertMatrix({ alertas, onDispensar, aDispensar = null, podeDispensar = true, ficheiros = [], onVerDocumento = null }) {
   const ordenados = ordenarAlertas(alertas);
   const abertos = alertasAbertos(alertas).length;
 
@@ -61,6 +83,28 @@ export function AlertMatrix({ alertas, onDispensar, aDispensar = null, podeDispe
                         {a.detail}
                       </p>
                     )}
+                    {ficheirosDoAlerta(a, ficheiros).map((f) => (
+                      <p key={f.id} className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground" data-testid="alerta-ficheiro">
+                        <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        <span className="break-all">
+                          Ficheiro: {f.nome}
+                          {f.paginas.length > 0 && ` · pág. ${f.paginas.join(", ")}`}
+                        </span>
+                        {onVerDocumento && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 gap-1 px-2 text-xs"
+                            onClick={() => onVerDocumento([{ id: f.id, rotulo: f.nome }], f.nome)}
+                            aria-label={`Ver ficheiro do alerta — ${f.nome}`}
+                          >
+                            <Eye className="h-3 w-3" aria-hidden="true" />
+                            Ver
+                          </Button>
+                        )}
+                      </p>
+                    ))}
                   </div>
                   {podeDispensar && !a.dismissed && (
                     <Button

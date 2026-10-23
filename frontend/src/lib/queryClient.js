@@ -121,6 +121,7 @@ export const queryKeys = {
     // a ordem e os filtros vão nos parâmetros E na chave: senão mudá-los não provocava sequer um pedido
     queue: (tab = 'pending', pagina = 1, pesquisa = '', ordem = '', filtros = {}) => [
       ...queryKeys.index.queueAll(), tab, pagina, pesquisa, ordem, filtros.estado || '', filtros.empresa || '', filtros.origem || '',
+      filtros.mine === true ? 'mine' : '',
     ],
     workstation: (processId) => [...queryKeys.index.all, 'workstation', processId],
     employers: (texto = '') => [...queryKeys.index.all, 'employers', texto],

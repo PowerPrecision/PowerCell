@@ -88,6 +88,7 @@ async def get_index_queue(
     index_status: Optional[str] = Query(None, max_length=20, description="pending | in_review (Fila) · indexed (Revisões)."),
     company_id: Optional[str] = Query(None, max_length=64, description="Só os processos desta empresa."),
     origin: Optional[str] = Query(None, max_length=10, description="own (da minha rede) | shared (partilhados por outra)."),
+    mine: bool = Query(False, description="Só os processos atribuídos a quem pergunta («Os Meus Processos» do Index)."),
     user: dict = Depends(_acesso),
 ):
     """Duas abas: `pending` («Fila de Espera») e `reviews` («Revisões Pendentes»).
@@ -96,7 +97,7 @@ async def get_index_queue(
     """
     return await run_get_index_queue(
         user, tab=tab, page=page, size=size, q=q,
-        sort_by=sort_by, index_status=index_status, company_id=company_id, origin=origin,
+        sort_by=sort_by, index_status=index_status, company_id=company_id, origin=origin, mine=mine,
     )
 
 

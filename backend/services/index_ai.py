@@ -235,6 +235,13 @@ def definicao_da_ferramenta(tipo: str) -> dict:
                 "kind": {"type": "string", "enum": ["credit", "debit"]},
                 "channel": {"type": ["string", "null"], "enum": [*_CANAIS, None]},
                 "counterpart": {"type": ["string", "null"], "description": "Descrição/contraparte (não será guardada)."},
+                "balance": {
+                    "type": ["number", "string", "null"],
+                    "description": (
+                        "Saldo DEPOIS deste movimento, exactamente como impresso na coluna de saldo (pode ser "
+                        "negativo). null se o extrato não imprime o saldo nesta linha. Não calcules: copia."
+                    ),
+                },
                 "page": {"type": ["integer", "null"]},
             },
             "required": ["amount", "kind"],
@@ -269,8 +276,15 @@ def definicao_da_ferramenta(tipo: str) -> dict:
             "iban": _campo("string", "IBAN da conta."),
             "period_start": _campo("string", "Início do período (YYYY-MM-DD)."),
             "period_end": _campo("string", "Fim do período (YYYY-MM-DD)."),
-            "opening_balance": _campo("number", "Saldo inicial (EUR)."),
-            "closing_balance": _campo("number", "Saldo final (EUR)."),
+            "opening_balance": _campo(
+                "number",
+                "Saldo inicial (EUR): o saldo ANTERIOR ao primeiro movimento (linha «saldo anterior»/«transporte»).",
+            ),
+            "closing_balance": _campo(
+                "number",
+                "Saldo final (EUR): o saldo DEPOIS do último movimento (linha «saldo final»/«saldo contabilístico»). "
+                "Costuma ser diferente do inicial: se leres o mesmo valor nos dois, volta a procurar o final.",
+            ),
             "movements": {"type": "array", "items": movimento, "description": "TODOS os movimentos do extrato."},
             "findings": {
                 "type": "array", "items": achado,
@@ -349,7 +363,11 @@ PROMPTS_POR_TIPO = {
         "porque merece confirmação), nunca genérica — por exemplo 'Transferência de 500 € a 12/03, a segunda "
         "do mês para o mesmo destino' ou 'Diferença de 150 € entre o saldo final e a soma dos movimentos'. "
         "Na 'description' não ponhas nomes de pessoas ou empresas, NIFs, IBANs nem números de conta. "
-        "É OBRIGATÓRIO identificar em 'bank_name' a instituição bancária que emitiu o extrato."
+        "É OBRIGATÓRIO identificar em 'bank_name' a instituição bancária que emitiu o extrato. "
+        "Lista os movimentos pela ORDEM em que aparecem no documento, sem saltar nenhum (incluindo os de todas as "
+        "páginas) e, quando o extrato tem coluna de saldo, copia em 'balance' o saldo impresso depois de cada "
+        "movimento. Não assinales como atípicos movimentos pequenos do dia-a-dia: só numerário e valores que "
+        "um analista de crédito pediria para justificar."
     ),
     TIPO_DECLARACAO: PROMPT_BASE + (
         " Documento: DECLARAÇÃO DE EFETIVIDADE (declaração da entidade patronal sobre o vínculo do trabalhador). "
@@ -538,6 +556,12 @@ def impressao_da_contraparte(texto: Any) -> Optional[str]:
     return hashlib.sha256(t.encode()).hexdigest()[:12]
 
 
+def _saldo_impresso(valor: Any) -> Optional[str]:
+    """O saldo de uma linha (pode ser negativo) como texto com 2 casas, ou `None`."""
+    numero = decimal_do_valor(valor)
+    return str(numero.quantize(Decimal("0.01"))) if numero is not None else None
+
+
 def normalizar_extrato(bruto: dict, *, document_id: Optional[str] = None) -> dict:
     """`{"factos": {...}}` com movimentos SEM texto de contraparte."""
     bruto = bruto if isinstance(bruto, dict) else {}
@@ -558,6 +582,8 @@ def normalizar_extrato(bruto: dict, *, document_id: Optional[str] = None) -> dic
             "canal": canal,
             "cp": impressao_da_contraparte(mov.get("counterpart")),
             "page": _pagina(mov),
+            # o saldo impresso depois do movimento (D da conferência linha a linha); `None` se a linha não o traz
+            "s": _saldo_impresso(mov.get("balance")),
         })
     achados = []
     for a in (bruto.get("findings") or [])[:20]:

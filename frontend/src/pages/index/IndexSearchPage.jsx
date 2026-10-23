@@ -6,8 +6,8 @@
  * num diálogo sobreposto, SEM sair da lista. Um erro de LEITURA nunca é «sem resultados»: diz-se.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { RefreshCw, Search } from "lucide-react";
 
 import DashboardLayout from "../../layouts/DashboardLayout";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
@@ -95,13 +95,6 @@ export default function IndexSearchPage() {
           icon={Search}
           title="Pesquisa avançada"
           description="Recibos por valor, declarações de efetividade por região e extratos por banco, nos processos a que tem acesso."
-          actions={
-            <Button asChild variant="outline">
-              <Link to="/index">
-                <ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />Voltar à fila
-              </Link>
-            </Button>
-          }
         />
 
         <Card>

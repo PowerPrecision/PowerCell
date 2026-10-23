@@ -347,6 +347,22 @@ describe("erros de leitura", () => {
     expect(screen.getByRole("button", { name: /tentar de novo/i })).toBeInTheDocument();
   });
 
+  it("o ecrã de erro também já não oferece «Voltar à fila»", async () => {
+    sessao.papel = "diretor";
+    api.getIndexWorkstation.mockRejectedValue({ response: { status: 500 } });
+    const cliente = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={cliente}>
+        <MemoryRouter initialEntries={["/index/proc-1"]}>
+          <Routes><Route path="/index/:processId" element={<IndexWorkstationPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByTestId("index-bancada-erro");
+    expect(screen.queryByText(/Voltar à fila/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /tentar de novo/i })).toBeInTheDocument();
+  });
+
   it("um 404 diz que não existe e NÃO oferece tentar de novo", async () => {
     api.getIndexWorkstation.mockRejectedValue({ response: { status: 404 } });
     const cliente = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -359,12 +375,6 @@ describe("erros de leitura", () => {
     );
     expect(await screen.findByTestId("index-bancada-erro")).toHaveTextContent("Processo não encontrado");
     expect(screen.queryByRole("button", { name: /tentar de novo/i })).not.toBeInTheDocument();
-  });
-
-  it("voltar à fila navega para /index", async () => {
-    montar();
-    await userEvent.click(await screen.findByRole("button", { name: /Voltar à fila/ }));
-    expect(await screen.findByTestId("fila")).toBeInTheDocument();
   });
 });
 
@@ -506,11 +516,30 @@ describe("documentos: Ver, Download e Upload sem sair da bancada", () => {
 });
 
 describe("a equipa do Index trabalha a partir de «Os Meus Processos»", () => {
-  it("sem perfil de equipa (gestão) o botão continua a ser «Voltar à fila» e leva à fila", async () => {
+  it.each(["diretor", "admin", "ceo", "master", "indexacao"])(
+    "o botão «Voltar à fila» foi extinto — nem o perfil %s o vê",
+    async (papel) => {
+      sessao.papel = papel;
+      montar();
+      await screen.findAllByTestId("ficheiro-do-index");
+      expect(screen.queryByRole("button", { name: /Voltar à fila/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /Voltar à fila/i })).not.toBeInTheDocument();
+      expect(screen.queryByText(/Voltar à fila/i)).not.toBeInTheDocument();
+    },
+  );
+
+  it("a gestão não tem botão de regresso (volta pelo menu ou pelo «Voltar» do browser)", async () => {
     sessao.papel = "diretor";
     montar();
-    await userEvent.click(await screen.findByRole("button", { name: /Voltar à fila/ }));
-    expect(await screen.findByTestId("fila")).toBeInTheDocument();
+    await screen.findAllByTestId("ficheiro-do-index");
+    expect(screen.queryByRole("button", { name: /Os meus processos/i })).not.toBeInTheDocument();
+  });
+
+  it("contraprova: o perfil Index continua a ter «Os meus processos»", async () => {
+    sessao.papel = "indexacao";
+    montar();
+    await screen.findAllByTestId("ficheiro-do-index");
+    expect(screen.getByRole("button", { name: /Os meus processos/i })).toBeInTheDocument();
   });
 
   it("o perfil Index volta a «Os meus processos» (a fila já não é dele)", async () => {

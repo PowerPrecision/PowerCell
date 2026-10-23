@@ -12480,3 +12480,23 @@ Stage Summary:
 
 ### Fotografia D-13 (produção) — POR PREENCHER
 _Colar aqui a saída de `python scripts/medir_colecoes.py --markdown` corrida em produção._
+
+
+---
+Task ID: ux-sla-dias-uteis-toasts-clientes-matriz-out2026
+Agent: Cloud Agent
+Task: Correcções de UX e lógica de negócio — SLA em dias úteis, «Os Meus Processos» do Index, fim do «Voltar à fila», toasts que voltam, «Clientes Registados» lenta; e a precisão da matriz de verificação dos extratos
+
+Date: 2026-10-23
+
+Work Log:
+* **SLA nível 2 em dias úteis** (`index_sla.tempo_util`): sábados e domingos (hora de Lisboa) não contam; relógio de parede; lembrete também em dias úteis; mensagem diz «dias úteis». Feriados contam como úteis (não há calendário). Nível 1 inalterado (horas de calendário). Testes antigos reescritos com dias úteis, não apagados; `test_index_sla_dias_uteis.py` (21).
+* **«Os Meus Processos» do Index**: `ProcessesPage` decide por `effectiveRole` e delega em `OsMeusProcessosDoIndex` (tabela da fila: Processo, Empresa/Origem, Estado, Documentos, Alertas, Entrada) sobre `GET /index/queue?mine=true`; «Novo Processo» mantido; estado no URL. `test_index_meus_processos_mongo.py` (9, MongoDB real; 2 mutações mortas: o `{campo: None}` sem id de utilizador e a bandeira ignorada), `OsMeusProcessosDoIndex.test.jsx` (13). Os 2 testes de `ProcessesPage.test.jsx` que assumiam o Index na tabela genérica foram reescritos.
+* **«Voltar à fila» removido** da bancada (e do ecrã de erro) e da pesquisa avançada; o Index regressa a «Os meus processos»; testes de ausência por papel e nome acessível, com contraprova.
+* **Toasts**: `utils/toastsDescartados.js` + `TasksContext` — um toast fechado no X não é recriado pelo progresso seguinte (nem após recarregar: `sessionStorage`); fechos do próprio código não contam; o resultado tem chave própria. `TasksContext.descartados.test.jsx` (12) + `toastsDescartados.test.js` (10); 5 mutações (4 mortas à 1.ª; a 5.ª — `esquecerDescarte` — era redundante e foi REMOVIDA em vez de coberta). Achado ao testar: aceder a `window.sessionStorage` lança com os dados do site bloqueados, e estava num parâmetro por omissão.
+* **«Clientes Registados» lenta**: medi antes de mexer (seed de 15 000 clientes / 21 000 processos num `mongod` local): **31 s** para um Diretor (1,3 s para o Master, que salta a janela) — 30 000 pedidos, porque `so_o_que_a_janela_deixa_ver` resolvia o âmbito por cliente. Agora ~0,9 s. Cortes: âmbito resolvido uma vez (`e_visitante_no_ambito`); a janela lê só os clientes de fora (`$nor`); `personal_data` só da página; origem/tipo só da página; sem sort do Mongo (em memória, estável); fases terminais calculadas uma vez por (rede, estado). Ecrã: cancelamento do pedido anterior (`AbortController`). O ecrã já paginava (50). **Não feito, dito:** a agregação estrutural no Mongo; o custo restante é o agrupamento em memória e cresce com a carteira.
+* **Matriz dos extratos**: ver o bullet do AGENTS.md. **Pergunta do cliente («em que ficheiro? as contas dentro do extrato batem?») NÃO respondida sobre os ficheiros dele** — estão em produção, inalcançável daqui. O que se corrigiu é o que a matriz podia dizer: o ficheiro, o saldo linha a linha, a materialidade e o numerário fraccionado.
+
+Stage Summary:
+* **Operação:** nenhuma migração. Para a matriz ganhar o saldo linha a linha, os extratos já analisados têm de ser extraídos outra vez (`Extrair dados`), ou esperar pelo preenchimento lento; sem isso ficam na conferência dos totais (agora com o aviso de que não localiza).
+* **Por validar com o negócio:** o limiar de 250 € (`ATIPICO_DA_IA_MINIMO`) e a regra do numerário fraccionado (3 movimentos / 7 dias / 1.000 €) são pressupostos meus, não calibrados.

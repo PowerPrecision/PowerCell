@@ -31,6 +31,38 @@ def _d(dias: float) -> str:
     return (AGORA - timedelta(days=dias)).isoformat()
 
 
+LISBOA = sla.FUSO_DOS_DIAS_UTEIS
+
+
+def _mover_uteis(desde: datetime, dias_uteis: int, sentido: int) -> datetime:
+    """`dias_uteis` dias úteis antes (-1) ou depois (+1) de `desde`, em RELÓGIO DE PAREDE de Lisboa.
+
+    A contagem do SLA é a que o utilizador faz — «sexta às 17:00 + 5 dias úteis = sexta às 17:00» —,
+    por isso a mudança de hora (25/10/2026) não pode deslocar a fronteira uma hora.
+    """
+    local = desde.astimezone(LISBOA).replace(tzinfo=None)
+    faltam = dias_uteis
+    while faltam > 0:
+        local += timedelta(days=sentido)
+        if local.weekday() < 5:
+            faltam -= 1
+    return local.replace(tzinfo=LISBOA).astimezone(timezone.utc)
+
+
+def _du_dt(dias_uteis: int) -> datetime:
+    """O momento que fica `dias_uteis` DIAS ÚTEIS antes de AGORA (salta sábados e domingos)."""
+    return _mover_uteis(AGORA, dias_uteis, -1)
+
+
+def _du(dias_uteis: int) -> str:
+    return _du_dt(dias_uteis).isoformat()
+
+
+def _depois_uteis(dias_uteis: int, desde: datetime = AGORA) -> timedelta:
+    """O intervalo (a somar a AGORA) que leva a `dias_uteis` dias úteis depois de `desde`."""
+    return _mover_uteis(desde, dias_uteis, +1) - AGORA
+
+
 @pytest_asyncio.fixture
 async def bd(monkeypatch):
     url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
@@ -121,9 +153,9 @@ class TestPredicados:
         assert sla.esta_intocado({k: v for k, v in base.items() if k != "index_assigned_at"}, AGORA, 48) is False
 
     def test_estagnado_so_depois_de_comecar_e_alem_do_prazo(self):
-        base = {"assigned_indexacao_id": "u", "index_status": "in_review", "index_last_activity_at": _d(6)}
+        base = {"assigned_indexacao_id": "u", "index_status": "in_review", "index_last_activity_at": _du(6)}
         assert sla.esta_estagnado(base, AGORA, 5) is True
-        assert sla.esta_estagnado({**base, "index_last_activity_at": _d(4)}, AGORA, 5) is False
+        assert sla.esta_estagnado({**base, "index_last_activity_at": _du(4)}, AGORA, 5) is False
         assert sla.esta_estagnado({**base, "index_status": "pending"}, AGORA, 5) is False
         assert sla.esta_estagnado({**base, "assigned_indexacao_id": None}, AGORA, 5) is False
 
@@ -134,12 +166,14 @@ class TestPredicados:
         assert sla.ultima_actividade({}) is None
 
     def test_alertar_uma_vez_lembrar_e_reabrir_com_actividade(self):
-        p = {"assigned_indexacao_id": "u", "index_status": "in_review", "index_last_activity_at": _d(6)}
+        p = {"assigned_indexacao_id": "u", "index_status": "in_review", "index_last_activity_at": _du(6)}
         assert sla.deve_alertar(p, AGORA, 5) is True
-        assert sla.deve_alertar({**p, "index_stagnation_alerted_at": _d(1)}, AGORA, 5) is False  # já avisou
-        assert sla.deve_alertar({**p, "index_stagnation_alerted_at": _d(5.1)}, AGORA, 5) is True  # lembrete
+        assert sla.deve_alertar({**p, "index_stagnation_alerted_at": _du(1)}, AGORA, 5) is False  # já avisou
+        antigo = (_du_dt(5) - timedelta(hours=2)).isoformat()   # passaram mais de 5 dias ÚTEIS
+        assert sla.deve_alertar({**p, "index_stagnation_alerted_at": antigo}, AGORA, 5) is True  # lembrete
         # houve actividade DEPOIS do último alerta e voltou a parar: novo ciclo
-        p2 = {**p, "index_last_activity_at": _d(5.5), "index_stagnation_alerted_at": _d(9)}
+        meio = (_du_dt(5) - timedelta(hours=12)).isoformat()
+        p2 = {**p, "index_last_activity_at": meio, "index_stagnation_alerted_at": _du(9)}
         assert sla.deve_alertar(p2, AGORA, 5) is True
 
     def test_escolha_prefere_quem_ainda_nao_teve_o_processo(self):
@@ -291,7 +325,7 @@ class TestNivel1Intocado:
 # ====================================================================
 async def _em_tratamento(bd, pid="p1", dias=6, **extra):
     return await _processo(bd, pid, index_status="in_review", index_assigned_at=_d(30), index_work_started_at=_d(20),
-                           index_last_activity_at=_d(dias), **extra)
+                           index_last_activity_at=_du(dias), **extra)
 
 
 class TestNivel2Estagnado:
@@ -330,7 +364,7 @@ class TestNivel2Estagnado:
         r2 = await sla.correr_sla_do_index(agora=AGORA + timedelta(hours=1))
         assert r2["nivel2"]["estagnados"] == 1 and r2["nivel2"]["alertados"] == 0
         assert len(await _avisos(bd, user_id="ix1")) == 1
-        r3 = await sla.correr_sla_do_index(agora=AGORA + timedelta(days=5, minutes=1))
+        r3 = await sla.correr_sla_do_index(agora=AGORA + _depois_uteis(5) + timedelta(minutes=1))
         assert r3["nivel2"]["alertados"] == 1 and len(await _avisos(bd, user_id="ix1")) == 2
 
     async def test_actividade_do_indexador_reabre_o_ciclo(self, bd):
@@ -340,7 +374,8 @@ class TestNivel2Estagnado:
             assert (await ist.registar_trabalho("p1", "ix1"))["registado"] is True
         r = await sla.correr_sla_do_index(agora=AGORA + timedelta(days=2))
         assert r["nivel2"]["estagnados"] == 0  # voltou a estar activo
-        r = await sla.correr_sla_do_index(agora=AGORA + timedelta(days=7))
+        depois = AGORA + _depois_uteis(1)   # a actividade foi aqui; 5 dias úteis depois volta a estar parado
+        r = await sla.correr_sla_do_index(agora=AGORA + _depois_uteis(5, depois) + timedelta(minutes=1))
         assert r["nivel2"]["alertados"] == 1  # parou outra vez: alerta novo, sem esperar pelo lembrete
 
     async def test_um_processo_so_atribuido_e_parado_ha_dez_dias_e_nivel_1_nao_e_alerta_de_estagnacao(self, bd):
