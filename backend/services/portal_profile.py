@@ -673,9 +673,12 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
         if any(k.startswith(f"{campo}.") for k in mongo_update)
     ]
 
+    # D-15: a data de nascimento vai cifrada, com o ano (em claro) ao lado.
+    from services.nascimento_protegido import proteger_caminhos
+
     await db.clients.update_one(
         {"id": client_id},
-        {"$set": mongo_update}
+        {"$set": proteger_caminhos(mongo_update)}
     )
 
     if espelhos and client.get("process_ids"):

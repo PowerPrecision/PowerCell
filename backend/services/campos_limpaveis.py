@@ -36,6 +36,9 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
+from services.encryption import CAMPOS_DE_NASCIMENTO_CIFRADOS
+from services.sub35 import CAMPO_DO_ANO
+
 #: Nomes alternativos de um campo de ``dados_pessoais`` (cliente) / ``personal_data`` (processo).
 #: Simétrico onde o dado tem dois nomes equivalentes.
 ALIASES_PESSOAIS: dict[str, tuple[str, ...]] = {
@@ -152,8 +155,12 @@ def espelhos_no_processo(processo: Optional[dict], campos: Iterable[str]) -> dic
     """
     doc = processo if isinstance(processo, dict) else {}
     pd = doc.get("personal_data") if isinstance(doc.get("personal_data"), dict) else {}
-    sets: dict[str, str] = {}
+    sets: dict[str, Any] = {}
     for campo in campos:
+        if campo in CAMPOS_DE_NASCIMENTO_CIFRADOS and CAMPO_DO_ANO in pd:
+            # D-15: o ano derivado vai com a data; um ano que sobrevivesse
+            # deixava o filtro Sub35 a achar quem já não tem data.
+            sets[f"personal_data.{CAMPO_DO_ANO}"] = None
         for nome in (campo, *aliases_do_campo(campo)):
             if nome in pd and not esta_vazio(pd[nome]):
                 sets[f"personal_data.{nome}"] = ""

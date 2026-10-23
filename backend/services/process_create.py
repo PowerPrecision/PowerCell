@@ -347,9 +347,14 @@ async def maybe_auto_assign_indexer_on_create(
                 f"(atribuição manual)"
             )
             # sem Index, o intermediário é quem recebe o processo à entrada
-            from services.process_assignment import auto_assign_intermediario_on_entry
+            from services.process_assignment import (
+                auto_assign_consultor_on_entry,
+                auto_assign_intermediario_on_entry,
+            )
 
             await auto_assign_intermediario_on_entry(process_id)
+            # rede SEM Index (ex.: Domus): não há triagem que lhe dê dono, atribui-se o consultor à entrada
+            await auto_assign_consultor_on_entry(process_id)
             return
 
         from services.process_assignment import assign_to_indexer

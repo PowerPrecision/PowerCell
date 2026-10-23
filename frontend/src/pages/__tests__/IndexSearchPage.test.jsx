@@ -95,6 +95,12 @@ describe("antes de pesquisar", () => {
     expect(searchIndexAdvanced).not.toHaveBeenCalled();
   });
 
+  it("não tem «Voltar à fila»: a fila-pool foi extinta", () => {
+    montar();
+    expect(screen.queryByText(/Voltar à fila/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /fila/i })).not.toBeInTheDocument();
+  });
+
   it("o banco só aparece quando se procuram extratos", async () => {
     const user = userEvent.setup();
     montar();

@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timezone
 
 from database import db
+from services.nascimento_protegido import proteger_documento
 from services.system_error_logger import system_error_logger
 
 logger = logging.getLogger(__name__)
@@ -247,6 +248,8 @@ async def run_migration_task(dry_run: bool, started_by: str):
                 client_id_map[old_id] = new_client_id
 
                 if not dry_run:
+                    # D-15: a data de nascimento copiada do processo segue cifrada.
+                    proteger_documento(new_client)
                     await db.clients.update_one(
                         {"id": new_client_id},
                         {"$set": new_client, "$unset": {"dados_financeiros": "", "co_buyers": "", "co_applicants": ""}}

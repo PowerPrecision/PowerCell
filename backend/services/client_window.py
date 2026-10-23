@@ -35,6 +35,7 @@ from services.tenant_network import (
     CAMPO_REDE,
     CAMPO_REDES_PARCEIRAS,
     PROJECCAO_DO_CARIMBO,
+    build_network_scope_condition,
     build_process_scope_condition,
     com_isolamento,
     documento_no_ambito,
@@ -114,6 +115,22 @@ async def ids_dos_processos_visiveis(
     return _ids(p.get("id") for p in encontrados)
 
 
+def e_visitante_no_ambito(cliente: Optional[dict], user: dict, scope) -> bool:
+    """`e_visitante_do_cliente` SEM I/O: o âmbito já está resolvido (`scope`).
+
+    Existe para as listagens. Resolver o âmbito por cliente (uma ida à base de dados — duas, com as
+    empresas) fazia «Clientes Registados» custar trinta mil pedidos a uma lista de quinze mil clientes:
+    mais de meio minuto, num servidor local. Quem percorre uma lista resolve o âmbito UMA vez.
+    """
+    if not cliente or fronteira_levantada(user, por_conta=True):
+        return False
+    from services.by_id_scope import cliente_e_da_pool
+
+    if cliente_e_da_pool(cliente):
+        return False
+    return not documento_no_ambito(cliente, scope)
+
+
 async def e_visitante_do_cliente(cliente: Optional[dict], user: dict) -> bool:
     """O cliente é de OUTRA rede e eu só chego a ele por um processo partilhado?
 
@@ -122,12 +139,7 @@ async def e_visitante_do_cliente(cliente: Optional[dict], user: dict) -> bool:
     """
     if not cliente or fronteira_levantada(user, por_conta=True):
         return False
-    from services.by_id_scope import cliente_e_da_pool
-
-    if cliente_e_da_pool(cliente):
-        return False
-    scope = await resolve_tenant_scope(user)
-    return not documento_no_ambito(cliente, scope)
+    return e_visitante_no_ambito(cliente, user, await resolve_tenant_scope(user))
 
 
 def processo_na_janela_do_visitante(processo: Optional[dict], redes: Iterable[str]) -> bool:
@@ -158,12 +170,18 @@ async def so_o_que_a_janela_deixa_ver(processos: list[dict], user: dict) -> list
     if not ids:
         return processos
     try:
-        docs = await db.clients.find(
-            {"id": {"$in": ids}}, {"_id": 0, "id": 1, "process_ids": 1, "lead_status": 1, **PROJECCAO_DO_CARIMBO},
-        ).to_list(len(ids))
         scope = await resolve_tenant_scope(user)
+        # Só interessam os clientes que NÃO estão no meu âmbito: um cliente da minha rede nunca é
+        # «visitante» e a linha de um cliente que não se conhece também fica. Pedir todos os documentos
+        # (milhares, numa carteira grande) para deitar quase todos fora era o grosso do custo: a condição
+        # de rede é a gémea em Mongo do predicado `documento_no_ambito` (afirmada por teste de concordância).
+        docs = await db.clients.find(
+            {"id": {"$in": ids}, "$nor": [build_network_scope_condition(scope)]},
+            {"_id": 0, "id": 1, "process_ids": 1, "lead_status": 1, **PROJECCAO_DO_CARIMBO},
+        ).to_list(len(ids))
+        # o âmbito resolve-se UMA vez (não por cliente): ver `e_visitante_no_ambito`
         visitados = {
-            d["id"] for d in docs if d.get("id") and await e_visitante_do_cliente(d, user)
+            d["id"] for d in docs if d.get("id") and e_visitante_no_ambito(d, user, scope)
         }
         conhecidos = {d.get("id") for d in docs}
     except Exception as exc:  # noqa: BLE001 - numa fronteira, a dúvida fecha
@@ -185,5 +203,6 @@ __all__ = [
     "PROJECCAO_DO_CARIMBO",
     "condicao_do_visitante",
     "e_visitante_do_cliente",
+    "e_visitante_no_ambito",
     "ids_dos_processos_visiveis",
 ]

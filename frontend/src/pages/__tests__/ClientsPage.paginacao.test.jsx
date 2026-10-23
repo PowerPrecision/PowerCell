@@ -5,7 +5,7 @@
  * de filtro volta à primeira, e a exportação percorre TODAS as páginas (e não só a que está no ecrã).
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../layouts/DashboardLayout", () => ({
@@ -147,5 +147,82 @@ describe("ClientsPage — paginação no servidor", () => {
     expect(chamadas.every((p) => p.get("size") === "200")).toBe(true);
     expect(chamadas.map((p) => p.get("page"))).toEqual(["1", "2", "3"]);
     expect(xlsx.linhas).toHaveLength(450);
+  });
+});
+
+
+/**
+ * A lista é pesada (o servidor agrupa a carteira antes de paginar). Se o utilizador muda de página
+ * enquanto um pedido ainda corre, a resposta ANTIGA pode chegar depois da nova e pisá-la.
+ */
+describe("ClientsPage — só o último pedido escreve no ecrã", () => {
+  function Navegar() {
+    const navegar = useNavigate();
+    return <button type="button" onClick={() => navegar("/clientes?page=2")}>ir para a página 2</button>;
+  }
+
+  function montarComNavegacao() {
+    return render(
+      <MemoryRouter initialEntries={["/clientes"]}>
+        <Navegar />
+        <Routes>
+          <Route path="/clientes" element={<ClientsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  const resposta = (de) => ({
+    ok: true,
+    json: () => Promise.resolve({ clients: clientes(50, de), total: 120, page: de / 50 + 1, size: 50, pages: 3 }),
+  });
+
+  it("uma resposta antiga que chega depois da nova NÃO a substitui", async () => {
+    let largarAPrimeira;
+    const sinais = [];
+    globalThis.fetch = vi.fn((url, opcoes) => {
+      sinais.push(opcoes?.signal);
+      const pagina = Number(new URL(String(url)).searchParams.get("page"));
+      if (pagina === 1) return new Promise((resolve) => { largarAPrimeira = () => resolve(resposta(0)); });
+      return Promise.resolve(resposta(50));
+    });
+    montarComNavegacao();
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByText("ir para a página 2"));
+    await aparece("Cliente 50");
+
+    largarAPrimeira();                         // a página 1 chega tarde
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByText("Cliente 0")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Cliente 50").length).toBeGreaterThan(0);
+  });
+
+  it("o pedido novo cancela o anterior (o servidor não continua a trabalhar para uma lista que ninguém vê)", async () => {
+    const sinais = [];
+    globalThis.fetch = vi.fn((url, opcoes) => {
+      sinais.push(opcoes?.signal);
+      return new Promise(() => {});
+    });
+    montarComNavegacao();
+    await waitFor(() => expect(sinais).toHaveLength(1));
+    fireEvent.click(screen.getByText("ir para a página 2"));
+    await waitFor(() => expect(sinais).toHaveLength(2));
+    expect(sinais[0].aborted).toBe(true);
+    expect(sinais[1].aborted).toBe(false);
+  });
+
+  it("um pedido cancelado não mostra «Erro ao carregar clientes»", async () => {
+    const { toast } = await import("sonner");
+    const spy = vi.spyOn(toast, "error").mockImplementation(() => {});
+    globalThis.fetch = vi.fn((url, opcoes) => new Promise((_, rejeitar) => {
+      opcoes.signal.addEventListener("abort", () => rejeitar(Object.assign(new Error("abort"), { name: "AbortError" })));
+    }));
+    const vista = montarComNavegacao();
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+    vista.unmount();                            // cancela o pedido em curso
+    await new Promise((r) => setTimeout(r, 20));
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

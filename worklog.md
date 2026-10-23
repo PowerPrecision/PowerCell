@@ -12459,3 +12459,63 @@ Work Log:
 * Bancada: Ver/Download por ficheiro (endpoint novo por processo, qualquer tipo, só do processo do caminho), upload directo sem sobrepor, botões Reivindicar/Devolver removidos. A matriz já mostrava o `detail` (nada a alterar).
 * Testes antigos invertidos, não apagados (claim/release, `derivar_estado`, migração, menu do Index). Suite do lote anterior: 12681 passed e 1 falha (guarda do único escritor de `index_status` apanhou `index_queue_query.py`, que só filtra) + 1 teste do frontend (`normalizarFila` ganhou `empresas`) — ambos corrigidos aqui.
 * Mutações medidas: backend 18 (17 mortas; a que sobreviveu retira o `$unset` da marca de estagnação no ramo de ARRANQUE, onde um processo `pending` nunca a tem — equivalente; o ramo da actividade, que conta, está coberto) e frontend 8, todas mortas.
+
+
+---
+Task ID: d15-data-de-nascimento-cifrada-d13-baseline-atlas-ips-out2026
+Agent: Cloud Agent
+Task: Sprint de segurança — (1) IPs de saída do Render para o Atlas; (2) D-15, data de nascimento cifrada mantendo a idade calculável; (3) D-13, fotografia de custos
+
+Date: 2026-10-23
+
+Work Log:
+* **1. Atlas / IPs de saída.** NÃO tenho acesso ao Render nem ao Atlas desta sessão (não há `MONGO_URL` no ambiente), por isso não obtive os IPs: entreguei o método. Fonte da lista = painel do Render → serviço → *Connect* → *Outbound* (região; `powercell` e `powercell-worker` estão ambos em `frankfurt` no `render.yaml`, pelo que partilham o conjunto — confirmar no painel, não verifiquei). Prova de que o serviço sai por eles + de que o Atlas aceita: `scripts/diagnosticar_saida_para_atlas.py` (Shell de cada serviço; imprime os IPs observados por 3 serviços de eco e faz `ping` ao Atlas sem imprimir credenciais; saída 0/1/2/3). `DEPLOY_RUNBOOK.md` Parte D. O que se acrescenta ao Atlas é a lista INTEIRA do painel, sem «Delete after».
+* **2. D-15.** `birth_date`/`data_nascimento` passam a cifrar-se (`encryption.CAMPOS_DE_NASCIMENTO_CIFRADOS`, uma só lista, reutilizada por `sub35`) em processos, clientes, 2.º titular, `co_buyers`, `co_applicants` e raiz; cada pessoa leva `birth_year` (int, em claro). Escolha do ano (opção (a) da D-15) e não de idade/booleano: não muda no aniversário. `sub35.data_iso` abre a cifra → a ETIQUETA é exacta com documento cru ou decifrado; o FILTRO do Mongo usa o ano (`intervalo_de_anos`: `[ano−35, ano−1]`) e é mais estrito — **custo assumido e medido**: quem nasceu em `ano−36` e ainda não fez anos fica fora do filtro (dentro da etiqueta). Os ramos de data em claro mantêm-se (documentos por migrar). `services/nascimento_protegido.py` (carimbo do ano, `proteger_caminhos`, `proteger_documento`) ligado aos escritores que contornam as funções de cifra: perfil do Portal e espelho do 2.º titular, `client_crud` (cliente→processos), `process_ai_conflict`, `ai_bulk_helpers`, `admin_proc_migration_helpers`; `campos_limpaveis` limpa o ano com a data. **Achado:** `build_existing_data_for_ai_compare` recebia o processo CRU (comparava a cifra com o que a IA leu; NIF e documento tinham o mesmo defeito latente) — passa a decifrar. Migração `scripts/migrar_datas_de_nascimento.py` + `services/birthdate_migration.py`: descreve por omissão; recusa-se sem cifra (3) ou com uma chave que não abre NIFs já cifrados (4); filtro optimista por documento; idempotente; não toca em `updated_at`. Verificada contra `mongod` real: 1.ª passagem escreve tudo, 2.ª dá «0 a fazer», `medir_datas_de_nascimento` dá «em claro: 0».
+* **3. D-13 / fotografia.** NÃO consegui tirá-la: sem acesso a produção. Correr `python scripts/medir_colecoes.py --markdown` em produção (ganhou `--markdown`: tabela pronta a colar, com data e NOME da base, nunca o URL) e colar aqui. O que se correu foi contra a base local de desenvolvimento (8 documentos) só para provar o formato — **não é a fotografia** e não se regista como tal. Slot: ver a secção «Fotografia D-13» abaixo.
+* Testes: `tests/unit/test_d15_data_de_nascimento_cifrada.py` (65), `tests/integration/test_d15_nascimento_cifrado_mongo.py` (17, MongoDB real: filtro ⊆ etiqueta sobre uma amostra com as margens, migração ponta a ponta, edição a meio, chave errada), `tests/unit/test_diagnosticar_saida_para_atlas.py` (7). `test_sub35.py`: a asserção «todo o intervalo fecha com `$lt`» passou a aceitar `$lte` (o ano é inteiro).
+
+Stage Summary:
+* **Operação (dono do produto):** deploy do código nos DOIS serviços; snapshot do Atlas; `migrar_datas_de_nascimento` (descreve → `--aplicar` → 2.ª passagem → `medir_datas_de_nascimento`); correr `diagnosticar_saida_para_atlas` no web e no worker e acrescentar a lista do painel ao Atlas; tirar a fotografia D-13.
+* **Limites ditos:** o ano de nascimento continua em claro; um backup anterior à migração mantém as datas em claro; `GET` de listagens que servem o documento cru passam a mostrar a cifra (e não a data) em `personal_data.birth_date` — a UI só usa a etiqueta; escritores futuros que gravem a data com `$set` pontuado têm de usar `proteger_caminhos` (há teste de ligação por escritor, não um inventário automático).
+
+### Fotografia D-13 (produção) — POR PREENCHER
+_Colar aqui a saída de `python scripts/medir_colecoes.py --markdown` corrida em produção._
+
+
+---
+Task ID: ux-sla-dias-uteis-toasts-clientes-matriz-out2026
+Agent: Cloud Agent
+Task: Correcções de UX e lógica de negócio — SLA em dias úteis, «Os Meus Processos» do Index, fim do «Voltar à fila», toasts que voltam, «Clientes Registados» lenta; e a precisão da matriz de verificação dos extratos
+
+Date: 2026-10-23
+
+Work Log:
+* **SLA nível 2 em dias úteis** (`index_sla.tempo_util`): sábados e domingos (hora de Lisboa) não contam; relógio de parede; lembrete também em dias úteis; mensagem diz «dias úteis». Feriados contam como úteis (não há calendário). Nível 1 inalterado (horas de calendário). Testes antigos reescritos com dias úteis, não apagados; `test_index_sla_dias_uteis.py` (21).
+* **«Os Meus Processos» do Index**: `ProcessesPage` decide por `effectiveRole` e delega em `OsMeusProcessosDoIndex` (tabela da fila: Processo, Empresa/Origem, Estado, Documentos, Alertas, Entrada) sobre `GET /index/queue?mine=true`; «Novo Processo» mantido; estado no URL. `test_index_meus_processos_mongo.py` (9, MongoDB real; 2 mutações mortas: o `{campo: None}` sem id de utilizador e a bandeira ignorada), `OsMeusProcessosDoIndex.test.jsx` (13). Os 2 testes de `ProcessesPage.test.jsx` que assumiam o Index na tabela genérica foram reescritos.
+* **«Voltar à fila» removido** da bancada (e do ecrã de erro) e da pesquisa avançada; o Index regressa a «Os meus processos»; testes de ausência por papel e nome acessível, com contraprova.
+* **Toasts**: `utils/toastsDescartados.js` + `TasksContext` — um toast fechado no X não é recriado pelo progresso seguinte (nem após recarregar: `sessionStorage`); fechos do próprio código não contam; o resultado tem chave própria. `TasksContext.descartados.test.jsx` (12) + `toastsDescartados.test.js` (10); 5 mutações (4 mortas à 1.ª; a 5.ª — `esquecerDescarte` — era redundante e foi REMOVIDA em vez de coberta). Achado ao testar: aceder a `window.sessionStorage` lança com os dados do site bloqueados, e estava num parâmetro por omissão.
+* **«Clientes Registados» lenta**: medi antes de mexer (seed de 15 000 clientes / 21 000 processos num `mongod` local): **31 s** para um Diretor (1,3 s para o Master, que salta a janela) — 30 000 pedidos, porque `so_o_que_a_janela_deixa_ver` resolvia o âmbito por cliente. Agora ~0,9 s. Cortes: âmbito resolvido uma vez (`e_visitante_no_ambito`); a janela lê só os clientes de fora (`$nor`); `personal_data` só da página; origem/tipo só da página; sem sort do Mongo (em memória, estável); fases terminais calculadas uma vez por (rede, estado). Ecrã: cancelamento do pedido anterior (`AbortController`). O ecrã já paginava (50). **Não feito, dito:** a agregação estrutural no Mongo; o custo restante é o agrupamento em memória e cresce com a carteira.
+* **Matriz dos extratos**: ver o bullet do AGENTS.md. **Pergunta do cliente («em que ficheiro? as contas dentro do extrato batem?») NÃO respondida sobre os ficheiros dele** — estão em produção, inalcançável daqui. O que se corrigiu é o que a matriz podia dizer: o ficheiro, o saldo linha a linha, a materialidade e o numerário fraccionado.
+
+Stage Summary:
+* **Operação:** nenhuma migração. Para a matriz ganhar o saldo linha a linha, os extratos já analisados têm de ser extraídos outra vez (`Extrair dados`), ou esperar pelo preenchimento lento; sem isso ficam na conferência dos totais (agora com o aviso de que não localiza).
+* **Por validar com o negócio:** o limiar de 250 € (`ATIPICO_DA_IA_MINIMO`) e a regra do numerário fraccionado (3 movimentos / 7 dias / 1.000 €) são pressupostos meus, não calibrados.
+
+
+---
+Task ID: caso-domus-sem-index-formulario-parceiro-out2026
+Agent: Cloud Agent
+Task: Caso Domus (rede sem Index: bypass, consultor à entrada, menu), formulário do Parceiro (2.º titular) e instruções do Render/Atlas
+
+Date: 2026-10-23
+
+Work Log:
+* **Bypass de estado:** já existia (`aplicar_regime_de_indexacao`); faltava prová-lo com DUAS redes na mesma base. `network_triage.rede_sem_index` passou a ser a regra pura e única (regime dos processos + `has_index` do ecrã).
+* **Consultor à entrada em rede sem Index:** `process_assignment.auto_assign_consultor_on_entry` (decide pelo documento: `index_dispensado_por`), ligada a `process_create` (ramo skip), `client_assign` e `client_process_ops.create_process`. Rede com Index: nada muda (P6). Achados laterais: `assign_to_least_busy_consultant` escrevia 3 dos 6 campos canónicos e o `create_process` do cliente só os singulares — corrigidos.
+* **Menu:** `/auth/me` → `capabilities.has_index` da rede da empresa em vigor; «Supervisão do Index» sai do menu (mesmo para o Master) e `/index` redirecciona (`RequerModuloIndex`).
+* **Formulário do Parceiro:** `compra_tipo` aceita sempre `individual`/`outra_pessoa`; dados do 2.º titular ligam-no no servidor; o ecrã decide o interruptor uma vez na hidratação. Causa do erro de produção é HIPÓTESE (configuração de opções do administrador) — não reproduzida com dados reais.
+* **Atlas/Render (Ponto 1):** ver `DEPLOY_RUNBOOK.md` Parte D e `scripts/diagnosticar_saida_para_atlas.py`. **D-13:** a fotografia continua POR PREENCHER (sem acesso a produção).
+
+Stage Summary:
+* **Operação:** nenhuma migração. Deploy dos DOIS serviços; no Atlas, acrescentar os IPs de saída do painel do Render (web e worker) antes de depender de `0.0.0.0/0` apagado; correr `diagnosticar_saida_para_atlas.py` em cada Shell.
+* **Por validar:** se a Domus tem mesmo ZERO utilizadores `indexacao` activos (é isso que a faz «sem Index»); a causa do erro do formulário na configuração real da rede do parceiro.

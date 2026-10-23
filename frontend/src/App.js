@@ -12,6 +12,7 @@ import GlobalUploadProgress from "./components/GlobalUploadProgress";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { eErroDeChunk, urlDeRecarregamento } from "./utils/chunkErrors";
 import { hasPermission, STAFF_ROLES, canAccessRoute, canAccessOrgAdmin } from "./utils/roleUtils";
+import RequerModuloIndex from "./components/RequerModuloIndex";
 import React, { Suspense, Component } from "react";
 import * as Sentry from "@sentry/react";
 import { FullPageSkeleton } from "./components/ui/skeletons";
@@ -526,9 +527,11 @@ function App() {
             path="/index"
             element={
               <ProtectedRoute allowedRoles={["master", "admin", "ceo", "diretor", "indexacao"]}>
-                <RouteBoundary name="Indexação">
-                  <IndexDashboardPage />
-                </RouteBoundary>
+                <RequerModuloIndex>
+                  <RouteBoundary name="Indexação">
+                    <IndexDashboardPage />
+                  </RouteBoundary>
+                </RequerModuloIndex>
               </ProtectedRoute>
             }
           />

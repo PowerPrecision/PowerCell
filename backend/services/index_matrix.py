@@ -49,6 +49,20 @@ RECORRENCIA_MINIMA = 3
 RECORRENCIA_VALOR_MINIMO = Decimal("100.00")
 #: Se o extrato chegou ao tecto de movimentos pode estar truncado: não se confere o saldo.
 TECTO_DE_MOVIMENTOS = 150
+#: O saldo CORRENTE (coluna de saldo após cada movimento) tolera só arredondamentos de cêntimos.
+TOLERANCIA_SALDO_CORRENTE = Decimal("0.02")
+#: Só se confere linha a linha se a coluna de saldo foi lida em pelo menos esta fracção dos movimentos
+#: (e em pelo menos 3): extratos que só imprimem o saldo no fim de cada dia não a têm em todas as linhas.
+FRACCAO_MINIMA_COM_SALDO = Decimal("0.8")
+MINIMO_DE_MOVIMENTOS_COM_SALDO = 3
+#: Um movimento que a IA aponta como «atípico» só conta a partir deste valor. Abaixo disto são os pequenos
+#: movimentos do dia-a-dia (50 €, 70 €…) que um analista de crédito não pede para confirmar; o que importa
+#: nos pequenos valores é o PADRÃO (recorrência, fragmentação), que o código calcula à parte.
+ATIPICO_DA_IA_MINIMO = Decimal("250.00")
+#: Fragmentação de numerário: este nº de movimentos em numerário, da mesma natureza, numa janela destes dias,
+#: cuja soma atinge `NUMERARIO_ATIPICO` (cada um abaixo dele) — o padrão de quem divide um depósito grande.
+FRAGMENTACAO_MINIMA = 3
+FRAGMENTACAO_JANELA_DIAS = 7
 
 
 def _dec(valor: Any) -> Optional[Decimal]:
@@ -270,6 +284,107 @@ def _ha_credito(liquido: Decimal, periodo: str, extratos: list[dict]) -> bool:
 # --------------------------------------------------------------------
 # extratos
 # --------------------------------------------------------------------
+def _sinal(m: dict) -> int:
+    return 1 if m.get("k") == "c" else -1
+
+
+def _quebras_do_saldo(ordem: list[dict], abertura: Optional[Decimal]) -> tuple[list[dict], Optional[Decimal]]:
+    """Percorre os movimentos NESTA ordem e devolve onde o saldo impresso não bate com a conta.
+
+    `esperado = saldo anterior ± movimento`; um movimento sem saldo impresso mantém a expectativa (não se
+    inventa um saldo). Devolve `(quebras, saldo_do_último_movimento)`.
+    """
+    quebras: list[dict] = []
+    anterior = abertura
+    for i, m in enumerate(ordem):
+        v = _dec(m.get("v"))
+        if v is None:
+            continue
+        impresso = _dec(m.get("s"))
+        esperado = None if anterior is None else anterior + _sinal(m) * v
+        if impresso is None:
+            anterior = esperado
+            continue
+        if esperado is not None and abs(esperado - impresso) > TOLERANCIA_SALDO_CORRENTE:
+            quebras.append({"i": i, "m": m, "anterior": anterior, "impresso": impresso, "esperado": esperado})
+        anterior = impresso
+    return quebras, anterior
+
+
+def _conferir_saldo_corrente(movimentos: list[dict], abertura: Optional[Decimal], fecho: Optional[Decimal]) -> Optional[str]:
+    """A conta LINHA A LINHA, como a faria um analista com o extrato à frente. `None` = não se aplica.
+
+    Só corre se a coluna de saldo foi lida (≥ 80 % dos movimentos). Experimenta a ordem do documento e a
+    inversa (há bancos que listam do mais recente para o mais antigo) e fica com a que menos quebras tem.
+    Devolve o texto da justificação se algo não bate, `""` se tudo bate, `None` se não é aplicável.
+    """
+    com_saldo = [m for m in movimentos if _dec(m.get("s")) is not None]
+    if len(com_saldo) < MINIMO_DE_MOVIMENTOS_COM_SALDO or Decimal(len(com_saldo)) < FRACCAO_MINIMA_COM_SALDO * len(movimentos):
+        return None
+    directa = _quebras_do_saldo(movimentos, abertura)
+    inversa = _quebras_do_saldo(movimentos[::-1], abertura)
+    ordem, (quebras, ultimo) = (movimentos, directa) if len(directa[0]) <= len(inversa[0]) else (movimentos[::-1], inversa)
+
+    frases: list[str] = []
+    for q in quebras:
+        m = q["m"]
+        natureza = "crédito" if m.get("k") == "c" else "débito"
+        origem = (
+            "o primeiro movimento não parte do saldo inicial"
+            if q["i"] == 0 and abertura is not None and q["anterior"] == abertura else "o saldo anterior era "
+            + _eur(q["anterior"])
+        )
+        frases.append(
+            f"no {natureza} de {_eur(_dec(m['v']))} a {_dia(m.get('d'))}{_pagina(m)}, {origem}; o saldo devia ficar em "
+            f"{_eur(q['esperado'])} mas o extrato indica {_eur(q['impresso'])} (diferença de "
+            f"{_eur(abs(q['esperado'] - q['impresso']))})"
+        )
+    fim = ""
+    if fecho is not None and ultimo is not None and len(movimentos) < TECTO_DE_MOVIMENTOS and abs(ultimo - fecho) > TOLERANCIA_SALDO:
+        fim = (
+            f" O saldo depois do último movimento ({_eur(ultimo)}) não coincide com o saldo final indicado "
+            f"({_eur(fecho)})."
+        )
+    if not frases and not fim:
+        return ""
+    texto = ""
+    if frases:
+        texto = (
+            f"Conferindo o saldo linha a linha, falha em {len(frases)} ponto(s): {_lista(frases)}. "
+            "Pode faltar um movimento ou ter sido lido um valor errado."
+        )
+    return (texto + fim).strip()
+
+
+def _fragmentacao_de_numerario(movimentos: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Janelas em que o numerário foi FRACCIONADO: vários movimentos pequenos que juntos passam o limiar."""
+    achados: list[tuple[str, list[dict]]] = []
+    for natureza, rotulo in (("c", "depósitos"), ("d", "levantamentos")):
+        pequenos = sorted(
+            (
+                (d, _dec(m.get("v")), m) for m in movimentos
+                if m.get("canal") == "numerario" and m.get("k") == natureza
+                and (d := _data(m.get("d"))) is not None and (v := _dec(m.get("v"))) is not None and v < NUMERARIO_ATIPICO
+            ),
+            key=lambda t: t[0],
+        )
+        i = 0
+        while i < len(pequenos):
+            janela = [t for t in pequenos[i:] if (t[0] - pequenos[i][0]).days < FRAGMENTACAO_JANELA_DIAS]
+            total = sum((t[1] for t in janela), Decimal(0))
+            if len(janela) >= FRAGMENTACAO_MINIMA and total >= NUMERARIO_ATIPICO:
+                achados.append((
+                    f"{len(janela)} {rotulo} em numerário entre {_dia(janela[0][0].isoformat())} e "
+                    f"{_dia(janela[-1][0].isoformat())}, no total de {_eur(total)} (cada um abaixo de "
+                    f"{_eur(NUMERARIO_ATIPICO)})",
+                    [t[2] for t in janela],
+                ))
+                i += len(janela)       # a janela seguinte começa depois desta: não se conta duas vezes
+            else:
+                i += 1
+    return achados
+
+
 def _verificar_extrato(e: dict) -> list[dict]:
     achados: list[dict] = []
     doc = e.get("document_id")
@@ -277,15 +392,31 @@ def _verificar_extrato(e: dict) -> list[dict]:
     movimentos = e.get("movimentos") or []
 
     abertura, fecho = _dec(e.get("opening")), _dec(e.get("closing"))
-    if None not in (abertura, fecho) and movimentos and len(movimentos) < TECTO_DE_MOVIMENTOS:
+    corrente = _conferir_saldo_corrente(movimentos, abertura, fecho) if movimentos else None
+    if corrente is not None:
+        # a conta linha a linha é mais exacta do que a dos totais: diz ONDE falha. Se ela bate, os totais
+        # (que são só o encadeamento das mesmas linhas) não precisam de segunda opinião.
+        if corrente:
+            achados.append(_achado("saldo_nao_bate", ref, None, corrente))
+    elif None not in (abertura, fecho) and movimentos and len(movimentos) < TECTO_DE_MOVIMENTOS:
         creditos = sum((_dec(m["v"]) or Decimal(0) for m in movimentos if m.get("k") == "c"), Decimal(0))
         debitos = sum((_dec(m["v"]) or Decimal(0) for m in movimentos if m.get("k") == "d"), Decimal(0))
         esperado = abertura + creditos - debitos
         if abs(esperado - fecho) > TOLERANCIA_SALDO:
+            pista = ""
+            if abertura == fecho:
+                # dois valores iguais ao cêntimo num extrato com movimentos quase nunca são verdade: o mais
+                # provável é o mesmo número lido duas vezes. Diz-se como pista, não como facto.
+                pista = (
+                    " O saldo final indicado é igual ao saldo inicial, o que costuma indicar o mesmo valor lido "
+                    "duas vezes — confirmar o saldo final no extrato."
+                )
             achados.append(_achado(
                 "saldo_nao_bate", ref, None,
                 f"Saldo inicial {_eur(abertura)} + créditos {_eur(creditos)} − débitos {_eur(debitos)} dá "
-                f"{_eur(esperado)}, mas o saldo final indicado é {_eur(fecho)} (diferença de {_eur(abs(esperado - fecho))}).",
+                f"{_eur(esperado)}, mas o saldo final indicado é {_eur(fecho)} (diferença de {_eur(abs(esperado - fecho))})."
+                f"{pista} Este extrato não traz o saldo linha a linha, pelo que não se localiza onde falha "
+                "(analisar de novo para o conferir movimento a movimento).",
             ))
 
     estranho: list[dict] = []
@@ -308,6 +439,8 @@ def _verificar_extrato(e: dict) -> list[dict]:
             continue
         for m in movimentos:
             mv = _dec(m.get("v"))
+            if mv is not None and mv < ATIPICO_DA_IA_MINIMO:
+                continue    # um movimento pequeno não é «atípico» por a IA o dizer; o padrão calcula-se à parte
             if mv is not None and abs(mv - v) <= Decimal("0.01") and (not a.get("d") or a["d"] == m.get("d")):
                 estranho.append(_ref(doc, m.get("page") or a.get("page")))
                 # o valor, a data e a página saem do MOVIMENTO (verificado); a nota é só a leitura do modelo
@@ -333,6 +466,9 @@ def _verificar_extrato(e: dict) -> list[dict]:
                 f"{len(vs)} movimentos de {_eur(RECORRENCIA_VALOR_MINIMO)} ou mais para a mesma contraparte, "
                 f"no total de {_eur(sum(vs, Decimal(0)))}"
             )
+    for frase, grupo in _fragmentacao_de_numerario(movimentos):
+        estranho.extend(_ref(doc, m.get("page")) for m in grupo)
+        razoes.append(frase)
     if estranho:
         achados.append(_achado("movimento_estranho", estranho, None, _lista(razoes) + "." if razoes else None))
     return achados

@@ -69,3 +69,33 @@ describe("camposAlterados", () => {
     expect(camposAlterados(inicial, { ...inicial, lead_status: "x", network_id: "y" }, PASSOS, { ligado: false })).toEqual({});
   });
 });
+
+describe("o formulário é inteligente: dados do 2.º titular ligam-no (QA, Out 2026)", () => {
+  it("com o esquema, qualquer campo do 2.º titular preenchido conta como ligado", () => {
+    expect(segundoTitularLigado({ compra_tipo: "individual", titular2_name: "Rui" }, PASSOS)).toBe(true);
+    expect(segundoTitularLigado({ titular2_nif: "232119867" }, PASSOS)).toBe(true);
+  });
+
+  it("sem dados nem valor no campo, não está ligado (e espaços não contam)", () => {
+    expect(segundoTitularLigado({ compra_tipo: "individual", titular2_name: "   " }, PASSOS)).toBe(false);
+    expect(segundoTitularLigado({ titular2_name: "" }, PASSOS)).toBe(false);
+  });
+
+  it("sem o esquema vale só o campo, como sempre", () => {
+    expect(segundoTitularLigado({ titular2_name: "Rui" })).toBe(false);
+  });
+
+  it("ligado por dados envia compra_tipo = outra_pessoa, mesmo que o campo diga outra coisa", () => {
+    const actuais = { ...{ name: "Joana", profissao: "Eng.", compra_tipo: "individual" }, titular2_name: "Rui" };
+    const inicial = { name: "Joana", profissao: "Eng.", compra_tipo: "individual" };
+    expect(camposAlterados(inicial, actuais, PASSOS, { ligado: true })).toEqual({
+      compra_tipo: "outra_pessoa",
+      titular2_name: "Rui",
+    });
+  });
+
+  it("desligado nunca acrescenta compra_tipo", () => {
+    const inicial = { name: "Joana", compra_tipo: "individual" };
+    expect(camposAlterados(inicial, { ...inicial, titular2_name: "Rui" }, PASSOS, { ligado: false })).toEqual({});
+  });
+});

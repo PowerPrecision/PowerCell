@@ -66,6 +66,8 @@ def _argumentos():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--csv", default=None, help="Escreve a tabela neste ficheiro.")
     p.add_argument("--so", default=None, help="Só estas colecções (separadas por vírgulas).")
+    p.add_argument("--markdown", action="store_true",
+                   help="Imprime também a tabela em Markdown, pronta a colar no worklog.md.")
     return p.parse_args()
 
 
@@ -157,6 +159,35 @@ def _imprimir(linhas: list[LinhaDaColeccao]) -> None:
     print("=" * 96)
 
 
+def _markdown(linhas: list[LinhaDaColeccao], base: str, agora: datetime) -> str:
+    """A «fotografia» para o `worklog.md`: data, nome da base e uma linha por colecção.
+
+    Leva o NOME da base (não o URL: traz credenciais) — uma fotografia sem a
+    base de onde saiu não distingue produção de desenvolvimento.
+    """
+    cab = "".join(f" >{d}d |" for d in ESCALOES_EM_DIAS)
+    linhas_md = [
+        f"**Fotografia D-13 — {agora:%Y-%m-%d %H:%M} UTC — base `{base}`**",
+        "",
+        f"| colecção | docs | dados | índices | B/doc | fatia |{cab} campo de data |",
+        "|---|---:|---:|---:|---:|---:|" + "---:|" * len(ESCALOES_EM_DIAS) + "---|",
+    ]
+    for l in ordenar_por_peso(linhas):
+        if not l.existe:
+            linhas_md.append(f"| {l.nome} | _(não existe)_ |" + " |" * (4 + len(ESCALOES_EM_DIAS)))
+            continue
+        fatias = []
+        for d in ESCALOES_EM_DIAS:
+            f = l.fatia_mais_antiga_que(d)
+            fatias.append(f"{f:.0%}" if f is not None else "—")
+        linhas_md.append(
+            f"| {l.nome} | {l.documentos} | {formatar_bytes(l.bytes_dados)} | "
+            f"{formatar_bytes(l.bytes_indices)} | {l.media_por_documento} | {fatia_do_total(l, linhas):.0%} | "
+            + " | ".join(fatias) + f" | {l.campo_de_data or (l.aviso or '—')} |"
+        )
+    return "\n".join(linhas_md)
+
+
 def main() -> int:
     args = _argumentos()
     nomes = list(COLECCOES_MEDIDAS)
@@ -175,6 +206,11 @@ def main() -> int:
         print("  Uma tabela vazia leria-se como «não pesa nada». Confirmar MONGO_URL/DB_NAME e repetir.")
         return 2
     _imprimir(linhas)
+    if args.markdown:
+        import os
+
+        print()
+        print(_markdown(linhas, os.environ.get("DB_NAME", "?"), datetime.now(timezone.utc)))
     if args.csv:
         with Path(args.csv).open("w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)

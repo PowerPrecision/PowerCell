@@ -218,6 +218,11 @@ async def run_get_me(request, user: dict):
         ),
     }
 
+    # ── Capacidades da REDE da empresa em vigor (Out 2026, caso Domus) ──
+    # `has_index` é DERIVADO da equipa (`network_triage.capacidades_da_rede`); o ecrã usa-o para não
+    # oferecer o módulo Index a uma rede que não o tem — nem ao Master. A parede continua a ser o servidor.
+    response["capabilities"] = await _capacidades_da_empresa_em_vigor(user, active_company_id)
+
     # Popular campos detalhados da empresa activa
     #
     # IMPORTANTE: Os campos active_company_* usam None (não "") como fallback
@@ -628,3 +633,23 @@ async def run_update_profile(data: dict, request, user: dict):
     if profile_warnings:
         response_data["warnings"] = profile_warnings
     return response_data
+
+
+async def _capacidades_da_empresa_em_vigor(user: dict, active_company_id) -> dict:
+    """``{"has_index": bool}`` da rede da empresa em vigor. **Nunca levanta** (é um enfeite do `/auth/me`).
+
+    A empresa em vigor é a da VISTA (`X-Company-Id` real: `vista_empresa_id`) e, para quem não é Master, a
+    activa. O Master sem empresa escolhida está na vista «Sistema» — todas as redes — e não herda a empresa
+    de `users.company`, que é um NOME legado e não uma escolha.
+    """
+    from services.network_triage import capacidades_da_rede, rede_da_empresa
+    from services.role_scope import conta_e_master
+
+    try:
+        referencia = user.get("vista_empresa_id")
+        if not referencia and not conta_e_master(user):
+            referencia = active_company_id
+        return await capacidades_da_rede(await rede_da_empresa(referencia))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[auth/me] Sem capacidades da rede: %s", exc)
+        return {"has_index": True}

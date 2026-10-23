@@ -206,6 +206,19 @@ async def restringir_a_equipa(consulta: dict, processo: Optional[dict]) -> dict:
 # ====================================================================
 # O REGIME DA REDE SEM INDEX (escritor de processos)
 # ====================================================================
+def rede_sem_index(rede: Any, com_index: Iterable[str]) -> bool:
+    """A regra, PURA: esta rede não tem o módulo Index, havendo Index noutras?
+
+    Sem rede conhecida NÃO é «sem Index» (sem saber de quem é, não se lhe tira o
+    Index) e sem NENHUMA rede com Index a regra não se liga (instalação nova,
+    dev, CI). É o único sítio onde isto se decide: o regime dos processos, a
+    atribuição à entrada e a capacidade que o ecrã recebe (`has_index`) saem
+    todos daqui — três respostas à mesma pergunta divergiam sem dar erro.
+    """
+    conjunto = {_texto(r) for r in com_index if _texto(r)}
+    return bool(_texto(rede)) and bool(conjunto) and _texto(rede) not in conjunto
+
+
 async def rede_do_processo_sem_index(processo: Optional[dict]) -> bool:
     """O dono é uma rede SEM Index, havendo Index noutras redes?
 
@@ -217,8 +230,43 @@ async def rede_do_processo_sem_index(processo: Optional[dict]) -> bool:
     rede = _texto(processo.get(CAMPO_REDE))
     if not rede or isinstance(processo.get(CAMPO_TRIAGEM), dict):
         return False
-    com_index = await redes_com_index()
-    return bool(com_index) and rede not in com_index
+    return rede_sem_index(rede, await redes_com_index())
+
+
+async def rede_da_empresa(empresa_ref: Any) -> Optional[str]:
+    """A rede de uma empresa dada pelo ID **ou** pelo nome (`X-Company-Id`, `users.company`).
+
+    ``None`` quando não se identifica nenhuma — nunca a rede de omissão: quem
+    pergunta decide o que fazer sem rede (aqui, não esconder nada).
+    """
+    ref = _texto(empresa_ref)
+    if not ref or ref.lower() in ("default", "all", "__all__"):
+        return None
+    try:
+        empresa = await db.companies.find_one(
+            {"$or": [{"id": ref}, {"name": ref}]},
+            {"_id": 0, "id": 1, "name": 1, CAMPO_REDE: 1},
+        )
+    except Exception as exc:
+        logger.warning("[INDEX] Falha a resolver a rede da empresa (%s).", exc)
+        return None
+    if not empresa:
+        return None
+    return resolve_network_id(empresa, company_id=empresa.get("id"))
+
+
+async def capacidades_da_rede(rede: Optional[str]) -> dict[str, bool]:
+    """O que a rede pode fazer, para o ecrã: ``{"has_index": bool}``.
+
+    ``has_index`` é DERIVADO da equipa (`redes_com_index`), não gravado. Sem
+    rede (vista «Sistema» do Master, conta antiga) o módulo fica à vista: é a
+    vista de quem supervisiona todas as redes. Uma leitura que falha também o
+    deixa à vista (um menu que desaparece por um soluço da base de dados é pior
+    do que um menu a mais; a parede é o servidor).
+    """
+    if not _texto(rede):
+        return {"has_index": True}
+    return {"has_index": not rede_sem_index(rede, await redes_com_index())}
 
 
 async def aplicar_regime_de_indexacao(process_doc: dict) -> bool:

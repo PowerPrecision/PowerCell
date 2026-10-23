@@ -187,7 +187,7 @@ async def _empresas_para_filtrar(base: dict) -> list[dict]:
 async def run_get_index_queue(
     user: dict, *, tab: str, page: int = 1, size: int = 25, q: Optional[str] = None,
     sort_by: Optional[str] = None, index_status: Optional[str] = None,
-    company_id: Optional[str] = None, origin: Optional[str] = None,
+    company_id: Optional[str] = None, origin: Optional[str] = None, mine: bool = False,
 ) -> dict[str, Any]:
     if tab not in ABAS:
         raise HTTPException(status_code=400, detail="Separador inválido")
@@ -204,6 +204,11 @@ async def run_get_index_queue(
             await condicao_de_processo_activo(),
         ],
     })
+    if mine:
+        # «Os Meus Processos»: só o que está atribuído a quem pergunta. Sem id de utilizador a condição NUNCA
+        # casa (`assigned_indexacao_id: None` casaria com todos os processos por atribuir — a lista de outra pessoa).
+        meu = (user or {}).get("id")
+        base = {"$and": [base, {"assigned_indexacao_id": meu} if meu else {"id": {"$in": []}}]}
     consulta = base
     dos_filtros = consulta_da_fila.condicao_dos_filtros(tab, filtros, scope)
     if dos_filtros:

@@ -314,6 +314,8 @@ export function parametrosDaFila({ tab, page, q, ordem, filtros }) {
   if (filtros?.estado) params.index_status = filtros.estado;
   if (filtros?.empresa) params.company_id = filtros.empresa;
   if (filtros?.origem) params.origin = filtros.origem;
+  // «Os Meus Processos» do Index: só o que está atribuído a quem pergunta (o servidor decide o «quem»)
+  if (filtros?.mine === true) params.mine = true;
   return params;
 }
 

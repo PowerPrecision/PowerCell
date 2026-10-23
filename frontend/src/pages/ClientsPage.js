@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 // PACOTE DG — removido import `safeLabel` (dropdown de Fase removido; clientes não têm fase).
 import { useAuth } from "../contexts/AuthContext";
@@ -196,32 +196,49 @@ export default function ClientsPage() {
     return params;
   }, [searchTerm, fonteFilter, tipoFilter, statusFilter, parceiroFilter, showDeleted, verHistorico, sortField, sortOrder]);
 
-  const pedirClientes = useCallback(async (numero, tamanho) => {
+  const pedirClientes = useCallback(async (numero, tamanho, signal) => {
     const token = localStorage.getItem("token");
     return fetch(`${API_URL}/clients?${parametrosDaLista(numero, tamanho)}`, {
       headers: { Authorization: `Bearer ${token}`, ...cabecalhosDeContexto() },
+      signal,
     });
   }, [parametrosDaLista]);
 
+  // O pedido da lista que está em curso. A lista é pesada (o servidor agrupa a carteira toda antes de
+  // paginar): se o utilizador muda de página, de filtro ou de ordem enquanto um pedido ainda corre, a
+  // resposta ANTIGA pode chegar depois da nova e pisá-la — o ecrã mostrava a lista de um filtro que já não
+  // estava escolhido. Cada pedido novo cancela o anterior e só o último escreve no ecrã.
+  const pedidoDaListaRef = useRef(null);
+  useEffect(() => () => pedidoDaListaRef.current?.abort(), []);
+
   const fetchClients = useCallback(async () => {
+    pedidoDaListaRef.current?.abort();
+    const controlador = new AbortController();
+    pedidoDaListaRef.current = controlador;
+    const eOUltimo = () => pedidoDaListaRef.current === controlador && !controlador.signal.aborted;
     try {
-      const response = await pedirClientes(pagina, TAMANHO_DA_PAGINA);
+      const response = await pedirClientes(pagina, TAMANHO_DA_PAGINA, controlador.signal);
+      if (!eOUltimo()) return;
 
       if (response.ok) {
         const data = await response.json();
+        if (!eOUltimo()) return;
         setClients(data.clients || []);
         setTotal(Number.isFinite(data.total) ? data.total : (data.clients || []).length);
         setTotalHistorico(Number.isFinite(data.total_historico) ? data.total_historico : 0);
         // PACOTE DG — removido `setAvailablePhases(data.available_statuses || [])` (dropdown de Fase removido).
       } else {
         const errorData = await response.json().catch(() => ({}));
+        if (!eOUltimo()) return;
         toast.error(extractErrorMessage(errorData.detail, "Erro ao carregar clientes"));
       }
     } catch (error) {
+      // um pedido cancelado por outro mais recente não é um erro: o utilizador não fez nada de mal
+      if (error?.name === "AbortError" || !eOUltimo()) return;
       console.error("Erro ao carregar clientes:", error);
       toast.error("Erro ao carregar clientes");
     } finally {
-      setLoading(false);
+      if (eOUltimo()) setLoading(false);
     }
   }, [pedirClientes, pagina]);
 

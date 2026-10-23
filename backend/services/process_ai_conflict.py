@@ -14,6 +14,7 @@ from fastapi import HTTPException
 
 from database import db
 from services.audit_cdc import inject_cdc_context
+from services.nascimento_protegido import proteger_caminhos
 from utils.input_sanitization import (
     sanitize_email,
     sanitize_name,
@@ -124,9 +125,10 @@ def apply_ai_conflict_choice(
             field, suggestion.get("suggested"),
         )
         field_path = suggestion.get("field_path", field)
-        update_data.update(
+        # D-15: aceitar a data de nascimento sugerida grava-a cifrada.
+        update_data.update(proteger_caminhos(
             build_ai_accept_update_fields(field, field_path, resolved_value),
-        )
+        ))
 
     remaining = list(ai_suggestions)
     remaining.pop(suggestion_index)

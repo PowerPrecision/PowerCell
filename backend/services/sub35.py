@@ -45,9 +45,16 @@ apoios à habitação jovem (isenção de IMT/IS e garantia pública), e foi o
 que o dono do produto confirmou. ``check_age_alert`` passa a derivar
 daqui, o que corrige o tal ano de clientes que ficava de fora.
 
-A data de nascimento NÃO é encriptada em repouso (não está nas
-``SENSITIVE_FIELDS``), ao contrário do NIF. É o que permite comparar no
-Mongo — e é dívida técnica registada (D-15), não um desenho.
+A data de nascimento É encriptada em repouso (D-15 fechada, Out 2026), como
+o NIF. O que permite continuar a filtrar no Mongo é o campo derivado
+``birth_year`` (o ANO, inteiro, em claro, gravado ao lado da data cifrada —
+ver ``services/nascimento_protegido.py``): a ETIQUETA decifra a data e usa o
+predicado exacto; o FILTRO usa o ano e é, de propósito, mais estrito (o ano da
+margem, ``hoje.year - 36``, depende do dia e do mês e fica de fora).
+
+Os documentos ainda por migrar (data em texto simples, sem ``birth_year``)
+continuam a casar pelos ramos de data de sempre — a ordem deploy → migração
+não importa.
 """
 from __future__ import annotations
 
@@ -55,6 +62,8 @@ import logging
 import unicodedata
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Optional
+
+from services.encryption import CAMPOS_DE_NASCIMENTO_CIFRADOS, decrypt_value, is_encrypted
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +78,12 @@ IDADE_MAXIMA_INCLUSIVE = 35
 IDADE_EXCLUSIVA = IDADE_MAXIMA_INCLUSIVE + 1
 
 #: Os dois nomes do mesmo campo. Ler só um é como o defeito nasceu.
-CAMPOS_DE_NASCIMENTO = ("birth_date", "data_nascimento")
+CAMPOS_DE_NASCIMENTO = CAMPOS_DE_NASCIMENTO_CIFRADOS
+
+#: O ANO de nascimento (inteiro, em claro), gravado ao lado da data cifrada
+#: de cada pessoa (D-15). Alimenta SÓ o filtro do Mongo; a etiqueta decifra a
+#: data. Quem escreve o campo é `nascimento_protegido`.
+CAMPO_DO_ANO = "birth_year"
 
 #: Onde a data vive num PROCESSO (por ordem de confiança).
 SECCOES_DO_PROCESSO = ("personal_data",)
@@ -170,6 +184,15 @@ def data_iso(valor: Any) -> Optional[str]:
         return valor.isoformat()
     if not isinstance(valor, str):
         return None
+
+    # D-15: a data está cifrada em repouso. Abre-se AQUI, no ponto único que
+    # interpreta uma data — assim a etiqueta é a mesma venha o documento
+    # decifrado (detalhe) ou cru (listagens que não decifram nada). Uma cifra
+    # que não abre (chave diferente) é «data desconhecida», que bloqueia.
+    if is_encrypted(valor):
+        valor = decrypt_value(valor)
+        if not isinstance(valor, str) or is_encrypted(valor):
+            return None
 
     texto = valor.strip()
     if not texto:
@@ -516,6 +539,33 @@ def intervalo_de_nascimento(hoje: Optional[date] = None) -> tuple[str, str]:
     return inicio.isoformat(), fim.isoformat()
 
 
+def intervalo_de_anos(hoje: Optional[date] = None) -> tuple[int, int]:
+    """Os anos de nascimento em que TODOS os nascidos são Sub35, `[lo, hi]` inclusive.
+
+    - `lo = hoje.year - 35`: quem nasceu a 1 de Janeiro desse ano faz 35 este
+      ano e quem nasceu a 31 de Dezembro faz 34 ou 35 — sempre elegível;
+    - `hi = hoje.year - 1`: o ano corrente fica de fora porque, sem o dia,
+      não se distingue um bebé de uma data no futuro (gralha de introdução).
+
+    **O ano `hoje.year - 36` NÃO entra**: é a margem — quem faz anos depois de
+    hoje ainda tem 35, quem já fez tem 36 — e o filtro já não vê o dia. A
+    etiqueta (data decifrada) continua a acertar nesses casos; o filtro por
+    ano é estrito, nunca mostra uma linha sem etiqueta.
+    """
+    referencia = _hoje(hoje)
+    return referencia.year - IDADE_MAXIMA_INCLUSIVE, referencia.year - 1
+
+
+def _ramo_do_ano(caminho_da_pessoa: str, lo: int, hi: int) -> dict:
+    """O ramo `birth_year ∈ [lo, hi]` de uma pessoa (secção, elemento da lista ou raiz).
+
+    `caminho_da_pessoa` é o prefixo (`personal_data`) ou vazio, para a raiz e
+    para os elementos de uma lista dentro de um `$elemMatch`.
+    """
+    campo = f"{caminho_da_pessoa}.{CAMPO_DO_ANO}" if caminho_da_pessoa else CAMPO_DO_ANO
+    return {campo: {"$gte": lo, "$lte": hi}}
+
+
 def _ramos_do_campo(caminho: str, inicio: str, fim: str) -> list[dict]:
     inicio_dt = datetime.strptime(inicio, _FORMATO_ISO)
     fim_dt = datetime.strptime(fim, _FORMATO_ISO)
@@ -576,9 +626,12 @@ def condicao_sem_comprador_bloqueador(hoje: Optional[date] = None) -> dict:
     teste de concordância, não deixada à sorte.
     """
     inicio, fim = intervalo_de_nascimento(hoje)
+    lo, hi = intervalo_de_anos(hoje)
     ramos_com_data_sub35: list[dict] = []
     for campo in CAMPOS_DE_NASCIMENTO:
         ramos_com_data_sub35.extend(_ramos_do_campo(campo, inicio, fim))
+    # D-15: a data está cifrada, o que lá fica em claro é o ano.
+    ramos_com_data_sub35.append(_ramo_do_ano("", lo, hi))
 
     bloqueia = {
         "$and": [
@@ -611,18 +664,22 @@ def condicao_sub35(
     sobre o processo inteiro — a mesma precedência do predicado.
     """
     inicio, fim = intervalo_de_nascimento(hoje)
+    lo, hi = intervalo_de_anos(hoje)
 
     def ramos_das_datas(secs: Iterable[str]) -> list[dict]:
         ramos: list[dict] = []
         for seccao in secs:
             for campo in CAMPOS_DE_NASCIMENTO:
                 ramos.extend(_ramos_do_campo(f"{seccao}.{campo}", inicio, fim))
+            # D-15: o ano (em claro) de quem já tem a data cifrada.
+            ramos.append(_ramo_do_ano(seccao, lo, hi))
         return ramos
 
     # Titular 1: nas secções pedidas e, em recurso, na raiz do documento.
     ramos_titular1 = ramos_das_datas(seccoes)
     for campo in CAMPOS_DE_NASCIMENTO:
         ramos_titular1.extend(_ramos_do_campo(campo, inicio, fim))
+    ramos_titular1.append(_ramo_do_ano("", lo, hi))
 
     # O 2.º titular não bloqueia: ou não existe, ou é ele próprio Sub35.
     titular2_ok = {

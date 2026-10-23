@@ -55,6 +55,7 @@ import CreateProcessModal from "../components/CreateProcessModal";
 // PACOTE CX — ClientDetailsModal para popup de detalhes ao clicar no nome
 import ClientDetailsModal from "../components/ClientDetailsModal";
 import { useAuth } from "../contexts/AuthContext";
+import OsMeusProcessosDoIndex from "./index/OsMeusProcessosDoIndex";
 import BotaoComPermissao from "../components/shared/BotaoComPermissao";
 import { CRIAR_PROCESSO, EXPORTAR_PROCESSO } from "../utils/capacidades";
 import { safeString } from "../utils/safeString";
@@ -77,7 +78,7 @@ const roleLabels = {
   admin: "Administrador",
 };
 
-const ProcessesPage = () => {
+const ProcessesPageCompleta = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1339,6 +1340,17 @@ const ProcessesPage = () => {
       </AlertDialog>
     </DashboardLayout>
   );
+};
+
+/**
+ * «Os Meus Processos» tem duas caras. Quem trabalha como Index (perfil EFECTIVO, não o da conta: um consultor
+ * que entra como Index vê o que um Index vê) faz triagem e precisa de Processo, Empresa/Origem, Estado,
+ * Documentos, Alertas e Entrada; os restantes perfis têm a tabela de acompanhamento de negócios.
+ * A decisão vive aqui, num só sítio, antes de qualquer hook da página completa (as regras dos hooks).
+ */
+const ProcessesPage = () => {
+  const { effectiveRole } = useAuth();
+  return effectiveRole === "indexacao" ? <OsMeusProcessosDoIndex /> : <ProcessesPageCompleta />;
 };
 
 export default ProcessesPage;

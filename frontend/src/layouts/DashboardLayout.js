@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { retirarModuloIndex } from "../utils/capacidadesDaRede";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate, Link, useLocation } from "react-router-dom";
 import { Button } from "../components/ui/button";
@@ -584,7 +585,8 @@ const DashboardLayout = ({ children, title }) => {
     return { main: [dashboardItem], groups: [], showAdminButton: false };
   };
 
-  const navData = getNavItems();
+  // Rede sem o módulo Index (ex.: Domus): «Supervisão do Index» sai do menu, mesmo para o Master.
+  const navData = retirarModuloIndex(getNavItems(), user);
 
   // O grupo que contém a ligação da rota actual abre-se, qualquer que seja o perfil: decide-se a
   // partir do PRÓPRIO menu, não de uma lista de rotas à parte (o `/index` e o `/validades` do

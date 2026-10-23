@@ -44,19 +44,26 @@ except ImportError:
     logger.warning("Biblioteca cryptography não instalada. Encriptação desativada.")
 
 
+#: A data de nascimento (D-15). Os DOIS nomes do mesmo campo, definidos AQUI
+#: porque `sub35` (que decide a idade) importa deste módulo e não o inverso —
+#: uma segunda lista escrita à mão divergiria da primeira sem dar erro. O
+#: ano (`birth_year`) que fica em claro ao lado da data cifrada é carimbado por
+#: `nascimento_protegido.acrescentar_ano_de_nascimento`.
+CAMPOS_DE_NASCIMENTO_CIFRADOS = ("birth_date", "data_nascimento")
+
 # Campos sensíveis por secção
 # PACOTE DD — adicionado `iban` e `conta_bancaria` a financial_data (PII bancário
 # RGPD). Mantém consistência com encrypt_sensitive_data/decrypt_sensitive_data
 # em services/process_service.py (caminho live usado pelas rotas).
 SENSITIVE_FIELDS = {
-    "personal_data": ["nif", "documento_id", "morada_fiscal", "phone"],
-    "titular2_data": ["nif", "documento_id", "phone"],
+    "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", *CAMPOS_DE_NASCIMENTO_CIFRADOS],
+    "titular2_data": ["nif", "documento_id", "phone", *CAMPOS_DE_NASCIMENTO_CIFRADOS],
     "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif", "iban", "conta_bancaria"],
     "vendedor": ["nif", "documento_id", "phone"],
     "intermediario": ["nif", "phone"],
-    "co_buyers": ["nif", "documento_id", "phone"],
-    "co_applicants": ["nif"],
-    "root": ["client_phone", "client_nif"]  # Campos no nível raiz do processo
+    "co_buyers": ["nif", "documento_id", "phone", *CAMPOS_DE_NASCIMENTO_CIFRADOS],
+    "co_applicants": ["nif", *CAMPOS_DE_NASCIMENTO_CIFRADOS],
+    "root": ["client_phone", "client_nif", *CAMPOS_DE_NASCIMENTO_CIFRADOS]  # Campos no nível raiz do processo
 }
 
 
@@ -227,8 +234,12 @@ class EncryptionService:
         if not self.is_available() or not process:
             return process
         
-        result = process.copy()
-        
+        result = copy.deepcopy(process)
+
+        # D-15: o ano fica em claro ao lado da data, que vai cifrada. ANTES de
+        # cifrar — o ano sai do valor original.
+        _acrescentar_ano_de_nascimento(result)
+
         # Encriptar campos no nível raiz
         for field in SENSITIVE_FIELDS.get("root", []):
             if field in result and result[field]:
@@ -477,10 +488,17 @@ def generate_email_hash(email: str) -> str:
 
 # Campos sensíveis na coleção 'clients'
 CLIENT_SENSITIVE_FIELDS = {
-    "dados_pessoais": ["nif", "documento_id", "morada_fiscal", "telefone", "phone"],
+    "dados_pessoais": ["nif", "documento_id", "morada_fiscal", "telefone", "phone", *CAMPOS_DE_NASCIMENTO_CIFRADOS],
     "contacto": ["telefone", "telefone_secundario", "phone"],
-    "titular2_data": ["nif", "documento_id", "telefone", "phone"],
+    "titular2_data": ["nif", "documento_id", "telefone", "phone", *CAMPOS_DE_NASCIMENTO_CIFRADOS],
 }
+
+
+def _acrescentar_ano_de_nascimento(doc) -> None:
+    """Carimba `birth_year` (D-15). Import tardio: `nascimento_protegido` importa deste módulo."""
+    from services.nascimento_protegido import acrescentar_ano_de_nascimento
+
+    acrescentar_ano_de_nascimento(doc)
 
 
 def encrypt_client_data(data: dict) -> dict:
@@ -511,12 +529,15 @@ def encrypt_client_data(data: dict) -> dict:
         # Mesmo sem encriptação, gerar blind indexes
         result = data.copy()
         _add_client_blind_indexes(result)
+        _acrescentar_ano_de_nascimento(result)
         return result
     
     result = copy.deepcopy(data)
     
     # Gerar blind indexes ANTES de encriptar
     _add_client_blind_indexes(result)
+    # D-15: o ano (em claro) ao lado da data de nascimento (cifrada).
+    _acrescentar_ano_de_nascimento(result)
     
     # Encriptar dados_pessoais
     if "dados_pessoais" in result and isinstance(result["dados_pessoais"], dict):
@@ -545,7 +566,12 @@ def encrypt_client_data(data: dict) -> dict:
     # Encriptar campo nif no nível raiz (se existir - compatibilidade)
     if "nif" in result and result["nif"]:
         result["nif"] = encryption_service.encrypt(str(result["nif"]))
-    
+
+    # A data de nascimento na raiz (documentos antigos) — D-15.
+    for field in CAMPOS_DE_NASCIMENTO_CIFRADOS:
+        if field in result and result[field]:
+            result[field] = encryption_service.encrypt(str(result[field]))
+
     return result
 
 
@@ -681,7 +707,11 @@ def decrypt_client_data(data: dict) -> dict:
     # Desencriptar campo nif no nível raiz (se existir)
     if "nif" in result and result["nif"]:
         result["nif"] = decrypt_field(result["nif"])
-    
+
+    for field in CAMPOS_DE_NASCIMENTO_CIFRADOS:
+        if field in result and result[field]:
+            result[field] = decrypt_field(result[field])
+
     return result
 
 

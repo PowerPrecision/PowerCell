@@ -252,7 +252,8 @@ class TestOFiltro:
         for ramo in _folhas(condicao_sub35(HOJE)):
             (expressao,) = ramo.values()
             if isinstance(expressao, dict) and "$gte" in expressao:
-                assert "$lt" in expressao, ramo
+                # Os ramos de DATA fecham com `$lt`; o ano (D-15) é inteiro e fecha com `$lte`.
+                assert "$lt" in expressao or "$lte" in expressao, ramo
 
     def test_a_condicao_inclui_as_marcas_manuais(self):
         cond = condicao_sub35(HOJE)

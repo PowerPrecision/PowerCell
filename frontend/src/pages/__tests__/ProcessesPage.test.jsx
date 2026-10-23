@@ -293,9 +293,10 @@ describe("ProcessesPage — a forma dos dados reais", () => {
 });
 
 describe("ProcessesPage — os botões fantasma (ligação do Lote 6)", () => {
-  it("o perfil index não vê o botão de criar activo", async () => {
-    papelActivo = "indexacao";
-    capacidadesPorPapel = { indexacao: { PROCESS_CREATE: false } };
+  it("um perfil sem a capacidade de criar não vê o botão activo", async () => {
+    // (o Index tem a sua própria tabela — `OsMeusProcessosDoIndex.test.jsx` — e PODE criar processos)
+    papelActivo = "administrativo";
+    capacidadesPorPapel = { administrativo: { PROCESS_CREATE: false } };
     montar();
     await screen.findByText("Ana Martins");
     const botao = screen.queryByRole("button", { name: /novo processo/i });
@@ -342,16 +343,14 @@ describe("ProcessesPage — interacção", () => {
     });
   });
 
-  it("o Index abre a BANCADA do processo (/index/:id), sem contexto de navegação", async () => {
+  it("o Index NÃO usa esta tabela: tem a sua (colunas de triagem)", async () => {
     papelActivo = "indexacao";
     caminho = "/processos";
-    const utilizador = userEvent.setup();
     montar();
-    const linha = (await screen.findByText("Ana Martins")).closest("tr");
-    await utilizador.click(linha);
-    await waitFor(() => expect(navegar).toHaveBeenCalled());
-    expect(navegar).toHaveBeenCalledWith("/index/p1");
-    expect(navegar.mock.calls.some(([d]) => String(d).startsWith("/process/"))).toBe(false);
+    // a tabela de acompanhamento de negócios não se desenha para o Index
+    await waitFor(() => expect(screen.queryByText("Notas do Consultor")).not.toBeInTheDocument());
+    expect(api.getMyProcesses).not.toHaveBeenCalled();
+    expect(api.getProcesses).not.toHaveBeenCalled();
   });
 
   it("contraprova: os outros perfis continuam a abrir o detalhe do processo", async () => {

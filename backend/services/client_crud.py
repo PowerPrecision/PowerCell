@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 
 from services.client_portal_email import _send_portal_welcome_email_safe
 from services.encryption import limpar_blind_indexes_de_campos_vazios
+from services.nascimento_protegido import proteger_caminhos
 from services.campos_limpaveis import (
     aliases_a_limpar_no_cliente,
     campos_pessoais_limpos,
@@ -649,9 +650,10 @@ async def run_update_client(
                     process_sync[dst_key] = sanitized_dados_pessoais[src_key]
 
         if process_sync:
+            # D-15: a data de nascimento segue cifrada (e com o ano ao lado).
             await db.processes.update_many(
                 {"id": {"$in": process_ids}},
-                {"$set": process_sync}
+                {"$set": proteger_caminhos(process_sync)}
             )
             logger.info(f"Sincronizados dados para {len(process_ids)} processos do cliente {client_id}: {list(process_sync.keys())}")
 

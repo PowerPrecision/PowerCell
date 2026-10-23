@@ -9,12 +9,14 @@ e suporta Segundos Titulares. O que se prova:
   2. a edição é por lista positiva e por TIPO (NIF, email, data, opção…),
      tudo validado antes de escrever o que quer que seja;
   3. o 2.º titular liga-se por `compra_tipo = outra_pessoa`; desligar apaga
-     os seus dados; preencher sem ligar é 400;
+     os seus dados; preencher sem ligar liga sozinho (individual expresso + dados é 400);
   4. só se edita o que ainda é do parceiro (rascunho, devolvida, lead sem
      processo) — um processo é da equipa e uma lead expirada não se trabalha;
   5. a PII fica cifrada e os blind indexes são recalculados.
 """
 from __future__ import annotations
+
+import copy
 
 import pytest
 from fastapi import HTTPException
@@ -271,14 +273,88 @@ class TestSegundoTitular:
         form = await pcf.run_get_client_form(PT1, cid)
         assert form["segundo_titular"] is True and form["values"]["titular2_name"] == "Rui Silva"
 
-    async def test_preencher_sem_ligar_e_400(self, com_form):
+    async def test_preencher_sem_ligar_liga_sozinho(self, com_form):
+        """Bug do QA: «escolha uma das opções» a quem JÁ estava a preencher o 2.º titular.
+
+        Dados do 2.º titular implicam «com outra pessoa» — a escolha é consequência, não um passo esquecível.
+        """
+        import services.partner_client_form as pcf
+        from services.encryption import decrypt_client_data
+
+        cid = await _rascunho(com_form)
+        r = await pcf.run_save_client_form(PT1, cid, _guardar({"titular2_name": "Rui", "titular2_email": "rui@c.pt"}))
+        assert r["segundo_titular"] is True
+        ficha = decrypt_client_data(_doc(com_form, cid))
+        assert ficha["dados_pessoais"]["compra_tipo"] == "outra_pessoa"
+        assert ficha["titular2_data"]["name"] == "Rui"
+        assert (await pcf.run_get_client_form(PT1, cid))["segundo_titular"] is True
+
+    async def test_individual_expresso_com_dados_do_segundo_titular_e_contradicao(self, com_form):
         import services.partner_client_form as pcf
 
         cid = await _rascunho(com_form)
         with pytest.raises(HTTPException) as erro:
-            await pcf.run_save_client_form(PT1, cid, _guardar({"titular2_name": "Rui"}))
-        assert erro.value.status_code == 400
+            await pcf.run_save_client_form(PT1, cid, _guardar({"compra_tipo": "individual", "titular2_name": "Rui"}))
+        assert erro.value.status_code == 400 and "individual" in erro.value.detail
         assert not _doc(com_form, cid).get("titular2_data")
+
+    async def test_limpar_campos_de_um_segundo_titular_desligado_nao_e_erro(self, com_form):
+        import services.partner_client_form as pcf
+
+        cid = await _rascunho(com_form)
+        r = await pcf.run_save_client_form(PT1, cid, _guardar({"titular2_name": ""}))
+        assert r["segundo_titular"] is False
+        assert not _doc(com_form, cid).get("titular2_data")
+
+    async def test_nome_em_falta_continua_a_ser_exigido_quando_so_ha_outros_dados(self, com_form):
+        import services.partner_client_form as pcf
+
+        cid = await _rascunho(com_form)
+        with pytest.raises(HTTPException) as erro:
+            await pcf.run_save_client_form(PT1, cid, _guardar({"titular2_email": "rui@c.pt"}))
+        assert erro.value.status_code == 400 and "nome do 2.º titular" in erro.value.detail
+
+    @pytest.mark.parametrize("opcoes", [[], ["Individual", "Com outra pessoa"], [{"value": "sozinho", "label": "Sozinho"}]])
+    async def test_o_interruptor_funciona_com_qualquer_configuracao_das_opcoes(self, com_form, opcoes):
+        """Causa provável do erro em produção: o administrador configurou `compra_tipo` com outras opções (ou
+        nenhuma) e o valor que o interruptor envia, «outra_pessoa», deixou de ser uma delas."""
+        import services.partner_client_form as pcf
+        from services.public_form_config import load_merged_form_fields as original
+
+        async def configurado(rede):
+            campos = copy.deepcopy(await original(rede))  # nunca mexer nos objectos partilhados dos defaults
+            for c in campos:
+                if c["field_key"] == "compra_tipo":
+                    c["options"] = opcoes
+            return campos
+
+        cid = await _rascunho(com_form)
+        antigo = pcf.load_merged_form_fields
+        pcf.load_merged_form_fields = configurado
+        try:
+            r = await pcf.run_save_client_form(PT1, cid, _guardar({"compra_tipo": "outra_pessoa", "titular2_name": "Rui"}))
+            assert r["segundo_titular"] is True
+            r = await pcf.run_save_client_form(PT1, cid, _guardar({"compra_tipo": "individual"}))
+            assert r["segundo_titular"] is False
+        finally:
+            pcf.load_merged_form_fields = antigo
+
+    async def test_outro_campo_de_selecao_continua_a_exigir_uma_das_opcoes(self, com_form):
+        """A tolerância é só para o campo que liga o 2.º titular — não abre a validação das restantes opções."""
+        import services.partner_client_form as pcf
+
+        cid = await _rascunho(com_form)
+        with pytest.raises(HTTPException) as erro:
+            await pcf.run_save_client_form(PT1, cid, _guardar({"estado_civil": "marciano"}))
+        assert erro.value.status_code == 400 and "escolha uma das opções" in erro.value.detail
+
+    async def test_um_valor_invalido_em_compra_tipo_continua_recusado(self, com_form):
+        import services.partner_client_form as pcf
+
+        cid = await _rascunho(com_form)
+        with pytest.raises(HTTPException) as erro:
+            await pcf.run_save_client_form(PT1, cid, _guardar({"compra_tipo": "talvez"}))
+        assert erro.value.status_code == 400
 
     async def test_ligado_exige_o_nome_do_segundo_titular(self, com_form):
         import services.partner_client_form as pcf

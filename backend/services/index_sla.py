@@ -9,7 +9,7 @@ saber. Mas nem todo o processo parado é igual, e tratá-los da mesma maneira se
   outro indexador da equipa (a mesma regra de carga da atribuição normal). Nada se perde: não há trabalho
   em curso.
 * **Nível 2 — estagnado.** O indexador já começou (`in_review`) e o processo não tem actividade há mais de
-  `INDEX_SLA_STALE_DAYS` dias (5) → **NÃO se retira a atribuição** (há trabalho feito: metadados editados,
+  `INDEX_SLA_STALE_DAYS` DIAS ÚTEIS (5; sábados e domingos não contam) → **NÃO se retira a atribuição** (há trabalho feito: metadados editados,
   ficheiros, análises — reatribuir deitá-lo fora ou entregá-lo a quem não o conhece). Gera-se um alerta ao
   indexador e à chefia da rede do processo, repetido de `INDEX_SLA_STALE_DAYS` em `INDEX_SLA_STALE_DAYS`
   enquanto continuar parado, e que recomeça se houver actividade e voltar a parar.
@@ -32,7 +32,12 @@ REGRAS QUE NÃO SE PODEM PERDER
 5. **Só processos activos** (fase não terminal do workflow da rede dona) e nunca os de Via Verde / indexados.
 6. **O alerta de estagnação chega a pessoas por id**: o indexador atribuído e a gestão DA REDE do processo
    (`alert_audience`, que falha fechada sem rede determinável) — a chefia de outra rede nunca vê o cliente.
-7. **Tudo se pode desligar** (`INDEX_SLA_ENABLED=false`) e todos os limiares são configuráveis; um valor
+7. **O nível 2 conta TEMPO ÚTIL, não dias de calendário** (`tempo_util`): as horas que caem num sábado ou
+   domingo (hora de Lisboa) não contam. Um processo com a última actividade à sexta às 17:00 só está
+   estagnado à sexta seguinte às 17:00, e nunca por causa de um fim-de-semana. **Os feriados não contam como
+   não úteis** (não há calendário de feriados no sistema): um feriado a meio da semana conta como dia útil.
+   O nível 1 (48 h sem pegar) continua em horas de calendário — não foi pedido mudá-lo.
+8. **Tudo se pode desligar** (`INDEX_SLA_ENABLED=false`) e todos os limiares são configuráveis; um valor
    inválido ou ≤ 0 cai na omissão (nunca desliga um limiar). O ciclo nunca levanta por causa de um processo.
 """
 from __future__ import annotations
@@ -41,6 +46,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from database import db
 from services import index_status as estado_do_index
@@ -96,6 +102,44 @@ def _para_datetime(valor: Any) -> Optional[datetime]:
 # ====================================================================
 # PURO
 # ====================================================================
+#: Onde se decide o que é fim-de-semana: o sábado de Lisboa não é o sábado de UTC.
+FUSO_DOS_DIAS_UTEIS = ZoneInfo("Europe/Lisbon")
+#: Um tecto para o laço dia a dia: uma data absurda (ano 1970) não pode pendurar o job.
+TECTO_DE_DIAS_A_PERCORRER = 3650
+
+
+def tempo_util(desde: datetime, ate: datetime) -> timedelta:
+    """O tempo decorrido entre dois momentos SEM as horas de sábado e domingo (hora de Lisboa). Pura.
+
+    `desde` depois de `ate` dá zero. Percorre dia a dia (os dias úteis contam inteiros, os de
+    fim-de-semana contam zero), pelo que a hora do dia em que a contagem começa é respeitada: sexta às
+    17:00 + 5 dias úteis = sexta seguinte às 17:00, e não a quarta.
+    """
+    if ate <= desde:
+        return timedelta(0)
+    inicio, fim = desde.astimezone(FUSO_DOS_DIAS_UTEIS), ate.astimezone(FUSO_DOS_DIAS_UTEIS)
+    total = timedelta(0)
+    dia = inicio.date()
+    ultimo = fim.date()
+    percorridos = 0
+    while dia <= ultimo and percorridos < TECTO_DE_DIAS_A_PERCORRER:
+        if dia.weekday() < 5:  # segunda a sexta
+            comeca = max(inicio, datetime.combine(dia, datetime.min.time(), tzinfo=FUSO_DOS_DIAS_UTEIS))
+            acaba = min(fim, datetime.combine(dia + timedelta(days=1), datetime.min.time(), tzinfo=FUSO_DOS_DIAS_UTEIS))
+            if acaba > comeca:
+                # a diferença entre dois `aware` no mesmo fuso é de relógio de parede; a mudança de hora
+                # (±1 h duas vezes por ano) é ruído aceitável num prazo de dias
+                total += acaba.replace(tzinfo=None) - comeca.replace(tzinfo=None)
+        dia += timedelta(days=1)
+        percorridos += 1
+    return total
+
+
+def dias_uteis_parado(desde: datetime, ate: datetime) -> int:
+    """Quantos dias ÚTEIS completos decorreram (para a mensagem). Pura."""
+    return tempo_util(desde, ate).days
+
+
 def esta_intocado(processo: dict, agora: datetime, horas: int) -> bool:
     """Nível 1: atribuído, nunca começado, e a atribuição já vai além do prazo. Pura."""
     if not processo.get("assigned_indexacao_id") or processo.get("index_status") == estado_do_index.IN_REVIEW:
@@ -123,7 +167,7 @@ def esta_estagnado(processo: dict, agora: datetime, dias: int) -> bool:
     if processo.get("is_indexed") is True or processo.get("skip_index") is True:
         return False
     desde = ultima_actividade(processo)
-    return desde is not None and agora - desde > timedelta(days=dias)
+    return desde is not None and tempo_util(desde, agora) > timedelta(days=dias)
 
 
 def deve_alertar(processo: dict, agora: datetime, dias: int) -> bool:
@@ -137,7 +181,7 @@ def deve_alertar(processo: dict, agora: datetime, dias: int) -> bool:
     desde = ultima_actividade(processo)
     if desde is not None and desde > alertado:
         return True
-    return agora - alertado >= timedelta(days=dias)
+    return tempo_util(alertado, agora) >= timedelta(days=dias)
 
 
 def escolher_novo_indexador(disponiveis: list[dict], anteriores: list[str]) -> Optional[dict]:
@@ -280,7 +324,7 @@ async def alertar_estagnados(agora: datetime, dias: int, condicao_activa: dict) 
             continue
         try:
             desde = ultima_actividade(processo)
-            parado = max(dias, (agora - desde).days) if desde else dias
+            parado = max(dias, dias_uteis_parado(desde, agora)) if desde else dias
             numero = processo.get("process_number") or str(processo["id"])[:8]
             indexador = processo["assigned_indexacao_id"]
             chefia = await gestao_da_rede_do_processo(processo, ROLES_DA_CHEFIA)
@@ -288,9 +332,9 @@ async def alertar_estagnados(agora: datetime, dias: int, condicao_activa: dict) 
             enviados = 0
             for uid in destinatarios:
                 mensagem = (
-                    f"O processo {numero} está em tratamento no Index mas sem actividade há {parado} dias."
+                    f"O processo {numero} está em tratamento no Index mas sem actividade há {parado} dias úteis."
                     if uid != indexador or len(destinatarios) == 1
-                    else f"O seu processo {numero} no Index não tem actividade há {parado} dias."
+                    else f"O seu processo {numero} no Index não tem actividade há {parado} dias úteis."
                 )
                 if uid != indexador:
                     mensagem += f" Indexador: {processo.get('indexacao_name') or 'atribuído'}."
@@ -328,6 +372,6 @@ async def correr_sla_do_index(*, agora: Optional[datetime] = None, ambiente=None
 
 
 __all__ = [
-    "correr_sla_do_index", "deve_alertar", "dias_sem_actividade", "escolher_novo_indexador", "esta_estagnado",
+    "correr_sla_do_index", "deve_alertar", "dias_sem_actividade", "dias_uteis_parado", "tempo_util", "escolher_novo_indexador", "esta_estagnado",
     "esta_intocado", "horas_sem_pegar", "sla_activo", "ultima_actividade",
 ]

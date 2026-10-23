@@ -38,10 +38,17 @@ export default function ClientDataForm({ caseId }) {
   const inicial = useMemo(() => consulta.data?.values ?? {}, [consulta.data]);
   const [valores, setValores] = useState({});
   const [guardado, setGuardado] = useState(false);
+  // O interruptor. Decide-se UMA vez, quando os dados chegam (dados do 2.º titular na ficha ligam-no, mesmo que
+  // `compra_tipo` diga outra coisa) e daí em diante é do parceiro. Derivá-lo dos valores a cada render fazia o
+  // bloco desaparecer debaixo dos dedos de quem apagava o único campo do 2.º titular.
+  const [ligado, setLigado] = useState(false);
 
   // Hidrata quando os dados chegam (e depois de cada gravação).
   useEffect(() => {
-    if (consulta.data) setValores({ ...consulta.data.values });
+    if (consulta.data) {
+      setValores({ ...consulta.data.values });
+      setLigado(segundoTitularLigado(consulta.data.values, consulta.data.passos));
+    }
   }, [consulta.data]);
 
   const guardar = useMutation({
@@ -65,8 +72,7 @@ export default function ClientDataForm({ caseId }) {
   const editavel = form.editavel === true;
   const titular = passosDoTitular(form.passos);
   const segundo = passoDoSegundoTitular(form.passos);
-  const ligado = segundoTitularLigado(valores);
-  const tinhaSegundo = segundoTitularLigado(inicial);
+  const tinhaSegundo = segundoTitularLigado(inicial, form.passos);
 
   const mudar = (chave, valor) => {
     setGuardado(false);
@@ -77,11 +83,13 @@ export default function ClientDataForm({ caseId }) {
   // Desligar só é uma alteração se o 2.º titular JÁ existia na ficha; se foi
   // ligado e desligado antes de guardar, repõe-se o valor de origem (não se
   // escreve «individual» por cima de um campo que nunca foi preenchido).
-  const alterarSegundoTitular = (activo) =>
+  const alterarSegundoTitular = (activo) => {
+    setLigado(activo);
     mudar(
       CHAVE_DO_SEGUNDO_TITULAR,
       activo ? VALOR_LIGADO : tinhaSegundo ? VALOR_DESLIGADO : inicial[CHAVE_DO_SEGUNDO_TITULAR]
     );
+  };
 
   const aSubmeter = (e) => {
     e.preventDefault();

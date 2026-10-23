@@ -43,6 +43,7 @@ import {
   useTaskEvents,
 } from "../hooks/useTaskEvents";
 
+import { criarRegistoDeToastsDescartados } from "../utils/toastsDescartados";
 import {
   eTarefaDeEmailDeAcesso,
   esquecerToastDeEmail,
@@ -135,6 +136,10 @@ export function TasksProvider({ children }) {
   const pollingIntervalRef = useRef(null);
   const previousTaskIdsRef = useRef(new Set());
   const toastedTaskIdsRef = useRef(new Set()); // Permanent dedup: completion already toasted
+  // Toasts que o utilizador FECHOU: nenhuma actualização os recria (ver `utils/toastsDescartados`).
+  const descartadosRef = useRef(null);
+  if (descartadosRef.current === null) descartadosRef.current = criarRegistoDeToastsDescartados();
+
   const loadingToastIdsRef = useRef([]); // Ordered list of active loading toast ids (cap 5)
   const consecutiveFailuresRef = useRef(0);
   const circuitBreakerActiveRef = useRef(false);
@@ -161,6 +166,8 @@ export function TasksProvider({ children }) {
   };
 
   const toastIdFor = (taskId) => `bg-task-${taskId}`;
+  // O fecho do toast de RESULTADO regista-se à parte do do progresso (são dois avisos da mesma tarefa).
+  const chaveDoFim = (id) => `${id}:fim`;
 
   /**
    * Ensure a sticky loading toast exists for an active task (cap 5).
@@ -178,26 +185,42 @@ export function TasksProvider({ children }) {
       registarToastDeEmail(id);
     }
 
+    // O utilizador fechou este toast: o progresso seguinte NÃO o recria (era o que o fazia «voltar»).
+    if (descartadosRef.current.foiDescartado(id)) {
+      loadingToastIdsRef.current = queue.filter((x) => x !== id);
+      return;
+    }
+
     if (!queue.includes(id)) {
       // Cap: dismiss oldest loading toast if at limit
       while (queue.length >= MAX_LOADING_TOASTS) {
         const oldest = queue.shift();
+        // fecho do CÓDIGO, não do utilizador: não conta como descartado
+        descartadosRef.current.prepararFechoNosso(oldest);
         toast.dismiss(oldest);
       }
       queue.push(id);
     }
 
+    descartadosRef.current.aoCriar(id);
     toast.loading(task.title, {
       id,
       description: task.progress_message || "Em curso…",
       duration: Infinity,
       closeButton: true, // PACOTE DD — utilizador pode fechar manualmente
+      onDismiss: () => {
+        if (descartadosRef.current.aoFechar(id) === "utilizador") {
+          loadingToastIdsRef.current = loadingToastIdsRef.current.filter((x) => x !== id);
+          largarTemporizadorDeSync(id);
+        }
+      },
     });
 
     if (eSyncDeEmail(task) && !temporizadoresDeSyncRef.current.has(id)) {
       temporizadoresDeSyncRef.current.set(id, setTimeout(() => {
         temporizadoresDeSyncRef.current.delete(id);
         loadingToastIdsRef.current = loadingToastIdsRef.current.filter((x) => x !== id);
+        descartadosRef.current.prepararFechoNosso(id);
         toast.dismiss(id);
       }, TOAST_DE_SYNC_LIMITE_MS));
     }
@@ -212,9 +235,20 @@ export function TasksProvider({ children }) {
     esquecerToastDeEmail(id);
     largarTemporizadorDeSync(id);
 
+    // Terminou: é uma situação NOVA e merece o seu aviso, mesmo que o utilizador tenha fechado o de
+    // «a carregar» (o descarte do progresso tem outra chave e não cobre o resultado). Ao fechar ESTE (o X) regista-se
+    // com outra chave: um recarregamento da página (que volta a listar a tarefa por confirmar) não o
+    // recria. Não se confirma a tarefa no servidor: uma falha fechada no toast tem de continuar a
+    // poder ver-se no painel de tarefas.
+    descartadosRef.current.aoCriar(chaveDoFim(id));
+    const aoFecharOTerminal = () => {
+      descartadosRef.current.aoFechar(chaveDoFim(id));
+    };
+
     if (kind === "success") {
       toast.success(`${task.title} concluída!`, {
         id,
+        onDismiss: aoFecharOTerminal,
         description: task.description || "A tarefa foi concluída com sucesso.",
         // A sincronização de email é rotina: o sucesso some sozinho (as outras tarefas ficam até
         // o utilizador fechar, que é o PACOTE DD).
@@ -230,6 +264,7 @@ export function TasksProvider({ children }) {
     } else {
       toast.error(`${task.title} falhou`, {
         id,
+        onDismiss: aoFecharOTerminal,
         description: task.error_message || "Ocorreu um erro durante a execução.",
         duration: Infinity,
         closeButton: true, // PACOTE DD — utilizador pode fechar manualmente
@@ -293,6 +328,12 @@ export function TasksProvider({ children }) {
 
     // Permanent dedup: skip if already toasted completion for this task
     if (toastedTaskIdsRef.current.has(task.task_id)) return;
+    // O utilizador já fechou o aviso do resultado (nesta sessão do browser): não volta, nem depois de
+    // um recarregamento nem de a página remontar — a ref acima só vive enquanto o provider vive.
+    if (descartadosRef.current.foiDescartado(chaveDoFim(toastIdFor(task.task_id)))) {
+      toastedTaskIdsRef.current.add(task.task_id);
+      return;
+    }
 
     if (isUnacknowledged && (isNowCompleted || isNowFailed)) {
       toastedTaskIdsRef.current.add(task.task_id);
@@ -417,6 +458,7 @@ export function TasksProvider({ children }) {
       setActiveCount(prev => Math.max(0, prev - 1));
       const id = toastIdFor(taskId);
       loadingToastIdsRef.current = loadingToastIdsRef.current.filter((x) => x !== id);
+      descartadosRef.current.prepararFechoNosso(id);
       toast.dismiss(id);
       toast.info("Tarefa cancelada");
     } catch (error) {
