@@ -145,7 +145,11 @@ class TestAsRotasDoParceiro:
 class TestQuemTocaEmPartners:
     #: só a identidade. (A declaração dos índices deixou de tocar em `db.partners` na D-10: vive num
     #: registo de dados — `INDEX_DEFINITIONS` — e não em chamadas à colecção.)
-    PERMITIDOS = {"services/partner_security.py", "services/partner_accounts.py"}
+    PERMITIDOS = {
+        "services/partner_security.py",
+        "services/partner_accounts.py",
+        "services/partner_accounts_admin.py",
+    }
 
     @staticmethod
     def _toca_em_partners(arvore: ast.AST) -> bool:

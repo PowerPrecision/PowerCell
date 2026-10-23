@@ -539,6 +539,7 @@ class TestInventario:
         ("services/companies_crud_api_mutate.py", "run_update_company"),
         ("services/gdpr_api_mutate.py", "run_anonymize_batch"),
         ("services/gdpr_api_mutate.py", "run_anonymize_single"),
+        ("services/partner_accounts_admin.py", "run_delete_partner"),
     ]
 
     @pytest.mark.parametrize("ficheiro,funcao", COM_PASSWORD)

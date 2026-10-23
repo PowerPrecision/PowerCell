@@ -62,7 +62,7 @@ export default function OrganizationAdminPage() {
             <UsersAccessAdminTab isMaster={effectiveRole === "master"} />
           </TabsContent>
           <TabsContent value="parceiros" className="mt-4">
-            <PartnersAdminTab />
+            <PartnersAdminTab isMaster={effectiveRole === "master"} />
           </TabsContent>
         </Tabs>
       </div>

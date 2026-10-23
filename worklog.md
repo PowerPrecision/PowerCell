@@ -12576,3 +12576,17 @@ Work Log:
 Stage Summary:
 * **Operação:** definir `GOV_TEST_NIF`/`GOV_TEST_PWD` (e `GOV_TEST_NISS`) no serviço worker; sem elas o job avisa os Master semanalmente. Leads já associadas antes do deploy não têm a marca `consolidacao_pendente` (os ficheiros ficaram na pasta do registo, como antes): ficam por consolidar à mão com o religamento.
 * **Não verificado:** nada contra os portais reais do Estado; S3 real (cliente boto3 falso); consumo de RAM do Chromium no worker de 512 MB.
+
+
+## Gestão avançada de parceiros (Out 2026)
+
+Pedido: o Master com uma empresa escolhida via os parceiros de todas as redes; e a gestão só convidava e suspendia. Pediu-se Editar (nome e email), Mudar Empresa, Eliminar e Gerar Nova Password, com diálogos no `PartnersAdminTab`.
+
+* **Vista:** `utilizador_e_global` → `fronteira_levantada` na lista, nas opções dos filtros, no abrir por id e na suspensão (`partner_accounts`). Reproduzido no teste antes da correcção (o Master na Domus via os dois parceiros).
+* **Backend:** `services/partner_accounts_admin.py` + 3 rotas Master-only em `routes/partners_admin.py`; email no `PATCH` existente (validado antes de escrever, anula o convite pendente, abate sessões). `ESTADO_ELIMINADO` em `partner_security`; eliminados fora de listas/opções/gestão/`contacto_do_parceiro`.
+* **Decisões minhas, a rever:** as quatro acções só do Master; soft delete (o nome e o `id` ficam para o histórico), email trocado por um marcador único; mudar empresa mantém as ligações de mercado e não reactiva suspensões; a nova password vai por email em claro e só se grava depois de o email sair.
+* **Frontend:** `PartnerActionDialogs.jsx`, `PartnersAdminTab` com `isMaster`, `utils/partnersAdmin.js` (`corpoDaEdicao` só envia o que mudou), 3 funções novas em `services/api.js`.
+* **Três regressões do commit anterior, apanhadas ao correr a suite completa COM MongoDB (sem ele as de integração saltam):** `alert_audience.destinatarios_de_infraestrutura` (lista com `admin` sem `master` no inventário de papéis); um teste fraco do D-39 (`chamadas[-3:]` incluía a cópia da 1.ª execução); e o teste do ciclo agendado sem neutralizar `consolidate_partner_lead_files`.
+* **Mutações:** 19 backend + 9 frontend (a lista inclui a ordem password/escrita, o gate Master, a vista, o convite pendente e o abate de sessões), todas mortas.
+* **Não verificado:** o envio real do email (SMTP falseado ao nível da chamada), o fluxo com um Master real no browser.
+* **Verificações:** suite backend completa 13 401 passados + 13 saltados (com `mongod` avulso), depois de corrigir as três regressões acima; frontend 4 453 testes, ESLint `--quiet` e build limpos; flake8 (E9,F63,F7,F82) limpo.

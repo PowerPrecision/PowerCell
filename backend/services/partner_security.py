@@ -78,6 +78,9 @@ AMBIENTES_DE_PRODUCAO = ("production", "prod")
 ESTADO_CONVIDADO = "invited"
 ESTADO_ACTIVO = "active"
 ESTADO_SUSPENSO = "suspended"
+#: Eliminado pelo Master (soft delete): a conta deixa de existir para o login, para as listas
+#: e para a gestão; o `id` fica só para os registos que o referem (atribuições, histórico).
+ESTADO_ELIMINADO = "deleted"
 
 _esquema = HTTPBearer(auto_error=False)
 
@@ -319,6 +322,7 @@ __all__ = [
     "AUDIENCIA",
     "ESTADO_ACTIVO",
     "ESTADO_CONVIDADO",
+    "ESTADO_ELIMINADO",
     "ESTADO_SUSPENSO",
     "HORAS_DE_VALIDADE",
     "PortalDoParceiroDesligado",
