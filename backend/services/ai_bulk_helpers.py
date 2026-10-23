@@ -20,6 +20,7 @@ from routes.ai_bulk.constants import (
 )
 from routes.ai_bulk.utils import categorize_extracted_fields, validate_nif
 from services.ai_document import MAX_FILE_SIZE, build_update_data_from_extraction
+from services.nascimento_protegido import proteger_documento
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,8 @@ async def update_client_data(process_id: str, extracted_data: dict, document_typ
         }
         
         if len(update_data) > 1:
+            # D-15: a data de nascimento extraída pela IA grava-se cifrada.
+            proteger_documento(update_data)
             result = await db.processes.update_one(
                 {"id": process_id},
                 {

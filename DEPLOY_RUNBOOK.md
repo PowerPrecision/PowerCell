@@ -136,3 +136,55 @@ atribuições) e a medição da D-19.
 * A ordem e os comandos vêm da leitura dos scripts, **não** de uma execução em produção — nenhum
   foi corrido contra a base de dados real nesta sessão.
 * Não sei quais destes passos já correram em produção; o `dry-run` de cada um di-lo.
+
+## Parte D — Atlas: lista de IPs de saída do Render (Out 2026)
+
+O incidente de 16 Out 2026 (deploy «Timed Out», login 500) foi a *IP Access List* do Atlas vazia.
+O `0.0.0.0/0` provisório já foi apagado — **a lista tem de ter os IPs de saída reais ANTES de o próximo
+deploy ou reinício**, senão o incidente repete-se.
+
+**Onde está a lista (autoridade).** Painel do Render → serviço → botão **Connect** (canto superior direito)
+→ separador **Outbound**. Mostra os IPs (ou intervalos) de saída da *região* do serviço. Os dois serviços
+do `render.yaml` — `powercell` (web) e `powercell-worker` — estão ambos em `frankfurt`, pelo que **partilham
+o mesmo conjunto**; confirma-o abrindo o painel de cada um (não verifiquei daqui: não tenho acesso ao Render).
+Os IPs são partilhados por todos os serviços da mesma região, não são exclusivos deste projecto.
+
+**Prova de que o serviço sai mesmo por eles** (Shell do serviço, um de cada vez, web e worker):
+
+```bash
+cd backend && python scripts/diagnosticar_saida_para_atlas.py
+```
+
+Imprime os IPs de saída observados (3 serviços de eco × 3 amostras) e faz `ping` ao Atlas com o `MONGO_URL`
+do serviço (sem imprimir credenciais). Saída 0 = o Atlas aceita; 1 = não aceita (quase de certeza a lista
+de acesso). Os IPs observados têm de constar da lista do painel; **o que se acrescenta ao Atlas é a lista do
+painel inteira**, não só o IP que o eco devolveu (a saída roda por vários).
+
+**No Atlas.** *Network Access → Add IP Address*, um registo por IP/intervalo da lista do painel, **sem**
+«Delete after…» (foi provavelmente uma entrada temporária que expirou que causou o incidente — confirmar no
+*Activity Feed* do projecto). Depois de correr o diagnóstico nos dois serviços com saída 0, a lista final
+deve ter só os IPs do Render (mais, se for o caso, os IPs de quem opera à mão).
+
+**Se o Render mudar os IPs** (mudança de região, ou aviso do Render): repetir esta parte. Um alerta no Atlas
+para «Network Access» alterada e o diagnóstico acima no checklist de cada deploy evitam descobrir isto por 500.
+
+## Parte E — D-15: cifrar as datas de nascimento existentes
+
+Pré-requisitos: o deploy da Parte A com o código da D-15 **nos dois serviços**, e a mesma `ENCRYPTION_KEY`
+de sempre (o script recusa-se se a chave não abre os NIFs que já estão cifrados — código 4).
+**Snapshot do Atlas antes de aplicar.**
+
+```bash
+cd backend
+python -m scripts.migrar_datas_de_nascimento             # descreve: contagens, nada é escrito
+python -m scripts.migrar_datas_de_nascimento --aplicar   # cifra e carimba o ano
+python -m scripts.migrar_datas_de_nascimento             # 2.ª passagem: «0 com algo a fazer»
+python scripts/medir_datas_de_nascimento.py              # «com data em claro: 0» nas duas colecções
+```
+
+* A ordem deploy → migração **não importa**: o filtro Sub35 aceita os dois estados (ver `services/sub35.py`).
+  Fazer a migração ANTES do deploy é que não: o código antigo não sabe ler datas cifradas.
+* «perdidos para edições» > 0 = alguém editou o registo a meio; volta a correr.
+* «cifradas e ILEGÍVEIS» > 0 = datas cifradas com outra chave. O script não lhes toca.
+* **Custo assumido:** o filtro «Sub35» passa a ser por ANO de nascimento e deixa de apanhar quem nasceu em
+  `ano_corrente − 36` e ainda não fez anos (a etiqueta no cartão continua exacta).

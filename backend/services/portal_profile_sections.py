@@ -49,6 +49,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from services.nascimento_protegido import proteger_caminhos
+
 logger = logging.getLogger(__name__)
 
 #: Grupo do formulário → campo onde vive na ficha do CLIENTE.
@@ -368,9 +370,12 @@ async def espelhar_nos_processos(db, process_ids: list, espelhos: dict[str, dict
                 for nome, v in valores.items():
                     para_definir[f"{campo}.{nome}"] = v
             else:
-                para_definir[campo] = dict(valores)
+                para_definir[campo] = proteger_caminhos(dict(valores))
         if para_definir:
-            await db.processes.update_one({"id": processo["id"]}, {"$set": para_definir})
+            # D-15: o espelho do 2.º titular pode trazer a data de nascimento.
+            await db.processes.update_one(
+                {"id": processo["id"]}, {"$set": proteger_caminhos(para_definir)},
+            )
             tocados += 1
     return tocados
 

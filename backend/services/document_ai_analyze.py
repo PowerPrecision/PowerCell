@@ -79,6 +79,12 @@ def build_existing_data_for_ai_compare(process: dict) -> dict:
     Income uses monthly_income / rendimento_mensal — never renda_habitacao_atual
     (that field is housing rent, not salary).
     """
+    # O processo chega CRU da base de dados: a data de nascimento (D-15), o NIF e o
+    # documento estão cifrados. Comparar a cifra com o que a IA leu dava um
+    # «conflito» em todos os campos e mostrava `ENC:…` como valor actual.
+    from services.process_service import decrypt_sensitive_data
+
+    process = decrypt_sensitive_data(process or {})
     personal = process.get("personal_data", {}) or {}
     financial = process.get("financial_data", {}) or {}
     real_estate = process.get("real_estate_data", {}) or {}

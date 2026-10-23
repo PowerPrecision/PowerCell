@@ -21,7 +21,14 @@ from database import db
 from models.process import ProcessCreate, ProcessUpdate
 from services.process_sharing import PROJECCAO as PROJECCAO_PARTILHA
 from services.sub35 import PROJECCAO as PROJECCAO_SUB35
-from services.encryption import encryption_service, generate_nif_hash, generate_email_hash, generate_telefone_hash
+from services.encryption import (
+    CAMPOS_DE_NASCIMENTO_CIFRADOS,
+    encryption_service,
+    generate_nif_hash,
+    generate_email_hash,
+    generate_telefone_hash,
+)
+from services.nascimento_protegido import acrescentar_ano_de_nascimento
 from services.process_labels import normalizar_etiquetas
 
 logger = logging.getLogger(__name__)
@@ -719,23 +726,26 @@ def encrypt_sensitive_data(data: dict) -> dict:
         # Mesmo sem encriptação, gerar blind indexes
         result = copy.deepcopy(data)
         _add_process_blind_indexes(result)
+        acrescentar_ano_de_nascimento(result)
         return result
     
     result = copy.deepcopy(data)
     
     # Gerar blind indexes ANTES de encriptar (hashes calculados a partir dos valores originais)
     _add_process_blind_indexes(result)
+    # D-15: o ano de nascimento fica em claro ao lado da data, que vai cifrada.
+    acrescentar_ano_de_nascimento(result)
     
     # Encriptar campos no nível raiz
-    root_fields = ["client_phone", "client_nif"]
+    root_fields = ["client_phone", "client_nif", *CAMPOS_DE_NASCIMENTO_CIFRADOS]
     for field in root_fields:
         if field in result and result[field]:
             result[field] = encryption_service.encrypt(str(result[field]))
     
     # Encriptar sub-dicionários
     sections = {
-        "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone"],
-        "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_utilizador", "portal_financas_senha", "seg_social_utilizador", "seg_social_senha"],
+        "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone", *CAMPOS_DE_NASCIMENTO_CIFRADOS],
+        "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_utilizador", "portal_financas_senha", "seg_social_utilizador", "seg_social_senha", *CAMPOS_DE_NASCIMENTO_CIFRADOS],
         # PACOTE DD — IBAN e conta_bancaria passam a ser encriptados em repouso
         # (identificador bancário é PII RGPD). Dados plain-text existentes
         # continuam acessíveis: decrypt_sensitive_data passa-through valores
@@ -754,7 +764,7 @@ def encrypt_sensitive_data(data: dict) -> dict:
     # Encriptar listas de 2º Titular / Fiador
     for list_field in ["co_buyers", "co_applicants"]:
         if list_field in result and isinstance(result[list_field], list):
-            list_fields = ["nif", "documento_id", "phone", "telefone"]
+            list_fields = ["nif", "documento_id", "phone", "telefone", *CAMPOS_DE_NASCIMENTO_CIFRADOS]
             for i, item in enumerate(result[list_field]):
                 if isinstance(item, dict):
                     for field in list_fields:
@@ -796,15 +806,15 @@ def decrypt_sensitive_data(data: dict) -> dict:
         return value
     
     # Desencriptar campos no nível raiz
-    root_fields = ["client_phone", "client_nif"]
+    root_fields = ["client_phone", "client_nif", *CAMPOS_DE_NASCIMENTO_CIFRADOS]
     for field in root_fields:
         if field in result and result[field]:
             result[field] = decrypt_field(result[field])
     
     # Desencriptar sub-dicionários
     sections = {
-        "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone"],
-        "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_utilizador", "portal_financas_senha", "seg_social_utilizador", "seg_social_senha"],
+        "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone", *CAMPOS_DE_NASCIMENTO_CIFRADOS],
+        "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_utilizador", "portal_financas_senha", "seg_social_utilizador", "seg_social_senha", *CAMPOS_DE_NASCIMENTO_CIFRADOS],
         # PACOTE DD — IBAN e conta_bancaria passam a ser desencriptados em leitura
         # (simétrico a encrypt_sensitive_data). Valores plain-text legacy são
         # retornados inalterados (decrypt_field retorna valor se não começar por "ENC:").
@@ -822,7 +832,7 @@ def decrypt_sensitive_data(data: dict) -> dict:
     # Desencriptar listas de 2º Titular / Fiador
     for list_field in ["co_buyers", "co_applicants"]:
         if list_field in result and isinstance(result[list_field], list):
-            list_fields = ["nif", "documento_id", "phone", "telefone"]
+            list_fields = ["nif", "documento_id", "phone", "telefone", *CAMPOS_DE_NASCIMENTO_CIFRADOS]
             for i, item in enumerate(result[list_field]):
                 if isinstance(item, dict):
                     for field in list_fields:

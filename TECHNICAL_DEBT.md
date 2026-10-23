@@ -61,43 +61,6 @@ pequeno (`resolve_tenant_stamp` no `public_registration`) e a Pool passa a
 
 ## Correcção e modelo de dados
 
-### D-15 · A data de nascimento é PII e está em claro
-**Onde:** `backend/services/encryption.py` (`SENSITIVE_FIELDS`,
-`CLIENT_SENSITIVE_FIELDS`), `personal_data.birth_date` /
-`personal_data.data_nascimento`, `dados_pessoais.*`.
-
-O NIF, o documento de identificação, a morada fiscal e o telefone são
-encriptados em repouso. A **data de nascimento não está em nenhuma das duas
-listas** — está em texto simples em `processes` e em `clients`. Com o nome,
-é dos campos que mais contribui para identificar uma pessoa, e a avaliação
-de impacto do RGPD trata-a como PII.
-
-**Porque foi adiado (Lote 4):** encriptá-la **parte o filtro Sub35**. A
-condição Mongo de `services/sub35.py` compara a data com um limite
-(`$gte`/`$lt` sobre a data ISO), o que só funciona em claro. Encriptar
-exigiria uma das três: (a) um blind index por FAIXA (um campo derivado
-`nascimento_ano` ou `sub35_ate`, que tem de ser recalculado — e um valor
-derivado gravado volta a ficar errado no dia do aniversário, que é o
-defeito que o Lote 4 acabou de fechar); (b) filtrar em Python depois de
-desencriptar, o que obriga a ler a colecção inteira; (c) aceitar que o
-filtro deixa de existir.
-
-**Decisão registada (Lote 5):** o dono do produto confirmou o adiamento —
-fica para uma sprint dedicada à criptografia, de propósito, para não partir o
-filtro Sub35 recém-construído.
-
-**Medição disponível (Lote 5):** `python scripts/medir_datas_de_nascimento.py`
-(só leitura, só contagens, nenhum valor no output) diz em que colecções e
-campos a data existe, quantas estão em claro, quantas já estão cifradas e
-quantas não são nem uma coisa nem outra (lixo que uma migração teria de tratar
-à mão). Correr em produção antes da decisão.
-
-**O que é preciso para fechar:** decidir entre o filtro e a encriptação, com
-o DPO. Se a escolha for encriptar, a opção (a) com um campo `ano_de_nascimento`
-(não a idade, não um booleano) é a única que não quebra a pesquisa nem precisa
-de recálculo: o ano não muda, e o limiar de "menos de 36" calcula-se sobre ele
-com uma margem de um ano a resolver em Python.
-
 ## Infraestrutura e custos
 
 ### D-13 · Custos do MongoDB Atlas: sem camadas de dados (Épico)
@@ -127,7 +90,9 @@ degradação não é linear.
    `python scripts/medir_colecoes.py [--csv f]` — só leitura, `collStats` por
    colecção + idade por escalão 30/90/180/365 dias, contando datas
    `datetime` E texto ISO; falta CORRÊ-LA em produção e colar a tabela no
-   `worklog.md`.)* `db.stats()` por colecção (tamanho de dados,
+   `worklog.md`. Out 2026: `--markdown` imprime a tabela pronta a colar, com
+   a data e o NOME da base (nunca o URL). **A fotografia continua por tirar:**
+   a sessão que a tentou não tem `MONGO_URL` de produção — ver o `worklog.md`.)* `db.stats()` por colecção (tamanho de dados,
    tamanho de índices, contagem) e o *Performance Advisor* do Atlas. Sem isto
    arrisca-se arquivar a colecção errada: a intuição diz `history`, os números
    podem dizer `emails` (que guarda corpos de mensagens). **Nenhum passo
@@ -497,6 +462,7 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 
 | # | Dívida | Fechada em |
 |---|---|---|
+| D-15 | A data de nascimento era PII em texto simples | Iteração `d15-data-de-nascimento-cifrada` — cifrada em repouso (`birth_date`/`data_nascimento` em `personal_data`, `dados_pessoais`, `titular2_data`, `co_buyers`, `co_applicants` e na raiz dos processos antigos) e com o **ano** (`birth_year`, inteiro, em claro) gravado ao lado por todas as funções de cifra (`encrypt_sensitive_data`, `encrypt_client_data`, `EncryptionService.encrypt_process`) e pelos escritores pontuados (`nascimento_protegido.proteger_caminhos`/`proteger_documento`). A ETIQUETA decifra a data e continua exacta (`sub35.data_iso` abre a cifra, por isso funciona também nas listagens que servem o documento cru); o FILTRO usa o ano e é **deliberadamente mais estrito**: quem nasceu em `ano_corrente − 36` e ainda não fez anos fica fora do filtro (e dentro da etiqueta) — o custo assumido. Os documentos por migrar continuam a casar pelos ramos de data de sempre (a ordem deploy → migração não importa). Migração: `python -m scripts.migrar_datas_de_nascimento [--aplicar]` (descreve por omissão; recusa-se se a chave não abre NIFs já cifrados; filtro optimista por documento; idempotente). `test_d15_data_de_nascimento_cifrada.py` (65), `tests/integration/test_d15_nascimento_cifrado_mongo.py` (17, MongoDB real) |
 | D-2 | Segredo JWT partilhado entre o Portal e o staff | Iteração `lote5-zero-debt` — `PORTAL_JWT_SECRET` próprio e OPCIONAL (`services/portal_jwt_secret.py`): definido, os tokens do Portal passam a ser assinados com ele e o verificador aceita os dois segredos durante a janela (`PORTAL_JWT_ACCEPT_LEGACY`, por omissão ligada), pelo que **nada se invalida**. Sem a variável, comportamento anterior. **Operação:** definir `PORTAL_JWT_SECRET` no serviço web e, passados ~90 dias (tempo de vida do magic link mais longo), pôr `PORTAL_JWT_ACCEPT_LEGACY=false`. Cobre também o WebSocket do Portal e o rate limit. `test_lote5_d2_segredo_proprio_do_portal.py` (23) |
 | D-4 | Duas políticas de força bruta para as duas portas do Portal | Iteração `lote5-zero-debt` — a política é DADO (`Politica` por âmbito: login 8/10 min, verify 5/15 min, colecção própria) num só motor; o `verify` passou a usar o mesmo mecanismo que o login (ordem: recusar antes de olhar para a credencial; 400 não gasta tentativas; sucesso limpa; ler falha aberto). `test_lote5_d4_politicas_de_forca_bruta.py` (14) |
 | D-6 | `INACTIVE_STATUSES` era resíduo legado e ainda decidia em `client_list_search` | Iteração `lote5-zero-debt` — as fases fechadas vêm do MOTOR (por rede) em `client_list_search`, `admin_observability`, `document_delete`, `client_me` e `process_kanban_diagnose`; a lista fica só como recurso de arranque. `test_lote5_d6_estados_fechados_vem_do_motor.py` (8) |
