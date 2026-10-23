@@ -198,14 +198,10 @@ class TestPutDoCliente:
 
         await _semear(bd)
         with _contexto(bd):
-            assert await cu.encontrar_cliente_duplicado(
-                None, EMAIL, None, rede=REDE_INCUMBENTE,
-            ) is not None
+            assert await cu.encontrar_cliente_duplicado(None, EMAIL) is not None
         await _actualizar_cliente(bd, {"email": ""})
         with _contexto(bd):
-            assert await cu.encontrar_cliente_duplicado(
-                None, EMAIL, None, rede=REDE_INCUMBENTE,
-            ) is None
+            assert await cu.encontrar_cliente_duplicado(None, EMAIL) is None
 
     async def test_o_processo_nao_recompoe_o_email_antigo_na_resposta(self, bd):
         """O que o ecrã lê: `client_email` vazio no processo cai no do cliente — ambos têm de estar vazios."""

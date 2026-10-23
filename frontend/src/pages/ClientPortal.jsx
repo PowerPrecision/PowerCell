@@ -79,6 +79,7 @@ import {
   ShieldCheck,
   // PACOTE DH — ícones para a secção "Próximos Eventos"
   Bell,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import Dropzone from "@/components/shared/Dropzone";
@@ -101,6 +102,15 @@ import PortalInativo from "../components/portal/PortalInativo";
 import NotaDoPedido from "../components/portal/NotaDoPedido";
 import { pedidosParaJuntarMais, rotuloDoBotao, textoDoConvite } from "../utils/pedidosDeDocumentos";
 import { eBloqueioDoPortal, limparSessaoDoPortal, mensagemDoBloqueio } from "../utils/portalInativo";
+import PortalHubEcra from "../components/portal/PortalHubEcra";
+import usePortalHub from "../hooks/usePortalHub";
+import {
+  avisarMudancaDeSessao,
+  guardarHub,
+  podeTrocarDeProcesso,
+  precisaDeEscolher,
+  voltarAoHub,
+} from "../utils/portalHub";
 
 // ====================================================================
 // CLIENT-ONLY WRAPPER — prevents hydration mismatches with Radix portals
@@ -1839,7 +1849,7 @@ function IframeDetector({ children }) {
 // ====================================================================
 // MAIN CLIENT PORTAL
 // ====================================================================
-function ClientPortalPagina() {
+function ClientPortalPagina({ onTrocarDeProcesso = null }) {
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('A carregar o seu processo...');
   const [error, setError] = useState(null);
@@ -1884,6 +1894,9 @@ function ClientPortalPagina() {
           if (!resolveRes.ok) throw new Error('resolve failed');
           const resolveData = await resolveRes.json();
           jwtToken = resolveData.token || resolveData.access_token || rawToken;
+          // D-42: o link curto devolve também o Hub (restrito à rede do processo do link). O
+          // cliente entra no processo a que o link levava e pode trocar a partir do cabeçalho.
+          guardarHub(resolveData, { escolhido: resolveData.process_id || '' });
         }
         // Guardar o token em localStorage (lido pelo apiClient do Portal)
         localStorage.setItem('portalToken', jwtToken);
@@ -1898,6 +1911,7 @@ function ClientPortalPagina() {
 
         // Saltar o ecrã de login — o useEffect de data-fetch existente
         // vai carregar /portal/status com o token guardado.
+        avisarMudancaDeSessao();
         setIsVerified(true);
       } catch (err) {
         console.error('[ClientPortal] Auto-login falhou:', err);
@@ -2442,6 +2456,19 @@ function ClientPortalPagina() {
             <Shield className="w-3.5 h-3.5" />
             <span>Acesso Seguro</span>
           </div>
+          {/* D-42: trocar de processo sem terminar a sessão (só quando há mais do que um) */}
+          {isVerified && onTrocarDeProcesso && (
+            <button
+              type="button"
+              onClick={onTrocarDeProcesso}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-emerald-600 transition-colors ml-2"
+              title="Trocar de processo"
+              data-testid="portal-trocar-de-processo"
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Trocar de processo</span>
+            </button>
+          )}
           {/* Botão Terminar Sessão */}
           {isVerified && (
             <button
@@ -3116,11 +3143,25 @@ function ClientPortalPagina() {
 // cliente tem de poder mudar a vista em qualquer um deles. Fica em baixo à
 // esquerda: o canto de baixo à direita é do botão de mensagens e o de cima
 // é do cabeçalho.
+//
+// D-42: é também aqui que se decide entre o HUB (o cliente tem 2+ processos e ainda
+// não escolheu) e a página de um processo. A página remonta quando o processo escolhido
+// muda (`key`): o estado dela — mensagens, eventos, visitas, separadores — é todo de UM
+// processo e não pode atravessar para o seguinte (o cliente veria a conversa errada).
 export default function ClientPortal() {
   const { escuro, alternar } = usePortalTheme();
+  const hub = usePortalHub();
+  const mostrarHub = precisaDeEscolher(hub);
   return (
     <>
-      <ClientPortalPagina />
+      {mostrarHub ? (
+        <PortalHubEcra hub={hub} nome={null} />
+      ) : (
+        <ClientPortalPagina
+          key={hub.escolhido || 'sem-hub'}
+          onTrocarDeProcesso={podeTrocarDeProcesso(hub) ? voltarAoHub : null}
+        />
+      )}
       <TemaToggle
         escuro={escuro}
         onAlternar={alternar}

@@ -456,16 +456,18 @@ class TestORegisto:
         assert len(bd.clients.docs) == antes
 
     @pytest.mark.asyncio
-    async def test_a_mesma_pessoa_noutra_rede_e_outro_cliente_nao_o_da_outra_rede(self, registo):
-        """D-32: o link de outra rede nunca reutiliza nem recarimba o cliente alheio."""
+    async def test_a_mesma_pessoa_noutra_rede_nunca_reutiliza_nem_recarimba_o_cliente_alheio(self, registo):
+        """D-32 → D-42 (INVERTIDO): o link de outra rede já não cria «outro cliente» — a identidade é
+        global, logo o registo anónimo é recusado (409 genérico) — mas continua a não reutilizar,
+        actualizar nem recarimbar o cliente alheio."""
         pr, bd = registo
         r = await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))
         assert r.status_code == 200
         # a mesma pessoa regista-se agora pelo link da Power
         r = await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-power"))
-        assert r.status_code == 200
+        assert r.status_code == 409
         clientes = [c for c in bd.clients.docs if c.get("fonte") == "public_form"]
-        assert sorted(c["network_id"] for c in clientes) == sorted([REDE_DOMUS, REDE_INCUMBENTE])
+        assert [c["network_id"] for c in clientes] == [REDE_DOMUS], "um só cliente, ainda da Domus"
 
     @pytest.mark.asyncio
     async def test_o_mesmo_contacto_na_mesma_rede_e_recusado_com_409(self, registo):
@@ -477,16 +479,17 @@ class TestORegisto:
         assert len([c for c in bd.clients.docs if c.get("fonte") == "public_form"]) == 1
 
     @pytest.mark.asyncio
-    async def test_um_cliente_da_pool_e_do_grupo_incumbente_e_bloqueia_so_o_seu_link(self, registo):
-        """A pilha por carimbar pertence à rede de omissão: bloqueia o link dela, não o de uma ilha."""
+    async def test_um_cliente_da_pool_bloqueia_todos_os_links(self, registo):
+        """D-42 (INVERTIDO: no D-38 bloqueava só o link da rede de omissão): a identidade é global,
+        a pilha por carimbar também conta para o link de uma ilha."""
         pr, bd = registo
         assert (await pr.run_public_client_registration(_pedido(), _dados())).status_code == 200
         assert "network_id" not in next(c for c in bd.clients.docs if c.get("fonte") == "public_form")
         assert (await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-power"))).status_code == 409
-        assert (await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))).status_code == 200
+        assert (await pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))).status_code == 409
         clientes = [c for c in bd.clients.docs if c.get("fonte") == "public_form"]
-        assert len(clientes) == 2
-        assert sum(1 for c in clientes if "network_id" not in c) == 1, "a pilha ficou intacta"
+        assert len(clientes) == 1
+        assert "network_id" not in clientes[0], "a pilha ficou intacta"
 
 
 # ====================================================================

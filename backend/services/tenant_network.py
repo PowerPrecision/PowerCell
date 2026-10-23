@@ -78,6 +78,10 @@ CONDICAO_IMPOSSIVEL: dict = {CAMPO_REDE: {"$in": []}}
 #: com mais do que uma rede.
 CAMPO_REDES_PARCEIRAS = "partner_network_ids"
 
+#: As redes cuja equipa foi ASSOCIADA a um cliente que é de outra rede (D-42: identidade global).
+#: Dá-lhes a janela (abrir a ficha como visitante, criar-lhe processo) — nunca o âmbito do dono.
+CAMPO_REDES_ASSOCIADAS = "redes_associadas"
+
 #: Todos os campos onde o carimbo pode viver. Uma PROJECÇÃO que os
 #: deixe de fora faz a verificação de posse ver um documento sem marca —
 #: e "sem marca" é a tolerância do legado, logo a guarda abre em vez de

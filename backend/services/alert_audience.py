@@ -278,6 +278,35 @@ async def emails_dos_master() -> list[str]:
     ))
 
 
+async def destinatarios_de_infraestrutura(*, incluir_admins: bool) -> list[dict]:
+    """``[{"id", "email"}]`` dos Master activos (e, se pedido, dos Admin activos).
+
+    Para o que não pertence a rede nenhuma e não leva dados de clientes (a manutenção dos scrapers do
+    Estado, por exemplo): o Master é o dono da infraestrutura; os Admin entram só quando a direcção
+    decidiu que a falha lhes diz respeito. Nunca para avisos que citem clientes — esses seguem
+    `gestao_da_rede_do_processo`. Utilizadores sem email utilizável ficam de fora do email mas contam
+    para a notificação in-app (por isso `email` pode vir vazio).
+    """
+    from services.role_query import deep_role_filter
+
+    papeis = ["master"] + (["admin"] if incluir_admins else [])
+    try:
+        utilizadores = await db.users.find(
+            {"$and": [
+                {"$or": [deep_role_filter(p) for p in papeis]},
+                {"is_active": {"$ne": False}},
+            ]},
+            {"_id": 0, "id": 1, "email": 1},
+        ).to_list(MAX_UTILIZADORES)
+    except Exception as exc:
+        logger.warning("[alert_audience] Falha a ler os destinatários de infraestrutura (%s).", exc)
+        return []
+    return [
+        {"id": u["id"], "email": _texto(u.get("email")).lower() if _email_utilizavel(u.get("email")) else ""}
+        for u in utilizadores if u.get("id")
+    ]
+
+
 async def emails_da_gestao_da_rede_do_processo(
     processo: Optional[dict],
     papeis: Sequence[str],

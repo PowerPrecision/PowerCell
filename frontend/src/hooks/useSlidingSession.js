@@ -25,6 +25,7 @@
  */
 import { useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
+import { CHAVES_DO_HUB, avisarMudancaDeSessao } from '../utils/portalHub';
 
 // Chaves usadas no localStorage para a sessão do portal
 const PORTAL_STORAGE_KEYS = [
@@ -40,6 +41,8 @@ const PORTAL_STORAGE_KEYS = [
   'portal_client_id',
   'portal_client_name',
   'portal_process_id',
+  // O Hub (D-42): a credencial ancorada ao cliente não sobrevive à sessão.
+  ...CHAVES_DO_HUB,
 ];
 
 // Chaves no sessionStorage (legado OTP)
@@ -74,6 +77,8 @@ export default function useSlidingSession({
     PORTAL_SESSION_KEYS.forEach(key => {
       try { sessionStorage.removeItem(key); } catch { /* private mode / quota */ }
     });
+    // O invólucro do Portal decide entre o Hub e a página: tem de saber que a sessão acabou.
+    avisarMudancaDeSessao();
 
     if (showMessage) {
       toast.error('Sessão expirada por inatividade', {

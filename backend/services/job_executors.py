@@ -110,6 +110,20 @@ async def _executar_sync_de_webmail_do_worker() -> None:
     await run_webmail_worker_sync()
 
 
+async def _executar_healthcheck_dos_scrapers() -> None:
+    # Automático: respeita o intervalo mínimo (cada arranque do worker corre todos os jobs, e cada
+    # corrida é um login na conta de teste do Estado).
+    from services.gov_scrapers_healthcheck import correr_healthcheck
+
+    await correr_healthcheck(respeitar_intervalo=True)
+
+
+async def _forcar_healthcheck_dos_scrapers() -> None:
+    from services.gov_scrapers_healthcheck import correr_healthcheck
+
+    await correr_healthcheck(respeitar_intervalo=False)
+
+
 EXECUTORES: dict[str, Callable[[], Awaitable[Any]]] = {
     "background_job_monitor": _executar_monitor_de_jobs,
     "email_auto_sync": _executar_auto_sync_de_email,
@@ -117,6 +131,13 @@ EXECUTORES: dict[str, Callable[[], Awaitable[Any]]] = {
     "cdc_audit": _executar_cdc,
     "scheduled_tasks": _executar_tarefas_agendadas,
     "webmail_worker_sync": _executar_sync_de_webmail_do_worker,
+    "gov_scrapers_healthcheck": _executar_healthcheck_dos_scrapers,
+}
+
+#: Variantes para a execução FORÇADA (botão do painel): quando forçar significa mais do que repetir o
+#: ciclo — aqui, ignorar o intervalo mínimo que protege a conta de teste. Só há entrada para o que difere.
+EXECUTORES_FORCADOS: dict[str, Callable[[], Awaitable[Any]]] = {
+    "gov_scrapers_healthcheck": _forcar_healthcheck_dos_scrapers,
 }
 
 # Jobs que existem no painel mas não se forçam, com o motivo À VISTA. Um
@@ -137,7 +158,7 @@ def motivo_para_nao_forcar(chave: str) -> str:
     return SEM_EXECUCAO_MANUAL.get(chave, "")
 
 
-async def executar_job(chave: str) -> None:
+async def executar_job(chave: str, *, forcado: bool = False) -> None:
     """Corre o job. O batimento embrulha o trabalho, como no laço.
 
     Levanta o que o job levantar — o batimento precisa de ver a excepção
@@ -148,6 +169,8 @@ async def executar_job(chave: str) -> None:
     executor = EXECUTORES.get(chave)
     if executor is None:
         raise KeyError(f"Job desconhecido: {chave}")
+    if forcado:
+        executor = EXECUTORES_FORCADOS.get(chave, executor)
 
     declarado = JOBS_POR_CHAVE.get(chave) or {}
     if not job_esta_activo(declarado):

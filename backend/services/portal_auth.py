@@ -22,6 +22,8 @@ from services.portal_security import (
     PORTAL_TOKEN_VALIDITY_DAYS,
 )
 from services.auth import require_staff
+from services.portal_hub import anexar_hub
+from services.workflow_phases import rede_do_processo
 from services.portal_estado import escolher_processo_do_cliente, exigir_processo_activo
 from services.portal_brute_force import (
     AMBITO_DO_LOGIN,
@@ -244,14 +246,18 @@ async def run_portal_login(data: PortalLoginRequest):
         f"email={email[:3]}***@***"
     )
 
-    return JSONResponse(content={
+    resposta = {
         "token": token,
         "client_id": client_id,
         "client_name": client_name,
         "process_id": process_id,
         "token_type": "access_code_session",
         "expires_in": 4 * 60 * 60,  # 4 horas em segundos
-    })
+    }
+    # D-42: o Hub — a credencial ancorada ao CLIENTE e os processos activos que ele pode escolher.
+    # O código de acesso é uma credencial do próprio cliente: cobre todas as redes dele (sem `nets`).
+    await anexar_hub(resposta, client_id, redes_permitidas=None, processo_de_entrada=process_id)
+    return JSONResponse(content=resposta)
 
 
 async def run_verify_portal_login(client_id: str, data: dict):
@@ -324,11 +330,10 @@ async def run_verify_portal_login(client_id: str, data: dict):
 
     # Bloco 3 (ponto 14): credenciais válidas, mas o processo está numa fase
     # terminal → Portal bloqueado. DEPOIS da credencial, nunca antes (oráculo).
-    await exigir_processo_activo(
-        await db.processes.find_one(
-            {"id": result["process_id"]}, {"_id": 0, "id": 1, "status": 1}
-        )
+    processo_verificado = await db.processes.find_one(
+        {"id": result["process_id"]}, {"_id": 0, "id": 1, "status": 1, "network_id": 1},
     )
+    await exigir_processo_activo(processo_verificado)
 
     # Gerar token de sessão verificada
     session_token = create_verified_session_token(
@@ -336,14 +341,23 @@ async def run_verify_portal_login(client_id: str, data: dict):
         client_id=result["client_id"],
     )
 
-    return JSONResponse(content={
+    resposta = {
         "token": session_token,
         "process_id": result["process_id"],
         "client_name": result["client_name"],
         "process_number": result["process_number"],
         "token_type": "verified_session",
         "expires_in": 4 * 60 * 60,  # 4 horas em segundos
-    })
+    }
+    # D-42: NIF + nº de processo prova o PROCESSO, não o cliente inteiro: o Hub que daqui sai fica
+    # confinado à rede desse processo (quem tem o número de um processo da Power não ganha a porta
+    # para o que o cliente tem na Domus).
+    await anexar_hub(
+        resposta, result["client_id"],
+        redes_permitidas=[rede_do_processo(processo_verificado) or ""],
+        processo_de_entrada=result["process_id"],
+    )
+    return JSONResponse(content=resposta)
 
 
 async def run_resolve_portal_token(short_id: str):
@@ -412,18 +426,28 @@ async def run_resolve_portal_token(short_id: str):
 
     # Bloco 3 (ponto 14): o link curto É a credencial (já foi validado acima),
     # logo dizer que o processo está inativo não revela nada a quem não a tem.
+    processo_do_link = None
     if token_doc.get("process_id"):
-        await exigir_processo_activo(
-            await db.processes.find_one(
-                {"id": token_doc["process_id"]}, {"_id": 0, "id": 1, "status": 1}
-            )
+        processo_do_link = await db.processes.find_one(
+            {"id": token_doc["process_id"]}, {"_id": 0, "id": 1, "status": 1, "network_id": 1}
         )
+        await exigir_processo_activo(processo_do_link)
 
-    return {
+    resposta = {
         "token": token_doc["jwt_token"],
         "process_id": token_doc.get("process_id"),
         "client_id": client_id,
     }
+    # D-42: o link é gerado (e pode ser copiado) pela equipa de UMA empresa. O Hub que daqui sai
+    # fica confinado à rede do processo do link: a equipa da Power não ganha, por ter o link, a
+    # porta para o processo que o cliente tem na Domus.
+    if processo_do_link:
+        await anexar_hub(
+            resposta, client_id,
+            redes_permitidas=[rede_do_processo(processo_do_link) or ""],
+            processo_de_entrada=token_doc.get("process_id"),
+        )
+    return resposta
 
 
 async def run_impersonate_client_portal(process_id: str, request: Request, user: dict):

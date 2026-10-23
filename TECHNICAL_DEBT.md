@@ -127,66 +127,32 @@ do passo 2.
 
 ## Produto e âmbito
 
-### D-42 · Identidade do cliente: por REDE (hoje) ou GLOBAL com processos locais (proposta do dono do produto)
-**Onde:** `services/client_uniqueness.py`, `services/b2b_client_match.py`, `services/public_registration.py`, `services/client_crud.py`
+### D-43 · A identidade global é um oráculo de existência e tem um limite de produto (D-42 fechada)
+**Onde:** `services/client_uniqueness.py` (`resolver_identidade`), `services/client_crud.py`, `routes/clients.py` (`/clients/find-or-create`)
 
-**O que existe (D-38, Out 2026):** NIF, Email e Telemóvel não se repetem **dentro da rede**. O mesmo
-NIF em duas redes são dois clientes, de propósito. Os canais respondem assim: o registo público
-devolve 409 genérico (`DUPLICATE_CLIENT`, sem id nem campo — porta anónima); a criação no CRM devolve
-409 com o cliente existente **da própria rede**; a lead do Parceiro **associa-se** ao cliente existente
-na rede de destino (`b2b_client_match`, NIF primeiro, destino soberano) em vez de falhar. Não há 422:
-o 409 só aparece quando a pessoa já existe na rede, e é o comportamento pretendido.
+Com NIF e Email únicos em toda a base (Out 2026), três consequências ficam **assumidas e por rever**:
+(1) **oráculo de existência entre redes** — a criação no CRM responde 409 opaco (sem id, nome nem campo)
+quando o NIF/Email pertence a um cliente de OUTRA rede e a prova não chega para associar (é preciso NIF **e**
+Email do MESMO cliente); ainda assim, «este NIF já existe» deixa de ser local e quem tem o NIF consegue
+sondá-lo; o limite de pedidos e o 409 uniforme atenuam, não eliminam. Decisão RGPD (responsável por
+tratamento quando duas redes têm a mesma pessoa) pendente do DPO. (2) **um casal que partilha email deixa de
+poder ser dois clientes** — o segundo é recusado; o contorno é o 2.º titular do mesmo processo ou um email
+próprio. (3) **`POST /clients/find-or-create`** é anterior a esta decisão, é global e devolve o cliente
+inteiro — fora do âmbito desta entrega e por fechar (devia passar por `resolver_identidade`).
 
-**A proposta de produto (Lote 7.1):** «Cliente (NIF/Email) é global na BD, sem duplicados; o Processo é
-local». Não é uma correcção, é outro modelo, e tem um custo que o isolamento Lote 4→7 foi construído para
-evitar: um 409 global é um **oráculo de existência entre redes** («este NIF já é cliente de alguém») e
-obriga a decidir quem é dono dos dados pessoais (RGPD: quem é o responsável por tratamento quando a
-Domus e a Power têm a mesma pessoa?). A alternativa que dá o funil central sem esse custo é uma
-**identidade global opaca ao lado da local**: uma colecção `identidades` (hash do NIF → `identity_id`),
-sem dados pessoais, que cada cliente local referencia; os canais passam a *associar* (nunca bloquear)
-quando a identidade já existe noutra rede, e só a equipa da rede dona vê os dados. **Decisão pendente.**
+**Para fechar:** decisão do DPO sobre (1), mensagem de produto para (2), e levar o `find-or-create` ao ponto único.
 
-### D-39 · Colisão B2B: os ficheiros do parceiro ficam na pasta do registo dele
-**Onde:** `services/b2b_client_match.py`, `services/partner_drafts.py::_associar_a_cliente_existente`
+### D-44 · O Hub do Portal deixa o código de acesso escolher processos de outras redes
+**Onde:** `services/portal_hub.py`, `routes/portal.py` (`/portal/hub*`)
 
-Quando a lead de um parceiro corresponde a um cliente que já existe na rede de
-destino (NIF primeiro, email só sem NIF), associa-se a ele em vez de nascer outro
-— sem tocar nos contactos do destino. O que **não** se fez: os ficheiros que o
-parceiro enviou antes da libertação ficam na pasta do **registo dele**
-(`Documentação Clientes/{lead_id}/…`), não na do cliente existente. A entrada
-`partner_leads` do cliente guarda `pasta_dos_documentos_do_lead` para a
-consolidação manual.
+O token do Hub ancora-se ao `client_id`. O login por **código de acesso** (conhecido de quem tem a ficha do
+cliente na rede dona) não restringe redes: quem o conhece entra no Hub e pode escolher processos do mesmo
+cliente noutras redes (Domus ↔ Power). Os logins por link mágico/NIF restringem-se à rede do processo
+(`nets`), e a escolha só devolve o token do processo seleccionado, com a mesma regra de posse da listagem
+(404 uniforme; processo inactivo → 403 `portal_inativo`). O risco é o código de acesso, não o Hub.
 
-**Porque foi adiado:** mover objectos S3 é a operação que partiu 205 ligações no
-Épico 10; a pasta de posse deriva do id do cliente, logo re-apontar `db.documents`
-sem mover faria o proxy recusar a chave (403). Qualquer das duas é uma decisão
-sobre S3, não sobre a regra de identificação.
-
-**Para fechar:** um passo explícito da equipa (religar/consolidar com
-`s3_relink`) ou uma cópia controlada para a pasta do cliente, com `db.documents`
-re-apontado no mesmo acto. Fica também por decidir se, sem correspondência por NIF
-mas com email/telemóvel iguais aos de OUTRO cliente da rede, a libertação deve
-mesmo criar o registo (hoje cria e marca `possible_duplicate_of`: o NIF diz que é
-outra pessoa, e perder uma lead paga por um email partilhado é pior).
-
-### D-40 · A unicidade de NIF/Email/Telemóvel é aplicacional (sem índice único)
-**Onde:** `backend/services/client_uniqueness.py`; medição em `scripts/diagnose_client_duplicates.py`
-
-A guarda do D-38 verifica antes de gravar. Dois pedidos simultâneos com o mesmo
-contacto podem passar os dois (corrida residual). Só um índice único parcial por
-rede sobre os blind indexes (`network_id` + `*_hash`, ignorando eliminados e
-vazios) a fecha — e esse índice **recusa-se a nascer** enquanto houver duplicados
-na base, porque a regra é nova e os dados são antigos.
-
-**Porque foi adiado:** antes de decidir é preciso saber quantos casos existem.
-O diagnóstico (só leitura) responde: corrê-lo em produção e ver «índice único
-viável» ou o nº de casos a resolver à mão.
-
-**Para fechar:** resolver os casos que o relatório listar (manter um cliente,
-passar-lhe os processos, eliminar o outro — decisão humana) e declarar o índice
-em `db_indexes.py` (nunca num passo de operações). O `network_id` por carimbar
-(rede de omissão) e a rede da empresa sem carimbo têm de ser tratados no índice
-(ou backfill prévio), senão a pilha antiga escapa-lhe.
+**Para fechar:** um segundo passo (OTP por email do próprio cliente) antes de mostrar processos de uma rede
+diferente da do login, ou restringir o login por código à rede do processo.
 
 ### D-41 · Resto das acções destrutivas só-Master sem password
 **Onde:** restauro de backups (`/restore*`), migrações e resets de processos (`admin_migration`, `admin_process_migration`), reset de permissões
@@ -237,18 +203,23 @@ filtra pelos processos do âmbito; as contagens não. Fechar exige carimbar
 `history` (escritor único `log_history`) e migrar o legado — adiado por ser um
 escritor central e por o impacto ser só em quem trabalha em duas redes.
 
-### D-30 · Os scrapers do Estado e dos portais só se provam em produção
-**Onde:** `services/gov_scraper.py`, `services/scraper.py`
+### D-30 · Os scrapers do Estado e dos portais só se provam contra os portais reais
+**Onde:** `services/gov_scraper.py`, `services/scraper.py`; health check em `services/gov_scrapers_healthcheck.py`
 
-Sem rede nem credenciais reais, tudo o que se prova é a orquestração (política,
-estado, arquivo, MFA) e a camada estruturada contra HTML de fixture. Os
-selectores do Portal das Finanças e da Segurança Social Direta (`FINANCAS_SEL`,
-`SEG_SOCIAL_SEL`) continuam a ser os do código anterior e **não foram
-validados contra os portais**; o `gov_scraper` tem ~3 000 linhas num módulo só,
-com dois fluxos inner quase gémeos. O que fecha isto: um relatório de
-selectores falhados por execução (passo e selector, sem credenciais) e uma
-rotina de verificação mensal com uma conta de teste; só depois faz sentido
-partir o módulo.
+**Fechado (Out 2026) — a deteção:** um job diário no worker corre a extracção de produção às Finanças e à
+Segurança Social com uma conta de teste (`GOV_TEST_NIF`/`GOV_TEST_PWD`, opcional `GOV_TEST_NISS`) e avisa Master
+e Admins (notificação + email) quando os selectores deixam de funcionar — antes de um cliente o descobrir.
+Distingue selectores / credenciais / MFA / rede e nunca confunde uma conta de teste mal configurada com um
+portal avariado. Nada da conta de teste (NIF, password, screenshot) é gravado nem enviado.
+
+**O que continua por provar:** a detecção só é tão boa como a conta de teste (sem MFA, com IRS e nota de
+liquidação) — não está configurada nem foi exercitada contra os portais reais; os selectores
+(`FINANCAS_SEL`, `SEG_SOCIAL_SEL`) continuam a ser os do código anterior; o `gov_scraper` tem ~3 000 linhas
+num módulo só, com dois fluxos inner quase gémeos; e correr o Chromium no worker de 512 MB tem o risco de
+memória do incidente anterior (o job só corre com o semáforo do worker e uma vez por dia).
+
+**Para fechar:** definir as variáveis no serviço worker, ver o primeiro relatório (`gov_scrapers_health`) e só
+depois partir o módulo.
 
 ### D-34 · Conteúdo global escrito por perfis locais (o fecho do processo fechado está concluído)
 **Onde:** `routes/changelog.py`; guarda em `services/process_closed_guard.py`
@@ -473,6 +444,9 @@ Ficam aqui só o número e a iteração que as fechou — o detalhe vive no
 | D-38 | O registo público actualizava, sem prova de posse, um cliente já existente da mesma rede | Iteração `d38-duplicados-por-rede` — **NIF, Email e Telemóvel não se repetem dentro da rede**: o formulário público responde 409 genérico (`DUPLICATE_CLIENT`, sem id, nome nem campo — a porta é anónima) e não cria nem altera nada; o ramo de upsert foi apagado, não desligado. A criação e a edição do CRM passaram do âmbito GLOBAL para o da rede (o 409 devolvia o id e o nome de clientes de OUTRAS redes) e verificam também o telemóvel (com e sem indicativo, via blind index); na edição só se verifica o que MUDOU. `services/client_uniqueness.py` é o ponto único. Cobertura: `test_d38_duplicados_por_rede.py` (39), `tests/integration/test_duplicados_por_rede_mongo.py` (8, MongoDB real), `PublicClientForm.duplicado.test.jsx`. 14 mutações medidas, todas mortas |
 | D-41 (parcial) | A anonimização individual (`/gdpr/anonymize`) era irreversível e não pedia password | Iteração `accoes-destrutivas-ui`: `AnonymizeRequest.password` exigida fora do `dry_run` (que é FALSO por omissão neste pedido, ao contrário do lote), depois da fronteira de rede (404 antes do 403) e antes de qualquer escrita; painel «Compliance › Anonimização» com diálogo. O resto das acções de infraestrutura continua em aberto (secção D-41) |
 | D-14 | O formulário público podia criar um cliente com NIF repetido | Iteração `d38-duplicados-por-rede` — fechada pelo mesmo ponto: opção (c) (recusar com mensagem clara). Limite dito: o portal do parceiro (`partner_leads`) não recusa — marca `possible_duplicate_of` e a colisão B2B (D-39) resolve-se na libertação |
+| D-42 | A identidade do cliente era por rede (o mesmo NIF em duas redes = dois clientes) | Iteração `sprint-estrutural-identidade-hub` — **NIF e Email definem um cliente único em toda a base; o telemóvel deixa de ser critério.** `client_uniqueness.resolver_identidade` decide `novo`/`mesma_rede`/`associar`/`opaco`: só se associa uma rede quando NIF **e** Email apontam para o MESMO cliente estrangeiro (`redes_associadas`, janela de visitante em `client_window`, só GET/PUT da ficha e criar processo em `by_id_scope`); a segregação do CRM mantém-se (cada equipa vê só o seu processo). Registo público e criação no CRM respondem 409 opaco. Fusão dos duplicados existentes: `scripts/resolve_client_duplicates.py` (`client_merge_plan` puro + `client_merge_apply`; ambíguos — dois NIFs ligados por um email — nunca se fundem sozinhos). Riscos assumidos: D-43 |
+| D-40 | A unicidade de NIF/Email era aplicacional (corrida residual) | Iteração `sprint-estrutural-identidade-hub` — índices únicos parciais globais `idx_client_nif_hash_unico`/`idx_client_email_hash_unico` (`partialFilterExpression`: `is_deleted` falso/ausente e hash não vazio) declarados em `db_indexes.py`; um 11000 na construção é log accionável (correr `resolve_client_duplicates` e reiniciar), nunca derruba o arranque. Os escritores traduzem `DuplicateKeyError` em 409 opaco |
+| D-39 | Os ficheiros que o parceiro enviava antes da libertação ficavam na pasta do registo dele quando a lead se associava a um cliente existente | Iteração `sprint-estrutural-identidade-hub` — `services/partner_lead_files.py`: a associação copia cada ficheiro registado para a pasta definitiva do cliente (chave exacta, nunca sobrescreve: um nome ocupado ganha ` (2)`), verifica o tamanho, reaponta `db.documents` (`s3_path` e `attached_files`) e `db.document_metadata` e SÓ DEPOIS apaga a origem; fora da pasta de origem não se move nada; falha a meio → `consolidacao_pendente` no rascunho e repetição diária (`scheduled_tasks`). Limite dito: só se movem objectos que a base de dados regista |
 | D-8 | `db.emails`: faltavam as caixas partilhadas por cargo | Iteração `d8-caixas-partilhadas-por-rede` — o carimbo dos emails já estava fechado na escrita; faltava o que o impedia nas caixas partilhadas: a configuração era UMA por cargo para o sistema inteiro (o Admin da Domus editava, e ligava por OAuth, a Indexação da Power) e a regra «caixa partilhada do seu cargo» dava a todo o `indexacao` de todas as redes os emails de todas as redes. A caixa passa a identificar-se por **(cargo, rede)**: `shared_mailbox_scope` é o ponto único (administração pela rede da empresa activa; o email herda a rede da caixa; leitura só dentro do âmbito; o aviso em tempo real só a quem tem o email no âmbito, incluindo o da Caixa Geral). A pilha antiga (sem `network_id`) é da rede de omissão — nada se apaga nem se move. Backfill `scripts/backfill_shared_mailbox_network_id.py` (recusa-se sem rede) |
 | D-32 | O registo público procurava e actualizava clientes em todas as redes | Iteração `d8-caixas-partilhadas-por-rede` — `POST /public/client-registration` é anónimo e escreve: procurava o email em toda a base de dados e **actualizava** o cliente encontrado (de qualquer rede), re-marcava-o como lead novo e devolvia o `client_id` e `is_new_client` (um oráculo). A procura vive agora na rede do link (`ambito_do_registo`: a rede + as suas empresas; a pilha por carimbar só conta para a rede de omissão); a mesma pessoa em duas redes são dois clientes; o aviso à gestão (push + email com nome, email e telefone) ia ao «primeiro admin da base de dados» e passa a ir só à gestão da rede do link; `is_new_client` saiu |
 | D-34 (changelog) | Geração por IA e diagnóstico do changelog aceitavam Admin e CEO | Iteração `d8-caixas-partilhadas-por-rede` — só-Master, por uma constante única e inventário por AST |

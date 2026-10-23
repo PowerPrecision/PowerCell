@@ -100,7 +100,7 @@ test("matched_fields desconhecidos caem no fallback nif|email", () => {
   assert.match(parsed.message, /Já existe um cliente com este NIF ou Email\.$/);
 });
 
-test("D-38: o telemóvel é um campo em conflito reconhecido", () => {
+test("D-42: o telemóvel já não é um campo em conflito (o servidor que o devolva é ignorado)", () => {
   const parsed = parseDuplicateClientError(
     axiosError(409, {
       existing_client_id: "cli-5",
@@ -108,43 +108,59 @@ test("D-38: o telemóvel é um campo em conflito reconhecido", () => {
       matched_fields: ["telefone"],
     })
   );
-  assert.deepEqual(parsed.matched_fields, ["telefone"]);
-  assert.equal(duplicateFieldLabel(parsed.matched_fields), "Telemóvel");
-  assert.match(parsed.message, /Já existe um cliente com este Telemóvel: Rui/);
+  assert.deepEqual(parsed.matched_fields, ["nif", "email"]);
+  assert.equal(duplicateFieldLabel(["telefone"]), "NIF ou Email");
 });
 
-test("D-38: três campos em conflito dizem-se todos, pela ordem NIF, Email, Telemóvel", () => {
+test("D-42: NIF e Email dizem-se pela ordem NIF, Email", () => {
   const parsed = parseDuplicateClientError(
-    axiosError(409, { matched_fields: ["telefone", "nif", "email"] })
+    axiosError(409, { matched_fields: ["email", "nif"] })
   );
-  assert.equal(duplicateFieldLabel(["telefone", "nif", "email"]), "NIF, Email e Telemóvel");
-  assert.match(parsed.message, /Já existe um cliente com este NIF, este Email e este Telemóvel\.$/);
+  assert.equal(duplicateFieldLabel(["email", "nif"]), "NIF e Email");
+  assert.match(parsed.message, /Já existe um cliente com este NIF e este Email\.$/);
 });
 
-test("D-38: NIF e telemóvel sem email", () => {
-  assert.equal(duplicateFieldLabel(["nif", "telefone"]), "NIF e Telemóvel");
+test("D-42: o 409 opaco da equipa (cliente de outra rede) não traz id nem nome e não oferece 'usar existente'", () => {
+  const parsed = parseDuplicateClientError(
+    axiosError(409, {
+      code: "DUPLICATE_CLIENT",
+      message: "Já existe um registo associado a este NIF ou Email.",
+    })
+  );
+  assert.equal(parsed.opaco, true);
+  assert.equal(parsed.existing_client_id, null);
+  assert.equal(parsed.existing_client_name, null);
+  assert.equal(parsed.message, "Já existe um registo associado a este NIF ou Email.");
 });
 
-test("D-38: o 409 anónimo do formulário público tem o seu reconhecedor", () => {
+test("D-42: um 409 estruturado COM id continua a ser o da própria rede (não é opaco)", () => {
+  const parsed = parseDuplicateClientError(
+    axiosError(409, { code: "DUPLICATE_CLIENT", existing_client_id: "cli-1", existing_client_name: "Ana" })
+  );
+  assert.equal(parsed.opaco, undefined);
+  assert.equal(parsed.existing_client_id, "cli-1");
+});
+
+test("D-42: o 409 anónimo do formulário público tem o seu reconhecedor", () => {
   const erro = {
     response: {
       status: 409,
       data: {
         success: false,
         code: "DUPLICATE_CLIENT",
-        detail: "Já existe um registo associado a este NIF, Email ou Telemóvel.",
+        detail: "Já existe um registo associado a este NIF ou Email.",
       },
     },
   };
   assert.equal(
     publicDuplicateMessage(erro),
-    "Já existe um registo associado a este NIF, Email ou Telemóvel."
+    "Já existe um registo associado a este NIF ou Email."
   );
   // Não se confunde com o da equipa (detail é uma string, não um objecto).
   assert.equal(isDuplicateClientError(erro), false);
 });
 
-test("D-38: sem mensagem do servidor usa a por omissão; outros 409 não contam", () => {
+test("D-42: sem mensagem do servidor usa a por omissão; outros 409 não contam", () => {
   assert.equal(
     publicDuplicateMessage({ response: { status: 409, data: { code: "DUPLICATE_CLIENT" } } }),
     PUBLIC_DUPLICATE_MESSAGE

@@ -122,6 +122,17 @@ JOBS_DECLARADOS: list[dict[str, Any]] = [
         "so_em_producao": True,
     },
     {
+        "chave": "gov_scrapers_healthcheck",
+        "nome": "Health check dos scrapers do Estado",
+        "descricao": (
+            "Uma vez por dia corre a extracção de teste às Finanças e à Segurança Social (GOV_TEST_NIF/GOV_TEST_PWD) "
+            "e avisa Master e Admins se os selectores deixaram de funcionar."
+        ),
+        "interval_seconds": 86400,
+        "processo": "worker",
+        "so_em_producao": True,
+    },
+    {
         "chave": "webmail_worker_sync",
         "nome": "Sincronização de e-mail (rede de segurança)",
         "descricao": "Segunda passagem, mais lenta, para o caso de o processo principal estar em baixo.",

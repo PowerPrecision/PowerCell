@@ -147,3 +147,71 @@ class TestRestoreClient:
 
         activities = fake_async_db.process_activities.docs
         assert any(a.get("type") == "client_restored" for a in activities)
+
+
+class TestRestoreComIdentidadeGlobal:
+    """D-42: NIF e Email são únicos em toda a base de dados — restaurar não recria o duplicado."""
+
+    def _eliminado(self, **extra):
+        return {
+            "id": "velho", "nome": "Ana", "is_deleted": True, "deleted": True, "status": "eliminado",
+            "is_active": False, "previous_status": "fase_documental",
+            "dados_pessoais": {"nif_hash": "hash-nif"}, "contacto": {"email_hash": "hash-email"},
+            **extra,
+        }
+
+    async def test_recusa_se_um_cliente_activo_ja_tem_o_nif(self, fake_async_db):
+        import services.restore_api_client as svc
+
+        _seed(fake_async_db, client_doc=self._eliminado())
+        fake_async_db.clients.docs.append({"id": "novo", "dados_pessoais": {"nif_hash": "hash-nif"}})
+        with patch.object(svc, "db", fake_async_db):
+            with pytest.raises(HTTPException) as exc:
+                await run_restore_client("velho", USER)
+        assert exc.value.status_code == 409
+        assert next(c for c in fake_async_db.clients.docs if c["id"] == "velho")["is_deleted"] is True
+
+    async def test_recusa_se_um_cliente_activo_ja_tem_o_email(self, fake_async_db):
+        import services.restore_api_client as svc
+
+        _seed(fake_async_db, client_doc=self._eliminado())
+        fake_async_db.clients.docs.append({"id": "novo", "contacto": {"email_hash": "hash-email"}})
+        with patch.object(svc, "db", fake_async_db):
+            with pytest.raises(HTTPException) as exc:
+                await run_restore_client("velho", USER)
+        assert exc.value.status_code == 409
+
+    async def test_um_rival_eliminado_nao_bloqueia(self, fake_async_db):
+        import services.restore_api_client as svc
+
+        _seed(fake_async_db, client_doc=self._eliminado())
+        fake_async_db.clients.docs.append(
+            {"id": "outro", "dados_pessoais": {"nif_hash": "hash-nif"}, "is_deleted": True},
+        )
+        with patch.object(svc, "db", fake_async_db):
+            await run_restore_client("velho", USER)
+        assert next(c for c in fake_async_db.clients.docs if c["id"] == "velho")["is_deleted"] is False
+
+    async def test_um_cliente_fundido_nunca_se_restaura(self, fake_async_db):
+        import services.restore_api_client as svc
+
+        _seed(fake_async_db, client_doc=self._eliminado(merged_into="sobrevivente"))
+        with patch.object(svc, "db", fake_async_db):
+            with pytest.raises(HTTPException) as exc:
+                await run_restore_client("velho", USER)
+        assert exc.value.status_code == 409 and "fundido" in exc.value.detail
+
+    async def test_a_corrida_do_indice_unico_tambem_e_409(self, fake_async_db):
+        from pymongo.errors import DuplicateKeyError
+
+        import services.restore_api_client as svc
+
+        _seed(fake_async_db, client_doc=self._eliminado())
+
+        async def rebenta(*_a, **_k):
+            raise DuplicateKeyError("E11000")
+
+        with patch.object(svc, "db", fake_async_db), patch.object(fake_async_db.clients, "update_one", rebenta):
+            with pytest.raises(HTTPException) as exc:
+                await run_restore_client("velho", USER)
+        assert exc.value.status_code == 409

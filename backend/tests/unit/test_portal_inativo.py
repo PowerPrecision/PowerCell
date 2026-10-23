@@ -418,6 +418,8 @@ SEM_GUARDA_DO_CLIENTE = {
     "resolve_portal_token": "emite token; recusa dentro de `run_resolve_portal_token`",
     "impersonate_client_portal": "staff (`require_staff`), não é o cliente",
     "create_recommendations": "staff (`get_current_user`)",
+    "portal_hub_list": "D-42: o Hub (`get_current_hub`, token do CLIENTE); todos os processos inactivos = o 403 do Portal inactivo, dentro de `listar_para_o_hub`",
+    "portal_hub_select": "D-42: o Hub; um processo inactivo do cliente = o 403 do Portal inactivo, dentro de `seleccionar_processo` (e a `get_current_client` do token emitido re-verifica em cada pedido)",
     # `get_scraper_job_status` SAIU desta lista (Bloco 5): estava aqui como «consulta
     # pública de um job por id opaco», mas devolvia o documento inteiro do job —
     # `mfa_code` em claro incluído. Passou a exigir `get_current_client`.

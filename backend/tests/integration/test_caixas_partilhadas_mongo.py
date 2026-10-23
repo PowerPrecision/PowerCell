@@ -209,10 +209,13 @@ class TestRegistoPublicoPorRede:
         return cadeia
 
     async def _procurar(self, rede, email):
-        from services.client_uniqueness import encontrar_cliente_duplicado
+        """O cliente deste email que PERTENCE à rede (D-42: a procura é global, a posse é por rede)."""
+        from services.client_uniqueness import cliente_e_da_rede, encontrar_clientes_duplicados
 
-        achado = await encontrar_cliente_duplicado(None, email, rede=rede)
-        return achado and achado["id"]
+        for candidato in await encontrar_clientes_duplicados(None, email):
+            if await cliente_e_da_rede(candidato, rede):
+                return candidato["id"]
+        return None
 
     @pytest.mark.asyncio
     async def test_cada_rede_so_encontra_o_seu(self, clientes):

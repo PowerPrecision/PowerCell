@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Quantos clientes violam a regra «NIF, Email e Telemóvel não se repetem na rede» (D-38).
+"""Quantos clientes violam a regra «NIF e Email não se repetem» (D-38 → D-42, identidade global).
 
 A PERGUNTA
 ==========
 A regra é nova e a base de dados é antiga. A guarda (`client_uniqueness`)
 só verifica o que entra e o que muda; **o que já lá está fica como está**.
-Antes de decidir se um índice único por rede é viável — é a única coisa que
-fecha a corrida entre dois pedidos simultâneos —, é preciso saber quantos
-clientes existentes o violariam, onde e por que campo. É isso que este
+Antes de decidir se os índices únicos parciais (`db_indexes`: NIF e Email,
+globais — são a única coisa que fecha a corrida entre dois pedidos simultâneos)
+se constroem, é preciso saber quantos clientes existentes os violariam, onde e
+por que campo. É isso que este
 script imprime. A classificação vive em `services/client_duplicates_audit.py`
-(puro, com testes); aqui só se lê a base de dados.
+(puro, com testes); aqui só se lê a base de dados. Para RESOLVER, `scripts/resolve_client_duplicates.py`.
 
 ESTRITAMENTE SÓ DE LEITURA
 ==========================
@@ -28,8 +29,8 @@ O QUE SAI
     * «casos»: clientes ligados por qualquer campo contam como UMA decisão
       (a mesma pessoa inserida duas vezes repete NIF, email e telemóvel de
       uma só vez — são 3 grupos e 1 caso);
-    * quantos valores são partilhados entre redes DIFERENTES (não é
-      violação: a mesma pessoa em duas redes são dois clientes);
+    * quantos grupos atravessam redes DIFERENTES (a mesma pessoa com processos
+      em duas empresas: é o caso que `resolve_client_duplicates` funde);
     * o veredicto: «índice único viável» ou quantos casos o impedem.
 
 Os valores saem mascarados (`*****9461`, `a***@dominio.pt`) e sem nomes;
@@ -79,7 +80,6 @@ PROJECCAO_CLIENTE = {
     "network_id": 1, "company_id": 1, "company": 1, "company_name": 1,
     "dados_pessoais.nif": 1, "dados_pessoais.nif_hash": 1,
     "contacto.email": 1, "contacto.email_hash": 1,
-    "contacto.telefone": 1, "contacto.telefone_hash": 1,
 }
 PROJECCAO_EMPRESA = {"_id": 0, "id": 1, "name": 1, "network_id": 1}
 
@@ -161,7 +161,7 @@ def _imprimir(relatorio: Relatorio, registos: list[Registo], processos: dict[str
     completos = args.dados_pessoais
 
     print("=" * 70)
-    print("D-38 — DUPLICADOS DE NIF / EMAIL / TELEMÓVEL POR REDE (só leitura)")
+    print("D-42 — DUPLICADOS DE NIF / EMAIL (identidade global, só leitura)")
     print("=" * 70)
     print(f"Clientes activos auditados: {resumo['total_clientes']}")
     for rede, n in sorted(resumo["clientes_por_rede"].items()):
@@ -180,7 +180,7 @@ def _imprimir(relatorio: Relatorio, registos: list[Registo], processos: dict[str
         print("    Confirmar que a chave de cifra do ambiente é a de produção.")
         print("-" * 70)
 
-    print("VIOLAÇÕES DENTRO DA MESMA REDE")
+    print("DUPLICADOS (em qualquer rede)")
     if not resumo["grupos"]:
         print("  Nenhuma.")
     for rede, linha in resumo["por_rede"].items():
@@ -194,9 +194,9 @@ def _imprimir(relatorio: Relatorio, registos: list[Registo], processos: dict[str
           f"→  CASOS A DECIDIR À MÃO: {resumo['casos']}")
     print("-" * 70)
 
-    entre_redes = resumo["partilhados_entre_redes"]
+    entre_redes = resumo["grupos_entre_redes"]
     if entre_redes:
-        print("PARTILHADOS ENTRE REDES DIFERENTES (não é violação — são clientes distintos):")
+        print("GRUPOS QUE ATRAVESSAM REDES (o mesmo cliente com processos em empresas diferentes):")
         for campo in CAMPOS_UNICOS:
             if entre_redes.get(campo):
                 print(f"  {ROTULOS[campo]}: {entre_redes[campo]} valor(es)")
@@ -206,18 +206,18 @@ def _imprimir(relatorio: Relatorio, registos: list[Registo], processos: dict[str
         print("→ NENHUM cliente activo foi lido: confirmar DB_NAME antes de tirar conclusões "
               "(zero clientes não é «sem duplicados»).")
     elif resumo["indice_unico_viavel"]:
-        print("→ Um índice único por rede é VIÁVEL: não há nenhum duplicado a resolver.")
+        print("→ Os índices únicos de NIF e Email são VIÁVEIS: não há nenhum duplicado a resolver.")
     else:
-        print(f"→ Um índice único por rede NÃO é viável ainda: {resumo['casos']} caso(s) "
-              "têm de ser resolvidos antes\n  (manter um cliente, passar os processos, "
-              "eliminar o outro).")
+        print(f"→ Os índices únicos NÃO se constroem ainda: {resumo['casos']} caso(s) "
+              "têm de ser resolvidos antes\n  (`python -m scripts.resolve_client_duplicates`: "
+              "descreve; `--aplicar` funde o que é inequívoco).")
     print("-" * 70)
 
     if relatorio.grupos:
         mostrados = relatorio.grupos[:args.limite_exemplos]
         print(f"GRUPOS (maiores primeiro, {len(mostrados)} de {len(relatorio.grupos)}):")
         for g in mostrados:
-            print(f"  [{g.rede}] {ROTULOS[g.campo]} {mostrar(g.campo, g.chave, valores_completos=completos)}"
+            print(f"  [{' + '.join(g.redes)}] {ROTULOS[g.campo]} {mostrar(g.campo, g.chave, valores_completos=completos)}"
                   f" — {len(g.membros)} clientes")
             for cid in g.membros:
                 nome = f" «{nomes.get(cid, '')}»" if completos else ""
@@ -227,10 +227,10 @@ def _imprimir(relatorio: Relatorio, registos: list[Registo], processos: dict[str
         destino = Path(args.csv)
         with destino.open("w", newline="", encoding="utf-8") as fh:
             escritor = csv.writer(fh)
-            escritor.writerow(["rede", "campo", "valor", "clientes", "ids", "processos"])
+            escritor.writerow(["redes", "campo", "valor", "clientes", "ids", "processos"])
             for g in relatorio.grupos:
                 escritor.writerow([
-                    g.rede, g.campo, mostrar(g.campo, g.chave, valores_completos=completos),
+                    " + ".join(g.redes), g.campo, mostrar(g.campo, g.chave, valores_completos=completos),
                     len(g.membros), ";".join(g.membros),
                     ";".join(str(processos.get(c, 0)) for c in g.membros),
                 ])
@@ -247,7 +247,7 @@ async def principal() -> int:
         processos = await _processos_por_cliente(em_conflito) if em_conflito else {}
     except PyMongoError as exc:
         print("=" * 70)
-        print("D-38 — MEDIÇÃO NÃO REALIZADA")
+        print("D-42 — MEDIÇÃO NÃO REALIZADA")
         print("=" * 70)
         print(f"  A base de dados não respondeu: {exc}")
         print(

@@ -49,10 +49,13 @@ const DuplicateClientAlert = ({ duplicate, onDismiss, onUseExisting }) => {
           {duplicate.message}
         </p>
         <p className="text-xs text-red-600/90 dark:text-red-400/90">
-          {`O ${fieldLabel} introduzido já pertence a um cliente activo da sua rede. `}
-          {onUseExisting
+          {duplicate.opaco
+            ? "Este NIF ou Email já está registado no sistema. Para associar o cliente à sua empresa, "
+              + "indique o NIF e o Email exactamente como estão registados; senão, corrija os dados."
+            : `O ${fieldLabel} introduzido já pertence a um cliente activo da sua rede. `}
+          {!duplicate.opaco && (onUseExisting
             ? "Pode usar o cliente existente ou alterar os dados para continuar."
-            : "Altere os dados para continuar."}
+            : "Altere os dados para continuar.")}
         </p>
         {onUseExisting && duplicate.existing_client_id && (
           <Button

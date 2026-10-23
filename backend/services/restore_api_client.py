@@ -24,6 +24,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
+from pymongo.errors import DuplicateKeyError
 
 from database import db
 
@@ -51,6 +52,42 @@ async def _resolve_restored_status(previous_status, doc: dict | None = None) -> 
     return await get_first_workflow_status(rede_do_processo(doc))
 
 
+def _erro_de_identidade_em_uso() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail="Já existe um cliente activo com o mesmo NIF ou Email: não é possível restaurar este.",
+    )
+
+
+async def _exigir_identidade_livre(doc: dict) -> None:
+    """D-42: NIF e Email são únicos em toda a base de dados — restaurar não pode recriar o duplicado.
+
+    Um cliente que foi FUNDIDO noutro (`merged_into`) nunca se restaura: perdeu os índices de
+    identidade de propósito e o activo é o que ficou. Para o resto, compara-se pelos índices
+    cegos gravados (sem decifrar nada) com os clientes activos.
+    """
+    if doc.get("merged_into"):
+        raise HTTPException(
+            status_code=409,
+            detail="Este cliente foi fundido noutro (era um duplicado) e não pode ser restaurado.",
+        )
+    ramos = []
+    nif_hash = (doc.get("dados_pessoais") or {}).get("nif_hash")
+    email_hash = (doc.get("contacto") or {}).get("email_hash")
+    if nif_hash:
+        ramos.append({"dados_pessoais.nif_hash": nif_hash})
+    if email_hash:
+        ramos.append({"contacto.email_hash": email_hash})
+    if not ramos:
+        return
+    rival = await db.clients.find_one(
+        {"$or": ramos, "id": {"$ne": doc.get("id")}, "is_deleted": {"$ne": True}, "status": {"$ne": "eliminado"}},
+        {"_id": 0, "id": 1},
+    )
+    if rival:
+        raise _erro_de_identidade_em_uso()
+
+
 async def run_restore_client(client_id: str, user: dict) -> dict:
     """Restaura um cliente eliminado (soft delete) + cascata."""
     # Procurar o cliente nas DUAS colecções (modelo unificado — ver
@@ -74,6 +111,9 @@ async def run_restore_client(client_id: str, user: dict) -> dict:
             detail="Cliente não está eliminado — não precisa de restauração",
         )
 
+    if collection is db.clients:
+        await _exigir_identidade_livre(doc)
+
     now = datetime.now(timezone.utc).isoformat()
     restored_status = await _resolve_restored_status(doc.get("previous_status"), doc)
 
@@ -88,7 +128,11 @@ async def run_restore_client(client_id: str, user: dict) -> dict:
         "restored_by": user.get("id", ""),
         "updated_at": now,
     }
-    await collection.update_one({"id": client_id}, {"$set": restore_set})
+    try:
+        await collection.update_one({"id": client_id}, {"$set": restore_set})
+    except DuplicateKeyError:
+        # A corrida que o pré-teste não apanha: o índice único parcial (D-42) é a última linha.
+        raise _erro_de_identidade_em_uso()
 
     restored_processes: list[str] = []
 

@@ -12537,3 +12537,42 @@ Work Log:
 Stage Summary:
 * **Operação:** nenhuma migração. Documentos anteriores sem marcador mostram o que o `client_id` diz.
 * **Por fazer (de propósito):** o CRM não mostra o `titular` no S3FileManager; a escolha de titular para pedidos da checklist (um pedido por titular) é decisão de produto.
+
+---
+Task ID: sprint-estrutural-identidade-hub-out2026
+Agent: Cloud Agent
+Task: Sprint Estrutural — identidade global (D-42/D-40) e Hub do Portal do Cliente
+
+Date: 2026-10-23
+
+Work Log:
+* **Identidade global:** NIF e Email únicos em toda a base, telemóvel fora (`client_uniqueness`: `resolver_identidade` → `novo`/`mesma_rede`/`associar`/`opaco`). Associa uma rede só com NIF **e** Email do MESMO cliente estrangeiro (`redes_associadas`); a janela de visitante (`client_window`) e `by_id_scope(com_associados=)` mantêm a segregação. Registo público: 409 opaco (sem id/nome/campo). Lead de parceiro: associa ou fica RETIDA (`identidade_em_conflito`) com aviso único à gestão.
+* **Fusão:** `scripts/resolve_client_duplicates.py` (omissão lê; `--aplicar`; `--criar-indices`; exit 0/1/2). `client_merge_plan` (puro) + `client_merge_apply` (reaponta processos e as colecções descobertas por leitura; elimina o absorvido no fim; retomável). Dois NIFs ligados por um email são AMBÍGUOS e nunca se fundem sozinhos.
+* **Índices:** únicos parciais `idx_client_nif_hash_unico`/`idx_client_email_hash_unico` em `db_indexes.py`; 11000 na construção é log accionável.
+* **Hub do Portal:** token `client_hub` ancorado ao `client_id` (`portal_hub.py`), `GET /portal/hub`, `POST /portal/hub/select` (devolve o token do processo escolhido; 404 uniforme; inactivo → 403). Frontend: `PortalHub`/`PortalHubEcra`, `usePortalHub`, `utils/portalHub.js`; um só processo entra directo; «Trocar de processo».
+* **Testes invertidos/renomeados (não apagados):** `test_d38_duplicados_por_rede` → `test_d42_identidade_global`; `test_duplicados_por_rede_mongo` → `test_identidade_global_mongo`; registo cruzado em `test_d32`/`test_formulario_por_rede` passou a 409. O duplo de Mongo passou a aplicar `$addToSet` (antes ignorava em silêncio; o `test_fluxo_mestre` dependia disso e foi reescrito).
+* **Mutações:** ~20 no D-42 (1 equivalente), 14 no Hub (todas mortas), frontend com 2 equivalentes assumidas.
+
+Stage Summary:
+* **Operação (por esta ordem):** deploy → `python -m scripts.resolve_client_duplicates` (simulação) → resolver à mão os AMBÍGUOS → `--aplicar` → o índice único nasce no arranque seguinte (ou `--criar-indices`). Sem esta ordem o índice recusa-se a nascer (e a app arranca na mesma).
+* **Riscos assumidos:** D-43 (oráculo de existência entre redes, casal com email partilhado, `find-or-create` global) e D-44 (código de acesso → Hub com processos de outras redes).
+* **Não verificado:** dados reais de produção (nº de duplicados), login real do Portal em browser.
+
+---
+Task ID: sprint-estrutural-d39-d30-out2026
+Agent: Cloud Agent
+Task: Sprint Estrutural — consolidação dos ficheiros do parceiro (D-39) e health check dos scrapers do Estado (D-30)
+
+Date: 2026-10-23
+
+Work Log:
+* **D-39:** `services/partner_lead_files.py` (copiar → verificar → reapontar → só então apagar a origem, chave exacta, nunca sobrescreve, retomável) ligado à associação (`partner_drafts._associar_a_cliente_existente`), com a marca `consolidacao_pendente` no mesmo `$set` e repetição diária no `scheduled_tasks`. Primitiva nova `s3_storage.copy_object_exact`. Ensinado o `com_bd` dos testes do parceiro a incluir o módulo no `tenant_db`.
+* **D-30:** `services/gov_scrapers_healthcheck.py` + job `gov_scrapers_healthcheck` (worker, 24 h) registado em `JOBS_DECLARADOS`/`EXECUTORES`; `executar_job(forcado=True)` para o botão do painel ignorar o intervalo de 20 h; `alert_audience.destinatarios_de_infraestrutura`; colecção `gov_scrapers_health`; variáveis `GOV_TEST_*` no `render.yaml`.
+* **Testes ajustados (não apagados):** os fakes de `executar_job` em `test_execucao_forcada_de_jobs` aceitam `forcado`; os conjuntos de jobs declarados e as cadências do worker incluem o novo job.
+* **Achados dos testes:** o `_codigo` do health check deixava passar os dígitos de um NIF (limpar caracteres não chega) — passou a aceitar só identificadores; a mutação que apagava o ramo `selector_desatualizado` sobrevivia (passo desconhecido) e ganhou teste.
+* **Mutações:** D-39 16 (2 sobreviveram à 1.ª passagem: a ordem apagar/reapontar — o espião só via o último delete — e o ramo «registo já no destino»; ambas eram testes fracos e foram endurecidas), D-30 21 (1 sobreviveu e foi coberta).
+* **Verificações:** suite backend completa 13 135 passados (1 falha artefacto de editar `s3_storage.py` durante a corrida, passa isolada); frontend 4 419 testes, ESLint `--quiet` e build limpos; testes do fluxo do parceiro corridos com MongoDB inalcançável (como o `backend-fast`).
+
+Stage Summary:
+* **Operação:** definir `GOV_TEST_NIF`/`GOV_TEST_PWD` (e `GOV_TEST_NISS`) no serviço worker; sem elas o job avisa os Master semanalmente. Leads já associadas antes do deploy não têm a marca `consolidacao_pendente` (os ficheiros ficaram na pasta do registo, como antes): ficam por consolidar à mão com o religamento.
+* **Não verificado:** nada contra os portais reais do Estado; S3 real (cliente boto3 falso); consumo de RAM do Chromium no worker de 512 MB.

@@ -32,7 +32,7 @@ const PASSOS_ESCONDIDOS = Object.fromEntries(
   [2, 3, 4, 5].map((n) => [String(n), { depends_on: { field: "compra_tipo", value: "__nunca__" } }]),
 );
 
-const MENSAGEM = "Já existe um registo associado a este NIF, Email ou Telemóvel.";
+const MENSAGEM = "Já existe um registo associado a este NIF ou Email.";
 
 // Os campos que o `validateForm` exige (nome, email, telemóvel e NIF), no passo 1.
 const CAMPOS = [

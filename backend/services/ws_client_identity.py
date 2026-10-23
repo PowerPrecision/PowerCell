@@ -91,7 +91,12 @@ TIPO_DO_STAFF = "access"
 # os deixar cair numa omissão.
 TIPO_GOV = "gov_auth"
 
-TIPOS_ESTRANHOS_AO_STAFF: tuple[str, ...] = (*TIPOS_DO_PORTAL, TIPO_GOV)
+#: O token do HUB do Portal (D-42): ancorado ao CLIENTE (`sub = client_id`), serve só para listar e
+#: escolher processos. **Fica de propósito FORA de `TIPOS_DO_PORTAL`**: o WebSocket do Portal deriva a
+#: sala do `sub` como se fosse um processo, e um token cujo `sub` é um cliente não pode abri-la.
+TIPO_DO_HUB = "client_hub"
+
+TIPOS_ESTRANHOS_AO_STAFF: tuple[str, ...] = (*TIPOS_DO_PORTAL, TIPO_DO_HUB, TIPO_GOV)
 
 
 def tipo_de_token_e_do_portal(tipo: Optional[str]) -> bool:

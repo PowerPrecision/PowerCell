@@ -1,24 +1,30 @@
 """
 ====================================================================
-DIAGNÓSTICO DE DUPLICADOS DE CLIENTES POR REDE (D-38) — PURO
+DIAGNÓSTICO DE DUPLICADOS DE CLIENTES (D-38 → D-42, identidade GLOBAL) — PURO
 ====================================================================
-A regra «NIF, Email e Telemóvel não se repetem dentro da rede»
-(`client_uniqueness`) é NOVA e a base de dados é ANTIGA. Este módulo
-responde, sem escrever nada, a uma pergunta de operações: **quantos
-clientes violam a regra hoje, em que rede, e por que campo?** É esse
-número que decide se um índice único por rede é viável ou se há uma
-limpeza manual antes dele (a corrida entre dois pedidos simultâneos é a
-parte da D-38 que só um índice fecha).
+A regra «NIF e Email não se repetem» (`client_uniqueness`) é NOVA e a base
+de dados é ANTIGA. Este módulo responde, sem escrever nada, a uma pergunta de
+operações: **quantos clientes violam a regra hoje, em que redes, e por que
+campo?** É esse número que decide se os índices únicos parciais de
+`db_indexes` se constroem ou se há uma limpeza antes
+(`scripts/resolve_client_duplicates.py`).
+
+D-42 (Out 2026): A IDENTIDADE PASSOU A SER GLOBAL E O TELEMÓVEL SAIU
+  Até ao D-38 a regra era «dentro da mesma rede» e o mesmo NIF em duas redes
+  eram dois clientes. A direcção decidiu o contrário: **NIF e Email definem um
+  cliente único em toda a base de dados** (a segregação continua no CRM, pela
+  janela de processos), e o telemóvel deixa de contar. Por isso os grupos já
+  não são por rede: um grupo é um valor repetido em QUALQUER rede, e diz em
+  que redes aparece (`Grupo.redes`) — um grupo que atravessa redes é
+  precisamente o caso que o D-42 resolve fundindo.
 
 A IDENTIDADE É A DA GUARDA, NÃO UMA SEGUNDA REGRA
   Duas cópias da mesma regra divergem sem dar erro. O valor-chave de cada
   campo sai das mesmas peças que o `client_uniqueness` usa:
     * NIF       — 9 dígitos (o `generate_nif_hash` ignora o resto);
-    * Email     — aparado e em minúsculas;
-    * Telemóvel — `telefones_candidatos(...)[0]`: `912 345 678`,
-                  `+351 912 345 678` e `00351912345678` são o mesmo.
-  Um valor que a guarda não consegue indexar (NIF com 8 dígitos, telefone
-  com 5) não identifica ninguém e aqui também não conta.
+    * Email     — aparado e em minúsculas.
+  Um valor que a guarda não consegue indexar (NIF com 8 dígitos) não
+  identifica ninguém e aqui também não conta.
 
 COMO SE ATRIBUI UMA REDE A UM CLIENTE
   `network_id` do carimbo; senão a rede da EMPRESA (a ilha implícita
@@ -28,10 +34,8 @@ COMO SE ATRIBUI UMA REDE A UM CLIENTE
   nunca se funde com uma rede concreta por adivinhação.
 
 O QUE NÃO É VIOLAÇÃO
-  O mesmo NIF em DUAS redes são dois clientes (D-32: «a mesma pessoa em
-  duas redes são dois clientes»). Conta-se à parte, como informação, e não
-  entra nos grupos. Eliminados (`is_deleted`/`status="eliminado"`) não
-  bloqueiam a guarda, logo também não entram aqui.
+  Eliminados (`is_deleted`/`status="eliminado"`) não bloqueiam a guarda nem
+  o índice parcial, logo também não entram aqui.
 
 PRIVACIDADE
   O relatório diz QUAIS valores se repetem, mas por omissão mascarados
@@ -48,9 +52,7 @@ from typing import Any, Iterable, Optional
 from services.client_uniqueness import (
     CAMPO_EMAIL,
     CAMPO_NIF,
-    CAMPO_TELEFONE,
     CAMPOS_UNICOS,
-    telefones_candidatos,
 )
 from services.tenant_network import CAMPOS_EMPRESA, CAMPO_REDE, rede_de_omissao, resolve_network_id
 
@@ -79,12 +81,7 @@ def chave_email(valor: Any) -> Optional[str]:
     return texto or None
 
 
-def chave_telefone(valor: Any) -> Optional[str]:
-    candidatos = telefones_candidatos(_texto(valor))
-    return candidatos[0] if candidatos else None
-
-
-_CHAVES = {CAMPO_NIF: chave_nif, CAMPO_EMAIL: chave_email, CAMPO_TELEFONE: chave_telefone}
+_CHAVES = {CAMPO_NIF: chave_nif, CAMPO_EMAIL: chave_email}
 
 
 def esta_eliminado(doc: dict) -> bool:
@@ -102,7 +99,6 @@ class Registo:
     rede: str
     nif: Optional[str] = None
     email: Optional[str] = None
-    telefone: Optional[str] = None
     nome: str = ""
     #: Campos cuja chave veio do índice cego por o valor não se ter podido
     #: decifrar. Contam-se e dizem-se: um relatório que não os visse seria
@@ -140,11 +136,8 @@ def registo_de(
 
     nif, nif_cego = _valor_ou_indice(dados.get("nif"), dados.get("nif_hash"), "nif-hash", chave_nif)
     email, email_cego = _valor_ou_indice(contacto.get("email"), contacto.get("email_hash"), "email-hash", chave_email)
-    telefone, tel_cego = _valor_ou_indice(
-        contacto.get("telefone"), contacto.get("telefone_hash"), "telefone-hash", chave_telefone,
-    )
     cegos = tuple(
-        c for c, cego in ((CAMPO_NIF, nif_cego), (CAMPO_EMAIL, email_cego), (CAMPO_TELEFONE, tel_cego))
+        c for c, cego in ((CAMPO_NIF, nif_cego), (CAMPO_EMAIL, email_cego))
         if cego
     )
     return Registo(
@@ -152,7 +145,6 @@ def registo_de(
         rede=rede,
         nif=nif,
         email=email,
-        telefone=telefone,
         nome=_texto(doc.get("nome") or doc.get("name") or doc.get("client_name")),
         sem_decifrar=cegos,
     )
@@ -175,10 +167,16 @@ def rede_do_documento(doc: dict, redes_das_empresas: dict[str, Optional[str]]) -
 # --------------------------------------------------------------------
 @dataclass(frozen=True)
 class Grupo:
-    rede: str
+    #: As redes em que o valor aparece (uma só = duplicado dentro da rede; várias = o
+    #: mesmo cliente com processos em empresas diferentes, o caso do D-42).
+    redes: tuple[str, ...]
     campo: str
     chave: str
     membros: tuple[str, ...]  # ids dos clientes, por ordem estável
+
+    @property
+    def atravessa_redes(self) -> bool:
+        return len(self.redes) >= 2
 
 
 @dataclass
@@ -190,8 +188,8 @@ class Relatorio:
     #: Conjuntos de clientes ligados por qualquer campo (uma «pessoa duplicada»
     #: são N linhas): o nº de decisões humanas é este, não o de grupos.
     casos: list[tuple[str, ...]] = field(default_factory=list)
-    #: Valores partilhados entre redes DIFERENTES — informação, não violação.
-    partilhados_entre_redes: dict[str, int] = field(default_factory=dict)
+    #: Grupos cujos membros estão em redes DIFERENTES, por campo (a fusão cria associações).
+    grupos_entre_redes: dict[str, int] = field(default_factory=dict)
     sem_decifrar: dict[str, int] = field(default_factory=dict)
     sem_rede_de_omissao: bool = False
 
@@ -201,10 +199,9 @@ class Relatorio:
 
 
 def auditar(registos: Iterable[Registo]) -> Relatorio:
-    """Agrupa por (rede, campo, chave) e devolve só os grupos com 2+ clientes."""
+    """Agrupa por (campo, chave) — GLOBAL — e devolve só os grupos com 2+ clientes."""
     relatorio = Relatorio()
-    por_grupo: dict[tuple[str, str, str], list[str]] = {}
-    por_valor: dict[tuple[str, str], set[str]] = {}
+    por_grupo: dict[tuple[str, str], list[str]] = {}
     rede_de: dict[str, str] = {}
 
     for r in registos:
@@ -219,18 +216,19 @@ def auditar(registos: Iterable[Registo]) -> Relatorio:
             chave = r.chave(campo)
             if not chave:
                 continue
-            por_grupo.setdefault((r.rede, campo, chave), []).append(r.id)
-            por_valor.setdefault((campo, chave), set()).add(r.rede)
+            por_grupo.setdefault((campo, chave), []).append(r.id)
 
     relatorio.sem_rede_de_omissao = rede_de_omissao() is None
-    for (rede, campo, chave), ids in por_grupo.items():
-        if len(set(ids)) >= 2:
-            relatorio.grupos.append(Grupo(rede, campo, chave, tuple(sorted(set(ids)))))
-    relatorio.grupos.sort(key=lambda g: (-len(g.membros), g.rede, g.campo, g.chave))
+    for (campo, chave), ids in por_grupo.items():
+        membros = tuple(sorted(set(ids)))
+        if len(membros) >= 2:
+            redes = tuple(sorted({rede_de[i] for i in membros}))
+            relatorio.grupos.append(Grupo(redes, campo, chave, membros))
+    relatorio.grupos.sort(key=lambda g: (-len(g.membros), g.redes, g.campo, g.chave))
 
-    for (campo, _chave), redes in por_valor.items():
-        if len(redes) >= 2:
-            relatorio.partilhados_entre_redes[campo] = relatorio.partilhados_entre_redes.get(campo, 0) + 1
+    for g in relatorio.grupos:
+        if g.atravessa_redes:
+            relatorio.grupos_entre_redes[g.campo] = relatorio.grupos_entre_redes.get(g.campo, 0) + 1
 
     relatorio.casos = _casos(relatorio.grupos)
     return relatorio
@@ -261,11 +259,12 @@ def resumir(relatorio: Relatorio) -> dict:
     """Os números do relatório, por rede e por campo (sem valores pessoais)."""
     por_rede: dict[str, dict[str, Any]] = {}
     for g in relatorio.grupos:
-        linha = por_rede.setdefault(
-            g.rede, {"grupos": {c: 0 for c in CAMPOS_UNICOS}, "clientes": set()},
-        )
-        linha["grupos"][g.campo] += 1
-        linha["clientes"].update(g.membros)
+        for rede in g.redes:
+            linha = por_rede.setdefault(
+                rede, {"grupos": {c: 0 for c in CAMPOS_UNICOS}, "clientes": set()},
+            )
+            linha["grupos"][g.campo] += 1
+            linha["clientes"].update(g.membros)
     return {
         "total_clientes": relatorio.total_clientes,
         "clientes_por_rede": dict(relatorio.clientes_por_rede),
@@ -277,7 +276,7 @@ def resumir(relatorio: Relatorio) -> dict:
             for rede, v in sorted(por_rede.items())
         },
         "por_campo": {c: sum(1 for g in relatorio.grupos if g.campo == c) for c in CAMPOS_UNICOS},
-        "partilhados_entre_redes": dict(relatorio.partilhados_entre_redes),
+        "grupos_entre_redes": dict(relatorio.grupos_entre_redes),
         "sem_decifrar": dict(relatorio.sem_decifrar),
         "sem_rede_de_omissao": relatorio.sem_rede_de_omissao,
         # Zero clientes lidos não é «sem duplicados»: é, quase de certeza, a base errada.
@@ -310,7 +309,6 @@ __all__ = [
     "auditar",
     "chave_email",
     "chave_nif",
-    "chave_telefone",
     "esta_eliminado",
     "mascarar",
     "mostrar",

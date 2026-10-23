@@ -31,6 +31,8 @@ export const mensagemDoBloqueio = (corpo) => {
   return typeof mensagem === "string" && mensagem.trim() ? mensagem : MENSAGEM_PORTAL_INATIVO;
 };
 
+import { CHAVES_DO_HUB, avisarMudancaDeSessao } from "./portalHub";
+
 /** Chaves onde o Portal guarda a sessão do cliente (localStorage e sessionStorage). */
 export const CHAVES_DA_SESSAO_DO_PORTAL = [
   "portalToken",
@@ -45,6 +47,8 @@ export const CHAVES_DA_SESSAO_DO_PORTAL = [
   "portal_client_name",
   "portal_process_id",
   "portalVerified",
+  // O Hub (D-42): terminar a sessão esquece também a credencial ancorada ao cliente.
+  ...CHAVES_DO_HUB,
 ];
 
 /** Esquece a sessão. Nunca levanta: um storage bloqueado não pode partir o ecrã. */
@@ -57,4 +61,5 @@ export const limparSessaoDoPortal = () => {
       /* storage indisponível — o servidor continua a recusar o token */
     }
   }
+  avisarMudancaDeSessao();
 };

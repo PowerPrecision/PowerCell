@@ -201,14 +201,10 @@ class TestApagarONifPeloCliente:
 
         await _semear(bd)
         with _contexto(bd):
-            assert await cu.encontrar_cliente_duplicado(
-                NIF, None, None, rede=REDE_INCUMBENTE,
-            ) is not None
+            assert await cu.encontrar_cliente_duplicado(NIF, None) is not None
         await _put_cliente(bd, {"dados_pessoais": {"nif": ""}})
         with _contexto(bd):
-            assert await cu.encontrar_cliente_duplicado(
-                NIF, None, None, rede=REDE_INCUMBENTE,
-            ) is None
+            assert await cu.encontrar_cliente_duplicado(NIF, None) is None
 
     async def test_null_explicito_tambem_apaga(self, bd):
         await _semear(bd)

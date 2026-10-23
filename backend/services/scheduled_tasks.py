@@ -556,6 +556,15 @@ class ScheduledTasksService:
         resultado = await expirar_leads_inactivas(days, bd=self.db)
         return sum(resultado.values())
 
+    async def consolidate_partner_lead_files(self, limite: int = 50) -> int:
+        """D-39: repete a passagem dos ficheiros das leads de parceiros associadas a um cliente
+        existente que ficaram a meio (falha do S3, processo morto). Devolve as que ainda restam.
+        Idempotente: uma lead já consolidada nem aparece."""
+        from services.partner_lead_files import consolidar_pendentes
+
+        resumo = await consolidar_pendentes(limite=limite, agora=datetime.now(timezone.utc).isoformat())
+        return resumo["ainda_pendentes"]
+
     async def check_clients_waiting_too_long(self, days: int = 15) -> int:
         """
         Verificar clientes no estado "em espera" há mais de X dias.
@@ -1745,6 +1754,7 @@ class ScheduledTasksService:
             countdown_count = await _tarefa("countdown de pré-aprovação", self.check_pre_approval_countdown)
             waiting_count = await _tarefa("clientes em espera", self.check_clients_waiting_too_long)
             expired_partner_leads = await _tarefa("leads de parceiros expiradas", self.expire_stale_partner_leads)
+            pending_lead_files = await _tarefa("ficheiros de leads de parceiros por consolidar", self.consolidate_partner_lead_files)
             watchdog_count = await _tarefa("watchdog de validades", self.check_document_expirations_watchdog)
             purged_originals = await _tarefa("originais do Index vencidos", self.purge_index_originals, 0)
             index_sla_count = await _tarefa("SLA de inactividade do Index", self.run_index_sla, 0)
@@ -1764,6 +1774,7 @@ class ScheduledTasksService:
             logger.info(f"- Alertas de countdown: {countdown_count}")
             logger.info(f"- Alertas clientes em espera: {waiting_count}")
             logger.info(f"- Leads de parceiros expiradas (60 dias): {expired_partner_leads}")
+            logger.info(f"- Ficheiros de leads de parceiros ainda por consolidar: {pending_lead_files}")
             logger.info(f"- Watchdog expiração docs: {watchdog_count}")  # NOVA LINHA
             logger.info(f"- Originais do Index eliminados (graça vencida): {purged_originals}")
             logger.info(f"- SLA do Index (reatribuídos + alertas de estagnação): {index_sla_count}")

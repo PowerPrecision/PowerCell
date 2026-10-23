@@ -135,6 +135,14 @@ async def _esperar_fundo(mundo):
 # ====================================================================
 
 class TestAExploracao:
+    """D-32 → D-42: o link da Domus não encontra NEM TOCA no cliente da Power.
+
+    O que mudou no D-42: a mesma pessoa em duas redes já não são «dois clientes» — a identidade
+    é global, logo o registo anónimo da Domus com o email da Power é recusado (409 genérico) em
+    vez de criar um segundo cliente. O que NÃO mudou: o cliente da Power fica intacto e a resposta
+    não diz quem é.
+    """
+
     @pytest.mark.asyncio
     async def test_o_link_da_domus_nao_encontra_nem_toca_no_cliente_da_power(self, mundo):
         original = _cliente_da_rede(mundo.bd, REDE_INCUMBENTE)
@@ -142,13 +150,12 @@ class TestAExploracao:
 
         r = await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus", phone="999888777"))
 
-        assert r.status_code == 200
+        assert r.status_code == 409, "INVERTIDO (era 200): a identidade é global"
         vitima = next(c for c in mundo.bd.clients.docs if c["id"] == original["id"])
         assert {k: vitima[k] for k in antes} == antes, "o cliente da Power ficou intacto"
         assert vitima["lead_status"] == "converted", "não foi re-marcado como lead novo"
         assert vitima["network_id"] == REDE_INCUMBENTE
-        novos = [c for c in _publicos(mundo.bd) if c["id"] != original["id"]]
-        assert len(novos) == 1 and novos[0]["network_id"] == REDE_DOMUS
+        assert [c for c in _publicos(mundo.bd) if c["id"] != original["id"]] == [], "e não nasceu um segundo"
 
     @pytest.mark.asyncio
     async def test_a_resposta_nao_devolve_o_id_do_cliente_de_outra_rede(self, mundo):
@@ -157,24 +164,28 @@ class TestAExploracao:
         original = _cliente_da_rede(mundo.bd, REDE_INCUMBENTE)
         r = await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))
         corpo = json.loads(r.body)
-        assert corpo["client_id"] != original["id"]
+        assert original["id"] not in r.body.decode()
+        assert "client_id" not in corpo and corpo["code"] == "DUPLICATE_CLIENT"
 
     @pytest.mark.asyncio
-    async def test_a_mesma_pessoa_em_duas_redes_sao_dois_clientes(self, mundo):
-        await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))
-        await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-power"))
-        redes = sorted(c["network_id"] for c in _publicos(mundo.bd))
-        assert redes == sorted([REDE_DOMUS, REDE_INCUMBENTE])
+    async def test_a_mesma_pessoa_em_duas_redes_e_um_so_cliente(self, mundo):
+        """INVERTIDO (eram dois clientes no D-32): o segundo registo, em qualquer rede, é 409."""
+        primeiro = await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))
+        segundo = await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-power"))
+        assert primeiro.status_code == 200
+        assert segundo.status_code == 409
+        assert len(_publicos(mundo.bd)) == 1
 
     @pytest.mark.asyncio
-    async def test_a_pilha_por_carimbar_nao_e_reclamada_por_uma_ilha(self, mundo):
+    async def test_a_pilha_por_carimbar_tambem_conta(self, mundo):
+        """INVERTIDO (a Domus «criava o seu» no D-32): com identidade global não há ilha que escape."""
         legado = _cliente_da_rede(mundo.bd, None)
         r = await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-domus"))
-        assert r.status_code == 200
+        assert r.status_code == 409
         intacto = next(c for c in mundo.bd.clients.docs if c["id"] == legado["id"])
         assert "network_id" not in intacto and "company_id" not in intacto
         assert intacto["lead_status"] == "converted"
-        assert len(_publicos(mundo.bd)) == 2, "a Domus criou o seu, não adoptou o do grupo incumbente"
+        assert len(_publicos(mundo.bd)) == 1
 
     @pytest.mark.asyncio
     async def test_a_resposta_nao_tem_o_oraculo_is_new_client(self, mundo):
@@ -268,14 +279,15 @@ class TestGuardasDeFonte:
             texto = ast.unparse(no)
             assert not any(c in texto for c in ("email_hash", "contacto.email", "nif_hash", "dados_pessoais.nif", "telefone")), texto
 
-    def test_contraprova_a_procura_diz_a_rede_do_link(self):
+    def test_contraprova_a_procura_e_global_e_unica(self):
+        """D-42: a procura já não diz a rede do link (a identidade é global), e é UMA só."""
         _, funcao = self._funcao()
         chamadas = [
             n for n in ast.walk(funcao)
             if isinstance(n, ast.Call) and ast.unparse(n.func) == "encontrar_cliente_duplicado"
         ]
         assert len(chamadas) == 1
-        assert "rede" in {k.arg for k in chamadas[0].keywords}
+        assert "rede" not in {k.arg for k in chamadas[0].keywords}
 
     def test_o_registo_nao_consulta_a_gestao_de_toda_a_base_de_dados(self):
         import services.public_registration as pr

@@ -227,7 +227,7 @@ async def run_forcar_execucao_de_job(chave: str, user: dict | None = None) -> di
     # Processo web: estamos no processo que alberga o job.
     logger.info("[MOTOR] %s forçou execução de %s (web)", quem, chave)
     try:
-        await executar_job(chave)
+        await executar_job(chave, forcado=True)
     except Exception as e:
         # O batimento já registou `erro`; aqui diz-se a quem carregou.
         logger.error("[MOTOR] Execução forçada de %s falhou: %s", chave, e)

@@ -432,7 +432,38 @@ async def avisar_gestao_da_lead(partner: dict, cliente: dict, ligacao: dict) -> 
         logger.warning("[PARCEIRO] Falha a avisar a gestão da lead %s: %s", cliente.get("id"), exc)
 
 
+async def avisar_gestao_da_lead_retida(rascunho: dict) -> None:
+    """Avisa a gestão da rede de destino de que uma lead ficou RETIDA por identidade em conflito (D-42).
+
+    Diz só o que a própria rede escreveu (o nome que o parceiro submeteu) — nada do cliente
+    de outra rede, nem sequer que há mais do que um registo para verificar.
+    """
+    from services.alerts import notify_new_client_registration
+    from services.encryption import decrypt_client_data
+
+    visivel = decrypt_client_data(dict(rascunho))
+    await notify_new_client_registration(
+        {
+            "id": rascunho["id"],
+            "client_id": rascunho["id"],
+            "client_name": visivel.get("nome"),
+            "client_email": (visivel.get("contacto") or {}).get("email"),
+            "client_phone": (visivel.get("contacto") or {}).get("telefone"),
+            "process_type": rascunho.get("pending_process_type"),
+            "network_id": rascunho.get("network_id"),
+            "company_id": rascunho.get("company_id"),
+            "company_name": rascunho.get("company_name"),
+        },
+        has_property=bool(rascunho.get("has_property")),
+        origem=(
+            f"Parceiro {rascunho.get('submitted_by_partner_name') or ''}".strip()
+            + " (RETIDA: o NIF/Email já está registado e precisa de verificação)"
+        ),
+    )
+
+
 __all__ = [
+    "avisar_gestao_da_lead_retida",
     "JANELA_DO_DUPLO_CLIQUE_MINUTOS",
     "LIMITE_DE_LEADS_POR_DIA",
     "PartnerLeadIn",
