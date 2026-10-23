@@ -12519,3 +12519,21 @@ Work Log:
 Stage Summary:
 * **Operação:** nenhuma migração. Deploy dos DOIS serviços; no Atlas, acrescentar os IPs de saída do painel do Render (web e worker) antes de depender de `0.0.0.0/0` apagado; correr `diagnosticar_saida_para_atlas.py` em cada Shell.
 * **Por validar:** se a Domus tem mesmo ZERO utilizadores `indexacao` activos (é isso que a faz «sem Index»); a causa do erro do formulário na configuração real da rede do parceiro.
+
+
+---
+Task ID: parceiro-documentos-por-titular-out2026
+Agent: Cloud Agent
+Task: Portal do Parceiro — distinguir os documentos do 1.º e do 2.º titular
+
+Date: 2026-10-23
+
+Work Log:
+* **Regra** em `services/partner_titulares.py` (pura): só há titulares com 2.º titular; marcador explícito > `client_id` do 2.º cliente > por omissão (ficheiro → 1.º; pedido → ninguém, porque a checklist serve os dois).
+* **Escrita:** `confirm-upload` aceita `titular` e guarda-o POR FICHEIRO; `titular2` num caso de um comprador é 400.
+* **Leitura:** o detalhe devolve `titulares` e `titular`/`titular_label` por pedido e ficheiro; do 2.º titular só sai o nome.
+* **Ecrã:** etiqueta «2.º titular · Nome» e seletor «De quem é o documento» obrigatório ao enviar (só com dois compradores).
+
+Stage Summary:
+* **Operação:** nenhuma migração. Documentos anteriores sem marcador mostram o que o `client_id` diz.
+* **Por fazer (de propósito):** o CRM não mostra o `titular` no S3FileManager; a escolha de titular para pedidos da checklist (um pedido por titular) é decisão de produto.

@@ -170,6 +170,15 @@ describe("enviarFicheiro — os três passos", () => {
     expect(Object.keys(corpo)).not.toEqual(expect.arrayContaining(["file_size", "content_type"]));
   });
 
+  it("o titular vai SÓ na confirmação (o pedido do URL é extra=forbid) e só quando é dado", async () => {
+    await api.enviarFicheiro("caso-1", ficheiro, { requestId: "req-1", titular: "titular2" });
+    expect(JSON.parse(pedidos[0].data)).not.toHaveProperty("titular");
+    expect(JSON.parse(pedidos[1].data)).toMatchObject({ request_id: "req-1", titular: "titular2" });
+    pedidos.length = 0;
+    await api.enviarFicheiro("caso-1", ficheiro, { requestId: "req-1" });
+    expect(JSON.parse(pedidos[1].data)).not.toHaveProperty("titular");
+  });
+
   it("sem pedido nem categoria não envia os campos", async () => {
     await api.enviarFicheiro("caso-1", ficheiro);
     expect(JSON.parse(pedidos[0].data)).toEqual({ filename: "cc final.pdf", content_type: "application/pdf" });

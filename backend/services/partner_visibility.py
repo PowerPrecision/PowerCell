@@ -216,6 +216,8 @@ PROJECCAO_DO_PROCESSO: dict[str, int] = {
     "assigned_parceiro_id": 1,
     "network_id": 1, "company_id": 1, "company_name": 1, "company": 1,
     "client_id": 1, "second_client_id": 1, "client_ids": 1,
+    # Só para saber SE há 2.º titular e como se chama (separar os documentos dos dois): sai o nome, nada mais.
+    "second_client_name": 1, "titular2_data.name": 1, "titular2_data.nome": 1,
     "s3_folder": 1, "is_indexed": 1, "skip_index": 1, "is_deleted": 1,
     # Só para dizer ao parceiro ONDE o processo está (a cadeia de partilhas B2B). Entram
     # na leitura, nunca na saída: ele não vê redes, ids nem quem passou a quem.
@@ -234,6 +236,8 @@ PROJECCAO_DA_LEAD: dict[str, int] = {
     "submitted_by_partner_id": 1,
     "network_id": 1, "company_id": 1, "company_name": 1, "company": 1,
     "process_ids": 1, "lead_status": 1, "is_deleted": 1,
+    # Só para saber SE a lead tem 2.º titular e como se chama (separar os documentos dos dois).
+    "dados_pessoais.compra_tipo": 1, "titular2_data.name": 1, "titular2_data.nome": 1,
     # Rascunhos (colecção do parceiro) e a validação financeira.
     "partner_stage": 1, "devolucao": 1, "last_activity_at": 1,
     "validacao_financeira": 1, "expired_at": 1,

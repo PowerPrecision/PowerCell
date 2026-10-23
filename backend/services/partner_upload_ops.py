@@ -37,7 +37,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -52,6 +52,7 @@ from services.document_intake import (
 from services.document_portal_counts import apply_portal_request_upload
 from services.document_portal_request import clientes_do_processo
 from services.document_receipt_draft import agendar_apos_upload_do_parceiro
+from services.partner_titulares import TITULAR_2, tem_segundo_titular
 from services.partner_portal_read import (
     Caso,
     _consulta_de_pedidos,
@@ -104,6 +105,8 @@ class PartnerConfirmUploadIn(BaseModel):
     original_filename: str = Field(..., min_length=1, max_length=255)
     category: Optional[str] = Field(None, max_length=60)
     request_id: Optional[str] = Field(None, max_length=80)
+    #: De quem é o documento, num processo com dois compradores (`titular1` | `titular2`).
+    titular: Optional[Literal["titular1", "titular2"]] = None
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -164,6 +167,7 @@ async def _guardar_ficheiro(
     agora: str,
     categoria_pedida: Optional[str] = None,
     comprovativo: bool = False,
+    titular: Optional[str] = None,
 ) -> str:
     """Grava o registo do ficheiro. Devolve o id do ficheiro.
 
@@ -186,6 +190,8 @@ async def _guardar_ficheiro(
             "content_type": tipo,
             "uploaded_at": agora,
             "uploaded_by": autoria,
+            # De quem é ESTE ficheiro: um pedido pode receber ficheiros dos dois titulares.
+            **({"titular": titular} if titular else {}),
         }
         campos = {
             "filename": filename,
@@ -247,6 +253,7 @@ async def _guardar_ficheiro(
         # antes da indexação é sempre `Index`): é por ela que o ecrã separa
         # o que foi submetido.
         "declared_category": categoria_pedida or None,
+        **({"titular": titular} if titular else {}),
         **({"comprovativo_de_pagamento": True} if comprovativo else {}),
     })
     return file_id
@@ -267,6 +274,14 @@ async def run_partner_confirm_upload(partner: dict, case_id: str, data: PartnerC
     #    para um pedido inválido não deixar um objecto órfão no bucket.
     if data.request_id:
         await _pedido_do_caso(caso, data.request_id)
+
+    # 2b. De quem é o documento. O 2.º titular só existe num caso com dois compradores: um marcador
+    #     «titular2» num caso de um só é um pedido incoerente (400), não um dado a guardar às cegas.
+    titular = data.titular
+    if titular == TITULAR_2 and not tem_segundo_titular(caso):
+        raise HTTPException(status_code=400, detail="Este caso não tem 2.º titular.")
+    if not tem_segundo_titular(caso):
+        titular = None
 
     # 3. QUARENTENA: tamanho e tipo REAIS; reprovar apaga, falha de leitura
     #    é 503 e não apaga.
@@ -289,6 +304,7 @@ async def run_partner_confirm_upload(partner: dict, case_id: str, data: PartnerC
         tamanho=tamanho, tipo=tipo, request_id=data.request_id, agora=agora,
         categoria_pedida=_texto_ou_none(data.category),
         comprovativo=comprovativo,
+        titular=titular,
     )
 
     # Actividade (adia a expiração) e, se era o comprovativo, a libertação:

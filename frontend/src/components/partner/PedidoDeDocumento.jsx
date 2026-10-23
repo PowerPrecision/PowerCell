@@ -17,15 +17,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import PartnerUploadBox from "@/components/partner/PartnerUploadBox";
 import FicheiroDoCaso from "@/components/partner/FicheiroDoCaso";
 import { cn } from "@/lib/utils";
-import { progressoDoPedido } from "@/utils/partnerPortal";
+import { etiquetaDoTitular, progressoDoPedido } from "@/utils/partnerPortal";
 import { convidaAJuntarMais, textoDoConvite } from "@/utils/pedidosDeDocumentos";
 
-export default function PedidoDeDocumento({ caseId, pedido, desactivado = false }) {
+export default function PedidoDeDocumento({ caseId, pedido, desactivado = false, titulares = [] }) {
   const pendente = pedido.estado === "pendente";
   const { enviados, esperados } = progressoDoPedido(pedido);
   // A quantidade é uma recomendação: o 1.º ficheiro cumpre o pedido e o cartão
   // continua a convidar a juntar mais (decisão da direcção, Out 2026).
   const convite = textoDoConvite(pedido);
+  const doTitular = etiquetaDoTitular(pedido, titulares);
 
   return (
     <Card
@@ -40,6 +41,11 @@ export default function PedidoDeDocumento({ caseId, pedido, desactivado = false 
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="text-base font-semibold">{pedido.label}</p>
+            {doTitular && (
+              <Badge variant="secondary" data-testid={`titular-do-pedido-${pedido.id}`} data-titular={pedido.titular} className="mt-1">
+                {doTitular}
+              </Badge>
+            )}
             {pedido.notes ? <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">{pedido.notes}</p> : null}
           </div>
           <div className="flex items-center gap-2">
@@ -59,7 +65,7 @@ export default function PedidoDeDocumento({ caseId, pedido, desactivado = false 
         {pedido.ficheiros.length > 0 && (
           <ul className="space-y-2">
             {pedido.ficheiros.map((f) => (
-              <FicheiroDoCaso key={f.id} caseId={caseId} ficheiro={f} dentroDoPedido />
+              <FicheiroDoCaso key={f.id} caseId={caseId} ficheiro={f} dentroDoPedido titulares={titulares} />
             ))}
           </ul>
         )}
@@ -68,9 +74,9 @@ export default function PedidoDeDocumento({ caseId, pedido, desactivado = false 
           <p className="text-sm text-muted-foreground" data-testid={`convite-${pedido.id}`}>{convite}</p>
         )}
 
-        {pendente && !desactivado && <PartnerUploadBox caseId={caseId} requestId={pedido.id} rotulo="Enviar ficheiro" />}
+        {pendente && !desactivado && <PartnerUploadBox caseId={caseId} requestId={pedido.id} rotulo="Enviar ficheiro" titulares={titulares} titularPorOmissao={pedido.titular} />}
         {!pendente && !desactivado && convidaAJuntarMais(pedido) && (
-          <PartnerUploadBox caseId={caseId} requestId={pedido.id} rotulo="Adicionar mais" />
+          <PartnerUploadBox caseId={caseId} requestId={pedido.id} rotulo="Adicionar mais" titulares={titulares} titularPorOmissao={pedido.titular} />
         )}
       </CardContent>
     </Card>

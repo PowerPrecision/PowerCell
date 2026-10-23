@@ -74,6 +74,11 @@ from services.partner_drafts import (
     ROTULO_DO_COMPROVATIVO,
     e_comprovativo_de_pagamento,
 )
+from services.partner_titulares import (
+    rotulo as rotulo_do_titular,
+    titular_do_documento,
+    titulares_do_caso,
+)
 from services.portal_doc_categories import DOCUMENT_CATEGORY_MAP
 from services.portal_status_helpers import nota_do_pedido, rotulo_do_pedido
 from services.workflow_phases import (
@@ -407,6 +412,8 @@ def _ficheiros_de(doc: dict, partner_id: str) -> list[dict]:
             "s3_path": entrada["s3_path"],
             "request_id": pedido if _e_pedido(doc) else None,
             "category": _categoria_do_ficheiro(doc),
+            "titular_marcado": entrada.get("titular") or doc.get("titular"),
+            "client_id": doc.get("client_id"),
         })
     if not anexos and doc.get("s3_path") and ficheiro_e_visivel(doc.get("uploaded_by"), partner_id):
         encontrados.append({
@@ -419,6 +426,8 @@ def _ficheiros_de(doc: dict, partner_id: str) -> list[dict]:
             "s3_path": doc["s3_path"],
             "request_id": pedido if _e_pedido(doc) else None,
             "category": _categoria_do_ficheiro(doc),
+            "titular_marcado": doc.get("titular"),
+            "client_id": doc.get("client_id"),
         })
     return encontrados
 
@@ -451,12 +460,21 @@ def estado_de_aprovacao_do_caso(caso: "Caso") -> Optional[str]:
     return ESTADO_DE_APROVACAO.get(str(estado or ""))
 
 
-def _dto_do_ficheiro(f: dict, partner_id: str, aprovacao: Optional[str] = None) -> dict:
+def _titular_do_ficheiro(f: dict, caso: Optional["Caso"]) -> Optional[str]:
+    if caso is None:
+        return None
+    return titular_do_documento(caso, marcado=f.get("titular_marcado"), client_id=f.get("client_id"))
+
+
+def _dto_do_ficheiro(f: dict, partner_id: str, aprovacao: Optional[str] = None, caso: Optional["Caso"] = None) -> dict:
     # A «aprovação» só existe para o comprovativo de pagamento — é o único ficheiro que passa por
     # uma decisão da equipa (a validação financeira). Os outros estão simplesmente recebidos.
     e_comprovativo = e_comprovativo_de_pagamento(f.get("category") or "")
+    titular = _titular_do_ficheiro(f, caso)
     return {
         "estado": (aprovacao if e_comprovativo and aprovacao else "recebido"),
+        "titular": titular,
+        "titular_label": rotulo_do_titular(titular),
         "id": f["id"],
         "category": f.get("category"),
         "category_label": _rotulo_da_categoria(f.get("category")),
@@ -468,8 +486,12 @@ def _dto_do_ficheiro(f: dict, partner_id: str, aprovacao: Optional[str] = None) 
     }
 
 
-def _dto_do_pedido(doc: dict, partner_id: str, aprovacao: Optional[str] = None) -> dict:
+def _dto_do_pedido(doc: dict, partner_id: str, aprovacao: Optional[str] = None, caso: Optional["Caso"] = None) -> dict:
     categoria = _categoria_em_texto(doc)
+    titular = (
+        titular_do_documento(caso, marcado=doc.get("titular"), client_id=doc.get("client_id"), e_pedido=True)
+        if caso is not None else None
+    )
     info = DOCUMENT_CATEGORY_MAP.get(categoria, {"label": categoria, "icon": "📎"})
     pendente = doc.get("status") in ESTADOS_PENDENTES
     return {
@@ -478,11 +500,13 @@ def _dto_do_pedido(doc: dict, partner_id: str, aprovacao: Optional[str] = None) 
         "category": categoria,
         "notes": nota_do_pedido(doc),
         "estado": "pendente" if pendente else "recebido",
+        "titular": titular,
+        "titular_label": rotulo_do_titular(titular),
         "expected_count": parse_expected_count(doc),
         "uploaded_count": len(doc.get("attached_files") or []) or doc.get("uploaded_count") or 0,
         "created_at": doc.get("created_at"),
         "updated_at": doc.get("updated_at"),
-        "ficheiros": [_dto_do_ficheiro(f, partner_id, aprovacao) for f in _ficheiros_de(doc, partner_id)],
+        "ficheiros": [_dto_do_ficheiro(f, partner_id, aprovacao, caso) for f in _ficheiros_de(doc, partner_id)],
     }
 
 
@@ -505,10 +529,10 @@ async def run_get_case(partner: dict, case_id: str) -> dict:
         base = dto_da_lead(caso.client)
 
     aprovacao = estado_de_aprovacao_do_caso(caso)
-    pedidos = [_dto_do_pedido(d, partner["id"], aprovacao) for d in documentos if _e_pedido(d)]
+    pedidos = [_dto_do_pedido(d, partner["id"], aprovacao, caso) for d in documentos if _e_pedido(d)]
     pedidos.sort(key=lambda p: str(p.get("created_at") or ""))
     soltos = [
-        _dto_do_ficheiro(f, partner["id"], aprovacao)
+        _dto_do_ficheiro(f, partner["id"], aprovacao, caso)
         for d in documentos if not _e_pedido(d)
         for f in _ficheiros_de(d, partner["id"])
     ]
@@ -518,6 +542,8 @@ async def run_get_case(partner: dict, case_id: str) -> dict:
     retida = (not caso.e_processo) and bool(base.get("requer_comprovativo"))
     return {
         **base,
+        # Os compradores, para o ecrã separar os documentos dos dois (vazio com um só comprador).
+        "titulares": titulares_do_caso(caso),
         "pedidos": pedidos,
         "ficheiros": soltos,
         "categorias": categorias_de_documentos(lead_retida=retida),

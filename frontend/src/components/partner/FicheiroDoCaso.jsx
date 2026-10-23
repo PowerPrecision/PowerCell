@@ -10,7 +10,7 @@ import { Download, File as FicheiroGenerico, FileImage, FileText, Loader2 } from
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { obterUrlDeDescarga } from "@/services/partnerApi";
-import { formatarData, mensagemDeErro, podeDescarregar, rotuloDeAutoria, tamanhoLegivel, tipoDeFicheiro } from "@/utils/partnerPortal";
+import { etiquetaDoTitular, formatarData, mensagemDeErro, podeDescarregar, rotuloDeAutoria, tamanhoLegivel, tipoDeFicheiro } from "@/utils/partnerPortal";
 
 /** O estado de cada ficheiro, na linguagem do parceiro. «Recebido» é o de todos; o comprovativo de
  *  pagamento segue a validação financeira da equipa. Um estado que o servidor não conheça cai em
@@ -24,7 +24,7 @@ export const ROTULO_DO_ESTADO = {
 
 const ICONE_POR_TIPO = { pdf: FileText, imagem: FileImage, documento: FileText, outro: FicheiroGenerico };
 
-export default function FicheiroDoCaso({ caseId, ficheiro, dentroDoPedido = false }) {
+export default function FicheiroDoCaso({ caseId, ficheiro, dentroDoPedido = false, titulares = [] }) {
   const [aObter, setAObter] = useState(false);
   const [erro, setErro] = useState("");
 
@@ -60,6 +60,7 @@ export default function FicheiroDoCaso({ caseId, ficheiro, dentroDoPedido = fals
   const mostrarEstado = !dentroDoPedido || estado !== "recebido";
   const { tipo, extensao } = tipoDeFicheiro(ficheiro.filename);
   const Icone = ICONE_POR_TIPO[tipo];
+  const doTitular = etiquetaDoTitular(ficheiro, titulares);
 
   return (
     <li
@@ -73,6 +74,11 @@ export default function FicheiroDoCaso({ caseId, ficheiro, dentroDoPedido = fals
         </span>
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{ficheiro.filename || "Ficheiro"}</p>
+          {doTitular && (
+            <Badge variant="secondary" data-testid="titular-do-ficheiro" data-titular={ficheiro.titular} className="mt-0.5">
+              {doTitular}
+            </Badge>
+          )}
           <p className="text-xs text-muted-foreground">{detalhe}</p>
           {erro && <p role="alert" className="text-xs text-destructive">{erro}</p>}
         </div>

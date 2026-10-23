@@ -92,5 +92,6 @@
   "process_number": null,
   "process_type": "credito_habitacao",
   "requer_comprovativo": true,
+  "titulares": [],
   "updated_at": "2026-10-11T09:30:00+00:00"
 }

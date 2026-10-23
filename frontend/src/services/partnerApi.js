@@ -105,7 +105,7 @@ export const obterUrlDeDescarga = (caseId, fileId) =>
  * o servidor (desvio inteligente). O tamanho e o tipo que o browser declara
  * não vão: o servidor lê os reais do objecto.
  */
-export async function enviarFicheiro(caseId, file, { requestId, category, onProgress } = {}) {
+export async function enviarFicheiro(caseId, file, { requestId, category, titular, onProgress } = {}) {
   const tipo = file.type || "application/octet-stream";
   const url = await pedirUrlDeEnvio(caseId, {
     filename: file.name,
@@ -119,5 +119,7 @@ export async function enviarFicheiro(caseId, file, { requestId, category, onProg
     original_filename: file.name,
     ...(category ? { category } : {}),
     ...(requestId ? { request_id: requestId } : {}),
+    // De quem é o documento (só num caso com dois compradores). Vai SÓ na confirmação: o pedido do URL é `extra=forbid`.
+    ...(titular ? { titular } : {}),
   });
 }
