@@ -93,9 +93,17 @@ class TestSoUmProcessoPorCliente:
         )
         processos = await mundo.processes.find({"client_id": "c-1"}).to_list(10)
         assert len(processos) == 1
-        assert sum(1 for r in resultados if r.get("completed")) == 1
-        perdedores = [r for r in resultados if not r.get("completed")]
-        assert {r["error"] for r in perdedores} == {"creation_in_progress"}
+        # Quem CRIOU é um só. Os outros ou perderam a reivindicação («em curso») ou chegaram
+        # depois de o processo estar ligado ao cliente e receberam o que já existe — o duplo
+        # passou a aplicar o `$addToSet` do `process_ids` (antes ignorava-o em silêncio), e é esse o
+        # comportamento do Mongo real.
+        criadores = [r for r in resultados if r.get("completed") and not r.get("already_existed")]
+        assert len(criadores) == 1
+        outros = [r for r in resultados if r not in criadores]
+        assert len(outros) == 2
+        for r in outros:
+            assert r.get("already_existed") is True or r.get("error") == "creation_in_progress", r
+            assert r.get("process_id") in (None, criadores[0]["process_id"]), r
 
     async def test_um_pedido_seguinte_ve_o_processo_existente_sem_reivindicar(self, mundo):
         await _semear_cliente_com_checklist_completa(mundo)

@@ -101,6 +101,10 @@ export function normalizarCaso(resposta) {
       .filter((p) => p && typeof p === "object" && p.id)
       .map((p) => ({ ...p, ficheiros: ficheiros(p.ficheiros) })),
     ficheiros: ficheiros(r.ficheiros),
+    // Os compradores (vazio com um só): é o que decide se os documentos se separam por titular.
+    titulares: (Array.isArray(r.titulares) ? r.titulares : []).filter(
+      (t) => t && typeof t === "object" && texto(t.id)
+    ),
     // As notas da equipa (só leitura): sempre uma lista, sem lixo.
     notas_da_equipa: (Array.isArray(r.notas_da_equipa) ? r.notas_da_equipa : []).filter(
       (n) => n && typeof n === "object" && texto(n.text)
@@ -111,6 +115,25 @@ export function normalizarCaso(resposta) {
       (c) => c && typeof c === "object" && texto(c.value)
     ),
   };
+}
+
+/** O caso tem dois compradores? Só então há titulares a distinguir nos documentos. */
+export function temDoisTitulares(titulares) {
+  return Array.isArray(titulares) && titulares.length > 1;
+}
+
+/**
+ * «2.º titular · Rui Silva» — a etiqueta de um documento. O servidor já manda o rótulo; o nome vem da lista de
+ * titulares do caso (quem o escreveu foi o parceiro). Sem titular (um só comprador, ou um pedido que serve os
+ * dois) não há etiqueta: ``""``.
+ */
+export function etiquetaDoTitular(item, titulares) {
+  const id = item?.titular;
+  if (!id) return "";
+  const conhecido = (Array.isArray(titulares) ? titulares : []).find((t) => t?.id === id);
+  const rotulo = item?.titular_label || conhecido?.label || "";
+  if (!rotulo) return "";
+  return conhecido?.nome ? `${rotulo} · ${conhecido.nome}` : rotulo;
 }
 
 /** O parceiro pode escrever uma nota neste caso? Só num processo (não numa lead) e enquanto aberto. */

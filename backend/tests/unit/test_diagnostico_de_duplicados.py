@@ -1,10 +1,10 @@
-"""O diagnóstico de duplicados de clientes por rede (D-38).
+"""O diagnóstico de duplicados de clientes (D-38 → D-42: identidade GLOBAL, sem telemóvel).
 
 O que estes testes protegem:
   * a IDENTIDADE de cada campo é a da guarda (`client_uniqueness`): um relatório
     que agrupasse com outra regra contaria violações que a guarda não vê, ou
     esconderia as que vê;
-  * a fronteira de REDE: o mesmo NIF em duas redes NÃO é violação;
+  * a identidade é GLOBAL: o mesmo NIF em duas redes É um duplicado (D-42), e o grupo diz as redes;
   * a ARITMÉTICA — grupos, clientes envolvidos e «casos» (a mesma pessoa
     inserida duas vezes repete 3 campos de uma vez e é UMA decisão, não 3);
   * a PRIVACIDADE: por omissão nada de valores completos nem nomes;
@@ -19,7 +19,6 @@ import pytest
 
 from services import client_duplicates_audit as da
 from services.client_duplicates_audit import Registo, auditar, mascarar, resumir
-from services.client_uniqueness import telefones_candidatos
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "diagnose_client_duplicates.py"
 
@@ -29,21 +28,13 @@ def _r(id_, rede="R1", **kw):
 
 
 class TestAIdentidadeEADaGuarda:
-    @pytest.mark.parametrize("escrito", ["912345678", "912 345 678", "+351 912 345 678", "00351912345678"])
-    def test_o_telemovel_tem_uma_so_chave(self, escrito):
-        assert da.chave_telefone(escrito) == "912345678"
+    def test_o_telemovel_nao_e_um_campo_da_auditoria(self):
+        """INVERTIDO (era uma chave única no D-38): o telemóvel saiu da identidade."""
+        assert not hasattr(da, "chave_telefone")
+        assert "telefone" not in {f for f in Registo.__dataclass_fields__}
+        from services.client_uniqueness import CAMPOS_UNICOS
 
-    def test_a_chave_do_telefone_concorda_com_os_candidatos_da_guarda(self):
-        """Duas formas são o MESMO telemóvel aqui sse a guarda as procura em conjunto."""
-        formas = ["912345678", "+351912345678", "00351 912 345 678", "933333333", "12345", ""]
-        for a in formas:
-            for b in formas:
-                aqui = da.chave_telefone(a) is not None and da.chave_telefone(a) == da.chave_telefone(b)
-                guarda = bool(set(telefones_candidatos(a)) & set(telefones_candidatos(b)))
-                assert aqui == guarda, (a, b)
-
-    def test_telefone_curto_nao_identifica_ninguem(self):
-        assert da.chave_telefone("12345") is None
+        assert CAMPOS_UNICOS == ("nif", "email")
 
     def test_nif_so_com_nove_digitos(self):
         assert da.chave_nif("200 000 004") == "200000004"
@@ -60,16 +51,22 @@ class TestOsGrupos:
         rel = auditar([_r("a", nif="200000004"), _r("b", nif="200000004"), _r("c", nif="500000000")])
         assert [(g.campo, g.membros) for g in rel.grupos] == [("nif", ("a", "b"))]
 
-    def test_o_mesmo_nif_em_duas_redes_NAO_e_violacao(self):
+    def test_o_mesmo_nif_em_duas_redes_E_um_duplicado_que_atravessa_redes(self):
+        """INVERTIDO (D-38: «não é violação»): a identidade é global."""
         rel = auditar([_r("a", "R1", nif="200000004"), _r("b", "R2", nif="200000004")])
-        assert rel.grupos == []
-        assert rel.partilhados_entre_redes == {"nif": 1}
-        assert resumir(rel)["indice_unico_viavel"] is True
+        assert [(g.campo, g.membros, g.redes) for g in rel.grupos] == [("nif", ("a", "b"), ("R1", "R2"))]
+        assert rel.grupos[0].atravessa_redes
+        assert rel.grupos_entre_redes == {"nif": 1}
+        assert resumir(rel)["indice_unico_viavel"] is False
 
-    def test_a_mesma_pessoa_inserida_duas_vezes_e_UM_caso_com_tres_grupos(self):
-        a = dict(nif="200000004", email="a@x.pt", telefone="912345678")
+    def test_um_grupo_dentro_de_uma_rede_nao_atravessa(self):
+        rel = auditar([_r("a", "R1", nif="200000004"), _r("b", "R1", nif="200000004")])
+        assert not rel.grupos[0].atravessa_redes and rel.grupos_entre_redes == {}
+
+    def test_a_mesma_pessoa_inserida_duas_vezes_e_UM_caso_com_dois_grupos(self):
+        a = dict(nif="200000004", email="a@x.pt")
         rel = auditar([_r("a", **a), _r("b", **a), _r("c", nif="500000000")])
-        assert len(rel.grupos) == 3
+        assert len(rel.grupos) == 2
         assert rel.casos == [("a", "b")]
         assert resumir(rel)["casos"] == 1
         assert resumir(rel)["clientes_afectados"] == 2
@@ -94,14 +91,14 @@ class TestOsGrupos:
         """Uma base errada (DB_NAME enganado) não pode ler-se como «índice viável»."""
         assert resumir(auditar([]))["indice_unico_viavel"] is False
 
-    def test_o_resumo_por_rede_conta_so_a_propria_rede(self):
+    def test_o_resumo_por_rede_conta_so_as_redes_do_grupo(self):
         rel = auditar([
             _r("a", "R1", nif="200000004"), _r("b", "R1", nif="200000004"),
             _r("c", "R2", email="x@x.pt"), _r("d", "R2", email="x@x.pt"), _r("e", "R2", email="x@x.pt"),
         ])
         r = resumir(rel)["por_rede"]
-        assert r["R1"] == {"grupos": {"nif": 1, "email": 0, "telefone": 0}, "clientes": 2}
-        assert r["R2"] == {"grupos": {"nif": 0, "email": 1, "telefone": 0}, "clientes": 3}
+        assert r["R1"] == {"grupos": {"nif": 1, "email": 0}, "clientes": 2}
+        assert r["R2"] == {"grupos": {"nif": 0, "email": 1}, "clientes": 3}
 
     def test_os_maiores_grupos_vem_primeiro(self):
         rel = auditar([

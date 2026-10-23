@@ -71,6 +71,7 @@ from database import db
 from services.auth import get_current_user
 from services.role_scope import fronteira_levantada
 from services.tenant_network import (
+    CAMPO_REDES_ASSOCIADAS,
     CAMPO_REDES_PARCEIRAS,
     PROJECCAO_DO_CARIMBO,
     TenantScope,
@@ -90,7 +91,8 @@ ERRO_TAREFA_NAO_ENCONTRADA = "Tarefa não encontrada"
 ERRO_DOCUMENTO_NAO_ENCONTRADO = "Documento não encontrado"
 
 PROJECCAO_DO_CLIENTE = {
-    "_id": 0, "id": 1, "process_ids": 1, "lead_status": 1, **PROJECCAO_DO_CARIMBO,
+    "_id": 0, "id": 1, "process_ids": 1, "lead_status": 1, CAMPO_REDES_ASSOCIADAS: 1,
+    **PROJECCAO_DO_CARIMBO,
 }
 #: O que a pergunta «este processo é meu?» precisa de um processo — o
 #: carimbo, as redes convidadas e o `client_id` (para o id flexível).
@@ -186,10 +188,23 @@ async def _titular_de_um_processo_meu(
     return bool(await db.processes.find_one(consulta, {"_id": 0, "id": 1}))
 
 
+def cliente_associado_a_minha_rede(cliente: Optional[dict], scope: TenantScope) -> bool:
+    """A minha rede foi ASSOCIADA a este cliente (D-42: NIF + Email provados na criação)?"""
+    associadas = (cliente or {}).get(CAMPO_REDES_ASSOCIADAS)
+    if not isinstance(associadas, (list, tuple, set)):
+        return False
+    return bool({str(r).strip() for r in associadas if r} & set(scope.network_ids))
+
+
 async def cliente_no_ambito(
-    client_id: str, user: dict, *, com_convidados: bool = False,
+    client_id: str, user: dict, *, com_convidados: bool = False, com_associados: bool = False,
 ) -> Optional[bool]:
-    """O cliente é da rede de quem pede? ``None`` se o id não existe."""
+    """O cliente é da rede de quem pede? ``None`` se o id não existe.
+
+    ``com_associados`` (D-42): as redes associadas ao cliente global também o abrem. Só as
+    rotas que isso justifica o pedem (ver `_aceita_associado`) — eliminar, atribuir e ligar
+    continuam a exigir um processo da MINHA rede.
+    """
     cliente = await db.clients.find_one({"id": client_id}, PROJECCAO_DO_CLIENTE)
     if not cliente:
         return None
@@ -200,6 +215,8 @@ async def cliente_no_ambito(
     if documento_no_ambito(cliente, scope):
         return True
     if await _titular_de_um_processo_meu(client_id, scope, com_convidados=com_convidados):
+        return True
+    if com_associados and cliente_associado_a_minha_rede(cliente, scope):
         return True
     # A Pool é o último ramo: só se pergunta (e só custa uma consulta) para
     # o que não tem carimbo nenhum, e fecha-se se algum processo o refere.
@@ -378,6 +395,20 @@ def _aceita_convidado(request: Request) -> bool:
     )
 
 
+#: As rotas em que ter sido ASSOCIADO ao cliente global (D-42) basta para o abrir: ler e editar a
+#: ficha (como o convidado) e criar-lhe um processo — o passo seguinte da criação, que é para
+#: isso que a associação existe.
+_CAMINHO_DE_CRIAR_PROCESSO = "/clients/{client_id}/create-process"
+
+
+def _aceita_associado(request: Request) -> bool:
+    rota = request.scope.get("route")
+    caminho = getattr(rota, "path", "") or ""
+    if _aceita_convidado(request):
+        return True
+    return request.method == "POST" and caminho.endswith(_CAMINHO_DE_CRIAR_PROCESSO)
+
+
 async def exigir_cliente_no_ambito(
     request: Request, user: dict = Depends(get_current_user),
 ) -> None:
@@ -386,7 +417,9 @@ async def exigir_cliente_no_ambito(
     if not client_id:
         return
     if await cliente_no_ambito(
-        client_id, user, com_convidados=_aceita_convidado(request),
+        client_id, user,
+        com_convidados=_aceita_convidado(request),
+        com_associados=_aceita_associado(request),
     ) is False:
         logger.warning(
             "[CLIENTES] %s pediu %s %s, fora da sua rede.",

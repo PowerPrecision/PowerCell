@@ -52,6 +52,7 @@ import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from pymongo.errors import DuplicateKeyError
 
 from database import db
 
@@ -235,7 +236,13 @@ async def libertar_se_tiver_comprovativo(client_id: str) -> Optional[dict]:
     # associa-se a ele em vez de nascer outro (NIF primeiro, email só sem NIF) e o
     # destino mantém os seus contactos intactos. Falhar a procura NUNCA perde a lead:
     # segue o caminho de sempre (um registo novo, marcado como possível duplicado).
-    associado = await _associar_a_cliente_existente(rascunho, comprovativo, agora)
+    from services.b2b_client_match import IdentidadeEmConflito
+
+    try:
+        associado = await _associar_a_cliente_existente(rascunho, comprovativo, agora)
+    except IdentidadeEmConflito:
+        await _reter_por_identidade_em_conflito(rascunho, agora)
+        return None
     if associado:
         return associado
 
@@ -259,10 +266,56 @@ async def libertar_se_tiver_comprovativo(client_id: str) -> Optional[dict]:
     if rascunho.get("devolucao"):
         cliente["devolucoes_anteriores"] = [rascunho["devolucao"]]
 
-    await db.clients.insert_one(dict(cliente))
+    try:
+        await db.clients.insert_one(dict(cliente))
+    except DuplicateKeyError:
+        # O índice único parcial (D-42) recusou: o NIF/Email apareceu entretanto (corrida) ou
+        # a procura acima falhou. A lead não se perde: fica retida e a gestão é avisada.
+        await _reter_por_identidade_em_conflito(rascunho, agora)
+        return None
     await db.partner_drafts.delete_one({"id": client_id})
     logger.info("[PARCEIRO] Lead %s libertada para a equipa (comprovativo recebido).", client_id)
     return cliente
+
+
+async def _reter_por_identidade_em_conflito(rascunho: dict, agora: str) -> None:
+    """D-42: o NIF/Email da lead é de um cliente de OUTRA rede e a lead não o prova. Retém e avisa.
+
+    Nunca cria um segundo cliente (a identidade é global) nem junta a lead ao cliente
+    alheio (daria a esta rede a janela sobre quem não é dela). Marca o rascunho, avisa a
+    gestão da rede de destino e deixa o aviso do log — a decisão é humana.
+    """
+    primeira_vez = not rascunho.get("identidade_em_conflito")
+    await db.partner_drafts.update_one(
+        {"id": rascunho["id"]},
+        {"$set": {"identidade_em_conflito": {"desde": rascunho.get("identidade_em_conflito", {}).get("desde") or agora}}},
+    )
+    logger.warning(
+        "[PARCEIRO] Lead %s retida: o NIF/Email já pertence a um cliente de outra rede e a lead não o prova.",
+        rascunho.get("id"),
+    )
+    if not primeira_vez:
+        return
+    try:
+        from services.partner_leads import avisar_gestao_da_lead_retida
+
+        await avisar_gestao_da_lead_retida(rascunho)
+    except Exception as exc:  # noqa: BLE001 — avisar nunca desfaz a retenção
+        logger.warning("[PARCEIRO] Falha a avisar a gestão da lead retida %s: %s", rascunho.get("id"), exc)
+
+
+async def _consolidar_ficheiros_da_lead(lead_id: str, existente: dict, agora: str) -> None:
+    """D-39: os ficheiros do parceiro passam para a pasta definitiva do cliente. Nunca levanta.
+
+    A associação JÁ aconteceu quando isto corre; falhar aqui deixa a marca `consolidacao_pendente`
+    no rascunho e a repetição diária termina o trabalho — nunca desfaz nem bloqueia a associação.
+    """
+    try:
+        from services.partner_lead_files import consolidar_ficheiros_da_lead
+
+        await consolidar_ficheiros_da_lead(lead_id, existente, agora=agora)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[PARCEIRO] Consolidação dos ficheiros da lead %s falhou (fica pendente): %s", lead_id, exc)
 
 
 async def _associar_a_cliente_existente(rascunho: dict, comprovativo: dict, agora: str) -> Optional[dict]:
@@ -272,7 +325,12 @@ async def _associar_a_cliente_existente(rascunho: dict, comprovativo: dict, agor
     não há correspondência — ou quando a procura falhou. A regra completa, e o
     que se recusa fazer, está em `b2b_client_match`.
     """
-    from services.b2b_client_match import encontrar_cliente_de_destino, entrada_de_associacao
+    from services.b2b_client_match import (
+        IdentidadeEmConflito,
+        encontrar_cliente_de_destino,
+        entrada_de_associacao,
+    )
+    from services.client_uniqueness import associar_rede_ao_cliente, cliente_e_da_rede
     from services.encryption import decrypt_client_data
 
     try:
@@ -280,6 +338,10 @@ async def _associar_a_cliente_existente(rascunho: dict, comprovativo: dict, agor
         existente, por = await encontrar_cliente_de_destino(lead, rede=rascunho.get("network_id"))
         if not existente:
             return None
+        # D-42: o cliente pode ser de OUTRA rede (a prova de NIF + Email foi dada): a rede de
+        # destino ganha a janela sobre ele, e só isso.
+        if not await cliente_e_da_rede(existente, rascunho.get("network_id")):
+            await associar_rede_ao_cliente(existente["id"], rascunho.get("network_id"))
         entrada = entrada_de_associacao(
             lead=lead, existente=existente, por=por, comprovativo=comprovativo, quando=agora,
         )
@@ -295,14 +357,22 @@ async def _associar_a_cliente_existente(rascunho: dict, comprovativo: dict, agor
                 "associada_em": agora,
                 "updated_at": agora,
                 "last_activity_at": agora,
+                # Nasce JUNTO com a associação: se o processo morrer antes de os ficheiros mudarem de
+                # pasta, a marca fica e a repetição diária (`consolidar_pendentes`) retoma (D-39).
+                "consolidacao_pendente": {"desde": agora},
             }},
         )
+        await _consolidar_ficheiros_da_lead(rascunho["id"], existente, agora)
         logger.info(
             "[PARCEIRO] Lead %s associada ao cliente %s da rede de destino (por %s; contactos divergentes: %s).",
             rascunho.get("id"), existente.get("id"), por, entrada["campos_divergentes"] or "nenhum",
         )
         visivel = decrypt_client_data({k: v for k, v in existente.items() if k != "_id"})
         return {**visivel, "_associada": True}
+    except IdentidadeEmConflito:
+        # Deixa de ser uma falha de procura: criar outro cliente quebraria a identidade
+        # global. A lead fica retida e a gestão é avisada — dito, nunca em silêncio.
+        raise
     except Exception as exc:  # noqa: BLE001 — a lead segue o caminho normal, nunca se perde
         logger.warning("[PARCEIRO] Falha na colisão B2B da lead %s: %s", rascunho.get("id"), exc)
         return None

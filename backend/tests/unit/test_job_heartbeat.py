@@ -151,6 +151,7 @@ class TestRegistoDeclarado:
             "cdc_audit",
             "scheduled_tasks",
             "webmail_worker_sync",
+            "gov_scrapers_healthcheck",
         }
 
     def test_cada_job_diz_em_que_processo_corre(self):

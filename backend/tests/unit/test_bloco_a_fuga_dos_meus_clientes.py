@@ -411,6 +411,8 @@ SEM_CONDICAO_DE_REDE_POR_DESENHO = {
     "ai_bulk_cache_ops.py": "cache de NIF; a lista de revisões pendentes aplica a rede",
     "document_expiry_crud.py": "criação por id; as listagens aplicam a rede",
     "index_sla.py": "job de fundo do SLA do Index: percorre os processos de TODAS as redes de propósito (corre sem utilizador), mas cada acção é por processo — o pool de indexadores é o da rede do processo e a chefia avisada é a DA REDE do processo (`gestao_da_rede_do_processo`, falha fechada); nunca devolve dados a ninguém",
+    "client_merge_apply.py": "D-42: executa o plano do script `resolve_client_duplicates` (operações, corre contra produção de propósito): a identidade é GLOBAL, logo reaponta processos de TODAS as redes de um cliente duplicado para o sobrevivente; só escreve o plano e nunca devolve dados a ninguém",
+    "portal_hub.py": "D-42: o Hub do Portal lista os processos do PRÓPRIO cliente autenticado (client_id do token, em qualquer rede — é a pessoa a ver o que é seu); o `nets` do token restringe as redes para links e verificações, e a posse de cada escolha sai da mesma consulta",
     "index_status_migration.py": "migração de operações (script, corre contra produção de propósito): lê o estado de TODOS os processos para o derivar; só escreve estado de indexação e nunca devolve dados a ninguém",
 }
 

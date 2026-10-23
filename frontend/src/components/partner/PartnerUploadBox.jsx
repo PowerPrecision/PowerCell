@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import Dropzone from "@/components/shared/Dropzone";
 import { queryKeys } from "@/lib/queryClient";
 import { enviarFicheiro } from "@/services/partnerApi";
-import { TIPOS_ACEITES_NO_PARCEIRO, mensagemDeErro } from "@/utils/partnerPortal";
+import { TIPOS_ACEITES_NO_PARCEIRO, mensagemDeErro, temDoisTitulares } from "@/utils/partnerPortal";
 import {
   A_ENVIAR,
   ENVIADO,
@@ -41,6 +41,9 @@ export default function PartnerUploadBox({
   categorias,
   desactivado = false,
   testId,
+  // Num caso com dois compradores o parceiro diz DE QUEM é o documento (o servidor guarda-o).
+  titulares = [],
+  titularPorOmissao,
 }) {
   const queryClient = useQueryClient();
   const entrada = useRef(null);
@@ -49,11 +52,18 @@ export default function PartnerUploadBox({
   const [aviso, setAviso] = useState("");
   const [aEnviar, setAEnviar] = useState(false);
   const [escolhida, setEscolhida] = useState("");
+  const [titular, setTitular] = useState(titularPorOmissao || "");
+  const comTitulares = temDoisTitulares(titulares);
   const comSeletor = Array.isArray(categorias) && categorias.length > 0 && !requestId && !categoria;
   const categoriaFinal = categoria || (comSeletor ? escolhida : "");
 
   const enviar = async (ficheiros) => {
     if (!ficheiros?.length || aEnviar || desactivado) return;
+    // Não se adivinha de quem é: um documento sem dono é pior do que um envio que pede uma escolha.
+    if (comTitulares && !titular) {
+      setRecusa("Indique de quem é o documento (1.º ou 2.º titular) antes de enviar.");
+      return;
+    }
     setAEnviar(true);
     setRecusa("");
     setAviso("");
@@ -69,6 +79,7 @@ export default function PartnerUploadBox({
         const resposta = await enviarFicheiro(caseId, ficheiros[i], {
           requestId,
           ...(categoriaFinal ? { category: categoriaFinal } : {}),
+          ...(comTitulares && titular ? { titular } : {}),
         });
         if (resposta?.destino?.fila_ia) foiParaIndexacao = true;
         if (resposta?.lead_submetida) leadSubmetida = true;
@@ -104,6 +115,23 @@ export default function PartnerUploadBox({
       className={`rounded-md border border-dashed border-border p-3 ${className}`}
       testId={testId || (requestId ? `dropzone-${requestId}` : "dropzone-solto")}
     >
+      {comTitulares && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <label htmlFor={`titular-${requestId || caseId}`} className="text-sm font-medium">De quem é o documento</label>
+          <select
+            id={`titular-${requestId || caseId}`}
+            value={titular}
+            onChange={(e) => { setTitular(e.target.value); setRecusa(""); }}
+            disabled={aEnviar || desactivado}
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            <option value="">Escolha o titular…</option>
+            {titulares.map((t) => (
+              <option key={t.id} value={t.id}>{t.nome ? `${t.label} · ${t.nome}` : t.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
       {comSeletor && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <label htmlFor={`tipo-${caseId}`} className="text-sm font-medium">Tipo de documento</label>

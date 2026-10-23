@@ -5,6 +5,10 @@ A REGRA (adenda de Out 2026)
   1. Hierarquia: NIF primeiro; só sem NIF se procura pelo email.
   2. Match → associa-se ao cliente existente e a rede de destino NÃO vê os seus
      contactos (email/telemóvel/NIF/nome) alterados.
+  3. D-42 (identidade GLOBAL): o cliente pode ser de OUTRA rede. Associa-se com a prova de NIF
+     **e** Email do mesmo cliente (a rede de destino passa a `redes_associadas`); sem prova —
+     ou com o email de OUTRA pessoa — a lead fica RETIDA e a gestão é avisada. Nunca nasce um
+     segundo cliente com o mesmo NIF ou Email.
 
 O QUE ESTES TESTES PROVAM
   * a hierarquia (um NIF presente que não coincide NÃO cai para o email);
@@ -90,16 +94,22 @@ class TestAHierarquia:
         assert not [c for c in com_bd.clients.docs if c["id"] == cid]
         assert _cliente(com_bd, "c-existente")["partner_leads"][0]["associada_por"] == "email"
 
-    async def test_um_nif_presente_que_nao_coincide_nao_cai_para_o_email(self, com_bd):
-        """O mesmo email com outro NIF é outra pessoa (uma família partilha o email)."""
-        _existente(com_bd, id="c-outra-pessoa", nif="123456789", email=EMAIL_DA_LEAD)
-        cid, _ = await _submeter_e_libertar(com_bd, nif=NIF_DA_LEAD)
+    async def test_um_nif_presente_que_nao_coincide_nao_cai_para_o_email_mas_o_email_e_unico(self, com_bd):
+        """INVERTIDO (D-42): o mesmo email com outro NIF já não cria «um cliente novo, possível duplicado».
 
-        novo = _cliente(com_bd, cid)
-        assert novo["lead_status"] == "new", "nasceu um cliente novo"
+        O email é único em toda a base de dados: a lead fica RETIDA, nada se associa à outra pessoa e
+        a gestão é avisada de que há uma verificação a fazer.
+        """
+        _existente(com_bd, id="c-outra-pessoa", nif="123456789", email=EMAIL_DA_LEAD)
+        with patch("services.alerts.notify_new_client_registration", new=AsyncMock()) as avisar:
+            cid, resposta = await _submeter_e_libertar(com_bd, nif=NIF_DA_LEAD)
+
+        assert not [c for c in com_bd.clients.docs if c["id"] == cid], "não nasceu um segundo cliente com o email"
         assert "partner_leads" not in _cliente(com_bd, "c-outra-pessoa")
-        # A triagem fica a saber (como antes): é um possível duplicado, não um match.
-        assert "c-outra-pessoa" in novo.get("possible_duplicate_of", [])
+        rascunho = next(d for d in com_bd.partner_drafts.docs if d["id"] == cid)
+        assert rascunho["identidade_em_conflito"]["desde"]
+        assert resposta["lead_submetida"] is False
+        avisar.assert_awaited_once()
 
     async def test_o_telemovel_sozinho_nunca_identifica(self, com_bd):
         _existente(com_bd, id="c-mesmo-telemovel", nif="123456789", email="x@y.pt", telefone=TELEFONE_DA_LEAD)
@@ -175,12 +185,41 @@ class TestASoberaniaDoDestino:
 # ════════════════════════════════════════════════════════════════════
 @pytest.mark.asyncio
 class TestSoADestinoConta:
-    async def test_um_cliente_de_outra_rede_com_o_mesmo_nif_nao_e_match(self, com_bd):
-        _existente(com_bd, id="c-domus", rede=REDE_DOMUS)
-        cid, _ = await _submeter_e_libertar(com_bd, nif=NIF_DA_LEAD)
+    async def test_um_cliente_de_outra_rede_com_o_mesmo_nif_mas_sem_prova_retem_a_lead(self, com_bd):
+        """INVERTIDO (era «cliente novo»): só o NIF coincide — não prova nada e não se cria um segundo cliente."""
+        antes = copy.deepcopy(_existente(com_bd, id="c-domus-b2b", rede=REDE_DOMUS))
+        with patch("services.alerts.notify_new_client_registration", new=AsyncMock()) as avisar:
+            cid, _ = await _submeter_e_libertar(com_bd, nif=NIF_DA_LEAD)
 
-        assert _cliente(com_bd, cid)["lead_status"] == "new"
-        assert "partner_leads" not in _cliente(com_bd, "c-domus")
+        assert not [c for c in com_bd.clients.docs if c["id"] == cid]
+        assert _cliente(com_bd, "c-domus-b2b") == antes, "o cliente da Domus ficou intacto (nem redes_associadas)"
+        assert next(d for d in com_bd.partner_drafts.docs if d["id"] == cid)["identidade_em_conflito"]
+        avisar.assert_awaited_once()
+
+    async def test_um_cliente_de_outra_rede_com_nif_e_email_iguais_associa_a_rede_de_destino(self, com_bd):
+        """O caso do D-42: a prova foi dada, a rede de destino ganha a janela e mais nada."""
+        _existente(com_bd, id="c-domus-b2b", rede=REDE_DOMUS, email=EMAIL_DA_LEAD)
+        antes = copy.deepcopy(_cliente(com_bd, "c-domus-b2b"))
+
+        cid, resposta = await _submeter_e_libertar(com_bd, nif=NIF_DA_LEAD)
+
+        assert resposta["lead_submetida"] is True
+        assert not [c for c in com_bd.clients.docs if c["id"] == cid]
+        depois = copy.deepcopy(_cliente(com_bd, "c-domus-b2b"))
+        assert depois.pop("redes_associadas") == [REDE_INCUMBENTE]
+        assert len(depois.pop("partner_leads")) == 1
+        assert depois == antes, "nenhum campo do cliente da Domus foi reescrito"
+
+    async def test_a_retencao_so_avisa_uma_vez(self, com_bd):
+        """Cada novo envio do parceiro volta a tentar libertar; o aviso à gestão não se repete."""
+        _existente(com_bd, id="c-domus-b2b", rede=REDE_DOMUS)
+        with patch("services.alerts.notify_new_client_registration", new=AsyncMock()) as avisar:
+            cid, _ = await _submeter_e_libertar(com_bd, nif=NIF_DA_LEAD)
+            await _enviar(com_bd, cid, "Outros", nome="outro.pdf")
+            from services.partner_drafts import libertar_se_tiver_comprovativo
+
+            await libertar_se_tiver_comprovativo(cid)
+        assert avisar.await_count == 1
 
     async def test_um_cliente_eliminado_nao_e_match(self, com_bd):
         _existente(com_bd, is_deleted=True, status="eliminado")
@@ -322,11 +361,14 @@ class TestARegraPura:
 
         chamadas = []
 
-        async def procura(nif, email, telefone=None, *, rede=None, excluir_id=None):
-            chamadas.append((nif, email, telefone))
-            return {"id": "x"} if (nif or email) else None
+        async def procura(nif, email, *, excluir_id=None, limite=5):
+            chamadas.append((nif, email))
+            return [{"id": "x"}] if (nif or email) else []
 
-        with patch.object(m, "encontrar_cliente_duplicado", procura):
+        async def da_rede(_cliente, _rede):
+            return True
+
+        with patch.object(m, "encontrar_clientes_duplicados", procura), patch.object(m, "cliente_e_da_rede", da_rede):
             await m.encontrar_cliente_de_destino(
                 {"dados_pessoais": {"nif": "501964843"}, "contacto": {"email": "a@b.pt", "telefone": "912345678"}}, rede="r",
             )
@@ -335,7 +377,7 @@ class TestARegraPura:
             )
             await m.encontrar_cliente_de_destino({"dados_pessoais": {}, "contacto": {"telefone": "912345678"}}, rede="r")
 
-        assert chamadas == [("501964843", None, None), (None, "a@b.pt", None)], (
+        assert chamadas == [("501964843", None), (None, "a@b.pt")], (
             "com NIF só o NIF; sem NIF só o email; só com telemóvel não se procura"
         )
 
@@ -344,12 +386,13 @@ class TestARegraPura:
 
         chamadas = []
 
-        async def procura(nif, email, telefone=None, *, rede=None, excluir_id=None):
+        async def procura(nif, email, *, excluir_id=None, limite=5):
             chamadas.append((nif, email))
-            return None
+            return []
 
-        with patch.object(m, "encontrar_cliente_duplicado", procura):
+        with patch.object(m, "encontrar_clientes_duplicados", procura):
             resultado = await m.encontrar_cliente_de_destino(
                 {"dados_pessoais": {"nif": "501964843"}, "contacto": {"email": "a@b.pt"}}, rede="r",
             )
-        assert resultado == (None, None) and chamadas == [("501964843", None)]
+        # o NIF não casou ninguém: só então se confirma que o EMAIL (único, D-42) também está livre
+        assert resultado == (None, None) and chamadas == [("501964843", None), (None, "a@b.pt")]

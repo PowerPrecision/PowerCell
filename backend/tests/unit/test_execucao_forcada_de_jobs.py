@@ -158,8 +158,9 @@ class TestOEndpointDistingueOsDoisCaminhos:
     async def test_um_job_do_WEB_corre_agora(self, monkeypatch):
         corridos = []
 
-        async def falso_executar(chave):
+        async def falso_executar(chave, *, forcado=False):
             corridos.append(chave)
+            assert forcado is True, "o botão do painel tem de pedir a execução FORÇADA"
 
         monkeypatch.setattr(motor, "JOBS_POR_CHAVE", JOBS_POR_CHAVE)
         monkeypatch.setattr(je, "executar_job", falso_executar)
@@ -196,7 +197,7 @@ class TestOEndpointDistingueOsDoisCaminhos:
     async def test_uma_falha_do_job_chega_a_quem_carregou(self, monkeypatch):
         """O batimento registou `erro`; mas quem carregou no botão tem de
         saber, senão fica à espera de nada."""
-        async def rebenta(chave):
+        async def rebenta(chave, *, forcado=False):
             raise RuntimeError("o IMAP recusou")
 
         monkeypatch.setattr(je, "executar_job", rebenta)
@@ -241,6 +242,7 @@ class TestOLacoEOBotaoUsamOMESMOTrabalho:
         assert jobs == {
             "scheduled_tasks": 3600,
             "webmail_worker_sync": 600,
+            "gov_scrapers_healthcheck": 86400,
         }
 
     def test_o_executor_do_backup_chama_o_MESMO_que_o_laco(self):

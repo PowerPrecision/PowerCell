@@ -22,6 +22,8 @@ from models.process import PublicClientRegistration
 from fastapi import HTTPException
 from services.form_config_scope import rede_do_link_publico
 from services.alert_audience import gestao_da_rede_do_processo
+from pymongo.errors import DuplicateKeyError
+
 from services.client_uniqueness import encontrar_cliente_duplicado, erro_publico_de_duplicado
 from services.tenant_network import CAMPO_REDE
 from services.email import send_new_client_notification
@@ -86,7 +88,7 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
 
     # =========================================
     # PASSO 1: BLOQUEIO RIGOROSO DE DUPLICADOS (D-38)
-    # NIF, Email e Telemóvel não se repetem DENTRO DA REDE do link. Se algum já
+    # NIF e Email não se repetem (identidade global, D-42). Se algum já
     # existe, o pedido é recusado (409): nem se cria um registo novo nem se
     # actualiza o antigo em silêncio — quem submete tem de saber que aquele
     # contacto já está registado. A resposta é genérica (sem id, nome nem
@@ -95,12 +97,12 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
     nif_do_formulario = None
     if isinstance(data.personal_data, dict) and data.personal_data.get("nif"):
         nif_do_formulario = sanitize_nif(str(data.personal_data.get("nif")))
-    duplicado = await encontrar_cliente_duplicado(
-        nif_do_formulario, clean_email, clean_phone, rede=_rede,
-    )
+    # D-42: a identidade é GLOBAL (NIF/Email; o telemóvel já não conta) — a procura já
+    # não pára na rede do link. A resposta continua a ser a mesma, genérica.
+    duplicado = await encontrar_cliente_duplicado(nif_do_formulario, clean_email)
     if duplicado:
         logger.info(
-            "[PUBLIC FORM] Registo recusado: contacto já existente na rede %s (cliente %s)",
+            "[PUBLIC FORM] Registo recusado: NIF/Email já existente (link da rede %s, cliente %s)",
             _rede, duplicado.get("id"),
         )
         return JSONResponse(status_code=409, content=erro_publico_de_duplicado())
@@ -171,7 +173,12 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         except Exception:
             pass
     
-    await db.clients.insert_one(client_doc)
+    try:
+        await db.clients.insert_one(client_doc)
+    except DuplicateKeyError:
+        # Corrida: o índice único parcial (D-42) apanhou o que a procura acima não viu.
+        logger.info("[PUBLIC FORM] Índice único recusou o registo (corrida de NIF/Email).")
+        return JSONResponse(status_code=409, content=erro_publico_de_duplicado())
     
     # M3 - Criar pasta S3 para o cliente
     try:

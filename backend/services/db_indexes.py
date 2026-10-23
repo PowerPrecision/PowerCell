@@ -106,6 +106,15 @@ async def _create_index_safe(collection, idx: dict, collection_name: str, result
 
         elif "already exists" in str(e).lower():
             results["skipped"].append(label)
+        elif error_code == 11000 and idx.get("unique"):
+            # Há duplicados na base de dados: o índice único não se constrói. NÃO é uma avaria
+            # da aplicação — a criação repete-se em cada arranque até a limpeza estar feita.
+            results["errors"].append(f"{label}: duplicados existentes — {str(e)[:160]}")
+            logger.error(
+                "❌ Índice único %s NÃO criado: existem documentos duplicados. Correr "
+                "`python -m scripts.resolve_client_duplicates` (descreve) e, depois de rever, "
+                "`--aplicar`; o índice nasce no arranque seguinte.", label,
+            )
         else:
             results["errors"].append(f"{label}: {str(e)}")
             logger.error(f"Erro ao criar índice {label}: {e}")
@@ -629,6 +638,51 @@ _definir(
         
         # Índice composto para listagem de registos pendentes
         {"keys": [("registration_completed", 1), ("assigned_to", 1)], "name": "idx_client_pending_assignment"},
+    ],
+)
+
+# ====================================================================
+# IDENTIDADE GLOBAL DO CLIENTE (D-42/D-40, Out 2026)
+# ====================================================================
+# NIF e Email definem o cliente único em TODA a base de dados (o telemóvel não
+# conta). A guarda da aplicação (`client_uniqueness`) evita chegar aqui; estes dois
+# índices são a última linha de defesa contra a corrida entre dois pedidos.
+#
+# PORQUE É PARCIAL: um cliente ELIMINADO não pode bloquear a recriação (`is_deleted`
+# `True` fica fora), e só entra quem TEM hash (`$gt: ""` exclui ausente, `null` e
+# vazio — `{"$type": "string"}` deixava passar a string vazia). O MongoDB não aceita
+# `$ne` num filtro parcial; `$in: [False, None]` cobre ausente, `null` e `False`
+# (verificado contra um mongod 7).
+#
+# PORQUE É UM ÍNDICE À PARTE dos `idx_client_*_hash` acima: o MongoDB admite dois
+# índices com a mesma chave e opções diferentes, e substituir o existente passava
+# pelo «drop & recreate» do `_create_index_safe` — que, com duplicados na base,
+# deixava a colecção SEM índice de pesquisa. Assim, enquanto houver duplicados esta
+# criação falha com um erro que diz o que fazer e tudo o resto continua a funcionar.
+# Ordem de operação: `scripts/resolve_client_duplicates.py --aplicar` PRIMEIRO, depois
+# o arranque seguinte cria os índices.
+_FILTRO_DE_CLIENTE_ACTIVO = {"is_deleted": {"$in": [False, None]}}
+_definir(
+    "clients",
+    [
+        {
+            "keys": [("dados_pessoais.nif_hash", 1)],
+            "name": "idx_client_nif_hash_unico",
+            "unique": True,
+            "partialFilterExpression": {
+                **_FILTRO_DE_CLIENTE_ACTIVO,
+                "dados_pessoais.nif_hash": {"$gt": ""},
+            },
+        },
+        {
+            "keys": [("contacto.email_hash", 1)],
+            "name": "idx_client_email_hash_unico",
+            "unique": True,
+            "partialFilterExpression": {
+                **_FILTRO_DE_CLIENTE_ACTIVO,
+                "contacto.email_hash": {"$gt": ""},
+            },
+        },
     ],
 )
 

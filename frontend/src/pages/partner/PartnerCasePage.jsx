@@ -120,16 +120,16 @@ export default function PartnerCasePage() {
       <section aria-label="Documentos pendentes" className="space-y-3">
         <h2 className="text-lg font-semibold">Pendentes</h2>
         {retida && <ComprovativoObrigatorio caseId={caso.id} />}
-        {pendentes.map((p) => <PedidoDeDocumento key={p.id} caseId={caso.id} pedido={p} desactivado={expirada} />)}
+        {pendentes.map((p) => <PedidoDeDocumento key={p.id} caseId={caso.id} pedido={p} desactivado={expirada} titulares={caso.titulares} />)}
         {nadaPendente && <p className="text-sm text-muted-foreground">Sem documentos pendentes neste momento.</p>}
       </section>
 
       <section aria-label="Documentos submetidos" className="space-y-3">
         <h2 className="text-lg font-semibold">Submetidos</h2>
-        {pedidosSubmetidos.map((p) => <PedidoDeDocumento key={p.id} caseId={caso.id} pedido={p} desactivado={expirada} />)}
+        {pedidosSubmetidos.map((p) => <PedidoDeDocumento key={p.id} caseId={caso.id} pedido={p} desactivado={expirada} titulares={caso.titulares} />)}
         {ficheirosSubmetidos.length > 0 && (
           <ul className="space-y-1">
-            {ficheirosSubmetidos.map((f) => <FicheiroDoCaso key={f.id} caseId={caso.id} ficheiro={f} />)}
+            {ficheirosSubmetidos.map((f) => <FicheiroDoCaso key={f.id} caseId={caso.id} ficheiro={f} titulares={caso.titulares} />)}
           </ul>
         )}
         {nadaSubmetido && <p className="text-sm text-muted-foreground">Ainda não submeteu nenhum documento.</p>}
@@ -138,7 +138,7 @@ export default function PartnerCasePage() {
       {!expirada && (
         <section aria-label="Enviar outro documento" className="space-y-3">
           <h2 className="text-lg font-semibold">Enviar outro documento</h2>
-          <PartnerUploadBox caseId={caso.id} rotulo="Enviar ficheiros" categorias={caso.categorias} />
+          <PartnerUploadBox caseId={caso.id} rotulo="Enviar ficheiros" categorias={caso.categorias} titulares={caso.titulares} />
         </section>
       )}
     </div>

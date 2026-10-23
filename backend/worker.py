@@ -317,7 +317,7 @@ async def _atender_pedidos_de_execucao() -> None:
             from services.job_executors import executar_job
 
             async with _semaforo():
-                await executar_job(chave)
+                await executar_job(chave, forcado=True)
             await complete_task(task_id, result={"chave": chave})
         except Exception as e:
             logger.error("[Agendador] Execução forçada de %s falhou: %s", chave, e)

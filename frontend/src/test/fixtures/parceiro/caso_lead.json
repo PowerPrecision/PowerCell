@@ -97,6 +97,8 @@
       "id": "req-lead",
       "label": "Cartão de Cidadão",
       "notes": "Frente e verso",
+      "titular": null,
+      "titular_label": null,
       "updated_at": null,
       "uploaded_count": 0
     }
@@ -105,5 +107,6 @@
   "process_number": null,
   "process_type": "credito_habitacao",
   "requer_comprovativo": false,
+  "titulares": [],
   "updated_at": "2026-10-03T10:00:00+00:00"
 }

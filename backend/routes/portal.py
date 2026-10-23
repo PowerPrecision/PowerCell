@@ -12,9 +12,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Response, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from middleware.rate_limit import limiter
 
+from services.portal_hub import get_current_hub, listar_para_o_hub, seleccionar_processo
 from services.portal_security import get_current_client
 from services.auth import get_current_user, require_staff
 
@@ -122,6 +124,42 @@ async def verify_portal_login(
     data: dict,
 ):
     return await run_verify_portal_login(client_id, data)
+
+
+# ====================================================================
+# D-42 — O HUB: um cliente, vários processos
+# ====================================================================
+# Estas duas rotas são as ÚNICAS do Portal que NÃO usam `get_current_client`: a credencial é o
+# token do Hub (`sub = client_id`), que não abre nenhuma rota de processo. Escolher um processo
+# devolve o token de sempre, desse processo (ver `services/portal_hub.py`).
+#
+# O limite é por cliente (a chave do limiter é o `sub` do token) e o POST leva `response: Response`
+# como todos os outros (sem ele o SUCESSO devolve 500).
+class HubSelectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    process_id: str = Field(..., min_length=1, max_length=64)
+
+
+@router.get("/hub")
+@limiter.limit("30/minute")
+async def portal_hub_list(
+    request: Request,
+    response: Response,
+    hub: dict = Depends(get_current_hub),
+):
+    return await listar_para_o_hub(hub)
+
+
+@router.post("/hub/select")
+@limiter.limit("20/minute")
+async def portal_hub_select(
+    request: Request,
+    response: Response,
+    data: HubSelectRequest,
+    hub: dict = Depends(get_current_hub),
+):
+    return await seleccionar_processo(hub, data.process_id)
 
 
 @router.get("/resolve/{short_id}")

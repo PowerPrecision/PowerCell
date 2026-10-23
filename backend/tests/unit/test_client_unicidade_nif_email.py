@@ -222,10 +222,12 @@ class TestAsDuasPortasUsamOMesmoPontoUnico:
     """Guardas sobre o código-fonte — e a contraprova ao lado, porque uma
     guarda de fonte sem contraprova é satisfeita por apagar a chamada."""
 
-    def test_a_criacao_chama_assert_cliente_unico(self):
+    def test_a_criacao_chama_a_resolucao_de_identidade(self):
+        """D-42: a criação já não chama `assert_cliente_unico` (só recusava) — chama
+        `resolver_identidade`, que decide entre recusar, associar e ser opaco."""
         from services import client_crud
         fonte = codigo_da_funcao_sem_comentarios(client_crud.run_create_client)
-        assert "assert_cliente_unico" in fonte
+        assert "resolver_identidade" in fonte
 
     def test_a_edicao_chama_assert_cliente_unico(self):
         from services import client_crud

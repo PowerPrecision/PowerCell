@@ -12,7 +12,9 @@ import {
   construirPayloadDaLead,
   formatarConversao,
   mensagemDeErro,
+  etiquetaDoTitular,
   normalizarCaso,
+  temDoisTitulares,
   normalizarCasos,
   normalizarPainel,
   pedidosPendentes,
@@ -261,5 +263,41 @@ describe("notas do parceiro", () => {
     expect(validarNota("x".repeat(MAX_CARACTERES_DA_NOTA + 1))).not.toBe("");
     expect(validarNota("x".repeat(MAX_CARACTERES_DA_NOTA))).toBe("");
     expect(validarNota(" olá ")).toBe("");
+  });
+});
+
+
+describe("titulares do caso (1.º e 2.º)", () => {
+  const titulares = [
+    { id: "titular1", label: "1.º titular", nome: "Ana Primeira" },
+    { id: "titular2", label: "2.º titular", nome: "Rui Segundo" },
+  ];
+
+  it("só há titulares a distinguir com dois compradores", () => {
+    expect(temDoisTitulares(titulares)).toBe(true);
+    expect(temDoisTitulares([titulares[0]])).toBe(false);
+    for (const v of [undefined, null, [], "x", {}]) expect(temDoisTitulares(v)).toBe(false);
+  });
+
+  it("a etiqueta junta o rótulo do servidor ao nome do titular", () => {
+    expect(etiquetaDoTitular({ titular: "titular2", titular_label: "2.º titular" }, titulares)).toBe("2.º titular · Rui Segundo");
+    expect(etiquetaDoTitular({ titular: "titular1", titular_label: "1.º titular" }, titulares)).toBe("1.º titular · Ana Primeira");
+  });
+
+  it("sem titular (um comprador, ou um pedido que serve os dois) não há etiqueta", () => {
+    expect(etiquetaDoTitular({ titular: null, titular_label: null }, titulares)).toBe("");
+    expect(etiquetaDoTitular({}, titulares)).toBe("");
+    expect(etiquetaDoTitular(undefined, undefined)).toBe("");
+  });
+
+  it("sem o nome ainda há rótulo; sem lista de titulares usa o rótulo do servidor", () => {
+    expect(etiquetaDoTitular({ titular: "titular2", titular_label: "2.º titular" }, [{ id: "titular2", label: "2.º titular", nome: null }])).toBe("2.º titular");
+    expect(etiquetaDoTitular({ titular: "titular2", titular_label: "2.º titular" })).toBe("2.º titular");
+  });
+
+  it("normalizarCaso devolve sempre uma lista de titulares, sem lixo", () => {
+    expect(normalizarCaso({}).titulares).toEqual([]);
+    expect(normalizarCaso({ titulares: "x" }).titulares).toEqual([]);
+    expect(normalizarCaso({ titulares: [null, {}, ...titulares] }).titulares).toEqual(titulares);
   });
 });

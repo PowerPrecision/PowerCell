@@ -92,6 +92,8 @@
       "file_size": null,
       "filename": "foto.jpg",
       "id": "solto-cliente",
+      "titular": null,
+      "titular_label": null,
       "uploaded_at": "2026-10-06T11:00:00+00:00"
     },
     {
@@ -103,6 +105,8 @@
       "file_size": null,
       "filename": "extra.pdf",
       "id": "solto-eu",
+      "titular": null,
+      "titular_label": null,
       "uploaded_at": "2026-10-06T10:00:00+00:00"
     }
   ],
@@ -144,6 +148,8 @@
       "id": "req-1",
       "label": "CC frente e verso",
       "notes": "Frente e verso, por favor",
+      "titular": null,
+      "titular_label": null,
       "updated_at": null,
       "uploaded_count": 0
     },
@@ -162,6 +168,8 @@
           "file_size": 10,
           "filename": "irs-cliente.pdf",
           "id": "f-cli",
+          "titular": null,
+          "titular_label": null,
           "uploaded_at": "2026-10-05T11:00:00+00:00"
         },
         {
@@ -173,12 +181,16 @@
           "file_size": 11,
           "filename": "irs-parceiro.pdf",
           "id": "f-eu",
+          "titular": null,
+          "titular_label": null,
           "uploaded_at": "2026-10-05T12:00:00+00:00"
         }
       ],
       "id": "req-2",
       "label": "Declaração de IRS",
       "notes": "",
+      "titular": null,
+      "titular_label": null,
       "updated_at": null,
       "uploaded_count": 4
     }
@@ -186,5 +198,6 @@
   "pedidos_pendentes": 1,
   "process_number": "PROC-a-novo",
   "process_type": "credito_habitacao",
+  "titulares": [],
   "updated_at": "2026-10-02T10:00:00+00:00"
 }

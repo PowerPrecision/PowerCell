@@ -14,6 +14,7 @@ import unicodedata
 from typing import List, Optional
 from datetime import datetime, timezone
 
+from pymongo.errors import DuplicateKeyError
 from fastapi import HTTPException, Request
 
 from database import db
@@ -35,7 +36,18 @@ from services.encryption import (
     generate_email_hash,
     generate_telefone_hash,
 )
-from services.client_uniqueness import assert_cliente_unico, rede_do_cliente, so_o_que_mudou
+from services.client_uniqueness import (
+    IDENTIDADE_ASSOCIAR,
+    IDENTIDADE_DA_MESMA_REDE,
+    IDENTIDADE_OPACA,
+    assert_cliente_unico,
+    associar_rede_ao_cliente,
+    construir_erro_de_duplicado,
+    erro_opaco_de_duplicado,
+    rede_do_cliente,
+    resolver_identidade,
+    so_o_que_mudou,
+)
 from services.process_service import get_next_process_number
 from services.s3_document_root import pasta_para_gravar
 from services.s3_storage import s3_service
@@ -199,6 +211,41 @@ async def run_get_client(
     
     return client
 
+async def _associar_cliente_global(
+    existente: dict,
+    rede: Optional[str],
+    *,
+    nome: str,
+    email: Optional[str],
+    telefone: Optional[str],
+    nif: Optional[str],
+    user: dict,
+) -> Client:
+    """D-42: o cliente já existe noutra rede e quem pede provou conhecê-lo — a rede passa a vê-lo como VISITANTE.
+
+    Acrescenta a rede a ``redes_associadas`` e **mais nada**: o documento do
+    cliente não se reescreve (nome, contactos e dados da outra rede ficam como
+    estão) e a resposta devolve só o que quem pediu acabou de escrever, mais o
+    `id` — nunca a ficha. O que esta equipa passa a ver do cliente é o que a
+    janela (`client_window`) deixa: os processos da sua rede.
+    """
+    if not await associar_rede_ao_cliente(existente["id"], rede):
+        # Sem rede determinável não há a quem dar a janela: seria devolver o id de um
+        # cliente que a equipa não poderia abrir. O 409 opaco é a resposta honesta.
+        raise erro_opaco_de_duplicado()
+    logger.info(
+        "[CLIENT-CREATE] Cliente global %s associado à rede %s por %s (NIF + Email provados).",
+        existente.get("id"), rede, user.get("email"),
+    )
+    return Client(
+        id=existente["id"],
+        nome=nome,
+        contacto=ClientContact(email=email, telefone=telefone),
+        dados_pessoais=ClientPersonalData(nif=nif),
+        portal_access_code=None,
+    )
+
+
 async def run_create_client(
     client_data: ClientCreate,
     user: dict,
@@ -247,10 +294,23 @@ async def run_create_client(
     # Sem carimbo o cliente nasce por carimbar — e a pilha por carimbar pertence
     # à rede de omissão —, logo é nela (toda, não só a parte por carimbar) que
     # se procura o duplicado.
-    await assert_cliente_unico(
-        sanitized_nif, sanitized_email, sanitized_telefone,
-        rede=(carimbo or {}).get("network_id") or rede_de_omissao(),
+    # D-42: a identidade é GLOBAL (NIF/Email; o telemóvel não conta). Um cliente
+    # que já existe NOUTRA rede não é um erro quando quem pede prova conhecê-lo
+    # (NIF e Email do mesmo cliente): associa-se, sem copiar nem mostrar a ficha.
+    rede_de_destino = (carimbo or {}).get("network_id") or rede_de_omissao()
+    identidade = await resolver_identidade(
+        sanitized_nif, sanitized_email, rede=rede_de_destino,
     )
+    if identidade.veredicto == IDENTIDADE_DA_MESMA_REDE:
+        raise construir_erro_de_duplicado(identidade.cliente, sanitized_nif, sanitized_email)
+    if identidade.veredicto == IDENTIDADE_OPACA:
+        raise erro_opaco_de_duplicado()
+    if identidade.veredicto == IDENTIDADE_ASSOCIAR:
+        return await _associar_cliente_global(
+            identidade.cliente, rede_de_destino,
+            nome=sanitized_nome, email=sanitized_email, telefone=sanitized_telefone,
+            nif=sanitized_nif, user=user,
+        )
 
     now = datetime.now(timezone.utc).isoformat()
     
@@ -308,7 +368,13 @@ async def run_create_client(
     if carimbo:
         client_dict.update(carimbo)
 
-    await db.clients.insert_one(client_dict)
+    try:
+        await db.clients.insert_one(client_dict)
+    except DuplicateKeyError:
+        # A corrida que a procura não apanha: dois pedidos com o mesmo NIF/Email ao mesmo
+        # tempo. O índice único parcial (`db_indexes`, D-42) é a última linha de defesa.
+        logger.info("[CLIENT-CREATE] Índice único recusou o cliente (corrida de NIF/Email).")
+        raise erro_opaco_de_duplicado()
 
     logger.info(f"Cliente criado: {client.id} - {client.nome} por {user.get('email')}")
 
@@ -474,7 +540,6 @@ async def run_update_client(
     # hash que nunca casa — a guarda passaria sempre, calada.
     email_submetido: Optional[str] = None
     nif_submetido: Optional[str] = None
-    telefone_submetido: Optional[str] = None
 
     sanitized_contacto = None
     contactos_limpos: list = []
@@ -495,7 +560,6 @@ async def run_update_client(
             email_submetido = s_email
         if "telefone" in contact_dump and contact_dump["telefone"]:
             contact_dump["telefone"] = sanitize_phone(contact_dump["telefone"]) or contact_dump["telefone"]
-            telefone_submetido = contact_dump["telefone"]
         if "telefone_secundario" in contact_dump and contact_dump["telefone_secundario"]:
             contact_dump["telefone_secundario"] = sanitize_phone(contact_dump["telefone_secundario"]) or contact_dump["telefone_secundario"]
         # Merge with existing contacto to preserve fields not in this update.
@@ -542,11 +606,9 @@ async def run_update_client(
     # CONSIGO PRÓPRIO e gravar sem mexer no NIF devolvia 409.
     # D-38: três campos, na rede DESTE cliente, e só o que mudou (um duplicado
     # antigo em que não se tocou não pode travar a edição de outro campo).
-    nif_a_verificar, email_a_verificar, telefone_a_verificar = so_o_que_mudou(
-        client, nif_submetido, email_submetido, telefone_submetido,
-    )
+    nif_a_verificar, email_a_verificar = so_o_que_mudou(client, nif_submetido, email_submetido)
     await assert_cliente_unico(
-        nif_a_verificar, email_a_verificar, telefone_a_verificar,
+        nif_a_verificar, email_a_verificar,
         rede=rede_do_cliente(client), excluir_id=client_id,
     )
 

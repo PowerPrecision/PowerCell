@@ -46,7 +46,15 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from services.client_uniqueness import encontrar_cliente_duplicado, so_o_que_mudou
+from services.client_uniqueness import (
+    CAMPOS_UNICOS,
+    campos_em_conflito,
+    cliente_e_da_rede,
+    encontrar_clientes_duplicados,
+    telefones_candidatos,
+    so_o_que_mudou,
+)
+from services.encryption import generate_telefone_hash
 
 logger = logging.getLogger(__name__)
 
@@ -69,32 +77,71 @@ def dados_de_identificacao(lead: dict) -> tuple[str, str, str]:
     return _texto(dados.get("nif")), _texto(contacto.get("email")), _texto(contacto.get("telefone"))
 
 
+class IdentidadeEmConflito(Exception):
+    """O NIF/Email da lead já pertence a um cliente de OUTRA rede e a lead não prova conhecê-lo.
+
+    Criar outro cliente quebraria a identidade global (D-42); associar sem prova
+    daria a uma rede a janela sobre um cliente que não é dela. A lead fica retida.
+    """
+
+
 async def encontrar_cliente_de_destino(
     lead: dict, *, rede: Optional[str],
 ) -> tuple[Optional[dict], Optional[str]]:
-    """O cliente da rede de destino que É este, e por que critério.
+    """O cliente que É este, e por que critério. O NIF decide primeiro; o email só entra sem NIF.
 
     ``lead`` vem desencriptada. Devolve ``(cliente, "nif"|"email")`` ou
-    ``(None, None)``. O NIF decide primeiro; o email só entra sem NIF.
+    ``(None, None)``. A identidade é GLOBAL (D-42):
+
+    * se o cliente é da rede de destino, associa-se (como sempre);
+    * se é de OUTRA rede, só se associa com a prova de NIF **e** Email do mesmo
+      cliente — e o chamador acrescenta a rede a ``redes_associadas``;
+    * sem essa prova levanta ``IdentidadeEmConflito`` (nunca devolve o cliente
+      de outra rede a quem não o provou).
     """
     nif, email, _telefone = dados_de_identificacao(lead)
     if nif:
-        existente = await encontrar_cliente_duplicado(nif, None, None, rede=rede)
-        return (existente, POR_NIF) if existente else (None, None)
-    if email:
-        existente = await encontrar_cliente_duplicado(None, email, None, rede=rede)
-        return (existente, POR_EMAIL) if existente else (None, None)
-    return None, None
+        por, candidatos = POR_NIF, await encontrar_clientes_duplicados(nif, None)
+    elif email:
+        por, candidatos = POR_EMAIL, await encontrar_clientes_duplicados(None, email)
+    else:
+        return None, None
+    if not candidatos:
+        if nif and email and await encontrar_clientes_duplicados(None, email, limite=1):
+            # NIF novo com o email de OUTRA pessoa: o email é único (D-42), logo não nasce um
+            # segundo cliente com ele. Antes ficava «possível duplicado»; agora é um conflito
+            # que uma pessoa resolve (a lead fica retida e a gestão é avisada).
+            raise IdentidadeEmConflito(POR_EMAIL)
+        return None, None
+
+    for candidato in candidatos:
+        if await cliente_e_da_rede(candidato, rede):
+            return candidato, por
+
+    if nif and email and len(candidatos) == 1:
+        if len(campos_em_conflito(candidatos[0], nif, email)) == len(CAMPOS_UNICOS):
+            return candidatos[0], por
+    raise IdentidadeEmConflito(por)
+
+
+def _telefone_diverge(existente: dict, telefone: Optional[str]) -> bool:
+    """O telemóvel enviado difere do gravado? (O telemóvel já não identifica; continua a ser contacto.)"""
+    candidatos = telefones_candidatos(telefone)
+    if not candidatos:
+        return False
+    contacto = existente.get("contacto") or {}
+    hashes = {generate_telefone_hash(c) for c in candidatos}
+    return not (contacto.get("telefone_hash") in hashes or contacto.get("telefone") == str(telefone).strip())
 
 
 def campos_divergentes(existente: dict, lead: dict) -> list[str]:
     """Quais dos contactos enviados DIFEREM dos gravados no destino (só nomes)."""
     _nif, email, telefone = dados_de_identificacao(lead)
-    _n, email_novo, telefone_novo = so_o_que_mudou(existente, None, email or None, telefone or None)
+    _n, email_novo = so_o_que_mudou(existente, None, email or None)
     divergentes = []
     if email_novo:
         divergentes.append("email")
-    if telefone_novo:
+    if _telefone_diverge(existente, telefone or None):
         divergentes.append("telefone")
     return divergentes
 
@@ -123,6 +170,7 @@ def entrada_de_associacao(
 
 __all__ = [
     "CAMPOS_DE_CONTACTO",
+    "IdentidadeEmConflito",
     "POR_EMAIL",
     "POR_NIF",
     "campos_divergentes",

@@ -1,4 +1,4 @@
-"""O diagnóstico de duplicados (D-38) contra um MongoDB REAL.
+"""O diagnóstico de duplicados (D-38 → D-42, identidade global) contra um MongoDB REAL.
 
 O oráculo é a GUARDA DE PRODUÇÃO: tudo o que o relatório diz ser duplicado, o
 `encontrar_cliente_duplicado` tem de achar também — e o que o relatório diz ser
@@ -74,7 +74,7 @@ async def _semear(bd):
         _cliente("leg", telefone="00351912345678"),
         # Único.
         _cliente("c", rede=REDE_INCUMBENTE, nif="500000000", telefone="966666666"),
-        # Mesmo NIF que o "a", mas na Domus: dois clientes, NÃO é violação.
+        # Mesmo NIF que o "a", mas na Domus: com a identidade global (D-42) é UM grupo que atravessa redes.
         _cliente("f", rede=REDE_DOMUS, empresa="cmp-domus", nif="200000004"),
         # Só com a empresa gravada (sem rede): é da rede dela. Partilha o email com "g".
         _cliente("g", empresa="cmp-domus", email="comum@domus.pt"),
@@ -104,16 +104,16 @@ async def test_o_relatorio_bate_certo_com_um_mongo_real(bd):
     assert sorted(r.id for r in registos) == ["a", "b", "c", "f", "g", "h", "leg", "s1", "s2"], (
         "os eliminados não entram"
     )
-    grupos = {(g.rede, g.campo): g.membros for g in rel.grupos}
-    assert grupos[(REDE_INCUMBENTE, "nif")] == ("a", "b")
-    assert grupos[(REDE_INCUMBENTE, "email")] == ("a", "b")
-    assert grupos[(REDE_INCUMBENTE, "telefone")] == ("a", "b", "leg"), (
-        "as três formas do telemóvel e a pilha por carimbar são a mesma pessoa"
+    grupos = {(g.campo, g.redes): g.membros for g in rel.grupos}
+    assert grupos[("nif", (REDE_DOMUS, REDE_INCUMBENTE))] == ("a", "b", "f"), (
+        "o mesmo NIF na Domus É um duplicado (identidade global) e o grupo diz as duas redes"
     )
-    assert grupos[(REDE_DOMUS, "email")] == ("g", "h"), "a empresa sem rede gravada pertence à rede da empresa"
-    assert (REDE_DOMUS, "nif") not in grupos, "o mesmo NIF noutra rede não é violação"
-    assert rel.casos == [("a", "b", "leg"), ("g", "h")]
-    assert rel.partilhados_entre_redes == {"nif": 1}
+    assert grupos[("email", (REDE_INCUMBENTE,))] == ("a", "b")
+    assert grupos[("email", (REDE_DOMUS,))] == ("g", "h"), "a empresa sem rede gravada pertence à rede da empresa"
+    assert not any(c == "telefone" for c, _ in grupos), "o telemóvel já não identifica ninguém"
+    assert "leg" not in {m for membros in grupos.values() for m in membros}
+    assert rel.casos == [("a", "b", "f"), ("g", "h")]
+    assert rel.grupos_entre_redes == {"nif": 1}
     assert processos == {"a": 2}, "os processos eliminados não contam"
 
 
@@ -127,7 +127,7 @@ async def test_a_guarda_de_producao_concorda_com_o_relatorio(bd):
     with patch("database.db", bd), tenant_db(bd, cu):
         registos = await script._carregar_registos()
         rel = script.auditar(registos)
-        em_conflito = {(g.rede, c) for g in rel.grupos for c in g.membros}
+        em_conflito = {c for g in rel.grupos for c in g.membros}
         valores = {r.id: r for r in registos}
 
         for r in registos:
@@ -138,10 +138,9 @@ async def test_a_guarda_de_producao_concorda_com_o_relatorio(bd):
             achado = await cu.encontrar_cliente_duplicado(
                 (claro["dados_pessoais"] or {}).get("nif") or None,
                 (claro["contacto"] or {}).get("email"),
-                (claro["contacto"] or {}).get("telefone") or None,
-                rede=r.rede, excluir_id=r.id,
+                excluir_id=r.id,
             )
-            assert bool(achado) == ((r.rede, r.id) in em_conflito), (
+            assert bool(achado) == (r.id in em_conflito), (
                 f"{r.id} ({valores[r.id].rede}): relatório e guarda discordam"
             )
 
@@ -189,6 +188,7 @@ async def test_a_execucao_completa_imprime_e_sai_com_zero(bd, capsys, monkeypatc
     assert codigo == 0
     saida = capsys.readouterr().out
     assert "CASOS A DECIDIR À MÃO: 2" in saida
+    assert "GRUPOS QUE ATRAVESSAM REDES" in saida
     assert "200000004" not in saida and "ana@x.pt" not in saida, "por omissão nada de dados pessoais"
     assert "*****0004" in saida
-    assert "NÃO é viável" in saida
+    assert "NÃO se constroem" in saida

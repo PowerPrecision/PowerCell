@@ -721,6 +721,31 @@ class S3Service:
             logger.error(f"Erro inesperado ao gravar {object_name}: {e}")
             return False
 
+    def copy_object_exact(self, origem: str, destino: str) -> bool:
+        """Copia a chave EXACTA `origem` para a chave EXACTA `destino` (no mesmo bucket).
+
+        Para quem já decidiu as duas chaves (a consolidação dos ficheiros de uma lead de parceiro,
+        D-39): nunca deriva pasta nem nome, nunca tenta variações underscore/espaço e **não apaga a
+        origem** — apagar é um passo à parte, só depois de a cópia estar verificada e a base de dados
+        reapontada. O S3 sobrescreve em silêncio uma chave que exista: quem chama verifica antes que o
+        destino está `ausente` (ou que é o mesmo conteúdo).
+        """
+        if not self.is_configured() or not origem or not destino or origem == destino:
+            return False
+        try:
+            self.s3_client.copy_object(
+                CopySource={"Bucket": self.bucket_name, "Key": origem},
+                Bucket=self.bucket_name,
+                Key=destino,
+            )
+            return True
+        except ClientError as e:
+            logger.error(f"Erro ao copiar {origem} -> {destino}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Erro inesperado ao copiar {origem} -> {destino}: {e}")
+            return False
+
     def get_object_exact(self, object_name: str, max_bytes: int) -> tuple[str, Optional[bytes]]:
         """Conteúdo da chave EXACTA (nunca as variações underscore/espaço do `get_file_content`).
 

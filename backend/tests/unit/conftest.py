@@ -361,6 +361,19 @@ class FakeAsyncCollection:
             target.extend(values)
 
     @staticmethod
+    def _apply_add_to_set(doc: dict, ops: dict) -> None:
+        """Aplica `$addToSet` (escalar ou {$each: [...]}) — fiel ao Mongo: SEM duplicados, ordem de inserção."""
+        for field, value in ops.items():
+            values = value.get("$each", [value]) if isinstance(value, dict) and "$each" in value else [value]
+            target = doc.get(field)
+            if not isinstance(target, list):
+                target = []
+                doc[field] = target
+            for item in values:
+                if item not in target:
+                    target.append(item)
+
+    @staticmethod
     def _apply_set(doc: dict, set_ops: dict) -> None:
         """Aplica ``$set`` com suporte a dot-notation (PACOTE 10)."""
         for path, value in set_ops.items():
@@ -399,6 +412,9 @@ class FakeAsyncCollection:
         push_ops = update.get("$push")
         if push_ops:
             self._apply_push(doc, push_ops)
+        add_ops = update.get("$addToSet")
+        if add_ops:
+            self._apply_add_to_set(doc, add_ops)
         inc_ops = update.get("$inc")
         if inc_ops:
             self._apply_inc(doc, inc_ops)

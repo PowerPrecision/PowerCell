@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { API_BASE_URL } from "../utils/apiBaseUrl";
 import { eBloqueioDoPortal, mensagemDoBloqueio } from '../utils/portalInativo';
+import { avisarMudancaDeSessao, guardarHub } from '../utils/portalHub';
 
 const BACKEND_URL = API_BASE_URL;
 
@@ -170,6 +171,11 @@ export default function ClientPortalLogin({ onLoginSuccess }) {
         sessionStorage.removeItem('portalClientId');
         sessionStorage.removeItem('portalAuthMethod');
         sessionStorage.removeItem('portalVerified');
+
+        // D-42: com 2+ processos activos o servidor devolve o Hub; o contentor mostra-o em vez
+        // de entrar num processo à sorte. Com menos, limpa o que houver de uma sessão anterior.
+        guardarHub(data, { escolhido: '' });
+        avisarMudancaDeSessao();
 
         toast.success(`Bem-vindo, ${data.client_name || 'Cliente'}!`);
 

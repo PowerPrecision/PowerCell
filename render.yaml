@@ -251,6 +251,16 @@ services:
       - key: AWS_BUCKET_NAME
         sync: false
 
+      # ── Health check dos scrapers do Estado (D-30) ──
+      # Conta de TESTE (sem MFA, com IRS/nota de liquidação). Sem estas variáveis o job
+      # diz que não verificou e avisa os Master semanalmente. Nunca usar uma conta de cliente.
+      - key: GOV_TEST_NIF
+        sync: false
+      - key: GOV_TEST_PWD
+        sync: false
+      - key: GOV_TEST_NISS
+        sync: false
+
       # ── Email (SECRETS) ──
       - key: EMAIL_PROVIDER
         value: resend
