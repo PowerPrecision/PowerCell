@@ -81,3 +81,38 @@ export function corpoDoConvite(form) {
   if (telefone) corpo.phone = telefone;
   return corpo;
 }
+
+const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/** O formulário de edição, a partir do parceiro que vem do servidor. */
+export const formularioDeEdicao = (parceiro) => ({
+  name: parceiro?.name || "",
+  email: parceiro?.email || "",
+  phone: parceiro?.phone || "",
+});
+
+export function validarEdicao(form, { podeMudarEmail = false } = {}) {
+  const f = { name: "", email: "", phone: "", ...(form || {}) };
+  const erros = {};
+  if (String(f.name).trim().length < 2) erros.name = "Indique o nome do parceiro.";
+  if (podeMudarEmail && !EMAIL_VALIDO.test(String(f.email).trim())) erros.email = "Indique um email válido.";
+  return erros;
+}
+
+/**
+ * O corpo do PATCH: SÓ o que mudou (o servidor recusa o email a quem não é Master, e um corpo com o
+ * email inalterado não pode falhar por isso). Email igual — sem distinguir maiúsculas — não vai.
+ * `null` = nada a gravar.
+ */
+export function corpoDaEdicao(parceiro, form, { podeMudarEmail = false } = {}) {
+  const base = formularioDeEdicao(parceiro);
+  const f = { ...base, ...(form || {}) };
+  const corpo = {};
+  const nome = String(f.name).trim();
+  if (nome !== base.name) corpo.name = nome;
+  const telefone = String(f.phone).trim();
+  if (telefone !== base.phone) corpo.phone = telefone;
+  const email = String(f.email).trim();
+  if (podeMudarEmail && email.toLowerCase() !== base.email.toLowerCase()) corpo.email = email;
+  return Object.keys(corpo).length ? corpo : null;
+}

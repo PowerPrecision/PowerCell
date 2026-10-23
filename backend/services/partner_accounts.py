@@ -63,6 +63,7 @@ from database import db
 from services.partner_security import (
     ESTADO_ACTIVO,
     ESTADO_CONVIDADO,
+    ESTADO_ELIMINADO,
     ESTADO_SUSPENSO,
     conta_com_acesso,
     create_partner_token,
@@ -126,6 +127,8 @@ class PartnerInvite(_Estrito):
 class PartnerUpdate(_Estrito):
     name: Optional[str] = Field(None, min_length=2, max_length=120)
     phone: Optional[str] = Field(None, max_length=30)
+    #: Só o Master (a identidade de login muda). Invalida o convite pendente e as sessões abertas.
+    email: Optional[str] = Field(None, min_length=3, max_length=100)
     #: Suspende/reactiva as ligações às redes DE QUEM ACTUA.
     suspended: Optional[bool] = None
 
@@ -405,12 +408,14 @@ async def parceiro_no_ambito(partner: Optional[dict], actor: dict) -> bool:
     Reutiliza o predicado de posse do CRM (`documento_no_ambito`) sobre um
     documento que só leva a rede: é a mesma resposta que as listagens dão.
     """
-    from services.role_scope import utilizador_e_global
+    from services.role_scope import fronteira_levantada
     from services.tenant_network import resolve_tenant_scope
 
-    if not partner:
+    if not partner or partner.get("status") == ESTADO_ELIMINADO:
         return False
-    if utilizador_e_global(actor):
+    # O Master COM empresa escolhida é estreitado à rede dela (como em todas as listagens);
+    # sem empresa (vista «Sistema») não tem fronteira.
+    if fronteira_levantada(actor):
         return True
     scope = await resolve_tenant_scope(actor or {})
     return _no_ambito_do_actor(partner, scope)
@@ -472,14 +477,17 @@ async def contacto_do_parceiro(partner_id: str) -> Optional[dict]:
     """
     if not partner_id:
         return None
-    parceiro = await db.partners.find_one({"id": str(partner_id)}, {"_id": 0, "email": 1, "name": 1})
-    return parceiro if parceiro and parceiro.get("email") else None
+    parceiro = await db.partners.find_one({"id": str(partner_id)}, {"_id": 0, "email": 1, "name": 1, "status": 1})
+    if not parceiro or not parceiro.get("email") or parceiro.get("status") == ESTADO_ELIMINADO:
+        return None
+    return {"email": parceiro["email"], "name": parceiro.get("name")}
 
 
 async def carregar_parceiro_gerivel(partner_id: str, actor: dict) -> dict:
     """O parceiro, se quem actua o pode gerir. **404** caso contrário —
     igual ao de «não existe» (nunca 403: seria um directório de contas)."""
     partner = await db.partners.find_one({"id": partner_id}, {"_id": 0, "password_hash": 0})
+    # `parceiro_no_ambito` recusa o eliminado: para a gestão ele deixou de existir.
     if not partner or not await parceiro_no_ambito(partner, actor):
         raise HTTPException(status_code=404, detail="Parceiro não encontrado")
     return partner
@@ -647,12 +655,18 @@ async def run_resend_invite(partner_id: str, actor: dict) -> dict:
 
 
 async def run_update_partner(partner_id: str, data: PartnerUpdate, actor: dict) -> dict:
-    from services.role_scope import utilizador_e_global
+    from services.role_scope import fronteira_levantada
     from services.tenant_network import resolve_tenant_scope
 
     partner = await carregar_parceiro_gerivel(partner_id, actor)
     agora = agora_iso()
     definir: dict[str, Any] = {"updated_at": agora}
+    # O email é a identidade de login: valida-se (e recusa-se) ANTES de gravar o que quer que seja.
+    novo_email = None
+    if data.email is not None:
+        from services import partner_accounts_admin
+
+        novo_email = await partner_accounts_admin.validar_novo_email(partner, data.email, actor)
 
     if data.name is not None:
         nome = sanitize_name(data.name)
@@ -663,8 +677,11 @@ async def run_update_partner(partner_id: str, data: PartnerUpdate, actor: dict) 
         definir["phone"] = sanitize_phone(data.phone) or None
 
     incremento = False
+    if novo_email:
+        definir["email"] = novo_email
+        incremento = True  # a identidade mudou: as sessões abertas caem
     if data.suspended is not None:
-        eglobal = utilizador_e_global(actor)
+        eglobal = fronteira_levantada(actor)
         scope = None if eglobal else await resolve_tenant_scope(actor or {})
         novo_estado = ESTADO_SUSPENSO if data.suspended else ESTADO_ACTIVO
         # Reescreve-se a LISTA inteira (e não `redes.0.status`): é uma
@@ -683,16 +700,29 @@ async def run_update_partner(partner_id: str, data: PartnerUpdate, actor: dict) 
                 ESTADO_SUSPENSO if data.suspended
                 else (ESTADO_ACTIVO if partner.get("password_set_at") or partner.get("terms") else ESTADO_CONVIDADO)
             )
-        incremento = bool(data.suspended)
+        incremento = incremento or bool(data.suspended)
 
     operacao: dict[str, Any] = {"$set": definir}
     if incremento:
-        # Suspender mata as sessões abertas na hora.
+        # Suspender (ou mudar o email) mata as sessões abertas na hora.
         operacao["$inc"] = {"token_epoch": 1}
+    if novo_email:
+        # O convite pendente foi enviado para o endereço antigo: não pode activar a conta do novo.
+        operacao["$unset"] = {"invite": ""}
     await db.partners.update_one({"id": partner_id}, operacao)
 
     if data.name is not None:
         await db.users.update_one({"id": partner_id, "role": "parceiro"}, {"$set": {"name": definir["name"]}})
+    novo_convite = None
+    if novo_email:
+        await db.users.update_one({"id": partner_id, "role": "parceiro"}, {"$set": {"email": novo_email}})
+        await _auditar(
+            actor, partner_id, f"Email do parceiro alterado: {partner.get('name')}", "partner_email_change",
+            {"convite_pendente_anulado": bool((partner.get("invite") or {}).get("token_hash"))},
+        )
+        if partner.get("status") == ESTADO_CONVIDADO:
+            # Nunca activou a conta: o convite segue para o endereço novo.
+            novo_convite = await run_resend_invite(partner_id, actor)
     if data.suspended is not None:
         await _auditar(
             actor, partner_id,
@@ -700,16 +730,20 @@ async def run_update_partner(partner_id: str, data: PartnerUpdate, actor: dict) 
             "partner_suspend" if data.suspended else "partner_reactivate", {},
         )
     actualizado = await db.partners.find_one({"id": partner_id}, {"_id": 0, "password_hash": 0})
-    return publico(actualizado)
+    resposta = publico(actualizado)
+    if novo_convite:
+        resposta["invite_path"] = novo_convite["invite_path"]
+    return resposta
 
 
 async def run_list_partners(actor: dict) -> dict:
-    from services.role_scope import utilizador_e_global
+    from services.role_scope import fronteira_levantada
     from services.tenant_network import resolve_tenant_scope
 
-    eglobal = utilizador_e_global(actor)
+    # Master com empresa escolhida: só os parceiros da rede dela (a vista é estrita).
+    eglobal = fronteira_levantada(actor)
     scope = None if eglobal else await resolve_tenant_scope(actor or {})
-    docs = await db.partners.find({}, {"_id": 0, "password_hash": 0}).to_list(2000)
+    docs = await db.partners.find({"status": {"$ne": ESTADO_ELIMINADO}}, {"_id": 0, "password_hash": 0}).to_list(2000)
     visiveis = [p for p in docs if eglobal or _no_ambito_do_actor(p, scope)]
     visiveis.sort(key=lambda p: (p.get("name") or "").lower())
     return {"partners": [publico(p) for p in visiveis], "total": len(visiveis)}
@@ -725,19 +759,22 @@ async def run_list_partner_options(actor: dict) -> dict:
     dele. Contas antigas (utilizadores de role `parceiro`) entram se ainda forem referidas por
     processos, deduplicadas por id.
     """
-    from services.role_scope import utilizador_e_global
+    from services.role_scope import fronteira_levantada
     from services.tenant_network import resolve_tenant_scope
 
-    eglobal = utilizador_e_global(actor)
+    eglobal = fronteira_levantada(actor)
     scope = None if eglobal else await resolve_tenant_scope(actor or {})
-    docs = await db.partners.find({}, {"_id": 0, "id": 1, "name": 1, "redes": 1, "convidado_pela_rede": 1}).to_list(2000)
+    docs = await db.partners.find(
+        {"status": {"$ne": ESTADO_ELIMINADO}},
+        {"_id": 0, "id": 1, "name": 1, "redes": 1, "convidado_pela_rede": 1},
+    ).to_list(2000)
     opcoes: dict[str, str] = {
         str(p["id"]): str(p.get("name") or "").strip() or "Parceiro"
         for p in docs if p.get("id") and (eglobal or _no_ambito_do_actor(p, scope))
     }
     from services.admin_users_scope import build_users_scope_query, empresas_da_empresa_activa
 
-    consulta = {"role": {"$in": ["parceiro", "partner"]}}
+    consulta = {"role": {"$in": ["parceiro", "partner"]}, "partner_eliminado": {"$ne": True}}
     ambito = await build_users_scope_query(await empresas_da_empresa_activa(actor or {}))
     if ambito:
         consulta = {"$and": [consulta, ambito]}

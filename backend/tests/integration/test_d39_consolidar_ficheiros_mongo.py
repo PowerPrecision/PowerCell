@@ -315,9 +315,11 @@ class TestRegistoJaNoDestino:
         modulo, base, s3 = ambiente
         existente, _ = await _preparar(base, s3, ficheiros={"Index/a.pdf": b"a"})
         await modulo.consolidar_ficheiros_da_lead(LEAD, existente, agora=AGORA)
+        antes = len(s3.chamadas)
         segunda = await modulo.consolidar_ficheiros_da_lead(LEAD, existente, agora=AGORA)
         assert segunda["ja_movido"] == 1 and segunda["fora_da_origem"] == 0 and segunda["movido"] == 0
-        assert not [c for op, c in s3.chamadas[-3:] if op == "copy"]
+        # Só as chamadas da 2.ª execução contam (as da 1.ª incluem a cópia legítima).
+        assert not [c for op, c in s3.chamadas[antes:] if op == "copy"]
 
 
 @pytest.mark.asyncio

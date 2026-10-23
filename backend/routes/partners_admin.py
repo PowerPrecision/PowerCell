@@ -7,11 +7,20 @@ Quem convida e gere parceiros é o Master, o Admin e o CEO — estes dois
 rede, igual ao de «não existe»). `require_roles` autoriza o VERBO; o
 OBJECTO é verificado no serviço.
 """
-from fastapi import APIRouter, Depends, Request, Response
+from typing import Optional
+
+from fastapi import APIRouter, Body, Depends, Request, Response
 
 from middleware.rate_limit import limiter
 from models.auth import UserRole
 from services.auth import require_roles
+from services.partner_accounts_admin import (
+    PartnerChangeCompany,
+    run_change_company,
+    run_delete_partner,
+    run_reset_password,
+)
+from services.reauth_password import ConfirmacaoPorPassword
 from services.partner_accounts import (
     PartnerInvite,
     PartnerUpdate,
@@ -25,6 +34,8 @@ from services.partner_accounts import (
 router = APIRouter(prefix="/admin/partners", tags=["Parceiros (gestão)"])
 
 _GESTAO = [UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]
+#: Identidade, credenciais e existência da conta: só o Master (o serviço repete a pergunta).
+_SO_MASTER = [UserRole.MASTER]
 
 
 @router.get("")
@@ -66,3 +77,39 @@ async def resend_partner_invite(
     user: dict = Depends(require_roles(_GESTAO)),
 ):
     return await run_resend_invite(partner_id, user)
+
+
+@router.post("/{partner_id}/change-company")
+@limiter.limit("30/hour")
+async def change_partner_company(
+    request: Request,
+    response: Response,
+    partner_id: str,
+    data: PartnerChangeCompany,
+    user: dict = Depends(require_roles(_SO_MASTER)),
+):
+    return await run_change_company(partner_id, data, user)
+
+
+@router.post("/{partner_id}/reset-password")
+@limiter.limit("10/hour")
+async def reset_partner_password(
+    request: Request,
+    response: Response,
+    partner_id: str,
+    user: dict = Depends(require_roles(_SO_MASTER)),
+):
+    return await run_reset_password(partner_id, user)
+
+
+@router.delete("/{partner_id}")
+@limiter.limit("10/minute")
+async def delete_partner(
+    request: Request,
+    response: Response,
+    partner_id: str,
+    data: Optional[ConfirmacaoPorPassword] = Body(None),
+    user: dict = Depends(require_roles(_SO_MASTER)),
+):
+    """Elimina (soft delete) a conta do parceiro. Exige a password actual (corpo `{password}`)."""
+    return await run_delete_partner(partner_id, data.password if data else None, user)

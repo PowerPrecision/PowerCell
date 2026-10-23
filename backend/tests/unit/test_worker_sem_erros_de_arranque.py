@@ -157,7 +157,7 @@ class TestUmaTarefaQueFalhaNaoParaAsOutras:
             "expire_stale_partner_leads", "check_document_expirations_watchdog",
             "send_monthly_document_reminder", "check_stale_processes", "cleanup_old_notifications",
             "cleanup_temp_files", "cleanup_scraper_cache", "send_weekly_ai_report",
-            "send_weekly_ceo_report", "run_index_sla",
+            "send_weekly_ceo_report", "run_index_sla", "consolidate_partner_lead_files",
         ]:
             setattr(servico, nome, AsyncMock(return_value=0))
         servico.connect = AsyncMock()

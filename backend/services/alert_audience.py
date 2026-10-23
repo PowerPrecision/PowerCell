@@ -289,7 +289,7 @@ async def destinatarios_de_infraestrutura(*, incluir_admins: bool) -> list[dict]
     """
     from services.role_query import deep_role_filter
 
-    papeis = ["master"] + (["admin"] if incluir_admins else [])
+    papeis = ["master", "admin"] if incluir_admins else ["master"]
     try:
         utilizadores = await db.users.find(
             {"$and": [

@@ -750,8 +750,21 @@ export const setOrigemFinanceira = (processId, corpo) =>
 // «Serviço pago pelo parceiro» de um processo.
 export const getPartners = () => api.get("/admin/partners");
 export const invitePartner = (corpo) => api.post("/admin/partners/invite", corpo);
-export const updatePartner = (partnerId, corpo) => api.patch(`/admin/partners/${partnerId}`, corpo);
+// Os erros destas acções dizem-se NO sítio (diálogo ou toast do componente): sem `skipErrorToast` o
+// interceptor acrescentava um segundo aviso por cima.
+export const updatePartner = (partnerId, corpo) =>
+  api.patch(`/admin/partners/${partnerId}`, corpo, { skipErrorToast: true });
 export const resendPartnerInvite = (partnerId) => api.post(`/admin/partners/${partnerId}/resend-invite`);
+// Só Master (o servidor repete a pergunta): mudar de empresa, nova palavra-passe e eliminar.
+export const changePartnerCompany = (partnerId, companyId) =>
+  api.post(`/admin/partners/${partnerId}/change-company`, { company_id: companyId }, { skipErrorToast: true });
+export const resetPartnerPassword = (partnerId) =>
+  api.post(`/admin/partners/${partnerId}/reset-password`, null, { skipErrorToast: true });
+// Eliminar não se desfaz: sem a password actual nem sai o pedido (o servidor também a exige).
+export const deletePartner = (partnerId, password) =>
+  password
+    ? api.delete(`/admin/partners/${partnerId}`, { data: { password }, skipErrorToast: true })
+    : Promise.reject(new Error("deletePartner: a password actual é obrigatória."));
 
 export const getServicoDoParceiro = (processId) =>
   api.get(`/processes/${processId}/partner-service`, { skipErrorToast: true });

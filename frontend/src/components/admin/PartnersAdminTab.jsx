@@ -2,7 +2,8 @@
  * Separador Parceiros — convidar e gerir os parceiros de negócio da rede.
  *
  * Liga a GET /admin/partners, POST /admin/partners/invite, PATCH
- * /admin/partners/{id} e POST /admin/partners/{id}/resend-invite.
+ * /admin/partners/{id}, POST /admin/partners/{id}/resend-invite e — só Master —
+ * POST …/change-company, POST …/reset-password e DELETE /admin/partners/{id}.
  *
  * O ONBOARDING É SÓ POR CONVITE: não há registo público. O link do convite
  * aparece UMA vez, a quem convida (o servidor só guarda o hash) — se o email
@@ -11,12 +12,15 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Loader2, MailPlus, MoreHorizontal, RefreshCw, UserCheck, UserPlus, UserX } from "lucide-react";
+import {
+  ArrowRightLeft, Copy, KeyRound, Loader2, MailPlus, MoreHorizontal, Pencil, RefreshCw, Trash2, UserCheck, UserPlus, UserX,
+} from "lucide-react";
 import { toast } from "sonner";
 
-import { getCompanies, getPartners, invitePartner, resendPartnerInvite, updatePartner } from "../../services/api";
+import { deletePartner, getCompanies, getPartners, invitePartner, resendPartnerInvite, updatePartner } from "../../services/api";
 import { queryKeys } from "../../lib/queryClient";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
+import { lerErroDeConfirmacao } from "../../utils/confirmarComPassword";
 import { normalizeCompaniesPayload } from "../../utils/organizationAdmin";
 import {
   CONVITE_VAZIO,
@@ -34,6 +38,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
@@ -41,6 +46,8 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import EmptyState from "../ui/EmptyState";
+import ConfirmarComPasswordDialog from "./ConfirmarComPasswordDialog";
+import { EditarParceiroDialog, MudarEmpresaDialog, NovaPasswordDialog } from "./PartnerActionDialogs";
 
 function LinkDoConvite({ caminho }) {
   const link = linkDoConvite(caminho, typeof window !== "undefined" ? window.location.origin : "");
@@ -66,13 +73,22 @@ function LinkDoConvite({ caminho }) {
   );
 }
 
-export default function PartnersAdminTab() {
+/**
+ * @param {boolean} isMaster Só o Master altera o email, muda a empresa, gera palavra-passe e elimina
+ *   (o servidor repete a pergunta: aqui só se evita oferecer o que ia ser recusado).
+ */
+export default function PartnersAdminTab({ isMaster = false }) {
   const queryClient = useQueryClient();
   const [aConvidar, setAConvidar] = useState(false);
   const [form, setForm] = useState(CONVITE_VAZIO);
   const [erros, setErros] = useState({});
   const [erroGeral, setErroGeral] = useState("");
   const [ultimoConvite, setUltimoConvite] = useState(null);
+  // Parceiro-alvo de cada diálogo de gestão (null = fechado).
+  const [aEditar, setAEditar] = useState(null);
+  const [aMudarEmpresa, setAMudarEmpresa] = useState(null);
+  const [aGerarPassword, setAGerarPassword] = useState(null);
+  const [aEliminar, setAEliminar] = useState(null);
 
   const parceiros = useQuery({
     queryKey: queryKeys.orgAdmin.partners(),
@@ -119,6 +135,25 @@ export default function PartnersAdminTab() {
     },
     onError: (e) => toast.error(extractErrorMessage(e?.response?.data?.detail, "Não foi possível actualizar o parceiro")),
   });
+
+  const aposEdicao = (dados) => {
+    toast.success("Parceiro actualizado");
+    // Mudar o email de quem nunca activou a conta gera um convite novo, para o endereço novo.
+    if (dados?.invite_path) setUltimoConvite({ caminho: dados.invite_path, nome: dados.name });
+    recarregar();
+  };
+  const aposMudarEmpresa = (dados) => {
+    toast.success(dados?.alterado === false ? "O parceiro já estava nesta empresa" : "Empresa do parceiro alterada");
+    recarregar();
+  };
+  const aposNovaPassword = (dados) => {
+    toast.success(`Nova palavra-passe enviada para ${dados?.email || "o parceiro"}`);
+    recarregar();
+  };
+  const aposEliminar = () => {
+    toast.success("Parceiro eliminado");
+    recarregar();
+  };
 
   const abrir = () => {
     setForm(CONVITE_VAZIO);
@@ -197,6 +232,10 @@ export default function PartnersAdminTab() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => setAEditar(p)}>
+                          <Pencil className="h-4 w-4" aria-hidden="true" />
+                          Editar
+                        </DropdownMenuItem>
                         <DropdownMenuItem
                           disabled={reenviar.isPending}
                           onClick={() => reenviar.mutate(p.id)}
@@ -213,6 +252,26 @@ export default function PartnersAdminTab() {
                             : <UserCheck className="h-4 w-4" aria-hidden="true" />}
                           {activo ? "Suspender" : "Reactivar"}
                         </DropdownMenuItem>
+                        {isMaster && (
+                          <>
+                            <DropdownMenuItem onClick={() => setAMudarEmpresa(p)}>
+                              <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
+                              Mudar Empresa
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={p.status !== "active"}
+                              onClick={() => setAGerarPassword(p)}
+                            >
+                              <KeyRound className="h-4 w-4" aria-hidden="true" />
+                              Gerar Nova Password
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-destructive" onClick={() => setAEliminar(p)}>
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
+                              Eliminar
+                            </DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
@@ -221,6 +280,54 @@ export default function PartnersAdminTab() {
             })}
           </TableBody>
         </Table>
+      )}
+
+      <EditarParceiroDialog
+        parceiro={aEditar}
+        podeMudarEmail={isMaster}
+        onOpenChange={(aberto) => !aberto && setAEditar(null)}
+        onSucesso={aposEdicao}
+      />
+      {isMaster && (
+        <>
+          <MudarEmpresaDialog
+            parceiro={aMudarEmpresa}
+            onOpenChange={(aberto) => !aberto && setAMudarEmpresa(null)}
+            onSucesso={aposMudarEmpresa}
+          />
+          <NovaPasswordDialog
+            parceiro={aGerarPassword}
+            onOpenChange={(aberto) => !aberto && setAGerarPassword(null)}
+            onSucesso={aposNovaPassword}
+          />
+          {/* Eliminar não se desfaz: só o Master, e com a password actual. */}
+          <ConfirmarComPasswordDialog
+            open={Boolean(aEliminar)}
+            onOpenChange={(aberto) => !aberto && setAEliminar(null)}
+            titulo="Eliminar parceiro"
+            descricao={
+              <>
+                <p>
+                  Vai eliminar a conta de <strong>{aEliminar?.name}</strong> ({aEliminar?.email}). Esta acção não se desfaz.
+                </p>
+                <p>
+                  O parceiro deixa de poder entrar, perde as ligações às empresas e o email fica livre para um novo
+                  convite. Os processos que lhe foram atribuídos mantêm o nome dele no histórico.
+                </p>
+              </>
+            }
+            onConfirmar={(password) => deletePartner(aEliminar.id, password)}
+            onSucesso={aposEliminar}
+            rotuloConfirmar="Eliminar parceiro"
+            Icone={Trash2}
+            testIdBase="eliminar-parceiro"
+            lerErro={(err) => lerErroDeConfirmacao(err, {
+              naoEncontrado: "Este parceiro já não existe.",
+              recusado: "Não foi possível eliminar o parceiro.",
+              erro: "Não foi possível eliminar o parceiro. Tente novamente.",
+            })}
+          />
+        </>
       )}
 
       <Dialog open={aConvidar} onOpenChange={setAConvidar}>
