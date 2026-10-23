@@ -6,14 +6,12 @@ os escritores pontuados): nenhum duplo reimplementa a cifra nem a idade.
 from __future__ import annotations
 
 import copy
-import inspect
 from datetime import date, datetime
 
 import pytest
 
 from services import campos_limpaveis, nascimento_protegido as np_
 from services import portal_profile_sections, process_ai_conflict, sub35
-from services import encryption as enc
 from services.birthdate_migration import planear
 from services.encryption import (
     CAMPOS_DE_NASCIMENTO_CIFRADOS,

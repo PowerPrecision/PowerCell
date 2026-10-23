@@ -139,8 +139,6 @@ class TestONumeroDePedidosNaoCrescePorCliente:
 
 async def _semear_mais(base, ja, ate):
     # acrescenta clientes de `ja` a `ate`
-    import itertools
-
     for i in range(ja, ate):
         await _semear_um(base, i)
 

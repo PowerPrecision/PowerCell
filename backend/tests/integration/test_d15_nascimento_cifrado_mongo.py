@@ -20,7 +20,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from services import sub35
 from services.birthdate_exposure_audit import Relatorio, auditar
-from services.encryption import EncryptionService, encryption_service, is_encrypted
+from services.encryption import EncryptionService, encryption_service
 from services.process_service import encrypt_sensitive_data
 
 pytestmark = pytest.mark.asyncio
