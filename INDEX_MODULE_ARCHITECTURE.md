@@ -22,7 +22,7 @@ Hoje há `is_indexed` (bool), `skip_index` (Via Verde) e `hub_triage.state` (fil
 (`document_visibility`, `document_intake`, `network_triage`, `process_assignment`, `email_archive`…).
 
 ```
-pending ──claim/abrir workstation──▶ in_review ──mark-indexed──▶ indexed
+pending ──o indexador atribuído abre/trabalha a bancada──▶ in_review ──mark-indexed──▶ indexed
    ▲                                     │                          │
    └─────────── devolver à fila ─────────┘            set-indexed OFF (reabre; os originais purgados não regressam)
 ```
@@ -171,7 +171,7 @@ rotas com `{process_id}`: `exigir_processo_no_ambito` (404 uniforme) e `exigir_p
 |---|---|---|
 | `GET /index/queue?tab=pending\|reviews&page=` | Index, gestão | **Dashboard.** `pending` = `index_status ∈ {pending,in_review}`; `reviews` = `indexed ∧ has_pending_review`. Só a rede do utilizador. DTO positivo: nº do processo, nome do cliente, nº de ficheiros, nº de alertas — **sem** metadados profissionais. |
 | `GET /index/processes/{id}` | Index, gestão | **Workstation.** Estado, jobs activos, metadados profissionais, alertas, ficheiros e estado de cada um. |
-| `POST /index/processes/{id}/claim` | Index | `pending → in_review` (idempotente). |
+| `POST /index/processes/{id}/start` | Index | `pending → in_review` SÓ para o indexador atribuído (idempotente; substitui o antigo `claim`; `release` foi apagado). |
 | `POST /index/processes/{id}/analyze` | Index, gestão | Cria o job de análise (categoriza, extrai metadados, matriz). **202 + `task_id`.** `force=false` salta ficheiros com a mesma impressão digital. |
 | `POST /index/processes/{id}/extract` | Index, gestão | O «Extrair dados» que já existe (`/processes/{id}/documents/extract`): devolve propostas para a ficha, **não grava**. Mantém-se tal como está. |
 | `POST /index/processes/{id}/sanitize` | Index, gestão | Job que gera os PDF limpos (sem metadados do PDF). Idempotente. |
@@ -375,7 +375,7 @@ Divergências e decisões:
 
 ### Fase 3 — API, RBAC e fecho (Out 2026)
 
-`routes/index_module.py` (`/api/index/*`, stubs finos) → `services/index_api.py` (fila, bancada, claim/release, analisar/extrair,
+`routes/index_module.py` (`/api/index/*`, stubs finos) → `services/index_api.py` (fila, bancada, start, analisar/extrair,
 edição humana, dispensar alertas, directório) e `services/index_finalize.py` («marcar como indexado» + job de fecho).
 
 Decisões e divergências:
@@ -480,3 +480,73 @@ Detalhe e lições no `AGENTS.md` («Declaração de Efetividade manda no empreg
 3. **`/index/pesquisa`:** ecrã da pesquisa avançada com o «Ver documento» num `Dialog` sobreposto; o payload leva
    `document_id` (vista por documento) / `document_ids` (vista por emprego), nunca nomes de ficheiro.
 
+
+
+### Operações do Index (Out 2026): download, fila, reanálise lenta e arquivo histórico
+
+Detalhe e lições no `AGENTS.md` («Operações de ficheiros, fila e arquivo do Index»).
+
+1. **Download directo:** `GET /index/documents/{id}/content?download=true` → `Content-Disposition: attachment` (mesma parede
+   da pré-visualização; tecto de 50 MB; rasto no trilho de auditoria). Botão «Download» ao lado de «Ver documento».
+2. **Fila:** `GET /index/queue?sort_by=<campo>_<asc|desc>&index_status=&company_id=&origin=own|shared` (lista fechada, 422
+   fora dela; desempate por `id`; facetas `empresas`/`estados` na resposta). Estado no URL (`idx_sort`, `idx_status`,
+   `idx_company`, `idx_origin`) e cabeçalhos clicáveis.
+3. **Reanálise lenta:** `scripts/slow_backfill_ia.py` — ver «Como correr» abaixo.
+4. **Arquivo histórico:** `scripts/import_historico_zip.py` — linhas `historical: true` em `process_index_documents`, sem processo,
+   sem ficheiro e com `network_id` obrigatório; aparecem na pesquisa por documento como «Arquivo histórico» (sem ligação ao
+   processo nem botões de ficheiro) e **nunca** na vista por emprego.
+
+#### Como correr os scripts (a partir de `backend/`, com `MONGO_URL`/`DB_NAME` do ambiente alvo)
+
+**Reanálise lenta (banco dos extratos e localidade dos recibos antigos)**
+
+```bash
+python -m scripts.slow_backfill_ia                                   # conta o que falta; NÃO chama a IA, NÃO escreve
+SLOW_BACKFILL_BATCH_SIZE=20 python -m scripts.slow_backfill_ia --aplicar   # UM lote (20 por omissão, tecto 200)
+python -m scripts.slow_backfill_ia --aplicar --tipo extrato --batch-size 10
+# cron: de 30 em 30 minutos
+*/30 * * * *  cd /app/backend && INDEX_AI_PROVIDER=openai python -m scripts.slow_backfill_ia --aplicar >> /var/log/slow_backfill.log 2>&1
+```
+
+Variáveis: `SLOW_BACKFILL_BATCH_SIZE` (20; inválido/≤0 → 20), `SLOW_BACKFILL_PAUSE_SECONDS` (1), `INDEX_AI_PROVIDER=openai`
+(com o motor simulado recusa: código 3). Saída: uma linha por documento (`[slow-backfill] n/N doc=<id> tipo=banco → preenchido`)
+e `PROGRESSO: lote=… preenchidos=… sem_valor=… adiados=… falhados=… restantes=…`. Termina sozinho quando `restantes=0`.
+Não mexe na impressão digital (a análise normal continua a saltar o ficheiro), não entra em ciclo (marca `slow_backfill_ia`
+por documento) e dois crons sobrepostos não pagam duas vezes (reserva atómica de 15 min).
+
+**Importação do arquivo histórico (ZIPs da OneDrive)**
+
+```bash
+python -m scripts.import_historico_zip /dados/arquivo.zip --rede grupo_power_precision         # só descreve (nada é lido)
+python -m scripts.import_historico_zip /dados/arquivo.zip --rede grupo_power_precision --aplicar
+python -m scripts.import_historico_zip /dados/arquivo.zip --rede grupo_power_precision --aplicar --limite-ia 500 --etiqueta "OneDrive 2019"
+python -m scripts.import_historico_zip --desfazer <import_id> --aplicar                         # apaga as linhas dessa importação
+```
+
+`--rede` é obrigatória e tem de existir numa empresa (uma gralha seria rejeitada com a lista de redes). O ZIP nunca é
+descomprimido: lê-se o índice e depois um ficheiro de cada vez, em blocos de 1 MB e com tecto de 20 MB por ficheiro (memória =
+um ficheiro; disco = nada). Idempotente e retomável (id da linha = conteúdo + rede); `--limite-ia N` pára ao fim de N
+chamadas ao modelo e repetir o comando continua. Saída: `[import-historico] n/N → estado` e
+`PROGRESSO: importacao=<id> membros=… importados=… ja_importados=… identificacao=… …`. Códigos de saída: 0 ok · 2 ZIP
+ilegível · 3 motor simulado · 4 rede em falta/desconhecida · 130 interrompido.
+
+
+### Fusão de menus, atribuição automática e SLA de dois níveis (Out 2026)
+
+Detalhe e lições no `AGENTS.md` («Index: fusão de menus, atribuição automática e SLA de inactividade em dois níveis»).
+
+1. **Sem menu isolado «Indexação» para a equipa.** O Index e o Intermediário vêem o seu trabalho em «Os Meus Processos»
+   (`/processos`); um clique de um indexador abre direto a bancada (`/index/:processId`, `utils/destinoDoProcesso.js`). A fila
+   `/index` fica como «Supervisão do Index» (gestão); a «Pesquisa Avançada» ganhou item no menu do Index.
+2. **Estar atribuído ≠ estar em tratamento.** `pending → in_review` só acontece quando o indexador ATRIBUÍDO trabalha
+   (`index_status.registar_trabalho`: abrir a bancada, analisar, editar, dispensar alertas, carregar ficheiros). `claim`/`release`
+   foram apagados.
+3. **Atribuição à entrada:** indexador por carga (`assign_to_indexer`, já existia) **e** intermediário por carga
+   (`auto_assign_intermediario_on_entry`, só se estiver vazio). Os dois carimbam/derivam do pool da rede do processo.
+4. **SLA em dois níveis** (`services/index_sla.py`, no job horário `scheduled_tasks`): nível 1 reatribui o processo atribuído
+   que ninguém começou em `INDEX_SLA_UNTOUCHED_HOURS` (48 h); nível 2 NÃO retira a atribuição de um processo em tratamento sem
+   actividade há `INDEX_SLA_STALE_DAYS` (5 dias): avisa o indexador e a chefia da rede, repetindo de 5 em 5 dias.
+   `INDEX_SLA_ENABLED=false` desliga os dois.
+5. **Bancada:** cada ficheiro tem «Ver documento» e «Download»
+   (`GET /index/processes/{id}/files/{doc_id}/content[?download=true]`, qualquer tipo do dossier, só do processo do caminho) e
+   há upload direto sem sair do ecrã (nunca sobrepõe: nome repetido → ` (2)`).

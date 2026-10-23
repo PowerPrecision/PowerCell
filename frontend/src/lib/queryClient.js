@@ -118,7 +118,10 @@ export const queryKeys = {
   index: {
     all: ['index'],
     queueAll: () => [...queryKeys.index.all, 'queue'],
-    queue: (tab = 'pending', pagina = 1, pesquisa = '') => [...queryKeys.index.queueAll(), tab, pagina, pesquisa],
+    // a ordem e os filtros vão nos parâmetros E na chave: senão mudá-los não provocava sequer um pedido
+    queue: (tab = 'pending', pagina = 1, pesquisa = '', ordem = '', filtros = {}) => [
+      ...queryKeys.index.queueAll(), tab, pagina, pesquisa, ordem, filtros.estado || '', filtros.empresa || '', filtros.origem || '',
+    ],
     workstation: (processId) => [...queryKeys.index.all, 'workstation', processId],
     employers: (texto = '') => [...queryKeys.index.all, 'employers', texto],
     search: (chave = '') => [...queryKeys.index.all, 'search', chave],

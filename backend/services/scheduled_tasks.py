@@ -1691,6 +1691,19 @@ class ScheduledTasksService:
         logger.info(f"Processos atrasados: {len(stale_processes)} atrasados, {len(urgent_processes)} urgentes, {notifications_created} notificações criadas")
         return notifications_created
     
+    async def run_index_sla(self) -> int:
+        """SLA de inactividade do Index em dois níveis (ver `services/index_sla`).
+
+        Nível 1: reatribui o processo atribuído que ninguém começou. Nível 2: avisa (sem tirar a atribuição)
+        o indexador e a chefia quando o trabalho começado estagnou. Devolve quantos processos foram tocados.
+        """
+        from services.index_sla import correr_sla_do_index
+
+        resumo = await correr_sla_do_index()
+        if not resumo.get("activo"):
+            return 0
+        return int(resumo["nivel1"]["reatribuidos"]) + int(resumo["nivel2"]["alertados"])
+
     async def purge_index_originals(self) -> int:
         """Elimina os originais do Index cuja graça acabou e cujo PDF limpo se confirma (Lote 12).
 
@@ -1734,6 +1747,7 @@ class ScheduledTasksService:
             expired_partner_leads = await _tarefa("leads de parceiros expiradas", self.expire_stale_partner_leads)
             watchdog_count = await _tarefa("watchdog de validades", self.check_document_expirations_watchdog)
             purged_originals = await _tarefa("originais do Index vencidos", self.purge_index_originals, 0)
+            index_sla_count = await _tarefa("SLA de inactividade do Index", self.run_index_sla, 0)
             monthly_count = await _tarefa("lembretes mensais", self.send_monthly_document_reminder)
             stale_count = await _tarefa("processos atrasados", self.check_stale_processes)
             cleanup_count = await _tarefa("limpeza de notificações", self.cleanup_old_notifications)
@@ -1752,6 +1766,7 @@ class ScheduledTasksService:
             logger.info(f"- Leads de parceiros expiradas (60 dias): {expired_partner_leads}")
             logger.info(f"- Watchdog expiração docs: {watchdog_count}")  # NOVA LINHA
             logger.info(f"- Originais do Index eliminados (graça vencida): {purged_originals}")
+            logger.info(f"- SLA do Index (reatribuídos + alertas de estagnação): {index_sla_count}")
             logger.info(f"- Lembretes mensais: {monthly_count}")
             logger.info(f"- Processos atrasados/urgentes: {stale_count}")
             logger.info(f"- Notificações limpas: {cleanup_count}")

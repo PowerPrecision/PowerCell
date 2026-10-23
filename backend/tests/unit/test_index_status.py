@@ -25,7 +25,8 @@ class TestDerivarEstado:
             ({"is_indexed": False}, "pending", False),
             ({"is_indexed": True}, "indexed", False),
             ({"skip_index": True}, "indexed", True),
-            ({"assigned_indexacao_id": "u1"}, "in_review", False),
+            # estar ATRIBUÍDO não é estar em tratamento (Out 2026): é o que distingue o processo intocado do estagnado
+            ({"assigned_indexacao_id": "u1"}, "pending", False),
             ({"index_status": "in_review"}, "in_review", False),
             # quem indexou vence a dispensa: foi uma pessoa
             ({"is_indexed": True, "skip_index": True}, "indexed", False),
@@ -174,46 +175,62 @@ class TestOGanchoDoRegimeCobreOsCaminhosTodos:
 
 
 # ── transições assíncronas ─────────────────────────────────────────────────
-class TestReivindicarEDevolver:
-    @pytest.mark.asyncio
-    async def test_claim_e_devolver(self, fake_async_db):
-        await fake_async_db.processes.insert_one({"id": "p1", "index_status": "pending"})
-        with patch.object(ist, "db", fake_async_db):
-            r = await ist.reivindicar("p1")
-            assert r == {"alterado": True, "estado": "in_review"}
-            # idempotente
-            assert (await ist.reivindicar("p1"))["alterado"] is False
-            assert (await ist.devolver_a_fila("p1"))["alterado"] is True
-            assert (await ist.devolver_a_fila("p1"))["alterado"] is False
-        doc = await fake_async_db.processes.find_one({"id": "p1"})
-        assert doc["index_status"] == "pending"
+class TestRegistarTrabalho:
+    """O indexador ATRIBUÍDO que trabalha arranca o tratamento (substitui o «Reivindicar» manual)."""
 
     @pytest.mark.asyncio
-    async def test_claim_nunca_toca_num_indexado_nem_dispensado(self, fake_async_db):
-        await fake_async_db.processes.insert_one({"id": "i", "is_indexed": True, "index_status": "indexed"})
-        await fake_async_db.processes.insert_one(
-            {"id": "d", "skip_index": True, "index_status": "indexed", "index_skipped": True}
-        )
+    async def test_o_atribuido_arranca_o_tratamento_uma_so_vez(self, fake_async_db):
+        await fake_async_db.processes.insert_one({"id": "p1", "index_status": "pending", "assigned_indexacao_id": "u1"})
         with patch.object(ist, "db", fake_async_db):
-            ri = await ist.reivindicar("i")
-            rd = await ist.reivindicar("d")
-        assert ri == {"alterado": False, "estado": "indexed"}
-        assert rd == {"alterado": False, "estado": "indexed"}
+            r1 = await ist.registar_trabalho("p1", "u1")
+            primeiro = (await fake_async_db.processes.find_one({"id": "p1"}))["index_work_started_at"]
+            r2 = await ist.registar_trabalho("p1", "u1")
+        assert r1 == {"iniciado": True, "registado": True}
+        assert r2 == {"iniciado": False, "registado": True}  # já em tratamento: só carimba a actividade
+        doc = await fake_async_db.processes.find_one({"id": "p1"})
+        assert doc["index_status"] == "in_review" and doc["index_work_started_at"] == primeiro
+        assert doc["index_last_activity_at"]
+
+    @pytest.mark.asyncio
+    async def test_quem_nao_e_o_atribuido_nao_inicia_nem_adia_o_alarme(self, fake_async_db):
+        await fake_async_db.processes.insert_one({"id": "p1", "index_status": "pending", "assigned_indexacao_id": "u1"})
+        await fake_async_db.processes.insert_one(
+            {"id": "p2", "index_status": "in_review", "assigned_indexacao_id": "u1", "index_last_activity_at": "2020-01-01T00:00:00+00:00"})
+        with patch.object(ist, "db", fake_async_db):
+            assert await ist.registar_trabalho("p1", "outro") == {"iniciado": False, "registado": False}
+            assert await ist.registar_trabalho("p2", "outro") == {"iniciado": False, "registado": False}
+            assert await ist.registar_trabalho("p1", None) == {"iniciado": False, "registado": False}
+        assert (await fake_async_db.processes.find_one({"id": "p1"}))["index_status"] == "pending"
+        assert (await fake_async_db.processes.find_one({"id": "p2"}))["index_last_activity_at"] == "2020-01-01T00:00:00+00:00"
+
+    @pytest.mark.asyncio
+    async def test_nunca_toca_num_indexado_dispensado_ou_eliminado(self, fake_async_db):
+        await fake_async_db.processes.insert_many([
+            {"id": "i", "is_indexed": True, "index_status": "indexed", "assigned_indexacao_id": "u1"},
+            {"id": "d", "skip_index": True, "index_status": "indexed", "assigned_indexacao_id": "u1"},
+            {"id": "x", "is_deleted": True, "index_status": "pending", "assigned_indexacao_id": "u1"},
+        ])
+        with patch.object(ist, "db", fake_async_db):
+            for pid in ("i", "d", "x"):
+                assert (await ist.registar_trabalho(pid, "u1"))["registado"] is False
         assert (await fake_async_db.processes.find_one({"id": "i"}))["index_status"] == "indexed"
         assert (await fake_async_db.processes.find_one({"id": "d"}))["index_status"] == "indexed"
+        assert (await fake_async_db.processes.find_one({"id": "x"}))["index_status"] == "pending"
 
     @pytest.mark.asyncio
-    async def test_devolver_nao_desfaz_um_indexado(self, fake_async_db):
-        await fake_async_db.processes.insert_one({"id": "i", "is_indexed": True, "index_status": "indexed"})
-        with patch.object(ist, "db", fake_async_db):
-            assert (await ist.devolver_a_fila("i"))["alterado"] is False
-        assert (await fake_async_db.processes.find_one({"id": "i"}))["index_status"] == "indexed"
+    async def test_nunca_propaga(self):
+        class Rebenta:
+            class processes:
+                @staticmethod
+                async def update_one(*a, **k):
+                    raise RuntimeError("bd em baixo")
 
-    @pytest.mark.asyncio
-    async def test_processo_eliminado_nao_e_reivindicado(self, fake_async_db):
-        await fake_async_db.processes.insert_one({"id": "x", "is_deleted": True, "index_status": "pending"})
-        with patch.object(ist, "db", fake_async_db):
-            assert (await ist.reivindicar("x"))["alterado"] is False
+        with patch.object(ist, "db", Rebenta):
+            assert await ist.registar_trabalho("p1", "u1") == {"iniciado": False, "registado": False}
+
+    def test_o_reivindicar_e_o_devolver_a_fila_deixaram_de_existir(self):
+        # apagados, não desligados: código adormecido atrás de um `raise` é um convite a religá-lo
+        assert not hasattr(ist, "reivindicar") and not hasattr(ist, "devolver_a_fila")
 
 
 class TestContadores:
@@ -299,7 +316,7 @@ class TestUmSoEscritor:
     #: Quem pode ESCREVER `index_status`: o próprio módulo (e o `$set` da migração vem dele).
     #: `index_api.py` monta o DTO de RESPOSTA (`{"index_status": ...}` lê o estado derivado, não o escreve);
     #: não escreve em `db.processes` — há guarda disso em `test_index_guardas.py`.
-    PERMITIDOS = {"index_status.py", "index_api.py"}
+    PERMITIDOS = {"index_status.py", "index_api.py", "index_sla.py", "index_queue_query.py"}  # os dois últimos só FILTRAM por `index_status` (ver o teste abaixo)
 
     def test_ninguem_fora_do_modulo_escreve_index_status_a_mao(self):
         intrusos = []
@@ -309,6 +326,25 @@ class TestUmSoEscritor:
             if _chaves_de_dicts_com("index_status", ficheiro.read_text(encoding="utf-8")):
                 intrusos.append(ficheiro.name)
         assert intrusos == [], f"escritores de index_status à margem do ponto único: {intrusos}"
+
+    @staticmethod
+    def _estado_dentro_de_set(fonte: str) -> list[str]:
+        """Os campos de estado (`index_status`/`is_indexed`) que a fonte põe dentro de um `$set`."""
+        achados = []
+        for no in ast.walk(ast.parse(fonte)):
+            if isinstance(no, ast.Dict):
+                for k, v in zip(no.keys, no.values):
+                    if isinstance(k, ast.Constant) and k.value == "$set" and isinstance(v, ast.Dict):
+                        achados += [c.value for c in v.keys if isinstance(c, ast.Constant) and c.value in ("index_status", "is_indexed")]
+        return achados
+
+    @pytest.mark.parametrize("modulo", ["index_sla.py", "index_queue_query.py"])
+    def test_quem_so_filtra_por_index_status_nunca_o_escreve(self, modulo):
+        assert self._estado_dentro_de_set((SERVICOS / modulo).read_text(encoding="utf-8")) == []
+
+    def test_contraprova_o_leitor_do_set_apanha_uma_escrita(self):
+        assert self._estado_dentro_de_set('x = {"$set": {"index_status": "indexed"}}') == ["index_status"]
+        assert self._estado_dentro_de_set('x = {"index_status": "indexed"}') == []  # um filtro não é uma escrita
 
     def test_contraprova_o_leitor_ve_o_proprio_modulo(self):
         fonte = (SERVICOS / "index_status.py").read_text(encoding="utf-8")
@@ -353,13 +389,13 @@ class TestMigracao:
     def test_plano_por_processo(self):
         assert mig.plano_do_processo(self.DOCS[0]) == {"index_status": "indexed", "index_skipped": False}
         assert mig.plano_do_processo(self.DOCS[3]) == {"index_status": "indexed", "index_skipped": True}
-        assert mig.plano_do_processo(self.DOCS[4]) == {"index_status": "in_review", "index_skipped": False}
+        assert mig.plano_do_processo(self.DOCS[4]) == {"index_status": "pending", "index_skipped": False}
         assert mig.plano_do_processo(self.DOCS[5]) is None
 
     def test_resumo(self):
         r = mig.resumo(self.DOCS)
         assert r["total"] == 6 and r["a_escrever"] == 5
-        assert r["por_estado"] == {"indexed": 1, "pending": 2, "indexed+dispensado": 1, "in_review": 1}
+        assert r["por_estado"] == {"indexed": 1, "pending": 3, "indexed+dispensado": 1}
 
     @pytest.mark.asyncio
     async def test_aplicar_e_idempotente(self, fake_async_db):

@@ -71,6 +71,15 @@ describe("getIndexDocumentContent — o «Ver documento» da pesquisa", () => {
     expect(config).toMatchObject({ responseType: "blob", skipErrorToast: true });
   });
 
+  it("sem download não leva o parâmetro; com download:true leva `download=true`", async () => {
+    const get = vi.spyOn(api, "get").mockResolvedValue({ data: new Blob(["x"]) });
+    await getIndexDocumentContent("doc-9");
+    expect(get.mock.calls[0][1].params).toBeUndefined();
+    await getIndexDocumentContent("doc-9", { download: true });
+    expect(get.mock.calls[1][0]).toBe("/index/documents/doc-9/content");
+    expect(get.mock.calls[1][1]).toMatchObject({ params: { download: true }, responseType: "blob", skipErrorToast: true });
+  });
+
   it("o id é escapado (nunca parte do caminho)", async () => {
     const get = vi.spyOn(api, "get").mockResolvedValue({ data: new Blob(["x"]) });
     await getIndexDocumentContent("a/b?c");

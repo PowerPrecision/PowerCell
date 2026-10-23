@@ -276,6 +276,36 @@ class TestABancada:
         assert r["active_jobs"] == {"analysis": None, "finalize": None, "sanitize": None}
 
     @pytest.mark.asyncio
+    async def test_diz_se_o_processo_e_do_utilizador_para_o_ecra_decidir_se_arranca_o_tratamento(self, fake_async_db):
+        await fake_async_db.processes.insert_one({"id": PID, "network_id": "r", "is_deleted": False, "index_status": "pending",
+                                                  "assigned_indexacao_id": INDEXADOR["id"]})
+        outro = {**INDEXADOR, "id": "outro"}
+        with _Contexto(fake_async_db):
+            meu = await api.run_get_index_workstation(INDEXADOR, PID)
+            alheio = await api.run_get_index_workstation(outro, PID)
+        assert meu["process"]["assigned_to_me"] is True
+        assert alheio["process"]["assigned_to_me"] is False
+
+    @pytest.mark.asyncio
+    async def test_um_processo_por_atribuir_nao_e_de_ninguem(self, fake_async_db):
+        await fake_async_db.processes.insert_one({"id": PID, "network_id": "r", "is_deleted": False, "index_status": "pending"})
+        sem_id = {k: v for k, v in INDEXADOR.items() if k != "id"}
+        with _Contexto(fake_async_db):
+            r = await api.run_get_index_workstation(sem_id, PID)
+        assert r["process"]["assigned_to_me"] is False  # `None == None` não é «é meu»
+
+    @pytest.mark.asyncio
+    async def test_a_estagnacao_so_aparece_em_tratamento_e_com_alerta_dado(self, fake_async_db):
+        await fake_async_db.processes.insert_many([
+            {"id": "a", "network_id": "r", "is_deleted": False, "index_status": "in_review", "index_stagnation_alerted_at": "2026-10-01T00:00:00+00:00"},
+            {"id": "b", "network_id": "r", "is_deleted": False, "index_status": "in_review"},
+            {"id": "c", "network_id": "r", "is_deleted": False, "index_status": "pending", "index_stagnation_alerted_at": "2026-10-01T00:00:00+00:00"},
+        ])
+        with _Contexto(fake_async_db):
+            a, b, c = [(await api.run_get_index_workstation(INDEXADOR, i))["process"]["stagnant"] for i in "abc"]
+        assert (a, b, c) == (True, False, False)
+
+    @pytest.mark.asyncio
     async def test_processo_inexistente_ou_eliminado_e_404(self, fake_async_db):
         await fake_async_db.processes.insert_one({"id": PID, "is_deleted": True})
         with _Contexto(fake_async_db):
@@ -315,14 +345,30 @@ class TestABancada:
 # ====================================================================
 class TestAccoes:
     @pytest.mark.asyncio
-    async def test_claim_passa_a_in_review_e_e_idempotente(self, fake_async_db):
-        await fake_async_db.processes.insert_one({"id": PID, "network_id": "r", "is_deleted": False,
-                                                  "is_indexed": False, "index_status": "pending"})
-        with _Contexto(fake_async_db):
-            r1 = await api.run_claim_process(INDEXADOR, PID)
-            r2 = await api.run_claim_process(INDEXADOR, PID)
-        assert r1["estado"] == "in_review"
-        assert r2["estado"] == "in_review" and r2["alterado"] is False
+    async def test_abrir_a_bancada_arranca_o_tratamento_so_do_atribuido(self, fake_async_db):
+        await fake_async_db.processes.insert_one({"id": PID, "network_id": "r", "is_deleted": False, "is_indexed": False,
+                                                  "index_status": "pending", "assigned_indexacao_id": INDEXADOR["id"]})
+        outro = {**INDEXADOR, "id": "outro"}
+        with _Contexto(fake_async_db), patch.object(ist, "db", fake_async_db):
+            r0 = await api.run_start_work(outro, PID)
+            r1 = await api.run_start_work(INDEXADOR, PID)
+            r2 = await api.run_start_work(INDEXADOR, PID)
+        assert r0["iniciado"] is False and r1["iniciado"] is True
+        assert r2["iniciado"] is False and r2["registado"] is True  # idempotente: só carimba a actividade
+        assert (await fake_async_db.processes.find_one({"id": PID}))["index_status"] == "in_review"
+
+    @pytest.mark.asyncio
+    async def test_as_acoes_de_escrita_carimbam_a_actividade_do_atribuido(self, fake_async_db):
+        await fake_async_db.processes.insert_one({"id": PID, "network_id": "r", "is_deleted": False, "is_indexed": False,
+                                                  "index_status": "pending", "assigned_indexacao_id": INDEXADOR["id"]})
+        iniciar = AsyncMock(return_value={"task_id": "t-1", "iniciado": True})
+        with _Contexto(fake_async_db), patch.object(ist, "db", fake_async_db), patch.object(jobs, "iniciar_analise", iniciar):
+            await api.run_analyze_process(INDEXADOR, PID, force=False)
+        doc = await fake_async_db.processes.find_one({"id": PID})
+        assert doc["index_status"] == "in_review" and doc["index_last_activity_at"]
+
+    def test_o_claim_e_o_release_deixaram_de_existir(self):
+        assert not hasattr(api, "run_claim_process") and not hasattr(api, "run_release_process")
 
     @pytest.mark.asyncio
     async def test_analisar_devolve_ja_com_o_task_id(self, fake_async_db):

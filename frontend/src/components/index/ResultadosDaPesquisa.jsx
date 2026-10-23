@@ -1,12 +1,12 @@
 /**
  * ResultadosDaPesquisa — a tabela da pesquisa avançada do Index (apresentação pura).
  *
- * Diz o que aconteceu (`onVerDocumento(documentos, titulo)`); quem decide o que isso implica é a página.
- * As colunas dependem do que se procurou (emprego, recibo, declaração, extrato) e só mostram o que o
- * servidor devolveu — nunca o nome do cliente nem do ficheiro. O botão «Ver documento» só se desenha
- * com uma referência exacta ao documento (`document_id`/`document_ids`).
+ * Diz o que aconteceu (`onVerDocumento(documentos, titulo)`, `onDescarregar(chave, documentos)`); quem decide o
+ * que isso implica é a página. As colunas dependem do que se procurou (emprego, recibo, declaração, extrato)
+ * e só mostram o que o servidor devolveu — nunca o nome do cliente nem do ficheiro. Os botões «Ver documento»
+ * e «Download» só se desenham com uma referência exacta ao documento (`document_id`/`document_ids`).
  */
-import { AlertTriangle, Eye, SearchX } from "lucide-react";
+import { AlertTriangle, Download, Eye, Loader2, SearchX } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Badge } from "../ui/badge";
@@ -24,6 +24,15 @@ import {
 const SEM = <span className="text-muted-foreground">—</span>;
 
 function Processo({ item }) {
+  // o arquivo histórico não tem processo: o id é artificial e a ligação levaria a um 404
+  if (item.historical === true) {
+    return (
+      <div data-testid="resultado-historico">
+        <Badge variant="secondary">Arquivo histórico</Badge>
+        {item.import_label && <div className="mt-0.5 text-xs text-muted-foreground">{item.import_label}</div>}
+      </div>
+    );
+  }
   const numero = item.process_number ? `#${item.process_number}` : String(item.process_id || "").slice(0, 8);
   return (
     <div>
@@ -110,8 +119,10 @@ export function formaDasColunas(vista, tipo) {
  * @param {string} props.tipo — o `document_type` pedido ("" = por emprego)
  * @param {Array<Object>} props.itens
  * @param {(documentos: Array<{id: string, rotulo: string}>, titulo: string) => void} props.onVerDocumento
+ * @param {(chave: string, documentos: Array<{id: string, rotulo: string}>) => void} [props.onDescarregar]
+ * @param {Set<string>} [props.emCurso] — chaves das descargas a decorrer (desactivam o botão)
  */
-export function ResultadosDaPesquisa({ vista, tipo, itens, onVerDocumento }) {
+export function ResultadosDaPesquisa({ vista, tipo, itens, onVerDocumento, onDescarregar, emCurso }) {
   if (!itens.length) {
     return (
       <EmptyState
@@ -139,6 +150,8 @@ export function ResultadosDaPesquisa({ vista, tipo, itens, onVerDocumento }) {
       <TableBody>
         {itens.map((item, n) => {
           const documentos = documentosDoResultado(item, vista);
+          const chave = String(item.document_id || item.job_id || `${item.process_id}-${n}`);
+          const aDescarregar = emCurso?.has(chave) === true;
           const titulo = vista === "documents" ? rotuloDoDocumento(item) : `Documentos do emprego${item.employer?.name ? ` · ${item.employer.name}` : ""}`;
           return (
             <TableRow key={item.document_id || item.job_id || `${item.process_id}-${n}`} data-testid="pesquisa-linha">
@@ -157,20 +170,43 @@ export function ResultadosDaPesquisa({ vista, tipo, itens, onVerDocumento }) {
               ))}
               <TableCell className="text-right">
                 {documentos.length ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 gap-1"
-                    onClick={() => onVerDocumento(documentos, titulo)}
-                    aria-label={documentos.length > 1 ? `Ver documentos (${documentos.length}) — ${titulo}` : `Ver documento — ${titulo}`}
-                    data-testid="ver-documento"
-                  >
-                    <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-                    {documentos.length > 1 ? `Ver documentos (${documentos.length})` : "Ver documento"}
-                  </Button>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1"
+                      onClick={() => onVerDocumento(documentos, titulo)}
+                      aria-label={documentos.length > 1 ? `Ver documentos (${documentos.length}) — ${titulo}` : `Ver documento — ${titulo}`}
+                      data-testid="ver-documento"
+                    >
+                      <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                      {documentos.length > 1 ? `Ver documentos (${documentos.length})` : "Ver documento"}
+                    </Button>
+                    {onDescarregar && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1"
+                        disabled={aDescarregar}
+                        onClick={() => onDescarregar(chave, documentos)}
+                        aria-label={documentos.length > 1 ? `Download de ${documentos.length} documentos — ${titulo}` : `Download — ${titulo}`}
+                        data-testid="download-documento"
+                      >
+                        {aDescarregar ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                        ) : (
+                          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                        )}
+                        {documentos.length > 1 ? `Download (${documentos.length})` : "Download"}
+                      </Button>
+                    )}
+                  </div>
                 ) : (
-                  <span className="text-xs text-muted-foreground">Sem documento</span>
+                  <span className="text-xs text-muted-foreground">
+                    {item.historical === true ? "Só os dados (ficheiro não guardado)" : "Sem documento"}
+                  </span>
                 )}
               </TableCell>
             </TableRow>

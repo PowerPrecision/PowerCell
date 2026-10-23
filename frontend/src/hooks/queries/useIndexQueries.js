@@ -18,12 +18,13 @@ import {
   listaDoServidor,
   normalizarBancada,
   normalizarFila,
+  parametrosDaFila,
 } from "../../utils/indexRevisao";
 import { chaveDaPesquisa, normalizarResultado } from "../../utils/pesquisaIndex";
 
 const INTERVALO_DE_RECUO_MS = 4000;
 
-export function useIndexQueueQuery({ tab = "pending", page = 1, q = "", enabled = true } = {}) {
+export function useIndexQueueQuery({ tab = "pending", page = 1, q = "", ordem = "", filtros = {}, enabled = true } = {}) {
   const queryClient = useQueryClient();
 
   const aoEvento = useCallback(
@@ -36,8 +37,8 @@ export function useIndexQueueQuery({ tab = "pending", page = 1, q = "", enabled 
   useTaskEvents(aoEvento, { source: TASK_SOURCE.TASK_LOG, enabled });
 
   const query = useQuery({
-    queryKey: queryKeys.index.queue(tab, page, q),
-    queryFn: async () => normalizarFila((await getIndexQueue({ tab, page, q: q || undefined })).data),
+    queryKey: queryKeys.index.queue(tab, page, q, ordem, filtros),
+    queryFn: async () => normalizarFila((await getIndexQueue(parametrosDaFila({ tab, page, q, ordem, filtros }))).data),
     enabled,
     placeholderData: (anterior) => anterior,
   });
@@ -46,6 +47,7 @@ export function useIndexQueueQuery({ tab = "pending", page = 1, q = "", enabled 
     itens: query.data?.itens ?? [],
     total: query.data?.total ?? 0,
     tamanho: query.data?.tamanho ?? 0,
+    empresas: query.data?.empresas ?? [],
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     isError: query.isError,

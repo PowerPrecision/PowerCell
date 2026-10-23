@@ -227,20 +227,29 @@ describe("Módulo Index (Lote 12): o menu e a rota concordam com o servidor", ()
   const SEM_INDEX = ["consultor", "intermediario", "administrativo", "parceiro"];
 
   it("as duas rotas aceitam exactamente os perfis do servidor", () => {
-    for (const caminho of ["/index", "/index/:processId"]) {
+    for (const caminho of ["/index", "/index/pesquisa", "/index/:processId"]) {
       const papeis = ROTAS.get(caminho);
       assert.ok(papeis, `${caminho} perdeu as allowedRoles literais (o guarda ficou cego)`);
       assert.deepEqual([...papeis].sort(), [...COM_INDEX].sort(), caminho);
     }
   });
 
-  it("quem tem Index vê «Indexação» no menu", () => {
-    for (const perfil of COM_INDEX.filter((p) => p !== "master")) {
+  it("a gestão vê a fila de supervisão no menu", () => {
+    for (const perfil of ["admin", "ceo", "diretor"]) {
       assert.ok(
         hrefsDoPerfil(LAYOUT, perfil).includes("/index"),
         `${perfil} pode abrir /index mas o menu não o mostra`,
       );
     }
+  });
+
+  it("a equipa do Index já NÃO tem o menu «Indexação»: o trabalho chega por «Os Meus Processos» (Out 2026)", () => {
+    const menu = hrefsDoPerfil(LAYOUT, "indexacao");
+    assert.ok(!menu.includes("/index"), "o menu isolado «Indexação» devia ter desaparecido");
+    assert.ok(menu.includes("/processos"), "sem «Os Meus Processos» a equipa não tem onde ver o seu trabalho");
+    // …e a pesquisa avançada, que se chegava pela fila, continua alcançável
+    assert.ok(menu.includes("/index/pesquisa"), "a pesquisa avançada ficou sem caminho");
+    assert.ok(ROTAS.get("/index/pesquisa").includes("indexacao"));
   });
 
   it("quem não o tem NÃO o vê no menu (contraprova: o leitor não pôs tudo)", () => {

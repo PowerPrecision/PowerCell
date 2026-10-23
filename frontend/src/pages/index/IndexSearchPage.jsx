@@ -21,6 +21,7 @@ import PesquisaAvancadaFiltros from "../../components/index/PesquisaAvancadaFilt
 import ResultadosDaPesquisa from "../../components/index/ResultadosDaPesquisa";
 import VisualizadorDeDocumento from "../../components/index/VisualizadorDeDocumento";
 import { useIndexSearchQuery } from "../../hooks/queries/useIndexQueries";
+import { useDescarregarDocumentos } from "../../hooks/useDescarregarDocumentos";
 import { mensagemDeErro } from "../../utils/indexRevisao";
 import {
   FILTROS_VAZIOS,
@@ -45,6 +46,7 @@ export default function IndexSearchPage() {
   const [rascunho, setRascunho] = useState(submetidos);
   const [erros, setErros] = useState({});
   const [aVer, setAVer] = useState(null);
+  const { descarregar, emCurso } = useDescarregarDocumentos();
 
   // «Voltar» (ou um link) muda o URL por fora: o formulário acompanha-o.
   useEffect(() => {
@@ -151,6 +153,8 @@ export default function IndexSearchPage() {
                 tipo={submetidos.document_type}
                 itens={resultado.itens}
                 onVerDocumento={(documentos, titulo) => setAVer({ documentos, titulo })}
+                onDescarregar={descarregar}
+                emCurso={emCurso}
               />
               <Paginacao
                 total={resultado.total}
@@ -164,7 +168,13 @@ export default function IndexSearchPage() {
         )}
       </div>
 
-      <VisualizadorDeDocumento documentos={aVer?.documentos} titulo={aVer?.titulo} onFechar={() => setAVer(null)} />
+      <VisualizadorDeDocumento
+        documentos={aVer?.documentos}
+        titulo={aVer?.titulo}
+        onFechar={() => setAVer(null)}
+        onDescarregar={descarregar}
+        emCurso={emCurso}
+      />
     </DashboardLayout>
   );
 }

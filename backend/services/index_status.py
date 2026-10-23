@@ -8,9 +8,14 @@ PONTO ÚNICO DE ESCRITA. Até aqui «indexado?» era `is_indexed` (booleano), ma
 
 ::
 
-    pending ──claim──▶ in_review ──mark-indexed──▶ indexed
-       ▲                    │                          │
-       └──── devolver ──────┘              set-indexed OFF → pending
+    pending ──o indexador atribuído começa a trabalhar──▶ in_review ──mark-indexed──▶ indexed
+       ▲                                                                      │
+       └──────────────────────── set-indexed OFF ─────────────────────────────┘
+
+Estar ATRIBUÍDO não é estar «em tratamento» (Out 2026): a atribuição é automática e o processo
+continua `pending` até a pessoa lhe mexer (`registar_trabalho`). É essa diferença que permite ao SLA do
+Index (`index_sla`) distinguir o processo intocado (reatribui-se) do estagnado (só se avisa). Já não há
+«reivindicar» nem «devolver à fila»: o puxar manual deu lugar à atribuição automática.
 
 REGRAS QUE NÃO SE PODEM PERDER
 ------------------------------
@@ -73,9 +78,8 @@ def derivar_estado(doc: dict) -> dict[str, Any]:
     * `skip_index` ligado (Via Verde / rede sem Index) e ninguém indexou
       → `indexed` dispensado (`index_skipped=True`);
     * `is_indexed` ligado → `indexed`;
-    * um indexador atribuído (`assigned_indexacao_id`) e o processo em fila
-      → `in_review`;
-    * o resto → `pending`.
+    * o estado `in_review` JÁ gravado (alguém começou a trabalhar) mantém-se;
+    * o resto → `pending` — **inclui o processo atribuído a um indexador que ainda não lhe mexeu**.
 
     Devolve `{"index_status", "index_skipped"}`; nunca levanta.
     """
@@ -85,11 +89,10 @@ def derivar_estado(doc: dict) -> dict[str, Any]:
         return {"index_status": INDEXED, "index_skipped": False}
     if _e_verdadeiro(doc.get("skip_index")):
         return {"index_status": INDEXED, "index_skipped": True}
-    # `in_review` é uma conveniência do dashboard («a ser tratado por X»): só se
-    # o estado JÁ gravado o diz, ou há um indexador atribuído a este processo.
+    # `in_review` só se o estado JÁ gravado o diz: foi `registar_trabalho` que o escreveu. Antes deste
+    # lote um indexador atribuído bastava — e com a atribuição automática TODO o processo nascia «em
+    # tratamento», o que apagava a diferença entre «ninguém lhe pegou» e «alguém está a trabalhar».
     if doc.get("index_status") == IN_REVIEW:
-        return {"index_status": IN_REVIEW, "index_skipped": False}
-    if doc.get("assigned_indexacao_id"):
         return {"index_status": IN_REVIEW, "index_skipped": False}
     return {"index_status": PENDING, "index_skipped": False}
 
@@ -171,46 +174,48 @@ def condicao_da_fila(aba: str) -> dict:
 
 
 # ====================================================================
-# TRANSIÇÕES ASSÍNCRONAS (claim / devolver)
+# TRABALHO EM CURSO (pending → in_review, automático)
 # ====================================================================
-async def reivindicar(process_id: str) -> dict[str, Any]:
-    """`pending → in_review` (idempotente; atómico: só toca em quem está na fila).
+async def registar_trabalho(process_id: str, user_id: Optional[str]) -> dict[str, Any]:
+    """O indexador ATRIBUÍDO trabalhou no processo: arranca o tratamento e carimba a actividade.
 
-    Devolve `{"alterado": bool, "estado": str}`. Nunca levanta por causa do
-    estado: um processo já indexado ou dispensado responde `alterado=False`.
+    * `pending → in_review` (a primeira vez): grava `index_work_started_at`;
+    * em qualquer caso carimba `index_last_activity_at` — é o relógio da estagnação (SLA nível 2).
+
+    **Só conta o indexador atribuído**: um diretor a espreitar a bancada não começa o tratamento nem
+    adia o alarme de um processo parado. Idempotente, atómico (um só `update_one` por passo, com o filtro
+    a fazer de guarda) e nunca levanta — observa, não intercepta: falhar a carimbar não pode travar o trabalho.
+    Devolve `{"iniciado": bool, "registado": bool}`.
     """
-    resultado = await db.processes.update_one(
-        {
-            "id": process_id,
-            "is_deleted": {"$ne": True},
-            "is_indexed": {"$ne": True},
-            "skip_index": {"$ne": True},
-            "index_status": {"$ne": IN_REVIEW},
-        },
-        {"$set": {"index_status": IN_REVIEW, "index_skipped": False, "updated_at": _agora()}},
-    )
-    if resultado.modified_count:
-        return {"alterado": True, "estado": IN_REVIEW}
-    actual = await db.processes.find_one(
-        {"id": process_id}, {"_id": 0, "is_indexed": 1, "skip_index": 1, "index_status": 1,
-                              "assigned_indexacao_id": 1}
-    )
-    return {"alterado": False, "estado": derivar_estado(actual or {})["index_status"]}
-
-
-async def devolver_a_fila(process_id: str) -> dict[str, Any]:
-    """`in_review → pending` (idempotente). Não toca em indexados nem dispensados."""
-    resultado = await db.processes.update_one(
-        {
-            "id": process_id,
-            "is_deleted": {"$ne": True},
-            "is_indexed": {"$ne": True},
-            "skip_index": {"$ne": True},
-            "index_status": IN_REVIEW,
-        },
-        {"$set": {"index_status": PENDING, "index_skipped": False, "updated_at": _agora()}},
-    )
-    return {"alterado": bool(resultado.modified_count), "estado": PENDING}
+    if not user_id:
+        return {"iniciado": False, "registado": False}
+    agora = _agora()
+    base = {
+        "id": process_id,
+        "is_deleted": {"$ne": True},
+        "is_indexed": {"$ne": True},
+        "skip_index": {"$ne": True},
+        "assigned_indexacao_id": user_id,
+    }
+    try:
+        arranque = await db.processes.update_one(
+            {**base, "index_status": {"$ne": IN_REVIEW}},
+            {"$set": {
+                "index_status": IN_REVIEW, "index_skipped": False, "index_work_started_at": agora,
+                "index_last_activity_at": agora, "updated_at": agora,
+            }, "$unset": {"index_stagnation_alerted_at": ""}},
+        )
+        if arranque.modified_count:
+            return {"iniciado": True, "registado": True}
+        actividade = await db.processes.update_one(
+            {**base, "index_status": IN_REVIEW},
+            # voltar a mexer apaga a marca de estagnação: se parar outra vez, o alerta novo não espera pelo lembrete
+            {"$set": {"index_last_activity_at": agora}, "$unset": {"index_stagnation_alerted_at": ""}},
+        )
+        return {"iniciado": False, "registado": bool(actividade.modified_count)}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX] Actividade do processo %s não registada: %s", process_id, type(exc).__name__)
+        return {"iniciado": False, "registado": False}
 
 
 # ====================================================================

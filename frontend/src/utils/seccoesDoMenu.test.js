@@ -106,3 +106,27 @@ describe("abrirSeccoes", () => {
     expect(abrirSeccoes({ a: true }, ["b"]).a).toBe(true);
   });
 });
+
+describe("seccoesComRotaActiva — rotas que pertencem a uma ligação (`tambem`)", () => {
+  const grupos = [
+    { id: "trabalho", items: [{ href: "/processos", tambem: ["/index"] }, { href: "/kanban" }] },
+    { id: "outro", items: [{ href: "/clientes" }] },
+  ];
+
+  it("a bancada do Index (/index/:id) abre o grupo de «Os Meus Processos»", () => {
+    expect(seccoesComRotaActiva(grupos, "/index/abc")).toEqual(["trabalho"]);
+    expect(seccoesComRotaActiva(grupos, "/index")).toEqual(["trabalho"]);
+  });
+
+  it("sem `tambem` a rota não pertence a nenhum grupo (contraprova)", () => {
+    expect(seccoesComRotaActiva([{ id: "g", items: [{ href: "/processos" }] }], "/index/abc")).toEqual([]);
+  });
+
+  it("um prefixo parecido não conta (/indexar não é /index)", () => {
+    expect(seccoesComRotaActiva(grupos, "/indexar")).toEqual([]);
+  });
+
+  it("`tambem` mal formado é ignorado", () => {
+    expect(seccoesComRotaActiva([{ id: "g", items: [{ href: "/a", tambem: "/index" }] }], "/index")).toEqual([]);
+  });
+});

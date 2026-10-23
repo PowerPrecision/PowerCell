@@ -14,12 +14,10 @@ import { toast } from "sonner";
 import { queryKeys } from "../../lib/queryClient";
 import {
   analyzeIndexProcess,
-  claimIndexProcess,
   dismissIndexAlert,
   editIndexJob,
   extractIndexProcess,
   markIndexProcessIndexed,
-  releaseIndexProcess,
   sanitizeIndexProcess,
 } from "../../services/api";
 import { mensagemDeErro } from "../../utils/indexRevisao";
@@ -34,16 +32,6 @@ export function useIndexMutations(processId) {
     ]);
   const falhou = (erro) => toast.error(mensagemDeErro(erro));
 
-  const claim = useMutation({
-    mutationFn: () => claimIndexProcess(processId),
-    onSuccess: refrescar,
-    onError: falhou,
-  });
-  const release = useMutation({
-    mutationFn: () => releaseIndexProcess(processId),
-    onSuccess: refrescar,
-    onError: falhou,
-  });
   const analisar = useMutation({
     mutationFn: ({ force = false } = {}) => analyzeIndexProcess(processId, force),
     onSuccess: (resposta) => {
@@ -95,5 +83,5 @@ export function useIndexMutations(processId) {
     onError: falhou,
   });
 
-  return { claim, release, analisar, extrair, sanitizar, editar, dispensar, marcarIndexado };
+  return { analisar, extrair, sanitizar, editar, dispensar, marcarIndexado };
 }

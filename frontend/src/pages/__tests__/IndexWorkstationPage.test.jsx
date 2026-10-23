@@ -23,12 +23,19 @@ vi.mock("../../hooks/useTaskEvents", () => ({
   useTaskEvents: () => ({ isConnected: false }),
   TASK_SOURCE: { TASK_LOG: "task_log", BACKGROUND_JOB: "background_job" },
 }));
+const sessao = vi.hoisted(() => ({ papel: null }));
+vi.mock("../../contexts/AuthContext", () => ({
+  useAuthOpcional: () => (sessao.papel ? { effectiveRole: sessao.papel, user: { role: "consultor" } } : null),
+}));
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 vi.mock("../../services/api", () => ({
   getIndexWorkstation: vi.fn(),
-  claimIndexProcess: vi.fn(),
-  releaseIndexProcess: vi.fn(),
+  startIndexWork: vi.fn(),
+  getIndexProcessFileContent: vi.fn(),
+  getIndexDocumentContent: vi.fn(),
+  uploadProcessS3File: vi.fn(),
+  readBlobErrorBody: vi.fn(async () => null),
   analyzeIndexProcess: vi.fn(),
   extractIndexProcess: vi.fn(),
   editIndexJob: vi.fn(),
@@ -39,6 +46,7 @@ vi.mock("../../services/api", () => ({
 }));
 
 import * as api from "../../services/api";
+import apiFonte from "../../services/api.js?raw";
 import IndexWorkstationPage from "../index/IndexWorkstationPage";
 
 const campo = (value, extra = {}) => ({ value, needs_review: false, edited_by_human: false, confidence: "alta", ...extra });
@@ -90,6 +98,7 @@ function montar(bancada = BANCADA) {
 }
 
 beforeEach(() => {
+  sessao.papel = null;
   Object.values(api).forEach((f) => f.mockReset());
   Object.values(toast).forEach((f) => f.mockReset());
   api.searchIndexEmployers.mockResolvedValue({ data: { items: [] } });
@@ -360,13 +369,6 @@ describe("erros de leitura", () => {
 });
 
 describe("recusas do servidor nas acções de estado", () => {
-  it("reivindicar a falhar mostra o motivo", async () => {
-    api.claimIndexProcess.mockRejectedValue({ response: { status: 409, data: { detail: "Já está em tratamento." } } });
-    montar();
-    await userEvent.click(await screen.findByRole("button", { name: "Reivindicar" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Já está em tratamento."));
-  });
-
   it("editar a falhar (422) mostra o motivo e o painel continua aberto", async () => {
     api.editIndexJob.mockRejectedValue({ response: { status: 422, data: { detail: "O vencimento líquido não é um valor válido." } } });
     montar();
@@ -379,17 +381,168 @@ describe("recusas do servidor nas acções de estado", () => {
   });
 });
 
-describe("estado do processo", () => {
-  it("«Reivindicar» só em pending; «Devolver à fila» só em in_review", async () => {
-    api.claimIndexProcess.mockResolvedValue({ data: { success: true } });
-    const { unmount } = montar();
-    await userEvent.click(await screen.findByRole("button", { name: "Reivindicar" }));
-    await waitFor(() => expect(api.claimIndexProcess).toHaveBeenCalledWith("proc-1"));
-    expect(screen.queryByRole("button", { name: "Devolver à fila" })).not.toBeInTheDocument();
-    unmount();
-    montar({ ...BANCADA, process: { ...BANCADA.process, index_status: "in_review" } });
-    expect(await screen.findByRole("button", { name: "Devolver à fila" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reivindicar" })).not.toBeInTheDocument();
+describe("já não há «Reivindicar» nem «Devolver à fila» (Out 2026)", () => {
+  it.each(["pending", "in_review"])("em %s a bancada não tem nenhum dos dois botões", async (estado) => {
+    montar({ ...BANCADA, process: { ...BANCADA.process, index_status: estado } });
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.queryByRole("button", { name: /reivindicar/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /devolver à fila/i })).not.toBeInTheDocument();
+  });
+
+  it("o cliente da API já não tem o claim/release (apagados, não escondidos)", () => {
+    const fonte = apiFonte.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+    expect(fonte).not.toMatch(/claimIndexProcess|releaseIndexProcess|\/claim`|\/release`/);
+    expect(fonte).toMatch(/startIndexWork/); // contraprova: o leitor vê o módulo
+  });
+});
+
+describe("abrir a bancada é começar a trabalhar", () => {
+  const DELE = { ...BANCADA, process: { ...BANCADA.process, index_status: "pending", assigned_to_me: true } };
+
+  it("o indexador a quem o processo está atribuído arranca o tratamento, uma só vez", async () => {
+    api.startIndexWork.mockResolvedValue({ data: { success: true, iniciado: true, registado: true } });
+    const { rerender } = montar(DELE);
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    await waitFor(() => expect(api.startIndexWork).toHaveBeenCalledTimes(1));
+    expect(api.startIndexWork).toHaveBeenCalledWith("proc-1");
+    expect(rerender).toBeDefined();
+  });
+
+  it("depois de arrancar refaz a leitura da bancada (o estado passou a «em tratamento»)", async () => {
+    api.startIndexWork.mockResolvedValue({ data: { success: true, iniciado: true, registado: true } });
+    montar(DELE);
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    await waitFor(() => expect(api.getIndexWorkstation.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("quem não é o atribuído (um diretor a espreitar) NÃO inicia nada", async () => {
+    montar({ ...BANCADA, process: { ...BANCADA.process, index_status: "pending", assigned_to_me: false } });
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(api.startIndexWork).not.toHaveBeenCalled();
+  });
+
+  it("um processo que já está em tratamento não pede outra vez", async () => {
+    montar({ ...BANCADA, process: { ...BANCADA.process, index_status: "in_review", assigned_to_me: true } });
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(api.startIndexWork).not.toHaveBeenCalled();
+  });
+
+  it("uma falha do pedido não estraga a bancada nem mostra erro", async () => {
+    api.startIndexWork.mockRejectedValue({ response: { status: 500 } });
+    montar(DELE);
+    expect(await screen.findByRole("heading", { name: /Marta Quintela/ })).toBeInTheDocument();
+    await waitFor(() => expect(api.startIndexWork).toHaveBeenCalled());
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("documentos: Ver, Download e Upload sem sair da bancada", () => {
+  let descargas;
+  beforeEach(() => {
+    descargas = [];
+    URL.createObjectURL = vi.fn(() => "blob:teste");
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function click() {
+      descargas.push({ href: this.href, download: this.download });
+    });
+  });
+
+  it("cada linha tem «Ver documento» e «Download» com o nome do ficheiro", async () => {
+    montar();
+    const linhas = await screen.findAllByTestId("ficheiro-do-index");
+    expect(linhas).toHaveLength(3);
+    for (const [i, nome] of ["recibo_setembro.pdf", "extrato_setembro.pdf", "foto.jpg"].entries()) {
+      expect(within(linhas[i]).getByRole("button", { name: `Ver documento — ${nome}` })).toBeInTheDocument();
+      expect(within(linhas[i]).getByRole("button", { name: `Download — ${nome}` })).toBeInTheDocument();
+    }
+  });
+
+  it("«Download» pede o ficheiro DESTE processo com download:true e guarda-o", async () => {
+    api.getIndexProcessFileContent.mockResolvedValue({
+      data: new Blob(["x"], { type: "application/pdf" }), headers: { "content-type": "application/pdf" },
+    });
+    montar();
+    const linha = (await screen.findAllByTestId("ficheiro-do-index"))[0];
+    await userEvent.click(within(linha).getByTestId("ficheiro-download"));
+    await waitFor(() => expect(api.getIndexProcessFileContent).toHaveBeenCalledWith("proc-1", "d1", { download: true }));
+    await waitFor(() => expect(descargas).toHaveLength(1));
+    expect(descargas[0].download).toMatch(/recibo_setembro.*\.pdf$/);
+    expect(api.getIndexDocumentContent).not.toHaveBeenCalled(); // o endpoint da pesquisa não serve a bancada
+  });
+
+  it("«Ver» abre o ficheiro DESTE processo num diálogo sem sair da página", async () => {
+    api.getIndexProcessFileContent.mockResolvedValue({
+      data: new Blob(["x"], { type: "application/pdf" }), headers: { "content-type": "application/pdf" },
+    });
+    montar();
+    const linha = (await screen.findAllByTestId("ficheiro-do-index"))[1];
+    await userEvent.click(within(linha).getByTestId("ficheiro-ver"));
+    await waitFor(() => expect(api.getIndexProcessFileContent).toHaveBeenCalledWith("proc-1", "d2"));
+    expect(await screen.findByTestId("visualizador-corpo")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Marta Quintela/, hidden: true })).toBeInTheDocument(); // continua na bancada
+  });
+
+  it("um erro do servidor ao descarregar di-lo", async () => {
+    api.getIndexProcessFileContent.mockRejectedValue({ response: { status: 404 } });
+    montar();
+    const linha = (await screen.findAllByTestId("ficheiro-do-index"))[0];
+    await userEvent.click(within(linha).getByTestId("ficheiro-download"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  });
+
+  it("o upload directo está na aba: escolher um ficheiro envia-o para ESTE processo e refaz a lista", async () => {
+    api.uploadProcessS3File.mockResolvedValue({ data: { success: true } });
+    montar();
+    await screen.findAllByTestId("ficheiro-do-index");
+    const chamadasAntes = api.getIndexWorkstation.mock.calls.length;
+    const entrada = screen.getByTestId("upload-bancada-entrada");
+    await userEvent.upload(entrada, new File(["%PDF"], "novo_recibo.pdf", { type: "application/pdf" }));
+    await waitFor(() => expect(api.uploadProcessS3File).toHaveBeenCalledTimes(1));
+    expect(api.uploadProcessS3File.mock.calls[0][0]).toBe("proc-1");
+    expect(api.uploadProcessS3File.mock.calls[0][1].get("file").name).toBe("novo_recibo.pdf");
+    await waitFor(() => expect(api.getIndexWorkstation.mock.calls.length).toBeGreaterThan(chamadasAntes));
+    expect(await screen.findByText(/1 ficheiro adicionado/)).toBeInTheDocument();
+  });
+});
+
+describe("a equipa do Index trabalha a partir de «Os Meus Processos»", () => {
+  it("sem perfil de equipa (gestão) o botão continua a ser «Voltar à fila» e leva à fila", async () => {
+    sessao.papel = "diretor";
+    montar();
+    await userEvent.click(await screen.findByRole("button", { name: /Voltar à fila/ }));
+    expect(await screen.findByTestId("fila")).toBeInTheDocument();
+  });
+
+  it("o perfil Index volta a «Os meus processos» (a fila já não é dele)", async () => {
+    sessao.papel = "indexacao";
+    api.getIndexWorkstation.mockResolvedValue({ data: BANCADA });
+    const cliente = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={cliente}>
+        <MemoryRouter initialEntries={["/index/proc-1"]}>
+          <Routes>
+            <Route path="/index/:processId" element={<IndexWorkstationPage />} />
+            <Route path="/processos" element={<div data-testid="meus-processos" />} />
+            <Route path="/index" element={<div data-testid="fila" />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByRole("button", { name: /Voltar à fila/ })).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: /Os meus processos/ }));
+    expect(await screen.findByTestId("meus-processos")).toBeInTheDocument();
+    expect(screen.queryByTestId("fila")).not.toBeInTheDocument();
+  });
+
+  it("um processo parado há dias mostra o selo «Sem actividade»", async () => {
+    montar({ ...BANCADA, process: { ...BANCADA.process, index_status: "in_review", stagnant: true } });
+    expect(await screen.findByTestId("badge-estagnado")).toHaveTextContent("Sem actividade");
+  });
+
+  it("e não mostra o selo num processo normal", async () => {
+    montar();
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.queryByTestId("badge-estagnado")).not.toBeInTheDocument();
   });
 });
 

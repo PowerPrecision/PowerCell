@@ -180,7 +180,7 @@ describe("a forma dos dados do servidor normaliza-se UMA vez", () => {
   it("fila: `|| []` não chega — um objecto é truthy", () => {
     expect(normalizarFila({ items: { a: 1 }, total: 3 }).itens).toEqual([]);
     expect(normalizarFila({ items: [{ id: "x" }] }).total).toBe(1);
-    expect(normalizarFila(undefined)).toEqual({ itens: [], total: 0, pagina: 1, tamanho: 0 });
+    expect(normalizarFila(undefined)).toEqual({ itens: [], total: 0, pagina: 1, tamanho: 0, empresas: [] });
   });
 
   it("bancada: listas que não o são viram listas", () => {

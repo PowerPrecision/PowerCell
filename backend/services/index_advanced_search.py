@@ -56,7 +56,8 @@ from models.index_module import TipoDeContrato, nif_e_valido, normalizar_nif
 from services import index_store as store
 from services.index_banks import chave_do_filtro
 from services.index_matrix import nome_normalizado_da_entidade
-from services.tenant_network import build_tenant_process_condition
+from services import tenant_network
+from services.tenant_network import build_network_scope_condition, build_tenant_process_condition
 
 logger = logging.getLogger(__name__)
 
@@ -317,9 +318,16 @@ def _condicoes_do_documento(filtros: dict[str, Any], nifs_do_nome: list[str]) ->
 
 
 def construir_pipeline_de_documentos(
-    filtros: dict[str, Any], nifs_do_nome: list[str], condicao_de_processos: dict, *, pagina: int, tamanho: int
+    filtros: dict[str, Any], nifs_do_nome: list[str], condicao_de_processos: dict, *, pagina: int, tamanho: int,
+    condicao_dos_historicos: Optional[dict] = None,
 ) -> list[dict]:
-    """O pipeline da vista por documento. Pura. O `$match` vem antes do `$lookup`: filtra-se barato primeiro."""
+    """O pipeline da vista por documento. Pura. O `$match` vem antes do `$lookup`: filtra-se barato primeiro.
+
+    `condicao_dos_historicos` é a fronteira das linhas do ARQUIVO HISTÓRICO (importação de ZIPs): não têm processo,
+    logo o `$lookup` nunca as encontra e seriam descartadas; entram pelo ramo `historical` — que exige a marca E a
+    rede do âmbito de quem pergunta. Sem ela (omissão) o arquivo não aparece: **falha fechada**.
+    """
+    so_com_processo = {"proc.0": {"$exists": True}}
     return [
         {"$match": {"$and": _condicoes_do_documento(filtros, nifs_do_nome)}},
         # a fronteira: só processos do âmbito e não eliminados (regra 3)
@@ -330,7 +338,7 @@ def construir_pipeline_de_documentos(
                 {"$project": {"_id": 0, "id": 1, "process_number": 1, "status": 1, "company_name": 1}},
             ],
         }},
-        {"$match": {"proc.0": {"$exists": True}}},
+        {"$match": {"$or": [so_com_processo, condicao_dos_historicos]} if condicao_dos_historicos else so_com_processo},
         {"$facet": {
             "items": [
                 {"$sort": dict(ORDENACOES_DE_DOCUMENTOS[filtros["sort"]])},
@@ -346,6 +354,7 @@ def construir_pipeline_de_documentos(
 _CAMPOS_DO_DOCUMENTO = (
     "id", "process_id", "doc_type", "period", "net_salary_num", "employer_nif", "employer_name",
     "employer_location", "job_title", "contract_type", "admission_date", "bank", "needs_review",
+    "historical", "import_label",
 )
 
 
@@ -353,15 +362,20 @@ def resultado_do_documento(doc: dict) -> dict[str, Any]:
     """O DTO de UM documento: lista positiva (regra 4). Só o que o TIPO tem — o resto nem aparece."""
     proc = doc.get("proc") or {}
     tipo = doc.get("doc_type")
+    historico = doc.get("historical") is True
     saida: dict[str, Any] = {
         "document_id": doc.get("id"),
         "document_type": tipo,
-        "process_id": doc.get("process_id"),
+        # o arquivo histórico não tem processo (o id artificial não leva a lado nenhum) nem ficheiro para abrir
+        "process_id": None if historico else doc.get("process_id"),
         "process_number": proc.get("process_number"),
         "company_name": proc.get("company_name"),
         "period": doc.get("period"),
         "needs_review": bool(doc.get("needs_review")),
+        "historical": historico,
     }
+    if historico:
+        saida["import_label"] = doc.get("import_label")
     if tipo == store.DOC_TYPE_EXTRATO:
         saida["bank"] = doc.get("bank")
         return saida
@@ -414,6 +428,20 @@ def resultado_do_trabalho(doc: dict) -> dict[str, Any]:
     }
 
 
+async def _condicao_dos_historicos(user: dict) -> dict:
+    """A fronteira do arquivo histórico: a marca E a rede no âmbito de quem pergunta (o Master vê todas).
+
+    Deriva do MESMO construtor das outras superfícies (`build_network_scope_condition`). **Falha fechada**: se o
+    âmbito não se resolve, o arquivo não aparece (a pesquisa por processos já falhou alto, e o arquivo é um reforço).
+    """
+    try:
+        scope = await tenant_network.resolve_vista_scope(user)
+        return {"$and": [{"historical": True}, build_network_scope_condition(scope)]}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX-SEARCH] Âmbito do arquivo histórico não resolvido (%s): sem arquivo.", type(exc).__name__)
+        return {"id": {"$in": []}}
+
+
 async def run_advanced_search(
     user: dict,
     *,
@@ -446,7 +474,10 @@ async def run_advanced_search(
     condicao = await build_tenant_process_condition(user)
     try:
         if por_documento:
-            pipeline = construir_pipeline_de_documentos(filtros, nifs, condicao, pagina=pagina, tamanho=tamanho)
+            historicos = await _condicao_dos_historicos(user)
+            pipeline = construir_pipeline_de_documentos(
+                filtros, nifs, condicao, pagina=pagina, tamanho=tamanho, condicao_dos_historicos=historicos,
+            )
             saida = await store.agregar_documentos_do_index(pipeline, tempo_maximo_ms=TEMPO_MAXIMO_MS)
         else:
             pipeline = construir_pipeline(filtros, nifs, condicao, pagina=pagina, tamanho=tamanho)

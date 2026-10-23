@@ -410,6 +410,7 @@ SEM_CONDICAO_DE_REDE_POR_DESENHO = {
     "partner_portal_read.py": "âmbito do parceiro por relação ∧ rede",
     "ai_bulk_cache_ops.py": "cache de NIF; a lista de revisões pendentes aplica a rede",
     "document_expiry_crud.py": "criação por id; as listagens aplicam a rede",
+    "index_sla.py": "job de fundo do SLA do Index: percorre os processos de TODAS as redes de propósito (corre sem utilizador), mas cada acção é por processo — o pool de indexadores é o da rede do processo e a chefia avisada é a DA REDE do processo (`gestao_da_rede_do_processo`, falha fechada); nunca devolve dados a ninguém",
     "index_status_migration.py": "migração de operações (script, corre contra produção de propósito): lê o estado de TODOS os processos para o derivar; só escreve estado de indexação e nunca devolve dados a ninguém",
 }
 

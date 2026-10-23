@@ -401,6 +401,10 @@ async def _atribuir_indexador_da_rede(process_id: str, rede_destino: str) -> Non
                 "[INDEX] Processo %s na fila de triagem sem indexador atribuído: %s",
                 process_id, msg,
             )
+        # o intermediário da rede de destino entra ao mesmo tempo (só se estiver vazio)
+        from services.process_assignment import auto_assign_intermediario_on_entry
+
+        await auto_assign_intermediario_on_entry(process_id)
     except Exception as exc:
         logger.warning(
             "[INDEX] Falha a atribuir indexador ao processo %s (%s); "
