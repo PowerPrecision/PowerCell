@@ -21,7 +21,10 @@ from services.s3_folder_relink import religar_apos_rename
 from services.s3_explorer_scope import (
     ambito_do_utilizador,
     assert_pasta_no_ambito,
+    autorizar_criacao_de_pasta,
+    esquecer_pasta_criada,
     filtrar_subpastas,
+    registar_pasta_criada,
 )
 
 logger = logging.getLogger(__name__)
@@ -390,7 +393,11 @@ async def run_s3_create_folder(data: S3CreateFolderRequest, user: dict, request=
     folder_path = _resolve_explorer_path(folder_path)
 
     scope, papel = await ambito_do_utilizador(request, user)
-    await assert_pasta_no_ambito(folder_path, scope, role=papel)
+    # Uma pasta de topo NOVA não tem dono onde pegar: nasce com a rede de quem a cria
+    # (senão a parede, que a vê como órfã, devolvia 404 a quem a acabou de pedir).
+    carimbo = await autorizar_criacao_de_pasta(
+        folder_path, scope, role=papel, user=user, request=request
+    )
 
     # Ensure path ends with /
     if not folder_path.endswith("/"):
@@ -398,6 +405,9 @@ async def run_s3_create_folder(data: S3CreateFolderRequest, user: dict, request=
 
     # Create a .keep marker file to represent the folder
     marker_path = folder_path + ".keep"
+
+    if carimbo:
+        await registar_pasta_criada(folder_path, carimbo, user)
 
     try:
         s3_service.s3_client.put_object(
@@ -409,6 +419,8 @@ async def run_s3_create_folder(data: S3CreateFolderRequest, user: dict, request=
         logger.info(f"Pasta criada no S3: {folder_path}")
         return {"success": True, "folder_path": folder_path, "marker": marker_path}
     except Exception as e:
+        if carimbo:
+            await esquecer_pasta_criada(folder_path)
         logger.error(f"Erro ao criar pasta S3: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao criar pasta: {str(e)}")
 

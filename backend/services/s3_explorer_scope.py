@@ -83,6 +83,13 @@ PROJECCAO = {"_id": 0, "id": 1, "s3_folder": 1, "network_id": 1,
 PROJECCAO_DO_CLIENTE = {"_id": 0, "id": 1, "nome": 1, "s3_folder": 1,
                         "network_id": 1, "company_id": 1, "company_name": 1}
 
+#: Pastas de topo criadas à mão no Explorador (`s3_explorer_folders`): o único dono de uma
+#: pasta que não é de nenhum cliente. Sem este registo, uma pasta nova contava como ÓRFÃ e só o
+#: Master a voltava a ver — criar uma pasta tornava-a invisível a quem a criou.
+COLECCAO_DAS_PASTAS_CRIADAS = "s3_explorer_folders"
+PROJECCAO_DA_PASTA_CRIADA = {"_id": 0, "path": 1, "network_id": 1,
+                             "company_id": 1, "company_name": 1}
+
 
 @dataclass(frozen=True)
 class PastaDoExplorador:
@@ -202,6 +209,15 @@ async def carregar_pastas(caminhos: Sequence[str]) -> dict[str, PastaDoExplorado
                     _registar(normalizado, doc)
     except Exception as exc:
         logger.warning("[S3-SCOPE] Falha a ler os clientes das pastas (%s).", exc)
+
+    try:
+        cursor = getattr(db, COLECCAO_DAS_PASTAS_CRIADAS).find(
+            {"path": {"$in": list(por_normalizado)}}, PROJECCAO_DA_PASTA_CRIADA
+        )
+        for doc in await cursor.to_list(50000):
+            _registar(_normalizar(doc.get("path")), doc)
+    except Exception as exc:
+        logger.warning("[S3-SCOPE] Falha a ler as pastas criadas no Explorador (%s).", exc)
 
     resultado: dict[str, PastaDoExplorador] = {}
     for normalizado, brutos in por_normalizado.items():
@@ -358,6 +374,101 @@ async def assert_pasta_no_ambito(
     mapa = await carregar_pastas([alvo])
     if not pode_ver(mapa.get(alvo), scope, role=role):
         raise HTTPException(status_code=404, detail="Pasta não encontrada")
+
+
+async def _pasta_de_topo_existe_no_s3(alvo: str) -> bool:
+    """Há algum objecto sob esta pasta de topo? Falha de leitura levanta 503 (não se adivinha)."""
+    import asyncio
+
+    from services.s3_storage import s3_service
+
+    try:
+        resposta = await asyncio.to_thread(
+            s3_service.s3_client.list_objects_v2,
+            Bucket=s3_service.bucket_name,
+            Prefix=f"{alvo}/",
+            MaxKeys=1,
+        )
+    except Exception as exc:
+        logger.warning("[S3-SCOPE] Falha a verificar se a pasta existe (%s).", exc)
+        raise HTTPException(status_code=503, detail="Não foi possível verificar o armazenamento.")
+    return bool(resposta.get("Contents") or resposta.get("CommonPrefixes"))
+
+
+async def autorizar_criacao_de_pasta(
+    caminho: str,
+    scope: Optional[TenantScope],
+    *,
+    role: str,
+    user: dict,
+    request=None,
+) -> Optional[dict]:
+    """Pode criar esta pasta? Devolve o carimbo a registar, ou ``None`` se não há nada a registar.
+
+    Dois casos legítimos: (1) a pasta cai numa pasta que o utilizador já vê — vale a regra de
+    sempre; (2) é uma pasta de TOPO **nova** (ninguém a reclama e não há objectos no S3 com
+    esse prefixo). Neste caso não havia por onde pegar — a parede tratava-a como órfã e só o
+    Master a alcançava —, por isso nasce com dono: a rede da empresa activa de quem a cria.
+
+    Continua a ser 404 criar dentro de uma pasta alheia, dentro de uma órfã que já tem
+    conteúdo, ou uma pasta nova mais fundo do que o topo. Sem empresa determinável, uma pasta
+    nova seria uma órfã que quem a cria não voltaria a ver: 400, com o motivo.
+    """
+    normalizado = normalizar_caminho(caminho)
+    try:
+        await assert_pasta_no_ambito(normalizado, scope, role=role)
+        return None
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        recusa = exc
+
+    segmento = primeiro_segmento(normalizado)
+    alvo = f"{RAIZ_DO_EXPLORADOR}/{segmento}" if segmento else ""
+    # Só a pasta de topo em si; mais fundo, o topo teria de existir (e ser visível).
+    if not alvo or normalizado != alvo:
+        raise recusa
+
+    mapa = await carregar_pastas([alvo])
+    pasta = mapa.get(alvo)
+    if pasta is None or not pasta.orfa or await _pasta_de_topo_existe_no_s3(alvo):
+        raise recusa
+
+    from services.tenant_network import resolve_tenant_stamp
+
+    empresa = (user or {}).get("vista_empresa_id")
+    if not empresa and request is not None:
+        from services.auth import get_active_company_id_async
+
+        empresa = await get_active_company_id_async(request, user)
+    carimbo = await resolve_tenant_stamp(user, active_company_id=empresa)
+    rede = (carimbo or {}).get("network_id")
+    if not rede or (scope is not None and not scope.sem_fronteira and rede not in scope.network_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="Escolha primeiro a empresa em que quer criar a pasta.",
+        )
+    return carimbo
+
+
+async def registar_pasta_criada(caminho: str, carimbo: dict, user: dict) -> None:
+    """Regista o dono de uma pasta de topo criada à mão. Idempotente (índice único por caminho)."""
+    from datetime import datetime, timezone
+
+    await getattr(db, COLECCAO_DAS_PASTAS_CRIADAS).update_one(
+        {"path": _normalizar(caminho)},
+        {"$setOnInsert": {
+            "path": _normalizar(caminho),
+            **carimbo,
+            "created_by": (user or {}).get("id"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+
+
+async def esquecer_pasta_criada(caminho: str) -> None:
+    await getattr(db, COLECCAO_DAS_PASTAS_CRIADAS).delete_one({"path": _normalizar(caminho)})
 
 
 async def ambito_do_utilizador(request, user: dict, *, vista: bool = False) -> tuple[TenantScope, str]:

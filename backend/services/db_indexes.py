@@ -305,6 +305,13 @@ def _definir(colecao: str, indices: list[dict]) -> None:
     INDEX_DEFINITIONS.setdefault(colecao, []).extend(indices)
 
 
+# Pastas de topo criadas à mão no Explorador: dono (rede) de uma pasta que não é de nenhum
+# cliente. A leitura é por caminho e o caminho é único (a criação é idempotente).
+_definir(
+    "s3_explorer_folders",
+    [{"keys": [("path", 1)], "name": "idx_s3_explorer_folders_path", "unique": True}],
+)
+
 # Log da IA do processo: a única leitura é por `process_id`, mais recente primeiro.
 _definir(
     "process_ai_log",

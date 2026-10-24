@@ -12590,3 +12590,9 @@ Pedido: o Master com uma empresa escolhida via os parceiros de todas as redes; e
 * **Mutações:** 19 backend + 9 frontend (a lista inclui a ordem password/escrita, o gate Master, a vista, o convite pendente e o abate de sessões), todas mortas.
 * **Não verificado:** o envio real do email (SMTP falseado ao nível da chamada), o fluxo com um Master real no browser.
 * **Verificações:** suite backend completa 13 401 passados + 13 saltados (com `mongod` avulso), depois de corrigir as três regressões acima; frontend 4 453 testes, ESLint `--quiet` e build limpos; flake8 (E9,F63,F7,F82) limpo.
+
+
+## Explorador de ficheiros: criar pasta nova (Out 2026)
+- Relato: `POST /api/admin/s3-create-folder` → 404 «Pasta não encontrada» no menu Ficheiros. Causa: a pasta de topo nova era tratada como órfã pela parede (`assert_pasta_no_ambito`). Correcção em `s3_explorer_scope.autorizar_criacao_de_pasta` + colecção `s3_explorer_folders`; ver o bullet em `AGENTS.md`.
+- Verificação: `test_explorador_criar_pasta_nova.py` (12), isolamento/contenção do Explorador a verde; 6 mutações às guardas novas, todas mortas (uma sobreviveu à 1.ª passagem e levou um teste novo).
+- Não verificado: o fluxo no browser com o S3 real.
