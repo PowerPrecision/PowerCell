@@ -18,7 +18,7 @@ from fastapi import APIRouter, Body, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from middleware.rate_limit import limiter
-from services.auth import get_all_user_roles, get_effective_role, require_roles
+from services.auth import get_all_user_roles, get_effective_role, get_effective_role_async, require_roles
 from services.index_access import PAPEIS_DE_IA_DO_INDEX
 from services.index_advanced_search import TAMANHO_MAXIMO_DA_PAGINA, run_advanced_search
 from services.index_document_content import run_conteudo_do_documento, run_conteudo_do_ficheiro_do_processo
@@ -27,6 +27,7 @@ from services.index_api import (
     run_analyze_process,
     run_dismiss_alert,
     run_edit_professional_job,
+    run_exigir_titularidade,
     run_get_index_queue,
     run_get_index_workstation,
     run_start_work,
@@ -48,6 +49,13 @@ _acesso = require_roles(PAPEIS_DE_IA_DO_INDEX)
 #: «Atribuir a mim» é do indexador (perfil efectivo). A gestão atribui pelo «Gerir» do processo.
 PAPEIS_QUE_ASSUMEM = ["indexacao"]
 _so_o_index = require_roles(PAPEIS_QUE_ASSUMEM)
+
+
+async def _so_o_titular(request: Request, process_id: str, user: dict = Depends(_acesso)) -> None:
+    """Escritas da bancada: o Index só age nos processos seus ou sem indexador; para o de um colega,
+    «Atribuir a mim» primeiro (decisão do cliente, Out 2026). A gestão passa sempre."""
+    papel = await get_effective_role_async(request, user)
+    await run_exigir_titularidade(user, process_id, papel)
 
 
 class AnalyzeBody(BaseModel):
@@ -227,7 +235,7 @@ async def analyze_process(
     response: Response,
     process_id: str,
     data: AnalyzeBody = Body(default_factory=AnalyzeBody),
-    user: dict = Depends(_acesso),
+    user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
 ):
     """«Analisar»: corre em segundo plano e devolve já; o resultado chega como notificação."""
     return await run_analyze_process(user, process_id, force=data.force)
@@ -235,14 +243,20 @@ async def analyze_process(
 
 @router.post("/processes/{process_id}/extract", status_code=202)
 @limiter.limit("20/minute")
-async def extract_process(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
+async def extract_process(
+    request: Request, response: Response, process_id: str,
+    user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
+):
     """«Extrair dados»: volta a extrair TUDO (ignora a impressão digital)."""
     return await run_analyze_process(user, process_id, force=True)
 
 
 @router.post("/processes/{process_id}/sanitize", status_code=202)
 @limiter.limit("10/minute")
-async def sanitize_process(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
+async def sanitize_process(
+    request: Request, response: Response, process_id: str,
+    user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
+):
     """«Apagar metadados»: gera o PDF limpo dos ficheiros carregados pelo Index (original mantido na graça)."""
     return await run_sanitize_process(user, process_id)
 
@@ -255,7 +269,7 @@ async def edit_professional_job(
     process_id: str,
     job_id: str,
     data: EditJobBody,
-    user: dict = Depends(_acesso),
+    user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
 ):
     """Edição humana de campos de um trabalho: fica `edited_by_human` e sobrevive à reanálise."""
     return await run_edit_professional_job(user, process_id, job_id, data.fields)
@@ -264,7 +278,8 @@ async def edit_professional_job(
 @router.post("/processes/{process_id}/alerts/{alert_id}/dismiss")
 @limiter.limit("60/minute")
 async def dismiss_alert(
-    request: Request, response: Response, process_id: str, alert_id: str, user: dict = Depends(_acesso)
+    request: Request, response: Response, process_id: str, alert_id: str,
+    user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
 ):
     return await run_dismiss_alert(user, process_id, alert_id)
 
@@ -276,7 +291,7 @@ async def mark_indexed(
     response: Response,
     process_id: str,
     data: MarkIndexedBody = Body(default_factory=MarkIndexedBody),
-    user: dict = Depends(_acesso),
+    user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
 ):
     """Marcar como indexado — SEMPRE possível (a IA, os campos em dúvida e os alertas só avisam)."""
     return await run_mark_indexed(

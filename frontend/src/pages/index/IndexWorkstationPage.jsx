@@ -201,6 +201,9 @@ export default function IndexWorkstationPage() {
   const ocupado = haJobActivo(jobsActivos);
   // «Atribuir a mim» (Out 2026): só o Index, só o que é de outro (ou de ninguém) e ainda está «Por indexar».
   const podeAssumir = daEquipa && processo.assigned_to_me !== true && processo.index_status === "pending";
+  // Sem acções cruzadas (decisão do cliente, Out 2026): no processo de um colega o Index só consulta; para
+  // agir assume-o primeiro. A gestão não é tocada e o servidor volta a decidir (403).
+  const deOutro = daEquipa && processo.assigned_to_other === true;
 
   const marcar = (employers) =>
     m.marcarIndexado.mutate({ employers }, { onSuccess: () => setDialogoAberto(false) });
@@ -260,7 +263,19 @@ export default function IndexWorkstationPage() {
           }
         />
 
+        {deOutro && (
+          <Alert data-testid="aviso-processo-de-outro">
+            <AlertTitle>Processo de {processo.assigned_indexacao_name || "outro indexador"}</AlertTitle>
+            <AlertDescription>
+              {podeAssumir
+                ? "Pode consultá-lo. Para o analisar ou marcar como indexado, use primeiro «Atribuir a mim»."
+                : "Pode consultá-lo, mas já está em tratamento: só o indexador atribuído o pode analisar ou marcar como indexado."}
+            </AlertDescription>
+          </Alert>
+        )}
+
         <IndexActionsBar
+          somenteLeitura={deOutro}
           processo={processo}
           jobsActivos={jobsActivos}
           aAnalisar={m.analisar.isPending}
@@ -312,7 +327,7 @@ export default function IndexWorkstationPage() {
                 Metadados profissionais
                 {aRever > 0 && <Badge variant="secondary">{aRever} campo(s) a rever</Badge>}
               </CardTitle>
-              <Button size="sm" variant="outline" onClick={() => setPainelAberto(true)}>
+              <Button size="sm" variant="outline" disabled={deOutro} onClick={() => setPainelAberto(true)}>
                 <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
                 Rever
               </Button>
@@ -344,6 +359,7 @@ export default function IndexWorkstationPage() {
           onVerDocumento={(documentos, titulo) =>
             setAVer({ documentos: documentos.map((d) => ({ ...d, processId: processo.id })), titulo })
           }
+          podeDispensar={!deOutro}
           aDispensar={m.dispensar.isPending ? m.dispensar.variables : null}
           onDispensar={(id) => m.dispensar.mutate(id)}
         />

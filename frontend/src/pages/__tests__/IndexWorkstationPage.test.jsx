@@ -679,3 +679,52 @@ describe("«Atribuir a mim» na bancada", () => {
     expect(screen.queryByTestId("botao-atribuir-a-mim")).not.toBeInTheDocument();
   });
 });
+
+describe("sem acções cruzadas entre indexadores (Out 2026)", () => {
+  const doColega = (estado = "in_review") => ({
+    ...BANCADA,
+    active_jobs: { analysis: null, finalize: null, sanitize: null },
+    process: {
+      ...BANCADA.process, index_status: estado, assigned_to_me: false, assigned_to_other: true,
+      assigned_indexacao_name: "Rui Teixeira",
+    },
+  });
+  const accoes = () => ["Analisar", "Extrair dados", "Apagar metadados", "Marcar como Indexado"]
+    .map((nome) => screen.getByRole("button", { name: new RegExp(`^${nome}$`) }));
+
+  it("no processo de um colega o Index só consulta: as acções ficam desligadas e diz-se porquê", async () => {
+    sessao.papel = "indexacao";
+    api.startIndexWork.mockResolvedValue({ data: { iniciado: false } });
+    montar(doColega());
+    const aviso = await screen.findByTestId("aviso-processo-de-outro");
+    expect(aviso).toHaveTextContent("Rui Teixeira");
+    accoes().forEach((b) => expect(b).toBeDisabled());
+    expect(screen.getByRole("button", { name: /Rever/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Dispensar alerta/ })).not.toBeInTheDocument();
+  });
+
+  it("por indexar, o aviso aponta para «Atribuir a mim»", async () => {
+    sessao.papel = "indexacao";
+    montar(doColega("pending"));
+    expect(await screen.findByTestId("aviso-processo-de-outro")).toHaveTextContent("Atribuir a mim");
+    expect(screen.getByTestId("botao-atribuir-a-mim")).toBeInTheDocument();
+  });
+
+  it("contraprova: num processo sem indexador o Index age", async () => {
+    sessao.papel = "indexacao";
+    montar({ ...doColega("pending"), process: { ...doColega("pending").process, assigned_to_other: false } });
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.queryByTestId("aviso-processo-de-outro")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Analisar$/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^Marcar como Indexado$/ })).toBeEnabled();
+  });
+
+  it("contraprova: a gestão age no processo de qualquer indexador", async () => {
+    sessao.papel = "diretor";
+    montar(doColega());
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.queryByTestId("aviso-processo-de-outro")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Marcar como Indexado$/ })).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: /Dispensar alerta/ }).length).toBeGreaterThan(0);
+  });
+});

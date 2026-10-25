@@ -15,7 +15,7 @@ from database import db
 # sempre (a armadilha da ordem de import, ver AGENTS.md). Aqui o módulo carrega
 # com o resto do serviço, antes de qualquer teste patchar o que quer que seja.
 from services import phase_automation
-from services.index_status import campos_ao_indexar, campos_ao_reverter
+from services.index_status import campos_ao_indexar, campos_ao_reverter, exigir_titularidade
 from services.process_phase_clock import (
     montar_update,
     transicao_de_fase,
@@ -619,6 +619,7 @@ async def run_mark_process_indexed(
     )
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
+    exigir_titularidade(process, user, user_role)
 
     if process.get("is_indexed") is True:
         return {
@@ -751,6 +752,7 @@ async def run_set_process_indexed_flag(
     )
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
+    exigir_titularidade(process, user, user_role)
 
     if process.get("is_indexed") is not True:
         return {

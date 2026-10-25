@@ -389,3 +389,14 @@ export function estadoDoFicheiroEmTexto(ficheiro) {
   }
   return null;
 }
+
+/**
+ * Sem acções cruzadas entre indexadores (decisão do cliente, Out 2026): o perfil Index vê a rede inteira,
+ * mas só analisa ou marca como indexado o que é seu (ou de ninguém). No processo de um colega tem de o
+ * assumir primeiro («Atribuir a mim»). A gestão não é tocada; o servidor volta a decidir (403).
+ */
+export function processoDeOutroIndexador(processo, papel, utilizadorId) {
+  if (String(papel || "").toLowerCase() !== "indexacao") return false;
+  const dono = processo?.assigned_indexacao_id;
+  return Boolean(dono) && dono !== utilizadorId;
+}
