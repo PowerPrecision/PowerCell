@@ -37,6 +37,7 @@ import { safeLabel } from "../components/dashboard/DashboardShared";
 import { buildStatusOptions, formatStatusLabel } from "../utils/workflowStatuses";
 import useVoltar from "../hooks/useVoltar";
 import { processoEstaFechado, fasesParaReabrir, PAPEIS_QUE_REABREM } from "../utils/processoFechado";
+import { processoDeOutroIndexador } from "../utils/indexRevisao";
 import ReabrirProcessoDialog from "../components/processDetails/dialogs/ReabrirProcessoDialog";
 import ValidacaoFinanceira from "../components/validacao/ValidacaoFinanceira";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -1921,6 +1922,8 @@ const ProcessDetails = () => {
     INDEX_TOGGLE_ROLES.includes((effectiveRole || userRole || "").toLowerCase()) ||
     hasAnyRole(user, INDEX_TOGGLE_ROLES);
   const [indexToggleBusy, setIndexToggleBusy] = useState(false);
+  // sem acções cruzadas (Out 2026): o Index não liga nem desliga a indexação do processo de um colega
+  const indexacaoDeOutro = processoDeOutroIndexador(process, effectiveRole || userRole, user?.id);
   const handleToggleIndexed = async (checked) => {
     if (!id || indexToggleBusy) return;
     const previous = process?.is_indexed;
@@ -2738,7 +2741,9 @@ const ProcessDetails = () => {
               <div
                 className="flex items-center gap-1.5 h-8 px-2 sm:px-3 rounded-md border bg-background"
                 title={
-                  process?.is_indexed
+                  indexacaoDeOutro
+                    ? "Atribuído a outro indexador: use «Atribuir a mim» na bancada do Index primeiro"
+                    : process?.is_indexed
                     ? "Processo indexado — clique para reverter (voltar a 'não indexado')"
                     : "Marcar este processo como indexado (conclui a fase de indexação)"
                 }
@@ -2748,7 +2753,7 @@ const ProcessDetails = () => {
                   id="process-indexed-toggle"
                   checked={!!process?.is_indexed}
                   onCheckedChange={handleToggleIndexed}
-                  disabled={indexToggleBusy || !process}
+                  disabled={indexToggleBusy || !process || indexacaoDeOutro}
                   aria-label="Indexado"
                 />
                 <Label

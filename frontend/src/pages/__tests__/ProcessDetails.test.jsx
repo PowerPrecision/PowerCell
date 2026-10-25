@@ -894,3 +894,32 @@ describe("ProcessDetails — «Voltar» devolve a listagem com a pesquisa", () =
     expect(await screen.findByTestId("sonda")).toHaveTextContent(LISTA);
   });
 });
+
+describe("ProcessDetails — sem acções cruzadas entre indexadores (Out 2026)", () => {
+  const comIndexador = (dono) => {
+    pacote.valor = pacoteCompleto({ process: { ...PROCESSO, is_indexed: false, assigned_indexacao_id: dono } });
+  };
+  afterEach(() => { sessao.papel = "consultor"; });
+
+  it("o Index não liga o interruptor «Indexado» no processo de um colega", async () => {
+    sessao.papel = "indexacao";
+    comIndexador("u-rui");
+    montar();
+    const interruptor = await screen.findByRole("switch", { name: "Indexado" });
+    expect(interruptor).toBeDisabled();
+    expect(screen.getByTestId("indexed-toggle")).toHaveAttribute("title", expect.stringMatching(/Atribuir a mim/));
+  });
+
+  it("contraprova: no processo seu, e para a gestão no de qualquer um, o interruptor funciona", async () => {
+    sessao.papel = "indexacao";
+    comIndexador("u-1");
+    const { unmount } = montar();
+    expect(await screen.findByRole("switch", { name: "Indexado" })).toBeEnabled();
+    unmount();
+
+    sessao.papel = "admin";
+    comIndexador("u-rui");
+    montar();
+    expect(await screen.findByRole("switch", { name: "Indexado" })).toBeEnabled();
+  });
+});

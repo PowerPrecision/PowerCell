@@ -34,6 +34,7 @@ from services import index_store as store
 from services.background_tasks import spawn_background_task
 from services.document_ai_trigger import ia_da_entrada_ligada
 from services.index_access import e_upload_do_index
+from services.index_status import exigir_titularidade
 from services.task_log_service import TaskLogService
 
 logger = logging.getLogger(__name__)
@@ -198,9 +199,12 @@ async def run_mark_indexed(
 
     # a permissão vem ANTES de tocar nos metadados (um 403 não pode ter escrito nada)
     assert_mark_indexed_permission(user_role, all_roles)
+    # ... e a titularidade também: o processo de um colega não recebe NIFs de quem não o pode indexar
+    proc = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}}, {"_id": 0, "network_id": 1, "assigned_indexacao_id": 1})
+    exigir_titularidade(proc or {}, user, user_role)
     resultado_nifs: dict[str, Any] = {"applied": 0, "rejected": []}
     if employers:
-        proc = await db.processes.find_one({"id": process_id}, {"_id": 0, "network_id": 1})
         resultado_nifs = await aplicar_nifs_confirmados(process_id, (proc or {}).get("network_id"), employers)
     resposta = await run_mark_process_indexed(
         process_id, user, user_role=user_role, all_roles=all_roles, broadcast_fn=broadcast_fn)

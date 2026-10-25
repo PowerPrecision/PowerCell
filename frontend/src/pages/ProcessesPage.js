@@ -65,6 +65,7 @@ import { VALORES_DE_PARTILHA } from "../utils/kanbanFiltros";
 import PartilhaBadge from "../components/shared/PartilhaBadge";
 import Sub35Badge from "../components/shared/Sub35Badge";
 import { notifyFinancialEngine } from "../utils/financialEngineFeedback";
+import { processoDeOutroIndexador } from "../utils/indexRevisao";
 import { abreABancada, destinoDoProcesso } from "../utils/destinoDoProcesso";
 
 const roleLabels = {
@@ -254,10 +255,11 @@ const ProcessesPageCompleta = () => {
   const [markingProcessIds, setMarkingProcessIds] = useState(new Set());
   const [exporting, setExporting] = useState(false);
 
+  // perfil ACTIVO (um Index com outro papel de base também marca; um Admin a trabalhar como consultor não)
   const canMarkIndexed = useMemo(() => {
-    const role = user?.role?.toLowerCase();
+    const role = (effectiveRole || user?.role || '').toLowerCase();
     return role === 'indexacao' || role === 'master' || role === 'admin' || role === 'ceo';
-  }, [user?.role]);
+  }, [effectiveRole, user?.role]);
 
   // Sync filters with URL — searchTerm precisa de ser declarado antes de handleExportExcel
   const searchTerm = searchParams.get("search") || "";
@@ -1079,6 +1081,8 @@ const ProcessesPageCompleta = () => {
                   ) : (
                     sortedProcesses.map((process) => {
                       const prio = resolvePriority(process);
+                      // sem acções cruzadas (Out 2026): o Index não marca como indexado o processo de um colega
+                      const deOutroIndexador = processoDeOutroIndexador(process, effectiveRole, user?.id);
                       
                       // Construir lista de equipa
                       const teamMembers = [];
@@ -1258,8 +1262,11 @@ const ProcessesPageCompleta = () => {
                                   size="icon"
                                   className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
                                   onClick={(e) => handleMarkIndexed(e, process.id)}
-                                  disabled={markingProcessIds.has(process.id)}
-                                  title="Marcar indexação como concluída"
+                                  disabled={deOutroIndexador || markingProcessIds.has(process.id)}
+                                  title={deOutroIndexador
+                                    ? "Atribuído a outro indexador: abra o processo e use «Atribuir a mim» primeiro"
+                                    : "Marcar indexação como concluída"}
+                                  data-testid={`marcar-indexado-${process.id}`}
                                 >
                                   {markingProcessIds.has(process.id)
                                     ? <Loader2 className="h-4 w-4 animate-spin" />

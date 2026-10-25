@@ -174,6 +174,30 @@ def condicao_da_fila(aba: str) -> dict:
 
 
 # ====================================================================
+# TITULARIDADE (sem acções cruzadas entre indexadores)
+# ====================================================================
+ERRO_PROCESSO_DE_OUTRO_INDEXADOR = (
+    "Este processo está atribuído a outro indexador. Para trabalhar nele, use primeiro «Atribuir a mim»."
+)
+
+
+def exigir_titularidade(processo: dict, user: dict, papel: str) -> None:
+    """O perfil `indexacao` só age nos processos seus ou sem indexador (decisão do cliente, Out 2026).
+
+    Vê a rede inteira, mas analisar, extrair, limpar PDFs, editar metadados, dispensar alertas e marcar
+    ou desmarcar como indexado no processo de um colega é 403: assume-se primeiro («Atribuir a mim»).
+    A gestão não é tocada. 403 e não 404: o processo está no âmbito (o router já o garantiu).
+    """
+    from fastapi import HTTPException
+
+    if (papel or "").lower() != "indexacao":
+        return
+    dono = (processo or {}).get("assigned_indexacao_id") or None
+    if dono and dono != (user or {}).get("id"):
+        raise HTTPException(status_code=403, detail=ERRO_PROCESSO_DE_OUTRO_INDEXADOR)
+
+
+# ====================================================================
 # TRABALHO EM CURSO (pending → in_review, automático)
 # ====================================================================
 async def assumir(process_id: str, anterior: Optional[str], novo: dict) -> bool:

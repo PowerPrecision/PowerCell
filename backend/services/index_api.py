@@ -113,7 +113,7 @@ async def _carregar_processo(process_id: str, user: dict) -> dict:
     proc = await db.processes.find_one(
         {"id": process_id, "is_deleted": {"$ne": True}}, {"_id": 0, **{k: 1 for k in (
             "id", "process_number", "client_name", "status", "created_at", "updated_at", "index_status",
-            "index_skipped", "is_indexed", "skip_index", "assigned_indexacao_id", "has_pending_review",
+            "index_skipped", "is_indexed", "skip_index", "assigned_indexacao_id", "indexacao_name", "has_pending_review",
             "index_alerts_open", "indexed_at", "indexed_by_name", "network_id", "index_stagnation_alerted_at")}},
     )
     if not proc:
@@ -274,7 +274,11 @@ async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, An
         jobs[nome] = (activo or {}).get("task_id")
     processo_dto = _processo_dto(proc, ficheiros)
     # o ecrã só arranca o tratamento se o processo é DELE (o servidor volta a decidir ao receber o pedido)
-    processo_dto["assigned_to_me"] = bool(proc.get("assigned_indexacao_id")) and proc.get("assigned_indexacao_id") == (user or {}).get("id")
+    dono = proc.get("assigned_indexacao_id") or None
+    processo_dto["assigned_to_me"] = bool(dono) and dono == (user or {}).get("id")
+    # sem acções cruzadas: num processo de outro indexador o ecrã do Index só consulta (o servidor recusa na mesma)
+    processo_dto["assigned_to_other"] = bool(dono) and dono != (user or {}).get("id")
+    processo_dto["assigned_indexacao_name"] = proc.get("indexacao_name") if dono else None
     return {
         "process": processo_dto,
         "files": ficheiros,
@@ -347,6 +351,11 @@ async def run_assumir_processo(user: dict, process_id: str) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001 — o aviso nunca desfaz a atribuição
             logger.warning("[INDEX] Aviso ao indexador anterior não enviado: %s", type(exc).__name__)
     return {"success": True, "assigned_indexacao_id": meu_id}
+
+
+async def run_exigir_titularidade(user: dict, process_id: str, papel: str) -> None:
+    """Guarda das escritas da bancada: o Index só age no que é seu (ver `index_status.exigir_titularidade`)."""
+    estado_do_index.exigir_titularidade(await _carregar_processo(process_id, user), user, papel)
 
 
 async def _trabalhou(user: dict, process_id: str) -> None:

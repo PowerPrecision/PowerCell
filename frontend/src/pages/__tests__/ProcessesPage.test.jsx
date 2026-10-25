@@ -363,6 +363,40 @@ describe("ProcessesPage — interacção", () => {
     expect(api.getMyProcesses).not.toHaveBeenCalled();
   });
 
+  it("o Index não marca como indexado o processo de outro indexador (Out 2026)", async () => {
+    // Sem acções cruzadas: na Visão Global a prancheta fica desligada no processo de um colega; no
+    // que não tem indexador (ou é seu) continua activa. O servidor recusa na mesma (403).
+    papelActivo = "indexacao";
+    caminho = "/lista-processos";
+    api.getProcesses.mockResolvedValue({
+      data: {
+        ...RESPOSTA.data,
+        items: [
+          { ...LINHAS[1], id: "p-colega", client_name: "Do Colega", assigned_indexacao_id: "u-rui" },
+          { ...LINHAS[1], id: "p-livre", client_name: "Sem Ninguém", assigned_indexacao_id: null },
+          { ...LINHAS[1], id: "p-meu", client_name: "Do Próprio", assigned_indexacao_id: "u1" },
+        ],
+      },
+    });
+    montar();
+    await screen.findByText("Do Colega");
+    expect(screen.getByTestId("marcar-indexado-p-colega")).toBeDisabled();
+    expect(screen.getByTestId("marcar-indexado-p-colega")).toHaveAttribute("title", expect.stringMatching(/Atribuir a mim/));
+    expect(screen.getByTestId("marcar-indexado-p-livre")).toBeEnabled();
+    expect(screen.getByTestId("marcar-indexado-p-meu")).toBeEnabled();
+  });
+
+  it("contraprova: a gestão marca o processo de qualquer indexador", async () => {
+    papelActivo = "admin";
+    caminho = "/lista-processos";
+    api.getProcesses.mockResolvedValue({
+      data: { ...RESPOSTA.data, items: [{ ...LINHAS[1], id: "p-colega", client_name: "Do Colega", assigned_indexacao_id: "u-rui" }] },
+    });
+    montar();
+    await screen.findByText("Do Colega");
+    expect(screen.getByTestId("marcar-indexado-p-colega")).toBeEnabled();
+  });
+
   it("contraprova: os outros perfis continuam a abrir o detalhe do processo", async () => {
     papelActivo = "consultor";
     caminho = "/processos";
