@@ -39,7 +39,7 @@ import { createContext, useState, useEffect, useCallback, useRef, useContext, us
 import api, { setAuthToken, clearAuthToken, syncAuthContextHeaders, getRefreshedToken } from "../services/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { hasRole } from "../utils/roleUtils";
-import { collectUserRoles, getUserCompanyRecords, resolveCompanyIdFromUser } from "../utils/userProfiles";
+import { contextoInicial, getUserCompanyRecords, resolveCompanyIdFromUser } from "../utils/userProfiles";
 import { papelEfectivoDaSessao } from "../utils/papelEfectivo";
 import { eFalhaDeLigacao } from "../utils/falhaDeLigacao";
 import { toast } from "sonner";
@@ -78,6 +78,28 @@ export function AuthProvider({ children }) {
   const refreshTimeoutRef = useRef(null);
   const activeRoleInitialized = useRef(false);
   const activeCompanyInitialized = useRef(false);
+
+  // Grava o perfil de arranque (cargo + empresa) no estado e no storage, e marca-o como iniciado.
+  // Ponto único do login, do F5 e do impersonate: eram três cópias que divergiam (Out 2026).
+  const aplicarContexto = useCallback((userData, { role, companyId }) => {
+    const cargo = role || userData?.role || "consultor";
+    setActiveRole(cargo);
+    sessionStorage.setItem("activeRole", cargo);
+    activeRoleInitialized.current = true;
+    if (companyId) {
+      setActiveCompanyId(companyId);
+      localStorage.setItem("active_company_id", companyId);
+      sessionStorage.setItem("activeCompanyId", companyId);
+      const registo = getUserCompanyRecords(userData).find((c) => c.company_id === companyId);
+      applyBrandTheme(registo?.company_name || userData?.company);
+    } else {
+      setActiveCompanyId(null);
+      localStorage.removeItem("active_company_id");
+      sessionStorage.removeItem("activeCompanyId");
+    }
+    activeCompanyInitialized.current = true;
+    return { role: cargo, companyId: companyId || null };
+  }, []);
 
   // Função para decodificar JWT e obter expiração
   // (stable — empty deps, no outer references)
@@ -180,47 +202,15 @@ export function AuthProvider({ children }) {
       // ── Brand Theme: aplica classe de tema consoante a empresa ──
       applyBrandTheme(userData.company);
 
-      // Initialize activeRole only once (not on every fetchUser call)
-      if (!activeRoleInitialized.current) {
-        const savedRole = sessionStorage.getItem("activeRole");
-        const allRoles = collectUserRoles(userData);
-        if (savedRole && allRoles.includes(savedRole)) {
-          setActiveRole(savedRole);
-        } else {
-          setActiveRole(userData.role);
-          sessionStorage.setItem("activeRole", userData.role);
-        }
-        activeRoleInitialized.current = true;
-      }
-      
-      // Initialize activeCompanyId only once. Never persist user.company
-      // (display name) as X-Company-Id — UCR lookup is by company_id.
-      if (!activeCompanyInitialized.current) {
-        const savedCompanyId = localStorage.getItem("active_company_id")
-          || sessionStorage.getItem("activeCompanyId");
-        let currentActiveRole = activeRole || userData.role;
-        if (!activeRoleInitialized.current) {
-          currentActiveRole = sessionStorage.getItem("activeRole") || userData.role;
-        }
-        const companyId = resolveCompanyIdFromUser(
-          userData,
-          savedCompanyId,
-          currentActiveRole,
-        );
-        if (companyId) {
-          setActiveCompanyId(companyId);
-          localStorage.setItem("active_company_id", companyId);
-          sessionStorage.setItem("activeCompanyId", companyId);
-          const companies = getUserCompanyRecords(userData);
-          const matchingCompany = companies.find((c) => c.company_id === companyId)
-            || companies.find((c) => c.company_name === savedCompanyId);
-          applyBrandTheme(matchingCompany?.company_name || userData.company);
-        } else {
-          setActiveCompanyId(null);
-          localStorage.removeItem("active_company_id");
-          sessionStorage.removeItem("activeCompanyId");
-        }
-        activeCompanyInitialized.current = true;
+      // Arranque do perfil (uma vez por montagem): a escolha feita NESTE separador sobrevive ao
+      // F5; sem ela, manda o perfil «Padrão» — ver `contextoInicial` (Out 2026). O
+      // `active_company_id` do localStorage NÃO entra: é o espelho do interceptor e podia trazer a
+      // empresa de outra sessão, que vencia o «Padrão».
+      if (!activeRoleInitialized.current || !activeCompanyInitialized.current) {
+        aplicarContexto(userData, contextoInicial(userData, {
+          role: sessionStorage.getItem("activeRole"),
+          companyId: sessionStorage.getItem("activeCompanyId"),
+        }));
       }
       
       // Verificar se está em modo impersonate
@@ -285,17 +275,15 @@ export function AuthProvider({ children }) {
     // ── Brand Theme ──
     applyBrandTheme(userData.company);
 
-    // Reset activeRole to primary role on login
-    const primaryRole = userData.role;
-    setActiveRole(primaryRole);
-    sessionStorage.setItem("activeRole", primaryRole);
-    activeRoleInitialized.current = true;
+    // Entrar é arrancar no perfil «Padrão» (ou no principal, se não houver) — nunca na escolha
+    // de uma sessão anterior nem na primeira empresa da lista.
+    aplicarContexto(userData, contextoInicial(userData));
     
     // Agendar refresh
     scheduleTokenRefresh(access_token);
     
     return userData;
-  }, [scheduleTokenRefresh, queryClient]);
+  }, [scheduleTokenRefresh, queryClient, aplicarContexto]);
 
   const register = useCallback(async (name, email, password, phone) => {
     const response = await api.post("/auth/register", {
@@ -354,36 +342,12 @@ export function AuthProvider({ children }) {
     queryClient.clear();
   }, [queryClient]);
 
-  const applyUserContext = useCallback((userData) => {
-    const primaryRole = userData?.role || "consultor";
-    setActiveRole(primaryRole);
-    sessionStorage.setItem("activeRole", primaryRole);
-    activeRoleInitialized.current = true;
-
-    const companies = getUserCompanyRecords(userData);
-    const matchingCompany = companies.find((c) => c.is_default)
-      || companies.find((c) => c.role === primaryRole)
-      || companies[0];
-    const companyId = resolveCompanyIdFromUser(
-      userData,
-      matchingCompany?.company_id,
-      primaryRole,
-    );
-    if (companyId) {
-      setActiveCompanyId(companyId);
-      localStorage.setItem("active_company_id", companyId);
-      sessionStorage.setItem("activeCompanyId", companyId);
-      applyBrandTheme(matchingCompany?.company_name || userData?.company);
-    } else {
-      setActiveCompanyId(null);
-      localStorage.removeItem("active_company_id");
-      sessionStorage.removeItem("activeCompanyId");
-    }
-    activeCompanyInitialized.current = true;
-    // Quem troca de identidade (impersonate) precisa de saber o que ficou
-    // gravado para sincronizar os cabeçalhos ANTES de limpar a cache.
-    return { role: primaryRole, companyId: companyId || null };
-  }, []);
+  // Quem troca de identidade (impersonate) arranca no perfil «Padrão» da conta nova e precisa de
+  // saber o que ficou gravado para sincronizar os cabeçalhos ANTES de limpar a cache.
+  const applyUserContext = useCallback(
+    (userData) => aplicarContexto(userData, contextoInicial(userData)),
+    [aplicarContexto],
+  );
 
   // Bloco 4, ponto 33 — trocar de identidade é trocar de âmbito.
   //

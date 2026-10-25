@@ -1331,6 +1331,9 @@ export const getIndexWorkstation = (processId) =>
 // O indexador atribuído abriu a bancada: `pending → in_review` (substitui o «Reivindicar» manual).
 export const startIndexWork = (processId) =>
   api.post(`/index/processes/${processId}/start`, null, { skipErrorToast: true });
+// «Atribuir a mim» (Out 2026): o indexador assume um processo «Por indexar» que ninguém começou.
+export const assumirIndexProcess = (processId) =>
+  api.post(`/index/processes/${processId}/assumir`, null, { skipErrorToast: true });
 export const analyzeIndexProcess = (processId, force = false) =>
   api.post(`/index/processes/${processId}/analyze`, { force }, { skipErrorToast: true });
 export const extractIndexProcess = (processId) =>

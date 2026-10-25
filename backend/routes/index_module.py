@@ -23,6 +23,7 @@ from services.index_access import PAPEIS_DE_IA_DO_INDEX
 from services.index_advanced_search import TAMANHO_MAXIMO_DA_PAGINA, run_advanced_search
 from services.index_document_content import run_conteudo_do_documento, run_conteudo_do_ficheiro_do_processo
 from services.index_api import (
+    run_assumir_processo,
     run_analyze_process,
     run_dismiss_alert,
     run_edit_professional_job,
@@ -44,6 +45,9 @@ router = APIRouter(
 )
 
 _acesso = require_roles(PAPEIS_DE_IA_DO_INDEX)
+#: «Atribuir a mim» é do indexador (perfil efectivo). A gestão atribui pelo «Gerir» do processo.
+PAPEIS_QUE_ASSUMEM = ["indexacao"]
+_so_o_index = require_roles(PAPEIS_QUE_ASSUMEM)
 
 
 class AnalyzeBody(BaseModel):
@@ -203,6 +207,17 @@ async def get_index_workstation(
 async def start_work(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
     """O indexador atribuído abriu a bancada: `pending → in_review` (substitui o «Reivindicar» manual)."""
     return await run_start_work(user, process_id)
+
+
+@router.post("/processes/{process_id}/assumir")
+@limiter.limit("30/minute")
+async def assumir_processo(
+    request: Request, response: Response, process_id: str,
+    user: dict = Depends(_acesso),
+    _papel: dict = Depends(_so_o_index),
+):
+    """«Atribuir a mim»: o indexador assume um processo «Por indexar» que ninguém começou."""
+    return await run_assumir_processo(user, process_id)
 
 
 @router.post("/processes/{process_id}/analyze", status_code=202)

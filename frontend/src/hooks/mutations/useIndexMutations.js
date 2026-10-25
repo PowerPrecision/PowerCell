@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { queryKeys } from "../../lib/queryClient";
 import {
   analyzeIndexProcess,
+  assumirIndexProcess,
   dismissIndexAlert,
   editIndexJob,
   extractIndexProcess,
@@ -83,5 +84,16 @@ export function useIndexMutations(processId) {
     onError: falhou,
   });
 
-  return { analisar, extrair, sanitizar, editar, dispensar, marcarIndexado };
+  // «Atribuir a mim»: ao refrescar, a bancada passa a ser do utilizador e `useIniciarTratamento` arranca
+  // o tratamento (abrir a bancada é começar a trabalhar).
+  const assumir = useMutation({
+    mutationFn: () => assumirIndexProcess(processId),
+    onSuccess: () => {
+      toast.success("O processo passou a estar atribuído a si.");
+      return refrescar();
+    },
+    onError: falhou,
+  });
+
+  return { analisar, extrair, sanitizar, editar, dispensar, marcarIndexado, assumir };
 }
