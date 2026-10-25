@@ -114,6 +114,10 @@ class Client(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     created_by: Optional[str] = None
+    # Quem criou a ficha, para a ORIGEM dizer «Criado por <nome>» e não só «pela Equipa» (Out 2026).
+    # `created_by` é o email (é por ele que as listas «os meus» filtram); o nome guarda-se à nascença
+    # porque o email não diz quem é a pessoa. Fichas antigas resolvem-no ao servir.
+    created_by_name: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

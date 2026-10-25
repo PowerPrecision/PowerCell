@@ -467,7 +467,7 @@ const ProcessDetails = () => {
     try {
       const [staffRes, idxRes, partnerRes] = await Promise.all([
         getStaffUsers({ processId: id }).catch(() => ({ data: [] })),
-        getUsers("indexacao", { processId: id }).catch(() => ({ data: [] })),
+        getUsers("indexacao", { processId: id, forAssignment: true }).catch(() => ({ data: [] })),
         getUsers("parceiro", { processId: id }).catch(() => ({ data: [] })),
       ]);
       const merged = [

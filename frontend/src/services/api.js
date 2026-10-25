@@ -865,7 +865,7 @@ export const getUsers = (role, { forAssignment, processId, skipErrorToast } = {}
 /** Parceiros para os FILTROS «Por Parceiro» (P4): `{partners: [{id, name}], total}`. Os parceiros do
  *  Portal vivem em `db.partners` e já não vêm da lista de utilizadores. */
 export const getPartnerOptions = () => api.get("/partners/options", { skipErrorToast: true });
-/** Staff para dropdowns de atribuição (sem admin/indexação). Pacote DT. */
+/** Staff para dropdowns de atribuição (sem admin; o Index vem da rede inteira, não só da empresa escolhida). */
 export const getStaffUsers = ({ processId } = {}) =>
   api.get("/users/staff", {
     params: processId ? { process_id: processId } : {},

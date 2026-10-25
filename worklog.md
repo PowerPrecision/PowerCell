@@ -12596,3 +12596,10 @@ Pedido: o Master com uma empresa escolhida via os parceiros de todas as redes; e
 - Relato: `POST /api/admin/s3-create-folder` → 404 «Pasta não encontrada» no menu Ficheiros. Causa: a pasta de topo nova era tratada como órfã pela parede (`assert_pasta_no_ambito`). Correcção em `s3_explorer_scope.autorizar_criacao_de_pasta` + colecção `s3_explorer_folders`; ver o bullet em `AGENTS.md`.
 - Verificação: `test_explorador_criar_pasta_nova.py` (12), isolamento/contenção do Explorador a verde; 6 mutações às guardas novas, todas mortas (uma sobreviveu à 1.ª passagem e levou um teste novo).
 - Não verificado: o fluxo no browser com o S3 real.
+
+## Atribuição ao Index e autor da ficha nos Registos (Out 2026)
+- Pedido: (1) o CEO/Diretor não via os utilizadores do Index nas atribuições; (2) a origem das fichas criadas à mão dizia só «Criado pela Equipa».
+- (1) Causa: a dropdown de atribuição segue a empresa escolhida (P5) e as contas do Index estão noutra empresa da rede ou sem empresa. Não era o frontend (o `ProcessAssignDialog` tem o seletor «Indexação (Documentos)»). Correcção no servidor (`users_api_list._juntar_indexadores_da_rede`) + o detalhe pede o Index com `for_assignment`. Ver `AGENTS.md`.
+- (2) `created_by_name` gravado na criação; nome resolvido ao servir para as fichas antigas (`nomes_dos_autores`); `formatOrigemDoCliente` no ecrã.
+- Testes: `test_indexadores_na_lista_de_atribuicao.py` (7; os 2 do ataque vermelhos sem a correcção), `test_registos_autor_da_ficha.py` (4), `fonteLabels.test.js` (+2).
+- Não verificado: com os dados reais de produção (não sei em que empresa estão as contas do Index; o teste cobre os dois casos, outra empresa da rede e sem empresa) nem no browser.

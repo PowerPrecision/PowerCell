@@ -48,3 +48,24 @@ test("origens do Portal do Parceiro e dos processos nunca aparecem em snake_case
   assert.equal(formatFonteLabel("client_portal"), "Portal do Cliente");
   assert.equal(formatFonteLabel("lead"), "Registo (Lead)");
 });
+
+test("a ficha criada pela equipa diz quem a criou quando o servidor manda o nome", async () => {
+  const { formatOrigemDoCliente } = await import("./fonteLabels.js");
+  assert.equal(
+    formatOrigemDoCliente({ fonte: "staff_created", created_by_name: "João Silva" }),
+    "Criado por João Silva",
+  );
+  assert.equal(
+    formatOrigemDoCliente({ fonte: "staff_created", created_by_name: "  Ana  " }),
+    "Criado por Ana",
+  );
+});
+
+test("sem nome do autor mantém-se «Criado pela Equipa»; outras origens não mudam", async () => {
+  const { formatOrigemDoCliente } = await import("./fonteLabels.js");
+  assert.equal(formatOrigemDoCliente({ fonte: "staff_created" }), "Criado pela Equipa");
+  assert.equal(formatOrigemDoCliente({ fonte: "staff_created", created_by_name: "   " }), "Criado pela Equipa");
+  assert.equal(formatOrigemDoCliente({ fonte: "public_form", created_by_name: "João Silva" }), "Registo no Portal");
+  assert.equal(formatOrigemDoCliente({}), "—");
+  assert.equal(formatOrigemDoCliente(null), "—");
+});

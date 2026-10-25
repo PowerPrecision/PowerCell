@@ -68,6 +68,8 @@ async def run_get_users(
     users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(
         USERS_LIST_LIMIT
     )
+    if for_assignment:
+        users = await _juntar_indexadores_da_rede(user or {}, users, role, ambito)
     if process_id:
         from services.assignment_network_guard import (
             utilizadores_atribuiveis_ao_processo,
@@ -138,3 +140,48 @@ async def _juntar_a_equipa_do_processo(ator: dict, users: list[dict], process_id
         return users
     extra = await db.users.find({"id": {"$in": em_falta}}, {"_id": 0, "password": 0}).to_list(len(em_falta))
     return [*users, *extra]
+
+
+#: Os papéis do Index (o principal e o alias legado), os mesmos de `ASSIGNMENT_ALLOWED_ROLES`.
+PAPEIS_DO_INDEX = ("indexacao", "index")
+
+
+async def _juntar_indexadores_da_rede(
+    ator: dict, users: list[dict], role: str | None, ambito
+) -> list[dict]:
+    """Na lista de ATRIBUIÇÃO, os indexadores são os da REDE, não só os da empresa escolhida (Out 2026).
+
+    A dropdown segue a empresa do cabeçalho (P5), e para consultores e intermediários é isso que se quer.
+    O Index não é assim: a atribuição automática escolhe o indexador no pool da REDE da equipa
+    (`indexadores_disponiveis`), e as contas do Index vivem muitas vezes noutra empresa da rede ou sem
+    empresa nenhuma (a vista «Sistema»). Com a empresa escolhida, a gestão deixava de os ver e não os
+    podia atribuir à mão, embora o servidor aceitasse a atribuição e o sistema os atribuísse sozinho.
+
+    Só se ALARGA ao âmbito de rede de quem pergunta (`empresas_do_ambito`, nunca mais largo) e só a quem
+    o servidor aceitaria ao gravar (`ids_atribuiveis`, a mesma pergunta do `exigir_atribuidos_da_minha_rede`).
+    Com um filtro de papel que não seja do Index não há nada a juntar.
+    """
+    if role and role.strip().lower() not in PAPEIS_DO_INDEX:
+        return users
+
+    from services.admin_users_scope import build_users_scope_query, empresas_do_ambito
+    from services.assignment_network_guard import ids_atribuiveis
+    from services.role_query import deep_role_in_filter
+    from services.staff_assignment import apply_assignment_staff_filter
+
+    rede = await empresas_do_ambito(ator)
+    if rede == ambito:
+        return users  # sem empresa escolhida: a lista já é a da rede
+
+    query = apply_assignment_staff_filter(deep_role_in_filter(list(PAPEIS_DO_INDEX)), True)
+    scope_query = await build_users_scope_query(rede)
+    if scope_query:
+        query = {"$and": [query, scope_query]}
+    ja_la = {u.get("id") for u in users}
+    candidatos = [
+        u for u in await db.users.find(query, {"_id": 0, "password": 0}).to_list(USERS_LIST_LIMIT)
+        if u.get("id") not in ja_la
+    ]
+    if not candidatos:
+        return users
+    return [*users, *await ids_atribuiveis(ator, candidatos)]

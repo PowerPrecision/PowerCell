@@ -72,7 +72,7 @@ import {
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { safeString } from "../utils/safeString";
-import { formatFonteLabel } from "../utils/fonteLabels";
+import { formatOrigemDoCliente } from "../utils/fonteLabels";
 import ValidacaoFinanceira from "../components/validacao/ValidacaoFinanceira";
 import AccoesDaLead from "../components/leads/AccoesDaLead";
 import LeadDetailsDrawer from "../components/leads/LeadDetailsDrawer";
@@ -611,7 +611,7 @@ const ClientRegistrationsPage = () => {
                           <div className="flex items-center gap-1 mt-1">
                             {client.fonte && (
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                                {formatFonteLabel(client.fonte)}
+                                {formatOrigemDoCliente(client)}
                               </Badge>
                             )}
                             {/* Ponto 1 — na triagem, a elegibilidade
