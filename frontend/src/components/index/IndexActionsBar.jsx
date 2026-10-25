@@ -26,17 +26,21 @@ export function IndexActionsBar({
   onSanitizar,
   onMarcar,
   somenteLeitura = false,
+  motivoSomenteLeitura,
 }) {
   const ocupado = haJobActivo(jobsActivos);
   const indexado = processo?.index_status === "indexed";
+  // só-leitura (ex.: processo de outro indexador): o motivo vai como tooltip; num botão desligado o
+  // browser pode não mostrar o `title`, por isso também vai no contentor da barra
+  const motivo = somenteLeitura ? motivoSomenteLeitura : undefined;
 
   return (
-    <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Acções do Index">
-      <Button variant="outline" disabled={somenteLeitura || ocupado || aAnalisar} onClick={onAnalisar}>
+    <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Acções do Index" title={motivo}>
+      <Button variant="outline" disabled={somenteLeitura || ocupado || aAnalisar} onClick={onAnalisar} title={motivo}>
         {aAnalisar ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <Bot className="mr-1.5 h-4 w-4" aria-hidden="true" />}
         Analisar
       </Button>
-      <Button variant="outline" disabled={somenteLeitura || ocupado || aExtrair} onClick={onExtrair}>
+      <Button variant="outline" disabled={somenteLeitura || ocupado || aExtrair} onClick={onExtrair} title={motivo}>
         {aExtrair ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <ScanText className="mr-1.5 h-4 w-4" aria-hidden="true" />}
         Extrair dados
       </Button>
@@ -44,7 +48,7 @@ export function IndexActionsBar({
         variant="outline"
         disabled={somenteLeitura || ocupado || aSanitizar || porLimpar === 0}
         onClick={onSanitizar}
-        title={porLimpar === 0 ? "Nenhum ficheiro carregado pelo Index está por limpar" : undefined}
+        title={motivo || (porLimpar === 0 ? "Nenhum ficheiro carregado pelo Index está por limpar" : undefined)}
       >
         {aSanitizar ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <Eraser className="mr-1.5 h-4 w-4" aria-hidden="true" />}
         Apagar metadados
@@ -52,7 +56,7 @@ export function IndexActionsBar({
       <Button
         disabled={somenteLeitura || !podeMarcarComoIndexado({ processo, aMarcar })}
         onClick={onMarcar}
-        title={indexado ? "Este processo já está indexado" : undefined}
+        title={motivo || (indexado ? "Este processo já está indexado" : undefined)}
       >
         {aMarcar ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" aria-hidden="true" />}
         {indexado ? "Indexado" : "Marcar como Indexado"}

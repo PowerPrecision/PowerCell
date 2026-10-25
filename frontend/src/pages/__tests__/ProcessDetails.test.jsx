@@ -38,6 +38,7 @@ vi.mock("../../services/api", async (importOriginal) => ({
     angariador: null, definido_por: null, definido_em: null,
   } })),
   getCandidatosOrigemFinanceira: vi.fn(() => Promise.resolve({ data: { candidatos: [] } })),
+  assumirIndexProcess: vi.fn(() => Promise.resolve({ data: { success: true } })),
   // Forma REAL do servidor (fixture gerada pelo serviço), não uma inventada.
   getServicoDoParceiro: vi.fn(() => Promise.resolve({ data: servicoPorPagar })),
   reopenProcess: vi.fn(() => Promise.resolve({ data: { reopened: true } })),
@@ -908,6 +909,40 @@ describe("ProcessDetails — sem acções cruzadas entre indexadores (Out 2026)"
     const interruptor = await screen.findByRole("switch", { name: "Indexado" });
     expect(interruptor).toBeDisabled();
     expect(screen.getByTestId("indexed-toggle")).toHaveAttribute("title", expect.stringMatching(/Atribuir a mim/));
+  });
+
+  it("o Index vê o processo de um colega na vista normal: separadores e cartões, sem nada a menos", async () => {
+    sessao.papel = "indexacao";
+    comIndexador("u-rui");
+    montar();
+    expect(await screen.findByRole("heading", { name: /Processo #12/ })).toBeInTheDocument();
+    for (const nome of [/Resumo/, /Documentos/, /Histórico/, /Log da IA/]) {
+      expect(screen.getByRole("tab", { name: nome })).toBeEnabled();
+    }
+  });
+
+  it("por indexar, o Index pode assumir o processo do colega a partir do detalhe e segue para a bancada", async () => {
+    const { assumirIndexProcess } = await import("../../services/api");
+    sessao.papel = "indexacao";
+    pacote.valor = pacoteCompleto({ process: { ...PROCESSO, is_indexed: false, index_status: "pending", assigned_indexacao_id: "u-rui" } });
+    const utilizador = userEvent.setup();
+    montar();
+    await utilizador.click(await screen.findByTestId("detalhe-atribuir-a-mim"));
+    await waitFor(() => expect(assumirIndexProcess).toHaveBeenCalledWith(PROCESSO.id));
+  });
+
+  it("em tratamento, ou para a gestão, não há «Atribuir a mim» no detalhe", async () => {
+    sessao.papel = "indexacao";
+    pacote.valor = pacoteCompleto({ process: { ...PROCESSO, is_indexed: false, index_status: "in_review", assigned_indexacao_id: "u-rui" } });
+    const { unmount } = montar();
+    await screen.findByRole("heading", { name: /Processo #12/ });
+    expect(screen.queryByTestId("detalhe-atribuir-a-mim")).not.toBeInTheDocument();
+    unmount();
+    sessao.papel = "diretor";
+    comIndexador("u-rui");
+    montar();
+    await screen.findByRole("heading", { name: /Processo #12/ });
+    expect(screen.queryByTestId("detalhe-atribuir-a-mim")).not.toBeInTheDocument();
   });
 
   it("contraprova: no processo seu, e para a gestão no de qualquer um, o interruptor funciona", async () => {

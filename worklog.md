@@ -12620,3 +12620,13 @@ Pedido: o Master com uma empresa escolhida via os parceiros de todas as redes; e
 - Frontend: bancada em só-leitura com aviso (`aviso-processo-de-outro`) que aponta para «Atribuir a mim» ou diz que já está em tratamento; prancheta de «Todos os Processos» desligada com o motivo no `title`; interruptor «Indexado» do detalhe desligado. Regra partilhada `utils/indexRevisao.processoDeOutroIndexador`. Correcção de passagem: `canMarkIndexed` da lista passou a usar o perfil ACTIVO (era `user.role`).
 - Verificações: suite backend completa 13 461 passados + 13 saltados; frontend 4 484 testes.
 - Testes: `test_index_sem_accoes_cruzadas.py` (24), `indexRevisao.titularidade.test.js` (8), `IndexWorkstationPage.test.jsx` (+4), `ProcessesPage.test.jsx` (+2), `ProcessDetails.test.jsx` (+2); os novos de ecrã vermelhos antes da correcção. Mutações: inverter a regra, tirar a guarda dos NIFs e a do interruptor OFF — todas mortas.
+
+## Index: o processo de um colega vê-se normalmente (Out 2026)
+- Pedido (ajuste ao `3152ae3c`): o indexador que abre o processo de um colega (ex.: de «Todos os Processos") tem de o ver normalmente: vista de detalhes, separadores, documentos. Só os botões de acção ficam desligados, com tooltip.
+- Verificado no browser antes: o detalhe (`/process/:id`) já abria para o Index no processo de um colega, com os separadores; o que mudava o ecrã era o clique na lista levar sempre à bancada e a bancada abrir com um aviso grande.
+- `ProcessesPage.abrirProcesso`: o Index abre a bancada só no que é seu ou sem indexador; o de um colega abre na vista normal de detalhes (com as setas Anterior/Seguinte).
+- Bancada: saiu o aviso (`aviso-processo-de-outro`); o motivo vai em `title` na barra de acções, em cada botão e no «Rever» (`IndexActionsBar.motivoSomenteLeitura`).
+- Detalhe: «Atribuir a mim» (`detalhe-atribuir-a-mim`) para o Index num processo por indexar que não é seu; a seguir abre a bancada. Sem ele, assumir a partir de «Todos os Processos» deixava de ser possível.
+- Testes: `ProcessesPage.test.jsx` (+1, vermelho sem a correcção), `IndexWorkstationPage.test.jsx` (2 reescritos para a tooltip), `ProcessDetails.test.jsx` (+3). Frontend completo 4 488. Backend sem alterações.
+- Verificado no browser (local, dados fictícios): Inês → «Todos os Processos» → processo do Rui abre `/process/…` (2/6, separadores normais, «Atribuir a mim» e interruptor desligado); o seu abre a bancada; na bancada do Rui, a tooltip de «Analisar» diz o motivo.
+- Reparo, não mexido: no cartão «Atribuição» do detalhe o Index vê «Gerir».

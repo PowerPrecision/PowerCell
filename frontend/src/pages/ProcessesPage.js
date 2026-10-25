@@ -619,7 +619,9 @@ const ProcessesPageCompleta = () => {
       },
     });
     // O Index abre a bancada (`/index/:id`), que não tem setas Anterior/Seguinte: sem contexto de navegação.
-    if (abreABancada(effectiveRole)) {
+    // O processo de um colega abre-se na vista normal de detalhes, só para consulta (Out 2026).
+    const processo = sortedProcesses.find((p) => p.id === processId);
+    if (abreABancada(effectiveRole) && !processoDeOutroIndexador(processo, effectiveRole, user?.id)) {
       navigate(destinoDoProcesso(effectiveRole, processId));
       return;
     }
@@ -631,7 +633,7 @@ const ProcessesPageCompleta = () => {
     isGlobalView, effectiveCompanyId, indexStatusFilter, statusFilter,
     processTypeFilter, labelsFilter, labelsLogicFilter, sub35Filter,
     partilhaFilter, parceiroFilter,
-    assignedUserIdsFilter, assignedLogicFilter, navigate,
+    assignedUserIdsFilter, assignedLogicFilter, navigate, user?.id,
   ]);
 
   // FIX (Pacote K): Handler para mudança de filtro de vista (Select)

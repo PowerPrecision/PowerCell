@@ -692,29 +692,39 @@ describe("sem acções cruzadas entre indexadores (Out 2026)", () => {
   const accoes = () => ["Analisar", "Extrair dados", "Apagar metadados", "Marcar como Indexado"]
     .map((nome) => screen.getByRole("button", { name: new RegExp(`^${nome}$`) }));
 
-  it("no processo de um colega o Index só consulta: as acções ficam desligadas e diz-se porquê", async () => {
+  it("no processo de um colega o Index lê tudo; só as acções ficam desligadas, com o motivo em tooltip", async () => {
     sessao.papel = "indexacao";
     api.startIndexWork.mockResolvedValue({ data: { iniciado: false } });
     montar(doColega());
-    const aviso = await screen.findByTestId("aviso-processo-de-outro");
-    expect(aviso).toHaveTextContent("Rui Teixeira");
-    accoes().forEach((b) => expect(b).toBeDisabled());
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    // a leitura é a normal: documentos, metadados e alertas, sem aviso a mudar o ecrã
+    expect(screen.getAllByTestId("ficheiro-do-index")).toHaveLength(3);
+    expect(screen.getByText("Quinta do Sol Lda")).toBeInTheDocument();
+    expect(screen.getAllByTestId("alerta-do-index")).toHaveLength(2);
+    expect(screen.queryByTestId("aviso-processo-de-outro")).not.toBeInTheDocument();
+    accoes().forEach((b) => {
+      expect(b).toBeDisabled();
+      expect(b).toHaveAttribute("title", expect.stringContaining("Rui Teixeira"));
+    });
+    expect(screen.getByRole("toolbar", { name: "Acções do Index" })).toHaveAttribute("title", expect.stringContaining("Rui Teixeira"));
     expect(screen.getByRole("button", { name: /Rever/ })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /Dispensar alerta/ })).not.toBeInTheDocument();
+    // «Ver» continua à mão
+    expect(screen.getAllByRole("button", { name: /Ver/ }).length).toBeGreaterThan(0);
   });
 
-  it("por indexar, o aviso aponta para «Atribuir a mim»", async () => {
+  it("por indexar, a tooltip aponta para «Atribuir a mim»", async () => {
     sessao.papel = "indexacao";
     montar(doColega("pending"));
-    expect(await screen.findByTestId("aviso-processo-de-outro")).toHaveTextContent("Atribuir a mim");
-    expect(screen.getByTestId("botao-atribuir-a-mim")).toBeInTheDocument();
+    await screen.findByTestId("botao-atribuir-a-mim");
+    expect(screen.getByRole("button", { name: /^Analisar$/ })).toHaveAttribute("title", expect.stringContaining("Atribuir a mim"));
   });
 
   it("contraprova: num processo sem indexador o Index age", async () => {
     sessao.papel = "indexacao";
     montar({ ...doColega("pending"), process: { ...doColega("pending").process, assigned_to_other: false } });
     await screen.findByRole("heading", { name: /Marta Quintela/ });
-    expect(screen.queryByTestId("aviso-processo-de-outro")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Analisar$/ })).not.toHaveAttribute("title");
     expect(screen.getByRole("button", { name: /^Analisar$/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: /^Marcar como Indexado$/ })).toBeEnabled();
   });
@@ -723,7 +733,6 @@ describe("sem acções cruzadas entre indexadores (Out 2026)", () => {
     sessao.papel = "diretor";
     montar(doColega());
     await screen.findByRole("heading", { name: /Marta Quintela/ });
-    expect(screen.queryByTestId("aviso-processo-de-outro")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Marcar como Indexado$/ })).toBeEnabled();
     expect(screen.getAllByRole("button", { name: /Dispensar alerta/ }).length).toBeGreaterThan(0);
   });

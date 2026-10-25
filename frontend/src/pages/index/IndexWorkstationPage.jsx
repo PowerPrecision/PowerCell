@@ -204,6 +204,14 @@ export default function IndexWorkstationPage() {
   // Sem acções cruzadas (decisão do cliente, Out 2026): no processo de um colega o Index só consulta; para
   // agir assume-o primeiro. A gestão não é tocada e o servidor volta a decidir (403).
   const deOutro = daEquipa && processo.assigned_to_other === true;
+  // a leitura é total e o ecrã não muda: só as acções ficam desligadas, com o motivo em tooltip
+  const motivoDeOutro = deOutro
+    ? `Processo atribuído a ${processo.assigned_indexacao_name || "outro indexador"}. ${
+        podeAssumir
+          ? "Para o analisar ou marcar como indexado, use primeiro «Atribuir a mim»."
+          : "Já está em tratamento: só o indexador atribuído o pode alterar."
+      }`
+    : undefined;
 
   const marcar = (employers) =>
     m.marcarIndexado.mutate({ employers }, { onSuccess: () => setDialogoAberto(false) });
@@ -263,19 +271,9 @@ export default function IndexWorkstationPage() {
           }
         />
 
-        {deOutro && (
-          <Alert data-testid="aviso-processo-de-outro">
-            <AlertTitle>Processo de {processo.assigned_indexacao_name || "outro indexador"}</AlertTitle>
-            <AlertDescription>
-              {podeAssumir
-                ? "Pode consultá-lo. Para o analisar ou marcar como indexado, use primeiro «Atribuir a mim»."
-                : "Pode consultá-lo, mas já está em tratamento: só o indexador atribuído o pode analisar ou marcar como indexado."}
-            </AlertDescription>
-          </Alert>
-        )}
-
         <IndexActionsBar
           somenteLeitura={deOutro}
+          motivoSomenteLeitura={motivoDeOutro}
           processo={processo}
           jobsActivos={jobsActivos}
           aAnalisar={m.analisar.isPending}
@@ -327,10 +325,12 @@ export default function IndexWorkstationPage() {
                 Metadados profissionais
                 {aRever > 0 && <Badge variant="secondary">{aRever} campo(s) a rever</Badge>}
               </CardTitle>
-              <Button size="sm" variant="outline" disabled={deOutro} onClick={() => setPainelAberto(true)}>
-                <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                Rever
-              </Button>
+              <span title={motivoDeOutro}>
+                <Button size="sm" variant="outline" disabled={deOutro} onClick={() => setPainelAberto(true)} title={motivoDeOutro}>
+                  <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                  Rever
+                </Button>
+              </span>
             </CardHeader>
             <CardContent>
               {trabalhos.length === 0 ? (
