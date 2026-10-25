@@ -307,6 +307,48 @@ async def run_start_work(user: dict, process_id: str) -> dict[str, Any]:
     return {"success": True, **resultado}
 
 
+async def run_assumir_processo(user: dict, process_id: str) -> dict[str, Any]:
+    """«Atribuir a mim»: o indexador assume um processo POR INDEXAR que ninguém começou (Out 2026).
+
+    O Index vê a rede inteira em «Todos os Processos» para trabalhar de forma proactiva. Regra da direcção:
+    só se assume o que está «Por indexar» (de um colega que ainda não o abriu, ou sem ninguém); o que já está
+    «Em tratamento» fica com quem o começou. A escrita é CONDICIONAL ao dono e ao estado lidos: se o colega
+    abrir a bancada entre a leitura e a escrita, ganha quem trabalha (409) — como no SLA das 48 h.
+    Stealth: sem histórico do processo, só auditoria. Assumir não é começar: o relógio das 48 h recomeça e
+    o estado passa a «Em tratamento» quando o novo dono abrir a bancada.
+    """
+    proc = await _carregar_processo(process_id, user)
+    meu_id = (user or {}).get("id")
+    anterior = proc.get("assigned_indexacao_id") or None
+    if anterior and anterior == meu_id:
+        raise HTTPException(status_code=400, detail="Este processo já está atribuído a si.")
+    if estado_do_index.derivar_estado(proc)["index_status"] != estado_do_index.PENDING:
+        raise HTTPException(
+            status_code=409,
+            detail="Só pode assumir processos «Por indexar» que ainda ninguém começou.",
+        )
+    assumido = await estado_do_index.assumir(process_id, anterior, user)
+    if not assumido:
+        raise HTTPException(
+            status_code=409,
+            detail="O processo mudou entretanto (outro indexador começou a trabalhar nele). Actualize a página.",
+        )
+    await _auditar(user, process_id, "Processo assumido pelo Index", ["assigned_indexacao_id"])
+    if anterior:
+        try:
+            from services.realtime_notifications import send_realtime_notification
+
+            numero = proc.get("process_number") or str(process_id)[:8]
+            await send_realtime_notification(
+                anterior, "Processo assumido por um colega",
+                f"O processo {numero} foi assumido por {user.get('name') or 'outro indexador'}.",
+                "process_unassigned", process_id=process_id,
+            )
+        except Exception as exc:  # noqa: BLE001 — o aviso nunca desfaz a atribuição
+            logger.warning("[INDEX] Aviso ao indexador anterior não enviado: %s", type(exc).__name__)
+    return {"success": True, "assigned_indexacao_id": meu_id}
+
+
 async def _trabalhou(user: dict, process_id: str) -> None:
     """Uma acção de escrita do Index: carimba a actividade (relógio da estagnação). Nunca levanta."""
     await estado_do_index.registar_trabalho(process_id, (user or {}).get("id"))

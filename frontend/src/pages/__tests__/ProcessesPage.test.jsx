@@ -353,6 +353,16 @@ describe("ProcessesPage — interacção", () => {
     expect(api.getProcesses).not.toHaveBeenCalled();
   });
 
+  it("«Todos os Processos» é a Visão Global da rede também para o Index (Out 2026)", async () => {
+    // O Index caía na sua lista de atribuídos nos dois endereços e não via o resto da rede.
+    papelActivo = "indexacao";
+    caminho = "/lista-processos";
+    montar();
+    await waitFor(() => expect(api.getProcesses).toHaveBeenCalled());
+    expect(api.getProcesses.mock.calls[0][0]).toMatchObject({ show_all: true });
+    expect(api.getMyProcesses).not.toHaveBeenCalled();
+  });
+
   it("contraprova: os outros perfis continuam a abrir o detalhe do processo", async () => {
     papelActivo = "consultor";
     caminho = "/processos";

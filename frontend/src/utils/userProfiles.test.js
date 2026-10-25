@@ -5,6 +5,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  contextoInicial,
   buildProfileRoleTabs,
   buildUserProfileItems,
   collectUserRoles,
@@ -266,5 +267,55 @@ describe("resolveActiveCompanyName — ponto 12", () => {
     assert.equal(resolveActiveCompanyName(null, null), "");
     assert.equal(resolveActiveCompanyName(undefined, "c1"), "");
     assert.equal(resolveActiveCompanyName({}, null), "");
+  });
+});
+
+// Out 2026 — o perfil marcado «Padrão» manda à entrada (login e F5 sem escolha feita no separador).
+// O defeito: escolhia-se o primeiro UCR com o perfil principal (a ordem alfabética das empresas),
+// e um «Padrão» com outro cargo nunca vencia o perfil principal da conta.
+describe("contextoInicial — o perfil «Padrão» manda à entrada", () => {
+  const ANA = {
+    role: "consultor",
+    companies: [
+      { company_id: "cmp-alfa", company_name: "Alfa", role: "consultor" },
+      { company_id: "cmp-beta", company_name: "Beta", role: "consultor", is_default: true },
+      { company_id: "cmp-zeta", company_name: "Zeta", role: "diretor" },
+    ],
+  };
+
+  it("sem escolha guardada, entra no perfil Padrão e não no primeiro da lista", () => {
+    assert.deepEqual(contextoInicial(ANA), { role: "consultor", companyId: "cmp-beta" });
+  });
+
+  it("o Padrão com outro cargo vence o perfil principal da conta", () => {
+    const user = {
+      ...ANA,
+      companies: [
+        { company_id: "cmp-alfa", company_name: "Alfa", role: "consultor" },
+        { company_id: "cmp-zeta", company_name: "Zeta", role: "diretor", is_default: true },
+      ],
+    };
+    assert.deepEqual(contextoInicial(user), { role: "diretor", companyId: "cmp-zeta" });
+  });
+
+  it("uma escolha feita neste separador sobrevive ao F5", () => {
+    assert.deepEqual(contextoInicial(ANA, { role: "diretor", companyId: "cmp-zeta" }), { role: "diretor", companyId: "cmp-zeta" });
+  });
+
+  it("uma escolha guardada que já não pertence à conta é ignorada (vale o Padrão)", () => {
+    assert.deepEqual(contextoInicial(ANA, { role: "ceo", companyId: "cmp-x" }), { role: "consultor", companyId: "cmp-beta" });
+  });
+
+  it("um cargo guardado sem empresa guardada usa o Padrão desse cargo", () => {
+    assert.deepEqual(contextoInicial(ANA, { role: "consultor" }), { role: "consultor", companyId: "cmp-beta" });
+  });
+
+  it("sem Padrão nenhum, mantém o comportamento anterior (perfil principal)", () => {
+    const user = { role: "consultor", companies: ANA.companies.map(({ is_default, ...c }) => c) };
+    assert.deepEqual(contextoInicial(user), { role: "consultor", companyId: "cmp-alfa" });
+  });
+
+  it("conta sem empresas: perfil principal, sem empresa", () => {
+    assert.deepEqual(contextoInicial({ role: "parceiro", companies: [] }), { role: "parceiro", companyId: null });
   });
 });

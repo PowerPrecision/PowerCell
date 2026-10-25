@@ -76,6 +76,42 @@ async def condicao_de_isolamento_dos_registos(user: dict) -> dict:
     return {"$or": [{"$and": [pool, _SEM_PROCESSOS]}, estrita]}
 
 
+async def nomes_dos_autores(clientes: list[dict]) -> dict[str, str]:
+    """`{client_id: nome de quem criou a ficha}`, só para as linhas desta página (Out 2026).
+
+    O nome gravado à nascença (`created_by_name`) manda. As fichas antigas só têm o EMAIL do autor
+    (`created_by`): resolve-se num único pedido a `users`, só com o nome. Um email que já não casa com
+    ninguém (conta apagada, sistema) não tem nome — o ecrã mantém «Criado pela Equipa».
+    """
+    nomes: dict[str, str] = {}
+    por_email: dict[str, list[str]] = {}
+    for c in clientes:
+        cid = c.get("id")
+        if not cid:
+            continue
+        gravado = str(c.get("created_by_name") or "").strip()
+        if gravado:
+            nomes[cid] = gravado
+            continue
+        email = str(c.get("created_by") or "").strip().lower()
+        if email and "@" in email:
+            por_email.setdefault(email, []).append(cid)
+    if por_email:
+        try:
+            utilizadores = await db.users.find(
+                {"email": {"$in": sorted(por_email)}}, {"_id": 0, "email": 1, "name": 1},
+            ).to_list(length=len(por_email))
+        except Exception as exc:  # noqa: BLE001 — sem nome, o ecrã mostra a origem genérica
+            logger.warning("[registos] Falha a ler os nomes dos autores: %s", exc)
+            utilizadores = []
+        for u in utilizadores:
+            nome = str(u.get("name") or "").strip()
+            for cid in por_email.get(str(u.get("email") or "").strip().lower(), []):
+                if nome:
+                    nomes[cid] = nome
+    return nomes
+
+
 async def run_list_registered_clients(
     user: dict,
     search: Optional[str] = None,
@@ -379,7 +415,9 @@ async def run_list_registered_clients(
             {"_id": 0, "id": 1, "name": 1}
         ).to_list(length=50)
         assigned_users = {u["id"]: u["name"] for u in users}
-    
+
+    autores = await nomes_dos_autores(clients)
+
     # Os processos de cada linha: UM pedido, dentro do âmbito de PROCESSOS. Um id da lista do
     # cliente que aponte para um processo de outra rede (por exemplo depois de «Alterar Empresa»,
     # que move processos e não a ficha) não é visível — nem aparece, nem conta, nem esconde o lead.
@@ -504,6 +542,8 @@ async def run_list_registered_clients(
             "created_at": c.get("created_at"),
             "updated_at": c.get("updated_at"),
             "fonte": c.get("fonte"),
+            # Quem criou a ficha: a ORIGEM «Criado pela Equipa» passa a «Criado por <nome>».
+            "created_by_name": autores.get(c.get("id")),
             # Lead de parceiro: coluna «Parceiro» nas listas da equipa.
             "parceiro_name": c.get("submitted_by_partner_name"),
             # Validação financeira (aviso, nunca travão): o estado e se é

@@ -1347,10 +1347,16 @@ const ProcessesPageCompleta = () => {
  * que entra como Index vê o que um Index vê) faz triagem e precisa de Processo, Empresa/Origem, Estado,
  * Documentos, Alertas e Entrada; os restantes perfis têm a tabela de acompanhamento de negócios.
  * A decisão vive aqui, num só sítio, antes de qualquer hook da página completa (as regras dos hooks).
+ *
+ * Out 2026: só «Os Meus Processos» (`/processos`) é a lista do Index. «Todos os Processos»
+ * (`/lista-processos`, `show_all`) é a Visão Global da rede para TODOS os perfis, Index incluído — antes
+ * o Index caía na sua lista de atribuídos nos dois endereços e não via o resto da rede para o ir buscar.
  */
 const ProcessesPage = () => {
   const { effectiveRole } = useAuth();
-  return effectiveRole === "indexacao" ? <OsMeusProcessosDoIndex /> : <ProcessesPageCompleta />;
+  const { pathname } = useLocation();
+  const listaDoIndex = effectiveRole === "indexacao" && pathname !== "/lista-processos";
+  return listaDoIndex ? <OsMeusProcessosDoIndex /> : <ProcessesPageCompleta />;
 };
 
 export default ProcessesPage;

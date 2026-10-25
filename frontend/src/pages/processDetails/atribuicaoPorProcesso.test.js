@@ -24,7 +24,8 @@ describe("ProcessDetails — listas de atribuição do processo", () => {
   it("o staff, a indexação e o parceiro levam o processId", () => {
     const corpo = corpoDeFetchUsers();
     expect(corpo).toMatch(/getStaffUsers\(\{ processId: id \}\)/);
-    expect(corpo).toMatch(/getUsers\("indexacao", \{ processId: id \}\)/);
+    // O Index é uma lista de ATRIBUIÇÃO: `forAssignment` faz o servidor juntar os indexadores da rede.
+    expect(corpo).toMatch(/getUsers\("indexacao", \{ processId: id, forAssignment: true \}\)/);
     expect(corpo).toMatch(/getUsers\("parceiro", \{ processId: id \}\)/);
   });
 

@@ -267,11 +267,50 @@ export function resolveCompanyIdFromUser(user, hint, role) {
     if (byName) return byName.company_id;
   }
   if (role) {
-    const byRole = records.find((c) => c.role === role);
+    // Entre as empresas do mesmo cargo, a marcada «Padrão» vence a primeira da lista.
+    const byRole = records.find((c) => c.role === role && c.is_default)
+      || records.find((c) => c.role === role);
     if (byRole) return byRole.company_id;
   }
   const fallback = records.find((c) => c.is_default) || records[0];
   return fallback?.company_id || null;
+}
+
+/**
+ * O perfil (cargo + empresa) com que a sessão arranca — no login e num F5.
+ *
+ * Out 2026: o arranque escolhia o primeiro UCR com o perfil PRINCIPAL da conta (a ordem
+ * alfabética das empresas) e ignorava o perfil marcado «Padrão». Agora:
+ *   1. uma escolha feita NESTE separador (`guardado`, do sessionStorage) sobrevive ao F5 —
+ *      é ela que a troca de empresa usa para recarregar a página;
+ *   2. sem escolha (login, separador novo), manda o perfil «Padrão», mesmo com outro cargo;
+ *   3. sem «Padrão», o comportamento anterior (perfil principal).
+ * Uma escolha guardada que já não pertence à conta é ignorada.
+ *
+ * @returns {{ role: string|null, companyId: string|null }}
+ */
+export function contextoInicial(user, guardado = {}) {
+  const roles = collectUserRoles(user);
+  const roleGuardado = normalizeRole(guardado?.role || "");
+  if (roleGuardado && roles.includes(roleGuardado)) {
+    const records = getUserCompanyRecords(user)
+      .map((c) => normalizeCompanyRecord(c))
+      .filter((c) => c && c.company_id);
+    const empresaGuardada = records.find(
+      (c) => c.company_id === guardado?.companyId && c.role === roleGuardado,
+    );
+    return {
+      role: roleGuardado,
+      companyId: empresaGuardada?.company_id
+        || resolveCompanyIdFromUser(user, null, roleGuardado),
+    };
+  }
+  const padrao = getUserCompanyRecords(user)
+    .map((c) => normalizeCompanyRecord(c))
+    .find((c) => c && c.is_default && c.company_id);
+  if (padrao) return { role: padrao.role, companyId: padrao.company_id };
+  const principal = normalizeRole(user?.role || "") || null;
+  return { role: principal, companyId: resolveCompanyIdFromUser(user, null, principal) };
 }
 
 /** Roles presentes no user (primário + additional + UCRs) — para validar activeRole. */

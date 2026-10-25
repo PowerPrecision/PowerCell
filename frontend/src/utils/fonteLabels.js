@@ -64,4 +64,21 @@ export const formatFonteLabel = (fonte) => {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
+/**
+ * A origem de um CLIENTE numa lista: como `formatFonteLabel`, mas uma ficha criada pela equipa diz QUEM
+ * a criou («Criado por João Silva») quando o servidor manda o nome (`created_by_name`). Sem nome
+ * (fichas de contas apagadas, sistema) fica «Criado pela Equipa» — nunca se inventa um autor.
+ *
+ * @param {{fonte?: string, created_by_name?: string}} cliente
+ * @returns {string}
+ */
+export const formatOrigemDoCliente = (cliente) => {
+  const fonte = cliente?.fonte;
+  const autor = typeof cliente?.created_by_name === "string" ? cliente.created_by_name.trim() : "";
+  if (autor && String(fonte ?? "").trim().toLowerCase() === "staff_created") {
+    return `Criado por ${autor}`;
+  }
+  return formatFonteLabel(fonte);
+};
+
 export default FONTE_LABELS;

@@ -10,7 +10,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, ExternalLink, Eye, FileText, Loader2, PenLine } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Eye, FileText, Loader2, PenLine, UserPlus } from "lucide-react";
 
 import DashboardLayout from "../../layouts/DashboardLayout";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
@@ -199,6 +199,8 @@ export default function IndexWorkstationPage() {
   const aRever = totalDeCamposARever(trabalhos);
   const semNif = trabalhosSemNifConfirmado(trabalhos);
   const ocupado = haJobActivo(jobsActivos);
+  // «Atribuir a mim» (Out 2026): só o Index, só o que é de outro (ou de ninguém) e ainda está «Por indexar».
+  const podeAssumir = daEquipa && processo.assigned_to_me !== true && processo.index_status === "pending";
 
   const marcar = (employers) =>
     m.marcarIndexado.mutate({ employers }, { onSuccess: () => setDialogoAberto(false) });
@@ -237,10 +239,23 @@ export default function IndexWorkstationPage() {
           }
           actions={
             daEquipa ? (
-              <Button variant="ghost" onClick={irParaOsMeus}>
-                <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                Os meus processos
-              </Button>
+              <span className="flex flex-wrap items-center gap-2">
+                {podeAssumir && (
+                  <Button
+                    onClick={() => m.assumir.mutate()}
+                    disabled={m.assumir.isPending}
+                    data-testid="botao-atribuir-a-mim"
+                    title="Só processos «Por indexar» que ainda ninguém começou"
+                  >
+                    <UserPlus className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                    Atribuir a mim
+                  </Button>
+                )}
+                <Button variant="ghost" onClick={irParaOsMeus}>
+                  <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                  Os meus processos
+                </Button>
+              </span>
             ) : undefined
           }
         />

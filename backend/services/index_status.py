@@ -176,6 +176,27 @@ def condicao_da_fila(aba: str) -> dict:
 # ====================================================================
 # TRABALHO EM CURSO (pending → in_review, automático)
 # ====================================================================
+async def assumir(process_id: str, anterior: Optional[str], novo: dict) -> bool:
+    """«Atribuir a mim» (Out 2026): passa o processo ao indexador `novo` SÓ se o dono e o estado são os lidos.
+
+    Condicional a `anterior` (ou a nenhum) e a ninguém ter começado (`in_review`, indexado, Via Verde):
+    se o colega abrir a bancada entretanto, ganha quem trabalha (`False`). O relógio das 48 h recomeça.
+    """
+    agora = _agora()
+    r = await db.processes.update_one(
+        {
+            "id": process_id, "is_deleted": {"$ne": True}, "is_indexed": {"$ne": True}, "skip_index": {"$ne": True},
+            "index_status": {"$ne": IN_REVIEW},
+            "assigned_indexacao_id": anterior if anterior else {"$in": [None, ""]},
+        },
+        {"$set": {
+            "assigned_indexacao_id": novo.get("id"), "indexacao_name": novo.get("name"),
+            "index_assigned_at": agora, "updated_at": agora,
+        }},
+    )
+    return bool(r.modified_count)
+
+
 async def registar_trabalho(process_id: str, user_id: Optional[str]) -> dict[str, Any]:
     """O indexador ATRIBUÍDO trabalhou no processo: arranca o tratamento e carimba a actividade.
 

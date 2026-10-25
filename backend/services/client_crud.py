@@ -330,6 +330,7 @@ async def run_create_client(
         created_at=now,
         updated_at=now,
         created_by=user.get("email"),
+        created_by_name=(user.get("name") or "").strip() or None,
         # BUGFIX (UX Fix #3, Fev 2026): sem isto, o cliente nunca aparecia na
         # lista "Registos de Clientes" (a query dessa página filtra sempre
         # por registration_completed=True — antes só era definido pelo

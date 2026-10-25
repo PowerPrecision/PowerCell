@@ -32,6 +32,7 @@ vi.mock("sonner", () => ({ toast }));
 vi.mock("../../services/api", () => ({
   getIndexWorkstation: vi.fn(),
   startIndexWork: vi.fn(),
+  assumirIndexProcess: vi.fn(),
   getIndexProcessFileContent: vi.fn(),
   getIndexDocumentContent: vi.fn(),
   uploadProcessS3File: vi.fn(),
@@ -642,5 +643,39 @@ describe("a justificação exacta de cada alerta", () => {
     const detalhe = await screen.findByTestId("alerta-detalhe");
     expect(detalhe.querySelector("img")).toBeNull();
     expect(detalhe.textContent).toContain("<img src=x");
+  });
+});
+
+// Out 2026 — «Atribuir a mim»: o Index puxa um processo «Por indexar» que o colega ainda não abriu.
+describe("«Atribuir a mim» na bancada", () => {
+  const deOutro = (estado = "pending") => ({ ...BANCADA, process: { ...BANCADA.process, index_status: estado, assigned_to_me: false } });
+
+  it("o Index vê o botão num processo por indexar de outro e assume-o", async () => {
+    sessao.papel = "indexacao";
+    api.assumirIndexProcess.mockResolvedValue({ data: { success: true } });
+    const utilizador = userEvent.setup();
+    montar(deOutro());
+    await utilizador.click(await screen.findByTestId("botao-atribuir-a-mim"));
+    await waitFor(() => expect(api.assumirIndexProcess).toHaveBeenCalledWith("proc-1"));
+    expect(toast.success).toHaveBeenCalled();
+  });
+
+  it("não aparece num processo já em tratamento, nem no que já é seu, nem à gestão", async () => {
+    sessao.papel = "indexacao";
+    api.startIndexWork.mockResolvedValue({ data: { iniciado: false } });
+    const { unmount } = montar(deOutro("in_review"));
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.queryByTestId("botao-atribuir-a-mim")).not.toBeInTheDocument();
+    unmount();
+
+    const meu = montar({ ...BANCADA, process: { ...BANCADA.process, assigned_to_me: true } });
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.queryByTestId("botao-atribuir-a-mim")).not.toBeInTheDocument();
+    meu.unmount();
+
+    sessao.papel = "diretor";
+    montar(deOutro());
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.queryByTestId("botao-atribuir-a-mim")).not.toBeInTheDocument();
   });
 });
