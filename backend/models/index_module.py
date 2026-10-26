@@ -125,6 +125,9 @@ class TrabalhoProfissional(BaseModel):
     #: O tipo de contrato (e a admissão) vêm da Declaração de Efetividade, que tem precedência
     #: absoluta sobre os recibos (decisão da direcção, Out 2026). Nunca editável: é um facto derivado.
     certified_by_declaration: bool = False
+    #: De quem é o emprego (`titular1`/`titular2`), só em processos com 2.º titular: o titular dos documentos
+    #: de origem (o marcador do ficheiro manda, não a conta que o enviou). `None` com um só comprador.
+    titular: Optional[str] = Field(default=None, pattern=r"^titular[12]$")
     period: Optional[str] = None
     source_document_ids: list[str] = Field(default_factory=list)
 

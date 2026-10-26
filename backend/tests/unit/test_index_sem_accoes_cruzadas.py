@@ -77,6 +77,7 @@ ROTAS_DE_ESCRITA = [
     ("POST", "/processes/{process_id}/sanitize"),
     ("PATCH", "/processes/{process_id}/professional-metadata/{job_id}"),
     ("POST", "/processes/{process_id}/alerts/{alert_id}/dismiss"),
+    ("PATCH", "/processes/{process_id}/files/{document_id}/titular"),
     ("POST", "/processes/{process_id}/mark-indexed"),
 ]
 

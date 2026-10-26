@@ -433,6 +433,22 @@ async def run_edit_professional_job(
     }
 
 
+async def run_set_file_titular(user: dict, process_id: str, document_id: str, titular: str) -> dict[str, Any]:
+    """Corrige de quem é um ficheiro. Só com 2.º titular; vale para qualquer ficheiro do processo (também os do
+    cliente: um recibo do 2.º enviado pela conta do 1.º). A próxima análise refaz os empregos por titular."""
+    proc = await _carregar_processo(process_id, user)
+    if not titulares_do_caso(SimpleNamespace(e_processo=True, process=proc, client=None)):
+        raise HTTPException(status_code=422, detail="Este processo só tem um titular.")
+    feito = await db.document_metadata.update_one(
+        {"id": document_id, "process_id": process_id}, {"$set": {"titular": titular}}
+    )
+    if not feito.matched_count:
+        raise HTTPException(status_code=404, detail="Documento não encontrado neste processo.")
+    await _auditar(user, process_id, "Titular do documento corrigido", ["titular"])
+    await _trabalhou(user, process_id)
+    return {"success": True, "id": document_id, "titular": titular}
+
+
 async def run_dismiss_alert(user: dict, process_id: str, alert_id: str) -> dict[str, Any]:
     await _carregar_processo(process_id, user)
     alerta = await store.dispensar_alerta(process_id, alert_id, user.get("id"))

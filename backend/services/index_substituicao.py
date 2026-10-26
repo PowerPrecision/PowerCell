@@ -14,8 +14,13 @@ A REGRA (pura: `documentos_substituidos`)
 * só num processo COM Index (`skip_index` desligado: Via Verde e redes sem Index ficam como estavam);
 * só os três tipos (`TIPOS_SUBSTITUIVEIS`); a identificação e o resto nunca se escondem;
 * por **(tipo, titular)**: o recibo que o Index carregou para o 1.º titular não esconde os recibos do 2.º;
-* o trabalho (entidade patronal) não entra na chave: o Index volta a carregar os comprovativos de TODOS os
-  trabalhos, e os dele agrupam-se por NIF na análise como sempre;
+* recibos e declarações também por **emprego** (afinação do cliente, Out 2026): o recibo do «Emprego A»
+  só esconde os do cliente desse mesmo emprego; os do «Emprego B» continuam a contar até o Index carregar os
+  dele. O emprego é a entidade patronal (NIF válido; o nome só quando os NIFs não discordam — a mesma regra
+  das declarações em `index_store`). Sem entidade conhecida (ainda por ler) **não se esconde**: um recibo do
+  Index sem entidade não substitui nada, e um do cliente sem entidade continua a contar. A análise do Index lê
+  os do cliente que ainda contam, e a entidade deles aparece;
+* os extratos não têm emprego: por (tipo, titular);
 * o tipo de um ficheiro: o que a análise do Index gravou (`index_facts.tipo`) e, antes dela, o que a
   categorização e o nome dizem (`tipo_de_analise`). Um upload do Index ainda por categorizar não esconde nada;
 * nunca se apaga nem se move nada: o documento continua no armazenamento e volta a contar se o do Index sair.
@@ -23,8 +28,10 @@ A REGRA (pura: `documentos_substituidos`)
 DE QUEM É UM DOCUMENTO
 ======================
 Só há titulares a distinguir com 2.º titular (sem ele, tudo é do 1.º). Um marcador explícito (`titular`, que
-o Index escolhe ao carregar e o parceiro também grava) vence; sem ele, o envio feito pelo próprio 2.º cliente
-(`client_id` do registo do Portal) é do 2.º; o resto é do 1.º.
+o Index escolhe ao carregar, pode corrigir em cada ficheiro na bancada e o parceiro também grava) vence SEMPRE,
+seja qual for a conta que enviou; sem ele, o envio feito pelo próprio 2.º cliente (`client_id` do registo do
+Portal) é do 2.º; o resto é do 1.º. A mesma atribuição decide de quem é o emprego nos metadados profissionais
+e a quem vão os rendimentos no motor financeiro (`financial_engine`).
 
 ONDE SE APLICA
 ==============
@@ -37,12 +44,16 @@ import logging
 from typing import Any, Iterable, Optional
 
 from database import db
+from models.index_module import nif_e_valido, normalizar_nif
 from services.index_ai import TIPO_DECLARACAO, TIPO_EXTRATO, TIPO_RECIBO, tipo_de_analise
+from services.index_matrix import nome_normalizado_da_entidade
 from services.partner_titulares import TITULAR_1, TITULAR_2, titular_marcado
 
 logger = logging.getLogger(__name__)
 
 TIPOS_SUBSTITUIVEIS = (TIPO_RECIBO, TIPO_EXTRATO, TIPO_DECLARACAO)
+#: Os que pertencem a um emprego: só se substituem dentro da mesma entidade patronal.
+TIPOS_POR_EMPREGO = (TIPO_RECIBO, TIPO_DECLARACAO)
 
 #: Quem pode pedir para VER os substituídos: os mesmos que vêem a pasta `Index`.
 PAPEIS_QUE_VEEM_OS_SUBSTITUIDOS = ("master", "admin", "ceo", "diretor", "indexacao")
@@ -50,6 +61,10 @@ PAPEIS_QUE_VEEM_OS_SUBSTITUIDOS = ("master", "admin", "ceo", "diretor", "indexac
 _PROJECCAO = {
     "_id": 0, "id": 1, "s3_path": 1, "filename": 1, "ai_category": 1, "ai_subcategory": 1,
     "index_facts.tipo": 1, "uploaded_by_index": 1, "is_clean_pdf": 1, "titular": 1, "client_id": 1,
+    "index_facts.employer_nif": 1, "index_facts.employer_name": 1,
+    "index_job.employer_nif.value": 1, "index_job.employer_name.value": 1,
+    "extracted_data.empresa": 1, "extracted_data.entidade_patronal": 1, "extracted_data.nif_empresa": 1,
+    "extracted_data.nif_entidade_patronal": 1,
 }
 
 
@@ -77,6 +92,46 @@ def tipo_do_documento(doc: dict) -> Optional[str]:
     return tipo if tipo in TIPOS_SUBSTITUIVEIS else None
 
 
+def _dict(valor: Any) -> dict:
+    return valor if isinstance(valor, dict) else {}
+
+
+def entidade_do_documento(doc: dict) -> set[str]:
+    """As identidades da entidade patronal do documento: `nif:<válido>` e `nome:<normalizado>`.
+
+    Da análise do Index (`index_facts`, depois `index_job`) e, antes dela, do que a categorização leu
+    (`extracted_data`). Vazio quando ainda ninguém leu a entidade.
+    """
+    factos, job, lido = _dict(doc.get("index_facts")), _dict(doc.get("index_job")), _dict(doc.get("extracted_data"))
+    empresa = lido.get("empresa")
+    nif = (
+        factos.get("employer_nif") or _dict(job.get("employer_nif")).get("value")
+        or lido.get("nif_empresa") or lido.get("nif_entidade_patronal") or _dict(empresa).get("nif")
+    )
+    nome = (
+        factos.get("employer_name") or _dict(job.get("employer_name")).get("value")
+        or (_dict(empresa).get("nome") if isinstance(empresa, dict) else empresa) or lido.get("entidade_patronal")
+    )
+    chaves: set[str] = set()
+    normal = normalizar_nif(nif) if isinstance(nif, (str, int)) else None
+    if normal and nif_e_valido(normal):
+        chaves.add(f"nif:{normal}")
+    nome_normal = nome_normalizado_da_entidade(nome) if isinstance(nome, str) else None
+    if nome_normal:
+        chaves.add(f"nome:{nome_normal}")
+    return chaves
+
+
+def mesma_entidade(a: set[str], b: set[str]) -> bool:
+    """NIF válido primeiro; o nome só quando os NIFs não discordam. Sem identidade de um dos lados: não."""
+    nifs_a, nifs_b = {c for c in a if c.startswith("nif:")}, {c for c in b if c.startswith("nif:")}
+    if nifs_a & nifs_b:
+        return True
+    if nifs_a and nifs_b:
+        return False  # dois NIFs válidos diferentes são duas entidades, mesmo com o mesmo nome
+    return bool((a - nifs_a) & (b - nifs_b))
+
+
 def titular_do_documento(doc: dict, processo: Optional[dict], registo: Optional[dict] = None) -> str:
     """`titular1`/`titular2`. `registo` é o do envio (`documents`, Portal/Parceiro), se houver."""
     if not tem_segundo_titular(processo):
@@ -99,8 +154,8 @@ def documentos_substituidos(
     if not processo_tem_index(processo):
         return set()
     registos_por_caminho = registos_por_caminho or {}
-    do_index: set[tuple[str, str]] = set()
-    do_cliente: list[tuple[str, tuple[str, str]]] = []
+    do_index: dict[tuple[str, str], list[set[str]]] = {}
+    do_cliente: list[tuple[str, tuple[str, str], set[str]]] = []
     for doc in docs:
         if not isinstance(doc, dict) or doc.get("is_clean_pdf") or not doc.get("id"):
             continue
@@ -108,11 +163,20 @@ def documentos_substituidos(
         if not tipo:
             continue
         chave = (tipo, titular_do_documento(doc, processo, registos_por_caminho.get(doc.get("s3_path") or "")))
+        entidade = entidade_do_documento(doc) if tipo in TIPOS_POR_EMPREGO else set()
         if doc.get("uploaded_by_index"):
-            do_index.add(chave)
+            do_index.setdefault(chave, []).append(entidade)
         else:
-            do_cliente.append((doc["id"], chave))
-    return {doc_id for doc_id, chave in do_cliente if chave in do_index}
+            do_cliente.append((doc["id"], chave, entidade))
+
+    def substituido(chave: tuple[str, str], entidade: set[str]) -> bool:
+        if chave not in do_index:
+            return False
+        if chave[0] not in TIPOS_POR_EMPREGO:
+            return True
+        return any(mesma_entidade(entidade, do_dele) for do_dele in do_index[chave])
+
+    return {doc_id for doc_id, chave, entidade in do_cliente if substituido(chave, entidade)}
 
 
 async def _registos_do_envio(process_id: str, caminhos: list[str]) -> dict[str, dict]:
@@ -224,6 +288,7 @@ async def aplicar_a_listagem(listagem: Any, process_id: Optional[str], papel: Op
 __all__ = [
     "TIPOS_SUBSTITUIVEIS", "PAPEIS_QUE_VEEM_OS_SUBSTITUIDOS", "processo_tem_index", "tem_segundo_titular",
     "tipo_do_documento", "titular_do_documento", "documentos_substituidos", "ids_substituidos",
-    "titulares_e_substituidos", "aplicar_a_listagem",
+    "titulares_e_substituidos", "aplicar_a_listagem", "TIPOS_POR_EMPREGO", "entidade_do_documento",
+    "mesma_entidade",
     "pode_ver_os_substituidos",
 ]

@@ -1346,6 +1346,8 @@ export const sanitizeIndexProcess = (processId) =>
   api.post(`/index/processes/${processId}/sanitize`, null, { skipErrorToast: true });
 export const editIndexJob = (processId, jobId, fields) =>
   api.patch(`/index/processes/${processId}/professional-metadata/${jobId}`, { fields }, { skipErrorToast: true });
+export const setIndexFileTitular = (processId, documentId, titular) =>
+  api.patch(`/index/processes/${processId}/files/${documentId}/titular`, { titular }, { skipErrorToast: true });
 export const dismissIndexAlert = (processId, alertId) =>
   api.post(`/index/processes/${processId}/alerts/${alertId}/dismiss`, null, { skipErrorToast: true });
 export const markIndexProcessIndexed = (processId, employers = []) =>

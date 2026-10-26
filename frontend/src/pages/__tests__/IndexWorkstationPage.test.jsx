@@ -41,6 +41,7 @@ vi.mock("../../services/api", () => ({
   extractIndexProcess: vi.fn(),
   editIndexJob: vi.fn(),
   dismissIndexAlert: vi.fn(),
+  setIndexFileTitular: vi.fn(),
   sanitizeIndexProcess: vi.fn(),
   markIndexProcessIndexed: vi.fn(),
   searchIndexEmployers: vi.fn(),
@@ -771,10 +772,40 @@ describe("comprovativos do cliente substituídos pelos do Index (Out 2026)", () 
   it("com 2.º titular cada ficheiro diz de quem é e o upload pergunta", async () => {
     montar(COM_SUBSTITUIDO);
     await screen.findByRole("heading", { name: /Marta Quintela/ });
-    const linhas = screen.getAllByTestId("ficheiro-do-index");
-    expect(within(linhas[0]).getByText("1.º titular")).toBeInTheDocument();
-    expect(within(linhas[1]).getByText("2.º titular")).toBeInTheDocument();
+    const seletores = screen.getAllByTestId("ficheiro-titular");
+    expect(seletores.map((s) => s.value)).toEqual(["titular1", "titular2"]);
     expect(screen.getByRole("button", { name: "2.º titular · Rui Quintela" })).toBeInTheDocument();
+  });
+
+  it("o Index corrige o titular de um ficheiro (manda sobre a conta que o enviou)", async () => {
+    sessao.papel = "indexacao";
+    api.setIndexFileTitular.mockResolvedValue({ data: { success: true } });
+    api.startIndexWork.mockResolvedValue({ data: { success: true } });
+    montar({ ...COM_SUBSTITUIDO, process: { ...COM_SUBSTITUIDO.process, assigned_to_me: true } });
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "De quem é — recibo_validado.pdf" }), "titular2");
+    await waitFor(() => expect(api.setIndexFileTitular).toHaveBeenCalledWith("proc-1", "i1", "titular2"));
+    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("Analisar"));
+  });
+
+  it("no processo de um colega o titular não se muda", async () => {
+    sessao.papel = "indexacao";
+    montar({ ...COM_SUBSTITUIDO, process: { ...COM_SUBSTITUIDO.process, assigned_to_other: true } });
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    screen.getAllByTestId("ficheiro-titular").forEach((s) => expect(s).toBeDisabled());
+  });
+
+  it("cada emprego diz de que titular é", async () => {
+    const comTitular = {
+      ...COM_SUBSTITUIDO,
+      professional_metadata: {
+        ...BANCADA.professional_metadata,
+        jobs: [{ ...BANCADA.professional_metadata.jobs[0], titular: "titular2" }],
+      },
+    };
+    montar(comTitular);
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.getByTestId("emprego-titular")).toHaveTextContent("2.º titular");
   });
 
   it("sem substituídos não há opção nenhuma", async () => {

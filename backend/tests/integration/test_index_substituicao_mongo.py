@@ -16,6 +16,7 @@ import pytest_asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from services import financial_engine as fe
+from services import index_ai as ia
 from services import index_api as api
 from services import index_jobs as jobs
 from services import index_status as ist
@@ -29,6 +30,8 @@ pytestmark = pytest.mark.asyncio
 
 USER = {"id": "u-index", "name": "Ivo Index", "role": "indexacao"}
 PID = "proc-sub"
+EMPREGO_A = "500000000"
+EMPREGO_B = "600000001"
 S3: dict[str, bytes] = {}
 
 
@@ -49,6 +52,8 @@ async def bd(monkeypatch):
         monkeypatch.setattr(modulo, "db", base)
     monkeypatch.setattr("database.db", base)
     monkeypatch.setenv("INDEX_AI_PROVIDER", "mock")
+    # o modelo simulado lê sempre o Emprego A (o NIF dele varia com o nome do ficheiro)
+    monkeypatch.setattr(ia, "_NIFS_SIMULADOS", (EMPREGO_A,))
     await base.processes.insert_one({
         "id": PID, "process_number": 7, "client_name": "Ana Cliente", "network_id": "rede-A",
         "is_indexed": False, "index_status": "in_review", "status": "indexacao", "assigned_indexacao_id": "u-index",
@@ -81,7 +86,9 @@ async def doc(bd, nome, *, sub_=None, categoria=None, **extra):
     return id_
 
 
-async def recibo(bd, nome, **extra):
+async def recibo(bd, nome, nif=EMPREGO_A, **extra):
+    # a entidade patronal que a categorização leu à entrada
+    extra.setdefault("extracted_data", {"nif_empresa": nif})
     return await doc(bd, nome, sub_="Recibo de Vencimento", categoria="Financeiros", **extra)
 
 
@@ -174,3 +181,92 @@ class TestSemIndex:
         await recibo(bd, "recibo_vencimento_outro.pdf", uploaded_by_index=True)
         assert await sub.ids_substituidos(PID) == set()
         assert c_rec in {d["id"] for d in await fe.collect_financial_documents(PID)}
+
+
+class TestPorEmprego:
+    async def test_o_emprego_b_continua_a_contar_ate_o_index_carregar_o_dele(self, bd):
+        c_a = await recibo(bd, "recibo_vencimento_a.pdf")
+        c_b = await recibo(bd, "recibo_vencimento_b.pdf", nif=EMPREGO_B)
+        await recibo(bd, "recibo_vencimento_a_index.pdf", uploaded_by_index=True)
+        assert await sub.ids_substituidos(PID) == {c_a}
+        assert c_b in {d["id"] for d in await fe.collect_financial_documents(PID)}
+        await recibo(bd, "recibo_vencimento_b_index.pdf", nif=EMPREGO_B, uploaded_by_index=True)
+        assert await sub.ids_substituidos(PID) == {c_a, c_b}
+
+
+class TestRendimentosPorTitular:
+    """O vencimento de um recibo marcado «2.º titular» nunca entra nos rendimentos do 1.º (Out 2026)."""
+
+    async def test_o_recibo_do_2o_enviado_pela_conta_do_1o_vai_para_o_2o(self, bd):
+        await bd.processes.update_one({"id": PID}, {"$set": {
+            "client_id": "cli-1", "second_client_id": "cli-2", "second_client_name": "Bruno Dias"}})
+        await recibo(bd, "recibo_vencimento_ana.pdf")
+        await recibo(bd, "recibo_vencimento_bruno.pdf", nif=EMPREGO_B, titular="titular2")
+        # foi a Ana (1.º titular) que o enviou pelo Portal: a conta não decide, decide o marcador
+        await bd.documents.insert_one({"id": "d-b", "s3_path": f"Documentação Clientes/{PID}/recibo_vencimento_bruno.pdf",
+                                       "client_id": "cli-1", "source": "client_portal"})
+        lidos = {
+            "recibo_vencimento_ana.pdf": {"empresa": "Clínica A", "salario_liquido": 1500},
+            "recibo_vencimento_bruno.pdf": {"empresa": "Oficina B", "salario_liquido": 900},
+        }
+
+        async def extrair(doc):
+            return lidos[doc["filename"]]
+
+        processo = await bd.processes.find_one({"id": PID}, {"_id": 0})
+        with patch.object(fe, "_extract_document_data", extrair):
+            r = await fe.consolidate_financial_data(processo, await fe.collect_financial_documents(PID))
+        fin = r["financial_data"]
+        assert fin["rendimento_liquido_total"] == 1500
+        assert [s["empresa"] for s in fin["salarios"]] == ["Clínica A"]
+        assert fin["rendimento_co_titular"] == 900
+        assert [s["empresa"] for s in fin["salarios_co_titular"]] == ["Oficina B"]
+        assert sorted(r["processed"]) == ["recibo_vencimento_ana.pdf", "recibo_vencimento_bruno.pdf"]
+
+    async def test_so_com_o_2o_titular_os_campos_do_1o_ficam_intactos(self, bd):
+        await bd.processes.update_one({"id": PID}, {"$set": {"second_client_id": "cli-2"}})
+        await recibo(bd, "recibo_vencimento_bruno.pdf", titular="titular2")
+
+        async def extrair(doc):
+            return {"empresa": "Oficina B", "salario_liquido": 900}
+
+        processo = await bd.processes.find_one({"id": PID}, {"_id": 0})
+        with patch.object(fe, "_extract_document_data", extrair):
+            r = await fe.consolidate_financial_data(processo, await fe.collect_financial_documents(PID))
+        assert r["financial_data"] == {"rendimento_co_titular": 900, "salarios_co_titular": r["financial_data"]["salarios_co_titular"]}
+        assert "rendimento_liquido_total" not in r["financial_data"]
+
+
+class TestCorrigirOTitular:
+    async def test_o_index_marca_o_recibo_do_2o_enviado_pela_conta_do_1o(self, bd):
+        from fastapi import HTTPException
+
+        await bd.processes.update_one({"id": PID}, {"$set": {"second_client_id": "cli-2", "second_client_name": "Bruno"}})
+        c = await recibo(bd, "recibo_bruno.pdf")
+        assert (await sub.titulares_e_substituidos(PID))[0][c] == "titular1"
+        r = await api.run_set_file_titular(USER, PID, c, "titular2")
+        assert r["titular"] == "titular2"
+        assert (await sub.titulares_e_substituidos(PID))[0][c] == "titular2"
+        with pytest.raises(HTTPException) as erro:
+            await api.run_set_file_titular(USER, PID, "nao-existe", "titular2")
+        assert erro.value.status_code == 404
+
+    async def test_com_um_so_titular_recusa(self, bd):
+        from fastapi import HTTPException
+
+        c = await recibo(bd, "recibo_ana.pdf")
+        with pytest.raises(HTTPException) as erro:
+            await api.run_set_file_titular(USER, PID, c, "titular2")
+        assert erro.value.status_code == 422
+        assert "titular" not in await bd.document_metadata.find_one({"id": c})
+
+
+class TestEmpregosPorTitularNaAnalise:
+    async def test_a_mesma_empresa_para_os_dois_titulares_da_dois_empregos(self, bd):
+        await bd.processes.update_one({"id": PID}, {"$set": {"second_client_id": "cli-2", "second_client_name": "Bruno"}})
+        a = await recibo(bd, "recibo_vencimento_ana.pdf")
+        b = await recibo(bd, "recibo_vencimento_bruno.pdf", titular="titular2")
+        await analisar()
+        meta = await bd.process_professional_metadata.find_one({"process_id": PID})
+        por_titular = {j["titular"]: j["source_document_ids"] for j in meta["jobs"]}
+        assert por_titular == {"titular1": [a], "titular2": [b]}

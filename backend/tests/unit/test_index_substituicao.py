@@ -21,16 +21,26 @@ def doc(id_, *, index=False, cat=None, subcat=None, nome="", **extra):
             "ai_subcategory": subcat, "uploaded_by_index": index, **extra}
 
 
-def recibo(id_, **kw):
-    return doc(id_, cat="Financeiros", subcat="Recibo de Vencimento", **kw)
+EMPREGO_A = "500000000"
+EMPREGO_B = "600000001"
+
+
+def _emprego(nif, kw):
+    if nif and "index_facts" not in kw and "extracted_data" not in kw:
+        kw["extracted_data"] = {"nif_empresa": nif}
+    return kw
+
+
+def recibo(id_, nif=EMPREGO_A, **kw):
+    return doc(id_, cat="Financeiros", subcat="Recibo de Vencimento", **_emprego(nif, kw))
 
 
 def extrato(id_, **kw):
     return doc(id_, cat="Bancários", subcat="Extrato Bancário", **kw)
 
 
-def declaracao(id_, **kw):
-    return doc(id_, cat="Financeiros", subcat="Declaração da Entidade Patronal", **kw)
+def declaracao(id_, nif=EMPREGO_A, **kw):
+    return doc(id_, cat="Financeiros", subcat="Declaração da Entidade Patronal", **_emprego(nif, kw))
 
 
 class TestARegra:
@@ -65,19 +75,62 @@ class TestARegra:
         assert sub.documentos_substituidos(docs, PROC) == set()
 
     def test_o_tipo_que_a_analise_do_index_gravou_manda(self):
-        docs = [recibo("c1"), doc("i1", index=True, cat="Outros", nome="a.pdf", index_facts={"tipo": "recibo_vencimento"})]
+        docs = [recibo("c1"), doc("i1", index=True, cat="Outros", nome="a.pdf",
+                                  index_facts={"tipo": "recibo_vencimento", "employer_nif": EMPREGO_A})]
         assert sub.documentos_substituidos(docs, PROC) == {"c1"}
 
     def test_o_pdf_limpo_nao_conta(self):
         docs = [recibo("c1"), recibo("l1", is_clean_pdf=True)]
         assert sub.documentos_substituidos(docs, PROC) == set()
 
-    def test_varios_trabalhos_do_mesmo_titular_saem_todos(self):
-        """O Index volta a carregar os comprovativos de todos os trabalhos: o trabalho não entra na chave."""
-        docs = [recibo("c1", index_facts={"tipo": "recibo_vencimento", "employer_nif": "500000000"}),
-                recibo("c2", index_facts={"tipo": "recibo_vencimento", "employer_nif": "600000000"}),
-                recibo("i1", index=True)]
+
+
+
+class TestPorEmprego:
+    """Afinação do cliente (Out 2026): o recibo do Emprego A só substitui os do Emprego A."""
+
+    def test_o_recibo_do_emprego_a_nao_esconde_os_do_emprego_b(self):
+        docs = [recibo("c1"), recibo("c2", nif=EMPREGO_B), recibo("i1", index=True)]
+        assert sub.documentos_substituidos(docs, PROC) == {"c1"}
+
+    def test_o_emprego_b_sai_quando_o_index_carrega_o_dele(self):
+        docs = [recibo("c1"), recibo("c2", nif=EMPREGO_B), recibo("i1", index=True), recibo("i2", index=True, nif=EMPREGO_B)]
         assert sub.documentos_substituidos(docs, PROC) == {"c1", "c2"}
+
+    def test_a_declaracao_tambem_e_por_emprego(self):
+        docs = [declaracao("c1"), declaracao("c2", nif=EMPREGO_B), declaracao("i1", index=True, nif=EMPREGO_B)]
+        assert sub.documentos_substituidos(docs, PROC) == {"c2"}
+
+    def test_o_extrato_nao_tem_emprego(self):
+        docs = [extrato("c1"), extrato("c2"), extrato("i1", index=True)]
+        assert sub.documentos_substituidos(docs, PROC) == {"c1", "c2"}
+
+    def test_upload_do_index_sem_entidade_lida_nao_substitui_nada(self):
+        docs = [recibo("c1"), recibo("c2", nif=EMPREGO_B), recibo("i1", index=True, nif=None)]
+        assert sub.documentos_substituidos(docs, PROC) == set()
+
+    def test_recibo_do_cliente_sem_entidade_lida_continua_a_contar(self):
+        docs = [recibo("c1", nif=None), recibo("i1", index=True)]
+        assert sub.documentos_substituidos(docs, PROC) == set()
+
+    def test_pelo_nome_quando_nao_ha_nif(self):
+        docs = [recibo("c1", nif=None, extracted_data={"empresa": "Clínica Santa Luzia, Lda."}),
+                recibo("i1", index=True, nif=None, index_facts={"tipo": "recibo_vencimento",
+                                                                 "employer_name": "CLINICA SANTA LUZIA LDA"})]
+        assert sub.documentos_substituidos(docs, PROC) == {"c1"}
+
+    def test_dois_nifs_diferentes_com_o_mesmo_nome_sao_dois_empregos(self):
+        docs = [recibo("c1", extracted_data={"nif_empresa": EMPREGO_A, "empresa": "Grupo X"}),
+                recibo("i1", index=True, extracted_data={"nif_empresa": EMPREGO_B, "empresa": "Grupo X"})]
+        assert sub.documentos_substituidos(docs, PROC) == set()
+
+    def test_a_entidade_da_analise_do_index_vence_a_da_categorizacao(self):
+        d = recibo("c1", extracted_data={"nif_empresa": EMPREGO_B}, index_facts={"employer_nif": EMPREGO_A})
+        assert sub.entidade_do_documento(d) == {f"nif:{EMPREGO_A}"}
+
+    def test_o_mesmo_emprego_de_titulares_diferentes_nao_se_mistura(self):
+        docs = [recibo("c1", titular="titular2"), recibo("i1", index=True, titular="titular1")]
+        assert sub.documentos_substituidos(docs, PROC_DOIS) == set()
 
 
 class TestPorTitular:

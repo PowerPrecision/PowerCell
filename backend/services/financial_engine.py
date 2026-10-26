@@ -47,6 +47,10 @@ from services.document_constants import DEFAULT_CLIENT_NAME, MIME_TYPE_PDF
 
 logger = logging.getLogger(__name__)
 
+# De quem é cada documento (`index_substituicao.titular_do_documento`).
+TITULAR_PRINCIPAL = "titular1"
+TITULAR_SEGUNDO = "titular2"
+
 
 # ====================================================================
 # TAXONOMIA DE DOCUMENTOS FINANCEIROS
@@ -173,13 +177,15 @@ async def collect_financial_documents(process_id: str) -> list[dict]:
     ).to_list(500)
 
     # Os comprovativos do cliente que o Index voltou a carregar já não contam: contam os dele.
-    from services.index_substituicao import ids_substituidos
+    # Cada documento leva o titular a quem pertence (o marcador do ficheiro manda, não a conta que o enviou).
+    from services.index_substituicao import titulares_e_substituidos
 
-    substituidos = await ids_substituidos(process_id)
+    titulares, substituidos = await titulares_e_substituidos(process_id)
     financial = []
     for doc in docs:
         if doc.get("id") in substituidos:
             continue
+        doc = {**doc, "titular": titulares.get(doc.get("id")) or TITULAR_PRINCIPAL}
         # O PDF limpo do Index (Lote 12) é uma cópia do original que já aqui está: contá-lo
         # extraía duas vezes o mesmo documento (chamada paga + rendimentos a dobrar).
         if doc.get("is_clean_pdf"):
@@ -310,12 +316,19 @@ async def consolidate_financial_data(
     """
     from services.documents.data_aggregator import ClientDataAggregator
 
+    # Um agregador por titular (afinação do cliente, Out 2026): o vencimento de um recibo do 2.º titular
+    # nunca entra nos rendimentos do 1.º, mesmo que tenha sido o 1.º a enviá-lo pelo Portal.
     aggregator = ClientDataAggregator(
         process.get("id") or "",
         process.get("client_name") or DEFAULT_CLIENT_NAME,
     )
+    do_segundo = ClientDataAggregator(
+        process.get("id") or "",
+        process.get("second_client_name") or DEFAULT_CLIENT_NAME,
+    )
     processed: list[str] = []
     failed: list[str] = []
+    processed_segundo: list[str] = []
 
     for doc in financial_documents:
         filename = str(doc.get("filename") or doc.get("s3_path") or "documento")
@@ -326,19 +339,42 @@ async def consolidate_financial_data(
         aggregator_type = AGGREGATOR_DOC_TYPES.get(
             doc.get("financial_doc_type") or "", "irs"
         )
+        e_do_segundo = doc.get("titular") == TITULAR_SEGUNDO
         try:
-            aggregator.add_extraction(aggregator_type, extracted, filename)
+            (do_segundo if e_do_segundo else aggregator).add_extraction(aggregator_type, extracted, filename)
             processed.append(filename)
+            if e_do_segundo:
+                processed_segundo.append(filename)
         except Exception as e:  # pragma: no cover — extracção malformada
             logger.warning(f"[MOTOR-FIN] Agregação falhou para '{filename}': {e}")
             failed.append(filename)
 
-    consolidated = aggregator.get_consolidated_data() if processed else {}
+    principal = set(processed) - set(processed_segundo)
+    consolidated = aggregator.get_consolidated_data() if principal else {}
+    financial_data = dict(consolidated.get("financial_data") or {})
+    if processed_segundo:
+        financial_data.update(rendimentos_do_segundo_titular(do_segundo.get_consolidated_data()))
     return {
-        "financial_data": consolidated.get("financial_data") or {},
+        "financial_data": financial_data,
         "processed": processed,
         "failed": failed,
     }
+
+
+def rendimentos_do_segundo_titular(consolidado: dict) -> dict:
+    """Os rendimentos lidos dos documentos do 2.º titular, nos campos DELE do processo.
+
+    `rendimento_co_titular` é o «Rendimento Co-Titular» do separador Financeiro, que o DSTI soma ao do 1.º;
+    `salarios_co_titular` guarda o detalhe por empresa. Nada vai para os campos do 1.º titular.
+    """
+    financeiro = (consolidado or {}).get("financial_data") or {}
+    saida: dict[str, Any] = {}
+    liquido = financeiro.get("rendimento_liquido_total") or financeiro.get("rendimento_mensal_irs")
+    if liquido:
+        saida["rendimento_co_titular"] = liquido
+    if financeiro.get("salarios"):
+        saida["salarios_co_titular"] = financeiro["salarios"]
+    return saida
 
 
 async def persist_financial_data(process_id: str, financial_data: dict) -> None:

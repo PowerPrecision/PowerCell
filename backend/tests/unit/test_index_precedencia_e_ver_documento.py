@@ -381,3 +381,27 @@ class TestARotaDoVerDocumento:
 
         r = resultado_do_documento({"id": "d1", "doc_type": "recibo", "process_id": "p", "filename": "ana_silva.pdf"})
         assert "ana_silva" not in str(r) and r["document_id"] == "d1"
+
+
+class TestEmpregosPorTitular:
+    """Afinação do cliente (Out 2026): o emprego e o vencimento seguem o titular do ficheiro."""
+
+    def test_dois_titulares_na_mesma_empresa_sao_dois_empregos(self):
+        recibos = [_recibo("r1", "2026-09", liquido=1500), _recibo("r2", "2026-09", liquido=900)]
+        trabalhos = store.calcular_trabalhos(recibos, [], {"r1": "titular1", "r2": "titular2"})
+        por_titular = {t.titular: t for t in trabalhos}
+        assert set(por_titular) == {"titular1", "titular2"}
+        assert str(por_titular["titular1"].net_salary.value) == "1500.00"
+        assert str(por_titular["titular2"].net_salary.value) == "900.00"
+        assert por_titular["titular2"].source_document_ids == ["r2"]
+
+    def test_a_declaracao_do_2o_nao_certifica_o_emprego_do_1o(self):
+        trabalhos = store.calcular_trabalhos(
+            [_recibo("r1", "2026-09")], [_declaracao("d2")], {"r1": "titular1", "d2": "titular2"})
+        assert trabalhos[0].contract_type.value == "termo_certo" and not trabalhos[0].certified_by_declaration
+
+    def test_o_job_id_do_1o_titular_nao_muda(self):
+        sem = store.calcular_trabalhos([_recibo("r1", "2026-09")], [])
+        com = store.calcular_trabalhos([_recibo("r1", "2026-09")], [], {"r1": "titular1"})
+        assert sem[0].job_id == com[0].job_id
+        assert sem[0].titular is None and com[0].titular == "titular1"

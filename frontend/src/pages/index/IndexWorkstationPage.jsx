@@ -68,7 +68,16 @@ function LigacaoAoProcesso({ processoId, children, ...resto }) {
 
 const ROTULO_DO_TITULAR = { titular1: "1.º titular", titular2: "2.º titular" };
 
-function ListaDeFicheiros({ ficheiros, processoId, onVer, onDescarregar, emCurso }) {
+function ListaDeFicheiros({
+  ficheiros,
+  processoId,
+  onVer,
+  onDescarregar,
+  emCurso,
+  titulares = [],
+  onMudarTitular,
+  motivoSomenteLeitura,
+}) {
   // os comprovativos do cliente que o Index já voltou a carregar não contam: escondidos, mas a um clique
   const [verSubstituidos, setVerSubstituidos] = useState(false);
   const substituidos = ficheiros.filter((f) => f.superseded === true).length;
@@ -101,7 +110,7 @@ function ListaDeFicheiros({ ficheiros, processoId, onVer, onDescarregar, emCurso
         return (
           <li key={f.id} className="flex flex-wrap items-center gap-2 py-2" data-testid="ficheiro-do-index">
             <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <span className={`min-w-0 flex-1 break-words text-sm ${f.superseded ? "text-muted-foreground line-through" : ""}`}>
+            <span className={`min-w-[12rem] flex-1 break-words text-sm ${f.superseded ? "text-muted-foreground line-through" : ""}`}>
               {nome}
             </span>
             {f.superseded && (
@@ -113,7 +122,24 @@ function ListaDeFicheiros({ ficheiros, processoId, onVer, onDescarregar, emCurso
                 Substituído
               </Badge>
             )}
-            {ROTULO_DO_TITULAR[f.titular] && <Badge variant="outline">{ROTULO_DO_TITULAR[f.titular]}</Badge>}
+            {titulares.length > 0 && f.titular && (
+              // o titular do ficheiro manda (não a conta que o enviou): o Index corrige-o aqui
+              <select
+                value={f.titular}
+                onChange={(e) => onMudarTitular?.(f.id, e.target.value)}
+                disabled={Boolean(motivoSomenteLeitura)}
+                title={motivoSomenteLeitura}
+                aria-label={`De quem é — ${nome}`}
+                data-testid="ficheiro-titular"
+                className="h-7 rounded-md border border-input bg-background px-1.5 text-xs"
+              >
+                {titulares.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {ROTULO_DO_TITULAR[t.id]}
+                  </option>
+                ))}
+              </select>
+            )}
             {f.category && <Badge variant="outline">{f.category}</Badge>}
             {rotuloDoTipoDeAnalise(f.analysis_type) &&
               (f.analysed ? (
@@ -351,6 +377,9 @@ export default function IndexWorkstationPage() {
                 onVer={(documentos, titulo) => setAVer({ documentos, titulo })}
                 onDescarregar={descarregar}
                 emCurso={emCurso}
+                titulares={processo.titulares || []}
+                onMudarTitular={(documentId, titular) => m.mudarTitular.mutate({ documentId, titular })}
+                motivoSomenteLeitura={motivoDeOutro}
               />
             </CardContent>
           </Card>
@@ -378,6 +407,11 @@ export default function IndexWorkstationPage() {
                   {trabalhos.map((t) => (
                     <li key={t.job_id} className="py-2 text-sm">
                       <span className="font-medium">{valorDoCampo(t.employer_name) || "Entidade por identificar"}</span>
+                      {ROTULO_DO_TITULAR[t.titular] && (
+                        <Badge variant="outline" className="ml-2" data-testid="emprego-titular">
+                          {ROTULO_DO_TITULAR[t.titular]}
+                        </Badge>
+                      )}
                       <span className="ml-2 text-muted-foreground">
                         {formatarDinheiro(valorDoCampo(t.net_salary))}
                       </span>
