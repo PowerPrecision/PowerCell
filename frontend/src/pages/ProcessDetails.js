@@ -3289,7 +3289,8 @@ const ProcessDetails = () => {
               )}
               deadlines={deadlines}
               onManageAssignment={openAssignDialog}
-              canManageAssignment={userRole !== "cliente"}
+              // o Index não muda atribuições (fica com um processo só pelo «Atribuir a mim»); o servidor também recusa
+              canManageAssignment={userRole !== "cliente" && !indexadorAtivo}
               priority={process?.prioridade || "media"}
               onPriorityChange={(value) => {
                 setProcess(prev => ({ ...prev, prioridade: value }));

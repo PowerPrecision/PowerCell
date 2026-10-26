@@ -945,6 +945,18 @@ describe("ProcessDetails — sem acções cruzadas entre indexadores (Out 2026)"
     expect(screen.queryByTestId("detalhe-atribuir-a-mim")).not.toBeInTheDocument();
   });
 
+  it("o Index não muda atribuições: o cartão Atribuição não tem «Gerir»", async () => {
+    sessao.papel = "indexacao";
+    comIndexador("u-rui");
+    const { unmount } = montar();
+    await screen.findByTestId("assignment-context-card");
+    expect(screen.queryByTestId("assign-users-btn")).not.toBeInTheDocument();
+    unmount();
+    sessao.papel = "diretor";
+    montar();
+    expect(await screen.findByTestId("assign-users-btn")).toBeInTheDocument();
+  });
+
   it("contraprova: no processo seu, e para a gestão no de qualquer um, o interruptor funciona", async () => {
     sessao.papel = "indexacao";
     comIndexador("u-1");

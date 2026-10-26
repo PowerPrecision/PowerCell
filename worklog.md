@@ -12630,3 +12630,10 @@ Pedido: o Master com uma empresa escolhida via os parceiros de todas as redes; e
 - Testes: `ProcessesPage.test.jsx` (+1, vermelho sem a correcção), `IndexWorkstationPage.test.jsx` (2 reescritos para a tooltip), `ProcessDetails.test.jsx` (+3). Frontend completo 4 488. Backend sem alterações.
 - Verificado no browser (local, dados fictícios): Inês → «Todos os Processos» → processo do Rui abre `/process/…` (2/6, separadores normais, «Atribuir a mim» e interruptor desligado); o seu abre a bancada; na bancada do Rui, a tooltip de «Analisar» diz o motivo.
 - Reparo, não mexido: no cartão «Atribuição» do detalhe o Index vê «Gerir».
+
+## Index: não muda atribuições (Out 2026)
+- Pedido: «o index n pode mudar atribuicoes».
+- Backend (`routes/processes.py`): dependência `_nao_e_o_index` (perfil efectivo via `get_effective_role_async`) devolve 403 «O perfil Index não altera atribuições de processos.» em `POST /processes/{id}/assign`, `/assign-me` e `/unassign-me`. «Atribuir a mim» da bancada (`/index/.../assumir`) não é isto e continua livre.
+- Frontend: o cartão «Atribuição» do detalhe deixa de mostrar «Gerir» ao Index (`canManageAssignment` com `!indexadorAtivo`). Fecha o reparo da entrada anterior.
+- Testes: `test_index_nao_muda_atribuicoes.py` (11), `ProcessDetails.test.jsx` (+1, vermelho antes da correcção).
+- Verificações: suite backend completa 13 394 passados + 90 saltados; o único falhado (`test_login_invalid_credentials`, 503) correu antes de o mongod local arrancar e passa ao repetir. Frontend completo 4 489.
