@@ -737,3 +737,50 @@ describe("sem acções cruzadas entre indexadores (Out 2026)", () => {
     expect(screen.getAllByRole("button", { name: /Dispensar alerta/ }).length).toBeGreaterThan(0);
   });
 });
+
+describe("comprovativos do cliente substituídos pelos do Index (Out 2026)", () => {
+  const COM_SUBSTITUIDO = {
+    ...BANCADA,
+    process: {
+      ...BANCADA.process,
+      titulares: [
+        { id: "titular1", label: "1.º titular", nome: "Marta Quintela" },
+        { id: "titular2", label: "2.º titular", nome: "Rui Quintela" },
+      ],
+    },
+    files: [
+      { ...BANCADA.files[0], id: "c1", filename: "scan_do_cliente.pdf", superseded: true, titular: "titular1" },
+      { ...BANCADA.files[0], id: "i1", filename: "recibo_validado.pdf", uploaded_by_index: true, titular: "titular1" },
+      { ...BANCADA.files[1], titular: "titular2" },
+    ],
+  };
+
+  it("o substituído não aparece até o Index o pedir, e aí vem marcado", async () => {
+    montar(COM_SUBSTITUIDO);
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.getAllByTestId("ficheiro-do-index")).toHaveLength(2);
+    expect(screen.queryByText("scan_do_cliente.pdf")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Ver os documentos do cliente substituídos (1)" }));
+    expect(screen.getAllByTestId("ficheiro-do-index")).toHaveLength(3);
+    const linha = screen.getByText("scan_do_cliente.pdf").closest("li");
+    expect(within(linha).getByTestId("badge-substituido")).toHaveTextContent("Substituído");
+    await userEvent.click(screen.getByRole("button", { name: "Esconder os documentos do cliente substituídos" }));
+    expect(screen.getAllByTestId("ficheiro-do-index")).toHaveLength(2);
+  });
+
+  it("com 2.º titular cada ficheiro diz de quem é e o upload pergunta", async () => {
+    montar(COM_SUBSTITUIDO);
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    const linhas = screen.getAllByTestId("ficheiro-do-index");
+    expect(within(linhas[0]).getByText("1.º titular")).toBeInTheDocument();
+    expect(within(linhas[1]).getByText("2.º titular")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "2.º titular · Rui Quintela" })).toBeInTheDocument();
+  });
+
+  it("sem substituídos não há opção nenhuma", async () => {
+    montar();
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.queryByTestId("ver-substituidos")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "De quem são os documentos" })).not.toBeInTheDocument();
+  });
+});

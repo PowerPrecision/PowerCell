@@ -112,4 +112,37 @@ describe("UploadNaBancada", () => {
     libertar();
     await waitFor(() => expect(screen.getByRole("button", { name: /Adicionar ficheiros/ })).toBeEnabled());
   });
+
+  describe("com 2.º titular (o do Index substitui os do cliente desse titular)", () => {
+    const TITULARES = [
+      { id: "titular1", label: "1.º titular", nome: "Ana" },
+      { id: "titular2", label: "2.º titular", nome: "Bruno" },
+    ];
+
+    it("pede primeiro de quem são os documentos: sem escolha não envia", async () => {
+      const { entrada } = montar({ titulares: TITULARES });
+      expect(screen.getByRole("button", { name: /Adicionar ficheiros/ })).toBeDisabled();
+      fireEvent.change(entrada, { target: { files: [pdf("a.pdf")] } });
+      expect(await screen.findByText("Escolha primeiro de quem são os documentos.")).toBeInTheDocument();
+      expect(uploadProcessS3File).not.toHaveBeenCalled();
+    });
+
+    it("envia o titular escolhido em cada ficheiro", async () => {
+      const { entrada } = montar({ titulares: TITULARES });
+      await userEvent.click(screen.getByRole("button", { name: "2.º titular · Bruno" }));
+      expect(screen.getByRole("button", { name: "2.º titular · Bruno" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: /Adicionar ficheiros/ })).toBeEnabled();
+      await userEvent.upload(entrada, [pdf("a.pdf"), pdf("b.pdf")]);
+      await waitFor(() => expect(uploadProcessS3File).toHaveBeenCalledTimes(2));
+      expect(uploadProcessS3File.mock.calls.map(([, f]) => f.get("titular"))).toEqual(["titular2", "titular2"]);
+    });
+
+    it("com um só comprador não pergunta nem envia titular", async () => {
+      const { entrada } = montar();
+      expect(screen.queryByRole("group", { name: "De quem são os documentos" })).not.toBeInTheDocument();
+      await userEvent.upload(entrada, [pdf("a.pdf")]);
+      await waitFor(() => expect(uploadProcessS3File).toHaveBeenCalled());
+      expect(uploadProcessS3File.mock.calls[0][1].has("titular")).toBe(false);
+    });
+  });
 });

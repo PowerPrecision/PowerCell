@@ -32,6 +32,7 @@ from services.document_filenames import (
 )
 from services.document_visibility import assert_can_upload_to_process
 from services.index_access import e_upload_do_index
+from services.partner_titulares import titular_marcado
 from services.index_finalize import agendar_analise_pos_indexacao
 from services.document_process_resolve import (
     extract_second_client_name,
@@ -223,6 +224,7 @@ async def run_upload_file_s3(
     background_tasks: BackgroundTasks,
     client_original_filename: Optional[str] = None,
     origem: str = "upload",
+    titular: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Pipeline completo de upload S3.
@@ -349,6 +351,14 @@ async def run_upload_file_s3(
             )
         except Exception as e:
             logger.warning(f"[UPLOAD] Erro ao agendar categorização: {e}")
+
+    marcado = titular_marcado(titular)
+    if marcado:
+        # de quem é o documento (1.º/2.º titular): é por titular que o do Index substitui o do cliente
+        try:
+            await db.document_metadata.update_one({"s3_path": s3_path}, {"$set": {"titular": marcado}})
+        except Exception as e:
+            logger.warning(f"[UPLOAD] Titular do documento não gravado: {e}")
 
     try:
         await log_history(

@@ -277,12 +277,21 @@ async def gravar_metadados(
     return modelo
 
 
+async def _fora_os_substituidos(process_id: str) -> dict[str, Any]:
+    """O filtro que tira os comprovativos do cliente que o Index já substituiu (`index_substituicao`)."""
+    from services.index_substituicao import ids_substituidos  # import tardio: index_substituicao lê o index_ai
+
+    ids = await ids_substituidos(process_id)
+    return {"id": {"$nin": sorted(ids)}} if ids else {}
+
+
 async def recalcular_metadados(process_id: str, network_id: Optional[str], impressao: Optional[str]) -> ProfessionalMetadata:
     """Recalcula os trabalhos a partir dos recibos que o processo TEM e grava."""
     entradas: list[tuple[str, TrabalhoProfissional]] = []
     cursor = db.document_metadata.find(
         # um original eliminado (`purgado`) continua a contar: os dados lidos dele não deixaram de ser verdade
-        {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_job": {"$exists": True, "$ne": None}},
+        {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_job": {"$exists": True, "$ne": None},
+         **await _fora_os_substituidos(process_id)},
         {"_id": 0, "id": 1, "index_job": 1},
     )
     for doc in await cursor.to_list(500):
@@ -307,7 +316,8 @@ async def _declaracoes_do_processo(process_id: str) -> list[tuple[str, dict]]:
     """
     try:
         docs = await db.document_metadata.find(
-            {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts.tipo": TIPO_DECLARACAO},
+            {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts.tipo": TIPO_DECLARACAO,
+             **await _fora_os_substituidos(process_id)},
             {"_id": 0, "id": 1, "index_facts": 1},
         ).to_list(100)
     except Exception as exc:  # noqa: BLE001
@@ -580,7 +590,8 @@ async def reconstruir_documentos_do_index(process_id: str, network_id: Optional[
         trabalhos = (metadados or {}).get("jobs") or []
         # os originais eliminados (`purgado`) contam: os DADOS lidos deles não deixaram de ser verdade
         docs = await db.document_metadata.find(
-            {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts": {"$exists": True, "$ne": None}},
+            {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts": {"$exists": True, "$ne": None},
+             **await _fora_os_substituidos(process_id)},
             {"_id": 0, "id": 1, "index_facts": 1, "index_job": 1},
         ).to_list(500)
         agora = _agora()
@@ -845,7 +856,8 @@ async def agregar_metadados_profissionais(pipeline: list[dict], *, tempo_maximo_
 async def factos_do_processo(process_id: str) -> list[dict]:
     """Os factos de TODOS os ficheiros do processo já analisados (incluindo os saltados nesta corrida)."""
     docs = await db.document_metadata.find(
-        {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts": {"$exists": True, "$ne": None}},
+        {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts": {"$exists": True, "$ne": None},
+         **await _fora_os_substituidos(process_id)},
         {"_id": 0, "index_facts": 1},
     ).to_list(500)
     return [d["index_facts"] for d in docs if isinstance(d.get("index_facts"), dict)]

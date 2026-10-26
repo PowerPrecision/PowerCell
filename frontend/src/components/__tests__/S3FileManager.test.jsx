@@ -22,7 +22,7 @@
  *   - a categoria Index só aparece a quem pode vê-la;
  *   - um 403 do backend dá aviso LOCALIZADO, não um painel vazio.
  */
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -66,8 +66,11 @@ vi.mock("../../services/api", async (original) => {
     // As funções de documentos do gestor de ficheiros passam pelo mesmo
     // resolvedor, para que o teste continue a descrever o comportamento e
     // não o transporte.
-    getProcessS3Files: (processId) =>
-      cliente.get(`/documents/client/${processId}/files`),
+    getProcessS3Files: (processId, opcoes = {}) =>
+      cliente.get(
+        `/documents/client/${processId}/files`,
+        ...(opcoes.incluirSubstituidos ? [{ params: { incluir_substituidos: true } }] : []),
+      ),
     getClientS3Mappings: (procura) =>
       cliente.get("/admin/client-s3-mappings", { params: { search: procura } }),
     saveClientS3Mapping: (processId, pasta) =>
@@ -565,3 +568,38 @@ describe("S3FileManager — «Forçar criação de pasta» (Lote 6)", () => {
   });
 });
 
+describe("comprovativos do cliente substituídos pelos do Index (Out 2026)", () => {
+  const COM_SUBSTITUIDOS = { ...RESPOSTA_FICHEIROS, superseded_count: 2 };
+
+  it("quem vê o Index sabe quantos são e pode pedi-los", async () => {
+    ligarRede({ carga: COM_SUBSTITUIDOS });
+    montar(utilizador({ user: { role: "indexacao" }, effectiveRole: "indexacao" }));
+    expect(await screen.findByText(/2 documentos do cliente foram substituídos pelos do Index/)).toBeInTheDocument();
+    axiosFalso.chamadas.length = 0;
+    fireEvent.click(screen.getByTestId("s3-ver-substituidos"));
+    await waitFor(() =>
+      expect(
+        axiosFalso.chamadas.some((c) => c.url.includes("/files") && c.resto[0]?.params?.incluir_substituidos === true),
+      ).toBe(true),
+    );
+    expect(screen.getByTestId("s3-ver-substituidos")).toHaveTextContent("Esconder");
+  });
+
+  it("um ficheiro devolvido como substituído vem marcado", async () => {
+    const carga = {
+      ...COM_SUBSTITUIDOS,
+      files: { Financeiros: [{ ...FICHEIROS.Financeiros[0], name: "recibo_cliente.pdf", superseded: true }] },
+    };
+    ligarRede({ carga });
+    montar(utilizador({ user: { role: "indexacao" }, effectiveRole: "indexacao" }));
+    await screen.findAllByText("recibo_cliente.pdf");
+    expect(screen.getAllByText("Substituído").length).toBeGreaterThan(0);
+  });
+
+  it("quem não vê o Index não tem a opção (o servidor nem lhe diz quantos são)", async () => {
+    ligarRede({ carga: COM_SUBSTITUIDOS });
+    montar();
+    await screen.findAllByText("irs_2025.pdf");
+    expect(screen.queryByTestId("s3-ver-substituidos")).not.toBeInTheDocument();
+  });
+});

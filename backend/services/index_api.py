@@ -24,6 +24,7 @@ REGRAS QUE NÃO SE PODEM PERDER
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -35,6 +36,8 @@ from services import index_queue_query as consulta_da_fila
 from services import index_status as estado_do_index
 from services import index_store as store
 from services.index_ai import TIPOS_ANALISADOS, tipo_de_analise
+from services.index_substituicao import ids_substituidos, titulares_e_substituidos
+from services.partner_titulares import titulares_do_caso
 from services.process_owner import calcular_empresa_dona
 from services import tenant_network
 from services.tenant_network import CAMPO_REDE, build_process_scope_condition, com_isolamento, rede_de_omissao
@@ -59,7 +62,7 @@ PROJECCAO_DOS_FICHEIROS = {
 }
 
 
-def _ficheiro_dto(doc: dict) -> dict[str, Any]:
+def _ficheiro_dto(doc: dict, substituidos: frozenset = frozenset(), titulares: Optional[dict] = None) -> dict[str, Any]:
     # o PDF limpo não se analisa: os factos vivem nos originais (senão contavam-se duas vezes)
     tipo = None if doc.get("is_clean_pdf") else tipo_de_analise(
         doc.get("ai_category"), doc.get("ai_subcategory"), doc.get("filename"))
@@ -77,6 +80,9 @@ def _ficheiro_dto(doc: dict) -> dict[str, Any]:
         "has_clean_pdf": bool(doc.get("clean_pdf_path")),
         "is_clean_pdf": bool(doc.get("is_clean_pdf")),
         "uploaded_by_index": bool(doc.get("uploaded_by_index")),
+        # comprovativo do cliente que o Index já voltou a carregar: não conta e só se vê a pedido
+        "superseded": doc.get("id") in substituidos,
+        "titular": (titulares or {}).get(doc.get("id")),
         "purge_after": doc.get("purge_after"),
         "created_at": doc.get("created_at"),
     }
@@ -103,7 +109,8 @@ def _processo_dto(proc: dict, ficheiros: Optional[list[dict]] = None) -> dict[st
     if ficheiros is not None:
         saida["documents_total"] = len(ficheiros)
         saida["documents_to_analyse"] = sum(
-            1 for f in ficheiros if f["analysis_type"] and not f["analysed"] and f["file_state"] != "purgado"
+            1 for f in ficheiros
+            if f["analysis_type"] and not f["analysed"] and f["file_state"] != "purgado" and not f.get("superseded")
         )
     return saida
 
@@ -114,7 +121,8 @@ async def _carregar_processo(process_id: str, user: dict) -> dict:
         {"id": process_id, "is_deleted": {"$ne": True}}, {"_id": 0, **{k: 1 for k in (
             "id", "process_number", "client_name", "status", "created_at", "updated_at", "index_status",
             "index_skipped", "is_indexed", "skip_index", "assigned_indexacao_id", "indexacao_name", "has_pending_review",
-            "index_alerts_open", "indexed_at", "indexed_by_name", "network_id", "index_stagnation_alerted_at")}},
+            "index_alerts_open", "indexed_at", "indexed_by_name", "network_id", "index_stagnation_alerted_at",
+            "second_client_id", "second_client_name", "titular2_data.name", "titular2_data.nome")}},
     )
     if not proc:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -235,8 +243,13 @@ async def run_get_index_queue(
         docs = await db.document_metadata.find(
             {"process_id": {"$in": ids}, "file_state": {"$ne": "purgado"}}, PROJECCAO_DOS_FICHEIROS
         ).to_list(5000)
+        # só um processo onde o Index já carregou alguma coisa pode ter comprovativos do cliente substituídos
+        com_uploads_do_index = {d.get("process_id") for d in docs if d.get("uploaded_by_index")}
+        substituidos: set[str] = set()
+        for pid in com_uploads_do_index:
+            substituidos |= await ids_substituidos(pid)
         for d in docs:
-            por_processo.setdefault(d.get("process_id"), []).append(_ficheiro_dto(d))
+            por_processo.setdefault(d.get("process_id"), []).append(_ficheiro_dto(d, frozenset(substituidos)))
     empresas = await _empresas_da_fila(processos, scope)
     return {
         "items": [
@@ -264,7 +277,8 @@ async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, An
     docs = await db.document_metadata.find(
         {"process_id": process_id, "file_state": {"$ne": "purgado"}}, PROJECCAO_DOS_FICHEIROS
     ).to_list(500)
-    ficheiros = [_ficheiro_dto(d) for d in docs]
+    titulares, substituidos = await titulares_e_substituidos(process_id, proc)
+    ficheiros = [_ficheiro_dto(d, frozenset(substituidos), titulares) for d in docs]
     metadados = await store.carregar_metadados(process_id)
     alertas = await store.alertas_do_processo(process_id)
     jobs = {}
@@ -279,6 +293,8 @@ async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, An
     # sem acções cruzadas: num processo de outro indexador o ecrã do Index só consulta (o servidor recusa na mesma)
     processo_dto["assigned_to_other"] = bool(dono) and dono != (user or {}).get("id")
     processo_dto["assigned_indexacao_name"] = proc.get("indexacao_name") if dono else None
+    # com 2.º titular o Index diz de quem é o que carrega (a substituição é por titular)
+    processo_dto["titulares"] = titulares_do_caso(SimpleNamespace(e_processo=True, process=proc, client=None))
     return {
         "process": processo_dto,
         "files": ficheiros,

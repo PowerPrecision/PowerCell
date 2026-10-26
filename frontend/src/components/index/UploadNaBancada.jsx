@@ -10,7 +10,8 @@
  * REGRAS: (1) uma única lista de tipos (`TIPOS_ACEITES`) para o botão e para o arrastar — em dois sítios divergem;
  * (2) **nunca sobrepõe**: um nome que já existe ganha ` (2)` (`nomesLivresDoLote`); (3) uma recusa diz o motivo
  * do servidor, ficheiro a ficheiro, e não impede os restantes; (4) no fim chama `onConcluido(n)` para a página
- * refrescar a lista.
+ * refrescar a lista; (5) com 2.º titular (`titulares` não vazio) o indexador diz primeiro de quem são os
+ * documentos: o recibo/extrato/declaração que carrega substitui os do cliente DESSE titular, e só esses.
  */
 import { useRef, useState } from "react";
 import { Loader2, Upload } from "lucide-react";
@@ -24,13 +25,27 @@ import { mensagemDeErro } from "../../utils/indexRevisao";
 export const TIPOS_ACEITES = ".pdf,.jpg,.jpeg,.png";
 const CATEGORIA_POR_OMISSAO = "Outros"; // a IA categoriza à entrada; o nome da categoria não decide nada aqui
 
-export function UploadNaBancada({ processId, nomesExistentes = [], onConcluido, desactivado = false, children }) {
+export function UploadNaBancada({
+  processId,
+  nomesExistentes = [],
+  titulares = [],
+  onConcluido,
+  desactivado = false,
+  children,
+}) {
   const entrada = useRef(null);
   const [aEnviar, setAEnviar] = useState(false);
+  const [titular, setTitular] = useState(null);
+  const escolherTitular = titulares.length > 0;
+  const falta = escolherTitular && !titular;
   const [resultado, setResultado] = useState(null); // { feitos, falhas: [{ nome, motivo }], recusados }
 
   const enviar = async (ficheiros) => {
     if (!ficheiros?.length || aEnviar) return;
+    if (falta) {
+      setResultado({ feitos: 0, falhas: [], recusados: "Escolha primeiro de quem são os documentos." });
+      return;
+    }
     setAEnviar(true);
     setResultado(null);
     const nomes = nomesLivresDoLote(ficheiros.map((f) => f.name), nomesExistentes);
@@ -41,6 +56,7 @@ export function UploadNaBancada({ processId, nomesExistentes = [], onConcluido, 
       formData.append("file", ficheiros[i]);
       formData.append("category", CATEGORIA_POR_OMISSAO);
       if (nomes[i] !== ficheiros[i].name) formData.append("custom_filename", nomes[i]);
+      if (escolherTitular) formData.append("titular", titular);
       try {
         await uploadProcessS3File(processId, formData);
         feitos += 1;
@@ -69,6 +85,24 @@ export function UploadNaBancada({ processId, nomesExistentes = [], onConcluido, 
       rotulo="Largue os ficheiros para os adicionar ao processo"
     >
       <div className="space-y-3">
+        {escolherTitular && (
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="De quem são os documentos">
+            <span className="text-sm text-muted-foreground">De quem são os documentos?</span>
+            {titulares.map((t) => (
+              <Button
+                key={t.id}
+                type="button"
+                size="sm"
+                variant={titular === t.id ? "default" : "outline"}
+                aria-pressed={titular === t.id}
+                onClick={() => setTitular(t.id)}
+                data-testid={`upload-bancada-titular-${t.id}`}
+              >
+                {t.nome ? `${t.label} · ${t.nome}` : t.label}
+              </Button>
+            ))}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <input
             ref={entrada}
@@ -85,7 +119,8 @@ export function UploadNaBancada({ processId, nomesExistentes = [], onConcluido, 
             type="button"
             variant="outline"
             size="sm"
-            disabled={desactivado || aEnviar}
+            disabled={desactivado || aEnviar || falta}
+            title={falta ? "Escolha primeiro de quem são os documentos" : undefined}
             onClick={() => entrada.current?.click()}
             data-testid="upload-bancada-botao"
           >

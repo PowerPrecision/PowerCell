@@ -172,8 +172,14 @@ async def collect_financial_documents(process_id: str) -> list[dict]:
         {"_id": 0, "extracted_text": 0},
     ).to_list(500)
 
+    # Os comprovativos do cliente que o Index voltou a carregar já não contam: contam os dele.
+    from services.index_substituicao import ids_substituidos
+
+    substituidos = await ids_substituidos(process_id)
     financial = []
     for doc in docs:
+        if doc.get("id") in substituidos:
+            continue
         # O PDF limpo do Index (Lote 12) é uma cópia do original que já aqui está: contá-lo
         # extraía duas vezes o mesmo documento (chamada paga + rendimentos a dobrar).
         if doc.get("is_clean_pdf"):

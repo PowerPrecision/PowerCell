@@ -66,20 +66,54 @@ function LigacaoAoProcesso({ processoId, children, ...resto }) {
   );
 }
 
+const ROTULO_DO_TITULAR = { titular1: "1.º titular", titular2: "2.º titular" };
+
 function ListaDeFicheiros({ ficheiros, processoId, onVer, onDescarregar, emCurso }) {
+  // os comprovativos do cliente que o Index já voltou a carregar não contam: escondidos, mas a um clique
+  const [verSubstituidos, setVerSubstituidos] = useState(false);
+  const substituidos = ficheiros.filter((f) => f.superseded === true).length;
+  const visiveis = verSubstituidos ? ficheiros : ficheiros.filter((f) => f.superseded !== true);
   if (ficheiros.length === 0) {
     return <p className="text-sm text-muted-foreground">Este processo ainda não tem documentos.</p>;
   }
   return (
+    <div className="space-y-2">
+      {substituidos > 0 && (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 px-2 text-xs text-muted-foreground"
+          aria-pressed={verSubstituidos}
+          onClick={() => setVerSubstituidos((v) => !v)}
+          data-testid="ver-substituidos"
+        >
+          {verSubstituidos
+            ? "Esconder os documentos do cliente substituídos"
+            : `Ver os documentos do cliente substituídos (${substituidos})`}
+        </Button>
+      )}
     <ul className="divide-y divide-border">
-      {ficheiros.map((f) => {
+      {visiveis.map((f) => {
         const nome = f.filename || "Documento";
         const documento = { id: f.id, rotulo: nome, processId: processoId };
         const aDescarregar = emCurso?.has(`ficheiro:${f.id}`) === true;
         return (
           <li key={f.id} className="flex flex-wrap items-center gap-2 py-2" data-testid="ficheiro-do-index">
             <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <span className="min-w-0 flex-1 break-words text-sm">{nome}</span>
+            <span className={`min-w-0 flex-1 break-words text-sm ${f.superseded ? "text-muted-foreground line-through" : ""}`}>
+              {nome}
+            </span>
+            {f.superseded && (
+              <Badge
+                variant="secondary"
+                data-testid="badge-substituido"
+                title="Documento do cliente: já não conta, porque o Index carregou um deste tipo para este titular"
+              >
+                Substituído
+              </Badge>
+            )}
+            {ROTULO_DO_TITULAR[f.titular] && <Badge variant="outline">{ROTULO_DO_TITULAR[f.titular]}</Badge>}
             {f.category && <Badge variant="outline">{f.category}</Badge>}
             {rotuloDoTipoDeAnalise(f.analysis_type) &&
               (f.analysed ? (
@@ -127,6 +161,7 @@ function ListaDeFicheiros({ ficheiros, processoId, onVer, onDescarregar, emCurso
         );
       })}
     </ul>
+    </div>
   );
 }
 
@@ -307,6 +342,7 @@ export default function IndexWorkstationPage() {
               <UploadNaBancada
                 processId={processo.id}
                 nomesExistentes={ficheiros.map((f) => f.filename)}
+                titulares={processo.titulares || []}
                 onConcluido={aoAdicionar}
               />
               <ListaDeFicheiros
