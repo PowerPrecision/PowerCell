@@ -12662,3 +12662,10 @@ Pedido: o Master com uma empresa escolhida via os parceiros de todas as redes; e
 - Testes: `test_index_substituicao.py` (31), `test_index_substituicao_mongo.py` (14), `test_index_precedencia_e_ver_documento.py` (+3), `test_index_sem_accoes_cruzadas.py` (+1 rota), `IndexWorkstationPage.test.jsx` (+3). Mutação no agregador por titular: morta.
 - Verificado no browser (local, dados fictícios): com um 2.º recibo de outra entidade, os dois do Emprego A ficam «Substituído» e o do Emprego B continua activo; seletor de titular em cada ficheiro e no upload. Guia do Index (passo 4 e figura 17) actualizado.
 - Verificações: suite backend completa 13 528 passados + 13 saltados; frontend completo 4 501.
+
+## 2026-10-27 — Convite de parceiro: 409 «Este email não pode ser usado para um parceiro»
+- Caso real: `andrea_ps18@hotmail.com` já era parceira **activa**, convidada pelo Master sem empresa (sem ligações e sem `convidado_pela_rede`). O 409 estava certo; o problema era não a encontrar: com empresa escolhida, `run_list_partners` estreita à rede e ela não tem nenhuma. O Flavio diz que na vista «Sistema» também não aparecia (não investigado no browser).
+- Correcção: `_sem_rede_visivel_ao_master` — o Master vê o parceiro sem rede em qualquer vista (lista, opções de filtro, gestão por id). Admin/CEO sem mudança.
+- Novo `scripts/diagnosticar_email_de_parceiro.py` (só leitura): diz qual das regras do convite recusou um email.
+- Testes: `test_lote5_parceiro_independente.py` (+1, falhava antes), `test_diagnosticar_email_de_parceiro.py` (5); 270 testes de parceiros passam. Suite completa e integração Mongo não corridas. Não verificado em produção.
+- O `[User: anónimo]` do `logging_middleware` é sempre anónimo: nada popula `request.state.user`.
