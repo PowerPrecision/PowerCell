@@ -33,6 +33,7 @@ from services.index_api import (
     run_start_work,
     run_sanitize_process,
     run_search_employers,
+    run_set_file_titular,
 )
 from services.index_finalize import run_mark_indexed
 from services.process_broadcast import broadcast_process_delta
@@ -62,6 +63,12 @@ class AnalyzeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     force: bool = False
+
+
+class TitularDoFicheiroBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    titular: str = Field(pattern=r"^titular[12]$")
 
 
 class EditJobBody(BaseModel):
@@ -282,6 +289,16 @@ async def dismiss_alert(
     user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
 ):
     return await run_dismiss_alert(user, process_id, alert_id)
+
+
+@router.patch("/processes/{process_id}/files/{document_id}/titular")
+@limiter.limit("60/minute")
+async def set_file_titular(
+    request: Request, response: Response, process_id: str, document_id: str, data: TitularDoFicheiroBody,
+    user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
+):
+    """De quem é o ficheiro (1.º/2.º titular): manda na substituição, no emprego e nos rendimentos."""
+    return await run_set_file_titular(user, process_id, document_id, data.titular)
 
 
 @router.post("/processes/{process_id}/mark-indexed")

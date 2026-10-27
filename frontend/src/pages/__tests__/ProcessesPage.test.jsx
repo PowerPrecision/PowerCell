@@ -386,6 +386,29 @@ describe("ProcessesPage — interacção", () => {
     expect(screen.getByTestId("marcar-indexado-p-meu")).toBeEnabled();
   });
 
+  it("o Index abre o processo de um colega na vista normal de detalhes; o seu continua na bancada", async () => {
+    papelActivo = "indexacao";
+    caminho = "/lista-processos";
+    api.getProcesses.mockResolvedValue({
+      data: {
+        ...RESPOSTA.data,
+        items: [
+          { ...LINHAS[1], id: "p-colega", client_name: "Do Colega", assigned_indexacao_id: "u-rui" },
+          { ...LINHAS[1], id: "p-meu", client_name: "Do Próprio", assigned_indexacao_id: "u1" },
+        ],
+      },
+    });
+    const utilizador = userEvent.setup();
+    montar();
+    await utilizador.click((await screen.findByText("Do Colega")).closest("tr"));
+    await waitFor(() => expect(navegar).toHaveBeenCalled());
+    expect(navegar.mock.calls[0][0]).toBe("/process/p-colega");
+    navegar.mockClear();
+    await utilizador.click(screen.getByText("Do Próprio").closest("tr"));
+    await waitFor(() => expect(navegar).toHaveBeenCalled());
+    expect(navegar.mock.calls[0][0]).toBe("/index/p-meu");
+  });
+
   it("contraprova: a gestão marca o processo de qualquer indexador", async () => {
     papelActivo = "admin";
     caminho = "/lista-processos";

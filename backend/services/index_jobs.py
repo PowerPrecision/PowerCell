@@ -46,6 +46,7 @@ from services.index_ai import (
 )
 from services.index_matrix import avaliar
 from services.index_status import gravar_contadores
+from services.index_substituicao import ids_substituidos
 from services.process_ai_log import classificar_falha, registar_accao_ia
 from services.task_log_service import TASK_LOG_COLLECTION, TaskLogService
 
@@ -189,6 +190,9 @@ async def analisar_ficheiros(
     docs = await db.document_metadata.find(
         {"process_id": process_id, "file_state": {"$ne": "purgado"}, "is_clean_pdf": {"$ne": True}}, {"_id": 0}
     ).to_list(500)
+    # os comprovativos do cliente que o Index já voltou a carregar não contam: não se gasta IA com eles
+    substituidos = await ids_substituidos(process_id)
+    docs = [d for d in docs if d.get("id") not in substituidos]
 
     resumo = {"analisados": 0, "saltados": 0, "falhas": 0, "ignorados": 0, "falhados": []}
     candidatos = []

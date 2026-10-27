@@ -203,6 +203,8 @@ from services.document_rename_smart import (
 @router.get("/client/{client_id}/files", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def list_client_files(
     client_id: str, 
+    request: Request,
+    incluir_substituidos: bool = False,
     user: dict = Depends(get_current_user)
 ):
     """Lista todos os ficheiros do cliente no S3 organizados por pastas.
@@ -327,6 +329,14 @@ async def list_client_files(
     except Exception as enrich_err:
         logger.warning(f"[FILES] Falha ao enriquecer metadados IA: {enrich_err}")
 
+    # Os comprovativos do cliente que o Index já voltou a carregar deixam de
+    # se ver (só contam os dele). Quem vê a pasta `Index` pode pedi-los.
+    from services.auth import get_effective_role_async
+    from services.index_substituicao import aplicar_a_listagem
+
+    papel = await get_effective_role_async(request, user)
+    files = await aplicar_a_listagem(files, effective_id, papel, incluir_substituidos)
+
     # Parede do servidor para a pasta `Index` (Bloco 2): o ecrã escondia-a,
     # mas esconder no cliente é cortesia, não fronteira.
     from services.document_intake import retirar_o_index_da_listagem
@@ -349,6 +359,7 @@ async def upload_file_s3(
     category: str = Form(...), # Ex: "Financeiros", "Imovel"
     empresa_nif: Optional[str] = Form(None),  # NIF da empresa - obrigatório para indexacao
     custom_filename: Optional[str] = Form(None),  # Nome personalizado para evitar conflitos
+    titular: Optional[str] = Form(None),  # "titular1"/"titular2": de quem é o documento (com 2.º titular)
     user: dict = Depends(get_current_user)
 ):
     """
@@ -396,6 +407,7 @@ async def upload_file_s3(
             user=user,
             background_tasks=background_tasks,
             client_original_filename=file.filename,
+            titular=titular,
         )
         return JSONResponse(status_code=200, content=response_data)
     except HTTPException:

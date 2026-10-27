@@ -97,6 +97,8 @@ import {
   addProcessObservationNote,
   // PACOTE 9 — Toggle "Indexado" no header (set-indexed true/false)
   setProcessIndexed,
+  // «Atribuir a mim» do Index a partir da vista normal (processo de um colega, Out 2026)
+  assumirIndexProcess,
   // PACOTE 11 (Eixo 4) — restauro rápido do processo eliminado (banner)
   restoreProcess,
   // Reabrir um processo fechado (fase terminal) para uma fase activa
@@ -170,6 +172,7 @@ import {
   CreditCard,
   CalendarClock,
   ClipboardList,
+  UserPlus,
   Check,
   Trash2,
   RotateCcw,
@@ -1924,6 +1927,26 @@ const ProcessDetails = () => {
   const [indexToggleBusy, setIndexToggleBusy] = useState(false);
   // sem acções cruzadas (Out 2026): o Index não liga nem desliga a indexação do processo de um colega
   const indexacaoDeOutro = processoDeOutroIndexador(process, effectiveRole || userRole, user?.id);
+  // O Index vê o processo de um colega na vista normal; para trabalhar nele assume-o aqui, se ainda ninguém
+  // o começou (o servidor decide: 409 se já está em tratamento) e segue para a bancada.
+  const indexadorAtivo = (effectiveRole || userRole || "").toLowerCase() === "indexacao";
+  const podeAssumirAqui =
+    indexadorAtivo && !!process && process.assigned_indexacao_id !== user?.id &&
+    process.is_indexed !== true && process.skip_index !== true && process.index_status !== "in_review";
+  const [aAssumir, setAAssumir] = useState(false);
+  const assumirParaMim = async () => {
+    if (!id || aAssumir) return;
+    setAAssumir(true);
+    try {
+      await assumirIndexProcess(id);
+      toast.success("O processo passou a ser seu.");
+      navigate(`/index/${encodeURIComponent(id)}`);
+    } catch (error) {
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Não foi possível atribuir o processo."));
+    } finally {
+      setAAssumir(false);
+    }
+  };
   const handleToggleIndexed = async (checked) => {
     if (!id || indexToggleBusy) return;
     const previous = process?.is_indexed;
@@ -2737,6 +2760,20 @@ const ProcessDetails = () => {
                 de gestão/indexação (canMarkIndexed). ON delega no fluxo canónico
                 do mark-indexed (notificações + salto de workflow); OFF reverte o
                 flag sem mexer na fase (histórico INDEXACAO_REVERTIDA no backend). */}
+            {podeAssumirAqui && (
+              <Button
+                size="sm"
+                className="h-8"
+                onClick={assumirParaMim}
+                disabled={aAssumir}
+                title="Só processos «Por indexar» que ainda ninguém começou"
+                data-testid="detalhe-atribuir-a-mim"
+              >
+                {aAssumir ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <UserPlus className="h-3.5 w-3.5 mr-1.5" />}
+                Atribuir a mim
+              </Button>
+            )}
+
             {canMarkIndexed && (
               <div
                 className="flex items-center gap-1.5 h-8 px-2 sm:px-3 rounded-md border bg-background"
@@ -3252,7 +3289,8 @@ const ProcessDetails = () => {
               )}
               deadlines={deadlines}
               onManageAssignment={openAssignDialog}
-              canManageAssignment={userRole !== "cliente"}
+              // o Index não muda atribuições (fica com um processo só pelo «Atribuir a mim»); o servidor também recusa
+              canManageAssignment={userRole !== "cliente" && !indexadorAtivo}
               priority={process?.prioridade || "media"}
               onPriorityChange={(value) => {
                 setProcess(prev => ({ ...prev, prioridade: value }));

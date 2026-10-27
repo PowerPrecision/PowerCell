@@ -41,6 +41,7 @@ vi.mock("../../services/api", () => ({
   extractIndexProcess: vi.fn(),
   editIndexJob: vi.fn(),
   dismissIndexAlert: vi.fn(),
+  setIndexFileTitular: vi.fn(),
   sanitizeIndexProcess: vi.fn(),
   markIndexProcessIndexed: vi.fn(),
   searchIndexEmployers: vi.fn(),
@@ -692,29 +693,39 @@ describe("sem acções cruzadas entre indexadores (Out 2026)", () => {
   const accoes = () => ["Analisar", "Extrair dados", "Apagar metadados", "Marcar como Indexado"]
     .map((nome) => screen.getByRole("button", { name: new RegExp(`^${nome}$`) }));
 
-  it("no processo de um colega o Index só consulta: as acções ficam desligadas e diz-se porquê", async () => {
+  it("no processo de um colega o Index lê tudo; só as acções ficam desligadas, com o motivo em tooltip", async () => {
     sessao.papel = "indexacao";
     api.startIndexWork.mockResolvedValue({ data: { iniciado: false } });
     montar(doColega());
-    const aviso = await screen.findByTestId("aviso-processo-de-outro");
-    expect(aviso).toHaveTextContent("Rui Teixeira");
-    accoes().forEach((b) => expect(b).toBeDisabled());
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    // a leitura é a normal: documentos, metadados e alertas, sem aviso a mudar o ecrã
+    expect(screen.getAllByTestId("ficheiro-do-index")).toHaveLength(3);
+    expect(screen.getByText("Quinta do Sol Lda")).toBeInTheDocument();
+    expect(screen.getAllByTestId("alerta-do-index")).toHaveLength(2);
+    expect(screen.queryByTestId("aviso-processo-de-outro")).not.toBeInTheDocument();
+    accoes().forEach((b) => {
+      expect(b).toBeDisabled();
+      expect(b).toHaveAttribute("title", expect.stringContaining("Rui Teixeira"));
+    });
+    expect(screen.getByRole("toolbar", { name: "Acções do Index" })).toHaveAttribute("title", expect.stringContaining("Rui Teixeira"));
     expect(screen.getByRole("button", { name: /Rever/ })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /Dispensar alerta/ })).not.toBeInTheDocument();
+    // «Ver» continua à mão
+    expect(screen.getAllByRole("button", { name: /Ver/ }).length).toBeGreaterThan(0);
   });
 
-  it("por indexar, o aviso aponta para «Atribuir a mim»", async () => {
+  it("por indexar, a tooltip aponta para «Atribuir a mim»", async () => {
     sessao.papel = "indexacao";
     montar(doColega("pending"));
-    expect(await screen.findByTestId("aviso-processo-de-outro")).toHaveTextContent("Atribuir a mim");
-    expect(screen.getByTestId("botao-atribuir-a-mim")).toBeInTheDocument();
+    await screen.findByTestId("botao-atribuir-a-mim");
+    expect(screen.getByRole("button", { name: /^Analisar$/ })).toHaveAttribute("title", expect.stringContaining("Atribuir a mim"));
   });
 
   it("contraprova: num processo sem indexador o Index age", async () => {
     sessao.papel = "indexacao";
     montar({ ...doColega("pending"), process: { ...doColega("pending").process, assigned_to_other: false } });
     await screen.findByRole("heading", { name: /Marta Quintela/ });
-    expect(screen.queryByTestId("aviso-processo-de-outro")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Analisar$/ })).not.toHaveAttribute("title");
     expect(screen.getByRole("button", { name: /^Analisar$/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: /^Marcar como Indexado$/ })).toBeEnabled();
   });
@@ -723,8 +734,84 @@ describe("sem acções cruzadas entre indexadores (Out 2026)", () => {
     sessao.papel = "diretor";
     montar(doColega());
     await screen.findByRole("heading", { name: /Marta Quintela/ });
-    expect(screen.queryByTestId("aviso-processo-de-outro")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Marcar como Indexado$/ })).toBeEnabled();
     expect(screen.getAllByRole("button", { name: /Dispensar alerta/ }).length).toBeGreaterThan(0);
+  });
+});
+
+describe("comprovativos do cliente substituídos pelos do Index (Out 2026)", () => {
+  const COM_SUBSTITUIDO = {
+    ...BANCADA,
+    process: {
+      ...BANCADA.process,
+      titulares: [
+        { id: "titular1", label: "1.º titular", nome: "Marta Quintela" },
+        { id: "titular2", label: "2.º titular", nome: "Rui Quintela" },
+      ],
+    },
+    files: [
+      { ...BANCADA.files[0], id: "c1", filename: "scan_do_cliente.pdf", superseded: true, titular: "titular1" },
+      { ...BANCADA.files[0], id: "i1", filename: "recibo_validado.pdf", uploaded_by_index: true, titular: "titular1" },
+      { ...BANCADA.files[1], titular: "titular2" },
+    ],
+  };
+
+  it("o substituído não aparece até o Index o pedir, e aí vem marcado", async () => {
+    montar(COM_SUBSTITUIDO);
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.getAllByTestId("ficheiro-do-index")).toHaveLength(2);
+    expect(screen.queryByText("scan_do_cliente.pdf")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Ver os documentos do cliente substituídos (1)" }));
+    expect(screen.getAllByTestId("ficheiro-do-index")).toHaveLength(3);
+    const linha = screen.getByText("scan_do_cliente.pdf").closest("li");
+    expect(within(linha).getByTestId("badge-substituido")).toHaveTextContent("Substituído");
+    await userEvent.click(screen.getByRole("button", { name: "Esconder os documentos do cliente substituídos" }));
+    expect(screen.getAllByTestId("ficheiro-do-index")).toHaveLength(2);
+  });
+
+  it("com 2.º titular cada ficheiro diz de quem é e o upload pergunta", async () => {
+    montar(COM_SUBSTITUIDO);
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    const seletores = screen.getAllByTestId("ficheiro-titular");
+    expect(seletores.map((s) => s.value)).toEqual(["titular1", "titular2"]);
+    expect(screen.getByRole("button", { name: "2.º titular · Rui Quintela" })).toBeInTheDocument();
+  });
+
+  it("o Index corrige o titular de um ficheiro (manda sobre a conta que o enviou)", async () => {
+    sessao.papel = "indexacao";
+    api.setIndexFileTitular.mockResolvedValue({ data: { success: true } });
+    api.startIndexWork.mockResolvedValue({ data: { success: true } });
+    montar({ ...COM_SUBSTITUIDO, process: { ...COM_SUBSTITUIDO.process, assigned_to_me: true } });
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "De quem é — recibo_validado.pdf" }), "titular2");
+    await waitFor(() => expect(api.setIndexFileTitular).toHaveBeenCalledWith("proc-1", "i1", "titular2"));
+    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("Analisar"));
+  });
+
+  it("no processo de um colega o titular não se muda", async () => {
+    sessao.papel = "indexacao";
+    montar({ ...COM_SUBSTITUIDO, process: { ...COM_SUBSTITUIDO.process, assigned_to_other: true } });
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    screen.getAllByTestId("ficheiro-titular").forEach((s) => expect(s).toBeDisabled());
+  });
+
+  it("cada emprego diz de que titular é", async () => {
+    const comTitular = {
+      ...COM_SUBSTITUIDO,
+      professional_metadata: {
+        ...BANCADA.professional_metadata,
+        jobs: [{ ...BANCADA.professional_metadata.jobs[0], titular: "titular2" }],
+      },
+    };
+    montar(comTitular);
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.getByTestId("emprego-titular")).toHaveTextContent("2.º titular");
+  });
+
+  it("sem substituídos não há opção nenhuma", async () => {
+    montar();
+    await screen.findByRole("heading", { name: /Marta Quintela/ });
+    expect(screen.queryByTestId("ver-substituidos")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "De quem são os documentos" })).not.toBeInTheDocument();
   });
 });

@@ -66,20 +66,80 @@ function LigacaoAoProcesso({ processoId, children, ...resto }) {
   );
 }
 
-function ListaDeFicheiros({ ficheiros, processoId, onVer, onDescarregar, emCurso }) {
+const ROTULO_DO_TITULAR = { titular1: "1.º titular", titular2: "2.º titular" };
+
+function ListaDeFicheiros({
+  ficheiros,
+  processoId,
+  onVer,
+  onDescarregar,
+  emCurso,
+  titulares = [],
+  onMudarTitular,
+  motivoSomenteLeitura,
+}) {
+  // os comprovativos do cliente que o Index já voltou a carregar não contam: escondidos, mas a um clique
+  const [verSubstituidos, setVerSubstituidos] = useState(false);
+  const substituidos = ficheiros.filter((f) => f.superseded === true).length;
+  const visiveis = verSubstituidos ? ficheiros : ficheiros.filter((f) => f.superseded !== true);
   if (ficheiros.length === 0) {
     return <p className="text-sm text-muted-foreground">Este processo ainda não tem documentos.</p>;
   }
   return (
+    <div className="space-y-2">
+      {substituidos > 0 && (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 px-2 text-xs text-muted-foreground"
+          aria-pressed={verSubstituidos}
+          onClick={() => setVerSubstituidos((v) => !v)}
+          data-testid="ver-substituidos"
+        >
+          {verSubstituidos
+            ? "Esconder os documentos do cliente substituídos"
+            : `Ver os documentos do cliente substituídos (${substituidos})`}
+        </Button>
+      )}
     <ul className="divide-y divide-border">
-      {ficheiros.map((f) => {
+      {visiveis.map((f) => {
         const nome = f.filename || "Documento";
         const documento = { id: f.id, rotulo: nome, processId: processoId };
         const aDescarregar = emCurso?.has(`ficheiro:${f.id}`) === true;
         return (
           <li key={f.id} className="flex flex-wrap items-center gap-2 py-2" data-testid="ficheiro-do-index">
             <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <span className="min-w-0 flex-1 break-words text-sm">{nome}</span>
+            <span className={`min-w-[12rem] flex-1 break-words text-sm ${f.superseded ? "text-muted-foreground line-through" : ""}`}>
+              {nome}
+            </span>
+            {f.superseded && (
+              <Badge
+                variant="secondary"
+                data-testid="badge-substituido"
+                title="Documento do cliente: já não conta, porque o Index carregou um deste tipo para este titular"
+              >
+                Substituído
+              </Badge>
+            )}
+            {titulares.length > 0 && f.titular && (
+              // o titular do ficheiro manda (não a conta que o enviou): o Index corrige-o aqui
+              <select
+                value={f.titular}
+                onChange={(e) => onMudarTitular?.(f.id, e.target.value)}
+                disabled={Boolean(motivoSomenteLeitura)}
+                title={motivoSomenteLeitura}
+                aria-label={`De quem é — ${nome}`}
+                data-testid="ficheiro-titular"
+                className="h-7 rounded-md border border-input bg-background px-1.5 text-xs"
+              >
+                {titulares.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {ROTULO_DO_TITULAR[t.id]}
+                  </option>
+                ))}
+              </select>
+            )}
             {f.category && <Badge variant="outline">{f.category}</Badge>}
             {rotuloDoTipoDeAnalise(f.analysis_type) &&
               (f.analysed ? (
@@ -127,6 +187,7 @@ function ListaDeFicheiros({ ficheiros, processoId, onVer, onDescarregar, emCurso
         );
       })}
     </ul>
+    </div>
   );
 }
 
@@ -204,6 +265,14 @@ export default function IndexWorkstationPage() {
   // Sem acções cruzadas (decisão do cliente, Out 2026): no processo de um colega o Index só consulta; para
   // agir assume-o primeiro. A gestão não é tocada e o servidor volta a decidir (403).
   const deOutro = daEquipa && processo.assigned_to_other === true;
+  // a leitura é total e o ecrã não muda: só as acções ficam desligadas, com o motivo em tooltip
+  const motivoDeOutro = deOutro
+    ? `Processo atribuído a ${processo.assigned_indexacao_name || "outro indexador"}. ${
+        podeAssumir
+          ? "Para o analisar ou marcar como indexado, use primeiro «Atribuir a mim»."
+          : "Já está em tratamento: só o indexador atribuído o pode alterar."
+      }`
+    : undefined;
 
   const marcar = (employers) =>
     m.marcarIndexado.mutate({ employers }, { onSuccess: () => setDialogoAberto(false) });
@@ -263,19 +332,9 @@ export default function IndexWorkstationPage() {
           }
         />
 
-        {deOutro && (
-          <Alert data-testid="aviso-processo-de-outro">
-            <AlertTitle>Processo de {processo.assigned_indexacao_name || "outro indexador"}</AlertTitle>
-            <AlertDescription>
-              {podeAssumir
-                ? "Pode consultá-lo. Para o analisar ou marcar como indexado, use primeiro «Atribuir a mim»."
-                : "Pode consultá-lo, mas já está em tratamento: só o indexador atribuído o pode analisar ou marcar como indexado."}
-            </AlertDescription>
-          </Alert>
-        )}
-
         <IndexActionsBar
           somenteLeitura={deOutro}
+          motivoSomenteLeitura={motivoDeOutro}
           processo={processo}
           jobsActivos={jobsActivos}
           aAnalisar={m.analisar.isPending}
@@ -309,6 +368,7 @@ export default function IndexWorkstationPage() {
               <UploadNaBancada
                 processId={processo.id}
                 nomesExistentes={ficheiros.map((f) => f.filename)}
+                titulares={processo.titulares || []}
                 onConcluido={aoAdicionar}
               />
               <ListaDeFicheiros
@@ -317,6 +377,9 @@ export default function IndexWorkstationPage() {
                 onVer={(documentos, titulo) => setAVer({ documentos, titulo })}
                 onDescarregar={descarregar}
                 emCurso={emCurso}
+                titulares={processo.titulares || []}
+                onMudarTitular={(documentId, titular) => m.mudarTitular.mutate({ documentId, titular })}
+                motivoSomenteLeitura={motivoDeOutro}
               />
             </CardContent>
           </Card>
@@ -327,10 +390,12 @@ export default function IndexWorkstationPage() {
                 Metadados profissionais
                 {aRever > 0 && <Badge variant="secondary">{aRever} campo(s) a rever</Badge>}
               </CardTitle>
-              <Button size="sm" variant="outline" disabled={deOutro} onClick={() => setPainelAberto(true)}>
-                <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                Rever
-              </Button>
+              <span title={motivoDeOutro}>
+                <Button size="sm" variant="outline" disabled={deOutro} onClick={() => setPainelAberto(true)} title={motivoDeOutro}>
+                  <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                  Rever
+                </Button>
+              </span>
             </CardHeader>
             <CardContent>
               {trabalhos.length === 0 ? (
@@ -342,6 +407,11 @@ export default function IndexWorkstationPage() {
                   {trabalhos.map((t) => (
                     <li key={t.job_id} className="py-2 text-sm">
                       <span className="font-medium">{valorDoCampo(t.employer_name) || "Entidade por identificar"}</span>
+                      {ROTULO_DO_TITULAR[t.titular] && (
+                        <Badge variant="outline" className="ml-2" data-testid="emprego-titular">
+                          {ROTULO_DO_TITULAR[t.titular]}
+                        </Badge>
+                      )}
                       <span className="ml-2 text-muted-foreground">
                         {formatarDinheiro(valorDoCampo(t.net_salary))}
                       </span>

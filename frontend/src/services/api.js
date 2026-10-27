@@ -1034,8 +1034,12 @@ export const getOneDriveStatus = () => api.get("/onedrive/status");
 // `skipErrorToast` no 403: quem não pode ver os documentos recebe um aviso
 // LOCALIZADO dentro da tab (PACOTE 11); um toast global por cima seria a
 // mesma informação duas vezes, a segunda sem contexto.
-export const getProcessS3Files = (processId) =>
-  api.get(`/documents/client/${processId}/files`, { skipErrorToast: true });
+export const getProcessS3Files = (processId, { incluirSubstituidos = false } = {}) =>
+  api.get(`/documents/client/${processId}/files`, {
+    skipErrorToast: true,
+    // os comprovativos do cliente que o Index já voltou a carregar só vêm a pedido (e só para quem vê o Index)
+    ...(incluirSubstituidos ? { params: { incluir_substituidos: true } } : {}),
+  });
 export const uploadProcessS3File = (processId, formData) =>
   api.post(`/documents/client/${processId}/upload`, formData, {
     // O `Content-Type` é tratado pelo interceptor (`formDataTransport`):
@@ -1342,6 +1346,8 @@ export const sanitizeIndexProcess = (processId) =>
   api.post(`/index/processes/${processId}/sanitize`, null, { skipErrorToast: true });
 export const editIndexJob = (processId, jobId, fields) =>
   api.patch(`/index/processes/${processId}/professional-metadata/${jobId}`, { fields }, { skipErrorToast: true });
+export const setIndexFileTitular = (processId, documentId, titular) =>
+  api.patch(`/index/processes/${processId}/files/${documentId}/titular`, { titular }, { skipErrorToast: true });
 export const dismissIndexAlert = (processId, alertId) =>
   api.post(`/index/processes/${processId}/alerts/${alertId}/dismiss`, null, { skipErrorToast: true });
 export const markIndexProcessIndexed = (processId, employers = []) =>

@@ -20,6 +20,7 @@ import {
   extractIndexProcess,
   markIndexProcessIndexed,
   sanitizeIndexProcess,
+  setIndexFileTitular,
 } from "../../services/api";
 import { mensagemDeErro } from "../../utils/indexRevisao";
 
@@ -95,5 +96,15 @@ export function useIndexMutations(processId) {
     onError: falhou,
   });
 
-  return { analisar, extrair, sanitizar, editar, dispensar, marcarIndexado, assumir };
+  // De quem é um ficheiro (1.º/2.º titular): manda na substituição, no emprego e nos rendimentos.
+  const mudarTitular = useMutation({
+    mutationFn: ({ documentId, titular }) => setIndexFileTitular(processId, documentId, titular),
+    onSuccess: () => {
+      toast.success("Titular do documento atualizado. Use «Analisar» para refazer os empregos.");
+      return refrescar();
+    },
+    onError: falhou,
+  });
+
+  return { analisar, extrair, sanitizar, editar, dispensar, marcarIndexado, assumir, mudarTitular };
 }

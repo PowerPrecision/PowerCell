@@ -57,6 +57,7 @@ from services.index_matrix import nome_normalizado_da_entidade
 logger = logging.getLogger(__name__)
 
 CAMPOS_DO_TRABALHO = ("employer_nif", "employer_name", "job_title", "net_salary", "contract_type")
+TITULAR_PRINCIPAL = "titular1"
 
 SUBCATEGORIAS = {
     TIPO_RECIBO: "Recibo de Vencimento",
@@ -172,6 +173,7 @@ def aplicar_declaracoes(
 def calcular_trabalhos(
     entradas: Iterable[tuple[str, TrabalhoProfissional]],
     declaracoes: Iterable[tuple[str, dict]] = (),
+    titulares: Optional[dict[str, str]] = None,
 ) -> list[TrabalhoProfissional]:
     """Agrupa os recibos por entidade. Em cada campo ganha o recibo MAIS RECENTE que o tem.
 
@@ -182,11 +184,23 @@ def calcular_trabalhos(
     As `declaracoes` (`(document_id, index_facts)`) de efetividade mandam no tipo de contrato e na
     admissão (`aplicar_declaracoes`); só enriquecem empregos que já existem por recibos — uma declaração
     sozinha não cria um emprego sem salário (continua pesquisável por documento).
+
+    `titulares` (`{document_id: "titular1"|"titular2"}`, só com 2.º titular) separa os empregos por titular:
+    dois titulares na mesma empresa são dois empregos, e a declaração de um nunca certifica o do outro. A chave
+    do 1.º titular não muda (os `job_id` de sempre mantêm-se).
     """
     declaracoes = list(declaracoes)
+    titulares = titulares or {}
+
+    def titular_de(document_id: Optional[str]) -> str:
+        return titulares.get(document_id or "") or TITULAR_PRINCIPAL
+
     grupos: dict[str, list[tuple[str, TrabalhoProfissional]]] = {}
     for document_id, job in entradas:
-        grupos.setdefault(chave_do_trabalho(job, document_id), []).append((document_id, job))
+        chave = chave_do_trabalho(job, document_id)
+        if titular_de(document_id) != TITULAR_PRINCIPAL:
+            chave = f"{titular_de(document_id)}|{chave}"
+        grupos.setdefault(chave, []).append((document_id, job))
 
     resultado: list[TrabalhoProfissional] = []
     for chave in sorted(grupos):
@@ -196,15 +210,18 @@ def calcular_trabalhos(
         for nome in CAMPOS_DO_TRABALHO:
             escolhido = next((getattr(j, nome) for _, j in membros if getattr(j, nome).value is not None), None)
             campos[nome] = (escolhido or getattr(membros[0][1], nome)).model_copy(deep=True)
+        titular = titular_de(membros[0][0])
         job = TrabalhoProfissional(
             job_id=job_id_da_chave(chave),
+            titular=titular if titulares else None,
             period=membros[0][1].period,
             # a localidade vem do recibo mais recente que a tem (como os restantes campos)
             employer_location=next((j.employer_location for _, j in membros if j.employer_location), None),
             source_document_ids=sorted({d for d, _ in grupos[chave] if d}),
             **campos,
         )
-        resultado.append(aplicar_declaracoes(job, membros, declaracoes))
+        do_mesmo_titular = [(d, f) for d, f in declaracoes if titular_de(d) == titular]
+        resultado.append(aplicar_declaracoes(job, membros, do_mesmo_titular))
     return resultado
 
 
@@ -277,12 +294,21 @@ async def gravar_metadados(
     return modelo
 
 
+async def _fora_os_substituidos(process_id: str) -> dict[str, Any]:
+    """O filtro que tira os comprovativos do cliente que o Index já substituiu (`index_substituicao`)."""
+    from services.index_substituicao import ids_substituidos  # import tardio: index_substituicao lê o index_ai
+
+    ids = await ids_substituidos(process_id)
+    return {"id": {"$nin": sorted(ids)}} if ids else {}
+
+
 async def recalcular_metadados(process_id: str, network_id: Optional[str], impressao: Optional[str]) -> ProfessionalMetadata:
     """Recalcula os trabalhos a partir dos recibos que o processo TEM e grava."""
     entradas: list[tuple[str, TrabalhoProfissional]] = []
     cursor = db.document_metadata.find(
         # um original eliminado (`purgado`) continua a contar: os dados lidos dele não deixaram de ser verdade
-        {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_job": {"$exists": True, "$ne": None}},
+        {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_job": {"$exists": True, "$ne": None},
+         **await _fora_os_substituidos(process_id)},
         {"_id": 0, "id": 1, "index_job": 1},
     )
     for doc in await cursor.to_list(500):
@@ -292,8 +318,11 @@ async def recalcular_metadados(process_id: str, network_id: Optional[str], impre
             logger.warning("[INDEX] index_job ilegível em %s: %s", doc.get("id"), type(exc).__name__)
     declaracoes = await _declaracoes_do_processo(process_id)
     existente = await carregar_metadados(process_id)
+    from services.index_substituicao import titulares_e_substituidos  # import tardio (como acima)
+
+    titulares, _ = await titulares_e_substituidos(process_id)
     trabalhos = aplicar_edicoes_humanas(
-        (existente or {}).get("jobs") or [], calcular_trabalhos(entradas, declaracoes)
+        (existente or {}).get("jobs") or [], calcular_trabalhos(entradas, declaracoes, titulares)
     )
     return await gravar_metadados(process_id, network_id, trabalhos, impressao)
 
@@ -307,7 +336,8 @@ async def _declaracoes_do_processo(process_id: str) -> list[tuple[str, dict]]:
     """
     try:
         docs = await db.document_metadata.find(
-            {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts.tipo": TIPO_DECLARACAO},
+            {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts.tipo": TIPO_DECLARACAO,
+             **await _fora_os_substituidos(process_id)},
             {"_id": 0, "id": 1, "index_facts": 1},
         ).to_list(100)
     except Exception as exc:  # noqa: BLE001
@@ -580,7 +610,8 @@ async def reconstruir_documentos_do_index(process_id: str, network_id: Optional[
         trabalhos = (metadados or {}).get("jobs") or []
         # os originais eliminados (`purgado`) contam: os DADOS lidos deles não deixaram de ser verdade
         docs = await db.document_metadata.find(
-            {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts": {"$exists": True, "$ne": None}},
+            {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts": {"$exists": True, "$ne": None},
+             **await _fora_os_substituidos(process_id)},
             {"_id": 0, "id": 1, "index_facts": 1, "index_job": 1},
         ).to_list(500)
         agora = _agora()
@@ -845,7 +876,8 @@ async def agregar_metadados_profissionais(pipeline: list[dict], *, tempo_maximo_
 async def factos_do_processo(process_id: str) -> list[dict]:
     """Os factos de TODOS os ficheiros do processo já analisados (incluindo os saltados nesta corrida)."""
     docs = await db.document_metadata.find(
-        {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts": {"$exists": True, "$ne": None}},
+        {"process_id": process_id, "is_clean_pdf": {"$ne": True}, "index_facts": {"$exists": True, "$ne": None},
+         **await _fora_os_substituidos(process_id)},
         {"_id": 0, "index_facts": 1},
     ).to_list(500)
     return [d["index_facts"] for d in docs if isinstance(d.get("index_facts"), dict)]

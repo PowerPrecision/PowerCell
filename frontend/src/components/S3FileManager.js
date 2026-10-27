@@ -261,6 +261,10 @@ const S3FileManager = ({
   const [stats, setStats] = useState(null);
   // Ficheiros à espera da Indexação, para quem não vê a pasta `Index`.
   const [emIndexacao, setEmIndexacao] = useState(0);
+  // Comprovativos do cliente que o Index já voltou a carregar: não contam e saem da listagem; quem vê a
+  // pasta Index pode pedi-los (o servidor só os devolve a esses perfis).
+  const [verSubstituidos, setVerSubstituidos] = useState(false);
+  const [substituidos, setSubstituidos] = useState(0);
   // `base_path` a `null` (e não ausente) = o servidor procurou e não há NADA no armazenamento.
   const [semPasta, setSemPasta] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -468,8 +472,9 @@ const S3FileManager = ({
     if (!processId) return;
 
     try {
-      const { data } = await getProcessS3Files(processId);
+      const { data } = await getProcessS3Files(processId, { incluirSubstituidos: verSubstituidos });
       setFiles(data.files || {});
+      setSubstituidos(Number(data?.superseded_count) || 0);
       setStats(data.stats || null);
       setEmIndexacao(quantosEmIndexacao(data));
       setSemPasta(data?.base_path === null);
@@ -497,7 +502,7 @@ const S3FileManager = ({
     } finally {
       setLoading(false);
     }
-  }, [processId]);
+  }, [processId, verSubstituidos]);
 
   useEffect(() => {
     fetchFiles();
@@ -2124,6 +2129,26 @@ const S3FileManager = ({
     <>
       <Card data-testid="s3-file-manager" className="h-full">
         {!canSeeIndexCategory && <AvisoEmIndexacao total={emIndexacao} />}
+        {canSeeIndexCategory && (substituidos > 0 || verSubstituidos) && (
+          <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground">
+            <span>
+              {substituidos === 1
+                ? "1 documento do cliente foi substituído pelo do Index e não conta."
+                : `${substituidos} documentos do cliente foram substituídos pelos do Index e não contam.`}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              aria-pressed={verSubstituidos}
+              onClick={() => setVerSubstituidos((v) => !v)}
+              data-testid="s3-ver-substituidos"
+            >
+              {verSubstituidos ? "Esconder" : "Ver"}
+            </Button>
+          </div>
+        )}
         {semPasta && !readOnly && !loading && (
           <ForcarPastaS3 id={processId} onFeito={aoCriarPasta} />
         )}
@@ -2605,6 +2630,16 @@ const S3FileManager = ({
                                 Estados: auto_approved (≥85% confiança, IA auto-aplicou),
                                 pending_review (<85%, à espera de revisão humana),
                                 approved/rejected/edited (decisão humana já registada). */}
+                            {file.superseded && (
+                              <Badge
+                                variant="secondary"
+                                className="text-[9px] py-0 h-4 px-1 shrink-0"
+                                title="Documento do cliente substituído pelo do Index: já não conta"
+                                data-testid="s3-badge-substituido"
+                              >
+                                Substituído
+                              </Badge>
+                            )}
                             {analyzingDocIds.has(file.doc_id || file.id) && (
                               <Badge
                                 variant="outline"
@@ -3173,6 +3208,15 @@ const S3FileManager = ({
                                 {file.category}
                               </Badge>
                               {/* PACOTE DJ — Sistema Híbrido. Badges de estado de revisão IA (grelha - Todos). */}
+                              {file.superseded && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[9px] py-0 h-4 px-1"
+                                  title="Documento do cliente substituído pelo do Index: já não conta"
+                                >
+                                  Substituído
+                                </Badge>
+                              )}
                               {analyzingDocIds.has(file.doc_id || file.id) && (
                                 <Badge
                                   variant="outline"

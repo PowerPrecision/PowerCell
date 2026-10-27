@@ -326,6 +326,37 @@ class TestOUploadSegueOPlano:
         assert fulfill.call_args.args[1]["category"] == "Financeiros"
 
 
+@pytest.mark.asyncio
+class TestTitularDoUpload:
+    """Com 2.º titular o Index diz de quem é o documento: é por titular que o dele substitui o do cliente."""
+
+    async def _enviar_com_titular(self, upload_env, titular):
+        processo = {"id": "p-1", "client_name": "Ana", "is_indexed": False}
+        _, tarefas, _, patches, _ = upload_env(processo, categoria="Outros")
+        for p in patches:
+            p.start()
+        try:
+            return await document_upload.run_upload_file_s3(
+                "p-1", file_content=b"%PDF-1.4", original_filename="f.pdf",
+                content_type="application/pdf", category="Outros", empresa_nif=None,
+                custom_filename=None, user={"id": "u-idx", "role": "indexacao"},
+                background_tasks=tarefas, titular=titular,
+            )
+        finally:
+            for p in patches:
+                p.stop()
+
+    async def test_grava_o_titular_escolhido(self, upload_env, fake_async_db):
+        res = await self._enviar_com_titular(upload_env, "titular2")
+        meta = await fake_async_db.document_metadata.find_one({"s3_path": res["path"]})
+        assert meta["titular"] == "titular2"
+
+    async def test_um_valor_que_nao_e_titular_nao_se_grava(self, upload_env, fake_async_db):
+        res = await self._enviar_com_titular(upload_env, "titular3")
+        meta = await fake_async_db.document_metadata.find_one({"s3_path": res["path"]})
+        assert "titular" not in meta
+
+
 # ---------------------------------------------------------------------
 # Upload directo (URL pré-assinado + confirmação)
 # ---------------------------------------------------------------------

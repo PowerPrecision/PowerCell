@@ -22,7 +22,7 @@ from models.process import (
     ProcessCreate, ProcessUpdate, ProcessResponse
 )
 from services.capability_gate import exigir_capacidade
-from services.auth import get_current_user, require_roles, require_staff, get_effective_role, get_all_user_roles, get_active_company_id_async
+from services.auth import get_current_user, require_roles, require_staff, get_effective_role, get_effective_role_async, get_all_user_roles, get_active_company_id_async
 from services.process_closed_guard import exigir_processo_editavel
 from services.process_reopen import run_reopen_process
 from services.process_scope_guard import exigir_processo_no_ambito
@@ -953,6 +953,16 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
 # (implementação em services/process_staff_assignment.send_assignment_email)
 # ====================================================================
 
+async def _nao_e_o_index(request: Request, user: dict = Depends(require_staff())) -> dict:
+    """O Index não muda atribuições (decisão do Flavio, Out 2026): nem pelo «Gerir», nem «atribuir-me /
+    remover-me». O indexador fica com um processo só pelo «Atribuir a mim» do módulo Index. Perfil EFECTIVO."""
+    from fastapi import HTTPException
+
+    if (await get_effective_role_async(request, user) or "").lower() == UserRole.INDEXACAO:
+        raise HTTPException(status_code=403, detail="O perfil Index não altera atribuições de processos.")
+    return user
+
+
 @router.post("/{process_id}/assign")
 async def assign_process(
     process_id: str, 
@@ -962,7 +972,7 @@ async def assign_process(
     parceiro_id: Optional[str] = None,
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
-    user: dict = Depends(require_staff())
+    user: dict = Depends(_nao_e_o_index)
 ):
     """Atribuir consultores/intermediários/indexação/parceiro (multi-assignee)."""
     return await run_staff_assign_process(
@@ -983,7 +993,7 @@ async def assign_process(
 @router.post("/{process_id}/assign-me")
 async def assign_me_to_process(
     process_id: str,
-    user: dict = Depends(require_staff())
+    user: dict = Depends(_nao_e_o_index)
 ):
     """Atribuir o utilizador actual ao processo (consultor ou mediador)."""
     return await run_assign_me_to_process(
@@ -997,7 +1007,7 @@ async def assign_me_to_process(
 @router.post("/{process_id}/unassign-me")
 async def unassign_me_from_process(
     process_id: str,
-    user: dict = Depends(require_staff())
+    user: dict = Depends(_nao_e_o_index)
 ):
     """Remover o utilizador actual do processo."""
     return await run_unassign_me_from_process(
