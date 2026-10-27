@@ -415,10 +415,32 @@ async def parceiro_no_ambito(partner: Optional[dict], actor: dict) -> bool:
         return False
     # O Master COM empresa escolhida é estreitado à rede dela (como em todas as listagens);
     # sem empresa (vista «Sistema») não tem fronteira.
-    if fronteira_levantada(actor):
+    if fronteira_levantada(actor) or _sem_rede_visivel_ao_master(partner, actor):
         return True
     scope = await resolve_tenant_scope(actor or {})
     return _no_ambito_do_actor(partner, scope)
+
+
+def _sem_rede(partner: dict) -> bool:
+    """Nenhuma ligação com rede e nenhuma rede do convite (PURA).
+
+    É o independente que o Master convidou sem empresa: não cai no âmbito de
+    NENHUMA empresa, logo nenhuma vista estreitada o mostra.
+    """
+    ligacoes = [r for r in (partner.get("redes") or []) if isinstance(r, dict) and r.get("network_id")]
+    return not ligacoes and not str(partner.get("convidado_pela_rede") or "").strip()
+
+
+def _sem_rede_visivel_ao_master(partner: dict, actor: dict) -> bool:
+    """O Master vê o parceiro sem rede em QUALQUER vista (PURA).
+
+    Só ele o pode gerir; escondê-lo quando há empresa escolhida deixava-o
+    invisível — e o convite seguinte para o mesmo email dava 409 sem que se
+    encontrasse a conta. Não alarga nada a um perfil local.
+    """
+    from services.role_scope import utilizador_e_global
+
+    return utilizador_e_global(actor) and _sem_rede(partner)
 
 
 def _no_ambito_do_actor(partner: dict, scope: Any) -> bool:
@@ -744,7 +766,10 @@ async def run_list_partners(actor: dict) -> dict:
     eglobal = fronteira_levantada(actor)
     scope = None if eglobal else await resolve_tenant_scope(actor or {})
     docs = await db.partners.find({"status": {"$ne": ESTADO_ELIMINADO}}, {"_id": 0, "password_hash": 0}).to_list(2000)
-    visiveis = [p for p in docs if eglobal or _no_ambito_do_actor(p, scope)]
+    visiveis = [
+        p for p in docs
+        if eglobal or _sem_rede_visivel_ao_master(p, actor) or _no_ambito_do_actor(p, scope)
+    ]
     visiveis.sort(key=lambda p: (p.get("name") or "").lower())
     return {"partners": [publico(p) for p in visiveis], "total": len(visiveis)}
 
@@ -770,7 +795,8 @@ async def run_list_partner_options(actor: dict) -> dict:
     ).to_list(2000)
     opcoes: dict[str, str] = {
         str(p["id"]): str(p.get("name") or "").strip() or "Parceiro"
-        for p in docs if p.get("id") and (eglobal or _no_ambito_do_actor(p, scope))
+        for p in docs
+        if p.get("id") and (eglobal or _sem_rede_visivel_ao_master(p, actor) or _no_ambito_do_actor(p, scope))
     }
     from services.admin_users_scope import build_users_scope_query, empresas_da_empresa_activa
 

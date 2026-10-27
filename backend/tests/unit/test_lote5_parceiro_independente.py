@@ -268,6 +268,21 @@ class TestGestaoDoIndependente:
         convite = await _independente(acc, MASTER)
         assert [p["id"] for p in (await acc.run_list_partners(MASTER))["partners"]] == [convite["partner"]["id"]]
 
+    async def test_o_master_com_empresa_escolhida_continua_a_ver_o_independente_sem_rede(self, com_bd):
+        """Convidado pelo Master sem empresa: não tem ligações nem rede do convite.
+        Com uma empresa escolhida a lista estreitava-o para fora e ninguém o via
+        (o convite seguinte respondia 409 e o parceiro não aparecia em lado nenhum)."""
+        import services.partner_accounts as acc
+
+        convite = await _independente(acc, MASTER)
+        pid = convite["partner"]["id"]
+        master_como_power = {**MASTER, "vista_empresa_id": "cmp-power"}
+        assert [p["id"] for p in (await acc.run_list_partners(master_como_power))["partners"]] == [pid]
+        assert (await acc.run_get_partner(pid, master_como_power))["id"] == pid
+        assert pid in [o["id"] for o in (await acc.run_list_partner_options(master_como_power))["partners"]]
+        # A parede das redes fica igual: um Admin não o vê.
+        assert (await acc.run_list_partners(ADMIN_POWER))["partners"] == []
+
     async def test_suspender_actua_na_conta_e_mata_a_sessao_na_hora(self, com_bd):
         import services.partner_accounts as acc
         import services.partner_security as sec
