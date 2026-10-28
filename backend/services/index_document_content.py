@@ -40,6 +40,7 @@ from fastapi import HTTPException
 from database import db
 from services.document_visibility import assert_can_view_process_documents
 from services.index_ai import TIPO_DECLARACAO, TIPO_EXTRATO, TIPO_RECIBO
+from services.index_ficheiros_do_s3 import chave_e_da_pasta_do_processo
 from services.previsualizacao_de_ficheiros import servir_ficheiro_do_s3
 from services.role_scope import fronteira_levantada
 from services import index_store as store
@@ -153,11 +154,17 @@ async def run_conteudo_do_ficheiro_do_processo(
     existe), visibilidade dos documentos, posse da chave S3 por segmento, tecto e rasto de auditoria na descarga.
     """
     documento: Optional[dict] = await db.document_metadata.find_one(
-        {"id": _texto(document_id), "process_id": _texto(process_id), "file_state": {"$ne": "purgado"}},
+        {"id": _texto(document_id), "file_state": {"$ne": "purgado"}},
         {"_id": 0, "id": 1, "process_id": 1, "s3_path": 1, "filename": 1},
     )
     processo = await _processo_no_ambito_ou_404(_texto(process_id), user)
     if not documento or not documento.get("s3_path"):
+        raise HTTPException(status_code=404, detail=ERRO_NAO_ENCONTRADO)
+    # a bancada lista a pasta do processo, que inclui a raiz do cliente: um registo dali pode ter o
+    # `process_id` de outro processo do mesmo cliente. Conta se a chave está na pasta DESTE processo.
+    if documento.get("process_id") != _texto(process_id) and not chave_e_da_pasta_do_processo(
+        documento["s3_path"], processo
+    ):
         raise HTTPException(status_code=404, detail=ERRO_NAO_ENCONTRADO)
     await assert_can_view_process_documents(user, processo)
 

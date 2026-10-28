@@ -36,6 +36,7 @@ from services import index_queue_query as consulta_da_fila
 from services import index_status as estado_do_index
 from services import index_store as store
 from services.index_ai import TIPOS_ANALISADOS, tipo_de_analise
+from services.index_ficheiros_do_s3 import registos_da_pasta_do_processo
 from services.index_substituicao import ids_substituidos, titulares_e_substituidos
 from services.partner_titulares import titulares_do_caso
 from services.process_owner import calcular_empresa_dona
@@ -122,7 +123,7 @@ async def _carregar_processo(process_id: str, user: dict) -> dict:
             "id", "process_number", "client_name", "status", "created_at", "updated_at", "index_status",
             "index_skipped", "is_indexed", "skip_index", "assigned_indexacao_id", "indexacao_name", "has_pending_review",
             "index_alerts_open", "indexed_at", "indexed_by_name", "network_id", "index_stagnation_alerted_at",
-            "second_client_id", "second_client_name", "titular2_data.name", "titular2_data.nome")}},
+            "second_client_id", "second_client_name", "titular2_data.name", "titular2_data.nome", "s3_folder")}},
     )
     if not proc:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -277,6 +278,11 @@ async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, An
     docs = await db.document_metadata.find(
         {"process_id": process_id, "file_state": {"$ne": "purgado"}}, PROJECCAO_DOS_FICHEIROS
     ).to_list(500)
+    # a lista é a MESMA da aba Documentos (a pasta S3); os registos do processo fora dela não se perdem
+    da_pasta = await registos_da_pasta_do_processo(proc, PROJECCAO_DOS_FICHEIROS)
+    if da_pasta is not None:
+        ja = {d.get("id") for d in da_pasta}
+        docs = da_pasta + [d for d in docs if d.get("id") not in ja]
     titulares, substituidos = await titulares_e_substituidos(process_id, proc)
     ficheiros = [_ficheiro_dto(d, frozenset(substituidos), titulares) for d in docs]
     metadados = await store.carregar_metadados(process_id)
