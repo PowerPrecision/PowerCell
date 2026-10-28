@@ -7,6 +7,7 @@ Funções de sanitização de inputs para prevenir XSS e outros ataques.
 Utiliza a biblioteca 'bleach' para limpeza segura de HTML.
 ====================================================================
 """
+import html
 import re
 import logging
 import bleach
@@ -153,6 +154,40 @@ def sanitize_string(value: str, max_length: int = 200) -> str:
         value = value[:max_length]
     
     return value.strip()
+
+
+def sanitize_multiline_text(value: Optional[str], max_length: int = 10000) -> str:
+    """Sanitiza texto simples com várias linhas (ex.: corpo de email).
+
+    Ao contrário de ``sanitize_string`` (feita para campos de uma linha),
+    NÃO junta as linhas: quebras de linha, parágrafos e indentação ficam
+    como o utilizador os escreveu. Remove tags HTML (e o conteúdo de
+    ``<script>``/``<style>``…), mas mantém ``&``, ``<`` e ``>`` literais —
+    quem mostra este texto em HTML tem de o escapar (``plain_text_to_html``).
+    """
+    if not value:
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+
+    value = value.replace('\x00', '').replace('\r\n', '\n').replace('\r', '\n')
+    value = _strip_dangerous_blocks(value)
+    value = bleach.clean(value, tags=[], attributes={}, protocols=ALLOWED_PROTOCOLS, strip=True)
+    # o bleach devolve HTML (``&`` → ``&amp;``); aqui queremos o texto tal como foi escrito
+    value = html.unescape(value)
+    value = "\n".join(linha.rstrip() for linha in value.split("\n")).strip()
+
+    if len(value) > max_length:
+        value = value[:max_length].rstrip()
+    return value
+
+
+def plain_text_to_html(value: Optional[str]) -> str:
+    """Texto simples → fragmento HTML seguro: escapa e converte ``\\n`` em ``<br/>``."""
+    if not value:
+        return ""
+    texto = str(value).replace('\r\n', '\n').replace('\r', '\n')
+    return html.escape(texto).replace('\n', '<br/>')
 
 
 def sanitize_html(value: str, allow_basic_formatting: bool = False, allow_email_html: bool = False) -> str:

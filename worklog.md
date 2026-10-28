@@ -12669,3 +12669,12 @@ Pedido: o Master com uma empresa escolhida via os parceiros de todas as redes; e
 - Novo `scripts/diagnosticar_email_de_parceiro.py` (só leitura): diz qual das regras do convite recusou um email.
 - Testes: `test_lote5_parceiro_independente.py` (+1, falhava antes), `test_diagnosticar_email_de_parceiro.py` (5); 270 testes de parceiros passam. Suite completa e integração Mongo não corridas. Não verificado em produção.
 - O `[User: anónimo]` do `logging_middleware` é sempre anónimo: nada popula `request.state.user`.
+
+## 2026-10-28 — Emails enviados chegavam como texto corrido
+- Pedido (Flavio): auditoria aos emails enviados — a formatação escrita (linhas, parágrafos) perdia-se e o texto saía todo seguido.
+- Causa: o corpo em texto simples passava por `sanitize_string`, que faz `' '.join(value.split())` (feita para campos de uma linha). Todas as quebras de linha desapareciam ANTES do envio. Também apagava `&`, `<`, `>` (o bleach escapava-os e as entidades eram removidas): «Silva & Filhos» saía «Silva Filhos».
+- Caminhos afectados e corrigidos (passam a usar `sanitize_multiline_text`): envio do Webmail e respostas (`run_send_email`), registo/edição de emails (`run_create_email_record`, `run_update_email`), templates de email (criar/editar), rascunhos automáticos (editar → enviar), mensagem personalizada do envio de documentação aos bancos (`custom_message`).
+- Notas do link temporário de upload (`temp_link_service`): entravam cruas no HTML (sem escape nem `<br/>`); agora `plain_text_to_html`.
+- Auditados sem problema: SMTP/Resend/Gmail API (`_synthesize_html_body` já converte `\n` em `<br/>`/`<p>`; sem assinatura sai text/plain com as quebras), HTML do editor rico (`sanitize_html(allow_email_html=True)` mantém `p`/`br`/`div`), magic link do portal, convites de parceiro, notificações do sistema (texto fixo).
+- Por fazer: o assunto continua a perder `&`/`<`/`>` (`sanitize_string`); o chat interno (`chat_messages`) também junta as linhas. Templates e rascunhos já gravados antes desta correcção continuam achatados na base de dados (não se recuperam).
+- Testes: `test_emails_preservam_formatacao.py` (10, falhavam antes — o corpo saía «Bom dia, Segue a documentação: - CC - IRS Cumprimentos, Silva Filhos»); 791 testes dos módulos tocados passam. Suite completa e integração Mongo não corridas. Não verificado em produção.

@@ -22,7 +22,7 @@ from services.email_template_vars import (
     _build_professional_email_html,
 )
 from services.process_service import decrypt_sensitive_data
-from utils.input_sanitization import sanitize_string, sanitize_email, sanitize_html
+from utils.input_sanitization import sanitize_string, sanitize_email, sanitize_html, sanitize_multiline_text
 
 logger = logging.getLogger(__name__)
 
@@ -592,7 +592,7 @@ async def _send_documentation_email_impl(
         logger.info(f"Usando custom_html_body do Rich Text Editor para processo {process_id} (utilizador: {current_user['role']})")
     
     elif custom_message:
-        custom_message = sanitize_string(custom_message, max_length=10000)
+        custom_message = sanitize_multiline_text(custom_message, max_length=10000)
         # Normalizar placeholders: [VAR_NAME] → {VAR_NAME}
         normalized_custom = re.sub(r'\[([A-Z_]+)\]', r'{\1}', custom_message)
         try:

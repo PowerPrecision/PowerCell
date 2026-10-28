@@ -21,7 +21,7 @@ from services.email_draft_service import (
     discard_draft,
     create_missing_doc_draft,
 )
-from utils.input_sanitization import sanitize_string, sanitize_email
+from utils.input_sanitization import sanitize_string, sanitize_email, sanitize_multiline_text
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ async def run_create_email_template(template: EmailTemplateCreate, request: Requ
         "id": template_id,
         "name": sanitize_string(template.name, max_length=200),
         "subject": sanitize_string(template.subject, max_length=300),
-        "body": sanitize_string(template.body, max_length=10000),
+        "body": sanitize_multiline_text(template.body, max_length=10000),
         "category": template.category,
         "is_default": template.is_default,
         "company_id": company_id,  # MULTI-EMPRESA
@@ -105,7 +105,7 @@ async def run_update_email_template(template_id: str, template: EmailTemplateCre
     update_data = {
         "name": sanitize_string(template.name, max_length=200),
         "subject": sanitize_string(template.subject, max_length=300),
-        "body": sanitize_string(template.body, max_length=10000),
+        "body": sanitize_multiline_text(template.body, max_length=10000),
         "category": template.category,
         "is_default": template.is_default,
         "updated_at": datetime.now(timezone.utc).isoformat()
@@ -286,7 +286,7 @@ async def run_edit_auto_draft(draft_id: str, data: dict, current_user: dict):
     if "subject" in data and data["subject"]:
         data["subject"] = sanitize_string(data["subject"], max_length=300)
     if "body" in data and data["body"]:
-        data["body"] = sanitize_string(data["body"], max_length=10000)
+        data["body"] = sanitize_multiline_text(data["body"], max_length=10000)
     if "to_emails" in data and data["to_emails"]:
         data["to_emails"] = [e for e in (sanitize_email(e) for e in data["to_emails"]) if e]
 
