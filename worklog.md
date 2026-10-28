@@ -12678,3 +12678,10 @@ Pedido: o Master com uma empresa escolhida via os parceiros de todas as redes; e
 - Auditados sem problema: SMTP/Resend/Gmail API (`_synthesize_html_body` já converte `\n` em `<br/>`/`<p>`; sem assinatura sai text/plain com as quebras), HTML do editor rico (`sanitize_html(allow_email_html=True)` mantém `p`/`br`/`div`), magic link do portal, convites de parceiro, notificações do sistema (texto fixo).
 - Por fazer: o assunto continua a perder `&`/`<`/`>` (`sanitize_string`); o chat interno (`chat_messages`) também junta as linhas. Templates e rascunhos já gravados antes desta correcção continuam achatados na base de dados (não se recuperam).
 - Testes: `test_emails_preservam_formatacao.py` (10, falhavam antes — o corpo saía «Bom dia, Segue a documentação: - CC - IRS Cumprimentos, Silva Filhos»); 791 testes dos módulos tocados passam. Suite completa e integração Mongo não corridas. Não verificado em produção.
+
+## 2026-10-28 — Assunto com «&» e quebras de linha no chat interno (seguimento)
+- Pedido (Flavio): tratar as duas pontas deixadas na correcção dos emails.
+- Assunto: novo `sanitize_single_line_text` (uma linha, sem HTML, mantém `&`, `<`, `>`) no envio do Webmail, registo/edição de emails, templates e rascunhos automáticos. «Silva & Filhos» deixava de ser «Silva Filhos».
+- Chat interno: o backend (`chat_messages`: enviar, enviar com anexo, editar) usa `sanitize_multiline_text`. A caixa de escrita do `ChatPanel` era um `Input` de uma linha; passou a `Textarea` — Enter envia, Shift+Enter muda de linha. A mensagem já era mostrada com `whitespace-pre-wrap`.
+- Visto de passagem, não corrigido: a edição de mensagens no chat nunca abre (`editingMessage === msg.id` compara um objecto com um id); o `ChatPanel` usa `fetch` cru em vez do Axios (`services/api.js`).
+- Testes: `test_emails_preservam_formatacao.py` (+6, falhavam antes), `ChatPanel.quebrasDeLinha.test.jsx` (1, falha sem a correcção); 1194 testes backend dos módulos tocados passam (os 2 falhados + 8 erros de `test_chat_and_config_iteration64.py` precisam de servidor ligado e falham igual sem as alterações). Suite completa não corrida. Não verificado no browser nem em produção.

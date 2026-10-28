@@ -1231,12 +1231,20 @@ const ChatPanel = ({ open, onOpenChange }) => {
             <Paperclip className="h-4 w-4" />
           )}
         </Button>
-        <Input
+        {/* Enter envia; Shift+Enter muda de linha (a mensagem mantém as quebras) */}
+        <Textarea
           placeholder="Escrever mensagem..."
           value={newMessage}
+          rows={1}
+          className="min-h-9 max-h-32 resize-none"
           onChange={(e) => {
             setNewMessage(e.target.value);
             handleTyping();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              handleSendMessage(e);
+            }
           }}
           disabled={sendingMessage}
         />
