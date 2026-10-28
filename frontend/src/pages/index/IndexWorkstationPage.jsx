@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Skeleton } from "../../components/ui/skeleton";
 import { PageHeader } from "../../components/shared/PageHeader";
 import { AlertMatrix } from "../../components/index/AlertMatrix";
+import { ConversaDoProcesso } from "../../components/index/ConversaDoProcesso";
 import { EmployerNifDialog } from "../../components/index/EmployerNifDialog";
 import { IndexActionsBar } from "../../components/index/IndexActionsBar";
 import { PedirAlteracaoDeAtribuicao } from "../../components/index/PedirAlteracaoDeAtribuicao";
@@ -436,6 +437,8 @@ export default function IndexWorkstationPage() {
           aDispensar={m.dispensar.isPending ? m.dispensar.variables : null}
           onDispensar={(id) => m.dispensar.mutate(id)}
         />
+
+        <ConversaDoProcesso processoId={processo.id} lado="index" />
       </div>
 
       <VisualizadorDeDocumento

@@ -35,6 +35,7 @@ from services.index_api import (
     run_search_employers,
     run_set_file_titular,
 )
+from services.index_conversa import MensagemDaConversa, run_enviar_do_index, run_ler_conversa_do_index
 from services.index_finalize import run_mark_indexed
 from services import index_assignment_requests as pedidos_de_atribuicao
 from services.process_broadcast import broadcast_process_delta
@@ -385,3 +386,20 @@ async def resolver_pedido_de_atribuicao(
 ):
     """A chefia fecha o pedido: «concluido» (tratado pelo «Gerir» do processo) ou «recusado»."""
     return await pedidos_de_atribuicao.run_resolver_pedido(user, pedido_id, data.decisao, data.nota)
+
+
+@router.get("/processes/{process_id}/conversa")
+@limiter.limit("120/minute")
+async def get_conversa(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
+    """A conversa do processo com quem o carregou (mensagens do chat interno marcadas com o processo)."""
+    return await run_ler_conversa_do_index(user, process_id)
+
+
+@router.post("/processes/{process_id}/conversa")
+@limiter.limit("30/minute")
+async def post_conversa(
+    request: Request, response: Response, process_id: str, data: MensagemDaConversa,
+    user: dict = Depends(_acesso),
+):
+    """Escrever a quem carregou o processo. Conversar não é agir: não exige ser o indexador atribuído."""
+    return await run_enviar_do_index(user, process_id, data)

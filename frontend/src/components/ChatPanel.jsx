@@ -88,7 +88,7 @@ const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "✅"
 const isParceiro = (user) => hasRole(user, "parceiro");
 
 const ChatPanel = ({ open, onOpenChange }) => {
-  const { user } = useAuth();
+  const { user, effectiveRole } = useAuth();
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -971,6 +971,18 @@ const ChatPanel = ({ open, onOpenChange }) => {
                         </div>
                       ) : (
                         <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                      )}
+
+                      {/* Conversa Index ↔ quem carregou: a mensagem é sobre um processo (responder aqui
+                          mantém-na lá). O Index abre a bancada; os outros, o processo. */}
+                      {msg.canal === "index" && msg.process_id && (
+                        <a
+                          href={(effectiveRole || user?.role) === "indexacao" ? `/index/${msg.process_id}` : `/processo/${msg.process_id}`}
+                          className="mt-1 inline-block text-[11px] underline underline-offset-2 opacity-80 hover:opacity-100"
+                          data-testid="chat-msg-processo"
+                        >
+                          {msg.process_number ? `Processo #${msg.process_number}` : "Ver processo"}
+                        </a>
                       )}
 
                       {/* Attachment */}

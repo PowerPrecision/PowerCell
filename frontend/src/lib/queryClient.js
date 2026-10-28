@@ -128,6 +128,7 @@ export const queryKeys = {
     search: (chave = '') => [...queryKeys.index.all, 'search', chave],
     pedidosAll: () => [...queryKeys.index.all, 'pedidos-atribuicao'],
     pedidos: (estado = 'pendente', processId = '') => [...queryKeys.index.pedidosAll(), estado, processId],
+    conversa: (processId, lado = 'index') => [...queryKeys.index.all, 'conversa', processId, lado],
   },
 
   // Histórico/Timeline

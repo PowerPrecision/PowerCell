@@ -244,6 +244,7 @@ import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
 import HistoryTab from "../components/processDetails/tabs/HistoryTab";
 import AiLogTab from "../components/processDetails/tabs/AiLogTab";
 import ProcessObservationsCard from "../components/processDetails/ProcessObservationsCard";
+import ConversaDoProcesso from "../components/index/ConversaDoProcesso";
 import VoiceNoteRecorder from "../components/processDetails/VoiceNoteRecorder";
 import ProcessLabelsEditor from "../components/processDetails/ProcessLabelsEditor";
 import ProcessSummaryTimeline from "../components/processDetails/ProcessSummaryTimeline";
@@ -2933,6 +2934,12 @@ const ProcessDetails = () => {
                     onOpenFullHistory={() => setMainTab("historico")}
                   />
                 </div>
+
+                {/* Conversa com o Index (Out 2026): o outro lado da bancada. Só quando o processo passa pelo
+                    Index; quem trabalha como Index fala a partir da bancada. */}
+                {!indexadorAtivo && process?.assigned_indexacao_id && (
+                  <ConversaDoProcesso processoId={id} lado="processo" />
+                )}
 
                 {/* PACOTE DD — cartão de Etiquetas removido (movido para PageHeader) */}
 

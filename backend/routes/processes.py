@@ -13,7 +13,7 @@ Autor: PowerCell Development Team
 import logging
 from typing import List, Optional
 from utils.frontend_url import get_frontend_url
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
 
 from database import db
@@ -86,6 +86,11 @@ from services.process_detail import (
     run_get_process_alerts,
 )
 from services.process_timeline import run_get_process_timeline
+from services.index_conversa import (
+    MensagemDaConversa,
+    run_enviar_do_processo,
+    run_ler_conversa_do_processo,
+)
 from services.process_observation_notes import (
     ObservationNoteCreate,
     run_add_observation_note,
@@ -657,6 +662,30 @@ async def get_process(
         populate_fn=populate_client_data,
         request=request,
     )
+
+
+async def _exigir_ver_processo(process_id: str, user: dict) -> None:
+    process = await db.processes.find_one({"id": process_id, "is_deleted": {"$ne": True}}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    if not can_view_process(user, process):
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+
+@router.get("/{process_id}/conversa-index")
+async def get_conversa_index(process_id: str, user: dict = Depends(require_staff())):
+    """A conversa com o Index sobre este processo (o outro lado da bancada)."""
+    await _exigir_ver_processo(process_id, user)
+    return await run_ler_conversa_do_processo(user, process_id)
+
+
+@router.post("/{process_id}/conversa-index")
+async def post_conversa_index(
+    process_id: str, data: MensagemDaConversa, user: dict = Depends(require_staff()),
+):
+    """Responder ao Index (vai para o indexador atribuído)."""
+    await _exigir_ver_processo(process_id, user)
+    return await run_enviar_do_processo(user, process_id, data)
 
 
 @router.post("/{process_id}/observation-notes")

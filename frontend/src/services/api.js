@@ -1360,6 +1360,15 @@ export const dismissIndexAlert = (processId, alertId) =>
   api.post(`/index/processes/${processId}/alerts/${alertId}/dismiss`, null, { skipErrorToast: true });
 export const markIndexProcessIndexed = (processId, employers = []) =>
   api.post(`/index/processes/${processId}/mark-indexed`, { employers }, { skipErrorToast: true });
+// Conversa do processo entre o Index e quem o carregou (mensagens do chat interno ligadas ao processo)
+export const getIndexConversa = (processId) =>
+  api.get(`/index/processes/${processId}/conversa`, { skipErrorToast: true });
+export const sendIndexConversa = (processId, text) =>
+  api.post(`/index/processes/${processId}/conversa`, { text }, { skipErrorToast: true });
+export const getProcessConversaIndex = (processId) =>
+  api.get(`/processes/${processId}/conversa-index`, { skipErrorToast: true });
+export const sendProcessConversaIndex = (processId, text) =>
+  api.post(`/processes/${processId}/conversa-index`, { text }, { skipErrorToast: true });
 /** Os bytes de um documento que a pesquisa devolveu (recibo, declaração, extrato) — por id, nunca por chave S3. */
 // `download: true` → o servidor responde com `Content-Disposition: attachment` (e deixa rasto de auditoria).
 export const getIndexDocumentContent = (documentId, { download = false } = {}) =>

@@ -45,6 +45,10 @@ vi.mock("../../services/api", () => ({
   sanitizeIndexProcess: vi.fn(),
   markIndexProcessIndexed: vi.fn(),
   searchIndexEmployers: vi.fn(),
+  getIndexConversa: vi.fn(async () => ({ data: { interlocutor: null, messages: [] } })),
+  sendIndexConversa: vi.fn(),
+  getProcessConversaIndex: vi.fn(),
+  sendProcessConversaIndex: vi.fn(),
 }));
 
 import * as api from "../../services/api";

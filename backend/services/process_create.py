@@ -615,6 +615,9 @@ async def assemble_staff_create_bundle(
         client_fields["client_id"],
     )
     apply_creator_role_assignment(process_doc, user)
+    # quem carregou o processo: é com esta pessoa que o Index fala (`index_conversa`)
+    process_doc["created_by_id"] = user.get("id")
+    process_doc["created_by_name"] = user.get("name")
     aplicar_parceiro_do_cliente(process_doc, client_fields)
 
     # PACOTE 5 (Fast-Track / Via Verde) — persistir o flag no processo

@@ -190,6 +190,12 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
             "read": False,
             "created_at": datetime.now(timezone.utc).isoformat()
         }
+        # a resposta à conversa Index ↔ quem carregou volta ao processo (ver `index_conversa`)
+        if not message.process_id:
+            from services.index_conversa import herdar_canal_do_processo
+
+            msg_doc.update(await herdar_canal_do_processo(
+                user_id, message.receiver_id, message.reply_to, mensagens=db.chat_messages))
 
         await db.chat_messages.insert_one(msg_doc)
 
@@ -203,7 +209,8 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
                 "sender_name": user.get("name", ""),
                 "receiver_id": message.receiver_id,
                 "content": message.content[:100],
-                "process_id": message.process_id,
+                "process_id": msg_doc.get("process_id"),
+                "canal": msg_doc.get("canal"),
                 "created_at": msg_doc["created_at"]
             },
         )
