@@ -89,6 +89,11 @@ export const pedirUrlDeEnvio = (caseId, body) =>
 export const confirmarEnvio = (caseId, body) =>
   dados(partnerHttp.post(`/cases/${encodeURIComponent(caseId)}/confirm-upload`, body));
 /** O parceiro escreve uma nota no SEU processo (entra no feed «Observações» da equipa). */
+// Conversa com a equipa do Index (quando foi o parceiro a carregar o processo)
+export const obterConversaIndex = (caseId) =>
+  dados(partnerHttp.get(`/cases/${encodeURIComponent(caseId)}/conversa-index`));
+export const enviarConversaIndex = (caseId, text) =>
+  dados(partnerHttp.post(`/cases/${encodeURIComponent(caseId)}/conversa-index`, { text }));
 export const escreverNota = (caseId, text) =>
   dados(partnerHttp.post(`/cases/${encodeURIComponent(caseId)}/notes`, { text }));
 export const obterUrlDeDescarga = (caseId, fileId) =>

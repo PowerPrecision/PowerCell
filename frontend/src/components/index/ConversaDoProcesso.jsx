@@ -93,6 +93,7 @@ export function ConversaDoProcesso({ processoId, lado = "index", className = "" 
           {interlocutor && (
             <span className="text-sm font-normal text-muted-foreground" data-testid="conversa-interlocutor">
               · {interlocutor.name}
+              {interlocutor.tipo === "parceiro" && " (Parceiro)"}
             </span>
           )}
         </CardTitle>
@@ -159,7 +160,9 @@ export function ConversaDoProcesso({ processoId, lado = "index", className = "" 
             />
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs text-muted-foreground">
-                Também chega ao chat interno de {interlocutor.name}.
+                {interlocutor.tipo === "parceiro"
+                  ? "O parceiro lê e responde no Portal do Parceiro (recebe um email quando tem mensagens novas)."
+                  : `Também chega ao chat interno de ${interlocutor.name}.`}
               </span>
               <Button
                 size="sm"

@@ -35,6 +35,7 @@ from services.partner_portal_read import (
     run_get_dashboard,
     run_list_cases,
 )
+from services.index_conversa import MensagemDaConversa, run_enviar_do_parceiro, run_ler_conversa_do_parceiro
 from services.partner_notes import PartnerNoteIn, run_partner_add_note
 from services.partner_security import get_current_partner
 from services.partner_upload_ops import (
@@ -172,6 +173,27 @@ async def partner_add_note(
     partner: dict = Depends(get_current_partner),
 ):
     return await run_partner_add_note(partner, case_id, data)
+
+
+# ── Conversa com a equipa do Index (quando foi o parceiro a carregar o processo) ──
+@router.get("/cases/{case_id}/conversa-index")
+@limiter.limit("120/minute")
+async def partner_get_conversa_index(
+    request: Request, response: Response, case_id: str, partner: dict = Depends(get_current_partner),
+):
+    return await run_ler_conversa_do_parceiro(partner, case_id)
+
+
+@router.post("/cases/{case_id}/conversa-index")
+@limiter.limit("60/hour")
+async def partner_post_conversa_index(
+    request: Request,
+    response: Response,
+    case_id: str,
+    data: MensagemDaConversa,
+    partner: dict = Depends(get_current_partner),
+):
+    return await run_enviar_do_parceiro(partner, case_id, data)
 
 
 # ── Dados do cliente: a estrutura do registo público, com 2.º titular ──

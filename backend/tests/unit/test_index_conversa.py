@@ -34,7 +34,7 @@ class _Contexto:
 
     def __enter__(self):
         mocks = [p.__enter__() for p in self.patches]
-        self.avisar = mocks[-1]
+        self.avisar = mocks[4]  # send_realtime_notification
         return self
 
     def __exit__(self, *exc):
@@ -56,7 +56,7 @@ async def test_quem_carregou_pelo_carimbo(fake_async_db):
     await _cenario(fake_async_db, created_by_id=INTER["id"], assigned_consultor_id=CONSULTOR["id"])
     with _Contexto(fake_async_db):
         u = await conversa.resolver_quem_carregou(await fake_async_db.processes.find_one({"id": PID}))
-    assert u == {"id": INTER["id"], "name": INTER["name"]}
+    assert u == {"id": INTER["id"], "name": INTER["name"], "tipo": "utilizador"}
 
 
 @pytest.mark.asyncio
@@ -146,3 +146,103 @@ async def test_chat_interno_sem_conversa_do_processo_nao_herda(fake_async_db):
     with _Contexto(fake_async_db):
         r = await chat_messages.run_send_message(ChatMessageCreate(receiver_id=INDEX["id"], content="Olá"), INTER)
     assert r["message"].get("canal") is None and r["message"].get("process_id") is None
+
+
+# ====================================================================
+# PARCEIRO — quando foi o parceiro a carregar o processo
+# ====================================================================
+from types import SimpleNamespace  # noqa: E402
+
+PT = {"id": "pt-1", "name": "Rui Parceiro"}
+
+
+class _ComParceiro(_Contexto):
+    def __init__(self, db, activo=True, e_processo=True):
+        super().__init__(db)
+        contacto = {"id": PT["id"], "name": PT["name"], "email": "rui@parceiro.pt"} if activo else None
+        self.email = AsyncMock()
+        self.emails: list = []
+        self.patches += [
+            patch("services.partner_accounts.parceiro_activo", AsyncMock(return_value=contacto)),
+            patch("services.partner_portal_read.resolver_caso",
+                  AsyncMock(return_value=SimpleNamespace(e_processo=e_processo, id=PID))),
+            patch("services.process_closed_guard.processo_esta_fechado", AsyncMock(return_value=False)),
+            patch("services.background_tasks.spawn_background_task", lambda coro, name=None: self.emails.append(name) or coro.close()),
+            patch.object(conversa, "_enviar_email_ao_parceiro", self.email),
+        ]
+
+
+async def _cenario_do_parceiro(db, **campos):
+    await db.clients.insert_one({"id": "c1", "submitted_by_partner_id": PT["id"]})
+    await _cenario(db, client_id="c1", assigned_parceiro_id=PT["id"], created_by_id=INTER["id"], **campos)
+
+
+@pytest.mark.asyncio
+async def test_parceiro_que_submeteu_a_lead_e_quem_carregou(fake_async_db):
+    await _cenario_do_parceiro(fake_async_db)
+    with _ComParceiro(fake_async_db):
+        u = await conversa.resolver_quem_carregou(await fake_async_db.processes.find_one({"id": PID}))
+    assert u == {"id": PT["id"], "name": PT["name"], "tipo": "parceiro"}
+
+
+@pytest.mark.asyncio
+async def test_parceiro_so_atribuido_ou_inactivo_nao_conta(fake_async_db):
+    await fake_async_db.clients.insert_one({"id": "c1", "submitted_by_partner_id": "outro"})
+    await _cenario(fake_async_db, client_id="c1", assigned_parceiro_id=PT["id"], created_by_id=INTER["id"])
+    with _ComParceiro(fake_async_db):
+        u = await conversa.resolver_quem_carregou(await fake_async_db.processes.find_one({"id": PID}))
+    assert u["id"] == INTER["id"]
+    await fake_async_db.clients.update_one({"id": "c1"}, {"$set": {"submitted_by_partner_id": PT["id"]}})
+    with _ComParceiro(fake_async_db, activo=False):
+        u = await conversa.resolver_quem_carregou(await fake_async_db.processes.find_one({"id": PID}))
+    assert u["id"] == INTER["id"]
+
+
+@pytest.mark.asyncio
+async def test_index_fala_com_o_parceiro_e_ele_responde_no_portal(fake_async_db):
+    await _cenario_do_parceiro(fake_async_db)
+    with _ComParceiro(fake_async_db) as ctx:
+        await conversa.run_enviar_do_index(INDEX, PID, conversa.MensagemDaConversa(text="Falta o IRS"))
+        await conversa.run_enviar_do_index(INDEX, PID, conversa.MensagemDaConversa(text="E o recibo"))
+        # um email só pela primeira por ler; nada vai ao chat interno nem às notificações do CRM
+        assert len(ctx.emails) == 1
+        assert ctx.avisar.await_count == 0
+        lido = await conversa.run_ler_conversa_do_parceiro(PT, PID)
+        assert [m["content"] for m in lido["messages"]] == ["Falta o IRS", "E o recibo"]
+        assert lido["interlocutor"] == {"name": INDEX["name"]}
+        r = await conversa.run_enviar_do_parceiro(PT, PID, conversa.MensagemDaConversa(text="Envio amanhã"))
+        assert ctx.avisar.await_args.kwargs["user_id"] == INDEX["id"]
+        vista = await conversa.run_ler_conversa_do_index(INDEX, PID)
+    assert r["message"]["mine"] is True
+    assert vista["messages"][-1]["content"] == "Envio amanhã"
+    assert vista["messages"][-1]["sender_name"] == "Rui Parceiro (Parceiro)"
+    assert await fake_async_db.chat_messages.count_documents({"receiver_id": PT["id"], "read": False}) == 0
+
+
+@pytest.mark.asyncio
+async def test_parceiro_nao_ve_as_mensagens_internas_da_equipa(fake_async_db):
+    await _cenario_do_parceiro(fake_async_db)
+    with _ComParceiro(fake_async_db):
+        await conversa.run_enviar_do_processo(INTER, PID, conversa.MensagemDaConversa(text="nota interna"))
+        await conversa.run_enviar_do_index(INDEX, PID, conversa.MensagemDaConversa(text="Para o parceiro"))
+        lido = await conversa.run_ler_conversa_do_parceiro(PT, PID)
+    assert [m["content"] for m in lido["messages"]] == ["Para o parceiro"]
+
+
+@pytest.mark.asyncio
+async def test_numa_lead_nao_ha_conversa(fake_async_db):
+    await _cenario_do_parceiro(fake_async_db)
+    with _ComParceiro(fake_async_db, e_processo=False), pytest.raises(HTTPException) as erro:
+        await conversa.run_enviar_do_parceiro(PT, PID, conversa.MensagemDaConversa(text="Olá"))
+    assert erro.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_mensagens_do_parceiro_nao_contam_no_chat_interno(fake_async_db):
+    from services import chat_presence
+
+    await _cenario_do_parceiro(fake_async_db)
+    with _ComParceiro(fake_async_db), patch.object(chat_presence, "db", fake_async_db):
+        await conversa.run_enviar_do_parceiro(PT, PID, conversa.MensagemDaConversa(text="Olá"))
+        r = await chat_presence.run_get_unread_count(INDEX)
+    assert r["direct_unread"] == 0

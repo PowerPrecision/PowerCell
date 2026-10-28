@@ -341,6 +341,7 @@ export const queryKeys = {
     caso: (id) => [...queryKeys.partner.all, 'caso', id],
     formulario: (id) => [...queryKeys.partner.all, 'formulario', id],
     destinos: () => [...queryKeys.partner.all, 'destinos'],
+    conversaIndex: (id) => [...queryKeys.partner.all, 'conversa-index', id],
   },
 };
 

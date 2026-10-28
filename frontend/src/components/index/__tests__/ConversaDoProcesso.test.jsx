@@ -73,3 +73,14 @@ describe("ConversaDoProcesso — Index ↔ quem carregou", () => {
     await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("Texto demasiado longo"));
   });
 });
+
+describe("ConversaDoProcesso — quando foi um parceiro a carregar", () => {
+  it("identifica o parceiro e explica que ele responde no portal", async () => {
+    api.getIndexConversa.mockResolvedValue({
+      data: { interlocutor: { id: "pt-1", name: "Rui", tipo: "parceiro" }, messages: [] },
+    });
+    montar({ lado: "index" });
+    expect(await screen.findByTestId("conversa-interlocutor")).toHaveTextContent("Rui (Parceiro)");
+    expect(screen.getByText(/Portal do Parceiro/)).toBeInTheDocument();
+  });
+});

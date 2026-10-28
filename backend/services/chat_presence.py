@@ -69,7 +69,9 @@ async def run_get_unread_count(user: dict):
     direct_unread = await db.chat_messages.count_documents({
         "receiver_id": user_id,
         "read": False,
-        "group_id": None
+        "group_id": None,
+        # as respostas de um parceiro (conversa do Index) lêem-se na bancada, não no chat interno
+        "sender_tipo": {"$ne": "parceiro"},
     })
 
     # Mensagens de grupos não lidas

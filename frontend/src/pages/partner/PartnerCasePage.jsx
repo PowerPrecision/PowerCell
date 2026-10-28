@@ -17,6 +17,7 @@ import ClientDataForm from "@/components/partner/ClientDataForm";
 import PartnerUploadBox from "@/components/partner/PartnerUploadBox";
 import ComprovativoObrigatorio from "@/components/partner/ComprovativoObrigatorio";
 import NotasDaEquipa from "@/components/partner/NotasDaEquipa";
+import ConversaComAEquipa from "@/components/partner/ConversaComAEquipa";
 import PedidoDeDocumento from "@/components/partner/PedidoDeDocumento";
 import FicheiroDoCaso from "@/components/partner/FicheiroDoCaso";
 import { queryKeys } from "@/lib/queryClient";
@@ -162,6 +163,8 @@ export default function PartnerCasePage() {
       <AvisoDaLead caso={caso} />
 
       {!eLead && <NotasDaEquipa notas={caso.notas_da_equipa} caseId={caso.id} podeEscrever={podeEscreverNotas(caso)} />}
+
+      {!eLead && <ConversaComAEquipa caseId={caso.id} podeEscrever={podeEscreverNotas(caso)} />}
 
       {eLead ? (
         <Tabs defaultValue="documentos" className="space-y-4">
