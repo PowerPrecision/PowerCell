@@ -1338,6 +1338,14 @@ export const startIndexWork = (processId) =>
 // «Atribuir a mim» (Out 2026): o indexador assume um processo «Por indexar» que ninguém começou.
 export const assumirIndexProcess = (processId) =>
   api.post(`/index/processes/${processId}/assumir`, null, { skipErrorToast: true });
+// Pedido de alteração de atribuição (Out 2026): o Index PEDE à chefia (motivo opcional); a chefia trata-o
+// pelo «Gerir» do processo e fecha o pedido («concluido» | «recusado»). O Index só vê os seus pedidos.
+export const pedirAlteracaoDeAtribuicao = (processId, motivo) =>
+  api.post(`/index/processes/${processId}/pedido-atribuicao`, { motivo: motivo || null }, { skipErrorToast: true });
+export const getPedidosDeAtribuicao = (params = {}) =>
+  api.get("/index/pedidos-atribuicao", { params, skipErrorToast: true });
+export const resolverPedidoDeAtribuicao = (pedidoId, decisao, nota) =>
+  api.post(`/index/pedidos-atribuicao/${pedidoId}/resolver`, { decisao, nota: nota || null }, { skipErrorToast: true });
 export const analyzeIndexProcess = (processId, force = false) =>
   api.post(`/index/processes/${processId}/analyze`, { force }, { skipErrorToast: true });
 export const extractIndexProcess = (processId) =>

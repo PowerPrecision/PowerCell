@@ -23,6 +23,7 @@ import { Users, UserCog, Clock, AlertTriangle, ChevronDown } from "lucide-react"
 import { differenceInCalendarDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeString } from "../../utils/safeString";
+import { PedirAlteracaoDeAtribuicao } from "../index/PedirAlteracaoDeAtribuicao";
 import { safeParseISO, safeFormat } from "../../lib/utils";
 
 const PRIORITY_OPTIONS = [
@@ -97,6 +98,7 @@ export default function AssignmentContextCard({
   deadlines = [],
   onManageAssignment,
   canManageAssignment,
+  canRequestChange = false,
   priority = "media",
   onPriorityChange,
   canEditPriority = false,
@@ -131,6 +133,15 @@ export default function AssignmentContextCard({
             <UserCog className="h-3.5 w-3.5" />
             Gerir
           </Button>
+        )}
+        {/* o Index não gere atribuições: pede a alteração à chefia */}
+        {!canManageAssignment && canRequestChange && process?.id && (
+          <PedirAlteracaoDeAtribuicao
+            processId={process.id}
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+          />
         )}
       </CardHeader>
       <CardContent className="pt-0 space-y-1">

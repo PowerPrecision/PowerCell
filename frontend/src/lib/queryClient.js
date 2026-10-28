@@ -126,6 +126,8 @@ export const queryKeys = {
     workstation: (processId) => [...queryKeys.index.all, 'workstation', processId],
     employers: (texto = '') => [...queryKeys.index.all, 'employers', texto],
     search: (chave = '') => [...queryKeys.index.all, 'search', chave],
+    pedidosAll: () => [...queryKeys.index.all, 'pedidos-atribuicao'],
+    pedidos: (estado = 'pendente', processId = '') => [...queryKeys.index.pedidosAll(), estado, processId],
   },
 
   // Histórico/Timeline

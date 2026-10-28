@@ -36,6 +36,7 @@ from services.index_api import (
     run_set_file_titular,
 )
 from services.index_finalize import run_mark_indexed
+from services import index_assignment_requests as pedidos_de_atribuicao
 from services.process_broadcast import broadcast_process_delta
 from services.process_closed_guard import exigir_processo_editavel
 from services.process_scope_guard import exigir_processo_no_ambito
@@ -50,6 +51,9 @@ _acesso = require_roles(PAPEIS_DE_IA_DO_INDEX)
 #: «Atribuir a mim» é do indexador (perfil efectivo). A gestão atribui pelo «Gerir» do processo.
 PAPEIS_QUE_ASSUMEM = ["indexacao"]
 _so_o_index = require_roles(PAPEIS_QUE_ASSUMEM)
+#: Quem trata os pedidos de alteração de atribuição do Index: a chefia (o Index só os cria e vê os seus).
+PAPEIS_QUE_TRATAM_PEDIDOS = list(pedidos_de_atribuicao.ROLES_DA_CHEFIA)
+_so_a_chefia = require_roles(PAPEIS_QUE_TRATAM_PEDIDOS)
 
 
 async def _so_o_titular(request: Request, process_id: str, user: dict = Depends(_acesso)) -> None:
@@ -84,6 +88,21 @@ class EmployerNif(BaseModel):
 
     job_id: str
     nif: str
+
+
+class PedidoDeAtribuicaoBody(BaseModel):
+    """O motivo é opcional: o Index pode pedir sem explicar."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    motivo: Optional[str] = Field(None, max_length=pedidos_de_atribuicao.MAX_MOTIVO)
+
+
+class ResolverPedidoBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decisao: str = Field(pattern=r"^(concluido|recusado)$")
+    nota: Optional[str] = Field(None, max_length=pedidos_de_atribuicao.MAX_MOTIVO)
 
 
 class MarkIndexedBody(BaseModel):
@@ -319,3 +338,50 @@ async def mark_indexed(
         broadcast_fn=broadcast_process_delta,
         employers=[e.model_dump() for e in data.employers],
     )
+
+
+# ====================================================================
+# PEDIDOS DE ALTERAÇÃO DE ATRIBUIÇÃO (Out 2026)
+# ====================================================================
+@router.post("/processes/{process_id}/pedido-atribuicao", status_code=201)
+@limiter.limit("20/minute")
+async def pedir_alteracao_de_atribuicao(
+    request: Request,
+    response: Response,
+    process_id: str,
+    data: PedidoDeAtribuicaoBody = Body(default_factory=PedidoDeAtribuicaoBody),
+    user: dict = Depends(_acesso),
+    _papel: dict = Depends(_so_o_index),
+):
+    """O Index pede à chefia que altere a atribuição do processo (motivo opcional). Não muda nada sozinho."""
+    return await pedidos_de_atribuicao.run_pedir_alteracao(user, process_id, data.motivo)
+
+
+@router.get("/pedidos-atribuicao")
+@limiter.limit("120/minute")
+async def listar_pedidos_de_atribuicao(
+    request: Request,
+    response: Response,
+    estado: Optional[str] = Query("pendente", max_length=20, description="pendente | concluido | recusado."),
+    process_id: Optional[str] = Query(None, max_length=64),
+    user: dict = Depends(_acesso),
+):
+    """A chefia vê os pedidos da sua rede; o Index só os seus. Perfil EFECTIVO."""
+    papel = (await get_effective_role_async(request, user) or "").lower()
+    return await pedidos_de_atribuicao.run_listar_pedidos(
+        user, so_meus=papel not in PAPEIS_QUE_TRATAM_PEDIDOS, estado=estado or None, process_id=process_id,
+    )
+
+
+@router.post("/pedidos-atribuicao/{pedido_id}/resolver")
+@limiter.limit("60/minute")
+async def resolver_pedido_de_atribuicao(
+    request: Request,
+    response: Response,
+    pedido_id: str,
+    data: ResolverPedidoBody,
+    user: dict = Depends(_acesso),
+    _papel: dict = Depends(_so_a_chefia),
+):
+    """A chefia fecha o pedido: «concluido» (tratado pelo «Gerir» do processo) ou «recusado»."""
+    return await pedidos_de_atribuicao.run_resolver_pedido(user, pedido_id, data.decisao, data.nota)

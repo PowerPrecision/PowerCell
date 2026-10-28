@@ -22,6 +22,7 @@ import { PageHeader } from "../../components/shared/PageHeader";
 import { AlertMatrix } from "../../components/index/AlertMatrix";
 import { EmployerNifDialog } from "../../components/index/EmployerNifDialog";
 import { IndexActionsBar } from "../../components/index/IndexActionsBar";
+import { PedirAlteracaoDeAtribuicao } from "../../components/index/PedirAlteracaoDeAtribuicao";
 import { ProfessionalReviewPanel } from "../../components/index/ProfessionalReviewPanel";
 import { UploadNaBancada } from "../../components/index/UploadNaBancada";
 import VisualizadorDeDocumento from "../../components/index/VisualizadorDeDocumento";
@@ -323,6 +324,8 @@ export default function IndexWorkstationPage() {
                     Atribuir a mim
                   </Button>
                 )}
+                {/* o Index não muda atribuições: pede à chefia (motivo opcional) */}
+                <PedirAlteracaoDeAtribuicao processId={processo.id} />
                 <Button variant="ghost" onClick={irParaOsMeus}>
                   <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />
                   Os meus processos
