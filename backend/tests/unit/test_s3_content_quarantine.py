@@ -51,20 +51,7 @@ JPEG = (
 
 # ZIP — e é o limite conhecido do método: um `.docx` É um ZIP, pelo que um ZIP
 # renomeado passa como documento Office.
-def _zip_verdadeiro() -> bytes:
-    """Um ZIP verdadeiro (com um membro que não é Office) — e não só a assinatura
-    `PK\\x03\\x04` seguida de zeros: o libmagic mais recente (runner do CI)
-    exige um cabeçalho local coerente e devolvia `application/octet-stream`."""
-    import io
-    import zipfile
-
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("leia-me.txt", "nada de Office aqui")
-    return buf.getvalue()
-
-
-ZIP_DOCX = _zip_verdadeiro()
+ZIP_DOCX = b"PK\x03\x04\x14\x00\x06\x00" + b"\x00" * 200
 
 # Executável ELF64 com cabeçalho COMPLETO → `application/x-executable`, que
 # está na lista de MIME perigosos e dispara o log crítico.
@@ -601,6 +588,43 @@ class TestOQueEstaParedeNaoFaz:
         )
         assert v.aprovado is True
         assert v.tipo_detectado == "application/zip"
+
+    def test_o_mesmo_zip_quando_o_libmagic_nao_o_reconhece(self):
+        """O libmagic mais recente devolve `application/octet-stream` para um
+        ZIP (foi o que pôs o CI vermelho em 28 Out 2026). O resultado não pode
+        depender da versão do libmagic: a assinatura `PK\\x03\\x04` com
+        extensão de Office continua a ser `application/zip`."""
+        from services import file_validation
+
+        with patch.object(
+            file_validation.magic, "from_buffer", return_value="application/octet-stream"
+        ):
+            v = q.avaliar_amostra(
+                ZIP_DOCX, filename="contrato.docx", tamanho_real=UM_MB
+            )
+        assert v.aprovado is True
+        assert v.tipo_detectado == "application/zip"
+
+    def test_o_recurso_zip_nao_abre_a_porta_a_outros_formatos(self):
+        """Contraprova do recurso: sem a assinatura ZIP, ou com uma extensão
+        que não é de ZIP, o `application/octet-stream` continua recusado."""
+        from services import file_validation
+
+        with patch.object(
+            file_validation.magic, "from_buffer", return_value="application/octet-stream"
+        ):
+            sem_assinatura = q.avaliar_amostra(
+                b"\x00\x01\x02\x03" + b"\x00" * 200,
+                filename="contrato.docx",
+                tamanho_real=UM_MB,
+            )
+            extensao_errada = q.avaliar_amostra(
+                ZIP_DOCX, filename="contrato.pdf", tamanho_real=UM_MB
+            )
+        assert sem_assinatura.aprovado is False
+        assert sem_assinatura.motivo == q.MOTIVO_CONTEUDO
+        assert extensao_errada.aprovado is False
+        assert extensao_errada.motivo == q.MOTIVO_CONTEUDO
 
     def test_um_pdf_valido_e_aceite_seja_o_que_for_que_tenha_dentro(self):
         """Um PDF com JavaScript dentro é um PDF. A parede não o abre."""
