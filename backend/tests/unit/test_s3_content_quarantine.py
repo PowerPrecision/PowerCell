@@ -589,6 +589,43 @@ class TestOQueEstaParedeNaoFaz:
         assert v.aprovado is True
         assert v.tipo_detectado == "application/zip"
 
+    def test_o_mesmo_zip_quando_o_libmagic_nao_o_reconhece(self):
+        """O libmagic mais recente devolve `application/octet-stream` para um
+        ZIP (foi o que pôs o CI vermelho em 28 Out 2026). O resultado não pode
+        depender da versão do libmagic: a assinatura `PK\\x03\\x04` com
+        extensão de Office continua a ser `application/zip`."""
+        from services import file_validation
+
+        with patch.object(
+            file_validation.magic, "from_buffer", return_value="application/octet-stream"
+        ):
+            v = q.avaliar_amostra(
+                ZIP_DOCX, filename="contrato.docx", tamanho_real=UM_MB
+            )
+        assert v.aprovado is True
+        assert v.tipo_detectado == "application/zip"
+
+    def test_o_recurso_zip_nao_abre_a_porta_a_outros_formatos(self):
+        """Contraprova do recurso: sem a assinatura ZIP, ou com uma extensão
+        que não é de ZIP, o `application/octet-stream` continua recusado."""
+        from services import file_validation
+
+        with patch.object(
+            file_validation.magic, "from_buffer", return_value="application/octet-stream"
+        ):
+            sem_assinatura = q.avaliar_amostra(
+                b"\x00\x01\x02\x03" + b"\x00" * 200,
+                filename="contrato.docx",
+                tamanho_real=UM_MB,
+            )
+            extensao_errada = q.avaliar_amostra(
+                ZIP_DOCX, filename="contrato.pdf", tamanho_real=UM_MB
+            )
+        assert sem_assinatura.aprovado is False
+        assert sem_assinatura.motivo == q.MOTIVO_CONTEUDO
+        assert extensao_errada.aprovado is False
+        assert extensao_errada.motivo == q.MOTIVO_CONTEUDO
+
     def test_um_pdf_valido_e_aceite_seja_o_que_for_que_tenha_dentro(self):
         """Um PDF com JavaScript dentro é um PDF. A parede não o abre."""
         pdf_com_js = (

@@ -6,6 +6,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 
@@ -31,6 +32,8 @@ vi.mock("../../services/api", () => ({
 
 import * as api from "../../services/api";
 import ChatPanel from "../ChatPanel";
+
+const AQUI = path.dirname(fileURLToPath(import.meta.url));
 
 const ok = (data) => Promise.resolve({ data });
 
@@ -96,9 +99,9 @@ describe("ChatPanel", () => {
   });
 
   it("não usa fetch cru", () => {
-    const src = fs.readFileSync(path.resolve(__dirname, "../ChatPanel.jsx"), "utf8");
+    const src = fs.readFileSync(path.resolve(AQUI, "../ChatPanel.jsx"), "utf8");
     expect(src).not.toMatch(/\bfetch\(/);
-    const layout = fs.readFileSync(path.resolve(__dirname, "../../layouts/DashboardLayout.js"), "utf8");
+    const layout = fs.readFileSync(path.resolve(AQUI, "../../layouts/DashboardLayout.js"), "utf8");
     expect(layout).not.toMatch(/fetch\([^)]*\/chat\//);
   });
 });

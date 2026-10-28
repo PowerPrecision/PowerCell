@@ -690,6 +690,11 @@ def test_os_escritores_com_escolha_passam_pela_guarda_de_rede(caminho, funcao):
 #: ausentes, com o motivo — uma lista de exclusão sem motivo é a forma de
 #: isto se desligar sozinho.
 EXCEPCOES_ESCRITAS = {
+    "index_document_content": (
+        "lê UM processo por id e decide com `processo_no_ambito` (o gémeo em Python da condição de "
+        "PROCESSOS: dono ou rede convidada); a condição genérica só filtra as linhas do ARQUIVO "
+        "HISTÓRICO (colecção própria, sem partilha), nunca `db.processes`"
+    ),
     "repor_ao_modelo": (
         "conta os processos DA REDE que estão numa fase que o modelo não tem, para "
         "recusar repor por cima deles; o `status` é um nome do workflow do dono, "

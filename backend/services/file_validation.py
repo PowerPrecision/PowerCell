@@ -141,6 +141,15 @@ EXTENSION_MIME_FALLBACK = {
     ".heif": "image/heif",
 }
 
+# Assinatura de um ZIP (cabeçalho local) e extensões que SÃO ZIPs.
+# O libmagic mais recente (Ubuntu do runner do CI desde 28 Out 2026) devolve
+# `application/octet-stream` para um ZIP que versões anteriores davam como
+# `application/zip` — e a quarentena do S3 só lê os primeiros 2 KB, onde nem o
+# diretório central do arquivo está. Sem este recurso, um `.docx`/`.xlsx`
+# legítimo passaria a ser recusado conforme a versão do libmagic do servidor.
+ZIP_SIGNATURE = b"PK\x03\x04"
+ZIP_EXTENSIONS = (".docx", ".xlsx", ".zip")
+
 
 def validate_file_content(
     file_content: bytes,
@@ -199,6 +208,19 @@ def validate_file_content(
             f"-> {detected_mime}"
         )
     
+    # 4b. FALLBACK ZIP: assinatura `PK\x03\x04` com extensão de ZIP/Office →
+    # o mesmo `application/zip` que o libmagic anterior devolvia (ver ZIP_SIGNATURE).
+    if (
+        detected_mime == "application/octet-stream"
+        and declared_ext in ZIP_EXTENSIONS
+        and file_content.startswith(ZIP_SIGNATURE)
+    ):
+        detected_mime = "application/zip"
+        logger.info(
+            f"[SECURITY] MIME fallback por assinatura ZIP: {sanitize_for_log(filename)} "
+            f"-> {detected_mime}"
+        )
+
     # 5. Verificar se é um tipo perigoso (executáveis, scripts)
     if detected_mime in DANGEROUS_MIME_TYPES:
         logger.critical(
