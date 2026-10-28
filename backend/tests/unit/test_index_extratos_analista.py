@@ -127,14 +127,15 @@ class TestOSaldoLinhaALinha:
                           for d in range(5)]
             movimentos[0]["balance"] = 1100
             return movimentos
-        # 3 de 5 (60 %) com saldo e uma quebra: NÃO se confere linha a linha (cai nos totais)
-        parcial = [linha("2026-08-02", 100, "credit", 1100), linha("2026-08-03", 100, "credit", 9999),
-                   linha("2026-08-04", 100, "credit", 1300), linha("2026-08-05", 100), linha("2026-08-06", 100)]
+        # 3 de 5 (60 %) com saldo e uma quebra (o saldo salta 150 num crédito de 100): NÃO se confere linha a
+        # linha (cai nos totais). Não é um saldo isolado mal lido (esse, a linha seguinte desmente-o e sai)
+        parcial = [linha("2026-08-02", 100, "credit", 1100), linha("2026-08-03", 100, "credit", 1250),
+                   linha("2026-08-04", 100, "credit", 1350), linha("2026-08-05", 100), linha("2026-08-06", 100)]
         achados, _ = avaliar(extrato_bruto(parcial, 1000, 1500))
         assert all("falha em" not in a["detalhe"] for a in do_saldo(achados))
         # 4 de 5 (80 %) com a mesma quebra: confere e localiza
-        quase = [linha("2026-08-02", 100, "credit", 1100), linha("2026-08-03", 100, "credit", 9999),
-                 linha("2026-08-04", 100, "credit", 1300), linha("2026-08-05", 100, "credit", 1400), linha("2026-08-06", 100)]
+        quase = [linha("2026-08-02", 100, "credit", 1100), linha("2026-08-03", 100, "credit", 1250),
+                 linha("2026-08-04", 100, "credit", 1350), linha("2026-08-05", 100, "credit", 1450), linha("2026-08-06", 100)]
         achados, _ = avaliar(extrato_bruto(quase, 1000, 1500))
         assert any("falha em" in a["detalhe"] for a in do_saldo(achados))
 
@@ -237,3 +238,112 @@ class TestNumerarioFraccionado:
                       linha("2026-06-03", 400, canal="numerario")]
         achados, _ = avaliar(extrato_bruto(movimentos))
         assert do_movimento(achados) == []
+
+
+class TestOSentidoProvadoPeloSaldo:
+    """Extratos BPI (Out 2026): avisos de saldo sobre extratos que batem certo ao cêntimo.
+
+    O `pypdf` partia o texto do PDF (o «-» do valor numa linha, os dígitos do saldo em várias) e o modelo
+    leu créditos como débitos e um saldo que não existe. Valores dos extratos reais, sem descrições.
+    """
+
+    def julho(self):
+        # o crédito de 6,99 € veio como débito e o saldo depois dos 21,11 € (8.904,12) veio como 9.044,12
+        return [
+            linha("2026-07-02", 6.99, "debit", 8925.23), linha("2026-07-02", 21.11, "debit", 9044.12),
+            linha("2026-07-02", 250, "debit", 8654.12), linha("2026-07-02", 10, "debit", 8644.12),
+            linha("2026-07-02", 80, "debit", 8564.12),
+        ]
+
+    def test_um_credito_lido_como_debito_nao_da_aviso_e_fica_credito(self):
+        achados, factos = avaliar(extrato_bruto(self.julho(), 8918.24, 8564.12))
+        assert do_saldo(achados) == []
+        assert [m["k"] for m in factos["movimentos"]] == ["c", "d", "d", "d", "d"]
+
+    def test_um_saldo_mal_lido_que_a_linha_seguinte_desmente_sai_sem_se_inventar_outro(self):
+        _, factos = avaliar(extrato_bruto(self.julho(), 8918.24, 8564.12))
+        assert [m["s"] for m in factos["movimentos"]] == ["8925.23", None, "8654.12", "8644.12", "8564.12"]
+        assert [m["v"] for m in factos["movimentos"]] == ["6.99", "21.11", "250.00", "10.00", "80.00"]  # valores intactos
+
+    def test_um_saldo_mal_lido_ao_lado_de_um_credito_lido_como_debito(self):
+        # agosto (extrato real): o saldo de uma linha mal lido e o crédito seguinte (500 €) lido como débito
+        movimentos = [linha("2026-08-16", 20, "debit", 7879.11), linha("2026-08-16", 5, "debit", 8014.11),
+                      linha("2026-08-16", 500, "debit", 8374.11), linha("2026-08-17", 10, "debit", 8364.11)]
+        achados, factos = avaliar(extrato_bruto(movimentos, 7899.11, 8364.11))
+        assert do_saldo(achados) == []
+        assert [m["k"] for m in factos["movimentos"]] == ["d", "d", "c", "d"]
+        assert factos["movimentos"][1]["s"] is None
+
+    def test_a_ordem_inversa_tambem_se_corrige(self):
+        achados, factos = avaliar(extrato_bruto(self.julho()[::-1], 8918.24, 8564.12))
+        assert do_saldo(achados) == []
+        assert factos["movimentos"][-1]["k"] == "c"
+
+    def test_os_factos_ja_guardados_corrigem_se_na_matriz_sem_nova_analise(self):
+        # setembro: a transferência recebida de 1.000 € guardada como débito antes desta correcção
+        guardado = {
+            "tipo": "extrato_bancario", "document_id": "e9", "period_start": "2026-09-01", "period_end": "2026-09-30",
+            "opening": "10236.88", "closing": "11081.62", "achados": [],
+            "movimentos": [
+                {"d": "2026-09-06", "v": "40.00", "k": "d", "s": "10196.88", "page": 2},
+                {"d": "2026-09-06", "v": "1000.00", "k": "d", "s": "11196.88", "page": 2},
+                {"d": "2026-09-07", "v": "115.26", "k": "d", "s": "11081.62", "page": 2},
+            ],
+        }
+        recibo = {"tipo": "recibo_vencimento", "document_id": "r9", "period": "2026-09", "net": "1000.00",
+                  "gross": None, "deductions": None, "ss": None, "irs": None, "employer_nif": None}
+        codigos = [a["code"] for a in mx.avaliar([guardado, recibo], hoje=HOJE)]
+        assert "saldo_nao_bate" not in codigos
+        assert "recibo_sem_credito" not in codigos       # o crédito do ordenado também passa a ser visto
+        assert guardado["movimentos"][1]["k"] == "d"     # e o que veio da base de dados não se altera
+
+    def test_um_valor_mal_lido_continua_a_dar_aviso_e_nao_se_adivinha_o_sentido(self):
+        movimentos = self.julho()
+        movimentos[0]["amount"] = 9.99           # o valor era 6,99: nem +9,99 nem −9,99 dão o saldo impresso
+        movimentos[1]["balance"] = 8904.12       # e o saldo seguinte encaixa com o impresso: o saldo está certo
+        achados, factos = avaliar(extrato_bruto(movimentos, 8918.24, 8564.12))
+        (a,) = do_saldo(achados)
+        assert "9,99 €" in a["detalhe"] and "falha em 1 ponto(s)" in a["detalhe"]
+        assert factos["movimentos"][0]["k"] == "d" and factos["movimentos"][0]["s"] == "8925.23"
+
+
+class TestOTextoDoExtratoPorLinhas:
+    @staticmethod
+    def _pdf_em_colunas() -> bytes:
+        import fitz  # PyMuPDF
+
+        doc = fitz.open()
+        pagina = doc.new_page(width=842, height=595)
+        pagina.insert_text((40, 100), "SALDO ANTERIOR", fontsize=8)
+        pagina.insert_text((700, 100), "8.918,24", fontsize=8)
+        for y, (data, desc, valor, saldo) in enumerate([
+            ("02/07", "CRE.DIV. ELEC", "6,99", "8.925,23"),
+            ("02/07", "COMPRA ELEC LOJA", "-21,11", "8.904,12"),
+        ]):
+            for x, texto in ((40, data), (90, desc), (600, valor), (700, saldo)):
+                pagina.insert_text((x, 120 + 14 * y), texto, fontsize=8)
+        pagina.insert_text((40, 160), "texto de enchimento " * 12, fontsize=6)
+        out = doc.tobytes()
+        doc.close()
+        return out
+
+    def test_cada_movimento_fica_numa_linha_com_o_sinal_junto_do_valor(self):
+        from services.ai_document import extract_text_from_pdf_por_linhas
+
+        linhas = extract_text_from_pdf_por_linhas(self._pdf_em_colunas()).splitlines()
+        assert any("COMPRA ELEC LOJA" in l and "-21,11" in l and l.rstrip().endswith("8.904,12") for l in linhas)
+        assert any("CRE.DIV." in l and "6,99" in l and "-6,99" not in l for l in linhas)
+
+    def test_o_extrato_vai_por_linhas_e_com_mais_tempo(self):
+        msgs, sem_contexto, timeout = ia._mensagens(ia.TIPO_EXTRATO, self._pdf_em_colunas(), "e.pdf", "application/pdf")
+        assert sem_contexto is False and timeout == ia.TIMEOUT_EXTRATO
+        assert "-21,11  8.904,12" in msgs[1]["content"]
+
+    def test_os_outros_tipos_nao_mudam(self):
+        _, _, timeout = ia._mensagens(ia.TIPO_RECIBO, self._pdf_em_colunas(), "r.pdf", "application/pdf")
+        assert timeout == ia.TIMEOUT_TEXTO
+
+    def test_pdf_ilegivel_por_linhas_devolve_vazio(self):
+        from services.ai_document import extract_text_from_pdf_por_linhas
+
+        assert extract_text_from_pdf_por_linhas(b"nao e um pdf") == ""

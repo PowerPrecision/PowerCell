@@ -54,6 +54,7 @@ from models.index_module import (
     normalizar_nif,
 )
 from services.index_banks import banco_do_extrato
+from services.index_matrix import corrigir_pelo_saldo
 from services.process_ai_log import classificar_falha
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,12 @@ CHAVE_AI_CONFIG = "index_analysis"
 MODELO_OMISSAO = "gpt-4o-mini"
 TIMEOUT_TEXTO = 60.0
 TIMEOUT_VISAO = 120.0
+#: Um extrato devolve UMA linha por movimento (um mês com 100+ movimentos dá ~8 000 tokens de resposta):
+#: com o tecto geral de 4 096 a resposta saía cortada (JSON inválido → «a análise não terminou») e os
+#: 60 s não chegavam para a escrever.
+TIMEOUT_EXTRATO = 180.0
+MAXIMO_DE_TOKENS = 4096
+MAXIMO_DE_TOKENS_DO_EXTRATO = 16000
 
 PROVIDER_OPENAI = "openai"
 PROVIDER_MOCK = "mock"
@@ -598,6 +605,8 @@ def normalizar_extrato(bruto: dict, *, document_id: Optional[str] = None) -> dic
             })
     abertura = _dinheiro(bruto.get("opening_balance"), positivo=False)
     fecho = _dinheiro(bruto.get("closing_balance"), positivo=False)
+    # o sentido de cada movimento é o que a coluna de saldo prova, não o que o modelo leu
+    movimentos = corrigir_pelo_saldo(movimentos, abertura)
     iban = _iban(_valor(bruto.get("iban")))
     # o banco é o que a IA leu (reconhecido ou como veio) e, só sem ele, o código do IBAN
     banco = banco_do_extrato(_valor(bruto.get("bank_name")), iban)
@@ -803,23 +812,28 @@ async def _registar_uso(modelo: str, decorrido_ms: int, sucesso: bool, erro: Opt
 
 
 def _mensagens_do_documento(
-    prompt: str, conteudo: bytes, filename: str, mime: str, *, maximo_texto: Optional[int] = None, enviar_nome: bool = True
+    prompt: str, conteudo: bytes, filename: str, mime: str, *, maximo_texto: Optional[int] = None,
+    enviar_nome: bool = True, por_linhas: bool = False, timeout_texto: float = TIMEOUT_TEXTO,
 ) -> tuple[list[dict], bool, float]:
     """`(mensagens, sem_contexto, timeout)`. Texto primeiro; visão quando o texto não chega.
 
     `maximo_texto` corta o texto enviado (a classificação não precisa do documento todo) e `enviar_nome=False`
     impede que o nome do ficheiro — que leva o do cliente — chegue ao modelo quando não há mais nada para ler.
+    `por_linhas=True` (extratos) lê o texto com as linhas da tabela reconstruídas — ver
+    `ai_document.extract_text_from_pdf_por_linhas`; sem ele (ou se falhar) usa-se o `pypdf`.
     """
     from services import ai_document as ai
 
     sistema = {"role": "system", "content": prompt}
     eh_pdf = (filename or "").lower().endswith(".pdf") or mime == "application/pdf"
     if eh_pdf:
-        texto = ai.extract_text_from_pdf(conteudo) or ""
+        texto = (ai.extract_text_from_pdf_por_linhas(conteudo) if por_linhas else "") or ""
+        if len(texto.strip()) < MINIMO_DE_TEXTO:
+            texto = ai.extract_text_from_pdf(conteudo) or ""
         if len(texto.strip()) >= MINIMO_DE_TEXTO:
             if maximo_texto:
                 texto = texto[:maximo_texto]
-            return [sistema, {"role": "user", "content": f"--- TEXTO DO DOCUMENTO ---\n{texto}"}], False, TIMEOUT_TEXTO
+            return [sistema, {"role": "user", "content": f"--- TEXTO DO DOCUMENTO ---\n{texto}"}], False, timeout_texto
         imagem, mime_img = ai.convert_pdf_to_image(conteudo, 0)
         if not imagem:
             nome = f"Nome do ficheiro: {filename}" if enviar_nome else "Sem conteúdo legível."
@@ -836,6 +850,10 @@ def _mensagens_do_documento(
 
 def _mensagens(tipo: str, conteudo: bytes, filename: str, mime: str) -> tuple[list[dict], bool, float]:
     """As mensagens da ANÁLISE de um tipo (o prompt do tipo + o documento)."""
+    if tipo == TIPO_EXTRATO:
+        return _mensagens_do_documento(
+            PROMPTS_POR_TIPO[tipo], conteudo, filename, mime, por_linhas=True, timeout_texto=TIMEOUT_EXTRATO
+        )
     return _mensagens_do_documento(PROMPTS_POR_TIPO[tipo], conteudo, filename, mime)
 
 
@@ -883,7 +901,8 @@ async def analisar_documento(
         modelo = await resolver_modelo()
         mensagens, sem_contexto, timeout = await asyncio.to_thread(_mensagens, tipo, conteudo, filename, mime)
         resposta = await call_openai_api(
-            messages=mensagens, tool_definition=definicao_da_ferramenta(tipo), timeout=timeout, model=modelo
+            messages=mensagens, tool_definition=definicao_da_ferramenta(tipo), timeout=timeout, model=modelo,
+            max_tokens=MAXIMO_DE_TOKENS_DO_EXTRATO if tipo == TIPO_EXTRATO else MAXIMO_DE_TOKENS,
         )
     except Exception as exc:  # noqa: BLE001 — a IA em baixo não pode parar o job
         logger.warning("[INDEX-IA] Falha do modelo (%s): %s", type(exc).__name__, classificar_falha(exc))

@@ -288,6 +288,92 @@ def _sinal(m: dict) -> int:
     return 1 if m.get("k") == "c" else -1
 
 
+def _encaixa(anterior: Decimal, sinal: int, v: Decimal, saldo: Decimal) -> bool:
+    return abs(anterior + sinal * v - saldo) <= TOLERANCIA_SALDO_CORRENTE
+
+
+def _corrigir_na_ordem(ordem: list[dict], abertura: Optional[Decimal]) -> None:
+    """Corrige `ordem` (cópias) do mais antigo para o mais recente. Ver `corrigir_pelo_saldo`."""
+    anterior = abertura
+    i = 0
+    while i < len(ordem):
+        m = ordem[i]
+        v, saldo = _dec(m.get("v")), _dec(m.get("s"))
+        if v is None:
+            i += 1
+            continue
+        if saldo is None or anterior is None:
+            anterior = saldo if saldo is not None else (None if anterior is None else anterior + _sinal(m) * v)
+            i += 1
+            continue
+        if _encaixa(anterior, _sinal(m), v, saldo):
+            anterior = saldo
+            i += 1
+            continue
+        if _encaixa(anterior, -_sinal(m), v, saldo):
+            # a coluna de saldo prova o sentido: o modelo leu um crédito como débito (ou o contrário)
+            m["k"] = "d" if m.get("k") == "c" else "c"
+            anterior = saldo
+            i += 1
+            continue
+        # o saldo DESTA linha foi mal lido? Só se não encaixa com NENHUM dos vizinhos (nem com o anterior, nem
+        # com o movimento seguinte, em qualquer sentido) e o saldo da linha seguinte fecha a conta sem ele. Um
+        # saldo verdadeiro depois de um movimento EM FALTA encaixa com o seguinte: esse fica, e a falha diz-se.
+        # O saldo ilegível sai (não se inventa outro) e os sentidos que a conta prova ficam.
+        seguinte = ordem[i + 1] if i + 1 < len(ordem) else None
+        v2 = _dec(seguinte.get("v")) if seguinte else None
+        saldo2 = _dec(seguinte.get("s")) if seguinte else None
+        if v2 is not None and saldo2 is not None and not (_encaixa(saldo, 1, v2, saldo2) or _encaixa(saldo, -1, v2, saldo2)):
+            s1, s2 = _sinal(m), _sinal(seguinte)
+            # pela ordem do que menos muda a leitura do modelo
+            for a, b in ((s1, s2), (-s1, s2), (s1, -s2), (-s1, -s2)):
+                if _encaixa(anterior, a, v, saldo2 - b * v2):
+                    m["k"], seguinte["k"] = ("c" if a > 0 else "d"), ("c" if b > 0 else "d")
+                    m["s"] = None
+                    anterior = saldo2
+                    i += 2
+                    break
+            else:
+                anterior = saldo
+                i += 1
+            continue
+        anterior = saldo
+        i += 1
+
+
+def corrigir_pelo_saldo(movimentos: list[dict], abertura: Optional[Decimal]) -> list[dict]:
+    """Cópias dos movimentos com o que a COLUNA DE SALDO prova corrigido. Não muda valores nem datas.
+
+    O modelo às vezes lê um crédito como débito (o sinal do valor fica noutra linha do texto do PDF) ou
+    lê mal um saldo impresso. A conferência linha a linha via isso como falhas do EXTRATO — avisos falsos
+    sobre um extrato que bate certo ao cêntimo. Duas correcções, só quando a aritmética as prova:
+
+    - `saldo anterior − v = saldo` num «crédito» (ou `+ v` num «débito»): o sentido estava trocado;
+    - o saldo de uma linha não encaixa com nenhum dos vizinhos mas o da linha seguinte fecha a conta sem
+      ele: esse saldo foi mal lido e passa a `None` (a linha conta como «sem saldo impresso»).
+
+    Um valor mal lido NÃO se corrige (o saldo não diz qual dos dois números está errado): continua a dar
+    aviso. A ordem do extrato (mais antigo primeiro ou o inverso) decide-se pela que mais saldos encadeia.
+    """
+    copias = [dict(m) for m in movimentos]
+    if len([m for m in copias if _dec(m.get("s")) is not None]) < MINIMO_DE_MOVIMENTOS_COM_SALDO:
+        return copias
+
+    def encadeados(ordem: list[dict]) -> int:
+        n = 0
+        for a, b in zip(ordem, ordem[1:]):
+            sa, sb, vb = _dec(a.get("s")), _dec(b.get("s")), _dec(b.get("v"))
+            if None not in (sa, sb, vb) and abs(abs(sb - sa) - vb) <= TOLERANCIA_SALDO_CORRENTE:
+                n += 1
+        return n
+
+    if encadeados(copias[::-1]) > encadeados(copias):
+        _corrigir_na_ordem(copias[::-1], abertura)
+    else:
+        _corrigir_na_ordem(copias, abertura)
+    return copias
+
+
 def _quebras_do_saldo(ordem: list[dict], abertura: Optional[Decimal]) -> tuple[list[dict], Optional[Decimal]]:
     """Percorre os movimentos NESTA ordem e devolve onde o saldo impresso não bate com a conta.
 
@@ -509,6 +595,11 @@ def avaliar(
     entidades = entidades or {}
     recibos = [f for f in factos if f.get("tipo") == "recibo_vencimento"]
     extratos = [f for f in factos if f.get("tipo") == "extrato_bancario"]
+    # os factos já guardados também se corrigem (não é preciso analisar de novo): o crédito do ordenado e o
+    # saldo usam os sentidos que a coluna de saldo prova, não os que o modelo leu
+    extratos = [
+        {**e, "movimentos": corrigir_pelo_saldo(e.get("movimentos") or [], _dec(e.get("opening")))} for e in extratos
+    ]
     identificacoes = [f for f in factos if f.get("tipo") == "identificacao"]
 
     achados: list[dict] = []

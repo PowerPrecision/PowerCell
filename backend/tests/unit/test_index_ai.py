@@ -487,3 +487,19 @@ class TestMensagens:
     def test_o_prompt_do_tipo_vai_no_sistema(self):
         msgs, _, _ = ia._mensagens(ia.TIPO_EXTRATO, self._pdf("x " * 200), "e.pdf", "application/pdf")
         assert msgs[0]["content"] == ia.PROMPTS_POR_TIPO[ia.TIPO_EXTRATO]
+
+
+class TestOTectoDaResposta:
+    """Um extrato de 100+ movimentos passava os 4 096 tokens: resposta cortada → «a análise não terminou»."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tipo,tecto", [(ia.TIPO_EXTRATO, ia.MAXIMO_DE_TOKENS_DO_EXTRATO), (ia.TIPO_RECIBO, ia.MAXIMO_DE_TOKENS)])
+    async def test_o_extrato_tem_tecto_proprio(self, tipo, tecto):
+        chamada = AsyncMock(return_value={"data": {}, "model": "m"})
+        with patch("services.index_ai.resolver_modelo", AsyncMock(return_value="m")), \
+             patch("services.index_ai._mensagens", return_value=([], False, 60.0)), \
+             patch("services.ai_document.call_openai_api", chamada), \
+             patch("services.index_ai._registar_uso", AsyncMock()):
+            await ia.analisar_documento(tipo=tipo, conteudo=b"x", filename="d.pdf", ambiente={"INDEX_AI_PROVIDER": "openai"})
+        assert chamada.await_args.kwargs["max_tokens"] == tecto
+        assert ia.MAXIMO_DE_TOKENS_DO_EXTRATO > ia.MAXIMO_DE_TOKENS == 4096
