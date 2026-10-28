@@ -51,7 +51,20 @@ JPEG = (
 
 # ZIP — e é o limite conhecido do método: um `.docx` É um ZIP, pelo que um ZIP
 # renomeado passa como documento Office.
-ZIP_DOCX = b"PK\x03\x04\x14\x00\x06\x00" + b"\x00" * 200
+def _zip_verdadeiro() -> bytes:
+    """Um ZIP verdadeiro (com um membro que não é Office) — e não só a assinatura
+    `PK\\x03\\x04` seguida de zeros: o libmagic mais recente (runner do CI)
+    exige um cabeçalho local coerente e devolvia `application/octet-stream`."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("leia-me.txt", "nada de Office aqui")
+    return buf.getvalue()
+
+
+ZIP_DOCX = _zip_verdadeiro()
 
 # Executável ELF64 com cabeçalho COMPLETO → `application/x-executable`, que
 # está na lista de MIME perigosos e dispara o log crítico.
