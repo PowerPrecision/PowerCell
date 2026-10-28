@@ -1348,6 +1348,13 @@ export const resolverPedidoDeAtribuicao = (pedidoId, decisao, nota) =>
   api.post(`/index/pedidos-atribuicao/${pedidoId}/resolver`, { decisao, nota: nota || null }, { skipErrorToast: true });
 export const analyzeIndexProcess = (processId, force = false) =>
   api.post(`/index/processes/${processId}/analyze`, { force }, { skipErrorToast: true });
+// «Analisar» na linha de UM ficheiro (sempre de novo). `tipo` = «Analisar como…» (a pessoa diz o que o ficheiro é).
+export const analyzeIndexFile = (processId, documentId, tipo = null) =>
+  api.post(
+    `/index/processes/${processId}/files/${encodeURIComponent(documentId)}/analyze`,
+    tipo ? { tipo } : {},
+    { skipErrorToast: true },
+  );
 export const extractIndexProcess = (processId) =>
   api.post(`/index/processes/${processId}/extract`, null, { skipErrorToast: true });
 export const sanitizeIndexProcess = (processId) =>

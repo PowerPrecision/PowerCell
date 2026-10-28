@@ -167,6 +167,24 @@ def tipo_de_analise(categoria: Optional[str], subcategoria: Optional[str], filen
     return None
 
 
+def tipo_do_documento(doc: Optional[dict]) -> Optional[str]:
+    """O tipo de análise de um registo de `document_metadata`, por ordem de autoridade.
+
+    1. `index_type_override` — o Index escolheu «Analisar como…» neste ficheiro (a pessoa manda);
+    2. a classificação que o documento já tem e o nome do ficheiro (`tipo_de_analise`);
+    3. `index_classified_type` — a IA leu o CONTEÚDO de um ficheiro sem pistas (ex.: «07-Julho.pdf»).
+    """
+    doc = doc or {}
+    escolhido = doc.get("index_type_override")
+    if escolhido in TIPOS_ANALISADOS:
+        return escolhido
+    tipo = tipo_de_analise(doc.get("ai_category"), doc.get("ai_subcategory"), doc.get("filename"))
+    if tipo is not None:
+        return tipo
+    classificado = doc.get("index_classified_type")
+    return classificado if classificado in TIPOS_ANALISADOS else None
+
+
 def subtipo_de_identificacao(texto: Optional[str]) -> Optional[str]:
     """`cc`/`bi`/`passaporte`/`titulo_residencia` a partir de um texto livre (subcategoria, nome)."""
     t = _sem_acentos(texto or "")
@@ -909,10 +927,18 @@ async def analisar_documento(
         await _registar_uso(modelo, int((time.monotonic() - inicio) * 1000), False, str(exc))
         return ResultadoDaAnalise(ok=False, tipo=tipo, modelo=modelo, motivo=classificar_falha(exc))
 
+    if (resposta or {}).get("truncated"):
+        # não se aproveita meia resposta: um extrato sem os últimos movimentos daria saldos «errados»
+        await _registar_uso(modelo, int((time.monotonic() - inicio) * 1000), False, "resposta_incompleta")
+        return ResultadoDaAnalise(ok=False, tipo=tipo, modelo=modelo, motivo="resposta_incompleta")
     await _registar_uso(modelo, int((time.monotonic() - inicio) * 1000), True)
-    bruto = dict(resposta.get("data") or {})
+    bruto = dict((resposta or {}).get("data") or {})
     bruto.pop("scratch", None)  # o raciocínio nunca passa daqui
-    r = normalizar(tipo, bruto, document_id=document_id, hoje=hoje)
+    try:
+        r = normalizar(tipo, bruto, document_id=document_id, hoje=hoje)
+    except Exception as exc:  # noqa: BLE001 — um valor inesperado do modelo não pode parar o job inteiro
+        logger.warning("[INDEX-IA] Resposta não normalizada (%s)", type(exc).__name__)
+        return ResultadoDaAnalise(ok=False, tipo=tipo, modelo=modelo, motivo="erro_da_ia")
     r.modelo = resposta.get("model") or modelo
     r.sem_contexto = sem_contexto
     return r

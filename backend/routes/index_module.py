@@ -12,7 +12,7 @@ Router fino; a lógica vive em `services/index_api.py` e `services/index_finaliz
 * Nenhum endpoint bloqueia a indexação: «mark-indexed» responde sempre (salvo permissão).
 """
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Body, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +24,7 @@ from services.index_advanced_search import TAMANHO_MAXIMO_DA_PAGINA, run_advance
 from services.index_document_content import run_conteudo_do_documento, run_conteudo_do_ficheiro_do_processo
 from services.index_api import (
     run_assumir_processo,
+    run_analyze_document,
     run_analyze_process,
     run_dismiss_alert,
     run_edit_professional_job,
@@ -68,6 +69,12 @@ class AnalyzeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     force: bool = False
+
+
+class AnalyzeDocumentBody(BaseModel):
+    """`tipo` vazio: a IA decide (pelo nome, pela classificação ou pelo conteúdo). Com `tipo`: «Analisar como…»."""
+    model_config = ConfigDict(extra="forbid")
+    tipo: Optional[Literal["recibo_vencimento", "extrato_bancario", "declaracao_efetividade", "identificacao"]] = None
 
 
 class TitularDoFicheiroBody(BaseModel):
@@ -266,6 +273,20 @@ async def analyze_process(
 ):
     """«Analisar»: corre em segundo plano e devolve já; o resultado chega como notificação."""
     return await run_analyze_process(user, process_id, force=data.force)
+
+
+@router.post("/processes/{process_id}/files/{document_id}/analyze", status_code=202)
+@limiter.limit("30/minute")
+async def analyze_document(
+    request: Request,
+    response: Response,
+    process_id: str,
+    document_id: str,
+    data: AnalyzeDocumentBody = Body(default_factory=AnalyzeDocumentBody),
+    user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
+):
+    """«Analisar» na linha de um ficheiro: só esse, sempre de novo; em segundo plano, como o resto."""
+    return await run_analyze_document(user, process_id, document_id, tipo=data.tipo)
 
 
 @router.post("/processes/{process_id}/extract", status_code=202)

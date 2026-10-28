@@ -10,13 +10,21 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, ExternalLink, Eye, FileText, Loader2, PenLine, UserPlus } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Eye, FileText, Loader2, PenLine, ScanSearch, UserPlus } from "lucide-react";
 
 import DashboardLayout from "../../layouts/DashboardLayout";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu";
 import { Skeleton } from "../../components/ui/skeleton";
 import { PageHeader } from "../../components/shared/PageHeader";
 import { AlertMatrix } from "../../components/index/AlertMatrix";
@@ -40,6 +48,7 @@ import {
   quantosPorLimpar,
   rotuloDoEstado,
   rotuloDoTipoDeAnalise,
+  TIPO_DE_ANALISE_ROTULO,
   totalDeCamposARever,
   trabalhosSemNifConfirmado,
   valorDoCampo,
@@ -70,6 +79,54 @@ function LigacaoAoProcesso({ processoId, children, ...resto }) {
 
 const ROTULO_DO_TITULAR = { titular1: "1.º titular", titular2: "2.º titular" };
 
+/**
+ * «Analisar» na linha de UM ficheiro (QA Index, Out 2026): o que ficou por analisar (a análise falhou, ou o
+ * nome não diz o que é — «07-Julho.pdf») lança-se aqui, sem refazer o processo todo. «Analisar como…» é a
+ * pessoa a dizer o tipo quando a IA não o percebe; fica gravado.
+ */
+function AnalisarFicheiro({ ficheiro, nome, onAnalisar, aAnalisar, motivoBloqueio }) {
+  const tipoActual = rotuloDoTipoDeAnalise(ficheiro.analysis_type);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 gap-1"
+          disabled={Boolean(motivoBloqueio) || aAnalisar}
+          title={motivoBloqueio}
+          aria-label={`Analisar — ${nome}`}
+          data-testid="ficheiro-analisar"
+        >
+          {aAnalisar ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <ScanSearch className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          Analisar
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => onAnalisar(ficheiro.id, null)} data-testid="analisar-automatico">
+          {tipoActual ? `Analisar de novo (${tipoActual.toLowerCase()})` : "Detetar o tipo e analisar"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Analisar como…</DropdownMenuLabel>
+        {Object.entries(TIPO_DE_ANALISE_ROTULO).map(([tipo, rotulo]) => (
+          <DropdownMenuItem
+            key={tipo}
+            onSelect={() => onAnalisar(ficheiro.id, tipo)}
+            data-testid={`analisar-como-${tipo}`}
+          >
+            {rotulo}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function ListaDeFicheiros({
   ficheiros,
   processoId,
@@ -79,6 +136,9 @@ function ListaDeFicheiros({
   titulares = [],
   onMudarTitular,
   motivoSomenteLeitura,
+  onAnalisar,
+  aAnalisarId,
+  motivoSemAnalise,
 }) {
   // os comprovativos do cliente que o Index já voltou a carregar não contam: escondidos, mas a um clique
   const [verSubstituidos, setVerSubstituidos] = useState(false);
@@ -143,13 +203,32 @@ function ListaDeFicheiros({
               </select>
             )}
             {f.category && <Badge variant="outline">{f.category}</Badge>}
-            {rotuloDoTipoDeAnalise(f.analysis_type) &&
+            {f.analysis_failed && !f.analysed ? (
+              <Badge
+                variant="destructive"
+                data-testid="badge-analise-falhou"
+                title="A última análise não terminou: o motivo está na matriz de verificação"
+              >
+                Análise falhou
+              </Badge>
+            ) : (
+              rotuloDoTipoDeAnalise(f.analysis_type) &&
               (f.analysed ? (
                 <Badge variant="secondary">Analisado</Badge>
               ) : (
                 <Badge variant="outline">Por analisar</Badge>
-              ))}
+              ))
+            )}
             <span className="flex items-center gap-1">
+              {onAnalisar && !f.is_clean_pdf && !f.superseded && (
+                <AnalisarFicheiro
+                  ficheiro={f}
+                  nome={nome}
+                  onAnalisar={onAnalisar}
+                  aAnalisar={aAnalisarId === f.id}
+                  motivoBloqueio={motivoSomenteLeitura || motivoSemAnalise}
+                />
+              )}
               <Button
                 type="button"
                 size="sm"
@@ -384,6 +463,9 @@ export default function IndexWorkstationPage() {
                 titulares={processo.titulares || []}
                 onMudarTitular={(documentId, titular) => m.mudarTitular.mutate({ documentId, titular })}
                 motivoSomenteLeitura={motivoDeOutro}
+                onAnalisar={(documentId, tipo) => m.analisarFicheiro.mutate({ documentId, tipo })}
+                aAnalisarId={m.analisarFicheiro.isPending ? m.analisarFicheiro.variables?.documentId : null}
+                motivoSemAnalise={ocupado ? "Já há uma análise a correr neste processo." : undefined}
               />
             </CardContent>
           </Card>

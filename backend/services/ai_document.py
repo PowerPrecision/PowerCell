@@ -1247,6 +1247,12 @@ async def call_openai_api(
     choice = response.choices[0]
     message = choice.message
     
+    # A resposta bateu no tecto de tokens: o JSON vem cortado (ou, pior, parseável mas sem o fim).
+    # Quem chama distingue isto de «a IA não percebeu o documento».
+    if getattr(choice, "finish_reason", None) == "length":
+        logger.warning("Resposta da OpenAI cortada pelo limite de %s tokens (%s)", max_tokens, model_id)
+        return {"data": {}, "method": "function_calling", "model": model_id, "error": "truncated", "truncated": True}
+
     if message.tool_calls and len(message.tool_calls) > 0:
         # Caminho de function calling - saída estruturada
         tool_call = message.tool_calls[0]

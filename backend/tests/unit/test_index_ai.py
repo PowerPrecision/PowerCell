@@ -435,6 +435,73 @@ class TestAnalisarDocumento:
         assert r.ok and r.sem_contexto is True
 
 
+class TestRespostaCortada:
+    """Um extrato de um mês com dezenas de movimentos passava os 4096 tokens: a resposta vinha cortada e o
+    ficheiro ficava «Por analisar» com um alerta genérico (QA Index, Out 2026)."""
+
+    @pytest.mark.asyncio
+    async def test_o_extrato_pede_mais_tokens_os_outros_nao(self):
+        chamada = AsyncMock(return_value={"data": recibo_bruto(), "model": "m"})
+        with patch("services.index_ai.resolver_modelo", AsyncMock(return_value="m")), \
+             patch("services.index_ai._mensagens", return_value=([], False, ia.TIMEOUT_TEXTO)), \
+             patch("services.ai_document.call_openai_api", chamada), \
+             patch("services.index_ai._registar_uso", AsyncMock()):
+            await ia.analisar_documento(tipo=ia.TIPO_EXTRATO, conteudo=b"x", filename="e.pdf",
+                                        ambiente={"INDEX_AI_PROVIDER": "openai"})
+            extrato = chamada.await_args.kwargs
+            await ia.analisar_documento(tipo=ia.TIPO_RECIBO, conteudo=b"x", filename="r.pdf",
+                                        ambiente={"INDEX_AI_PROVIDER": "openai"})
+            recibo = chamada.await_args.kwargs
+        assert extrato["max_tokens"] == ia.MAXIMO_DE_TOKENS_DO_EXTRATO > 4096
+        assert recibo["max_tokens"] == 4096
+
+    @pytest.mark.asyncio
+    async def test_resposta_cortada_e_falha_com_motivo_proprio(self):
+        cortada = {"data": {"movements": [{"amount": 1, "kind": "debit"}]}, "model": "m", "truncated": True}
+        with patch("services.index_ai.resolver_modelo", AsyncMock(return_value="m")), \
+             patch("services.index_ai._mensagens", return_value=([], False, 60.0)), \
+             patch("services.ai_document.call_openai_api", AsyncMock(return_value=cortada)), \
+             patch("services.index_ai._registar_uso", AsyncMock()):
+            r = await ia.analisar_documento(tipo=ia.TIPO_EXTRATO, conteudo=b"x", filename="e.pdf",
+                                            ambiente={"INDEX_AI_PROVIDER": "openai"})
+        # meia resposta não se aproveita: um extrato sem os últimos movimentos daria saldos «errados»
+        assert r.ok is False and r.motivo == "resposta_incompleta"
+
+    @pytest.mark.asyncio
+    async def test_um_valor_que_o_normalizador_nao_espera_e_falha_e_nao_excepcao(self):
+        with patch("services.index_ai.resolver_modelo", AsyncMock(return_value="m")), \
+             patch("services.index_ai._mensagens", return_value=([], False, 60.0)), \
+             patch("services.ai_document.call_openai_api", AsyncMock(return_value={"data": {"x": 1}, "model": "m"})), \
+             patch("services.index_ai.normalizar", side_effect=TypeError("inesperado")), \
+             patch("services.index_ai._registar_uso", AsyncMock()):
+            r = await ia.analisar_documento(tipo=ia.TIPO_EXTRATO, conteudo=b"x", filename="e.pdf",
+                                            ambiente={"INDEX_AI_PROVIDER": "openai"})
+        assert r.ok is False and r.motivo == "erro_da_ia"
+
+    def test_os_motivos_novos_tem_texto_para_o_ecra(self):
+        from services.process_ai_log import MOTIVOS
+
+        assert "resposta_incompleta" in MOTIVOS and "sem_tipo" in MOTIVOS
+
+
+class TestTipoDoDocumento:
+    def test_a_escolha_da_pessoa_manda(self):
+        doc = {"filename": "extrato_julho.pdf", "index_type_override": ia.TIPO_RECIBO}
+        assert ia.tipo_do_documento(doc) == ia.TIPO_RECIBO
+
+    def test_o_nome_e_a_categoria_antes_da_classificacao(self):
+        doc = {"filename": "extrato_julho.pdf", "index_classified_type": ia.TIPO_RECIBO}
+        assert ia.tipo_do_documento(doc) == ia.TIPO_EXTRATO
+
+    def test_sem_pistas_vale_a_classificacao_pelo_conteudo(self):
+        assert ia.tipo_do_documento({"filename": "07-Julho.pdf", "index_classified_type": ia.TIPO_RECIBO}) == ia.TIPO_RECIBO
+        assert ia.tipo_do_documento({"filename": "07-Julho.pdf", "index_classified_type": "outro"}) is None
+        assert ia.tipo_do_documento({"filename": "07-Julho.pdf"}) is None
+
+    def test_um_override_desconhecido_nao_conta(self):
+        assert ia.tipo_do_documento({"filename": "cc.pdf", "index_type_override": "caderneta"}) == ia.TIPO_IDENTIFICACAO
+
+
 class TestUsoRegistado:
     @pytest.mark.asyncio
     async def test_o_erro_registado_no_uso_e_um_codigo_nunca_o_texto(self):
