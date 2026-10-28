@@ -14,6 +14,9 @@
     # O que já está importado não volta à IA; só se guarda o ficheiro no S3 e se liga à linha.
     python -m scripts.import_historico_zip /dados/arquivo_onedrive.zip --rede grupo_power_precision --aplicar
 
+    # o ZIP que está no S3 (ex.: na Shell do Render): descarrega para um temporário, importa e apaga o temporário
+    python -m scripts.import_historico_zip s3://bucket/temp/import/import.zip --rede grupo_power_precision --aplicar
+
     # desfazer uma importação (o `import_id` vem na linha PROGRESSO; apaga também os ficheiros no S3)
     python -m scripts.import_historico_zip --desfazer 1a2b3c4d5e6f --aplicar
 
@@ -30,7 +33,7 @@ ao modelo, à chave S3, à base de dados ou ao ecrã), para o Index o ver e desc
 
 OPÇÕES
 ======
-  zip                  caminho do ZIP (obrigatório, excepto com --desfazer)
+  zip                  caminho do ZIP, ou `s3://bucket/chave.zip` (obrigatório, excepto com --desfazer)
   --rede REDE          OBRIGATÓRIA para importar: o `network_id` que pode ver estes documentos (tem de existir
                        numa empresa; uma gralha seria rejeitada). O Master vê todas as redes.
   --etiqueta TEXTO     o que o ecrã mostra («Arquivo histórico — TEXTO»); omissão: o nome do ZIP
@@ -54,6 +57,7 @@ import argparse
 import asyncio
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -94,8 +98,53 @@ async def _s3_pronto() -> bool:
     return s3_service.is_configured()
 
 
+def separar_uri_s3(texto: str) -> tuple[str, str] | None:
+    """`s3://bucket/chave` → `(bucket, chave)`; `None` se não for um URI S3 completo. PURA."""
+    if not isinstance(texto, str) or not texto.startswith("s3://"):
+        return None
+    bucket, _, chave = texto[len("s3://"):].partition("/")
+    return (bucket, chave) if bucket and chave and not chave.endswith("/") else None
+
+
+async def _descarregar_do_s3(bucket: str, chave: str) -> str:
+    """Copia o ZIP do S3 para um ficheiro temporário (em blocos, nunca na memória). Devolve o caminho."""
+    from services.s3_storage import s3_service
+
+    descritor, caminho = tempfile.mkstemp(prefix="import_historico_", suffix=".zip")
+    os.close(descritor)
+    await asyncio.to_thread(s3_service.s3_client.download_file, bucket, chave, caminho)
+    return caminho
+
+
 async def principal(argv=None) -> int:
+    """Com um `s3://…` no lugar do caminho, descarrega o ZIP para um temporário, importa e apaga o temporário."""
     args = _argumentos(argv)
+    uri = separar_uri_s3(args.zip or "")
+    if args.zip and args.zip.startswith("s3://") and uri is None:
+        print("URI S3 inválido (use s3://bucket/caminho/ficheiro.zip).")
+        return 2
+    if uri is None:
+        return await _principal(args)
+    if not await _s3_pronto():
+        print("S3 não configurado: não é possível ler o ZIP do S3.")
+        return 5
+    print("[import-historico] A descarregar o ZIP do S3 para um ficheiro temporário…")
+    try:
+        temporario = await _descarregar_do_s3(*uri)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ZIP não descarregado do S3 ({type(exc).__name__}): confirme o URI e as permissões.")
+        return 2
+    try:
+        args.zip = temporario
+        return await _principal(args)
+    finally:
+        try:
+            os.remove(temporario)
+        except OSError:
+            pass
+
+
+async def _principal(args) -> int:
 
     if args.desfazer:
         if not args.aplicar:
