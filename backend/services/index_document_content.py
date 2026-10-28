@@ -24,6 +24,11 @@ REGRAS QUE NÃO SE PODEM PERDER
    o registo diz (o original; o PDF limpo depois de o original ser purgado). Uma descarga deixa RASTO no trilho de
    auditoria (só ids e o papel efectivo, nunca o nome do ficheiro) e esse rasto nunca faz a descarga falhar:
    levar para casa o documento de um cliente é mais do que olhar para ele.
+6. **O ARQUIVO HISTÓRICO (28/10/2026)** — as linhas importadas de ZIPs (`hist_…`) não têm processo nem
+   `document_metadata`. Servem-se pelo mesmo endpoint, com a sua própria parede: a linha tem de estar no âmbito de
+   REDE de quem pede (a MESMA condição da pesquisa: `build_network_scope_condition`; 404 uniforme fora dele), ser
+   de um tipo pesquisável, e a chave tem de estar na pasta da importação E da rede da própria linha
+   (`index_store.chave_historica_e_da_linha`, por segmento) — posse antes de conteúdo, sempre.
 """
 from __future__ import annotations
 
@@ -37,13 +42,21 @@ from services.document_visibility import assert_can_view_process_documents
 from services.index_ai import TIPO_DECLARACAO, TIPO_EXTRATO, TIPO_RECIBO
 from services.previsualizacao_de_ficheiros import servir_ficheiro_do_s3
 from services.role_scope import fronteira_levantada
-from services.tenant_network import processo_no_ambito, resolve_tenant_scope
+from services import index_store as store
+from services.tenant_network import (
+    build_network_scope_condition,
+    processo_no_ambito,
+    resolve_tenant_scope,
+    resolve_vista_scope,
+)
 
 logger = logging.getLogger(__name__)
 
 ERRO_NAO_ENCONTRADO = "Documento não encontrado."
 #: Os únicos tipos de ficheiro que este atalho serve (os que a pesquisa por documento devolve).
 TIPOS_QUE_A_PESQUISA_MOSTRA = frozenset({TIPO_RECIBO, TIPO_EXTRATO, TIPO_DECLARACAO})
+#: Os ids das linhas do arquivo histórico (`index_historical_import.PREFIXO_DO_ID`).
+PREFIXO_DO_HISTORICO = "hist_"
 
 
 def _texto(valor) -> str:
@@ -79,8 +92,28 @@ async def _auditar_descarga(user: dict, processo: dict, document_id: str, reques
         logger.warning("[INDEX] Auditoria da descarga não gravada: %s", type(exc).__name__)
 
 
+async def _conteudo_historico(user: dict, document_id: str, *, descarregar: bool, request=None):
+    """Os bytes de UMA linha do arquivo histórico (regra 6), ou 404 uniforme."""
+    scope = await resolve_vista_scope(user)
+    linha = await store.carregar_linha_historica(document_id, build_network_scope_condition(scope))
+    if not linha or linha.get("doc_type") not in store.DOC_TYPES_PESQUISAVEIS or not linha.get("s3_path"):
+        raise HTTPException(status_code=404, detail=ERRO_NAO_ENCONTRADO)
+    chave = linha["s3_path"]
+    if not store.chave_historica_e_da_linha(chave, linha):
+        logger.warning("[INDEX] Linha histórica %s com uma chave fora da sua pasta: recusada.", document_id)
+        raise HTTPException(status_code=404, detail=ERRO_NAO_ENCONTRADO)
+    extensao = "." + chave.rsplit(".", 1)[-1] if "." in chave.rsplit("/", 1)[-1] else ""
+    nome = "_".join(p for p in (linha.get("doc_type"), linha.get("period")) if p) + extensao
+    resposta = await servir_ficheiro_do_s3(chave, nome, referencia=document_id, tipo_pelo=chave, descarregar=descarregar)
+    if descarregar:
+        await _auditar_descarga(user, {"id": store.processo_historico(linha.get("import_id") or "")}, document_id, request)
+    return resposta
+
+
 async def run_conteudo_do_documento(user: dict, document_id: str, *, descarregar: bool = False, request=None):
     """Os bytes do documento: `inline` para o ecrã o mostrar sem sair da pesquisa, ou `attachment` (`descarregar`)."""
+    if _texto(document_id).startswith(PREFIXO_DO_HISTORICO):
+        return await _conteudo_historico(user, _texto(document_id), descarregar=descarregar, request=request)
     documento: Optional[dict] = await db.document_metadata.find_one(
         {"id": _texto(document_id)},
         {"_id": 0, "id": 1, "process_id": 1, "s3_path": 1, "filename": 1, "index_facts.tipo": 1},

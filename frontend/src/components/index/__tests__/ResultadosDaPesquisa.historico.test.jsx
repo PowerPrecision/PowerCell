@@ -1,5 +1,6 @@
 /**
- * O arquivo histórico na pesquisa avançada (Out 2026): linhas SEM processo e SEM ficheiro.
+ * O arquivo histórico na pesquisa avançada (Out 2026): linhas SEM processo; com ficheiro só se a importação o
+ * guardou (`has_file`, desde 28/10/2026).
  * Forma real do `GET /api/index/advanced-search` por documento (`historical`, `import_label`, `process_id: null`).
  */
 import { render, screen, within } from "@testing-library/react";
@@ -71,5 +72,26 @@ describe("ResultadosDaPesquisa — arquivo histórico", () => {
     expect(documentosDoResultado({ ...NORMAL, historical: 1 }, "documents")).toHaveLength(1);
     expect(documentosDoResultado({ ...NORMAL, historical: true }, "documents")).toEqual([]);
     expect(documentosDoResultado(HISTORICO, "jobs")).toEqual([]);
+  });
+
+  it("com o ficheiro guardado (`has_file`) oferece Ver documento e Download, pelo id da linha", () => {
+    const onVer = vi.fn();
+    render(
+      <MemoryRouter>
+        <ResultadosDaPesquisa
+          vista="documents" tipo="recibo" itens={[{ ...HISTORICO, has_file: true }]}
+          onVerDocumento={onVer} onDescarregar={vi.fn()} emCurso={new Set()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("download-documento")).toBeInTheDocument();
+    expect(screen.queryByText(/ficheiro não guardado/i)).not.toBeInTheDocument();
+    screen.getByTestId("ver-documento").click();
+    expect(onVer).toHaveBeenCalledWith([expect.objectContaining({ id: "hist_abc" })], expect.any(String));
+  });
+
+  it("só `has_file === true` conta (um texto não inventa um ficheiro)", () => {
+    expect(documentosDoResultado({ ...HISTORICO, has_file: "true" }, "documents")).toEqual([]);
+    expect(documentosDoResultado({ ...HISTORICO, has_file: true }, "documents")).toHaveLength(1);
   });
 });

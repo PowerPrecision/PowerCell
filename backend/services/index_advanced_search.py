@@ -41,6 +41,11 @@ DUAS VISTAS (Out 2026)
    pelo mesmo `float(Decimal)`, logo a igualdade é exacta (não há `0.1 + 0.2`).
 10. **O banco compara-se pela CHAVE** (`index_banks`): «cgd», «caixa geral» e «Caixa Geral de Depósitos, S.A.» são
     o mesmo banco. Um banco fora da tabela pesquisa-se pelo nome.
+11. **`document_type=todos` (28/10/2026)** — os três tipos de uma vez. Aí TODOS os filtros se aceitam e cada um só
+    casa com os tipos que têm o campo: «entidade X» devolve recibos e declarações dessa entidade (um extrato não
+    tem entidade), «banco Y» só extratos, só um período devolve os três. Não é um 422 porque a pergunta faz sentido.
+12. **O arquivo histórico diz se tem ficheiro** (`has_file`), nunca a chave S3. Sem ficheiro guardado (importações
+    antigas, só com os dados) a linha continua a aparecer, sem «Ver documento».
 """
 from __future__ import annotations
 
@@ -124,10 +129,10 @@ def validar_filtros(
     bank: Optional[str] = None,
 ) -> dict[str, Any]:
     """Valida e normaliza os filtros. 422 com motivo; nunca um 500 nem «nada» por um intervalo trocado."""
-    if document_type is not None and document_type not in store.DOC_TYPES_PESQUISAVEIS:
+    if document_type is not None and document_type not in TIPOS_DO_PEDIDO:
         raise HTTPException(
             status_code=422,
-            detail=f"«document_type» desconhecido (válidos: {', '.join(store.DOC_TYPES_PESQUISAVEIS)})",
+            detail=f"«document_type» desconhecido (válidos: {', '.join(TIPOS_DO_PEDIDO)})",
         )
     banco = _texto_valido(bank, "bank")
     if min_salary is not None and min_salary < 0 or max_salary is not None and max_salary < 0:
@@ -166,6 +171,10 @@ def validar_filtros(
     return filtros
 
 
+#: «Tudo»: os três tipos de documento de uma vez (regra 11).
+DOC_TYPE_TODOS = "todos"
+TIPOS_DO_PEDIDO = (*store.DOC_TYPES_PESQUISAVEIS, DOC_TYPE_TODOS)
+
 #: filtro → tipos de documento em que existe. Um filtro fora do seu tipo é 422 (regra 8).
 _FILTROS_POR_TIPO: dict[str, tuple[str, ...]] = {
     "min_salary": (store.DOC_TYPE_RECIBO,),
@@ -190,6 +199,8 @@ def _exigir_filtros_do_tipo(filtros: dict[str, Any]) -> None:
         if _filtro_esta_ligado(filtros, "bank"):
             raise HTTPException(status_code=422, detail="«bank» exige «document_type=extrato»")
         return
+    if tipo == DOC_TYPE_TODOS:
+        return  # cada filtro só casa com os tipos que têm o campo (regra 11)
     for nome, tipos in _FILTROS_POR_TIPO.items():
         if _filtro_esta_ligado(filtros, nome) and tipo not in tipos:
             raise HTTPException(
@@ -286,7 +297,10 @@ ORDENACOES_DE_DOCUMENTOS = {
 
 def _condicoes_do_documento(filtros: dict[str, Any], nifs_do_nome: list[str]) -> list[dict]:
     """O `$match` sobre a projecção por documento. Puro. Começa SEMPRE pelo tipo (os índices são por tipo)."""
-    condicoes: list[dict] = [{"doc_type": filtros["document_type"]}]
+    tipo = filtros["document_type"]
+    condicoes: list[dict] = [
+        {"doc_type": {"$in": list(store.DOC_TYPES_PESQUISAVEIS)}} if tipo == DOC_TYPE_TODOS else {"doc_type": tipo}
+    ]
     if filtros["min_salary"] is not None or filtros["max_salary"] is not None:
         intervalo: dict[str, Any] = {"$ne": None}
         if filtros["min_salary"] is not None:
@@ -354,7 +368,7 @@ def construir_pipeline_de_documentos(
 _CAMPOS_DO_DOCUMENTO = (
     "id", "process_id", "doc_type", "period", "net_salary_num", "employer_nif", "employer_name",
     "employer_location", "job_title", "contract_type", "admission_date", "bank", "needs_review",
-    "historical", "import_label",
+    "historical", "import_label", "s3_path",
 )
 
 
@@ -376,6 +390,8 @@ def resultado_do_documento(doc: dict) -> dict[str, Any]:
     }
     if historico:
         saida["import_label"] = doc.get("import_label")
+        # se o ficheiro foi guardado na importação (regra 12) — a chave nunca sai
+        saida["has_file"] = isinstance(doc.get("s3_path"), str) and bool(doc.get("s3_path"))
     if tipo == store.DOC_TYPE_EXTRATO:
         saida["bank"] = doc.get("bank")
         return saida
@@ -498,5 +514,5 @@ async def run_advanced_search(
     }
 
 
-__all__ = ["run_advanced_search", "validar_filtros", "construir_pipeline", "construir_pipeline_de_documentos",
+__all__ = ["DOC_TYPE_TODOS", "run_advanced_search", "validar_filtros", "construir_pipeline", "construir_pipeline_de_documentos",
            "regex_sem_acentos"]

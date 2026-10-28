@@ -2,7 +2,7 @@
  * ResultadosDaPesquisa — a tabela da pesquisa avançada do Index (apresentação pura).
  *
  * Diz o que aconteceu (`onVerDocumento(documentos, titulo)`, `onDescarregar(chave, documentos)`); quem decide o
- * que isso implica é a página. As colunas dependem do que se procurou (emprego, recibo, declaração, extrato)
+ * que isso implica é a página. As colunas dependem do que se procurou (emprego, recibo, declaração, extrato ou tudo)
  * e só mostram o que o servidor devolveu — nunca o nome do cliente nem do ficheiro. Os botões «Ver documento»
  * e «Download» só se desenham com uma referência exacta ao documento (`document_id`/`document_ids`).
  */
@@ -18,6 +18,7 @@ import {
   documentosDoResultado,
   rotuloDoContrato,
   rotuloDoDocumento,
+  rotuloDoTipo,
   valorEmEuros,
 } from "../../utils/pesquisaIndex";
 
@@ -100,6 +101,15 @@ const COLUNAS = {
     ["Contrato", (i) => <Contrato item={i} />],
     ["Admissão", (i) => dataDeAdmissao(i.admission_date)],
     ["Emissão", (i) => i.period || SEM],
+  ],
+  todos: [
+    ["Tipo", (i) => rotuloDoTipo(i.document_type)],
+    ["Entidade / banco", (i) => (i.document_type === "extrato" ? i.bank || SEM : <Entidade item={i} />)],
+    ["Localidade", (i) => i.employer?.location || SEM],
+    ["Cargo", (i) => i.job_title || SEM],
+    ["Líquido", (i) => (i.document_type === "recibo" ? valorEmEuros(i.net_salary) : SEM)],
+    ["Contrato", (i) => <Contrato item={i} />],
+    ["Período", (i) => i.period || SEM],
   ],
   extrato: [
     ["Banco", (i) => i.bank || <span className="text-muted-foreground" title="A IA não leu o banco deste extrato">não identificado</span>],

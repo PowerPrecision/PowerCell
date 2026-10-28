@@ -137,8 +137,8 @@ async def advanced_search(
     period_to: Optional[str] = Query(None, description="YYYY-MM"),
     sort: str = Query("period_desc", description="period_desc | salary_desc | salary_asc"),
     document_type: Optional[str] = Query(
-        None, description="recibo | declaracao_efetividade | extrato — pesquisa por DOCUMENTO em vez de por emprego."),
-    bank: Optional[str] = Query(None, max_length=80, description="Banco do extrato (só com document_type=extrato)."),
+        None, description="recibo | declaracao_efetividade | extrato | todos — pesquisa por DOCUMENTO em vez de por emprego."),
+    bank: Optional[str] = Query(None, max_length=80, description="Banco do extrato (só com document_type=extrato ou todos)."),
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=TAMANHO_MAXIMO_DA_PAGINA),
     user: dict = Depends(_acesso),

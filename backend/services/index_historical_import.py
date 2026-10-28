@@ -3,8 +3,10 @@
 Há anos de recibos, extratos e declarações na OneDrive que nunca passaram pelo CRM. Não têm cliente nem processo:
 só interessa alimentar a **pesquisa avançada** (por valor, banco, zona, entidade) e o **directório de entidades
 patronais**. Este módulo lê um ZIP — de 85 MB ou de mais de 2 GB — ficheiro a ficheiro, classifica e extrai com a
-IA do Index e grava UMA linha pesquisável por documento. Os ficheiros em si **não são guardados** (nem no S3 nem
-em disco): do documento só ficam os factos que a pesquisa usa.
+IA do Index e grava UMA linha pesquisável por documento. Desde 28/10/2026 o **ficheiro também se guarda** no S3
+(`index_store.PREFIXO_S3_DO_ARQUIVO`, pasta da rede e da importação, nome = id da linha) para o Index o poder ver e
+descarregar na pesquisa avançada; uma reexecução sobre o mesmo ZIP liga os ficheiros às linhas antigas sem voltar a
+pagar a IA. Em disco local nunca se escreve nada.
 
 REGRAS QUE NÃO SE PODEM PERDER
 ------------------------------
@@ -29,8 +31,11 @@ REGRAS QUE NÃO SE PODEM PERDER
 6. **Custo contido.** `limite_ia` pára a execução depois de N documentos enviados ao modelo; o nome/pasta
    classificam de graça quando há pista (`classificar_sempre` força a IA); com o motor simulado recusa-se a correr
    (`IASimulada`) — um arquivo com dados inventados é pior do que um arquivo vazio.
-7. **Reversível.** Cada linha leva o `import_id`; `desfazer` apaga uma importação (o directório de entidades fica:
-   é global e partilhado).
+7. **Reversível.** Cada linha leva o `import_id`; `desfazer` apaga uma importação e os seus ficheiros no S3 (o
+   directório de entidades fica: é global e partilhado).
+8. **O ficheiro guarda-se DEPOIS da linha e só com ids na chave.** `guardar_ficheiro` é injectado (o script passa o
+   S3; sem ele não se guarda nada). Uma falha a guardar não desfaz a linha nem pára a importação: conta-se
+   (`ficheiros_falhados`) e a próxima reexecução tenta de novo.
 """
 from __future__ import annotations
 
@@ -71,6 +76,10 @@ PREFIXO_DO_ID = "hist_"
 
 #: veredictos negativos que a IA já custou e que se lembram (uma reexecução não os repete)
 ESTADOS_QUE_SE_LEMBRAM = ("identificacao", "outro", "sem_dados")
+
+
+#: `(chave, bytes, mime) -> gravou?` — quem guarda o ficheiro (o S3 no script; um falso nos testes).
+GuardarFicheiro = Callable[[str, bytes, str], Awaitable[bool]]
 
 
 class IASimulada(RuntimeError):
@@ -201,6 +210,8 @@ class Resumo:
     estados: dict[str, int] = field(default_factory=dict)
     entidades_novas: int = 0
     chamadas_ia: int = 0
+    ficheiros_guardados: int = 0
+    ficheiros_falhados: int = 0
     parou_por: Optional[str] = None
 
     def contar(self, estado: str) -> None:
@@ -214,7 +225,8 @@ class Resumo:
             f"identificacao={e.get('identificacao', 0)} outro={e.get('outro', 0)} sem_dados={e.get('sem_dados', 0)} "
             f"falhas_ia={e.get('falha_ia', 0)} ilegiveis={e.get('ilegivel', 0)} grandes={e.get('demasiado_grande', 0)} "
             f"excluidos={sum(v for k, v in e.items() if k.startswith('excluido_'))} "
-            f"entidades_novas={self.entidades_novas} chamadas_ia={self.chamadas_ia}"
+            f"entidades_novas={self.entidades_novas} chamadas_ia={self.chamadas_ia} "
+            f"ficheiros_guardados={self.ficheiros_guardados} ficheiros_falhados={self.ficheiros_falhados}"
             + (f" parou_por={self.parou_por}" if self.parou_por else "")
         )
 
@@ -260,6 +272,7 @@ async def importar_zip(
     classificar_sempre: bool = False,
     pausa: float = 0.0,
     permitir_simulado: bool = False,
+    guardar_ficheiro: Optional[GuardarFicheiro] = None,
     escrever: Callable[[str], None] = print,
     dormir: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> Resumo:
@@ -294,6 +307,7 @@ async def importar_zip(
                 estado = await _importar_membro(
                     zf, info, resumo, rede=rede, label=label, vistos=vistos_neste_zip,
                     classificar_sempre=classificar_sempre, permitir_simulado=permitir_simulado,
+                    guardar_ficheiro=guardar_ficheiro,
                 )
             except Exception as exc:  # noqa: BLE001 — um ficheiro a rebentar não pára a importação
                 logger.warning("[IMPORT-HISTORICO] Ficheiro %d: %s", entrada, type(exc).__name__)
@@ -316,6 +330,7 @@ async def _importar_membro(
     vistos: set[str],
     classificar_sempre: bool,
     permitir_simulado: bool,
+    guardar_ficheiro: Optional[GuardarFicheiro] = None,
 ) -> str:
     conteudo, motivo = await asyncio.to_thread(ler_membro, zf, info)
     if conteudo is None:
@@ -325,13 +340,18 @@ async def _importar_membro(
     if doc_id in vistos:
         return "duplicado_no_zip"
     vistos.add(doc_id)
-    if doc_id in await store.ids_historicos_conhecidos([doc_id]):
-        return "ja_importado"
-
     extensao = posixpath.splitext(info.filename.replace("\\", "/"))[1].lower() or ".pdf"
     # para o modelo o ficheiro não tem nome: o do ZIP leva o do cliente
     nome_neutro = f"documento{extensao}"
     mime = {".pdf": "application/pdf", ".png": "image/png"}.get(extensao, "image/jpeg")
+
+    if doc_id in await store.ids_historicos_conhecidos([doc_id]):
+        # já importado (ou já recusado): sem IA. Se a linha ainda não tem o ficheiro, liga-se agora (regra 8)
+        if guardar_ficheiro is not None:
+            linha_antiga = await store.linha_historica_sem_ficheiro(doc_id)
+            if linha_antiga:
+                await _guardar(linha_antiga, conteudo, extensao, mime, resumo, guardar_ficheiro)
+        return "ja_importado"
 
     tipo = None if classificar_sempre else pista_do_tipo(info.filename)
     if tipo is None:
@@ -357,6 +377,8 @@ async def _importar_membro(
         return "sem_dados"
 
     inserida = await store.gravar_documento_historico(linha)
+    if guardar_ficheiro is not None:
+        await _guardar(linha, conteudo, extensao, mime, resumo, guardar_ficheiro)
     if tipo == TIPO_RECIBO and resultado.job is not None:
         resumo.entidades_novas += await store.registar_entidades([resultado.job])
     elif tipo == TIPO_DECLARACAO:
@@ -364,13 +386,49 @@ async def _importar_membro(
     return "importado" if inserida else "ja_importado"
 
 
-async def desfazer_importacao(import_id: str) -> int:
-    """Apaga as linhas de UMA importação. Devolve quantas."""
+async def _guardar(
+    linha: dict, conteudo: bytes, extensao: str, mime: str, resumo: Resumo, guardar_ficheiro: GuardarFicheiro
+) -> None:
+    """Guarda o ficheiro de UMA linha e regista a chave. Nunca levanta: conta (regra 8)."""
+    chave = store.chave_do_ficheiro_historico(linha.get("network_id"), linha.get("import_id"), linha.get("id"), extensao)
+    try:
+        if chave and await guardar_ficheiro(chave, conteudo, mime) and await store.ligar_ficheiro_historico(linha["id"], chave):
+            resumo.ficheiros_guardados += 1
+            return
+    except Exception as exc:  # noqa: BLE001 — o ficheiro é um reforço; a linha já está gravada
+        logger.warning("[IMPORT-HISTORICO] Ficheiro não guardado (%s)", type(exc).__name__)
+    resumo.ficheiros_falhados += 1
+
+
+async def guardar_no_s3(chave: str, conteudo: bytes, mime: str) -> bool:
+    """O `guardar_ficheiro` real: grava a chave EXACTA no bucket (fora da thread do loop)."""
+    from services.s3_storage import s3_service
+
+    return await asyncio.to_thread(s3_service.put_object_exact, chave, conteudo, mime)
+
+
+async def desfazer_importacao(
+    import_id: str, apagar_ficheiro: Optional[Callable[[str], Awaitable[bool]]] = None
+) -> int:
+    """Apaga as linhas de UMA importação (e, com `apagar_ficheiro`, os seus ficheiros). Devolve quantas linhas."""
+    if apagar_ficheiro is not None:
+        for chave in await store.chaves_da_importacao_historica(import_id):
+            try:
+                await apagar_ficheiro(chave)
+            except Exception as exc:  # noqa: BLE001 — um ficheiro órfão no S3 não impede desfazer as linhas
+                logger.warning("[IMPORT-HISTORICO] Ficheiro não apagado (%s)", type(exc).__name__)
     return await store.apagar_importacao_historica(import_id)
+
+
+async def apagar_do_s3(chave: str) -> bool:
+    from services.s3_storage import s3_service
+
+    return await asyncio.to_thread(s3_service.delete_file, chave)
 
 
 __all__ = [
     "IASimulada", "RedeDesconhecida", "ZipInvalido", "Resumo", "analise_previa", "desfazer_importacao",
+    "guardar_no_s3", "apagar_do_s3",
     "etiqueta_da_importacao", "hash_do_zip", "id_do_documento", "importar_zip", "import_id_do_zip",
     "ler_membro", "membros_candidatos", "motivo_de_exclusao", "pista_do_tipo", "rede_existe", "redes_conhecidas",
     "tem_dados_uteis",

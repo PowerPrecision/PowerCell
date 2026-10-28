@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   FILTROS_VAZIOS,
+  TIPOS_DE_DOCUMENTO,
+  TIPO_TUDO,
   camposDoTipo,
   chaveDaPesquisa,
   dataDeAdmissao,
@@ -195,5 +197,24 @@ describe("pequenas coisas", () => {
   it("a chave da consulta não depende da ordem das chaves", () => {
     expect(chaveDaPesquisa({ a: 1, b: 2 })).toBe(chaveDaPesquisa({ b: 2, a: 1 }));
     expect(chaveDaPesquisa({ a: 1 })).not.toBe(chaveDaPesquisa({ a: 2 }));
+  });
+});
+
+describe("«Tudo» em «O que procurar» (28/10/2026)", () => {
+  it("existe no menu e tem todos os filtros (cada um só casa com os tipos que têm o campo)", () => {
+    expect(TIPOS_DE_DOCUMENTO.some((t) => t.valor === TIPO_TUDO && /tudo/i.test(t.rotulo))).toBe(true);
+    for (const campo of ["employer_name", "bank", "min_salary", "job_title", "period_from", "contract_type"]) {
+      expect(camposDoTipo(TIPO_TUDO)).toContain(campo);
+    }
+  });
+
+  it("vai no pedido como `todos`, com os filtros escritos", () => {
+    const pedido = filtrosParaPedido(com({ document_type: TIPO_TUDO, bank: "CGD", employer_name: "Qiado" }));
+    expect(pedido).toMatchObject({ document_type: "todos", bank: "CGD", employer_name: "Qiado" });
+  });
+
+  it("sobrevive ao URL (ida e volta)", () => {
+    const f = com({ document_type: TIPO_TUDO, period_from: "2025-01" });
+    expect(filtrosDoUrl(filtrosParaUrl(new URLSearchParams(), f))).toEqual(normalizarFiltros(f));
   });
 });

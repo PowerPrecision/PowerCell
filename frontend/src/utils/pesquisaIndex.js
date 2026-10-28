@@ -17,9 +17,12 @@
 import { formatarDinheiro } from "./indexRevisao";
 
 export const TIPO_POR_EMPREGO = "";
+/** «Tudo»: recibos, declarações e extratos de uma vez (cada filtro só casa com os tipos que têm o campo). */
+export const TIPO_TUDO = "todos";
 
 export const TIPOS_DE_DOCUMENTO = Object.freeze([
   { valor: TIPO_POR_EMPREGO, rotulo: "Por emprego (agregado)" },
+  { valor: TIPO_TUDO, rotulo: "Tudo (recibos, declarações e extratos)" },
   { valor: "recibo", rotulo: "Recibos de vencimento" },
   { valor: "declaracao_efetividade", rotulo: "Declarações de efetividade" },
   { valor: "extrato", rotulo: "Extratos bancários" },
@@ -39,6 +42,7 @@ const CAMPOS_POR_TIPO = Object.freeze({
   recibo: [...CAMPOS_COMUNS_DA_ENTIDADE, "job_title", "min_salary", "max_salary", "period_from", "period_to"],
   declaracao_efetividade: [...CAMPOS_COMUNS_DA_ENTIDADE, "job_title", "period_from", "period_to"],
   extrato: ["bank", "period_from", "period_to"],
+  [TIPO_TUDO]: [...CAMPOS_COMUNS_DA_ENTIDADE, "job_title", "bank", "min_salary", "max_salary", "period_from", "period_to"],
 });
 
 export const FILTROS_VAZIOS = Object.freeze({
@@ -237,8 +241,8 @@ export function rotuloDoDocumento(item) {
  */
 export function documentosDoResultado(item, vista) {
   if (!item || typeof item !== "object") return [];
-  // o arquivo histórico guarda os DADOS, não o ficheiro: não há nada a abrir nem a descarregar
-  if (item.historical === true) return [];
+  // o arquivo histórico só tem ficheiro se a importação o guardou (`has_file`); as antigas guardaram só os dados
+  if (item.historical === true && item.has_file !== true) return [];
   if (vista === "documents") {
     return typeof item.document_id === "string" && item.document_id ? [{ id: item.document_id, rotulo: rotuloDoDocumento(item) }] : [];
   }
