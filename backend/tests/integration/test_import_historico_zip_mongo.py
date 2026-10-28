@@ -86,9 +86,10 @@ class Modelo:
         self.classifica = classifica or (lambda texto: "outro")
         self.extrai = extrai or RESPOSTAS
 
-    async def __call__(self, *, messages, tool_definition, timeout, model):
+    async def __call__(self, *, messages, tool_definition, timeout, model, max_tokens=None):
+        # `max_tokens` é a assinatura real de `call_openai_api` (o extrato pede mais desde 2c9c5d6).
         nome = tool_definition["function"]["name"]
-        self.chamadas.append({"ferramenta": nome, "mensagens": messages})
+        self.chamadas.append({"ferramenta": nome, "mensagens": messages, "max_tokens": max_tokens})
         if nome == "classificar_documento":
             texto = " ".join(str(m.get("content")) for m in messages if m.get("role") == "user")
             return {"data": {"tipo": self.classifica(texto)}, "model": "modelo-teste"}
@@ -504,7 +505,9 @@ class TestOScript:
         from scripts import import_historico_zip as cli
 
         with patch("services.ai_document.call_openai_api", Modelo()):
-            codigo = await cli.principal([_zip_tipico(tmp_path), "--rede", "rede-A", "--aplicar", "--pausa", "0"])
+            codigo = await cli.principal(
+                [_zip_tipico(tmp_path), "--rede", "rede-A", "--aplicar", "--pausa", "0", "--sem-ficheiros"]
+            )
         saida = capsys.readouterr().out
         assert codigo == 0 and "PROGRESSO: importacao=" in saida and "importados=3" in saida and "identificacao=1" in saida
         assert "--desfazer" in saida
@@ -527,7 +530,7 @@ class TestOScript:
         from scripts import import_historico_zip as cli
 
         monkeypatch.setenv("INDEX_AI_PROVIDER", "mock")
-        assert await cli.principal([_zip_tipico(tmp_path), "--rede", "rede-A", "--aplicar"]) == 3
+        assert await cli.principal([_zip_tipico(tmp_path), "--rede", "rede-A", "--aplicar", "--sem-ficheiros"]) == 3
         assert "RECUSADO" in capsys.readouterr().out
 
     async def test_desfazer_pede_aplicar(self, bd, tmp_path, capsys):

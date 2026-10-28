@@ -123,7 +123,10 @@ jobs:
   # ==================================================================
   e2e-smoke:
     name: E2E Smoke (Playwright)
-    runs-on: ubuntu-latest
+    # Fixo em 24.04: o `ubuntu-latest` passou a 26.04 (28 Out 2026) e o
+    # Playwright 1.58 recusa instalar o Chromium lá («does not support chromium
+    # on ubuntu26.04-x64»). Voltar a `ubuntu-latest` quando o Playwright o suportar.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: [frontend, backend-fast]
     env:
