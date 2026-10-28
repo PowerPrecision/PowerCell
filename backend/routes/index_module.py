@@ -12,7 +12,7 @@ Router fino; a lógica vive em `services/index_api.py` e `services/index_finaliz
 * Nenhum endpoint bloqueia a indexação: «mark-indexed» responde sempre (salvo permissão).
 """
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Body, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +24,7 @@ from services.index_advanced_search import TAMANHO_MAXIMO_DA_PAGINA, run_advance
 from services.index_document_content import run_conteudo_do_documento, run_conteudo_do_ficheiro_do_processo
 from services.index_api import (
     run_assumir_processo,
+    run_analyze_document,
     run_analyze_process,
     run_dismiss_alert,
     run_edit_professional_job,
@@ -35,7 +36,9 @@ from services.index_api import (
     run_search_employers,
     run_set_file_titular,
 )
+from services.index_conversa import MensagemDaConversa, run_enviar_do_index, run_ler_conversa_do_index
 from services.index_finalize import run_mark_indexed
+from services import index_assignment_requests as pedidos_de_atribuicao
 from services.process_broadcast import broadcast_process_delta
 from services.process_closed_guard import exigir_processo_editavel
 from services.process_scope_guard import exigir_processo_no_ambito
@@ -50,6 +53,9 @@ _acesso = require_roles(PAPEIS_DE_IA_DO_INDEX)
 #: «Atribuir a mim» é do indexador (perfil efectivo). A gestão atribui pelo «Gerir» do processo.
 PAPEIS_QUE_ASSUMEM = ["indexacao"]
 _so_o_index = require_roles(PAPEIS_QUE_ASSUMEM)
+#: Quem trata os pedidos de alteração de atribuição do Index: a chefia (o Index só os cria e vê os seus).
+PAPEIS_QUE_TRATAM_PEDIDOS = list(pedidos_de_atribuicao.ROLES_DA_CHEFIA)
+_so_a_chefia = require_roles(PAPEIS_QUE_TRATAM_PEDIDOS)
 
 
 async def _so_o_titular(request: Request, process_id: str, user: dict = Depends(_acesso)) -> None:
@@ -63,6 +69,12 @@ class AnalyzeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     force: bool = False
+
+
+class AnalyzeDocumentBody(BaseModel):
+    """`tipo` vazio: a IA decide (pelo nome, pela classificação ou pelo conteúdo). Com `tipo`: «Analisar como…»."""
+    model_config = ConfigDict(extra="forbid")
+    tipo: Optional[Literal["recibo_vencimento", "extrato_bancario", "declaracao_efetividade", "identificacao"]] = None
 
 
 class TitularDoFicheiroBody(BaseModel):
@@ -84,6 +96,21 @@ class EmployerNif(BaseModel):
 
     job_id: str
     nif: str
+
+
+class PedidoDeAtribuicaoBody(BaseModel):
+    """O motivo é opcional: o Index pode pedir sem explicar."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    motivo: Optional[str] = Field(None, max_length=pedidos_de_atribuicao.MAX_MOTIVO)
+
+
+class ResolverPedidoBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decisao: str = Field(pattern=r"^(concluido|recusado)$")
+    nota: Optional[str] = Field(None, max_length=pedidos_de_atribuicao.MAX_MOTIVO)
 
 
 class MarkIndexedBody(BaseModel):
@@ -137,8 +164,8 @@ async def advanced_search(
     period_to: Optional[str] = Query(None, description="YYYY-MM"),
     sort: str = Query("period_desc", description="period_desc | salary_desc | salary_asc"),
     document_type: Optional[str] = Query(
-        None, description="recibo | declaracao_efetividade | extrato — pesquisa por DOCUMENTO em vez de por emprego."),
-    bank: Optional[str] = Query(None, max_length=80, description="Banco do extrato (só com document_type=extrato)."),
+        None, description="recibo | declaracao_efetividade | extrato | todos — pesquisa por DOCUMENTO em vez de por emprego."),
+    bank: Optional[str] = Query(None, max_length=80, description="Banco do extrato (só com document_type=extrato ou todos)."),
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=TAMANHO_MAXIMO_DA_PAGINA),
     user: dict = Depends(_acesso),
@@ -248,6 +275,20 @@ async def analyze_process(
     return await run_analyze_process(user, process_id, force=data.force)
 
 
+@router.post("/processes/{process_id}/files/{document_id}/analyze", status_code=202)
+@limiter.limit("30/minute")
+async def analyze_document(
+    request: Request,
+    response: Response,
+    process_id: str,
+    document_id: str,
+    data: AnalyzeDocumentBody = Body(default_factory=AnalyzeDocumentBody),
+    user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
+):
+    """«Analisar» na linha de um ficheiro: só esse, sempre de novo; em segundo plano, como o resto."""
+    return await run_analyze_document(user, process_id, document_id, tipo=data.tipo)
+
+
 @router.post("/processes/{process_id}/extract", status_code=202)
 @limiter.limit("20/minute")
 async def extract_process(
@@ -319,3 +360,67 @@ async def mark_indexed(
         broadcast_fn=broadcast_process_delta,
         employers=[e.model_dump() for e in data.employers],
     )
+
+
+# ====================================================================
+# PEDIDOS DE ALTERAÇÃO DE ATRIBUIÇÃO (Out 2026)
+# ====================================================================
+@router.post("/processes/{process_id}/pedido-atribuicao", status_code=201)
+@limiter.limit("20/minute")
+async def pedir_alteracao_de_atribuicao(
+    request: Request,
+    response: Response,
+    process_id: str,
+    data: PedidoDeAtribuicaoBody = Body(default_factory=PedidoDeAtribuicaoBody),
+    user: dict = Depends(_acesso),
+    _papel: dict = Depends(_so_o_index),
+):
+    """O Index pede à chefia que altere a atribuição do processo (motivo opcional). Não muda nada sozinho."""
+    return await pedidos_de_atribuicao.run_pedir_alteracao(user, process_id, data.motivo)
+
+
+@router.get("/pedidos-atribuicao")
+@limiter.limit("120/minute")
+async def listar_pedidos_de_atribuicao(
+    request: Request,
+    response: Response,
+    estado: Optional[str] = Query("pendente", max_length=20, description="pendente | concluido | recusado."),
+    process_id: Optional[str] = Query(None, max_length=64),
+    user: dict = Depends(_acesso),
+):
+    """A chefia vê os pedidos da sua rede; o Index só os seus. Perfil EFECTIVO."""
+    papel = (await get_effective_role_async(request, user) or "").lower()
+    return await pedidos_de_atribuicao.run_listar_pedidos(
+        user, so_meus=papel not in PAPEIS_QUE_TRATAM_PEDIDOS, estado=estado or None, process_id=process_id,
+    )
+
+
+@router.post("/pedidos-atribuicao/{pedido_id}/resolver")
+@limiter.limit("60/minute")
+async def resolver_pedido_de_atribuicao(
+    request: Request,
+    response: Response,
+    pedido_id: str,
+    data: ResolverPedidoBody,
+    user: dict = Depends(_acesso),
+    _papel: dict = Depends(_so_a_chefia),
+):
+    """A chefia fecha o pedido: «concluido» (tratado pelo «Gerir» do processo) ou «recusado»."""
+    return await pedidos_de_atribuicao.run_resolver_pedido(user, pedido_id, data.decisao, data.nota)
+
+
+@router.get("/processes/{process_id}/conversa")
+@limiter.limit("120/minute")
+async def get_conversa(request: Request, response: Response, process_id: str, user: dict = Depends(_acesso)):
+    """A conversa do processo com quem o carregou (mensagens do chat interno marcadas com o processo)."""
+    return await run_ler_conversa_do_index(user, process_id)
+
+
+@router.post("/processes/{process_id}/conversa")
+@limiter.limit("30/minute")
+async def post_conversa(
+    request: Request, response: Response, process_id: str, data: MensagemDaConversa,
+    user: dict = Depends(_acesso),
+):
+    """Escrever a quem carregou o processo. Conversar não é agir: não exige ser o indexador atribuído."""
+    return await run_enviar_do_index(user, process_id, data)

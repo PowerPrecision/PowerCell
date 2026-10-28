@@ -709,6 +709,76 @@ async def marcar_visto_no_arquivo(document_id: str, import_id: str, estado: str)
     )
 
 
+#: Raiz S3 dos ficheiros do arquivo histórico. Fica FORA de `Documentação Clientes/` de propósito: estes ficheiros
+#: não têm cliente nem processo, e os endpoints genéricos de documentos (que exigem essa raiz) nunca os servem.
+PREFIXO_S3_DO_ARQUIVO = "Arquivo Histórico Index/"
+_EXTENSOES_DO_ARQUIVO = (".pdf", ".jpg", ".jpeg", ".png")
+
+
+def _segmento_seguro(valor: Any) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(valor or "").strip())[:80]
+
+
+def pasta_do_ficheiro_historico(network_id: str, import_id: str) -> str:
+    """A pasta S3 de UMA importação numa rede (com `/` no fim: compara-se por segmento). PURA."""
+    return f"{PREFIXO_S3_DO_ARQUIVO}{_segmento_seguro(network_id)}/{_segmento_seguro(import_id)}/"
+
+
+def chave_do_ficheiro_historico(network_id: str, import_id: str, document_id: str, extensao: str) -> Optional[str]:
+    """A chave S3 do ficheiro de UMA linha histórica, ou `None`. PURA.
+
+    Só ids: nem o nome do ficheiro nem o caminho no ZIP (levam o nome do cliente) entram na chave.
+    """
+    ext = (extensao or "").lower()
+    if not network_id or not import_id or not document_id or ext not in _EXTENSOES_DO_ARQUIVO:
+        return None
+    return f"{pasta_do_ficheiro_historico(network_id, import_id)}{_segmento_seguro(document_id)}{ext}"
+
+
+def chave_historica_e_da_linha(chave: Any, linha: dict) -> bool:
+    """A chave guardada está na pasta da importação E da rede da própria linha? PURA. (A guarda de posse do arquivo.)"""
+    if not isinstance(chave, str) or not chave or ".." in chave.split("/"):
+        return False
+    pasta = pasta_do_ficheiro_historico(linha.get("network_id") or "", linha.get("import_id") or "")
+    resto = chave[len(pasta):] if chave.startswith(pasta) else ""
+    return bool(resto) and "/" not in resto
+
+
+async def linha_historica_sem_ficheiro(document_id: str) -> Optional[dict]:
+    """A linha histórica (rede + importação) se ainda não tem o ficheiro guardado; senão `None`."""
+    return await db.process_index_documents.find_one(
+        {"id": document_id, "historical": True, "s3_path": {"$in": [None, ""]}},
+        {"_id": 0, "id": 1, "network_id": 1, "import_id": 1},
+    )
+
+
+async def ligar_ficheiro_historico(document_id: str, chave: str) -> bool:
+    """Regista na linha histórica a chave S3 do seu ficheiro (`$set`: não toca no resto da linha)."""
+    r = await db.process_index_documents.update_one(
+        {"id": document_id, "historical": True},
+        {"$set": {"s3_path": chave, "updated_at": _agora()}},
+    )
+    return r.matched_count == 1
+
+
+async def carregar_linha_historica(document_id: str, condicao_de_ambito: dict) -> Optional[dict]:
+    """A linha histórica de um documento DENTRO do âmbito dado (para servir o ficheiro), ou `None`."""
+    return await db.process_index_documents.find_one(
+        {"$and": [{"id": document_id, "historical": True}, condicao_de_ambito]},
+        {"_id": 0, "id": 1, "network_id": 1, "import_id": 1, "doc_type": 1, "s3_path": 1, "period": 1},
+    )
+
+
+async def chaves_da_importacao_historica(import_id: str) -> list[str]:
+    """As chaves S3 dos ficheiros de UMA importação (para as apagar ao desfazer)."""
+    if not import_id:
+        return []
+    linhas = await db.process_index_documents.find(
+        {"historical": True, "import_id": import_id, "s3_path": {"$nin": [None, ""]}}, {"_id": 0, "s3_path": 1}
+    ).to_list(None)
+    return [l["s3_path"] for l in linhas if isinstance(l.get("s3_path"), str)]
+
+
 async def contar_documentos_historicos(import_id: str) -> int:
     return await db.process_index_documents.count_documents({"historical": True, "import_id": import_id})
 
@@ -889,5 +959,7 @@ __all__ = [
     "registar_ficheiro", "factos_do_processo", "contar_alertas_abertos",
     "nifs_das_entidades_pelo_nome", "agregar_metadados_profissionais",
     "projectar_documento", "reconstruir_documentos_do_index", "entidades_das_declaracoes",
-    "agregar_documentos_do_index", "DOC_TYPES_PESQUISAVEIS",
+    "agregar_documentos_do_index", "DOC_TYPES_PESQUISAVEIS", "PREFIXO_S3_DO_ARQUIVO",
+    "chave_do_ficheiro_historico", "chave_historica_e_da_linha", "ligar_ficheiro_historico",
+    "carregar_linha_historica", "chaves_da_importacao_historica", "linha_historica_sem_ficheiro",
 ]

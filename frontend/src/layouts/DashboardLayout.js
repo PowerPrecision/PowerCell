@@ -65,6 +65,7 @@ import MobileBottomNav from "../components/layout/MobileBottomNav";
 import ContextSwitcher from "../components/layout/ContextSwitcher";
 import GlobalSearchModal from "../components/GlobalSearchModal";
 import ChatPanel from "../components/ChatPanel";
+import { getChatUnreadCount } from "../services/api";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -76,7 +77,6 @@ import { classesDoCabecalhoFixo } from "../utils/stickyHeader";
 import { abrirSeccoes, gravarSeccoesAbertas, lerSeccoesAbertas, seccoesComRotaActiva } from "../utils/seccoesDoMenu";
 import ErrorBoundary from "../components/ErrorBoundary";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Máximo de itens para o badge de mensagens não lidas
 const MAX_UNREAD_DISPLAY = 99;
@@ -115,18 +115,12 @@ const DashboardLayout = ({ children, title }) => {
   // --- Contagem de mensagens não lidas (Chat Interno) ---
   const fetchChatUnreadCount = useCallback(async () => {
     try {
-      const token = localStorage.getItem("token");
-      if (!token) return;
+      if (!localStorage.getItem("token")) return;
       if (hasRole(user, "parceiro")) return;
-      const res = await fetch(`${API_URL}/api/chat/unread-count`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const total = data.unread_count || data.total || 0;
-        chatUnreadRef.current = total;
-        setChatUnreadCount(total);
-      }
+      const { data } = await getChatUnreadCount();
+      const total = data?.unread_count || data?.total || 0;
+      chatUnreadRef.current = total;
+      setChatUnreadCount(total);
     } catch {
       // Silently ignore fetch errors
     }

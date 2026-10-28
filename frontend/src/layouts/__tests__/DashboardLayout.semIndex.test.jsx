@@ -30,6 +30,7 @@ const PERFIS = {
 let sessao;
 
 vi.mock("../../services/api", () => ({
+  getChatUnreadCount: vi.fn(async () => ({ data: { unread_count: 0 } })),
   default: {
     get: vi.fn(async (url) => (String(url).includes("/auth/me") ? { data: sessao } : { data: {} })),
     post: vi.fn(async () => ({ data: {} })),

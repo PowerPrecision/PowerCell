@@ -505,6 +505,20 @@ async def contacto_do_parceiro(partner_id: str) -> Optional[dict]:
     return {"email": parceiro["email"], "name": parceiro.get("name")}
 
 
+async def parceiro_activo(partner_id: str) -> Optional[dict]:
+    """``{id, name, email}`` de um parceiro com a conta ACTIVA e com acesso, ou None.
+
+    Para a conversa do Index com o parceiro que carregou o processo: só se escreve a quem pode entrar
+    no portal para ler. Nunca devolve o hash nem o estado da conta.
+    """
+    if not partner_id:
+        return None
+    parceiro = await db.partners.find_one({"id": str(partner_id)}, {"_id": 0, "password_hash": 0, "invite": 0})
+    if not parceiro or parceiro.get("status") != ESTADO_ACTIVO or not conta_com_acesso(parceiro):
+        return None
+    return {"id": parceiro["id"], "name": parceiro.get("name") or "Parceiro", "email": parceiro.get("email")}
+
+
 async def carregar_parceiro_gerivel(partner_id: str, actor: dict) -> dict:
     """O parceiro, se quem actua o pode gerir. **404** caso contrário —
     igual ao de «não existe» (nunca 403: seria um directório de contas)."""

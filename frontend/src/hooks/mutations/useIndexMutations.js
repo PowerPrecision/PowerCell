@@ -13,6 +13,7 @@ import { toast } from "sonner";
 
 import { queryKeys } from "../../lib/queryClient";
 import {
+  analyzeIndexFile,
   analyzeIndexProcess,
   assumirIndexProcess,
   dismissIndexAlert,
@@ -39,6 +40,15 @@ export function useIndexMutations(processId) {
     onSuccess: (resposta) => {
       const d = resposta?.data || {};
       toast.info(d.message || "A análise está a correr em segundo plano.");
+      return refrescar();
+    },
+    onError: falhou,
+  });
+  // «Analisar» de UM ficheiro (o que ficou por analisar, ou «Analisar como…» quando o tipo não se percebe)
+  const analisarFicheiro = useMutation({
+    mutationFn: ({ documentId, tipo = null }) => analyzeIndexFile(processId, documentId, tipo),
+    onSuccess: (resposta) => {
+      toast.info(resposta?.data?.message || "O documento está a ser analisado em segundo plano.");
       return refrescar();
     },
     onError: falhou,
@@ -106,5 +116,5 @@ export function useIndexMutations(processId) {
     onError: falhou,
   });
 
-  return { analisar, extrair, sanitizar, editar, dispensar, marcarIndexado, assumir, mudarTitular };
+  return { analisar, analisarFicheiro, extrair, sanitizar, editar, dispensar, marcarIndexado, assumir, mudarTitular };
 }

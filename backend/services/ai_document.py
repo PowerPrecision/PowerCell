@@ -977,6 +977,43 @@ def extract_text_from_pdf(pdf_content: bytes, max_pages: int = MAX_PDF_PAGES) ->
         return ""
 
 
+def extract_text_from_pdf_por_linhas(pdf_content: bytes, max_pages: int = MAX_PDF_PAGES) -> str:
+    """Texto de um PDF com as LINHAS da página reconstruídas (PyMuPDF, ordenado por posição).
+
+    Para documentos em tabela (extratos bancários). O `pypdf` parte o texto de alguns PDFs em
+    fragmentos soltos — no extrato BPI o valor «-21,11» sai como «-» e «21,11» em linhas
+    diferentes e o saldo «8.904,12» como «8.9», «04», «,», «1», «2» — e o modelo perde o sinal
+    do movimento e lê saldos que não existem. Aqui cada linha do extrato fica numa linha
+    (data, descrição, valor com sinal, saldo). Mesmos limites e sanitização de
+    `extract_text_from_pdf`; devolve "" se falhar (quem chama recorre ao `pypdf`).
+    """
+    try:
+        import fitz  # PyMuPDF
+
+        doc = fitz.open(stream=pdf_content, filetype="pdf")
+        try:
+            text_parts = []
+            total_chars = 0
+            for i in range(min(len(doc), max_pages)):
+                page_text = doc[i].get_text("text", sort=True) or ""
+                if not page_text.strip():
+                    continue
+                if len(page_text) > MAX_PDF_PAGE_TEXT_LENGTH:
+                    # os espaços de alinhamento das colunas não contam: a sanitização reduz-nos
+                    page_text = re.sub(r" {3,}", "  ", page_text)[:MAX_PDF_PAGE_TEXT_LENGTH]
+                text_parts.append(page_text)
+                total_chars += len(page_text)
+                if total_chars >= MAX_PDF_TEXT_LENGTH:
+                    logger.warning(f"Limite de texto total atingido na página {i+1}")
+                    break
+        finally:
+            doc.close()
+        return sanitize_pdf_text("\n".join(text_parts), MAX_PDF_TEXT_LENGTH)
+    except Exception as e:
+        logger.warning(f"Falha na extracção de texto do PDF por linhas: {e}")
+        return ""
+
+
 def convert_pdf_to_image(pdf_content: bytes, page_num: int = 0, dpi: int = 150) -> Tuple[Optional[bytes], str]:
     """
     Converter uma página de PDF para imagem usando PyMuPDF.
@@ -1147,7 +1184,8 @@ async def call_openai_api(
     messages: list,
     tool_definition: dict = None,
     timeout: float = 60.0,
-    model: Optional[str] = None
+    model: Optional[str] = None,
+    max_tokens: int = 4096,
 ) -> dict:
     """
     Chamar API OpenAI usando SDK oficial com suporte a Function Calling.
@@ -1160,7 +1198,8 @@ async def call_openai_api(
         tool_definition: Definição OpenAI tool para function calling
         timeout: Timeout em segundos
         model: Modelo já resolvido. Se ausente, resolve pelo painel de IA.
-    
+        max_tokens: Tecto da resposta. Uma resposta cortada pelo tecto é JSON inválido (`data` vazio).
+
     Returns:
         Dicionário com dados extraídos da chamada de ferramenta
     
@@ -1175,7 +1214,7 @@ async def call_openai_api(
         "model": model_id,
         "messages": messages,
         "temperature": 0.1,
-        "max_tokens": 4096,
+        "max_tokens": max_tokens,
     }
     
     if tool_definition:
@@ -1208,6 +1247,12 @@ async def call_openai_api(
     choice = response.choices[0]
     message = choice.message
     
+    # A resposta bateu no tecto de tokens: o JSON vem cortado (ou, pior, parseável mas sem o fim).
+    # Quem chama distingue isto de «a IA não percebeu o documento».
+    if getattr(choice, "finish_reason", None) == "length":
+        logger.warning("Resposta da OpenAI cortada pelo limite de %s tokens (%s)", max_tokens, model_id)
+        return {"data": {}, "method": "function_calling", "model": model_id, "error": "truncated", "truncated": True}
+
     if message.tool_calls and len(message.tool_calls) > 0:
         # Caminho de function calling - saída estruturada
         tool_call = message.tool_calls[0]

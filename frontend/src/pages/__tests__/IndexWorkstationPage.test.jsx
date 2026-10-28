@@ -38,6 +38,7 @@ vi.mock("../../services/api", () => ({
   uploadProcessS3File: vi.fn(),
   readBlobErrorBody: vi.fn(async () => null),
   analyzeIndexProcess: vi.fn(),
+  analyzeIndexFile: vi.fn(),
   extractIndexProcess: vi.fn(),
   editIndexJob: vi.fn(),
   dismissIndexAlert: vi.fn(),
@@ -45,6 +46,10 @@ vi.mock("../../services/api", () => ({
   sanitizeIndexProcess: vi.fn(),
   markIndexProcessIndexed: vi.fn(),
   searchIndexEmployers: vi.fn(),
+  getIndexConversa: vi.fn(async () => ({ data: { interlocutor: null, messages: [] } })),
+  sendIndexConversa: vi.fn(),
+  getProcessConversaIndex: vi.fn(),
+  sendProcessConversaIndex: vi.fn(),
 }));
 
 import * as api from "../../services/api";
@@ -121,7 +126,7 @@ describe("a bancada monta e mostra o estado do servidor", () => {
     const lista = screen.getAllByTestId("ficheiro-do-index");
     expect(within(lista[0]).getByText("Analisado")).toBeInTheDocument();
     expect(within(lista[1]).getByText("Por analisar")).toBeInTheDocument();
-    expect(within(lista[2]).queryByText(/analisa/i)).not.toBeInTheDocument();
+    expect(within(lista[2]).queryByText(/^(Por analisar|Analisado)$/)).not.toBeInTheDocument();
     expect(screen.getByText("Quinta do Sol Lda")).toBeInTheDocument();
     expect(screen.getByText(/2 campo\(s\) a rever/)).toBeInTheDocument();
     expect(screen.getAllByTestId("alerta-do-index")).toHaveLength(2);
@@ -813,5 +818,79 @@ describe("comprovativos do cliente substituídos pelos do Index (Out 2026)", () 
     await screen.findByRole("heading", { name: /Marta Quintela/ });
     expect(screen.queryByTestId("ver-substituidos")).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "De quem são os documentos" })).not.toBeInTheDocument();
+  });
+});
+
+describe("«Analisar» na linha de cada ficheiro (QA Index, Out 2026)", () => {
+  const SEM_JOB = { ...BANCADA, active_jobs: { analysis: null, finalize: null, sanitize: null } };
+  const linhaDe = async (nome) =>
+    (await screen.findByText(nome)).closest("[data-testid='ficheiro-do-index']");
+
+  beforeEach(() => {
+    api.analyzeIndexFile.mockResolvedValue({ data: { success: true, started: true, message: "A analisar o documento." } });
+  });
+
+  it("um ficheiro sem tipo reconhecido analisa-se aqui: o servidor deteta o tipo", async () => {
+    montar(SEM_JOB);
+    const linha = await linhaDe("foto.jpg");
+    await userEvent.click(within(linha).getByRole("button", { name: "Analisar — foto.jpg" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Detetar o tipo e analisar" }));
+    await waitFor(() => expect(api.analyzeIndexFile).toHaveBeenCalledWith("proc-1", "d3", null));
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith("A analisar o documento."));
+  });
+
+  it("«Analisar como…» envia o tipo escolhido pela pessoa", async () => {
+    montar(SEM_JOB);
+    const linha = await linhaDe("foto.jpg");
+    await userEvent.click(within(linha).getByRole("button", { name: "Analisar — foto.jpg" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Recibo de vencimento" }));
+    await waitFor(() => expect(api.analyzeIndexFile).toHaveBeenCalledWith("proc-1", "d3", "recibo_vencimento"));
+  });
+
+  it("um ficheiro com tipo oferece analisá-lo de novo", async () => {
+    montar(SEM_JOB);
+    const linha = await linhaDe("extrato_setembro.pdf");
+    await userEvent.click(within(linha).getByRole("button", { name: "Analisar — extrato_setembro.pdf" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Analisar de novo (extrato bancário)" }));
+    await waitFor(() => expect(api.analyzeIndexFile).toHaveBeenCalledWith("proc-1", "d2", null));
+  });
+
+  it("quando a última análise falhou, a linha di-lo", async () => {
+    montar({ ...SEM_JOB, files: [{ ...SEM_JOB.files[1], analysis_failed: true }] });
+    const linha = await linhaDe("extrato_setembro.pdf");
+    expect(within(linha).getByTestId("badge-analise-falhou")).toHaveTextContent("Análise falhou");
+    expect(within(linha).queryByText("Por analisar")).not.toBeInTheDocument();
+  });
+
+  it("com uma análise a correr fica desligado, com o motivo", async () => {
+    montar(BANCADA);
+    const linha = await linhaDe("foto.jpg");
+    const botao = within(linha).getByRole("button", { name: "Analisar — foto.jpg" });
+    expect(botao).toBeDisabled();
+    expect(botao).toHaveAttribute("title", "Já há uma análise a correr neste processo.");
+  });
+
+  it("no processo de um colega fica desligado, como as outras acções", async () => {
+    sessao.papel = "indexacao";
+    api.startIndexWork.mockResolvedValue({ data: { iniciado: false } });
+    montar({ ...SEM_JOB, process: { ...SEM_JOB.process, index_status: "in_review", assigned_to_other: true,
+      assigned_indexacao_name: "Rui Teixeira" } });
+    const linha = await linhaDe("foto.jpg");
+    const botao = within(linha).getByRole("button", { name: "Analisar — foto.jpg" });
+    expect(botao).toBeDisabled();
+    expect(botao).toHaveAttribute("title", expect.stringContaining("Rui Teixeira"));
+  });
+
+  it("uma recusa mostra o motivo do servidor", async () => {
+    api.analyzeIndexFile.mockRejectedValue({ response: { status: 422, data: { detail: "O PDF limpo não se analisa." } } });
+    montar(SEM_JOB);
+    const linha = await linhaDe("foto.jpg");
+    await userEvent.click(within(linha).getByRole("button", { name: "Analisar — foto.jpg" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Detetar o tipo e analisar" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("O PDF limpo não se analisa."));
+  });
+
+  it("a chamada passa pelo Axios (nunca um fetch cru)", () => {
+    expect(apiFonte).toMatch(/export const analyzeIndexFile[\s\S]{0,200}api\.post\(/);
   });
 });

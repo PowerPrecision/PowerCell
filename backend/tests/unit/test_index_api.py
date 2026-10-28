@@ -396,6 +396,74 @@ class TestAccoes:
         assert r["success"] is True and r["started"] is False and r["task_id"] == "t-0"
 
 
+class TestAnalisarUmFicheiro:
+    """«Analisar» na linha do ficheiro (QA Index, Out 2026): só esse, sempre de novo, e «Analisar como…»."""
+
+    async def _semear(self, fake, **doc):
+        await fake.processes.insert_one({"id": PID, "network_id": "r", "is_deleted": False})
+        await fake.document_metadata.insert_one(
+            {"id": "d1", "process_id": PID, "filename": "07-Julho.pdf", "s3_path": "x/07-Julho.pdf", **doc})
+
+    @pytest.mark.asyncio
+    async def test_lanca_o_job_so_desse_ficheiro_e_forcado(self, fake_async_db):
+        await self._semear(fake_async_db)
+        iniciar = AsyncMock(return_value={"task_id": "t-1", "iniciado": True})
+        with _Contexto(fake_async_db), patch.object(jobs, "iniciar_analise", iniciar):
+            r = await api.run_analyze_document(INDEXADOR, PID, "d1")
+        assert r["task_id"] == "t-1" and r["started"] is True
+        assert iniciar.await_args.kwargs == {"force": True, "gatilho": "manual", "documento_id": "d1"}
+        assert "index_type_override" not in await fake_async_db.document_metadata.find_one({"id": "d1"})
+
+    @pytest.mark.asyncio
+    async def test_analisar_como_grava_o_tipo_escolhido_e_a_bancada_mostra_o(self, fake_async_db):
+        await self._semear(fake_async_db)
+        with _Contexto(fake_async_db), patch.object(
+                jobs, "iniciar_analise", AsyncMock(return_value={"task_id": "t-1", "iniciado": True})):
+            await api.run_analyze_document(INDEXADOR, PID, "d1", tipo="recibo_vencimento")
+            bancada = await api.run_get_index_workstation(INDEXADOR, PID)
+        assert (await fake_async_db.document_metadata.find_one({"id": "d1"}))["index_type_override"] == "recibo_vencimento"
+        f = bancada["files"][0]
+        assert f["analysis_type"] == "recibo_vencimento" and f["analysed"] is False
+
+    @pytest.mark.asyncio
+    async def test_ficheiro_de_outro_processo_e_404(self, fake_async_db):
+        await self._semear(fake_async_db)
+        await fake_async_db.document_metadata.insert_one({"id": "alheio", "process_id": "outro", "s3_path": "y"})
+        iniciar = AsyncMock()
+        with _Contexto(fake_async_db), patch.object(jobs, "iniciar_analise", iniciar):
+            with pytest.raises(HTTPException) as e:
+                await api.run_analyze_document(INDEXADOR, PID, "alheio", tipo="recibo_vencimento")
+        assert e.value.status_code == 404 and iniciar.await_count == 0
+        assert "index_type_override" not in await fake_async_db.document_metadata.find_one({"id": "alheio"})
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("doc", [{"file_state": "purgado"}, {"is_clean_pdf": True}])
+    async def test_sem_bytes_ou_pdf_limpo_e_422(self, fake_async_db, doc):
+        await self._semear(fake_async_db, **doc)
+        with _Contexto(fake_async_db), patch.object(jobs, "iniciar_analise", AsyncMock()):
+            with pytest.raises(HTTPException) as e:
+                await api.run_analyze_document(INDEXADOR, PID, "d1")
+        assert e.value.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_a_bancada_diz_que_a_ultima_analise_do_ficheiro_falhou(self, fake_async_db):
+        await self._semear(fake_async_db, ai_category="Bancários", ai_subcategory="Extrato Bancário")
+        await fake_async_db.process_index_alerts.insert_one({
+            "id": "al", "process_id": PID, "code": "analise_falhou", "severity": "info",
+            "refs": [{"document_id": "d1", "page": None}], "dismissed_by_human": False})
+        with _Contexto(fake_async_db):
+            f = (await api.run_get_index_workstation(INDEXADOR, PID))["files"][0]
+        assert f["analysis_type"] == "extrato_bancario" and f["analysis_failed"] is True
+
+    def test_a_rota_so_aceita_os_tipos_que_o_index_le(self):
+        from pydantic import ValidationError
+
+        assert index_module.AnalyzeDocumentBody(tipo="extrato_bancario").tipo == "extrato_bancario"
+        assert index_module.AnalyzeDocumentBody().tipo is None
+        with pytest.raises(ValidationError):
+            index_module.AnalyzeDocumentBody(tipo="caderneta")
+
+
 class TestSanitizar:
     @pytest.mark.asyncio
     async def test_devolve_ja_com_o_task_id(self, fake_async_db):

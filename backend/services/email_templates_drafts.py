@@ -21,7 +21,7 @@ from services.email_draft_service import (
     discard_draft,
     create_missing_doc_draft,
 )
-from utils.input_sanitization import sanitize_string, sanitize_email, sanitize_multiline_text
+from utils.input_sanitization import sanitize_string, sanitize_email, sanitize_multiline_text, sanitize_single_line_text
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ async def run_create_email_template(template: EmailTemplateCreate, request: Requ
     template_doc = {
         "id": template_id,
         "name": sanitize_string(template.name, max_length=200),
-        "subject": sanitize_string(template.subject, max_length=300),
+        "subject": sanitize_single_line_text(template.subject, max_length=300),
         "body": sanitize_multiline_text(template.body, max_length=10000),
         "category": template.category,
         "is_default": template.is_default,
@@ -104,7 +104,7 @@ async def run_update_email_template(template_id: str, template: EmailTemplateCre
     
     update_data = {
         "name": sanitize_string(template.name, max_length=200),
-        "subject": sanitize_string(template.subject, max_length=300),
+        "subject": sanitize_single_line_text(template.subject, max_length=300),
         "body": sanitize_multiline_text(template.body, max_length=10000),
         "category": template.category,
         "is_default": template.is_default,
@@ -284,7 +284,7 @@ async def run_edit_auto_draft(draft_id: str, data: dict, current_user: dict):
     await _exigir_rascunho_legivel(draft_id, current_user)
     # Sanitize user inputs before passing to service
     if "subject" in data and data["subject"]:
-        data["subject"] = sanitize_string(data["subject"], max_length=300)
+        data["subject"] = sanitize_single_line_text(data["subject"], max_length=300)
     if "body" in data and data["body"]:
         data["body"] = sanitize_multiline_text(data["body"], max_length=10000)
     if "to_emails" in data and data["to_emails"]:

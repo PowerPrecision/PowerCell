@@ -501,3 +501,117 @@ class TestDirectorio:
         meta_nif = (await bd.process_professional_metadata.find_one({"process_id": PID}))["jobs"][0]["employer_nif"]["value"]
         codigos = {a["code"] for a in await bd.process_index_alerts.find({}).to_list(20)}
         assert ("nif_entidade_incoerente" in codigos) == (meta_nif != "509442013")
+
+
+# ── ficheiros que ficavam por analisar (QA Index, Out 2026) ────────────────
+def _classificador(tipo):
+    """Falseia a classificação por CONTEÚDO (a IA real) e conta as chamadas."""
+    chamada = AsyncMock(return_value=ia.ClassificacaoDoDocumento(tipo=tipo))
+    return patch.object(jobs, "classificar_documento", chamada), chamada
+
+
+async def correr_um(documento_id, force=True):
+    r = await jobs.iniciar_analise(PID, USER, force=force, documento_id=documento_id)
+    await aguardar_tarefas_pendentes()
+    return r
+
+
+class TestFicheirosSemPistasNoNome:
+    async def test_um_recibo_chamado_07_julho_e_classificado_pelo_conteudo_e_analisado(self, bd):
+        d = await doc(bd, "07-Julho.pdf")
+        ctx, chamada = _classificador(ia.TIPO_RECIBO)
+        with ctx:
+            r = await correr()
+        assert chamada.await_count == 1
+        assert (await tarefa(bd, r["task_id"]))["result_data"]["analisados"] == 1
+        gravado = await bd.document_metadata.find_one({"id": d})
+        assert gravado["index_classified_type"] == ia.TIPO_RECIBO and gravado["ai_category"] == "Financeiros"
+        assert ia.tem_a_impressao_atual(gravado["analysis_fingerprint"])
+
+    async def test_a_classificacao_e_uma_vez_por_conteudo_tambem_quando_e_outro(self, bd):
+        d = await doc(bd, "Mapa_CRC.pdf")
+        ctx, chamada = _classificador(ia.TIPO_OUTRO)
+        with ctx:
+            r1 = await correr()
+            r2 = await correr()
+        assert chamada.await_count == 1                           # a segunda corrida não paga outra vez
+        for r in (r1, r2):
+            res = (await tarefa(bd, r["task_id"]))["result_data"]
+            assert res["analisados"] == 0 and res["falhas"] == 0 and res["ignorados"] == 1
+        assert (await bd.document_metadata.find_one({"id": d}))["index_classified_type"] == ia.TIPO_OUTRO
+        assert await bd.process_index_alerts.count_documents({"code": "analise_falhou"}) == 0
+
+    async def test_nao_saber_o_tipo_nao_se_grava(self, bd):
+        d = await doc(bd, "digitalizacao.pdf")
+        ctx, _ = _classificador(None)                              # IA em baixo / motor simulado
+        with ctx:
+            await correr()
+        assert "index_classified_type" not in await bd.document_metadata.find_one({"id": d})
+
+    async def test_um_ficheiro_sem_tipo_que_nao_se_le_nao_vira_alerta(self, bd):
+        d = await doc(bd, "certidao.pdf")
+        S3.pop((await bd.document_metadata.find_one({"id": d}))["s3_path"])
+        ctx, chamada = _classificador(ia.TIPO_RECIBO)
+        with ctx:
+            r = await correr()
+        assert chamada.await_count == 0
+        assert (await tarefa(bd, r["task_id"]))["result_data"]["falhas"] == 0
+        assert await bd.process_index_alerts.count_documents({}) == 0
+
+
+class TestAnalisarUmFicheiro:
+    async def test_so_o_ficheiro_pedido_e_sempre_de_novo(self, bd):
+        r_id, e_id, _ = await tres_documentos(bd)
+        await correr()
+        with patch.object(jobs, "analisar_documento", wraps=ia.analisar_documento) as chamada:
+            r = await correr_um(e_id)
+        assert chamada.await_count == 1 and chamada.await_args.kwargs["document_id"] == e_id
+        assert (await tarefa(bd, r["task_id"]))["result_data"]["analisados"] == 1
+        # os metadados do processo continuam a contar com TUDO o que está analisado
+        assert len((await bd.process_professional_metadata.find_one({"process_id": PID}))["jobs"]) == 1
+
+    async def test_sem_tipo_reconhecivel_falha_com_o_motivo_e_o_caminho(self, bd):
+        d = await doc(bd, "scan001.pdf")
+        ctx, _ = _classificador(ia.TIPO_OUTRO)
+        with ctx:
+            await correr_um(d)
+        alerta = await bd.process_index_alerts.find_one({"code": "analise_falhou"})
+        assert alerta["refs"] == [{"document_id": d, "page": None}]
+        assert "Analisar como" in alerta["detail"]
+
+    async def test_analisar_um_mantem_a_falha_dos_outros(self, bd):
+        _, e_id, i_id = await tres_documentos(bd)
+        real = ia.analisar_documento
+
+        async def extrato_cortado(**kw):
+            if kw["tipo"] == ia.TIPO_EXTRATO:
+                return ia.ResultadoDaAnalise(ok=False, tipo=kw["tipo"], motivo="resposta_incompleta")
+            return await real(**kw)
+
+        with patch.object(jobs, "analisar_documento", extrato_cortado):
+            await correr()
+        alerta = await bd.process_index_alerts.find_one({"code": "analise_falhou"})
+        assert alerta["refs"][0]["document_id"] == e_id and "cortada" in alerta["detail"]
+        await correr_um(i_id)                                      # outro ficheiro: a falha do extrato fica
+        abertos = await bd.process_index_alerts.find({"code": "analise_falhou"}).to_list(10)
+        assert [a["refs"][0]["document_id"] for a in abertos] == [e_id] and "cortada" in abertos[0]["detail"]
+        await correr_um(e_id)                                      # agora o próprio: resolve-se
+        assert await bd.process_index_alerts.count_documents({"code": "analise_falhou"}) == 0
+
+    async def test_uma_excepcao_num_ficheiro_nao_deixa_os_outros_por_analisar(self, bd):
+        """Antes, uma excepção a meio matava o job: TODOS ficavam «Por analisar» e sem alerta nenhum."""
+        _, e_id, _ = await tres_documentos(bd)
+        real = ia.analisar_documento
+
+        async def rebenta(**kw):
+            if kw["tipo"] == ia.TIPO_EXTRATO:
+                raise KeyError("valor inesperado")
+            return await real(**kw)
+
+        with patch.object(jobs, "analisar_documento", rebenta):
+            r = await correr()
+        t = await tarefa(bd, r["task_id"])
+        assert t["status"] == "completed"
+        assert t["result_data"]["analisados"] == 2 and t["result_data"]["falhas"] == 1
+        alerta = await bd.process_index_alerts.find_one({"code": "analise_falhou"})
+        assert alerta["refs"][0]["document_id"] == e_id and alerta["detail"]

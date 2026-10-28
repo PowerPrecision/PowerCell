@@ -10,7 +10,14 @@
     # um lote por noite, com tecto de custo (documentos enviados ao modelo)
     python -m scripts.import_historico_zip /dados/arquivo_onedrive.zip --rede grupo_power_precision --aplicar --limite-ia 500
 
-    # desfazer uma importação (o `import_id` vem na linha PROGRESSO)
+    # ligar os ficheiros a uma importação antiga (feita antes de 28/10/2026, só com os dados): o MESMO comando.
+    # O que já está importado não volta à IA; só se guarda o ficheiro no S3 e se liga à linha.
+    python -m scripts.import_historico_zip /dados/arquivo_onedrive.zip --rede grupo_power_precision --aplicar
+
+    # o ZIP que está no S3 (ex.: na Shell do Render): descarrega para um temporário, importa e apaga o temporário
+    python -m scripts.import_historico_zip s3://bucket/temp/import/import.zip --rede grupo_power_precision --aplicar
+
+    # desfazer uma importação (o `import_id` vem na linha PROGRESSO; apaga também os ficheiros no S3)
     python -m scripts.import_historico_zip --desfazer 1a2b3c4d5e6f --aplicar
 
 O QUE FAZ
@@ -20,12 +27,13 @@ por ficheiro): serve ZIPs de 85 MB e de mais de 2 GB com a mesma memória. Para 
 sugerem o tipo (de graça) ou a IA classifica; os recibos, extratos e declarações de efetividade são extraídos
 com a IA do Index e gravados em `process_index_documents` (com um `process_id` artificial
 `historical_import_<hash do ZIP>`); as entidades patronais com NIF válido vão para o directório `employers`.
-Documentos de identificação são reconhecidos e IGNORADOS. Os ficheiros não são guardados e nenhum nome de ficheiro,
-caminho ou cliente chega ao modelo, à base de dados ou ao ecrã.
+Documentos de identificação são reconhecidos e IGNORADOS. O ficheiro de cada linha importada guarda-se no S3 em
+`Arquivo Histórico Index/<rede>/<import_id>/<id>.<ext>` (só ids: nenhum nome de ficheiro, caminho ou cliente chega
+ao modelo, à chave S3, à base de dados ou ao ecrã), para o Index o ver e descarregar na pesquisa avançada.
 
 OPÇÕES
 ======
-  zip                  caminho do ZIP (obrigatório, excepto com --desfazer)
+  zip                  caminho do ZIP, ou `s3://bucket/chave.zip` (obrigatório, excepto com --desfazer)
   --rede REDE          OBRIGATÓRIA para importar: o `network_id` que pode ver estes documentos (tem de existir
                        numa empresa; uma gralha seria rejeitada). O Master vê todas as redes.
   --etiqueta TEXTO     o que o ecrã mostra («Arquivo histórico — TEXTO»); omissão: o nome do ZIP
@@ -34,13 +42,14 @@ OPÇÕES
   --classificar-sempre ignora a pista do nome/pasta e deixa a IA classificar tudo (mais caro, mais fiável)
   --pausa SEGUNDOS     pausa entre ficheiros pagos (omissão 0,5; env IMPORT_HISTORICO_PAUSE_SECONDS)
   --permitir-simulado  (dev/testes) aceita o motor simulado — escreve dados SIMULADOS
-  --desfazer ID        apaga as linhas da importação ID (as entidades patronais ficam)
+  --sem-ficheiros      só os dados, como antes de 28/10/2026 (não guarda nem exige o S3)
+  --desfazer ID        apaga as linhas da importação ID e os seus ficheiros no S3 (as entidades patronais ficam)
 
 IDEMPOTENTE: o id de cada linha deriva do conteúdo do ficheiro + a rede. Repetir o comando, ou retomar um que
 caiu a meio, não duplica nem volta a pagar o que já foi importado ou classificado como «não serve».
 
 CÓDIGOS DE SAÍDA:  0 ok · 2 ZIP ilegível/inexistente · 3 motor de IA simulado (recusado) · 4 rede em falta ou
-desconhecida · 130 interrompido (o progresso fica e retoma-se)
+desconhecida · 5 S3 não configurado (use --sem-ficheiros para importar só os dados) · 130 interrompido (o progresso fica e retoma-se)
 """
 from __future__ import annotations
 
@@ -48,6 +57,7 @@ import argparse
 import asyncio
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -65,6 +75,7 @@ def _argumentos(argv=None) -> argparse.Namespace:
     p.add_argument("--classificar-sempre", action="store_true")
     p.add_argument("--pausa", type=float, default=None)
     p.add_argument("--permitir-simulado", action="store_true")
+    p.add_argument("--sem-ficheiros", action="store_true")
     p.add_argument("--desfazer", metavar="IMPORT_ID", default=None)
     return p.parse_args(argv)
 
@@ -79,14 +90,68 @@ def _pausa(args) -> float:
     return imp.PAUSA_POR_OMISSAO_SEGUNDOS if valor < 0 else min(valor, 60.0)
 
 
+async def _s3_pronto() -> bool:
+    """O S3 configurado (env ou a configuração da BD, como no arranque do servidor)?"""
+    from services.s3_storage import s3_service, sync_s3_from_db_config
+
+    await sync_s3_from_db_config()
+    return s3_service.is_configured()
+
+
+def separar_uri_s3(texto: str) -> tuple[str, str] | None:
+    """`s3://bucket/chave` → `(bucket, chave)`; `None` se não for um URI S3 completo. PURA."""
+    if not isinstance(texto, str) or not texto.startswith("s3://"):
+        return None
+    bucket, _, chave = texto[len("s3://"):].partition("/")
+    return (bucket, chave) if bucket and chave and not chave.endswith("/") else None
+
+
+async def _descarregar_do_s3(bucket: str, chave: str) -> str:
+    """Copia o ZIP do S3 para um ficheiro temporário (em blocos, nunca na memória). Devolve o caminho."""
+    from services.s3_storage import s3_service
+
+    descritor, caminho = tempfile.mkstemp(prefix="import_historico_", suffix=".zip")
+    os.close(descritor)
+    await asyncio.to_thread(s3_service.s3_client.download_file, bucket, chave, caminho)
+    return caminho
+
+
 async def principal(argv=None) -> int:
+    """Com um `s3://…` no lugar do caminho, descarrega o ZIP para um temporário, importa e apaga o temporário."""
     args = _argumentos(argv)
+    uri = separar_uri_s3(args.zip or "")
+    if args.zip and args.zip.startswith("s3://") and uri is None:
+        print("URI S3 inválido (use s3://bucket/caminho/ficheiro.zip).")
+        return 2
+    if uri is None:
+        return await _principal(args)
+    if not await _s3_pronto():
+        print("S3 não configurado: não é possível ler o ZIP do S3.")
+        return 5
+    print("[import-historico] A descarregar o ZIP do S3 para um ficheiro temporário…")
+    try:
+        temporario = await _descarregar_do_s3(*uri)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ZIP não descarregado do S3 ({type(exc).__name__}): confirme o URI e as permissões.")
+        return 2
+    try:
+        args.zip = temporario
+        return await _principal(args)
+    finally:
+        try:
+            os.remove(temporario)
+        except OSError:
+            pass
+
+
+async def _principal(args) -> int:
 
     if args.desfazer:
         if not args.aplicar:
             print(f"[import-historico] --desfazer {args.desfazer}: nada foi apagado. Repetir com --aplicar.")
             return 0
-        apagadas = await imp.desfazer_importacao(args.desfazer)
+        apagar = imp.apagar_do_s3 if await _s3_pronto() else None
+        apagadas = await imp.desfazer_importacao(args.desfazer, apagar_ficheiro=apagar)
         print(f"[import-historico] importação {args.desfazer} desfeita: {apagadas} linhas apagadas (entidades mantidas).")
         return 0
 
@@ -129,10 +194,18 @@ async def principal(argv=None) -> int:
               f"{previa['candidatos']} a {2 * previa['candidatos']}.")
         return 0
 
+    guardar = None
+    if not args.sem_ficheiros:
+        if not await _s3_pronto():
+            print("S3 não configurado: os ficheiros não se podiam guardar. Configure o armazenamento ou use --sem-ficheiros.")
+            return 5
+        guardar = imp.guardar_no_s3
+
     try:
         resumo = await imp.importar_zip(
             args.zip, rede=args.rede, etiqueta=args.etiqueta, limite_ia=args.limite_ia,
             classificar_sempre=args.classificar_sempre, pausa=_pausa(args), permitir_simulado=args.permitir_simulado,
+            guardar_ficheiro=guardar,
         )
     except imp.IASimulada as exc:
         print(f"RECUSADO: {exc}")

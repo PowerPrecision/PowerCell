@@ -385,6 +385,16 @@ _definir(
     ],
 )
 
+# Pedidos de alteração de atribuição do Index (Out 2026): a chefia lista os pendentes, mais recentes
+# primeiro; o Index procura o seu pendente de um processo (um por pessoa e processo).
+_definir(
+    "index_assignment_requests",
+    [
+        {"keys": [("estado", 1), ("created_at", -1)], "name": "idx_pedidos_atribuicao_estado"},
+        {"keys": [("process_id", 1), ("requested_by", 1), ("estado", 1)], "name": "idx_pedidos_atribuicao_processo"},
+    ],
+)
+
 # ====================================================================
 # ÍNDICES PARA COLECÇÃO 'processes'
 # ====================================================================

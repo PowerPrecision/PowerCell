@@ -182,6 +182,15 @@ def sanitize_multiline_text(value: Optional[str], max_length: int = 10000) -> st
     return value
 
 
+def sanitize_single_line_text(value: Optional[str], max_length: int = 300) -> str:
+    """Como ``sanitize_multiline_text``, mas numa só linha (ex.: assunto de email).
+
+    Ao contrário de ``sanitize_string``, mantém ``&``, ``<`` e ``>`` literais.
+    """
+    value = " ".join(sanitize_multiline_text(value, max_length=max_length * 4).split())
+    return value[:max_length].rstrip()
+
+
 def plain_text_to_html(value: Optional[str]) -> str:
     """Texto simples → fragmento HTML seguro: escapa e converte ``\\n`` em ``<br/>``."""
     if not value:

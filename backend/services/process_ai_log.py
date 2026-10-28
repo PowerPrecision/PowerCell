@@ -75,6 +75,8 @@ MOTIVOS = {
     "tempo_excedido": "O serviço de IA demorou demasiado a responder.",
     "formato_nao_suportado": "Formato de ficheiro não suportado pela IA.",
     "erro_da_ia": "A IA não conseguiu analisar este documento.",
+    "resposta_incompleta": "A resposta da IA veio cortada (documento demasiado longo). Volte a analisar este documento.",
+    "sem_tipo": "Não foi possível perceber de que tipo é o documento. Use «Analisar como…» para o indicar.",
     "erro_interno": "Falha interna ao analisar o documento.",
     "pdf_limpo_invalido": "O PDF limpo não passou a verificação — o original foi mantido.",
     "armazenamento_indisponivel": "Não foi possível gravar ou ler o PDF limpo no armazenamento — o original foi mantido.",

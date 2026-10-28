@@ -35,7 +35,8 @@ from services import index_jobs
 from services import index_queue_query as consulta_da_fila
 from services import index_status as estado_do_index
 from services import index_store as store
-from services.index_ai import TIPOS_ANALISADOS, tipo_de_analise
+from services.index_ai import TIPOS_ANALISADOS, tipo_do_documento
+from services.index_ficheiros_do_s3 import registos_da_pasta_do_processo
 from services.index_substituicao import ids_substituidos, titulares_e_substituidos
 from services.partner_titulares import titulares_do_caso
 from services.process_owner import calcular_empresa_dona
@@ -58,14 +59,13 @@ PROJECCAO_DOS_FICHEIROS = {
     "_id": 0, "id": 1, "process_id": 1, "filename": 1, "s3_path": 1, "ai_category": 1,
     "ai_subcategory": 1, "ai_subtype": 1, "analysis_fingerprint": 1, "file_state": 1,
     "in_index_queue": 1, "created_at": 1, "clean_pdf_path": 1, "purge_after": 1, "is_clean_pdf": 1,
-    "uploaded_by_index": 1,
+    "uploaded_by_index": 1, "index_type_override": 1, "index_classified_type": 1,
 }
 
 
 def _ficheiro_dto(doc: dict, substituidos: frozenset = frozenset(), titulares: Optional[dict] = None) -> dict[str, Any]:
     # o PDF limpo não se analisa: os factos vivem nos originais (senão contavam-se duas vezes)
-    tipo = None if doc.get("is_clean_pdf") else tipo_de_analise(
-        doc.get("ai_category"), doc.get("ai_subcategory"), doc.get("filename"))
+    tipo = None if doc.get("is_clean_pdf") else tipo_do_documento(doc)
     return {
         "id": doc.get("id"),
         "filename": doc.get("filename"),
@@ -122,7 +122,7 @@ async def _carregar_processo(process_id: str, user: dict) -> dict:
             "id", "process_number", "client_name", "status", "created_at", "updated_at", "index_status",
             "index_skipped", "is_indexed", "skip_index", "assigned_indexacao_id", "indexacao_name", "has_pending_review",
             "index_alerts_open", "indexed_at", "indexed_by_name", "network_id", "index_stagnation_alerted_at",
-            "second_client_id", "second_client_name", "titular2_data.name", "titular2_data.nome")}},
+            "second_client_id", "second_client_name", "titular2_data.name", "titular2_data.nome", "s3_folder")}},
     )
     if not proc:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -277,10 +277,22 @@ async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, An
     docs = await db.document_metadata.find(
         {"process_id": process_id, "file_state": {"$ne": "purgado"}}, PROJECCAO_DOS_FICHEIROS
     ).to_list(500)
+    # a lista é a MESMA da aba Documentos (a pasta S3); os registos do processo fora dela não se perdem
+    da_pasta = await registos_da_pasta_do_processo(proc, PROJECCAO_DOS_FICHEIROS)
+    if da_pasta is not None:
+        ja = {d.get("id") for d in da_pasta}
+        docs = da_pasta + [d for d in docs if d.get("id") not in ja]
     titulares, substituidos = await titulares_e_substituidos(process_id, proc)
     ficheiros = [_ficheiro_dto(d, frozenset(substituidos), titulares) for d in docs]
     metadados = await store.carregar_metadados(process_id)
     alertas = await store.alertas_do_processo(process_id)
+    # a última análise deste ficheiro falhou (alerta aberto): o ecrã di-lo na linha, ao lado de «Analisar»
+    falhados = {
+        r.get("document_id") for a in alertas
+        if a.get("code") == "analise_falhou" and not a.get("dismissed_by_human") for r in (a.get("refs") or [])
+    }
+    for f in ficheiros:
+        f["analysis_failed"] = not f["analysed"] and f["id"] in falhados
     jobs = {}
     for nome, tipo in (("analysis", TaskType.INDEX_ANALYSIS), ("finalize", TaskType.INDEX_FINALIZE),
                        ("sanitize", TaskType.INDEX_SANITIZE)):
@@ -391,6 +403,40 @@ async def run_analyze_process(user: dict, process_id: str, *, force: bool = Fals
         "message": (
             "A análise está a correr em segundo plano; recebe uma notificação no fim."
             if resultado["iniciado"] else "Já há uma análise a correr neste processo."
+        ),
+    }
+
+
+async def run_analyze_document(
+    user: dict, process_id: str, document_id: str, *, tipo: Optional[str] = None
+) -> dict[str, Any]:
+    """«Analisar» na linha de UM ficheiro: lê-o de novo (ignora a impressão digital), mesmo que o tipo não se
+    perceba pelo nome. `tipo` («Analisar como…») é a pessoa a dizer o que o ficheiro é: fica gravado e manda
+    nas análises seguintes."""
+    await _carregar_processo(process_id, user)
+    doc = await db.document_metadata.find_one(
+        {"id": document_id, "process_id": process_id},
+        {"_id": 0, "id": 1, "file_state": 1, "is_clean_pdf": 1, "s3_path": 1},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento não encontrado neste processo.")
+    if doc.get("file_state") == "purgado" or not doc.get("s3_path"):
+        raise HTTPException(status_code=422, detail="O original deste documento já foi eliminado: não há o que ler.")
+    if doc.get("is_clean_pdf"):
+        raise HTTPException(status_code=422, detail="O PDF limpo não se analisa: analise o documento original.")
+    if tipo is not None:
+        await db.document_metadata.update_one({"id": document_id}, {"$set": {"index_type_override": tipo}})
+    resultado = await index_jobs.iniciar_analise(
+        process_id, user, force=True, gatilho="manual", documento_id=document_id
+    )
+    await _trabalhou(user, process_id)
+    return {
+        "success": True,
+        "task_id": resultado["task_id"],
+        "started": resultado["iniciado"],
+        "message": (
+            "O documento está a ser analisado em segundo plano; recebe uma notificação no fim."
+            if resultado["iniciado"] else "Já há uma análise a correr neste processo. Tente quando terminar."
         ),
     }
 

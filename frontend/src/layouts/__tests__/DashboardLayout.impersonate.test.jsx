@@ -33,6 +33,7 @@ let sessao; // quem responde ao /auth/me
 let alvo; // quem o impersonate devolve
 
 vi.mock("../../services/api", () => ({
+  getChatUnreadCount: vi.fn(async () => ({ data: { unread_count: 0 } })),
   default: {
     get: vi.fn(async (url) => (String(url).includes("/auth/me") ? { data: sessao } : { data: {} })),
     post: vi.fn(async (url) => {

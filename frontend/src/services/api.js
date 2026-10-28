@@ -1338,8 +1338,23 @@ export const startIndexWork = (processId) =>
 // «Atribuir a mim» (Out 2026): o indexador assume um processo «Por indexar» que ninguém começou.
 export const assumirIndexProcess = (processId) =>
   api.post(`/index/processes/${processId}/assumir`, null, { skipErrorToast: true });
+// Pedido de alteração de atribuição (Out 2026): o Index PEDE à chefia (motivo opcional); a chefia trata-o
+// pelo «Gerir» do processo e fecha o pedido («concluido» | «recusado»). O Index só vê os seus pedidos.
+export const pedirAlteracaoDeAtribuicao = (processId, motivo) =>
+  api.post(`/index/processes/${processId}/pedido-atribuicao`, { motivo: motivo || null }, { skipErrorToast: true });
+export const getPedidosDeAtribuicao = (params = {}) =>
+  api.get("/index/pedidos-atribuicao", { params, skipErrorToast: true });
+export const resolverPedidoDeAtribuicao = (pedidoId, decisao, nota) =>
+  api.post(`/index/pedidos-atribuicao/${pedidoId}/resolver`, { decisao, nota: nota || null }, { skipErrorToast: true });
 export const analyzeIndexProcess = (processId, force = false) =>
   api.post(`/index/processes/${processId}/analyze`, { force }, { skipErrorToast: true });
+// «Analisar» na linha de UM ficheiro (sempre de novo). `tipo` = «Analisar como…» (a pessoa diz o que o ficheiro é).
+export const analyzeIndexFile = (processId, documentId, tipo = null) =>
+  api.post(
+    `/index/processes/${processId}/files/${encodeURIComponent(documentId)}/analyze`,
+    tipo ? { tipo } : {},
+    { skipErrorToast: true },
+  );
 export const extractIndexProcess = (processId) =>
   api.post(`/index/processes/${processId}/extract`, null, { skipErrorToast: true });
 export const sanitizeIndexProcess = (processId) =>
@@ -1352,6 +1367,15 @@ export const dismissIndexAlert = (processId, alertId) =>
   api.post(`/index/processes/${processId}/alerts/${alertId}/dismiss`, null, { skipErrorToast: true });
 export const markIndexProcessIndexed = (processId, employers = []) =>
   api.post(`/index/processes/${processId}/mark-indexed`, { employers }, { skipErrorToast: true });
+// Conversa do processo entre o Index e quem o carregou (mensagens do chat interno ligadas ao processo)
+export const getIndexConversa = (processId) =>
+  api.get(`/index/processes/${processId}/conversa`, { skipErrorToast: true });
+export const sendIndexConversa = (processId, text) =>
+  api.post(`/index/processes/${processId}/conversa`, { text }, { skipErrorToast: true });
+export const getProcessConversaIndex = (processId) =>
+  api.get(`/processes/${processId}/conversa-index`, { skipErrorToast: true });
+export const sendProcessConversaIndex = (processId, text) =>
+  api.post(`/processes/${processId}/conversa-index`, { text }, { skipErrorToast: true });
 /** Os bytes de um documento que a pesquisa devolveu (recibo, declaração, extrato) — por id, nunca por chave S3. */
 // `download: true` → o servidor responde com `Content-Disposition: attachment` (e deixa rasto de auditoria).
 export const getIndexDocumentContent = (documentId, { download = false } = {}) =>
@@ -2202,4 +2226,32 @@ export const clearAllBackgroundJobs = () =>
   api.post("/ai/bulk/background-jobs/clear-all");
 
 // Export da instância axios configurada (para uso directo se necessário)
+// ── Chat interno ──
+// `skipErrorToast`: o ChatPanel mostra a sua própria mensagem de erro (ou
+// nenhuma, nos pedidos de fundo como a contagem e o «a escrever»).
+const chatSemToast = { skipErrorToast: true };
+export const getChatConversations = () => api.get("/chat/conversations", chatSemToast);
+export const getChatUnreadCount = () => api.get("/chat/unread-count", chatSemToast);
+export const getChatGroups = () => api.get("/chat/groups", chatSemToast);
+export const getChatMessages = (conversationId, isGroup = false) =>
+  api.get(`/chat/messages/${encodeURIComponent(conversationId)}`, {
+    params: { is_group: isGroup },
+    ...chatSemToast,
+  });
+export const getChatUsers = (search) =>
+  api.get("/chat/users", { params: search ? { search } : {}, ...chatSemToast });
+export const sendChatTyping = (data) => api.post("/chat/typing", data, chatSemToast);
+export const sendChatMessage = (data) => api.post("/chat/messages", data, chatSemToast);
+export const uploadChatAttachment = (formData) =>
+  api.post("/chat/messages/upload", formData, chatSemToast);
+export const reactToChatMessage = (messageId, reaction) =>
+  api.post("/chat/messages/react", { message_id: messageId, reaction }, chatSemToast);
+export const editChatMessage = (messageId, content) =>
+  api.put("/chat/messages/edit", { message_id: messageId, content }, chatSemToast);
+export const deleteChatMessage = (messageId) =>
+  api.delete(`/chat/messages/${encodeURIComponent(messageId)}`, chatSemToast);
+export const createChatGroup = (data) => api.post("/chat/groups", data, chatSemToast);
+export const searchChatMessages = (query, limit = 50) =>
+  api.post("/chat/search", { query, limit }, chatSemToast);
+
 export default api;

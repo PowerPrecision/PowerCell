@@ -39,15 +39,16 @@ from services.background_tasks import spawn_background_task
 from services.index_ai import (
     TIPOS_ANALISADOS,
     analisar_documento,
+    classificar_documento,
     impressao_digital,
     impressao_do_conjunto,
     tem_a_impressao_atual,
-    tipo_de_analise,
+    tipo_do_documento,
 )
 from services.index_matrix import avaliar
 from services.index_status import gravar_contadores
 from services.index_substituicao import ids_substituidos
-from services.process_ai_log import classificar_falha, registar_accao_ia
+from services.process_ai_log import MOTIVOS, classificar_falha, registar_accao_ia
 from services.task_log_service import TASK_LOG_COLLECTION, TaskLogService
 
 logger = logging.getLogger(__name__)
@@ -180,28 +181,60 @@ def _mime(filename: str) -> str:
     return mime_de(filename)
 
 
+async def _classificar_sem_tipo(doc: dict, conteudo: bytes, impressao: str) -> Optional[str]:
+    """Um ficheiro sem pistas no nome nem categoria (ex.: «07-Julho.pdf»): a IA lê o CONTEÚDO e diz o tipo.
+
+    UMA vez por conteúdo: o resultado (também «outro») fica em `document_metadata` com a impressão digital,
+    e só volta a ser perguntado se o ficheiro mudar. «Não sei» (IA em baixo, motor simulado) não se guarda.
+    """
+    if doc.get("index_classification_fingerprint") == impressao:
+        tipo = doc.get("index_classified_type")
+        return tipo if tipo in TIPOS_ANALISADOS else None
+    nome = doc.get("filename") or ""
+    classificacao = await classificar_documento(conteudo=conteudo, filename=nome, mime=_mime(nome))
+    if classificacao.tipo is None:
+        return None
+    await db.document_metadata.update_one(
+        {"id": doc["id"]},
+        {"$set": {"index_classified_type": classificacao.tipo, "index_classification_fingerprint": impressao}},
+    )
+    return classificacao.tipo if classificacao.tipo in TIPOS_ANALISADOS else None
+
+
 async def analisar_ficheiros(
-    process: dict, *, force: bool, gatilho: str, user: Optional[dict], progresso=None
+    process: dict, *, force: bool, gatilho: str, user: Optional[dict], progresso=None,
+    documento_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Analisa os ficheiros do processo que o Index lê. Devolve `{analisados, saltados, falhas, falhados, ignorados}`."""
+    """Analisa os ficheiros do processo que o Index lê. Devolve `{analisados, saltados, falhas, falhados, ignorados}`.
+
+    `documento_id` limita a corrida a UM ficheiro («Analisar» na linha do ficheiro): esse é lido mesmo sem
+    tipo conhecido (a IA classifica-o primeiro) e, se não se perceber o tipo, conta como falha com motivo.
+    `motivos` diz porque falhou cada ficheiro (código de `MOTIVOS`), para o alerta o explicar.
+    """
     process_id = process["id"]
     # Só se analisa o que tem BYTES para ler: nem os originais já eliminados (`purgado`) nem o PDF
     # limpo (`is_clean_pdf`, cujos factos vivem nos originais — contá-los duas vezes duplicava tudo).
-    docs = await db.document_metadata.find(
-        {"process_id": process_id, "file_state": {"$ne": "purgado"}, "is_clean_pdf": {"$ne": True}}, {"_id": 0}
-    ).to_list(500)
+    filtro = {"process_id": process_id, "file_state": {"$ne": "purgado"}, "is_clean_pdf": {"$ne": True}}
+    if documento_id:
+        filtro["id"] = documento_id
+    docs = await db.document_metadata.find(filtro, {"_id": 0}).to_list(500)
     # os comprovativos do cliente que o Index já voltou a carregar não contam: não se gasta IA com eles
     substituidos = await ids_substituidos(process_id)
     docs = [d for d in docs if d.get("id") not in substituidos]
 
-    resumo = {"analisados": 0, "saltados": 0, "falhas": 0, "ignorados": 0, "falhados": []}
+    resumo = {"analisados": 0, "saltados": 0, "falhas": 0, "ignorados": 0, "falhados": [], "motivos": {}}
     candidatos = []
     for doc in docs:
-        tipo = tipo_de_analise(doc.get("ai_category"), doc.get("ai_subcategory"), doc.get("filename"))
-        if tipo in TIPOS_ANALISADOS and doc.get("s3_path"):
-            candidatos.append((doc, tipo))
-        else:
+        if not doc.get("s3_path"):
             resumo["ignorados"] += 1
+            continue
+        # sem tipo conhecido também entra: o conteúdo decide (uma vez por ficheiro), já com os bytes na mão
+        candidatos.append((doc, tipo_do_documento(doc)))
+
+    def falhou(doc: dict, motivo: str) -> None:
+        resumo["falhas"] += 1
+        resumo["falhados"].append(doc.get("id"))
+        resumo["motivos"][doc.get("id")] = motivo
 
     for n, (doc, tipo) in enumerate(candidatos, start=1):
         if progresso:
@@ -209,38 +242,100 @@ async def analisar_ficheiros(
         nome = doc.get("filename")
         base = dict(process_id=process_id, accao="analisar", gatilho=gatilho, user=user,
                     ficheiro=nome, s3_path=doc.get("s3_path"), documento_id=doc.get("id"))
+        # Uma falha de UM ficheiro (um valor que o normalizador não esperava, S3 a meio…) não pára os
+        # outros: antes, uma excepção aqui matava o job e TODOS ficavam «Por analisar» sem alerta nenhum.
+        try:
+            conteudo, motivo = await _ler_ficheiro(doc["s3_path"])
+            if conteudo is None and tipo is None and not documento_id:
+                # um ficheiro que o Index talvez nem leia (uma certidão): não se lê, não é falha de ninguém
+                resumo["ignorados"] += 1
+                continue
+            if conteudo is None:
+                if motivo == "ilegivel":
+                    falhou(doc, motivo)
+                else:
+                    resumo["saltados"] += 1
+                await registar_accao_ia(estado="falha" if motivo == "ilegivel" else "saltado", motivo=motivo, **base)
+                continue
 
-        conteudo, motivo = await _ler_ficheiro(doc["s3_path"])
-        if conteudo is None:
-            resumo["falhas" if motivo == "ilegivel" else "saltados"] += 1
-            if motivo == "ilegivel":
-                resumo["falhados"].append(doc.get("id"))
-            await registar_accao_ia(estado="falha" if motivo == "ilegivel" else "saltado", motivo=motivo, **base)
-            continue
+            impressao = impressao_digital(conteudo)
+            if tipo is None:
+                tipo = await _classificar_sem_tipo(doc, conteudo, impressao)
+                if tipo is None:
+                    if documento_id:
+                        # pediram ESTE ficheiro: diz-se porque não foi lido (e como resolver)
+                        falhou(doc, "sem_tipo")
+                        await registar_accao_ia(estado="falha", motivo="sem_tipo", **base)
+                    else:
+                        resumo["ignorados"] += 1
+                    continue
 
-        impressao = impressao_digital(conteudo)
-        if not force and tem_a_impressao_atual(doc.get("analysis_fingerprint")) and doc["analysis_fingerprint"] == impressao:
-            resumo["saltados"] += 1
-            await registar_accao_ia(estado="saltado", motivo="ja_analisado", **base)
-            continue
+            if not force and tem_a_impressao_atual(doc.get("analysis_fingerprint")) and doc["analysis_fingerprint"] == impressao:
+                resumo["saltados"] += 1
+                await registar_accao_ia(estado="saltado", motivo="ja_analisado", **base)
+                continue
 
-        resultado = await analisar_documento(
-            tipo=tipo, conteudo=conteudo, filename=nome or "", mime=_mime(nome or ""), document_id=doc.get("id"),
-        )
-        if not resultado.ok:
-            resumo["falhas"] += 1
-            resumo["falhados"].append(doc.get("id"))
-            await registar_accao_ia(estado="falha", motivo=resultado.motivo or classificar_falha(None), **base)
-            continue
+            resultado = await analisar_documento(
+                tipo=tipo, conteudo=conteudo, filename=nome or "", mime=_mime(nome or ""), document_id=doc.get("id"),
+            )
+            if not resultado.ok:
+                motivo = resultado.motivo or classificar_falha(None)
+                falhou(doc, motivo)
+                await registar_accao_ia(estado="falha", motivo=motivo, **base)
+                continue
 
-        await store.registar_ficheiro(doc["id"], resultado, impressao)
-        resumo["analisados"] += 1
-        await registar_accao_ia(
-            estado="sucesso", categoria=store.CATEGORIA_DO_TIPO[tipo],
-            campos=list(resultado.factos.keys()), origem=resultado.origem,
-            motivo="sem_contexto" if resultado.sem_contexto else None, **base,
-        )
+            await store.registar_ficheiro(doc["id"], resultado, impressao)
+            resumo["analisados"] += 1
+            await registar_accao_ia(
+                estado="sucesso", categoria=store.CATEGORIA_DO_TIPO[tipo],
+                campos=list(resultado.factos.keys()), origem=resultado.origem,
+                motivo="sem_contexto" if resultado.sem_contexto else None, **base,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("[INDEX] Ficheiro %s do processo %s não analisado", doc.get("id"), process_id)
+            falhou(doc, "erro_interno")
+            await registar_accao_ia(estado="falha", motivo="erro_interno", **base)
     return resumo
+
+
+def _detalhe_da_falha(motivo: Optional[str]) -> Optional[str]:
+    return MOTIVOS.get(motivo or "") or None
+
+
+async def _alertas_de_falha(process_id: str, resumo: dict) -> list[dict]:
+    """Um alerta `analise_falhou` POR ficheiro, com o motivo em texto (o Index sabe o que fazer a seguir).
+
+    A matriz substitui os alertas a cada corrida. Numa corrida de UM ficheiro, as falhas dos OUTROS
+    (que esta corrida não voltou a tentar) mantêm-se enquanto continuarem por analisar.
+    """
+    motivos = resumo.get("motivos") or {}
+    achados = [
+        {"code": "analise_falhou", "refs": [{"document_id": d, "page": None}], "periodo": None,
+         "detalhe": _detalhe_da_falha(motivos.get(d))}
+        for d in resumo.get("falhados") or []
+    ]
+    so_um = resumo.get("documento_id")
+    if not so_um:
+        return achados
+    antigos = [a for a in await store.alertas_do_processo(process_id) if a.get("code") == "analise_falhou"]
+    outros = {
+        r.get("document_id"): a.get("detail")
+        for a in antigos for r in (a.get("refs") or [])
+        if r.get("document_id") and r.get("document_id") != so_um
+    }
+    if not outros:
+        return achados
+    ainda_por_analisar = {
+        d["id"] for d in await db.document_metadata.find(
+            {"process_id": process_id, "id": {"$in": list(outros)}}, {"_id": 0, "id": 1, "analysis_fingerprint": 1}
+        ).to_list(200)
+        if not tem_a_impressao_atual(d.get("analysis_fingerprint"))
+    }
+    for d, detalhe in outros.items():
+        if d in ainda_por_analisar:
+            achados.append({"code": "analise_falhou", "refs": [{"document_id": d, "page": None}], "periodo": None,
+                            "detalhe": detalhe})
+    return achados
 
 
 async def concluir_resultados(process: dict, resumo: dict) -> dict[str, Any]:
@@ -260,9 +355,7 @@ async def concluir_resultados(process: dict, resumo: dict) -> dict[str, Any]:
     await store.reconstruir_documentos_do_index(process_id, rede)  # a pesquisa por documento (nunca levanta)
     conhecidas = await store.entidades_conhecidas(f.get("employer_name") for f in factos)
     achados = avaliar(factos, entidades=conhecidas)
-    if resumo.get("falhados"):
-        achados.append({"code": "analise_falhou", "refs": [{"document_id": d, "page": None} for d in resumo["falhados"]],
-                        "periodo": None})
+    achados.extend(await _alertas_de_falha(process_id, resumo))
     run_id = str(uuid.uuid4())
     alertas = await store.substituir_alertas(process_id, rede, run_id, achados)
 
@@ -274,20 +367,25 @@ async def concluir_resultados(process: dict, resumo: dict) -> dict[str, Any]:
 
 
 async def analisar_e_concluir(
-    process: dict, *, force: bool, gatilho: str, user: Optional[dict], progresso=None
+    process: dict, *, force: bool, gatilho: str, user: Optional[dict], progresso=None,
+    documento_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Analisa os ficheiros e recalcula metadados/matriz. Devolve o resumo PÚBLICO (sem ids de falhados).
 
     Partilhada pela análise manual e pelo fecho da indexação (`index_finalize`): são dois
     jobs diferentes sobre o mesmo trabalho, e duas cópias do corpo divergiriam.
     """
-    resumo = await analisar_ficheiros(process, force=force, gatilho=gatilho, user=user, progresso=progresso)
+    resumo = await analisar_ficheiros(
+        process, force=force, gatilho=gatilho, user=user, progresso=progresso, documento_id=documento_id
+    )
+    resumo["documento_id"] = documento_id
     resumo.update(await concluir_resultados(process, resumo))
-    return {k: v for k, v in resumo.items() if k != "falhados"}
+    return {k: v for k, v in resumo.items() if k not in ("falhados", "motivos", "documento_id")}
 
 
 async def correr_analise(
-    task_id: str, process_id: str, user: Optional[dict], *, force: bool, gatilho: str
+    task_id: str, process_id: str, user: Optional[dict], *, force: bool, gatilho: str,
+    documento_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """O trabalho do job. Termina SEMPRE o TaskLog e liberta a chave; nunca levanta."""
     try:
@@ -301,7 +399,9 @@ async def correr_analise(
         async def progresso(pct: int, msg: str) -> None:
             await TaskLogService.update_task(task_id, progress=max(1, min(95, pct)), progress_message=msg)
 
-        publico = await analisar_e_concluir(process, force=force, gatilho=gatilho, user=user, progresso=progresso)
+        publico = await analisar_e_concluir(
+            process, force=force, gatilho=gatilho, user=user, progresso=progresso, documento_id=documento_id
+        )
         await TaskLogService.update_task(task_id, status=TaskStatus.COMPLETED, progress=100,
                                          progress_message="Análise concluída.", result_data=publico)
         await notificar_fim(process, (user or {}).get("id"), publico)
@@ -319,17 +419,22 @@ async def correr_analise(
 
 
 async def iniciar_analise(
-    process_id: str, user: Optional[dict], *, force: bool = False, gatilho: str = "manual"
+    process_id: str, user: Optional[dict], *, force: bool = False, gatilho: str = "manual",
+    documento_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Cria o job e DEVOLVE JÁ. `{"task_id", "iniciado"}`; `iniciado=False` se já havia um a correr."""
+    """Cria o job e DEVOLVE JÁ. `{"task_id", "iniciado"}`; `iniciado=False` se já havia um a correr.
+
+    Com `documento_id` analisa só esse ficheiro (o mesmo job: um activo por processo, mesmo assim)."""
+    metadata = {"force": bool(force), "gatilho": gatilho}
+    if documento_id:
+        metadata["documento_id"] = documento_id
     task_id, existente = await reivindicar_job(
-        process_id, TaskType.INDEX_ANALYSIS, (user or {}).get("id") or "system",
-        metadata={"force": bool(force), "gatilho": gatilho},
+        process_id, TaskType.INDEX_ANALYSIS, (user or {}).get("id") or "system", metadata=metadata,
     )
     if task_id is None:
         return {"task_id": existente, "iniciado": False}
     spawn_background_task(
-        correr_analise(task_id, process_id, user, force=force, gatilho=gatilho),
+        correr_analise(task_id, process_id, user, force=force, gatilho=gatilho, documento_id=documento_id),
         name=f"index-analise-{process_id}",
     )
     return {"task_id": task_id, "iniciado": True}

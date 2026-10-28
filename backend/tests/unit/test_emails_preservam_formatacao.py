@@ -121,3 +121,79 @@ def test_notas_do_link_temporario_sao_escapadas_e_mantem_quebras():
         src = fh.read()
     assert "<strong>Notas:</strong> {description}" not in src
     assert "plain_text_to_html(description)" in src
+
+
+# ====================================================================
+# Assunto: «&», «<» e «>» deixam de desaparecer
+# ====================================================================
+
+class TestSanitizeSingleLineText:
+    def test_mantem_caracteres_literais_e_junta_numa_linha(self):
+        from utils.input_sanitization import sanitize_single_line_text
+
+        assert sanitize_single_line_text(
+            "Proposta  Silva & Filhos\n<b>taxa</b> < 3%", max_length=300
+        ) == "Proposta Silva & Filhos taxa < 3%"
+
+    def test_trunca(self):
+        from utils.input_sanitization import sanitize_single_line_text
+
+        assert sanitize_single_line_text("abc def", max_length=3) == "abc"
+
+
+async def test_webmail_envio_mantem_o_e_comercial_no_assunto(fake_async_db):
+    from models.email import EmailSendRequest
+    from services import email_process_crud as crud
+    from services import email_send_queue as q
+
+    payload = EmailSendRequest(to_emails=["destino@x.pt"], subject="Silva & Filhos", body="x")
+    request = MagicMock()
+    request.headers = {}
+
+    with patch.object(q, "db", fake_async_db), \
+         patch.object(q, "schedule_pending_email_send", AsyncMock()), \
+         patch.object(q, "send_email", AsyncMock(return_value={"success": True})), \
+         patch("services.email_config_resolver.resolve_email_config_for_sync",
+               AsyncMock(return_value={"email_address": "geral@x.pt"})), \
+         patch("services.auth.get_active_company_id_async", AsyncMock(return_value=None)):
+        response = await crud.run_send_email(
+            payload, request, {"id": "u1", "email": "u1@x.pt", "role": "consultor"},
+            account="personal",
+        )
+
+    stored = await fake_async_db.pending_email_sends.find_one({"id": response["send_id"]})
+    assert stored["subject"] == "Silva & Filhos"
+
+
+def test_nenhum_assunto_de_email_passa_por_sanitize_string():
+    padrao = re.compile(r"sanitize_string\([^)]*subject")
+    culpados = []
+    for rel in ("services/email_process_crud.py", "services/email_templates_drafts.py"):
+        with open(os.path.join(BACKEND, rel), encoding="utf-8") as fh:
+            for n, linha in enumerate(fh, 1):
+                if padrao.search(linha):
+                    culpados.append(f"{rel}:{n}")
+    assert culpados == []
+
+
+# ====================================================================
+# Chat interno: as mensagens mantêm as quebras de linha
+# ====================================================================
+
+async def test_chat_mensagem_mantem_quebras_de_linha(fake_async_db):
+    from models.chat import ChatMessageCreate
+    from services import chat_messages as mod
+
+    await fake_async_db.users.insert_one({"id": "u2", "name": "B", "is_active": True})
+    msg = ChatMessageCreate(receiver_id="u2", content="linha 1\n\nlinha 2 & fim")
+    with patch.object(mod, "db", fake_async_db):
+        await mod.run_send_message(msg, {"id": "u1", "name": "A", "role": "consultor"})
+
+    stored = await fake_async_db.chat_messages.find_one({"sender_id": "u1"})
+    assert stored["content"] == "linha 1\n\nlinha 2 & fim"
+
+
+def test_chat_nao_usa_sanitize_string_no_conteudo():
+    with open(os.path.join(BACKEND, "services/chat_messages.py"), encoding="utf-8") as fh:
+        src = fh.read()
+    assert not re.search(r"sanitize_string\([^)]*content", src)

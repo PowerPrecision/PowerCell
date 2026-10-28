@@ -17,7 +17,7 @@ from models.chat import (
     ChatMessageCreate, ChatMessageReaction, ChatMessageEdit, ChatSearchQuery
 )
 from services.realtime_delivery import entregar_a_utilizador
-from utils.input_sanitization import sanitize_string
+from utils.input_sanitization import sanitize_multiline_text
 from services.chat_helpers import (
     _block_parceiro, MAX_ATTACHMENT_SIZE, ALLOWED_ATTACHMENT_TYPES
 )
@@ -123,7 +123,7 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
     user_id = user["id"]
 
     # Sanitizar conteúdo da mensagem antes de guardar
-    sanitized_content = sanitize_string(message.content, max_length=5000) if message.content else message.content
+    sanitized_content = sanitize_multiline_text(message.content, max_length=5000) if message.content else message.content
 
     if message.group_id:
         # Mensagem para grupo
@@ -190,6 +190,12 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
             "read": False,
             "created_at": datetime.now(timezone.utc).isoformat()
         }
+        # a resposta à conversa Index ↔ quem carregou volta ao processo (ver `index_conversa`)
+        if not message.process_id:
+            from services.index_conversa import herdar_canal_do_processo
+
+            msg_doc.update(await herdar_canal_do_processo(
+                user_id, message.receiver_id, message.reply_to, mensagens=db.chat_messages))
 
         await db.chat_messages.insert_one(msg_doc)
 
@@ -203,7 +209,8 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
                 "sender_name": user.get("name", ""),
                 "receiver_id": message.receiver_id,
                 "content": message.content[:100],
-                "process_id": message.process_id,
+                "process_id": msg_doc.get("process_id"),
+                "canal": msg_doc.get("canal"),
                 "created_at": msg_doc["created_at"]
             },
         )
@@ -248,7 +255,7 @@ async def run_upload_message_with_attachment(
     }
 
     # Sanitizar conteúdo da mensagem antes de guardar
-    sanitized_content = sanitize_string(content, max_length=5000) if content else content
+    sanitized_content = sanitize_multiline_text(content, max_length=5000) if content else content
 
     if group_id:
         group = await db.chat_groups.find_one(
@@ -413,7 +420,7 @@ async def run_edit_message(edit_data: ChatMessageEdit, user: dict):
         raise HTTPException(status_code=403, detail="Só pode editar as suas próprias mensagens")
 
     # Sanitizar conteúdo editado antes de guardar
-    sanitized_edit_content = sanitize_string(edit_data.content, max_length=5000) if edit_data.content else edit_data.content
+    sanitized_edit_content = sanitize_multiline_text(edit_data.content, max_length=5000) if edit_data.content else edit_data.content
 
     await db.chat_messages.update_one(
         {"id": edit_data.message_id},

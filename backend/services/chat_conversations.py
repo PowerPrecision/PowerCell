@@ -26,7 +26,10 @@ async def run_get_conversations(user: dict):
                     {"sender_id": user_id},
                     {"receiver_id": user_id}
                 ],
-                "group_id": None
+                "group_id": None,
+                # o parceiro não é um utilizador: a conversa com ele vive na bancada do Index
+                "sender_tipo": {"$ne": "parceiro"},
+                "receiver_tipo": {"$ne": "parceiro"},
             }
         },
         {"$sort": {"created_at": -1}},

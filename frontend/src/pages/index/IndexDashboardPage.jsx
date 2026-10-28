@@ -22,6 +22,7 @@ import { PageHeader } from "../../components/shared/PageHeader";
 import Paginacao from "../../components/shared/Paginacao";
 import { FiltrosDaFila } from "../../components/index/FiltrosDaFila";
 import { IndexQueueTable } from "../../components/index/IndexQueueTable";
+import { PedidosDeAtribuicaoCard } from "../../components/index/PedidosDeAtribuicaoCard";
 import { CODEC_NUMERO, useEstadoNaUrl, useTextoNaUrl } from "../../hooks/useEstadoNaUrl";
 import { useIndexQueueQuery } from "../../hooks/queries/useIndexQueries";
 import {
@@ -112,6 +113,9 @@ export default function IndexDashboardPage() {
             </Button>
           }
         />
+
+        {/* Pedidos de alteração de atribuição do Index: só aparece quando há pendentes */}
+        <PedidosDeAtribuicaoCard />
 
         <Tabs value={separador} onValueChange={mudarSeparador}>
           <TabsList>

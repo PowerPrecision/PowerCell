@@ -59,6 +59,8 @@ SEM_HISTORICO = {
     ("index_module.py", "start_work"): "abrir a bancada passa o processo a «em tratamento» e carimba a actividade do indexador atribuído; é estado interno da fila do Index e o perfil Indexação não deixa rasto",
     ("index_module.py", "analyze_process"): "job de IA que escreve só nos metadados do Index (e no Log da IA); a ficha não muda",
     ("index_module.py", "sanitize_process"): "gera o PDF limpo ao lado do original (aditivo, deixa rasto no Log da IA); o perfil Indexação não deixa rasto no histórico",
+    ("index_module.py", "post_conversa"): "mensagem do chat interno ligada ao processo (conversa Index ↔ quem carregou); a ficha não muda e o perfil Indexação não deixa rasto",
+    ("processes.py", "post_conversa_index"): "resposta ao Index pelo chat interno ligada ao processo; a ficha não muda (a conversa vive em `chat_messages`)",
     ("index_module.py", "extract_process"): "idem `analyze_process`: extracção para os metadados do Index, nunca para a ficha",
 }
 
