@@ -20,6 +20,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 
 from database import db
+from utils.input_sanitization import plain_text_to_html
 from models.temp_link import (
     TempLinkType, TempLinkStatus, 
     TempLinkCreate, TempLinkResponse
@@ -452,7 +453,7 @@ Cumprimentos,
                             </a>
                         </div>
                         
-                        {f'<p style="font-size: 14px; color: #64748b;"><strong>Notas:</strong> {description}</p>' if description else ''}
+                        {f'<p style="font-size: 14px; color: #64748b;"><strong>Notas:</strong> {plain_text_to_html(description)}</p>' if description else ''}
                         
                         <div style="background: #fef3c7; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b; margin-top: 20px;">
                             <p style="font-size: 14px; color: #92400e; margin: 0;">
@@ -501,7 +502,7 @@ Cumprimentos,
                             </a>
                         </div>
                         
-                        {f'<p style="font-size: 14px; color: #64748b;"><strong>Notas:</strong> {description}</p>' if description else ''}
+                        {f'<p style="font-size: 14px; color: #64748b;"><strong>Notas:</strong> {plain_text_to_html(description)}</p>' if description else ''}
                         
                         <p style="font-size: 14px; color: #64748b; margin-top: 30px;">
                             Cumprimentos,<br>

@@ -32,6 +32,7 @@ from services.email_service import (
     _get_email_account_for_email,
 )
 from utils.input_sanitization import (
+    sanitize_multiline_text,
     sanitize_string, sanitize_name, sanitize_email, sanitize_html, sanitize_url,
     log_sanitization_rejection,
 )
@@ -824,7 +825,7 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
     if payload.bcc_emails:
         bcc_emails = [e for e in (sanitize_email(e) for e in payload.bcc_emails) if e]
     subject = sanitize_string(payload.subject, max_length=300)
-    body = sanitize_string(payload.body, max_length=10000)
+    body = sanitize_multiline_text(payload.body, max_length=10000)
     # PACOTE AK: Sanitização e proteção do HTML — inline styles para imagens
     # evitam desformatação em clientes de email clássicos (Gmail/Outlook)
     body_html = payload.body_html
@@ -928,7 +929,7 @@ async def run_create_email_record(email_data: EmailCreate, current_user: dict):
     cc_emails = [e for e in (sanitize_email(e) for e in (email_data.cc_emails or [])) if e]
     bcc_emails = [e for e in (sanitize_email(e) for e in (email_data.bcc_emails or [])) if e]
     subject = sanitize_string(email_data.subject, max_length=300)
-    body = sanitize_string(email_data.body, max_length=10000)
+    body = sanitize_multiline_text(email_data.body, max_length=10000)
     notes = sanitize_string(email_data.notes, max_length=1000) if email_data.notes else None
 
     email = {
@@ -1031,7 +1032,7 @@ async def run_update_email(email_id: str, email_data: EmailUpdate, current_user:
     if email_data.subject is not None:
         update_data["subject"] = sanitize_string(email_data.subject, max_length=300)
     if email_data.body is not None:
-        update_data["body"] = sanitize_string(email_data.body, max_length=10000)
+        update_data["body"] = sanitize_multiline_text(email_data.body, max_length=10000)
     if email_data.notes is not None:
         update_data["notes"] = sanitize_string(email_data.notes, max_length=1000)
     if email_data.status is not None:
