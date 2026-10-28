@@ -2202,4 +2202,32 @@ export const clearAllBackgroundJobs = () =>
   api.post("/ai/bulk/background-jobs/clear-all");
 
 // Export da instância axios configurada (para uso directo se necessário)
+// ── Chat interno ──
+// `skipErrorToast`: o ChatPanel mostra a sua própria mensagem de erro (ou
+// nenhuma, nos pedidos de fundo como a contagem e o «a escrever»).
+const chatSemToast = { skipErrorToast: true };
+export const getChatConversations = () => api.get("/chat/conversations", chatSemToast);
+export const getChatUnreadCount = () => api.get("/chat/unread-count", chatSemToast);
+export const getChatGroups = () => api.get("/chat/groups", chatSemToast);
+export const getChatMessages = (conversationId, isGroup = false) =>
+  api.get(`/chat/messages/${encodeURIComponent(conversationId)}`, {
+    params: { is_group: isGroup },
+    ...chatSemToast,
+  });
+export const getChatUsers = (search) =>
+  api.get("/chat/users", { params: search ? { search } : {}, ...chatSemToast });
+export const sendChatTyping = (data) => api.post("/chat/typing", data, chatSemToast);
+export const sendChatMessage = (data) => api.post("/chat/messages", data, chatSemToast);
+export const uploadChatAttachment = (formData) =>
+  api.post("/chat/messages/upload", formData, chatSemToast);
+export const reactToChatMessage = (messageId, reaction) =>
+  api.post("/chat/messages/react", { message_id: messageId, reaction }, chatSemToast);
+export const editChatMessage = (messageId, content) =>
+  api.put("/chat/messages/edit", { message_id: messageId, content }, chatSemToast);
+export const deleteChatMessage = (messageId) =>
+  api.delete(`/chat/messages/${encodeURIComponent(messageId)}`, chatSemToast);
+export const createChatGroup = (data) => api.post("/chat/groups", data, chatSemToast);
+export const searchChatMessages = (query, limit = 50) =>
+  api.post("/chat/search", { query, limit }, chatSemToast);
+
 export default api;

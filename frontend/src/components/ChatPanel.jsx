@@ -63,8 +63,23 @@ import { format, isToday, isYesterday } from "date-fns";
 import { pt } from "date-fns/locale";
 import { hasRole } from "../utils/roleUtils";
 import { safeParseISO } from "../lib/utils";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
+import {
+  getChatConversations,
+  getChatUnreadCount,
+  getChatGroups,
+  getChatMessages,
+  getChatUsers,
+  sendChatTyping,
+  sendChatMessage,
+  uploadChatAttachment,
+  reactToChatMessage,
+  editChatMessage,
+  deleteChatMessage,
+  createChatGroup,
+  searchChatMessages,
+} from "../services/api";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Emojis comuns para reações rápidas
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "✅", "👎"];
@@ -73,7 +88,7 @@ const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "✅"
 const isParceiro = (user) => hasRole(user, "parceiro");
 
 const ChatPanel = ({ open, onOpenChange }) => {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -106,116 +121,82 @@ const ChatPanel = ({ open, onOpenChange }) => {
   // Carregar conversas
   const fetchConversations = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/chat/conversations`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setConversations(data.conversations || []);
-      }
+      const { data } = await getChatConversations();
+      setConversations(data.conversations || []);
     } catch {
-      // Error handled silently in production
+      // pedido de fundo: sem aviso
     }
-  }, [token]);
+  }, []);
 
   // Carregar contagem de não lidas
   const fetchUnreadCount = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/chat/unread-count`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const { data } = await getChatUnreadCount();
+      setUnreadCount({
+        total: data.unread_count || 0,
+        direct: data.direct_unread || 0,
+        group: data.group_unread || 0,
       });
-      if (response.ok) {
-        const data = await response.json();
-        setUnreadCount({
-          total: data.unread_count || 0,
-          direct: data.direct_unread || 0,
-          group: data.group_unread || 0,
-        });
-      }
     } catch {
-      // Error handled silently in production
+      // pedido de fundo: sem aviso
     }
-  }, [token]);
+  }, []);
 
   // Carregar grupos
   const fetchGroups = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/chat/groups`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setGroups(data.groups || []);
-      }
+      const { data } = await getChatGroups();
+      setGroups(data.groups || []);
     } catch {
-      // Error handled silently in production
+      // pedido de fundo: sem aviso
     }
-  }, [token]);
+  }, []);
 
   // Carregar mensagens de uma conversa
   const fetchMessages = useCallback(async (conversationId, isGroup = false) => {
     setLoading(true);
     try {
-      const response = await fetch(
-        `${API_URL}/api/chat/messages/${conversationId}?is_group=${isGroup}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setMessages(data.messages || []);
-        setSelectedConversation({
-          id: conversationId,
-          isGroup,
-          name: isGroup ? data.group?.name : data.other_user?.name,
-          group: data.group,
-          otherUser: data.other_user,
-        });
-        fetchConversations();
-        fetchUnreadCount();
-      }
-    } catch {
-      // Error handled silently in production
+      const { data } = await getChatMessages(conversationId, isGroup);
+      setMessages(data.messages || []);
+      setSelectedConversation({
+        id: conversationId,
+        isGroup,
+        name: isGroup ? data.group?.name : data.other_user?.name,
+        group: data.group,
+        otherUser: data.other_user,
+      });
+      fetchConversations();
+      fetchUnreadCount();
+    } catch (error) {
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao abrir a conversa"));
     } finally {
       setLoading(false);
     }
-  }, [token, fetchConversations, fetchUnreadCount]);
+  }, [fetchConversations, fetchUnreadCount]);
 
   // Carregar utilizadores para nova conversa/grupo
   const fetchUsers = useCallback(async () => {
     try {
-      const response = await fetch(
-        `${API_URL}/api/chat/users${searchQuery ? `?search=${encodeURIComponent(searchQuery)}` : ""}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setAllUsers(data.users || []);
-      }
+      const { data } = await getChatUsers(searchQuery);
+      setAllUsers(data.users || []);
     } catch {
-      // Error handled silently in production
+      // pedido de fundo: sem aviso
     }
-  }, [token, searchQuery]);
+  }, [searchQuery]);
 
   // Enviar indicador de digitação
   const sendTypingIndicator = useCallback(async (isTyping) => {
     if (!selectedConversation) return;
     try {
-      await fetch(`${API_URL}/api/chat/typing`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          receiver_id: selectedConversation.isGroup ? null : selectedConversation.id,
-          group_id: selectedConversation.isGroup ? selectedConversation.id : null,
-          is_typing: isTyping,
-        }),
+      await sendChatTyping({
+        receiver_id: selectedConversation.isGroup ? null : selectedConversation.id,
+        group_id: selectedConversation.isGroup ? selectedConversation.id : null,
+        is_typing: isTyping,
       });
     } catch {
-      // Error handled silently in production
+      // pedido de fundo: sem aviso
     }
-  }, [token, selectedConversation]);
+  }, [selectedConversation]);
 
   // Handler de digitação
   const handleTyping = useCallback(() => {
@@ -231,36 +212,23 @@ const ChatPanel = ({ open, onOpenChange }) => {
   // Enviar mensagem
   const handleSendMessage = async (e) => {
     e?.preventDefault();
-    if (!newMessage.trim() || !selectedConversation) return;
+    if (!newMessage.trim() || !selectedConversation || sendingMessage) return;
 
     setSendingMessage(true);
     try {
-      const response = await fetch(`${API_URL}/api/chat/messages`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          receiver_id: selectedConversation.isGroup ? null : selectedConversation.id,
-          group_id: selectedConversation.isGroup ? selectedConversation.id : null,
-          content: newMessage.trim(),
-          reply_to: replyTo?.id,
-        }),
+      const { data } = await sendChatMessage({
+        receiver_id: selectedConversation.isGroup ? null : selectedConversation.id,
+        group_id: selectedConversation.isGroup ? selectedConversation.id : null,
+        content: newMessage.trim(),
+        reply_to: replyTo?.id,
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setMessages((prev) => [...prev, data.message]);
-        setNewMessage("");
-        setReplyTo(null);
-        fetchConversations();
-        sendTypingIndicator(false);
-      } else {
-        toast.error("Erro ao enviar mensagem");
-      }
-    } catch {
-      toast.error("Erro ao enviar mensagem");
+      setMessages((prev) => [...prev, data.message]);
+      setNewMessage("");
+      setReplyTo(null);
+      fetchConversations();
+      sendTypingIndicator(false);
+    } catch (error) {
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao enviar mensagem"));
     } finally {
       setSendingMessage(false);
     }
@@ -287,22 +255,12 @@ const ChatPanel = ({ open, onOpenChange }) => {
         formData.append("receiver_id", selectedConversation.id);
       }
 
-      const response = await fetch(`${API_URL}/api/chat/messages/upload`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setMessages((prev) => [...prev, data.message]);
-        fetchConversations();
-        toast.success("Ficheiro enviado com sucesso");
-      } else {
-        toast.error("Erro ao enviar ficheiro");
-      }
-    } catch {
-      toast.error("Erro ao enviar ficheiro");
+      const { data } = await uploadChatAttachment(formData);
+      setMessages((prev) => [...prev, data.message]);
+      fetchConversations();
+      toast.success("Ficheiro enviado com sucesso");
+    } catch (error) {
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao enviar ficheiro"));
     } finally {
       setUploadingFile(false);
       if (fileInputRef.current) {
@@ -314,54 +272,35 @@ const ChatPanel = ({ open, onOpenChange }) => {
   // Adicionar reação
   const handleReaction = async (messageId, reaction) => {
     try {
-      const response = await fetch(`${API_URL}/api/chat/messages/react`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message_id: messageId, reaction }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === messageId ? { ...msg, reactions: data.reactions } : msg
-          )
-        );
-      }
+      const { data } = await reactToChatMessage(messageId, reaction);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId ? { ...msg, reactions: data.reactions } : msg
+        )
+      );
     } catch {
-      // Error handled silently in production
+      // reacção falhada: sem aviso
     }
     setShowReactionsFor(null);
   };
 
   // Editar mensagem
   const handleEditMessage = async (messageId, newContent) => {
+    const conteudo = (newContent || "").trim();
+    if (!conteudo) return;
     try {
-      const response = await fetch(`${API_URL}/api/chat/messages/edit`, {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message_id: messageId, content: newContent }),
-      });
-
-      if (response.ok) {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === messageId
-              ? { ...msg, content: newContent, edited: true }
-              : msg
-          )
-        );
-        setEditingMessage(null);
-        toast.success("Mensagem editada");
-      }
-    } catch {
-      toast.error("Erro ao editar mensagem");
+      await editChatMessage(messageId, conteudo);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? { ...msg, content: conteudo, edited: true }
+            : msg
+        )
+      );
+      setEditingMessage(null);
+      toast.success("Mensagem editada");
+    } catch (error) {
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao editar mensagem"));
     }
   };
 
@@ -370,17 +309,11 @@ const ChatPanel = ({ open, onOpenChange }) => {
     if (!window.confirm("Tem a certeza que deseja apagar esta mensagem?")) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/chat/messages/${messageId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
-        toast.success("Mensagem apagada");
-      }
-    } catch {
-      toast.error("Erro ao apagar mensagem");
+      await deleteChatMessage(messageId);
+      setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
+      toast.success("Mensagem apagada");
+    } catch (error) {
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao apagar mensagem"));
     }
   };
 
@@ -392,33 +325,22 @@ const ChatPanel = ({ open, onOpenChange }) => {
     }
 
     try {
-      const response = await fetch(`${API_URL}/api/chat/groups`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: newGroupName,
-          description: newGroupDescription,
-          members: selectedMembers,
-        }),
+      const { data } = await createChatGroup({
+        name: newGroupName,
+        description: newGroupDescription,
+        members: selectedMembers,
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        toast.success("Grupo criado com sucesso");
-        setShowNewGroup(false);
-        setNewGroupName("");
-        setNewGroupDescription("");
-        setSelectedMembers([]);
-        fetchGroups();
-        fetchConversations();
-        // Abrir o novo grupo
-        fetchMessages(data.group.id, true);
-      }
-    } catch {
-      toast.error("Erro ao criar grupo");
+      toast.success("Grupo criado com sucesso");
+      setShowNewGroup(false);
+      setNewGroupName("");
+      setNewGroupDescription("");
+      setSelectedMembers([]);
+      fetchGroups();
+      fetchConversations();
+      // Abrir o novo grupo
+      fetchMessages(data.group.id, true);
+    } catch (error) {
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao criar grupo"));
     }
   };
 
@@ -428,21 +350,10 @@ const ChatPanel = ({ open, onOpenChange }) => {
 
     setSearching(true);
     try {
-      const response = await fetch(`${API_URL}/api/chat/search`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ query: searchQuery, limit: 50 }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setSearchResults(data.results || []);
-      }
-    } catch {
-      toast.error("Erro ao pesquisar mensagens");
+      const { data } = await searchChatMessages(searchQuery, 50);
+      setSearchResults(data.results || []);
+    } catch (error) {
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao pesquisar mensagens"));
     } finally {
       setSearching(false);
     }
@@ -1021,17 +932,30 @@ const ChatPanel = ({ open, onOpenChange }) => {
                       )}
 
                       {/* Content */}
-                      {editingMessage === msg.id ? (
-                        <div className="flex gap-2">
-                          <Input
+                      {editingMessage?.id === msg.id ? (
+                        <div className="flex gap-2 items-start">
+                          {/* Enter guarda; Shift+Enter muda de linha; Esc cancela */}
+                          <Textarea
+                            autoFocus
+                            rows={2}
                             value={editingMessage.content}
                             onChange={(e) =>
                               setEditingMessage({ ...editingMessage, content: e.target.value })
                             }
-                            className="h-8 text-sm"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                                e.preventDefault();
+                                handleEditMessage(msg.id, editingMessage.content);
+                              } else if (e.key === "Escape") {
+                                e.stopPropagation();
+                                setEditingMessage(null);
+                              }
+                            }}
+                            className="min-h-9 text-sm resize-none bg-background text-foreground"
                           />
                           <Button
                             size="sm"
+                            aria-label="Guardar edição"
                             onClick={() => handleEditMessage(msg.id, editingMessage.content)}
                           >
                             <Check className="h-4 w-4" />
@@ -1039,6 +963,7 @@ const ChatPanel = ({ open, onOpenChange }) => {
                           <Button
                             size="sm"
                             variant="ghost"
+                            aria-label="Cancelar edição"
                             onClick={() => setEditingMessage(null)}
                           >
                             <X className="h-4 w-4" />
@@ -1115,6 +1040,7 @@ const ChatPanel = ({ open, onOpenChange }) => {
                               size="sm"
                               variant="ghost"
                               className="h-6 w-6 p-0"
+                              aria-label="Editar mensagem"
                               onClick={() => setEditingMessage({ id: msg.id, content: msg.content })}
                             >
                               <Edit2 className="h-3 w-3" />
@@ -1123,6 +1049,7 @@ const ChatPanel = ({ open, onOpenChange }) => {
                               size="sm"
                               variant="ghost"
                               className="h-6 w-6 p-0 text-destructive"
+                              aria-label="Apagar mensagem"
                               onClick={() => handleDeleteMessage(msg.id)}
                             >
                               <Trash2 className="h-3 w-3" />
