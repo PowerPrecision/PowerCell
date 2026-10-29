@@ -246,3 +246,54 @@ async def test_mensagens_do_parceiro_nao_contam_no_chat_interno(fake_async_db):
         await conversa.run_enviar_do_parceiro(PT, PID, conversa.MensagemDaConversa(text="Olá"))
         r = await chat_presence.run_get_unread_count(INDEX)
     assert r["direct_unread"] == 0
+
+
+# ── «Carregado por» na fila do Index: mostrar, não contactar ─────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_nomes_de_quem_carregou_por_pagina(fake_async_db):
+    for u in (INTER, CONSULTOR, PARCEIRO):
+        await fake_async_db.users.insert_one(dict(u))
+    await fake_async_db.users.update_one({"id": INTER["id"]}, {"$set": {"is_active": False, "email": "rui@x.pt"}})
+    await fake_async_db.clients.insert_many([
+        {"id": "c-parc", "submitted_by_partner_id": "par-1"},
+        {"id": "c-outro", "submitted_by_partner_id": "par-2"},
+    ])
+    await fake_async_db.partners.insert_one({"id": "par-1", "name": "Imobiliária Sol", "status": "suspenso"})
+    await fake_async_db.history.insert_many([
+        {"process_id": "p-hist", "user_id": CONSULTOR["id"], "action": "Criou processo", "created_at": "2026-01-01"},
+        {"process_id": "p-hist", "user_id": INTER["id"], "action": "Criou processo", "created_at": "2026-02-01"},
+    ])
+    processos = [
+        # parceiro: o cliente foi submetido pelo parceiro atribuído (mesmo com a conta suspensa, foi ele)
+        {"id": "p-parc", "client_id": "c-parc", "assigned_parceiro_id": "par-1", "created_by_id": CONSULTOR["id"]},
+        # parceiro atribuído que NÃO submeteu o cliente: vale o carimbo
+        {"id": "p-nao-parc", "client_id": "c-outro", "assigned_parceiro_id": "par-1", "created_by_id": CONSULTOR["id"]},
+        {"id": "p-nome", "created_by_name": "Nome Gravado", "created_by_id": CONSULTOR["id"]},
+        # um inactivo continua a ter o nome: foi quem carregou
+        {"id": "p-inactivo", "created_by_id": INTER["id"]},
+        {"id": "p-portal", "source": "onboarding_auto", "created_by": "onboarding_auto"},
+        {"id": "p-email", "created_by": "RUI@x.pt"},
+        {"id": "p-hist"},
+        # sem autor: nunca cai no mediador/consultor atribuído (não carregaram nada)
+        {"id": "p-nada", "assigned_mediador_ids": [INTER["id"]], "assigned_consultor_id": CONSULTOR["id"]},
+        # um id de parceiro em `users` nunca aparece como utilizador
+        {"id": "p-user-parceiro", "created_by_id": PARCEIRO["id"]},
+    ]
+    with patch.object(conversa, "db", fake_async_db):
+        nomes = await conversa.nomes_de_quem_carregou(processos)
+    assert nomes["p-parc"] == {"name": "Imobiliária Sol", "tipo": "parceiro"}
+    assert nomes["p-nao-parc"] == {"name": CONSULTOR["name"], "tipo": "utilizador"}
+    assert nomes["p-nome"]["name"] == "Nome Gravado"
+    assert nomes["p-inactivo"]["name"] == INTER["name"]
+    assert nomes["p-portal"] == {"name": conversa.ROTULO_CLIENTE_PORTAL, "tipo": "cliente"}
+    assert nomes["p-email"]["name"] == INTER["name"]
+    assert nomes["p-hist"]["name"] == CONSULTOR["name"]  # o PRIMEIRO «Criou processo»
+    assert "p-nada" not in nomes
+    assert "p-user-parceiro" not in nomes
+
+
+@pytest.mark.asyncio
+async def test_nomes_de_quem_carregou_nunca_derruba_a_fila(fake_async_db):
+    rebenta = AsyncMock(side_effect=RuntimeError("mongo em baixo"))
+    with patch.object(conversa, "_nomes_de_quem_carregou", rebenta):
+        assert await conversa.nomes_de_quem_carregou([{"id": "p"}]) == {}

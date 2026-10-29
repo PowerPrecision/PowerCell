@@ -12753,3 +12753,11 @@ Pedido: o Master com uma empresa escolhida via os parceiros de todas as redes; e
 - Causa: o email grande era saltado ANTES de se ler o Message-ID, por isso nunca chegava a `db.emails`: voltava a ser pedido e a dar o aviso em cada ciclo, e o utilizador nunca o via na caixa.
 - Correcção (`_fetch_all_from_folder_sync`): acima de `IMAP_MAX_EMAIL_BYTES` pede-se só `BODY.PEEK[]<0.1MB>` (cabeçalhos + texto, que vêm antes dos anexos). O email entra com uma nota no início do corpo («importado sem os anexos… abra-o no webmail original») e sem lista de anexos (descarregar um obrigaria a ir buscar a mensagem inteira ao IMAP). A deduplicação por Message-ID passa a travar as repetições; o log desce para INFO. RAM continua limitada a ~1 MB por mensagem.
 - Testes: `test_worker_memoria.py` (o teste do tecto reescrito; falha sem a correcção). Não verificado contra o IMAP real.
+
+
+## 2026-10-29 — Index: coluna «Carregado por» na lista de processos
+- Pedido (Flavio): o nome de quem carregou o processo não aparecia na lista de processos do Index.
+- `GET /api/index/queue` (Quadro do Index e «Os Meus Processos» do Index usam a mesma tabela) devolve `loaded_by: {name, tipo}` ou `null` por linha. Resolve-se por PÁGINA, em poucos pedidos (`index_conversa.nomes_de_quem_carregou`): parceiro que trouxe a lead → `created_by_name`/`created_by_id` → «Cliente (portal)» (`onboarding_auto`/`public_form`) → email legado em `created_by` → primeiro «Criou processo» do histórico.
+- Diferenças de propósito em relação a `resolver_quem_carregou` (que é para CONTACTAR): um inactivo continua a ter o nome, e sem autor conhecido mostra «—» em vez de cair no mediador/consultor atribuído (não carregaram nada). Nunca derruba a fila.
+- Ecrã: `IndexQueueTable` ganha a coluna «Carregado por» (com etiqueta «Parceiro» quando é um parceiro), a seguir a «Empresa/Origem».
+- Testes: `test_index_conversa.py` (+2), `test_index_api.py` (+1; `index_conversa` entra nos patches do `db`), `IndexQueueTable.carregadoPor.test.jsx` (5), `OsMeusProcessosDoIndex.test.jsx` actualizado (ordem das colunas). Integração Mongo do Index saltada (sem `mongod` no contentor). Não verificado no browser nem em produção.
