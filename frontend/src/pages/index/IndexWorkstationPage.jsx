@@ -44,6 +44,7 @@ import { queryKeys } from "../../lib/queryClient";
 import {
   estadoDoFicheiroEmTexto,
   formatarDinheiro,
+  NOME_DO_PAIS,
   haJobActivo,
   quantosPorLimpar,
   rotuloDoEstado,
@@ -498,8 +499,13 @@ export default function IndexWorkstationPage() {
                           {ROTULO_DO_TITULAR[t.titular]}
                         </Badge>
                       )}
+                      {NOME_DO_PAIS[t.country] && (
+                        <Badge variant="outline" className="ml-2" data-testid="emprego-pais">
+                          {NOME_DO_PAIS[t.country]}
+                        </Badge>
+                      )}
                       <span className="ml-2 text-muted-foreground">
-                        {formatarDinheiro(valorDoCampo(t.net_salary))}
+                        {formatarDinheiro(valorDoCampo(t.net_salary), t.currency)}
                       </span>
                     </li>
                   ))}

@@ -977,6 +977,14 @@ def extract_text_from_pdf(pdf_content: bytes, max_pages: int = MAX_PDF_PAGES) ->
         return ""
 
 
+def _texto_da_pagina_por_linhas(pagina) -> str:
+    page_text = pagina.get_text("text", sort=True) or ""
+    if len(page_text) > MAX_PDF_PAGE_TEXT_LENGTH:
+        # os espaços de alinhamento das colunas não contam: a sanitização reduz-nos
+        page_text = re.sub(r" {3,}", "  ", page_text)[:MAX_PDF_PAGE_TEXT_LENGTH]
+    return page_text
+
+
 def extract_text_from_pdf_por_linhas(pdf_content: bytes, max_pages: int = MAX_PDF_PAGES) -> str:
     """Texto de um PDF com as LINHAS da página reconstruídas (PyMuPDF, ordenado por posição).
 
@@ -995,12 +1003,9 @@ def extract_text_from_pdf_por_linhas(pdf_content: bytes, max_pages: int = MAX_PD
             text_parts = []
             total_chars = 0
             for i in range(min(len(doc), max_pages)):
-                page_text = doc[i].get_text("text", sort=True) or ""
+                page_text = _texto_da_pagina_por_linhas(doc[i])
                 if not page_text.strip():
                     continue
-                if len(page_text) > MAX_PDF_PAGE_TEXT_LENGTH:
-                    # os espaços de alinhamento das colunas não contam: a sanitização reduz-nos
-                    page_text = re.sub(r" {3,}", "  ", page_text)[:MAX_PDF_PAGE_TEXT_LENGTH]
                 text_parts.append(page_text)
                 total_chars += len(page_text)
                 if total_chars >= MAX_PDF_TEXT_LENGTH:
@@ -1012,6 +1017,43 @@ def extract_text_from_pdf_por_linhas(pdf_content: bytes, max_pages: int = MAX_PD
     except Exception as e:
         logger.warning(f"Falha na extracção de texto do PDF por linhas: {e}")
         return ""
+
+
+def extract_pages_text_por_linhas(pdf_content: bytes, max_pages: int = MAX_PDF_PAGES) -> list[str]:
+    """O texto POR LINHAS de cada página, em separado (uma entrada por página, vazia se não tem texto).
+
+    Para ler um extrato longo aos bocados: o tecto total de `extract_text_from_pdf_por_linhas` (50 KB)
+    cortava os extratos grandes a meio, e uma única resposta com centenas de movimentos é onde o modelo
+    salta linhas. Cada página tem o tecto e a sanitização de sempre. Devolve `[]` se falhar.
+    """
+    try:
+        import fitz  # PyMuPDF
+
+        doc = fitz.open(stream=pdf_content, filetype="pdf")
+        try:
+            return [
+                sanitize_pdf_text(_texto_da_pagina_por_linhas(doc[i]), MAX_PDF_PAGE_TEXT_LENGTH)
+                for i in range(min(len(doc), max_pages))
+            ]
+        finally:
+            doc.close()
+    except Exception as e:
+        logger.warning(f"Falha na extracção do texto das páginas do PDF: {e}")
+        return []
+
+
+def pdf_page_count(pdf_content: bytes) -> int:
+    """Número de páginas de um PDF (0 se não se abre)."""
+    try:
+        import fitz  # PyMuPDF
+
+        doc = fitz.open(stream=pdf_content, filetype="pdf")
+        try:
+            return len(doc)
+        finally:
+            doc.close()
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def convert_pdf_to_image(pdf_content: bytes, page_num: int = 0, dpi: int = 150) -> Tuple[Optional[bytes], str]:

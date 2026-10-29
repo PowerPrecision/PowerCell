@@ -29,6 +29,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Optional
 
 from models.index_module import nif_e_valido, normalizar_nif
+from services.index_paises import EURO, PORTUGAL, SIMBOLO_DA_MOEDA, verificar_descontos
 
 #: Diferença aceite entre o líquido do recibo e o crédito no extrato: o maior de 1 € e 1 %.
 TOLERANCIA_CREDITO_ABSOLUTA = Decimal("1.00")
@@ -37,18 +38,14 @@ TOLERANCIA_CREDITO_RELATIVA = Decimal("0.01")
 TOLERANCIA_CONTAS = Decimal("0.05")
 #: Diferença aceite entre o saldo final e o que os movimentos dão.
 TOLERANCIA_SALDO = Decimal("1.00")
-#: Taxas da Segurança Social: 11 % (trabalhador) e 23,75 % (entidade). Margem de ±0,15 pontos.
-TAXAS_SS = (Decimal("0.11"), Decimal("0.2375"))
-MARGEM_SS = Decimal("0.0015")
-#: Retenção de IRS acima disto do ilíquido não é plausível.
-IRS_MAXIMO_PLAUSIVEL = Decimal("0.50")
+#: As taxas da Segurança Social e os tectos do imposto são de cada PAÍS: ver `services.index_paises`.
 #: Numerário num único movimento a partir deste valor é atípico.
 NUMERARIO_ATIPICO = Decimal("1000.00")
 #: Mesma contraparte, este nº de vezes ou mais, cada uma acima do mínimo → recorrente.
 RECORRENCIA_MINIMA = 3
 RECORRENCIA_VALOR_MINIMO = Decimal("100.00")
 #: Se o extrato chegou ao tecto de movimentos pode estar truncado: não se confere o saldo.
-TECTO_DE_MOVIMENTOS = 150
+TECTO_DE_MOVIMENTOS = 500
 #: O saldo CORRENTE (coluna de saldo após cada movimento) tolera só arredondamentos de cêntimos.
 TOLERANCIA_SALDO_CORRENTE = Decimal("0.02")
 #: Só se confere linha a linha se a coluna de saldo foi lida em pelo menos esta fracção dos movimentos
@@ -104,10 +101,10 @@ def _achado(code: str, refs: list[dict], periodo: Optional[str] = None, detalhe:
 MAXIMO_DE_ITENS_NA_JUSTIFICACAO = 3
 
 
-def _eur(valor: Decimal) -> str:
-    """`1.234,56 €` (formato português)."""
+def _eur(valor: Decimal, moeda: str = EURO) -> str:
+    """`1.234,56 €` (formato português); `1.234,56 £` num documento em libras."""
     texto = f"{valor.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
-    return texto.replace(",", "\0").replace(".", ",").replace("\0", ".") + " €"
+    return texto.replace(",", "\0").replace(".", ",").replace("\0", ".") + " " + SIMBOLO_DA_MOEDA.get(moeda, moeda)
 
 
 def _pct(valor: Decimal, casas: int) -> str:
@@ -167,13 +164,89 @@ def _intervalo_do_mes_e_seguinte(periodo: str) -> tuple[date, date]:
 # --------------------------------------------------------------------
 # recibos
 # --------------------------------------------------------------------
+def _somas_das_rubricas(r: dict) -> tuple[Optional[Decimal], Optional[Decimal]]:
+    """(abonos, descontos) somados das linhas do recibo, ou `None` se o recibo não as trouxe."""
+    rubricas = [x for x in r.get("rubricas") or [] if isinstance(x, dict)]
+    somas = []
+    for k in ("abono", "desconto"):
+        vs = [_dec(x.get("v")) for x in rubricas if x.get("k") == k]
+        vs = [v for v in vs if v is not None]
+        somas.append(sum(vs, Decimal(0)) if vs else None)
+    return somas[0], somas[1]
+
+
+def conferencia_do_recibo(r: dict) -> list[str]:
+    """As contas de um recibo que não batem (texto, sem o prefixo do mês). `[]` = batem ou não se aplicam.
+
+    A conta é a mesma em todos os países — ilíquido − descontos = líquido — mas o que entra em «descontos»
+    não: em França o imposto (PAS) sai DEPOIS do «net à payer avant impôt», e há recibos cujo «total de
+    descontos» não inclui a retenção. Aceita-se qualquer das formas em que o recibo pode estar impresso; só
+    se avisa quando NENHUMA fecha. As linhas do recibo, quando lidas, também têm de somar os totais: se não
+    somam, ficou alguma linha por ler (ou um total mal lido).
+    """
+    moeda = r.get("currency") or EURO
+    liquido, bruto = _dec(r.get("net")), _dec(r.get("gross"))
+    descontos, irs = _dec(r.get("deductions")), _dec(r.get("irs"))
+    antes_do_imposto = _dec(r.get("net_before_tax"))
+    abonos, descontos_das_linhas = _somas_das_rubricas(r)
+
+    def fecha(a: Optional[Decimal], b: Optional[Decimal], c: Optional[Decimal]) -> Optional[bool]:
+        return None if None in (a, b, c) else abs(a - b - c) <= TOLERANCIA_CONTAS
+
+    formas = [
+        fecha(bruto, descontos, liquido),
+        fecha(bruto, (descontos + irs) if None not in (descontos, irs) else None, liquido),
+        fecha(abonos, descontos_das_linhas, liquido),
+        fecha(bruto, descontos_das_linhas, liquido),
+        fecha(abonos, descontos, liquido),
+    ]
+    if antes_do_imposto is not None:
+        # França: brut − cotisations = net avant impôt; net avant impôt − PAS = net payé
+        formas.append(fecha(antes_do_imposto, irs or Decimal(0), liquido) and (
+            fecha(bruto, descontos, antes_do_imposto) is not False
+        ))
+    motivos: list[str] = []
+    if any(f is not None for f in formas) and not any(f for f in formas):
+        if None not in (bruto, descontos, liquido):
+            motivos.append(
+                f"ilíquido {_eur(bruto, moeda)} − descontos {_eur(descontos, moeda)} dá {_eur(bruto - descontos, moeda)}, "
+                f"mas o líquido indicado é {_eur(liquido, moeda)} (diferença de {_eur(abs(bruto - descontos - liquido), moeda)})"
+            )
+        elif None not in (abonos, descontos_das_linhas, liquido):
+            motivos.append(
+                f"as linhas do recibo dão {_eur(abonos, moeda)} de abonos − {_eur(descontos_das_linhas, moeda)} de descontos "
+                f"= {_eur(abonos - descontos_das_linhas, moeda)}, mas o líquido indicado é {_eur(liquido, moeda)}"
+            )
+        else:
+            motivos.append("o ilíquido, os descontos e o líquido não fecham entre si")
+    # as linhas lidas têm de somar os totais impressos
+    if abonos is not None and bruto is not None and abs(abonos - bruto) > TOLERANCIA_CONTAS:
+        motivos.append(
+            f"as linhas de abonos lidas somam {_eur(abonos, moeda)}, mas o total ilíquido é {_eur(bruto, moeda)} "
+            "(pode ter ficado alguma linha por ler)"
+        )
+    if descontos_das_linhas is not None and descontos is not None and not any(
+        abs(descontos_das_linhas - total) <= TOLERANCIA_CONTAS
+        for total in (descontos, descontos + (irs or Decimal(0)))
+    ):
+        motivos.append(
+            f"as linhas de descontos lidas somam {_eur(descontos_das_linhas, moeda)}, mas o total de descontos é "
+            f"{_eur(descontos, moeda)} (pode ter ficado alguma linha por ler)"
+        )
+    motivos.extend(verificar_descontos(r, lambda v: _eur(v, moeda)))
+    return motivos
+
+
 def _verificar_recibo(r: dict, extratos: list[dict], entidades: dict[str, str], hoje: date) -> list[dict]:
     achados: list[dict] = []
     doc = r.get("document_id")
     ref = [_ref(doc)]
     periodo = _periodo(r.get("period"))
+    moeda = r.get("currency") or EURO
+    portugues = (r.get("pais") or PORTUGAL) == PORTUGAL
 
-    nif = normalizar_nif(r.get("employer_nif"))
+    # o NIF só existe em Portugal: o SIREN francês ou o número de um empregador inglês não são NIFs
+    nif = normalizar_nif(r.get("employer_nif")) if portugues else None
     if nif and not nif_e_valido(nif):
         achados.append(_achado(
             "nif_invalido", ref, periodo,
@@ -187,39 +260,20 @@ def _verificar_recibo(r: dict, extratos: list[dict], entidades: dict[str, str], 
         ))
 
     liquido, bruto = _dec(r.get("net")), _dec(r.get("gross"))
-    descontos, ss, irs = _dec(r.get("deductions")), _dec(r.get("ss")), _dec(r.get("irs"))
 
-    # contas do recibo (três verificações independentes; o dedup junta as repetidas)
-    if None not in (bruto, descontos, liquido) and abs(bruto - descontos - liquido) > TOLERANCIA_CONTAS:
-        diferenca = abs(bruto - descontos - liquido)
-        achados.append(_achado(
-            "contas_nao_batem", ref, periodo,
-            f"Recibo de {_mes(periodo)}: ilíquido {_eur(bruto)} − descontos {_eur(descontos)} dá "
-            f"{_eur(bruto - descontos)}, mas o líquido indicado é {_eur(liquido)} (diferença de {_eur(diferenca)}).",
-        ))
-    if bruto and bruto > 0 and ss is not None:
-        taxa = ss / bruto
-        if not any(abs(taxa - t) <= MARGEM_SS for t in TAXAS_SS):
-            achados.append(_achado(
-                "contas_nao_batem", ref, periodo,
-                f"Recibo de {_mes(periodo)}: a Segurança Social ({_eur(ss)}) é {_pct(taxa * 100, 2)} do ilíquido "
-                f"({_eur(bruto)}); o esperado é 11 % ou 23,75 %.",
-            ))
-    if bruto and bruto > 0 and irs is not None and irs / bruto > IRS_MAXIMO_PLAUSIVEL:
-        achados.append(_achado(
-            "contas_nao_batem", ref, periodo,
-            f"Recibo de {_mes(periodo)}: a retenção de IRS ({_eur(irs)}) é "
-            f"{_pct(irs / bruto * 100, 1)} do ilíquido ({_eur(bruto)}), acima do plausível.",
-        ))
+    # contas do recibo, com as regras do país (vários motivos juntam-se numa só justificação)
+    contas = conferencia_do_recibo(r)
+    if contas:
+        achados.append(_achado("contas_nao_batem", ref, periodo, f"Recibo de {_mes(periodo)}: " + "; ".join(contas) + "."))
 
     # realidade — cada motivo diz-se; vários motivos juntam-se numa só justificação
     motivos: list[str] = []
     if periodo and (int(periodo[:4]), int(periodo[5:7])) > (hoje.year, hoje.month):
         motivos.append(f"o período {_mes(periodo)} ainda não existe")
-    if not nif and not r.get("employer_name"):
+    if not (r.get("employer_nif") and portugues) and not r.get("employer_name"):
         motivos.append("não indica entidade patronal")
     if bruto is not None and liquido is not None and liquido > bruto:
-        motivos.append(f"o líquido ({_eur(liquido)}) é superior ao ilíquido ({_eur(bruto)})")
+        motivos.append(f"o líquido ({_eur(liquido, moeda)}) é superior ao ilíquido ({_eur(bruto, moeda)})")
     cobrem = _extratos_que_cobrem(periodo, extratos)
     iban = r.get("iban")
     if iban and cobrem and all(e.get("iban") for e in cobrem) and not any(e["iban"] == iban for e in cobrem):
@@ -227,19 +281,20 @@ def _verificar_recibo(r: dict, extratos: list[dict], entidades: dict[str, str], 
     if motivos:
         achados.append(_achado("recibo_irreal", ref, periodo, f"Recibo de {_mes(periodo)}: " + "; ".join(motivos) + "."))
 
-    # o crédito no extrato
+    # o crédito no extrato — só se compara na MESMA moeda (um ordenado em libras não se procura num extrato em euros)
     if liquido is not None and periodo:
+        mesma_moeda = [e for e in cobrem if (e.get("currency") or EURO) == moeda]
         if not cobrem:
             achados.append(_achado(
                 "extrato_em_falta", ref, periodo,
-                f"Não há extrato que cubra {_mes(periodo)} (nem o mês seguinte) para confirmar o líquido de {_eur(liquido)}.",
+                f"Não há extrato que cubra {_mes(periodo)} (nem o mês seguinte) para confirmar o líquido de {_eur(liquido, moeda)}.",
             ))
-        elif not _ha_credito(liquido, periodo, cobrem):
+        elif mesma_moeda and not _ha_credito(liquido, periodo, mesma_moeda):
             tolerancia = max(TOLERANCIA_CREDITO_ABSOLUTA, liquido * TOLERANCIA_CREDITO_RELATIVA)
             achados.append(_achado(
-                "recibo_sem_credito", ref + [_ref(e.get("document_id")) for e in cobrem], periodo,
-                f"Líquido de {_eur(liquido)} do recibo de {_mes(periodo)}: não há crédito de valor semelhante "
-                f"(±{_eur(tolerancia)}) nos extratos entre {_dia(_intervalo_do_mes_e_seguinte(periodo)[0])} "
+                "recibo_sem_credito", ref + [_ref(e.get("document_id")) for e in mesma_moeda], periodo,
+                f"Líquido de {_eur(liquido, moeda)} do recibo de {_mes(periodo)}: não há crédito de valor semelhante "
+                f"(±{_eur(tolerancia, moeda)}) nos extratos entre {_dia(_intervalo_do_mes_e_seguinte(periodo)[0])} "
                 f"e {_dia(_intervalo_do_mes_e_seguinte(periodo)[1])}.",
             ))
     return achados
@@ -397,7 +452,9 @@ def _quebras_do_saldo(ordem: list[dict], abertura: Optional[Decimal]) -> tuple[l
     return quebras, anterior
 
 
-def _conferir_saldo_corrente(movimentos: list[dict], abertura: Optional[Decimal], fecho: Optional[Decimal]) -> Optional[str]:
+def _conferir_saldo_corrente(
+    movimentos: list[dict], abertura: Optional[Decimal], fecho: Optional[Decimal], moeda: str = EURO
+) -> Optional[str]:
     """A conta LINHA A LINHA, como a faria um analista com o extrato à frente. `None` = não se aplica.
 
     Só corre se a coluna de saldo foi lida (≥ 80 % dos movimentos). Experimenta a ordem do documento e a
@@ -418,18 +475,18 @@ def _conferir_saldo_corrente(movimentos: list[dict], abertura: Optional[Decimal]
         origem = (
             "o primeiro movimento não parte do saldo inicial"
             if q["i"] == 0 and abertura is not None and q["anterior"] == abertura else "o saldo anterior era "
-            + _eur(q["anterior"])
+            + _eur(q["anterior"], moeda)
         )
         frases.append(
-            f"no {natureza} de {_eur(_dec(m['v']))} a {_dia(m.get('d'))}{_pagina(m)}, {origem}; o saldo devia ficar em "
-            f"{_eur(q['esperado'])} mas o extrato indica {_eur(q['impresso'])} (diferença de "
-            f"{_eur(abs(q['esperado'] - q['impresso']))})"
+            f"no {natureza} de {_eur(_dec(m['v']), moeda)} a {_dia(m.get('d'))}{_pagina(m)}, {origem}; o saldo devia ficar em "
+            f"{_eur(q['esperado'], moeda)} mas o extrato indica {_eur(q['impresso'], moeda)} (diferença de "
+            f"{_eur(abs(q['esperado'] - q['impresso']), moeda)})"
         )
     fim = ""
     if fecho is not None and ultimo is not None and len(movimentos) < TECTO_DE_MOVIMENTOS and abs(ultimo - fecho) > TOLERANCIA_SALDO:
         fim = (
-            f" O saldo depois do último movimento ({_eur(ultimo)}) não coincide com o saldo final indicado "
-            f"({_eur(fecho)})."
+            f" O saldo depois do último movimento ({_eur(ultimo, moeda)}) não coincide com o saldo final indicado "
+            f"({_eur(fecho, moeda)})."
         )
     if not frases and not fim:
         return ""
@@ -442,7 +499,7 @@ def _conferir_saldo_corrente(movimentos: list[dict], abertura: Optional[Decimal]
     return (texto + fim).strip()
 
 
-def _fragmentacao_de_numerario(movimentos: list[dict]) -> list[tuple[str, list[dict]]]:
+def _fragmentacao_de_numerario(movimentos: list[dict], moeda: str = EURO) -> list[tuple[str, list[dict]]]:
     """Janelas em que o numerário foi FRACCIONADO: vários movimentos pequenos que juntos passam o limiar."""
     achados: list[tuple[str, list[dict]]] = []
     for natureza, rotulo in (("c", "depósitos"), ("d", "levantamentos")):
@@ -461,8 +518,8 @@ def _fragmentacao_de_numerario(movimentos: list[dict]) -> list[tuple[str, list[d
             if len(janela) >= FRAGMENTACAO_MINIMA and total >= NUMERARIO_ATIPICO:
                 achados.append((
                     f"{len(janela)} {rotulo} em numerário entre {_dia(janela[0][0].isoformat())} e "
-                    f"{_dia(janela[-1][0].isoformat())}, no total de {_eur(total)} (cada um abaixo de "
-                    f"{_eur(NUMERARIO_ATIPICO)})",
+                    f"{_dia(janela[-1][0].isoformat())}, no total de {_eur(total, moeda)} (cada um abaixo de "
+                    f"{_eur(NUMERARIO_ATIPICO, moeda)})",
                     [t[2] for t in janela],
                 ))
                 i += len(janela)       # a janela seguinte começa depois desta: não se conta duas vezes
@@ -471,19 +528,46 @@ def _fragmentacao_de_numerario(movimentos: list[dict]) -> list[tuple[str, list[d
     return achados
 
 
-def _verificar_extrato(e: dict) -> list[dict]:
-    achados: list[dict] = []
-    doc = e.get("document_id")
-    ref = [_ref(doc)]
-    movimentos = e.get("movimentos") or []
+def _totais_impressos(movimentos: list[dict], e: dict, moeda: str) -> Optional[str]:
+    """Os totais de créditos e débitos que o extrato IMPRIME contra a soma dos movimentos lidos.
 
+    É a prova mais directa de que ficaram linhas por ler: se o banco diz «Total a crédito 3.210,00» e os
+    créditos lidos somam 2.710,00, faltam 500,00 em créditos — com ou sem coluna de saldo.
+    """
+    if len(movimentos) >= TECTO_DE_MOVIMENTOS:
+        return None
+    frases = []
+    for k, chave, nome in (("c", "total_credits", "créditos"), ("d", "total_debits", "débitos")):
+        impresso = _dec(e.get(chave))
+        if impresso is None:
+            continue
+        lido = sum((_dec(m.get("v")) or Decimal(0) for m in movimentos if m.get("k") == k), Decimal(0))
+        if abs(lido - impresso) > TOLERANCIA_SALDO:
+            falta = "faltam" if lido < impresso else "sobram"
+            frases.append(
+                f"os {nome} lidos somam {_eur(lido, moeda)}, mas o extrato indica um total de {nome} de "
+                f"{_eur(impresso, moeda)} ({falta} {_eur(abs(impresso - lido), moeda)})"
+            )
+    if not frases:
+        return None
+    return "Conferindo os totais impressos: " + "; ".join(frases) + ". Pode ter ficado algum movimento por ler."
+
+
+def conferencia_do_extrato(e: dict) -> Optional[str]:
+    """O que não bate num extrato (saldo linha a linha, totais impressos, saldo inicial/final). `None` = bate.
+
+    Usada pela matriz (`saldo_nao_bate`) e pela análise, que relê o documento uma vez quando a leitura não bate.
+    """
+    movimentos = e.get("movimentos") or []
+    moeda = e.get("currency") or EURO
     abertura, fecho = _dec(e.get("opening")), _dec(e.get("closing"))
-    corrente = _conferir_saldo_corrente(movimentos, abertura, fecho) if movimentos else None
+    textos: list[str] = []
+    corrente = _conferir_saldo_corrente(movimentos, abertura, fecho, moeda) if movimentos else None
     if corrente is not None:
         # a conta linha a linha é mais exacta do que a dos totais: diz ONDE falha. Se ela bate, os totais
         # (que são só o encadeamento das mesmas linhas) não precisam de segunda opinião.
         if corrente:
-            achados.append(_achado("saldo_nao_bate", ref, None, corrente))
+            textos.append(corrente)
     elif None not in (abertura, fecho) and movimentos and len(movimentos) < TECTO_DE_MOVIMENTOS:
         creditos = sum((_dec(m["v"]) or Decimal(0) for m in movimentos if m.get("k") == "c"), Decimal(0))
         debitos = sum((_dec(m["v"]) or Decimal(0) for m in movimentos if m.get("k") == "d"), Decimal(0))
@@ -497,13 +581,29 @@ def _verificar_extrato(e: dict) -> list[dict]:
                     " O saldo final indicado é igual ao saldo inicial, o que costuma indicar o mesmo valor lido "
                     "duas vezes — confirmar o saldo final no extrato."
                 )
-            achados.append(_achado(
-                "saldo_nao_bate", ref, None,
-                f"Saldo inicial {_eur(abertura)} + créditos {_eur(creditos)} − débitos {_eur(debitos)} dá "
-                f"{_eur(esperado)}, mas o saldo final indicado é {_eur(fecho)} (diferença de {_eur(abs(esperado - fecho))})."
+            textos.append(
+                f"Saldo inicial {_eur(abertura, moeda)} + créditos {_eur(creditos, moeda)} − débitos {_eur(debitos, moeda)} dá "
+                f"{_eur(esperado, moeda)}, mas o saldo final indicado é {_eur(fecho, moeda)} (diferença de {_eur(abs(esperado - fecho), moeda)})."
                 f"{pista} Este extrato não traz o saldo linha a linha, pelo que não se localiza onde falha "
-                "(analisar de novo para o conferir movimento a movimento).",
-            ))
+                "(analisar de novo para o conferir movimento a movimento)."
+            )
+    # mesmo com o saldo linha a linha a bater, faltar a ÚLTIMA linha não parte a cadeia: os totais apanham-no
+    totais = _totais_impressos(movimentos, e, moeda)
+    if totais:
+        textos.append(totais)
+    return " ".join(textos) or None
+
+
+def _verificar_extrato(e: dict) -> list[dict]:
+    achados: list[dict] = []
+    doc = e.get("document_id")
+    ref = [_ref(doc)]
+    movimentos = e.get("movimentos") or []
+    moeda = e.get("currency") or EURO
+
+    conferencia = conferencia_do_extrato(e)
+    if conferencia:
+        achados.append(_achado("saldo_nao_bate", ref, None, conferencia))
 
     estranho: list[dict] = []
     razoes: list[str] = []
@@ -515,7 +615,7 @@ def _verificar_extrato(e: dict) -> list[dict]:
             estranho.append(_ref(doc, m.get("page")))
             sentido = "Depósito" if m.get("k") == "c" else "Levantamento"
             por_movimento[(v, m.get("d"))] = len(razoes)
-            razoes.append(f"{sentido} em numerário de {_eur(v)} a {_dia(m.get('d'))}{_pagina(m)}")
+            razoes.append(f"{sentido} em numerário de {_eur(v, moeda)} a {_dia(m.get('d'))}{_pagina(m)}")
     # a IA aponta numerário atípico: só vale se existe mesmo um movimento assim
     for a in e.get("achados") or []:
         if a.get("tipo") != "numerario_atipico":
@@ -536,7 +636,7 @@ def _verificar_extrato(e: dict) -> list[dict]:
                     razoes[existente] += nota  # o código já o apontou: só se junta a nota
                 else:
                     por_movimento[(mv, m.get("d"))] = len(razoes)
-                    razoes.append(f"Movimento atípico de {_eur(mv)} a {_dia(m.get('d'))}{_pagina(m)}{nota}")
+                    razoes.append(f"Movimento atípico de {_eur(mv, moeda)} a {_dia(m.get('d'))}{_pagina(m)}{nota}")
                 break
     # mesma contraparte várias vezes (código, pela impressão — o texto não existe aqui)
     por_contraparte: dict[str, list[Decimal]] = defaultdict(list)
@@ -549,10 +649,10 @@ def _verificar_extrato(e: dict) -> list[dict]:
         estranho.append(_ref(doc))
         for vs in recorrentes:
             razoes.append(
-                f"{len(vs)} movimentos de {_eur(RECORRENCIA_VALOR_MINIMO)} ou mais para a mesma contraparte, "
-                f"no total de {_eur(sum(vs, Decimal(0)))}"
+                f"{len(vs)} movimentos de {_eur(RECORRENCIA_VALOR_MINIMO, moeda)} ou mais para a mesma contraparte, "
+                f"no total de {_eur(sum(vs, Decimal(0)), moeda)}"
             )
-    for frase, grupo in _fragmentacao_de_numerario(movimentos):
+    for frase, grupo in _fragmentacao_de_numerario(movimentos, moeda):
         estranho.extend(_ref(doc, m.get("page")) for m in grupo)
         razoes.append(frase)
     if estranho:
