@@ -3,7 +3,7 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
-## [2026-10-29] — Index: comunicação, análise por ficheiro e recibos estrangeiros; emails com formatação
+## [2026-10-29] — Index: comunicação, análise por ficheiro e recibos estrangeiros; emails com formatação; Telegram
 
 ### Adicionado
 - **Pedir alteração de atribuição.** O Index continua sem mudar atribuições, mas pode pedir à chefia que a altere, com um motivo opcional. O pedido aparece no cartão **Pedidos de alteração de atribuição** da Supervisão do Index, onde a chefia o fecha com **Tratado** ou **Recusar**; o indexador é avisado.
@@ -12,6 +12,8 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 - **«Analisar» por ficheiro na bancada**, com **Analisar como…** para dizer o tipo quando a IA não o percebe. A linha mostra **Análise falhou** quando a última análise não terminou, com o motivo na matriz.
 - **Pesquisa avançada:** opção **Tudo (recibos, declarações e extratos)** e **Ver documento/Download** também nos documentos do arquivo histórico importados com ficheiro.
 - **Recibos e extratos estrangeiros** (Reino Unido, França, Países Baixos, Luxemburgo): cada documento é lido com as regras do seu país; o emprego mostra o país e o líquido na moeda do recibo; o NIF só se pede nos recibos portugueses.
+
+- **Avisos no Telegram.** Cada pessoa liga a sua conta em **Definições › Notificações › Ligar Telegram** e escolhe que avisos recebe. As mensagens dizem só o tipo de aviso e o número do processo (sem nome, NIF nem valores do cliente); os avisos seguidos do mesmo processo chegam juntos numa só mensagem, e há a opção «Só quando não estou na aplicação». Precisa do bot configurado no servidor (DEPLOY_RUNBOOK, Parte F).
 
 ### Corrigido
 - **A bancada do Index mostra todos os documentos** que a aba Documentos do processo mostra, incluindo os que entraram na fase de lead (Portal ou parceiro).
