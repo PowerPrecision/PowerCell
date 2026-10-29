@@ -551,3 +551,41 @@ Detalhe e lições no `AGENTS.md` («Index: fusão de menus, atribuição autom�
 5. **Bancada:** cada ficheiro tem «Ver documento» e «Download»
    (`GET /index/processes/{id}/files/{doc_id}/content[?download=true]`, qualquer tipo do dossier, só do processo do caminho) e
    há upload direto sem sair do ecrã (nunca sobrepõe: nome repetido → ` (2)`).
+
+### Comunicação, análise por ficheiro e recibos estrangeiros (26–29 Out 2026)
+
+Detalhe, causas e testes no `worklog.md` (entradas de 26 a 29 Out 2026).
+
+1. **Substituição por emprego e por titular** (`index_substituicao.py`): os recibos/declarações do cliente só são escondidos
+   pelos do Index da MESMA entidade patronal e do MESMO titular; o motor financeiro agrega por titular (o 2.º titular vai para
+   o Rendimento Co-Titular). A bancada tem um seletor de titular por ficheiro.
+2. **A bancada lista o que a aba Documentos lista** (`index_ficheiros_do_s3.py`): parte da pasta S3 do processo + raiz do
+   cliente e regista as chaves que não tinham `document_metadata` (o que entrou na fase de lead, pelo Portal ou pelo parceiro).
+3. **Nada fica «Por analisar» em silêncio** (`index_jobs.py`): ficheiros sem pista no nome nem categoria são classificados pelo
+   conteúdo (uma vez por ficheiro, `index_classified_type`); a resposta cortada tem motivo próprio (`resposta_incompleta`); uma
+   excepção falha só esse ficheiro (`erro_interno`). `analise_falhou` passa a ser um alerta POR ficheiro, com motivo.
+   **`POST /index/processes/{id}/files/{doc}/analyze` (`{tipo?}`)** analisa só esse ficheiro (forçado); «Analisar como…» grava
+   `index_type_override`, que manda nas análises seguintes.
+4. **Extratos** (`ai_document.extract_text_from_pdf_por_linhas`, PyMuPDF): leitura por linhas (o `pypdf` partia sinal e saldo),
+   resposta até 16 000 tokens / 180 s, e `index_matrix.corrigir_pelo_saldo` — a coluna de saldo prova o sentido de cada movimento e
+   retira um saldo isolado mal lido (corre também sobre factos já guardados). Extratos longos lêem-se por blocos de páginas.
+5. **Recibos e extratos estrangeiros** (`index_paises.py`): país `PT/GB/FR/NL/LU` (no extrato manda o IBAN) e moeda `EUR/GBP`, guia
+   de leitura por país no prompt e tectos de plausibilidade dos descontos por país. O recibo pede TODAS as linhas e confere-as
+   contra os totais (SS portuguesa sobre a base de incidência, sem subsídio de refeição); o extrato confere os totais impressos.
+   `_ler_e_conferir` relê UMA vez quando as contas não batem. NIF só em recibos portugueses (o «confirmar NIF» ignora os
+   estrangeiros). `TrabalhoProfissional` ganha `country`/`currency`. `ESQUEMA_VERSAO` NÃO mudou: os documentos antigos só ganham
+   país/linhas com «Analisar de novo». Por fazer: a pesquisa avançada mostra o líquido sempre em euros.
+6. **Pedido de alteração de atribuição** (`index_assignment_requests.py`, colecção `index_assignment_requests`):
+   `POST /index/processes/{id}/pedido-atribuicao` (só Index, motivo opcional ≤ 1000, um pendente por pessoa e processo, stealth),
+   `GET /index/pedidos-atribuicao`, `POST /index/pedidos-atribuicao/{id}/resolver` (`concluido`|`recusado`, só chefia da rede).
+   «Tratado» não muda a atribuição: a chefia muda-a pelo «Gerir».
+7. **Conversa do processo** (`index_conversa.py`): mensagens directas do chat interno com `process_id` e `canal: "index"`.
+   `GET/POST /index/processes/{id}/conversa` (bancada) e `GET/POST /processes/{id}/conversa-index` (Resumo do processo). Quem
+   carregou: parceiro da lead (se activo) → `created_by_id` → «Criou processo» no histórico → intermediário/consultor. Com um
+   parceiro, as mensagens ficam fora do chat interno e ele responde no Portal (`/partner/cases/{id}/conversa-index`, email na
+   primeira por ler).
+8. **Coluna «Carregado por»** na fila (`loaded_by: {name, tipo}`, resolvido por página): parceiro → `created_by_*` →
+   «Cliente (portal)» → histórico; sem autor conhecido «—» (nunca o mediador/consultor atribuído).
+9. **Pesquisa avançada:** `document_type=todos` («Tudo») e Ver/Download nas linhas do arquivo histórico quando a importação guardou
+   o ficheiro (`has_file`; S3 em `Arquivo Histórico Index/<rede>/<import_id>/`). `import_historico_zip` aceita `s3://bucket/chave.zip`
+   e `--sem-ficheiros`; reexecutar sobre um ZIP já importado liga os ficheiros sem chamar a IA.

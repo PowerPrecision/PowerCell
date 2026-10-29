@@ -3,6 +3,27 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-10-29] — Index: comunicação, análise por ficheiro e recibos estrangeiros; emails com formatação
+
+### Adicionado
+- **Pedir alteração de atribuição.** O Index continua sem mudar atribuições, mas pode pedir à chefia que a altere, com um motivo opcional. O pedido aparece no cartão **Pedidos de alteração de atribuição** da Supervisão do Index, onde a chefia o fecha com **Tratado** ou **Recusar**; o indexador é avisado.
+- **Conversa com quem carregou o processo.** Cartão **Conversa com quem carregou** na bancada do Index e **Conversa com o Index** no Resumo do processo. As mensagens chegam pelo chat interno; quando o processo veio de um parceiro, ele lê e responde no Portal do Parceiro (**Conversa com a equipa de análise**) e recebe um email quando tem mensagens novas.
+- **Coluna «Carregado por»** na lista de processos do Index (utilizador, parceiro ou «Cliente (portal)»).
+- **«Analisar» por ficheiro na bancada**, com **Analisar como…** para dizer o tipo quando a IA não o percebe. A linha mostra **Análise falhou** quando a última análise não terminou, com o motivo na matriz.
+- **Pesquisa avançada:** opção **Tudo (recibos, declarações e extratos)** e **Ver documento/Download** também nos documentos do arquivo histórico importados com ficheiro.
+- **Recibos e extratos estrangeiros** (Reino Unido, França, Países Baixos, Luxemburgo): cada documento é lido com as regras do seu país; o emprego mostra o país e o líquido na moeda do recibo; o NIF só se pede nos recibos portugueses.
+
+### Corrigido
+- **A bancada do Index mostra todos os documentos** que a aba Documentos do processo mostra, incluindo os que entraram na fase de lead (Portal ou parceiro).
+- **Documentos que ficavam «Por analisar»** (nomes como «07-Julho.pdf», extratos longos cortados, um erro num ficheiro que parava a análise de todos) passam a ser analisados ou a dizer porque falharam.
+- **Avisos de saldo falsos nos extratos** (créditos lidos como débitos, sobretudo BPI): leitura por linhas e correcção pelo próprio saldo do extrato.
+- **Linhas que a IA saltava em recibos e extratos:** todas as linhas são lidas e conferidas com os totais impressos; quando as contas não batem, o documento é relido uma vez. A Segurança Social portuguesa deixa de dar aviso falso por causa do subsídio de refeição.
+- **Recibos e declarações substituídos por emprego e por titular:** o recibo do Index de um emprego só esconde os do cliente desse emprego e desse titular; o vencimento do 2.º titular vai para o Rendimento Co-Titular.
+- **Emails enviados mantêm a formatação:** quebras de linha e parágrafos deixam de se perder, e o assunto mantém «&», «<» e «>».
+- **Chat interno:** Enter envia e Shift+Enter muda de linha; o lápis de editar uma mensagem volta a abrir a edição.
+- **Webmail:** um email acima do tamanho máximo deixa de se perder; entra com o texto, sem anexos e com uma nota a pedir que se abra o original.
+- **Parceiros:** o Master vê o parceiro independente (sem rede) em qualquer vista.
+
 ## [2026-09-24] (13) — Fechar os furos encontrados nos testes de aceitação
 
 ### Segurança

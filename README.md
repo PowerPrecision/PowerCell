@@ -263,6 +263,8 @@ PowerCell/
 - **Assinatura por empresa (role-aware)**: Cada user pode ter uma assinatura diferente por empresa (`user_company_roles.signature`) e ainda uma global (`users.email_signature`). O `send_email` resolve a assinatura pela **empresa ativa** da sessão (header `X-Company-Id`). Prioridade: (1) UCR da empresa ativa → (2) assinatura global do user → (3) UCR da empresa default → (4) UCR de qualquer empresa → (5) assinatura do sistema. O composer do Webmail mostra uma pré-visualização da assinatura que será anexada no envio.
 - **Shared role accounts**: Indexação/Suporte usam conta partilhada global (Google OAuth ou IMAP)
 - **System SMTP (Bloco A)**: Emails transacionais do sistema (documentação, alertas) via SMTP global configurado pelo Admin
+- **Emails acima do tecto (`IMAP_MAX_EMAIL_BYTES`)**: entram na caixa só com cabeçalhos e texto (1.º MB), sem anexos e com uma nota no início do corpo a pedir que se abra o original; deixam de ser saltados em cada ciclo (Out 2026)
+- **Formatação preservada**: o corpo em texto simples mantém quebras de linha e parágrafos (`sanitize_multiline_text`) e o assunto mantém `&`, `<`, `>` (`sanitize_single_line_text`) no Webmail, templates, rascunhos automáticos e envio de documentação (Out 2026)
 - **Smart Threading**: Threading automático por In-Reply-To/References + tag `[Proc-{id}]` no assunto
 - **Envio de emails B2B**: Envio de documentação para bancos com editor rich text (WYSIWYG)
 - **Rascunhos automáticos IA**: Geração automática de emails quando faltam documentos
@@ -299,23 +301,20 @@ O sistema suporta os seguintes perfis (roles), cada um com permissões específi
 | **Consultor** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, AI Insights, Imóveis, Minutas, Leads, Ficheiros (Explorador) | CRUD processos/clientes, upload docs, financeiros, imóveis |
 | **Mediador/Intermediário** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, AI Insights, Minutas, Ficheiros (Explorador) | CRUD processos/clientes, upload docs, financeiros |
 | **Administrativo** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, Registos, Validades | CRUD processos/clientes, upload/delete docs |
-| **Indexação** | Kanban, Processos, Clientes, Docs, Notificações, **Meus Clientes** | Upload/delete/download docs, atribuir clientes, gerir tarefas, chat |
-| **Parceiro** | Nenhuma (utilizador fantasma) | Cargo oficial UCR — visível na gestão de acessos; sem login operacional típico |
+| **Indexação** | Quadro Geral (só leitura), Os Meus Processos (bancada do Index), Pesquisa Avançada, Documentos Pendentes, Todos os Processos/Clientes, Ficheiros, Chat | Ver/carregar/descarregar documentos, Analisar/Extrair dados na bancada, marcar como indexado, criar cliente+processo, pedir alteração de atribuição, conversa com quem carregou o processo |
+| **Parceiro** | Só o Portal do Parceiro (`/parceiro`) | Submeter leads, enviar documentos e comprovativo, completar dados do cliente, notas e conversa com a equipa de análise nos seus casos |
 | **Cliente** | Nenhuma (acesso externo via Magic Link) | Upload/download docs |
 
 #### Perfil INDEXACAO - Detalhes
 
-O perfil de **Indexação** foi projetado para operadores focados na organização documental:
+O perfil de **Indexação** faz a primeira triagem de cada processo novo (detalhe em `INDEX_MODULE_ARCHITECTURE.md` e no guia do perfil):
 
-- **Páginas**: Acede a Kanban, Processos, Clientes, Documentos, Notificações e "Meus Clientes"
-- **Não tem acesso a**: Dashboard, criar/editar clientes ou processos (dados base são **read-only**)
-- **Funcionalidades permitidas**:
-  - Upload, delete e download de documentos
-  - Gestão de tarefas (criar, editar, completar)
-  - Chat interno
-  - Atribuição de utilizadores a processos (consultores, intermediários, indexação)
-  - Atribuição de clientes
-- **Proteção de dados**: O backend retorna HTTP 403 se o utilizador tentar editar dados base via API
+- **Trabalho atribuído automaticamente** ao indexador com menos carga; aparece em «Os Meus Processos», que abre a bancada (`/index/:processId`). A lista mostra a coluna **Carregado por** (utilizador, parceiro ou «Cliente (portal)»).
+- **Bancada:** todos os documentos que a aba Documentos do processo mostra (incluindo os que entraram na fase de lead), com Ver/Download, upload, **Analisar** por ficheiro («Analisar como…»), titular por ficheiro, metadados profissionais (país e moeda nos recibos estrangeiros PT/GB/FR/NL/LU) e matriz de alertas.
+- **Não muda atribuições:** pede a alteração à chefia («Pedir alteração de atribuição», motivo opcional); a chefia trata o pedido na Supervisão do Index.
+- **Conversa com quem carregou o processo** (utilizador pelo chat interno, ou parceiro pelo Portal do Parceiro).
+- **Stealth:** as acções não deixam rasto no `history` do processo, só no `audit_trail`.
+- **Não tem:** Dashboard, Webmail, Registos de Clientes, nem edição/eliminação dos dados base (403 no backend).
 
 ### Segurança
 - JWT com access token (2h) + refresh token (7d) com rotação segura
