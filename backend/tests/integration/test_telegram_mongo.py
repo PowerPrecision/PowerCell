@@ -43,6 +43,12 @@ async def bd(monkeypatch):
         for idx in db_indexes.INDEX_DEFINITIONS[colecao]:
             await db_indexes._create_index_safe(getattr(base, colecao), idx, colecao, resultados)
     assert resultados["errors"] == []
+    # u1 é o consultor de p1 e p2; p3 é de outra pessoa
+    await base.processes.insert_many([
+        {"id": "p1", "assigned_consultor_ids": ["u1"]},
+        {"id": "p2", "assigned_consultor_ids": ["u1"]},
+        {"id": "p3", "assigned_consultor_ids": ["outro"]},
+    ])
 
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
     monkeypatch.setenv("TELEGRAM_BOT_USERNAME", "PowerCellTesteBot")
@@ -105,7 +111,7 @@ async def test_parar_desliga(bd):
 async def test_rajada_do_mesmo_processo_sai_numa_so_mensagem(bd):
     await _ligar(bd)
     bd.enviadas.clear()
-    await bd.processes.insert_one({"id": "p1", "process_number": 1234})
+    await bd.processes.update_one({"id": "p1"}, {"$set": {"process_number": 1234}})
 
     # o que nasce quando o Index marca o processo como indexado
     for tipo in ("process_assigned", "process_status_change", "process_status_change", "document_upload"):
@@ -214,3 +220,33 @@ async def test_falha_temporaria_repete_mais_tarde(bd):
     assert grupo["enviar_apos"].replace(tzinfo=None) > (
         telegram_notifications._agora() + timedelta(seconds=30)
     ).replace(tzinfo=None)
+
+
+@pytest.mark.asyncio
+async def test_so_recebe_avisos_dos_processos_atribuidos(bd):
+    await _ligar(bd)
+    # processo de outra pessoa (ex.: aviso à gestão da rede): fica só na app
+    assert await telegram_notifications.agendar("u1", "process_status_change", process_id="p3") is False
+    # processo que não existe ou foi eliminado
+    assert await telegram_notifications.agendar("u1", "process_status_change", process_id="nao-existe") is False
+    await bd.processes.update_one({"id": "p2"}, {"$set": {"is_deleted": True}})
+    assert await telegram_notifications.agendar("u1", "document_upload", process_id="p2") is False
+    # aviso de processo sem processo (ex.: automação por cargo) também não passa
+    assert await telegram_notifications.agendar("u1", "automation") is False
+    # o do seu processo passa
+    assert await telegram_notifications.agendar("u1", "process_status_change", process_id="p1") is True
+    assert await bd.telegram_outbox.count_documents({}) == 1
+
+
+@pytest.mark.asyncio
+async def test_avisos_pessoais_passam_mesmo_sem_atribuicao_ao_processo(bd):
+    await _ligar(bd)
+    assert await telegram_notifications.agendar("u1", "task_assigned", process_id="p3") is True
+    assert await telegram_notifications.agendar("u1", "deadline_reminder", process_id="p3") is True
+
+
+@pytest.mark.asyncio
+async def test_ruido_nunca_vai_para_o_telegram(bd):
+    await _ligar(bd)
+    for tipo in ("process_updated", "index_sanitize_done", "document_auto_fetch", "new_registration"):
+        assert await telegram_notifications.agendar("u1", tipo, process_id="p1") is False

@@ -139,6 +139,41 @@ TITULO_DO_TIPO: dict[str, str] = {
 }
 
 
+# Avisos dirigidos À PESSOA (a tarefa é dela, o prazo é dela): passam mesmo sem ser
+# atribuída ao processo. Tudo o resto que traga processo só passa a quem lá está atribuído.
+TIPOS_PESSOAIS: frozenset[str] = frozenset({
+    "task_assigned",
+    "task_unassigned",
+    "task_completed",
+    "deadline",
+    "deadline_reminder",
+    "deadline_approaching",
+    "deadline_missed",
+    "event_reminder",
+    "chat_message",
+    "index_conversa",
+})
+
+# Ruído: nunca vão para o Telegram, mesmo com a categoria ligada.
+TIPOS_SEM_TELEGRAM: frozenset[str] = frozenset({
+    "process_updated",       # «alguém mexeu no processo», sem dizer o quê
+    "index_sanitize_done",   # manutenção do Index
+    "document_auto_fetch",   # recolha automática, sem acção pedida
+    "new_registration",      # avisos à gestão da rede, não ao responsável
+    "clients_waiting",
+})
+
+
+async def _atribuido_ao_processo(user_id: str, process_id: str) -> bool:
+    """O utilizador está atribuído ao processo (consultor, intermediário, Index…)?"""
+    from services.alert_audience import ids_atribuidos
+
+    processo = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}}, {"_id": 0}
+    )
+    return bool(processo) and user_id in ids_atribuidos(processo)
+
+
 def janela_de_agrupamento() -> timedelta:
     try:
         segundos = int(os.environ.get("TELEGRAM_JANELA_SEGUNDOS", "90"))
@@ -186,6 +221,14 @@ async def agendar(
         ligacao = await telegram_link.ligacao_ativa(user_id)
         if not ligacao or not ligacao.get("chat_id"):
             return False
+
+        # Só o que é da pessoa: avisos da gestão da rede sobre processos de outros
+        # (registos novos, automações por cargo, processos parados) ficam na app.
+        if tipo in TIPOS_SEM_TELEGRAM:
+            return False
+        if tipo not in TIPOS_PESSOAIS:
+            if not process_id or not await _atribuido_ao_processo(user_id, process_id):
+                return False
 
         categoria = categoria_de(tipo)
         preferencias = {**telegram_link.preferencias_por_defeito(), **(ligacao.get("preferencias") or {})}

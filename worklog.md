@@ -12782,3 +12782,11 @@ Pedido: o Master com uma empresa escolhida via os parceiros de todas as redes; e
 - Entradas: `send_realtime_notification` (antes do filtro in-app; preferências próprias), chat directo e de grupo (texto e anexos), `scheduled_tasks.create_notification`, registo novo e match de imóvel (`alerts.py`), automações (`workflow_engine`), falha do email do Portal. De fora: `error_analysis` e `alerta_ao_master` (avisos de infraestrutura).
 - Preferências por categoria (atribuições, estados, documentos, portal, prazos, chat ligadas; «outros» desligado) e «Só quando não estou na aplicação» (desligado por omissão), no cartão novo `TelegramSettings` em Definições › Notificações.
 - Testes: `tests/unit/test_telegram_unit.py` (8), `tests/integration/test_telegram_mongo.py` (10, Mongo real em Docker; mutação «sem índice único» apanhada), `TelegramSettings.test.jsx` (3). Backend unitário 12 807 passados; os 2 que falham (inventários que apanham `services/index_conversa.py`) já falham em `dev` sem esta alteração. Não verificado contra o Telegram real nem em produção: falta criar o bot e pôr as variáveis (DEPLOY_RUNBOOK Parte F).
+
+
+## 2026-10-29 — Telegram: só os avisos dos processos da pessoa, sem ruído
+- Pedido (Flavio): «não quero receber notificações de outros processos nem ruído».
+- `telegram_notifications.agendar`: um aviso com processo só entra na fila se a pessoa estiver atribuída a esse processo (`alert_audience.ids_atribuidos`: consultor, intermediário, Index…) e o processo não estiver eliminado. Assim ficam só na app os avisos à gestão da rede sobre processos de outros (registos novos, automações por cargo, processos parados). Um aviso sem processo só passa se for pessoal (`TIPOS_PESSOAIS`: tarefas, prazos, agenda, chat).
+- Nunca vão para o Telegram (`TIPOS_SEM_TELEGRAM`): `process_updated`, `index_sanitize_done`, `document_auto_fetch`, `new_registration`, `clients_waiting`.
+- As notificações in-app não mudaram.
+- Testes: +3 em `test_telegram_mongo.py` (13; mutação «sem verificação de atribuição» apanhada).
