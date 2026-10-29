@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from database import db
 from services.realtime_delivery import entregar_a_utilizador
+from services.tenant_network import CAMPO_REDE, com_isolamento, rede_de_omissao
 from utils.input_sanitization import sanitize_multiline_text
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,23 @@ class MensagemDaConversa(BaseModel):
     text: str = Field(..., min_length=1, max_length=MAX_CARACTERES)
 
 
+def _rede(doc: dict) -> Optional[str]:
+    return str(doc.get(CAMPO_REDE) or "").strip() or rede_de_omissao()
+
+
+def _da_rede_dos_processos(processos: list[dict]) -> dict:
+    """Condição de rede para os CLIENTES referidos por processos: só os da rede de cada processo.
+
+    O cliente é global na rede, logo vive na rede do processo que o refere; um documento sem carimbo
+    pertence à rede de omissão (ou é legado sem rede, quando o processo também o é).
+    """
+    redes = {_rede(p) for p in processos}
+    valores: list[Optional[str]] = sorted(r for r in redes if r)
+    if None in redes or rede_de_omissao() in redes:
+        valores += [None, ""]
+    return {CAMPO_REDE: {"$in": valores}}
+
+
 def _ids(valor: Any) -> list[str]:
     if isinstance(valor, list):
         return [str(v) for v in valor if v]
@@ -86,7 +104,10 @@ async def parceiro_que_carregou(proc: dict) -> Optional[dict]:
     partner_id = str(proc.get("assigned_parceiro_id") or "").strip()
     if not partner_id or not proc.get("client_id"):
         return None
-    cliente = await db.clients.find_one({"id": proc["client_id"]}, {"_id": 0, "submitted_by_partner_id": 1})
+    cliente = await db.clients.find_one(
+        com_isolamento(_da_rede_dos_processos([proc]), {"id": proc["client_id"]}),
+        {"_id": 0, "submitted_by_partner_id": 1},
+    )
     if str((cliente or {}).get("submitted_by_partner_id") or "") != partner_id:
         return None
     from services.partner_accounts import parceiro_activo
@@ -157,19 +178,23 @@ async def _nomes_de_quem_carregou(processos: list[dict], saida: dict[str, dict])
     com_parceiro = {p["id"]: p for p in procs if p.get("assigned_parceiro_id") and p.get("client_id")}
     if com_parceiro:
         clientes = await db.clients.find(
-            {"id": {"$in": sorted({p["client_id"] for p in com_parceiro.values()})}},
-            {"_id": 0, "id": 1, "submitted_by_partner_id": 1},
+            com_isolamento(
+                _da_rede_dos_processos(list(com_parceiro.values())),
+                {"id": {"$in": sorted({p["client_id"] for p in com_parceiro.values()})}},
+            ),
+            {"_id": 0, "id": 1, "submitted_by_partner_id": 1, CAMPO_REDE: 1},
         ).to_list(length=len(com_parceiro))
-        submetido_por = {c["id"]: str(c.get("submitted_by_partner_id") or "") for c in clientes}
-        do_parceiro = {
-            pid: str(p["assigned_parceiro_id"]) for pid, p in com_parceiro.items()
-            if submetido_por.get(p["client_id"]) == str(p["assigned_parceiro_id"])
-        }
+        clientes_por_id = {c["id"]: c for c in clientes}
+        do_parceiro = {}
+        for pid, p in com_parceiro.items():
+            c = clientes_por_id.get(p["client_id"])
+            # o cliente tem de ser da rede DESTE processo (a consulta junta as redes da página)
+            if c and _rede(c) == _rede(p) and str(c.get("submitted_by_partner_id") or "") == str(p["assigned_parceiro_id"]):
+                do_parceiro[pid] = str(p["assigned_parceiro_id"])
         if do_parceiro:
-            parceiros = await db.partners.find(
-                {"id": {"$in": sorted(set(do_parceiro.values()))}}, {"_id": 0, "id": 1, "name": 1},
-            ).to_list(length=len(do_parceiro))
-            nome_do_parceiro = {p["id"]: p.get("name") or "Parceiro" for p in parceiros}
+            from services.partner_accounts import nomes_de_parceiros
+
+            nome_do_parceiro = await nomes_de_parceiros(list(do_parceiro.values()))
             for pid, partner_id in do_parceiro.items():
                 if partner_id in nome_do_parceiro:
                     saida[pid] = {"name": nome_do_parceiro[partner_id], "tipo": TIPO_PARCEIRO}

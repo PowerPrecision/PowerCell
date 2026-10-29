@@ -13,7 +13,7 @@ import pytest
 from fastapi import HTTPException
 
 from models.chat import ChatMessageCreate
-from services import chat_messages, index_conversa as conversa
+from services import chat_messages, index_conversa as conversa, partner_accounts
 
 PID = "p-conversa"
 INDEX = {"id": "u-index", "name": "Ana Index", "role": "indexacao"}
@@ -279,7 +279,7 @@ async def test_nomes_de_quem_carregou_por_pagina(fake_async_db):
         # um id de parceiro em `users` nunca aparece como utilizador
         {"id": "p-user-parceiro", "created_by_id": PARCEIRO["id"]},
     ]
-    with patch.object(conversa, "db", fake_async_db):
+    with patch.object(conversa, "db", fake_async_db), patch.object(partner_accounts, "db", fake_async_db):
         nomes = await conversa.nomes_de_quem_carregou(processos)
     assert nomes["p-parc"] == {"name": "Imobiliária Sol", "tipo": "parceiro"}
     assert nomes["p-nao-parc"] == {"name": CONSULTOR["name"], "tipo": "utilizador"}
@@ -290,6 +290,28 @@ async def test_nomes_de_quem_carregou_por_pagina(fake_async_db):
     assert nomes["p-hist"]["name"] == CONSULTOR["name"]  # o PRIMEIRO «Criou processo»
     assert "p-nada" not in nomes
     assert "p-user-parceiro" not in nomes
+
+
+@pytest.mark.asyncio
+async def test_nomes_de_quem_carregou_so_le_o_cliente_da_rede_do_processo(fake_async_db):
+    """Um cliente de OUTRA rede com o mesmo id nunca dá o parceiro (nem o nome dele) a esta fila."""
+    await fake_async_db.clients.insert_many([
+        {"id": "c-1", "network_id": "rede-b", "submitted_by_partner_id": "par-1"},
+        {"id": "c-2", "network_id": "rede-a", "submitted_by_partner_id": "par-2"},
+    ])
+    await fake_async_db.partners.insert_many([
+        {"id": "par-1", "name": "Imobiliária da Outra Rede", "status": "active"},
+        {"id": "par-2", "name": "Imobiliária Lua", "status": "deleted"},
+    ])
+    processos = [
+        {"id": "p-1", "network_id": "rede-a", "client_id": "c-1", "assigned_parceiro_id": "par-1"},
+        {"id": "p-2", "network_id": "rede-a", "client_id": "c-2", "assigned_parceiro_id": "par-2"},
+    ]
+    with patch.object(conversa, "db", fake_async_db), patch.object(partner_accounts, "db", fake_async_db):
+        nomes = await conversa.nomes_de_quem_carregou(processos)
+        contacto = await conversa.parceiro_que_carregou(processos[0])
+    assert nomes == {}  # um da outra rede; o outro com a conta eliminada
+    assert contacto is None
 
 
 @pytest.mark.asyncio
