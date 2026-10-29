@@ -241,7 +241,7 @@ async def notify_assigned_users_indexing_complete(
                     title="Indexação Concluída",
                     message=notification_message,
                     notification_type="indexing_complete",
-                    link=f"/process/${process_id}",
+                    link=f"/process/{process_id}",
                     process_id=process_id,
                 )
             except Exception as notif_err:

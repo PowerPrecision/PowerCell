@@ -22,7 +22,7 @@ import pytest_asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import DuplicateKeyError
 
-from services import db_indexes, telegram_bot, telegram_link, telegram_notifications
+from services import db_indexes, notification_policy, telegram_bot, telegram_link, telegram_notifications
 from services.telegram_bot import ResultadoDoEnvio
 
 COLECOES = ("telegram_links", "telegram_link_tokens", "telegram_outbox")
@@ -62,6 +62,7 @@ async def bd(monkeypatch):
         return ResultadoDoEnvio(ok=True)
 
     with patch.object(telegram_link, "db", base), patch.object(telegram_notifications, "db", base), \
+            patch.object(notification_policy, "db", base), \
             patch.object(telegram_bot, "enviar_mensagem", enviar_falso):
         base.enviadas = enviadas
         yield base

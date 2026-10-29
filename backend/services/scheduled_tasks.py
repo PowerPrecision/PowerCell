@@ -106,7 +106,11 @@ class ScheduledTasksService:
         client_name: str = None,
         link: str = None
     ):
-        """Criar uma notificação na base de dados."""
+        """Criar uma notificação na base de dados (se a política a deixar passar)."""
+        from services.notification_policy import deve_notificar
+
+        if not await deve_notificar(user_id, notification_type, process_id, bd=self.db):
+            return None
         notification = {
             "id": str(uuid.uuid4()),
             "user_id": user_id,
