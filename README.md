@@ -254,10 +254,9 @@ PowerCell/
 - **Disponível via API** e **CLI standalone** com suporte a `PROD_MONGO_URL`, `PROD_DB_NAME`, `DEV_MONGO_URL`, `DEV_DB_NAME`
 
 ### Notificações no Telegram (Out 2026)
-- Um bot por empresa (`services/telegram_bot.py`); cada utilizador liga a conta em **Definições › Notificações** com um código de uso único de 10 min (`t.me/<bot>?start=<código>`); `/parar` ou «Desligar Telegram» desligam.
+- Um bot por empresa (`services/telegram_bot.py`); cada utilizador liga a conta na **Área Pessoal** (Conta Global) ou em **Definições › Notificações** com um código de uso único de 10 min (`t.me/<bot>?start=<código>`); `/parar` ou «Desligar Telegram» desligam.
 - Mensagens mínimas: tipo de aviso + nº do processo, nunca dados do cliente. Fila `telegram_outbox` agrupada por processo/conversa numa janela fixa de 90 s (`TELEGRAM_JANELA_SEGUNDOS`); preferências por categoria e «Só quando não estou na aplicação».
 - Sem `TELEGRAM_BOT_TOKEN` o canal fica desligado. Configuração em `DEPLOY_RUNBOOK.md`, Parte F.
-- Nota: a página `/definicoes` ainda não tem atalho no menu da aplicação.
 
 ### Webmail (Email IMAP)
 - **Sincronização em tempo real (v2.0)**: o background sync IMAP corre **no processo da API a cada 60s** (não no ARQ Worker). Cada email novo emite WebSocket `new_email` para a room do utilizador; o React Query invalida a cache (`staleTime: 60s`) e actualiza a lista **sem skeleton nem reload**

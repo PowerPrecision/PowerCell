@@ -13,7 +13,7 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 - **Pesquisa avançada:** opção **Tudo (recibos, declarações e extratos)** e **Ver documento/Download** também nos documentos do arquivo histórico importados com ficheiro.
 - **Recibos e extratos estrangeiros** (Reino Unido, França, Países Baixos, Luxemburgo): cada documento é lido com as regras do seu país; o emprego mostra o país e o líquido na moeda do recibo; o NIF só se pede nos recibos portugueses.
 
-- **Avisos no Telegram.** Cada pessoa liga a sua conta em **Definições › Notificações › Ligar Telegram** e escolhe que avisos recebe. As mensagens dizem só o tipo de aviso e o número do processo (sem nome, NIF nem valores do cliente); os avisos seguidos do mesmo processo chegam juntos numa só mensagem, e há a opção «Só quando não estou na aplicação». Precisa do bot configurado no servidor (DEPLOY_RUNBOOK, Parte F).
+- **Avisos no Telegram.** Cada pessoa liga a sua conta na **Área Pessoal** (separador Conta Global; também em **Definições › Notificações**) com **Ligar Telegram** e escolhe que avisos recebe. As mensagens dizem só o tipo de aviso e o número do processo (sem nome, NIF nem valores do cliente); os avisos seguidos do mesmo processo chegam juntos numa só mensagem, e há a opção «Só quando não estou na aplicação». Precisa do bot configurado no servidor (DEPLOY_RUNBOOK, Parte F).
 
 ### Corrigido
 - **A bancada do Index mostra todos os documentos** que a aba Documentos do processo mostra, incluindo os que entraram na fase de lead (Portal ou parceiro).
