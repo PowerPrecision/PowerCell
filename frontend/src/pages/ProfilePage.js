@@ -64,6 +64,7 @@ import { ROLE_LABELS } from "../utils/roleUtils";
 import { buildProfileRoleTabs } from "../utils/userProfiles";
 // PACOTE DF — Sub-componente para as 3 cards por-UCR
 import ProfileRoleTab from "../components/ProfileRoleTab";
+import TelegramSettings from "../components/TelegramSettings";
 import {
   Lock,
   Monitor,
@@ -426,6 +427,9 @@ const ProfilePage = () => {
                 </p>
               </div>
             )}
+
+            {/* Card: Telegram (avisos no telemóvel, comum a todos os perfis) */}
+            <TelegramSettings />
           </TabsContent>
 
           {/* ── Tabs: uma por UCR real (gerada dinamicamente) ── */}

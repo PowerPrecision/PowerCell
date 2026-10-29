@@ -908,6 +908,10 @@ const DashboardLayout = ({ children, title }) => {
                     <User className="h-4 w-4 mr-2" />
                     Área Pessoal
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/definicoes")}>
+                    <Settings className="h-4 w-4 mr-2" />
+                    Definições
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout} className="text-destructive">
                     <LogOut className="h-4 w-4 mr-2" />
