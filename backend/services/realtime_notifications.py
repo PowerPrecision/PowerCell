@@ -100,6 +100,12 @@ async def send_realtime_notification(
     Returns:
         Notificação criada, ou None se o utilizador desactivou este tipo
     """
+    # Telegram: canal à parte, com as suas próprias preferências (por isso
+    # antes do filtro in-app). Agrupa por processo e nunca levanta.
+    from services.telegram_notifications import agendar as agendar_telegram
+
+    await agendar_telegram(user_id, notification_type, process_id=process_id, link=link)
+
     # Verificar preferências do utilizador
     if not await _should_send_inapp_notification(user_id, notification_type):
         logger.info(f"Notificação in-app bloqueada para {user_id} (tipo: {notification_type})")

@@ -120,6 +120,9 @@ class ScheduledTasksService:
         }
         
         await self.db.notifications.insert_one(notification)
+        from services.telegram_notifications import agendar_de_notificacao
+
+        await agendar_de_notificacao(notification)
         return notification
     
     async def check_expiring_documents(self) -> int:

@@ -406,6 +406,9 @@ async def _avisar_falha_do_envio(user: dict, process_id: str, client_name: str, 
             "read": False,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
+        from services.telegram_notifications import agendar as agendar_telegram
+
+        await agendar_telegram(user_id, "email_failed", process_id=process_id, link=f"/processo/{process_id}")
     except Exception as exc:  # noqa: BLE001 - o aviso é o último recurso
         logger.error("[MAGIC-LINK] Nem a notificação da falha foi gravada (processo %s): %s", process_id, exc)
 

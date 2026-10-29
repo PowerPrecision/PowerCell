@@ -312,6 +312,38 @@ _definir(
     [{"keys": [("path", 1)], "name": "idx_s3_explorer_folders_path", "unique": True}],
 )
 
+# Telegram: uma ligação por utilizador; a conversa (chat_id) procura-se no /parar e na troca de conta.
+_definir(
+    "telegram_links",
+    [
+        {"keys": [("user_id", 1)], "name": "idx_telegram_links_user", "unique": True},
+        {"keys": [("chat_id", 1)], "name": "idx_telegram_links_chat"},
+    ],
+)
+# Códigos de ligação de uso único: procuram-se pelo hash e caducam sozinhos.
+_definir(
+    "telegram_link_tokens",
+    [
+        {"keys": [("token_hash", 1)], "name": "idx_telegram_tokens_hash", "unique": True},
+        {"keys": [("expira_em", 1)], "name": "idx_telegram_tokens_ttl", "expireAfterSeconds": 3600},
+    ],
+)
+# Fila do Telegram: no máximo UM grupo «pendente» por (utilizador, assunto) — é o que junta a
+# rajada de avisos de um processo indexado numa só mensagem. A fila é técnica e esvazia-se sozinha.
+_definir(
+    "telegram_outbox",
+    [
+        {
+            "keys": [("user_id", 1), ("chave", 1)],
+            "name": "idx_telegram_outbox_grupo_pendente",
+            "unique": True,
+            "partialFilterExpression": {"status": "pendente"},
+        },
+        {"keys": [("status", 1), ("enviar_apos", 1)], "name": "idx_telegram_outbox_envio"},
+        {"keys": [("criado_em", 1)], "name": "idx_telegram_outbox_ttl", "expireAfterSeconds": 14 * 86400},
+    ],
+)
+
 # Log da IA do processo: a única leitura é por `process_id`, mais recente primeiro.
 _definir(
     "process_ai_log",

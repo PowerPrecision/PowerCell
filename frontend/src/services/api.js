@@ -1313,6 +1313,12 @@ export const deleteDocumentExpiry = (id) => api.delete(`/documents/expiry/${id}`
 export const getDocumentTypes = () => api.get("/documents/types");
 
 // Alerts & Notifications
+// Telegram — ligação da conta ao bot e preferências do próprio utilizador
+export const getTelegramEstado = () => api.get("/telegram/estado");
+export const ligarTelegram = () => api.post("/telegram/ligar");
+export const desligarTelegram = () => api.post("/telegram/desligar");
+export const atualizarPreferenciasTelegram = (dados) => api.put("/telegram/preferencias", dados);
+
 export const getNotifications = (unreadOnly = false) => 
   api.get("/alerts/notifications", { params: { unread_only: unreadOnly } });
 export const markNotificationRead = (id) => 

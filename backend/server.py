@@ -73,6 +73,7 @@ from routes import (
 from routes.alerts import router as alerts_router
 from routes.websocket import router as websocket_router
 from routes.push_notifications import router as push_notifications_router
+from routes.telegram import router as telegram_router
 from routes.tasks import router as tasks_router
 from routes.voice_notes import router as voice_notes_router
 from routes.document_extraction import router as document_extraction_router
@@ -620,6 +621,7 @@ app.include_router(documents_router, prefix="/api")
 app.include_router(alerts_router, prefix="/api")
 app.include_router(websocket_router, prefix="/api")
 app.include_router(push_notifications_router, prefix="/api")
+app.include_router(telegram_router, prefix="/api")
 app.include_router(tasks_router, prefix="/api")
 app.include_router(voice_notes_router, prefix="/api")
 app.include_router(document_extraction_router, prefix="/api")
@@ -1069,6 +1071,21 @@ async def startup():
     monitor_task = asyncio.create_task(background_job_monitor())
     _background_tasks.add(monitor_task)
     monitor_task.add_done_callback(_background_tasks.discard)
+
+    # Avisos no Telegram (leve — corre em todos os workers; cada grupo da
+    # fila é reclamado de forma atómica, por isso não há envios a dobrar).
+    from services.telegram_bot import configurar_webhook, telegram_configurado
+    if telegram_configurado():
+        from services.telegram_notifications import ciclo_de_envio
+        telegram_task = asyncio.create_task(ciclo_de_envio())
+        _background_tasks.add(telegram_task)
+        telegram_task.add_done_callback(_background_tasks.discard)
+        if _is_primary_worker:
+            webhook = await configurar_webhook()
+            if webhook.get("ok"):
+                logger.info("📨 Webhook do Telegram registado.")
+            else:
+                logger.warning(f"⚠️ Webhook do Telegram não registado: {webhook.get('motivo')}")
 
     # --- Tarefas pesadas: SÓ no worker primário em PRODUÇÃO ---
     if _is_production and _is_primary_worker:
