@@ -56,8 +56,9 @@ def _trabalho(job_id="job_a", **campos):
 def _modulos(fake_db):
     """Cada módulo importou `db` para si (a armadilha da ordem de import): patcha-se um a um."""
     from services import audit_trail_service as audit
+    from services import index_conversa as conversa
 
-    return [patch.object(m, "db", fake_db) for m in (api, st, ist, jobs, fin, audit)] + [patch("database.db", fake_db)]
+    return [patch.object(m, "db", fake_db) for m in (api, st, ist, jobs, fin, audit, conversa)] + [patch("database.db", fake_db)]
 
 
 class _Contexto:
@@ -205,6 +206,19 @@ class TestAFila:
                                              AsyncMock(return_value=TenantScope(network_ids=("rede-A",)))):
             r = await api.run_get_index_queue(INDEXADOR, tab="reviews")
         assert [p["id"] for p in r["items"]] == ["a3"]
+
+    @pytest.mark.asyncio
+    async def test_cada_linha_diz_quem_carregou_o_processo(self, fake_async_db):
+        await _semear_processos(fake_async_db)
+        await fake_async_db.users.insert_one({"id": "u-inter", "name": "Rui Intermediário", "role": "intermediario"})
+        await fake_async_db.processes.update_one({"id": "a1"}, {"$set": {"created_by_id": "u-inter"}})
+        with _Contexto(fake_async_db), patch("services.tenant_network.resolve_vista_scope",
+                                             AsyncMock(return_value=TenantScope(network_ids=("rede-A",)))):
+            r = await api.run_get_index_queue(INDEXADOR, tab="pending")
+        por_id = {p["id"]: p for p in r["items"]}
+        assert por_id["a1"]["loaded_by"] == {"name": "Rui Intermediário", "tipo": "utilizador"}
+        # sem autor conhecido não se inventa um: o ecrã mostra «—»
+        assert por_id["a2"]["loaded_by"] is None
 
     @pytest.mark.asyncio
     async def test_a_via_verde_nao_esta_na_fila(self, fake_async_db):

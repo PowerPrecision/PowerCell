@@ -76,13 +76,22 @@ export function totalDeCamposARever(trabalhos) {
   return listaDoServidor(trabalhos).reduce((n, t) => n + camposARever(t).length, 0);
 }
 
-/** `1234.5` → «1 234,50 €». Valor ausente → «—». Zero é um valor. */
-export function formatarDinheiro(valor) {
+/** `1234.5` → «1 234,50 €» (ou «1 234,50 £» num recibo em libras). Valor ausente → «—». Zero é um valor. */
+export function formatarDinheiro(valor, moeda = "EUR") {
   if (valor === null || valor === undefined || valor === "") return "—";
   const n = Number(valor);
   if (!Number.isFinite(n)) return "—";
-  return new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(n);
+  const currency = /^[A-Z]{3}$/.test(moeda || "") ? moeda : "EUR";
+  return new Intl.NumberFormat("pt-PT", { style: "currency", currency }).format(n);
 }
+
+/** País de um recibo estrangeiro (o servidor manda `PT`, `GB`, `FR`, `NL` ou `LU`). Portugal não se assinala. */
+export const NOME_DO_PAIS = {
+  GB: "Reino Unido",
+  FR: "França",
+  NL: "Países Baixos",
+  LU: "Luxemburgo",
+};
 
 /** Só dígitos (o servidor valida o dígito de controlo; aqui só se tira a pontuação). */
 export function normalizarNif(texto) {
@@ -134,9 +143,13 @@ export function edicoesDeConfirmacao(trabalho, chaves) {
   return saida;
 }
 
-/** Os trabalhos cujo NIF falta ou está em dúvida: é o que o diálogo de «Marcar como Indexado» pergunta. */
+/**
+ * Os trabalhos cujo NIF falta ou está em dúvida: é o que o diálogo de «Marcar como Indexado» pergunta.
+ * Um emprego estrangeiro (`country` ≠ `PT`) não tem NIF português: não se pergunta.
+ */
 export function trabalhosSemNifConfirmado(trabalhos) {
   return listaDoServidor(trabalhos).filter((t) => {
+    if (t?.country && t.country !== "PT") return false;
     const nif = t?.employer_nif;
     return valorDoCampo(nif) === null || (campoPrecisaDeRevisao(nif) && nif.edited_by_human !== true);
   });

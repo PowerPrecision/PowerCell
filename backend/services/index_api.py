@@ -37,6 +37,7 @@ from services import index_status as estado_do_index
 from services import index_store as store
 from services.index_ai import TIPOS_ANALISADOS, tipo_do_documento
 from services.index_ficheiros_do_s3 import registos_da_pasta_do_processo
+from services.index_conversa import CAMPOS_DE_QUEM_CARREGOU, nomes_de_quem_carregou
 from services.index_substituicao import ids_substituidos, titulares_e_substituidos
 from services.partner_titulares import titulares_do_caso
 from services.process_owner import calcular_empresa_dona
@@ -54,6 +55,8 @@ PROJECCAO_DA_FILA = {
     "assigned_indexacao_id": 1, "has_pending_review": 1, "index_alerts_open": 1,
     "indexed_at": 1, "indexed_by_name": 1, "index_stagnation_alerted_at": 1,
     "company_id": 1, "company_name": 1, CAMPO_REDE: 1,
+    # quem carregou o processo (coluna «Carregado por»)
+    **{campo: 1 for campo in CAMPOS_DE_QUEM_CARREGOU},
 }
 PROJECCAO_DOS_FICHEIROS = {
     "_id": 0, "id": 1, "process_id": 1, "filename": 1, "s3_path": 1, "ai_category": 1,
@@ -251,9 +254,14 @@ async def run_get_index_queue(
         for d in docs:
             por_processo.setdefault(d.get("process_id"), []).append(_ficheiro_dto(d, frozenset(substituidos)))
     empresas = await _empresas_da_fila(processos, scope)
+    carregadores = await nomes_de_quem_carregou(processos)
     return {
         "items": [
-            {**_processo_dto(p, por_processo.get(p["id"], [])), "company": empresas.get(p["id"])}
+            {
+                **_processo_dto(p, por_processo.get(p["id"], [])),
+                "company": empresas.get(p["id"]),
+                "loaded_by": carregadores.get(p["id"]),
+            }
             for p in processos
         ],
         "total": total,

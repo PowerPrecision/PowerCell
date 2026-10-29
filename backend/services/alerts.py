@@ -517,6 +517,10 @@ async def notify_new_client_registration(
 
     if notificacoes:
         await db.notifications.insert_many(notificacoes)
+        from services.telegram_notifications import agendar_de_notificacao
+
+        for notificacao in notificacoes:
+            await agendar_de_notificacao(notificacao)
 
 
 # ====================================================================
@@ -1014,12 +1018,16 @@ async def notify_property_match(
             "created_at": now
         }
 
+        from services.telegram_notifications import agendar_de_notificacao
+
         for destinatario in ids:
-            await db.notifications.insert_one({
+            notificacao = {
                 **base_da_notificacao,
                 "id": str(uuid.uuid4()),
                 "user_id": destinatario,
-            })
+            }
+            await db.notifications.insert_one(notificacao)
+            await agendar_de_notificacao(notificacao)
     
     # Se há agente responsável, enviar email (com verificação de preferências)
     if agent_email and matching_clients:

@@ -1827,6 +1827,14 @@ def _tamanho_anunciado(resposta_fetch) -> int:
     return 0
 
 
+def _nota_de_email_grande(tamanho: int) -> str:
+    """Aviso posto no início do corpo de um email importado sem anexos por exceder o tecto."""
+    return (
+        f"[PowerCell] Este email tem {tamanho / (1024*1024):.1f} MB e foi importado sem os anexos "
+        "(o texto pode vir incompleto). Abra-o no webmail original para ver os anexos.\n\n"
+    )
+
+
 def _fetch_all_from_folder_sync(
     account: EmailAccount,
     folder: str = "INBOX",
@@ -1838,7 +1846,7 @@ def _fetch_all_from_folder_sync(
     Versão síncrona para execução em thread.
     
     Otimizações de memória:
-    - Pré-verificação RFC822.SIZE: emails > 15MB são saltados (previne OOM)
+    - Pré-verificação RFC822.SIZE: emails > 15MB entram só com o 1.º MB (cabeçalhos e texto, sem anexos)
     - BODY.PEEK[]: lê sem marcar como ``\\Seen`` no servidor IMAP original
     
     Returns:
@@ -1883,20 +1891,26 @@ def _fetch_all_from_folder_sync(
                 # Antes de fazer fetch completo, verificar o tamanho do email.
                 # Isto evita carregar emails gigantes (>15MB) para a RAM.
                 email_size = _tamanho_anunciado(mail.fetch(num, "(RFC822.SIZE)"))
-                if email_size > MAX_EMAIL_SIZE:
+                parcial = email_size > MAX_EMAIL_SIZE
+                if parcial:
+                    # Antes o email era saltado e, como nunca chegava à BD, voltava a ser pedido (e
+                    # a dar o aviso) em CADA ciclo — e o utilizador nunca o via. Agora pede-se só o
+                    # princípio da mensagem (cabeçalhos + corpo de texto, que vêm antes dos anexos):
+                    # o email entra na caixa com uma nota, a deduplicação por Message-ID trava as
+                    # repetições e a RAM continua limitada a TAMANHO_PESADO por mensagem.
                     num_label = num.decode() if isinstance(num, bytes) else str(num)
-                    logger.warning(
+                    logger.info(
                         f"[Webmail Sync] Email #{num_label} excede limite de "
                         f"{MAX_EMAIL_SIZE / (1024*1024):.1f}MB "
-                        f"({email_size / (1024*1024):.1f}MB) — a saltar para prevenir OOM"
+                        f"({email_size / (1024*1024):.1f}MB) — importado sem anexos para prevenir OOM"
                     )
-                    continue
-                
-                # === OTIMIZAÇÃO: BODY.PEEK[] em vez de RFC822 ===
-                # Usa BODY.PEEK[] para ler o email SEM marcar como \Seen
-                # no servidor IMAP original, preservando o estado de leitura
-                # da caixa de correio da conta original.
-                fetch_result = mail.fetch(num, "(BODY.PEEK[])")
+                    fetch_result = mail.fetch(num, f"(BODY.PEEK[]<0.{TAMANHO_PESADO}>)")
+                else:
+                    # === OTIMIZAÇÃO: BODY.PEEK[] em vez de RFC822 ===
+                    # Usa BODY.PEEK[] para ler o email SEM marcar como \Seen
+                    # no servidor IMAP original, preservando o estado de leitura
+                    # da caixa de correio da conta original.
+                    fetch_result = mail.fetch(num, "(BODY.PEEK[])")
                 email_bytes = _extract_email_bytes_from_fetch(fetch_result)
                 if not email_bytes:
                     continue
@@ -1913,6 +1927,11 @@ def _fetch_all_from_folder_sync(
                 subject = decode_email_header(msg.get("Subject", ""))
                 date_str = msg.get("Date", "")
                 body_text, body_html, _ = get_email_body_with_embedded_images(msg)
+                if parcial:
+                    nota = _nota_de_email_grande(email_size)
+                    body_text = nota + (body_text or "")
+                    if body_html:
+                        body_html = f"<p><em>{html_module.escape(nota.strip())}</em></p>" + body_html
                 
                 # === SMART THREADING: Extrair cabeçalhos de rastreio ===
                 in_reply_to = msg.get("In-Reply-To", "")
@@ -1936,7 +1955,10 @@ def _fetch_all_from_folder_sync(
                 
                 # Extrair anexos (com id estável para download — Pacote DN.1)
                 attachments = []
-                for part in msg.walk():
+                # Num email parcial os anexos vêm cortados ou nem aparecem, e descarregar um deles
+                # obrigaria a ir buscar a mensagem inteira ao IMAP — exactamente o pico que o tecto
+                # evita. Não se listam: a nota no corpo manda abrir o email no webmail original.
+                for part in ([] if parcial else msg.walk()):
                     content_disposition = str(part.get("Content-Disposition", ""))
                     if "attachment" in content_disposition:
                         filename = part.get_filename() or "anexo"

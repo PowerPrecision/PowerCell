@@ -217,6 +217,8 @@ def calcular_trabalhos(
             period=membros[0][1].period,
             # a localidade vem do recibo mais recente que a tem (como os restantes campos)
             employer_location=next((j.employer_location for _, j in membros if j.employer_location), None),
+            country=next((j.country for _, j in membros if j.country), None),
+            currency=next((j.currency for _, j in membros if j.currency), None),
             source_document_ids=sorted({d for d, _ in grupos[chave] if d}),
             **campos,
         )

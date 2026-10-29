@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import WorkflowEditor from "../components/WorkflowEditor";
 import NotificationSettings from "../components/NotificationSettings";
+import TelegramSettings from "../components/TelegramSettings";
 import BulkDocumentUpload from "../components/BulkDocumentUpload";
 import { PageHeader } from "../components/shared/PageHeader";
 import { Spinner } from "../components/ui/Spinner";
@@ -444,6 +445,9 @@ const SettingsPage = () => {
             <div className="space-y-6">
               {/* Push Notifications */}
               <NotificationSettings />
+
+              {/* Telegram */}
+              <TelegramSettings />
               
               {/* Email Notifications */}
               <Card>

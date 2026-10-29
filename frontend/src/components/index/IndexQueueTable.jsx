@@ -9,6 +9,10 @@
  * o processo foi PARTILHADO por outra rede, di-lo — quem trata a fila precisa de saber de onde vem.
  * Sem empresa determinável mostra «—»: nunca se inventa uma.
  *
+ * A coluna «Carregado por» (Out 2026) diz quem carregou o processo (`loaded_by: {name, tipo}`, resolvido no
+ * servidor): um utilizador, o parceiro que trouxe a lead ou o próprio cliente pelo portal. Sem autor
+ * conhecido mostra «—» — nunca se põe no lugar o mediador ou o consultor atribuídos.
+ *
  * ORDENAÇÃO (Out 2026): os cabeçalhos de Processo, Empresa/Origem, Estado, Alertas e da data são botões que
  * pedem a ordem (`onOrdenar(coluna)`); `ordem` diz a que está em vigor e cada `<th>` leva `aria-sort`. A
  * tabela não ordena nada: a ordem é do servidor (a página seguinte tem de continuar a mesma lista).
@@ -67,6 +71,7 @@ export function IndexQueueTable({ itens, separador, onAbrir, mensagemVazia, orde
         <TableRow>
           <ColunaOrdenavel coluna="processo" rotulo="Processo" separador={separador} ordem={ordem} onOrdenar={onOrdenar} />
           <ColunaOrdenavel coluna="empresa" rotulo="Empresa/Origem" separador={separador} ordem={ordem} onOrdenar={onOrdenar} />
+          <TableHead>Carregado por</TableHead>
           <ColunaOrdenavel coluna="estado" rotulo="Estado" separador={separador} ordem={ordem} onOrdenar={onOrdenar} />
           <TableHead className="text-right">Documentos</TableHead>
           <ColunaOrdenavel coluna="alertas" rotulo="Alertas" separador={separador} ordem={ordem} onOrdenar={onOrdenar} className="text-right" />
@@ -96,6 +101,20 @@ export function IndexQueueTable({ itens, separador, onAbrir, mensagemVazia, orde
                   {p.company.other_network === true && (
                     <Badge variant="secondary" className="ml-1">
                       Partilhado
+                    </Badge>
+                  )}
+                </div>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
+            </TableCell>
+            <TableCell data-testid="index-queue-carregado-por">
+              {p.loaded_by?.name ? (
+                <div className="text-sm">
+                  {p.loaded_by.name}
+                  {p.loaded_by.tipo === "parceiro" && (
+                    <Badge variant="outline" className="ml-1">
+                      Parceiro
                     </Badge>
                   )}
                 </div>

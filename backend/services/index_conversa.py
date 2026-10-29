@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from database import db
 from services.realtime_delivery import entregar_a_utilizador
+from services.tenant_network import CAMPO_REDE, com_isolamento, rede_de_omissao
 from utils.input_sanitization import sanitize_multiline_text
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,23 @@ class MensagemDaConversa(BaseModel):
     text: str = Field(..., min_length=1, max_length=MAX_CARACTERES)
 
 
+def _rede(doc: dict) -> Optional[str]:
+    return str(doc.get(CAMPO_REDE) or "").strip() or rede_de_omissao()
+
+
+def _da_rede_dos_processos(processos: list[dict]) -> dict:
+    """Condição de rede para os CLIENTES referidos por processos: só os da rede de cada processo.
+
+    O cliente é global na rede, logo vive na rede do processo que o refere; um documento sem carimbo
+    pertence à rede de omissão (ou é legado sem rede, quando o processo também o é).
+    """
+    redes = {_rede(p) for p in processos}
+    valores: list[Optional[str]] = sorted(r for r in redes if r)
+    if None in redes or rede_de_omissao() in redes:
+        valores += [None, ""]
+    return {CAMPO_REDE: {"$in": valores}}
+
+
 def _ids(valor: Any) -> list[str]:
     if isinstance(valor, list):
         return [str(v) for v in valor if v]
@@ -86,7 +104,10 @@ async def parceiro_que_carregou(proc: dict) -> Optional[dict]:
     partner_id = str(proc.get("assigned_parceiro_id") or "").strip()
     if not partner_id or not proc.get("client_id"):
         return None
-    cliente = await db.clients.find_one({"id": proc["client_id"]}, {"_id": 0, "submitted_by_partner_id": 1})
+    cliente = await db.clients.find_one(
+        com_isolamento(_da_rede_dos_processos([proc]), {"id": proc["client_id"]}),
+        {"_id": 0, "submitted_by_partner_id": 1},
+    )
     if str((cliente or {}).get("submitted_by_partner_id") or "") != partner_id:
         return None
     from services.partner_accounts import parceiro_activo
@@ -120,6 +141,112 @@ async def resolver_quem_carregou(proc: dict) -> Optional[dict]:
         if u:
             return u
     return None
+
+
+# Campos do processo de que `nomes_de_quem_carregou` precisa (a fila junta-os à sua projecção).
+CAMPOS_DE_QUEM_CARREGOU = (
+    "id", "client_id", "assigned_parceiro_id", "created_by_id", "created_by_name", "created_by", "source", "fonte",
+)
+# Processos que o próprio cliente criou pelo formulário público (checklist completa): não há utilizador.
+_ORIGENS_DO_CLIENTE = frozenset({"onboarding_auto", "public_form"})
+ROTULO_CLIENTE_PORTAL = "Cliente (portal)"
+
+
+async def nomes_de_quem_carregou(processos: list[dict]) -> dict[str, dict]:
+    """`{process_id: {name, tipo}}` de quem carregou cada processo de uma LISTA (fila do Index, Out 2026).
+
+    Mostrar, não contactar: ao contrário de `resolver_quem_carregou`, um inactivo continua a ter o nome
+    (foi quem carregou) e NÃO se cai na atribuição — um mediador atribuído depois não carregou nada; sem
+    autor conhecido o processo fica fora do dicionário e o ecrã mostra «—». A ordem é a mesma:
+      0. o parceiro, quando o processo nasceu de uma lead dele;
+      1. o nome gravado à nascença (`created_by_name`) e depois o carimbo `created_by_id`;
+      2. o processo criado pelo próprio cliente no portal («Cliente (portal)»);
+      3. o email legado em `created_by`, e o autor do «Criou processo» no histórico (processos antigos).
+    Poucos pedidos por PÁGINA (nunca por linha); nunca levanta — é um enfeite de leitura.
+    """
+    saida: dict[str, dict] = {}
+    try:
+        await _nomes_de_quem_carregou(processos, saida)
+    except Exception as exc:  # noqa: BLE001 — sem nome, a fila mostra «—»
+        logger.warning("[INDEX] Quem carregou não resolvido: %s", type(exc).__name__)
+    return saida
+
+
+async def _nomes_de_quem_carregou(processos: list[dict], saida: dict[str, dict]) -> None:
+    procs = [p for p in processos if p.get("id")]
+    # 0. parceiro: o cliente foi submetido pelo parceiro atribuído ao processo
+    com_parceiro = {p["id"]: p for p in procs if p.get("assigned_parceiro_id") and p.get("client_id")}
+    if com_parceiro:
+        clientes = await db.clients.find(
+            com_isolamento(
+                _da_rede_dos_processos(list(com_parceiro.values())),
+                {"id": {"$in": sorted({p["client_id"] for p in com_parceiro.values()})}},
+            ),
+            {"_id": 0, "id": 1, "submitted_by_partner_id": 1, CAMPO_REDE: 1},
+        ).to_list(length=len(com_parceiro))
+        clientes_por_id = {c["id"]: c for c in clientes}
+        do_parceiro = {}
+        for pid, p in com_parceiro.items():
+            c = clientes_por_id.get(p["client_id"])
+            # o cliente tem de ser da rede DESTE processo (a consulta junta as redes da página)
+            if c and _rede(c) == _rede(p) and str(c.get("submitted_by_partner_id") or "") == str(p["assigned_parceiro_id"]):
+                do_parceiro[pid] = str(p["assigned_parceiro_id"])
+        if do_parceiro:
+            from services.partner_accounts import nomes_de_parceiros
+
+            nome_do_parceiro = await nomes_de_parceiros(list(do_parceiro.values()))
+            for pid, partner_id in do_parceiro.items():
+                if partner_id in nome_do_parceiro:
+                    saida[pid] = {"name": nome_do_parceiro[partner_id], "tipo": TIPO_PARCEIRO}
+
+    por_id: dict[str, list[str]] = {}
+    por_email: dict[str, list[str]] = {}
+    sem_autor: list[str] = []
+    for p in procs:
+        pid = p["id"]
+        if pid in saida:
+            continue
+        gravado = str(p.get("created_by_name") or "").strip()
+        if gravado:
+            saida[pid] = {"name": gravado, "tipo": "utilizador"}
+        elif p.get("created_by_id"):
+            por_id.setdefault(str(p["created_by_id"]), []).append(pid)
+        elif {p.get("source"), p.get("fonte"), p.get("created_by")} & _ORIGENS_DO_CLIENTE:
+            saida[pid] = {"name": ROTULO_CLIENTE_PORTAL, "tipo": "cliente"}
+        elif "@" in str(p.get("created_by") or ""):
+            por_email.setdefault(str(p["created_by"]).strip().lower(), []).append(pid)
+        else:
+            sem_autor.append(pid)
+
+    # 3. processos antigos sem carimbo: o primeiro «Criou processo» do histórico
+    if sem_autor:
+        registos = await db.history.find(
+            {"process_id": {"$in": sem_autor}, "action": {"$regex": "^Criou processo"}, "user_id": {"$ne": None}},
+            {"_id": 0, "process_id": 1, "user_id": 1, "created_at": 1},
+        ).sort("created_at", 1).to_list(length=len(sem_autor) * 5)
+        vistos: set[str] = set()
+        for r in registos:
+            if r.get("process_id") in vistos:
+                continue
+            vistos.add(r.get("process_id"))
+            por_id.setdefault(str(r["user_id"]), []).append(r["process_id"])
+
+    if por_id:
+        for u in await db.users.find(
+            {"id": {"$in": sorted(por_id)}}, {"_id": 0, "id": 1, "name": 1, "role": 1},
+        ).to_list(length=len(por_id)):
+            nome = str(u.get("name") or "").strip()
+            if nome and u.get("role") != "parceiro":
+                for pid in por_id.get(u["id"], []):
+                    saida[pid] = {"name": nome, "tipo": "utilizador"}
+    if por_email:
+        for u in await db.users.find(
+            {"email": {"$in": sorted(por_email)}}, {"_id": 0, "email": 1, "name": 1},
+        ).to_list(length=len(por_email)):
+            nome = str(u.get("name") or "").strip()
+            for pid in por_email.get(str(u.get("email") or "").strip().lower(), []):
+                if nome:
+                    saida[pid] = {"name": nome, "tipo": "utilizador"}
 
 
 async def _carregar(process_id: str) -> dict:

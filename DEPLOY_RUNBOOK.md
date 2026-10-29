@@ -188,3 +188,21 @@ python scripts/medir_datas_de_nascimento.py              # «com data em claro: 
 * «cifradas e ILEGÍVEIS» > 0 = datas cifradas com outra chave. O script não lhes toca.
 * **Custo assumido:** o filtro «Sub35» passa a ser por ANO de nascimento e deixa de apanhar quem nasceu em
   `ano_corrente − 36` e ainda não fez anos (a etiqueta no cartão continua exacta).
+
+## Parte F — Notificações no Telegram (Out 2026)
+
+Sem `TELEGRAM_BOT_TOKEN` o canal fica desligado e nada muda. Para ligar:
+
+1. No Telegram, falar com **@BotFather** → `/newbot` → dar nome (ex.: «PowerCell Avisos») e username
+   (tem de acabar em `bot`). Guardar o token que ele devolve. Opcional: `/setuserpic`, `/setdescription`.
+2. No Render, serviço **web** (não é preciso no worker), *Environment*:
+   - `TELEGRAM_BOT_TOKEN` = o token do passo 1;
+   - `TELEGRAM_WEBHOOK_SECRET` = uma cadeia aleatória longa (só `A-Z a-z 0-9 _ -`), ex.
+     `python -c "import secrets; print(secrets.token_urlsafe(32))"`;
+   - `FRONTEND_URL` já tem de existir (é o link do botão «Abrir no PowerCell»);
+   - opcionais: `TELEGRAM_BOT_USERNAME` (poupa um `getMe`), `TELEGRAM_JANELA_SEGUNDOS` (90 por omissão:
+     quanto tempo se juntam os avisos do mesmo processo), `TELEGRAM_WEBHOOK_URL` (por omissão
+     `RENDER_EXTERNAL_URL` + `/api/telegram/webhook`).
+3. Deploy. No arranque o worker primário regista o webhook: procurar nos logs «📨 Webhook do Telegram
+   registado.» (ou «⚠️ Webhook do Telegram não registado: …» com o motivo).
+4. Cada utilizador liga a sua conta em **Definições › Notificações › Ligar Telegram**.

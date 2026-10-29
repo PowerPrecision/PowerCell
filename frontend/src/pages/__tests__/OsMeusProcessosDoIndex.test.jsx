@@ -99,13 +99,15 @@ beforeEach(() => {
 });
 
 describe("Os Meus Processos — perfil Index", () => {
-  it("desenha as seis colunas de triagem, por esta ordem", async () => {
+  it("desenha as sete colunas de triagem, por esta ordem", async () => {
     montar();
     const tabela = await screen.findByTestId("index-queue-table");
     const colunas = within(tabela).getAllByRole("columnheader").map((c) => c.textContent.trim());
-    // a sétima é a das acções (só para leitores de ecrã)
-    expect(colunas.slice(0, 6)).toEqual(["Processo", "Empresa/Origem", "Estado", "Documentos", "Alertas", "Entrada"]);
-    expect(colunas[6]).toBe("Acções");
+    // a oitava é a das acções (só para leitores de ecrã)
+    expect(colunas.slice(0, 7)).toEqual(
+      ["Processo", "Empresa/Origem", "Carregado por", "Estado", "Documentos", "Alertas", "Entrada"],
+    );
+    expect(colunas[7]).toBe("Acções");
   });
 
   it("pede ao servidor SÓ os meus (mine=true) e a fila por tratar", async () => {
@@ -125,9 +127,9 @@ describe("Os Meus Processos — perfil Index", () => {
     expect(primeira.getByText("Casa Verde, Lda")).toBeInTheDocument();
     expect(primeira.getByText("Partilhado")).toBeInTheDocument();
     expect(primeira.getByText("Em tratamento")).toBeInTheDocument();
-    expect(within(primeira.getAllByRole("cell")[3]).getByText(/^9/)).toBeInTheDocument();     // documentos
+    expect(within(primeira.getAllByRole("cell")[4]).getByText(/^9/)).toBeInTheDocument();     // documentos
     expect(primeira.getByText("(3 por analisar)")).toBeInTheDocument();
-    expect(within(primeira.getAllByRole("cell")[4]).getByText("2")).toBeInTheDocument();   // alertas abertos
+    expect(within(primeira.getAllByRole("cell")[5]).getByText("2")).toBeInTheDocument();   // alertas abertos
     expect(primeira.getByText("Sem actividade")).toBeInTheDocument();
     expect(within(linhas[1]).getByTestId("index-queue-origem")).toHaveTextContent("—");
   });

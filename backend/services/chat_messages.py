@@ -152,9 +152,15 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
         await db.chat_messages.insert_one(msg_doc)
 
         # Notificar todos os membros do grupo
+        from services.telegram_notifications import agendar as agendar_telegram
+
         for member in group.get("members", []):
             member_id = member.get("user_id")
             if member_id and member_id != user_id:
+                await agendar_telegram(
+                    member_id, "chat_message",
+                    conversa=f"grupo:{message.group_id}", remetente=user.get("name", ""),
+                )
                 await entregar_a_utilizador(
                     member_id,
                     "new_chat_message",
@@ -200,6 +206,12 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
         await db.chat_messages.insert_one(msg_doc)
 
         # Notificar destinatário
+        from services.telegram_notifications import agendar as agendar_telegram
+
+        await agendar_telegram(
+            message.receiver_id, "chat_message",
+            conversa=f"direta:{user_id}", remetente=user.get("name", ""),
+        )
         await entregar_a_utilizador(
             message.receiver_id,
             "new_chat_message",
@@ -282,9 +294,15 @@ async def run_upload_message_with_attachment(
         await db.chat_messages.insert_one(msg_doc)
 
         # Notificar membros
+        from services.telegram_notifications import agendar as agendar_telegram
+
         for member in group.get("members", []):
             member_id = member.get("user_id")
             if member_id and member_id != user_id:
+                await agendar_telegram(
+                    member_id, "chat_message",
+                    conversa=f"grupo:{group_id}", remetente=user.get("name", ""),
+                )
                 await entregar_a_utilizador(
                     member_id,
                     "new_chat_message",
@@ -320,6 +338,12 @@ async def run_upload_message_with_attachment(
 
         await db.chat_messages.insert_one(msg_doc)
 
+        from services.telegram_notifications import agendar as agendar_telegram
+
+        await agendar_telegram(
+            receiver_id, "chat_message",
+            conversa=f"direta:{user_id}", remetente=user.get("name", ""),
+        )
         await entregar_a_utilizador(
             receiver_id,
             "new_chat_message",

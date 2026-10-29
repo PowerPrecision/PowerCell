@@ -364,6 +364,9 @@ class TestNivel2Estagnado:
         r2 = await sla.correr_sla_do_index(agora=AGORA + timedelta(hours=1))
         assert r2["nivel2"]["estagnados"] == 1 and r2["nivel2"]["alertados"] == 0
         assert len(await _avisos(bd, user_id="ix1")) == 1
+        # O relógio do SLA é simulado; o da junção de avisos do mesmo processo (10 min) é real.
+        # Cinco dias úteis depois a janela já fechou: fecha-se à mão para o lembrete não se juntar.
+        await bd.notifications.update_many({}, {"$set": {"agrupar_ate": "2000-01-01T00:00:00+00:00"}})
         r3 = await sla.correr_sla_do_index(agora=AGORA + _depois_uteis(5) + timedelta(minutes=1))
         assert r3["nivel2"]["alertados"] == 1 and len(await _avisos(bd, user_id="ix1")) == 2
 

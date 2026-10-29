@@ -519,6 +519,21 @@ async def parceiro_activo(partner_id: str) -> Optional[dict]:
     return {"id": parceiro["id"], "name": parceiro.get("name") or "Parceiro", "email": parceiro.get("email")}
 
 
+async def nomes_de_parceiros(partner_ids: list[str]) -> dict[str, str]:
+    """``{partner_id: nome}`` de VÁRIOS parceiros, num só pedido (coluna «Carregado por» da fila do Index).
+
+    Mostrar, não contactar: uma conta suspensa continua a ter o nome (foi quem carregou); só a
+    eliminada fica de fora. Nunca devolve mais do que o nome.
+    """
+    ids = sorted({str(i) for i in partner_ids if i})
+    if not ids:
+        return {}
+    parceiros = await db.partners.find(
+        {"id": {"$in": ids}, "status": {"$ne": ESTADO_ELIMINADO}}, {"_id": 0, "id": 1, "name": 1},
+    ).to_list(length=len(ids))
+    return {p["id"]: p.get("name") or "Parceiro" for p in parceiros}
+
+
 async def carregar_parceiro_gerivel(partner_id: str, actor: dict) -> dict:
     """O parceiro, se quem actua o pode gerir. **404** caso contrário —
     igual ao de «não existe» (nunca 403: seria um directório de contas)."""

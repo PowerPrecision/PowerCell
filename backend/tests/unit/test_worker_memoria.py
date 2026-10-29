@@ -12,6 +12,7 @@ import asyncio
 import base64
 import email
 import email.message
+import re
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -114,6 +115,10 @@ class _ImapFalso:
         dados = self.mensagens[num]
         if "RFC822.SIZE" in what:
             return "OK", [b"%s (RFC822.SIZE %d)" % (num, len(dados))]
+        parcial = re.search(r"BODY\.PEEK\[\]<0\.(\d+)>", what)
+        if parcial:
+            dados = dados[: int(parcial.group(1))]
+            return "OK", [(b"%s (BODY[]<0> {%d}" % (num, len(dados)), dados), b")"]
         return "OK", [(b"%s (BODY[] {%d}" % (num, len(dados)), dados), b")"]
 
     def logout(self):
@@ -157,13 +162,20 @@ class TestOLacoDeSincronizacao:
         _correr(mensagens)
         assert len(chamadas) == 1
 
-    def test_o_tecto_de_tamanho_salta_o_email_sem_o_descarregar(self, monkeypatch):
+    def test_o_tecto_de_tamanho_importa_o_email_sem_o_descarregar_inteiro(self, monkeypatch):
+        # Antes era saltado: nunca chegava à BD e repetia o aviso em cada ciclo de sincronização.
         monkeypatch.setenv("IMAP_MAX_EMAIL_BYTES", str(200 * 1024))
-        mensagens = {b"1": _mensagem(1, anexo=400 * 1024), b"2": _mensagem(2)}
+        mensagens = {b"1": _mensagem(1, anexo=3 * 1024 * 1024), b"2": _mensagem(2)}
         res, falso = _correr(mensagens)
-        assert [e["subject"] for e in res["emails"]] == ["Assunto 2"]
-        # o email grande só foi PERGUNTADO (RFC822.SIZE); o corpo nunca foi pedido
+        assert [e["subject"] for e in res["emails"]] == ["Assunto 1", "Assunto 2"]
+        grande = res["emails"][0]
+        assert grande["message_id"] == "<m1@x.pt>"  # dá para deduplicar no ciclo seguinte
+        assert "corpo 1" in grande["body"]
+        assert "importado sem os anexos" in grande["body"]
+        assert grande["attachments"] == []
+        # o email grande nunca foi pedido inteiro: só o princípio (cabeçalhos + texto)
         assert (b"1", "(BODY.PEEK[])") not in falso.fetches
+        assert any(n == b"1" and "BODY.PEEK[]<0." in w for n, w in falso.fetches)
 
     def test_o_tamanho_do_anexo_sai_sem_descodificar(self):
         mensagens = {b"1": _mensagem(1, anexo=50_000)}

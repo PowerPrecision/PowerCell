@@ -8,8 +8,10 @@ Funções utilitárias para enviar notificações via WebSocket.
 
 import logging
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import uuid
+
+from pymongo import ReturnDocument
 
 from database import db
 from services.websocket_manager import WSEventType
@@ -74,6 +76,66 @@ async def _should_send_inapp_notification(user_id: str, notification_type: str) 
     return True
 
 
+# Janela FIXA (desde o primeiro aviso) em que os avisos do mesmo processo se juntam.
+JANELA_DE_AGRUPAMENTO_NA_APP = timedelta(minutes=10)
+MAX_ITENS_DO_GRUPO = 20
+
+
+def _item_do_grupo(title: str, message: str, tipo: str, quando: datetime) -> dict:
+    return {"title": title, "message": message, "type": tipo, "created_at": quando.isoformat()}
+
+
+def _mensagem_do_grupo(total: int, numero: Optional[str], itens: list) -> str:
+    titulos: list[str] = []
+    for item in reversed(itens):
+        titulo = (item.get("title") or "").strip()
+        if titulo and titulo not in titulos:
+            titulos.append(titulo)
+    resumo = ", ".join(titulos[:3]) + ("…" if len(titulos) > 3 else "")
+    onde = f"no processo nº {numero}" if numero else "neste processo"
+    return f"{total} novidades {onde}" + (f": {resumo}" if resumo else "")
+
+
+async def _juntar_ao_aviso_do_processo(
+    user_id: str, process_id: str, title: str, message: str, tipo: str, link: Optional[str]
+) -> Optional[dict]:
+    """Junta o aviso ao aviso por ler do mesmo processo, se a janela ainda estiver aberta."""
+    agora = datetime.now(timezone.utc)
+    atual = await db.notifications.find_one_and_update(
+        {
+            "user_id": user_id,
+            "process_id": process_id,
+            "read": False,
+            "agrupar_ate": {"$gte": agora.isoformat()},
+        },
+        {
+            "$inc": {"grupo_total": 1},
+            "$push": {"grupo": {"$each": [_item_do_grupo(title, message, tipo, agora)], "$slice": -MAX_ITENS_DO_GRUPO}},
+            "$set": {"created_at": agora.isoformat(), "type": tipo, **({"link": link} if link else {})},
+        },
+        sort=[("created_at", -1)],
+        projection={"_id": 0},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not atual:
+        return None
+
+    # Só o número: há avisos (os do Index) que por regra não levam o nome do cliente.
+    processo = await db.processes.find_one({"id": process_id}, {"_id": 0, "process_number": 1}) or {}
+    numero = processo.get("process_number")
+    campos = {
+        "title": f"{atual.get('grupo_total', 2)} novidades",
+        "message": _mensagem_do_grupo(
+            int(atual.get("grupo_total") or 2),
+            str(numero) if numero not in (None, "") else None,
+            atual.get("grupo") or [],
+        ),
+        "agrupada": True,
+    }
+    await db.notifications.update_one({"id": atual["id"], "user_id": user_id}, {"$set": campos})
+    return {**atual, **campos}
+
+
 async def send_realtime_notification(
     user_id: str,
     title: str,
@@ -100,11 +162,34 @@ async def send_realtime_notification(
     Returns:
         Notificação criada, ou None se o utilizador desactivou este tipo
     """
+    # Telegram: canal à parte, com as suas próprias preferências (por isso
+    # antes do filtro in-app). Agrupa por processo e nunca levanta.
+    from services.telegram_notifications import agendar as agendar_telegram
+
+    await agendar_telegram(user_id, notification_type, process_id=process_id, link=link)
+
+    # Ruído e avisos de processos de outros ficam de fora (ver `notification_policy`).
+    from services.notification_policy import deve_notificar
+
+    if not await deve_notificar(user_id, notification_type, process_id, bd=db):
+        return None
+
     # Verificar preferências do utilizador
     if not await _should_send_inapp_notification(user_id, notification_type):
         logger.info(f"Notificação in-app bloqueada para {user_id} (tipo: {notification_type})")
         return None
-    
+
+    # A rajada do mesmo processo junta-se ao aviso por ler que já lá está: um só
+    # aviso no sino, sem som/toast/push repetidos (o id não muda).
+    if save_to_db and process_id:
+        agrupada = await _juntar_ao_aviso_do_processo(
+            user_id, process_id, title, message, notification_type, link
+        )
+        if agrupada:
+            await entregar_a_utilizador(user_id, WSEventType.NEW_NOTIFICATION, agrupada)
+            return agrupada
+
+    agora = datetime.now(timezone.utc)
     notification = {
         "id": str(uuid.uuid4()),
         "user_id": user_id,
@@ -114,9 +199,15 @@ async def send_realtime_notification(
         "link": link,
         "process_id": process_id,
         "read": False,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": agora.isoformat()
     }
-    
+    if process_id:
+        notification.update({
+            "grupo_total": 1,
+            "grupo": [_item_do_grupo(title, message, notification_type, agora)],
+            "agrupar_ate": (agora + JANELA_DE_AGRUPAMENTO_NA_APP).isoformat(),
+        })
+
     # Guardar na base de dados
     if save_to_db:
         await db.notifications.insert_one({**notification, "_id": notification["id"]})
@@ -185,18 +276,22 @@ async def notify_process_update(
         title = "Novo Processo Criado"
         message = f"{actor_name} criou um novo processo para {client_name}"
         event_type = WSEventType.PROCESS_CREATED
+        tipo = "process_created"
     elif action == "status_changed":
         title = "Estado do Processo Alterado"
         message = f"O processo de {client_name} mudou para {details}"
         event_type = WSEventType.PROCESS_STATUS_CHANGED
+        tipo = "process_status_change"
     elif action == "assigned":
         title = "Processo Atribuído"
         message = f"Foste atribuído ao processo de {client_name}"
         event_type = WSEventType.PROCESS_ASSIGNED
+        tipo = "process_assigned"
     else:
         title = "Processo Actualizado"
         message = f"O processo de {client_name} foi actualizado"
         event_type = WSEventType.PROCESS_UPDATED
+        tipo = "process_updated"  # ruído: a política deixa-o de fora
     
     # BUGFIX (E2E — privacidade das notificações, Set 2026): a notificação
     # (in-app) é enviada ESTRITAMENTE para os utilizadores atribuídos ao
@@ -212,8 +307,8 @@ async def notify_process_update(
             user_id=user_id,
             title=title,
             message=message,
-            notification_type="info",
-            link=f"/processos/{process_id}",
+            notification_type=tipo,
+            link=f"/process/{process_id}",
             process_id=process_id
         )
     

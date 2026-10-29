@@ -119,6 +119,10 @@ class TrabalhoProfissional(BaseModel):
     #: Opcional e NÃO revisável: serve a pesquisa avançada por zona e nunca põe um trabalho «a rever».
     #: Análises anteriores à pesquisa avançada não a têm até serem extraídas outra vez.
     employer_location: Optional[str] = Field(default=None, max_length=80)
+    #: País do recibo (`PT`, `GB`, `FR`, `NL`, `LU`) e moeda do líquido (`EUR`, `GBP`). Não revisáveis.
+    #: `None` nas análises anteriores aos recibos estrangeiros (eram todos lidos como portugueses, em euros).
+    country: Optional[str] = Field(default=None, pattern=r"^[A-Z]{2}$")
+    currency: Optional[str] = Field(default=None, pattern=r"^[A-Z]{3}$")
     #: Data de admissão (YYYY-MM-DD). Só vem de uma Declaração de Efetividade (um recibo não a traz) e
     #: não é revisável por pessoas (sem editor): se a declaração a leu com dúvida, não chega aqui.
     admission_date: Optional[str] = None

@@ -141,4 +141,8 @@ class TestNaoSeGuardaTextoDeErros:
             if isinstance(no, ast.Call) and isinstance(no.func, ast.Name) and no.func.id == "ResultadoDaAnalise":
                 for kw in no.keywords:
                     if kw.arg == "motivo":
-                        assert "classificar_falha" in ast.unparse(kw.value) or isinstance(kw.value, ast.Constant), ast.unparse(no)
+                        # `_so_codigo` só deixa passar chaves de `MOTIVOS` (os códigos que `_pedir` devolve)
+                        assert (
+                            "classificar_falha" in ast.unparse(kw.value) or "_so_codigo" in ast.unparse(kw.value)
+                            or isinstance(kw.value, ast.Constant)
+                        ), ast.unparse(no)

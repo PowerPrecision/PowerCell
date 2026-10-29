@@ -152,6 +152,14 @@ const NotificationsDropdown = () => {
     onNotification: useCallback((notification) => {
       if (!notification) return;
 
+      // Aviso do mesmo processo que se juntou a um aviso por ler: o servidor
+      // devolve o MESMO id actualizado. Substitui-se na lista e sobe ao topo,
+      // sem contar outra vez nem tocar som/toast (é o que tira o ruído).
+      if (notification.agrupada && notification.id) {
+        setNotifications(prev => [notification, ...prev.filter(n => n.id !== notification.id)].slice(0, 50));
+        return;
+      }
+
       // Increment unread counter immediately
       setUnreadCount(prev => prev + 1);
       previousUnreadCount.current += 1;

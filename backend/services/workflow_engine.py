@@ -277,7 +277,10 @@ async def execute_action(rule: dict, context: dict) -> bool:
                         "[WORKFLOW] Regra '%s': sem destinatários do cargo %r na rede do processo %s.",
                         rule.get("name"), config["target_role"], context.get("process_id"),
                     )
+                from services.telegram_notifications import agendar as agendar_telegram
+
                 for user_id in destinatarios[:20]:
+                    await agendar_telegram(user_id, "automation", process_id=context.get("process_id"))
                     await db.notifications.insert_one({
                         "id": str(uuid.uuid4()),
                         "user_id": user_id,
@@ -290,6 +293,11 @@ async def execute_action(rule: dict, context: dict) -> bool:
                         "rule_name": rule["name"],
                     })
             elif config.get("target_user_id"):
+                from services.telegram_notifications import agendar as agendar_telegram
+
+                await agendar_telegram(
+                    config["target_user_id"], "automation", process_id=context.get("process_id"),
+                )
                 await db.notifications.insert_one({
                     "id": str(uuid.uuid4()),
                     "user_id": config["target_user_id"],
