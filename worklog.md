@@ -12746,3 +12746,10 @@ Pedido: o Master com uma empresa escolhida via os parceiros de todas as redes; e
 - As mensagens com o parceiro ficam em `chat_messages` com `sender_tipo`/`receiver_tipo: "parceiro"`: ficam de fora do chat interno (lista de conversas e contador de não lidas), e o parceiro só vê as que lhe dizem respeito. Recebe um email na primeira mensagem por ler. O Index é avisado por notificação.
 - Portal do Parceiro: `GET/POST /api/partner/cases/{id}/conversa-index` (via `resolver_caso`; só num processo; fechado recusa) e cartão «Conversa com a equipa de análise» no caso. Na bancada aparece «Nome (Parceiro)».
 - Testes: +6 em `test_index_conversa.py`, `ConversaComAEquipa.test.jsx` (3), +1 em `ConversaDoProcesso.test.jsx`. Backend unitário 12 775 passados; os 2 que falham (`analyze_document` sem justificação no inventário do histórico e `index_document_content` com a condição genérica) vêm do commit «Analisar por ficheiro» de outra linha de trabalho e não deste. Frontend completo 4 532. Não verificado no browser nem em produção.
+
+
+## 2026-10-29 — Webmail Sync: emails acima do tecto deixam de se perder
+- Sintoma (Flavio, logs do Render): `[Webmail Sync] Email #1790 excede limite de 15.0MB (21.6MB) — a saltar` repetido.
+- Causa: o email grande era saltado ANTES de se ler o Message-ID, por isso nunca chegava a `db.emails`: voltava a ser pedido e a dar o aviso em cada ciclo, e o utilizador nunca o via na caixa.
+- Correcção (`_fetch_all_from_folder_sync`): acima de `IMAP_MAX_EMAIL_BYTES` pede-se só `BODY.PEEK[]<0.1MB>` (cabeçalhos + texto, que vêm antes dos anexos). O email entra com uma nota no início do corpo («importado sem os anexos… abra-o no webmail original») e sem lista de anexos (descarregar um obrigaria a ir buscar a mensagem inteira ao IMAP). A deduplicação por Message-ID passa a travar as repetições; o log desce para INFO. RAM continua limitada a ~1 MB por mensagem.
+- Testes: `test_worker_memoria.py` (o teste do tecto reescrito; falha sem a correcção). Não verificado contra o IMAP real.
