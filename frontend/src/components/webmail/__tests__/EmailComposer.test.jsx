@@ -192,3 +192,20 @@ describe("EmailComposer — anexos", () => {
     expect(onUploadFiles).toHaveBeenCalledWith([ficheiro]);
   });
 });
+
+describe("EmailComposer — anexar do PowerCell", () => {
+  it("sem o callback, o botão não aparece", () => {
+    render(<EmailComposer {...props()} />);
+
+    expect(screen.queryByRole("button", { name: /Anexar do PowerCell/ })).not.toBeInTheDocument();
+  });
+
+  it("com o callback, o botão abre o seletor de documentos", async () => {
+    const utilizador = userEvent.setup();
+    render(<EmailComposer {...props({ onAttachDocuments: vi.fn() })} />);
+
+    await utilizador.click(screen.getByRole("button", { name: /Anexar do PowerCell/ }));
+
+    expect(await screen.findByRole("textbox", { name: "Pesquisar processo" })).toBeInTheDocument();
+  });
+});

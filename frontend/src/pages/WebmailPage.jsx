@@ -1546,6 +1546,16 @@ const WebmailPage = () => {
     setComposerData((d) => ({ ...d, [campo]: valor }));
   }, []);
 
+  // «Anexar do PowerCell»: o servidor já copiou os ficheiros para anexos
+  // temporários; entram na mesma lista do upload (sem repetir o mesmo id).
+  const handleAttachDocuments = useCallback((anexos) => {
+    if (!Array.isArray(anexos) || anexos.length === 0) return;
+    setUploadAttachments((prev) => {
+      const ids = new Set(prev.map((a) => a.id));
+      return [...prev, ...anexos.filter((a) => a?.id && !ids.has(a.id))];
+    });
+  }, []);
+
   const handleRemoveUpload = useCallback((fileId) => {
     setUploadAttachments((prev) => prev.filter((a) => a.id !== fileId));
   }, []);
@@ -2068,6 +2078,7 @@ const WebmailPage = () => {
           onCancel={() => setComposerOpen(false)}
           onUploadFiles={uploadFiles}
           onRemoveAttachment={handleRemoveUpload}
+          onAttachDocuments={handleAttachDocuments}
         />
 
 

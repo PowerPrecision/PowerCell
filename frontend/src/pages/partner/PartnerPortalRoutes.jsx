@@ -15,6 +15,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { PartnerAuthProvider } from "@/contexts/PartnerAuthContext";
 import PartnerAccountPage from "@/pages/partner/PartnerAccountPage";
+import PartnerCalculatorsPage from "@/pages/partner/PartnerCalculatorsPage";
 import PartnerCasePage from "@/pages/partner/PartnerCasePage";
 import PartnerDashboardPage from "@/pages/partner/PartnerDashboardPage";
 import PartnerInvitePage from "@/pages/partner/PartnerInvitePage";
@@ -32,6 +33,7 @@ export default function PartnerPortalRoutes() {
           <Route index element={<PartnerDashboardPage />} />
           <Route path="novo-lead" element={<PartnerLeadPage />} />
           <Route path="casos/:caseId" element={<PartnerCasePage />} />
+          <Route path="calculadoras" element={<PartnerCalculatorsPage />} />
           <Route path="conta" element={<PartnerAccountPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/parceiro" replace />} />

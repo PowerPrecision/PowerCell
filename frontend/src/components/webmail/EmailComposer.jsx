@@ -14,6 +14,7 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
+  FolderOpen,
   Mail,
   Send,
   Upload,
@@ -43,6 +44,7 @@ import { sanitizeEmailHtml, htmlToText } from "../../utils/sanitize";
 import { formatFileSize, getAttachmentIcon } from "./webmailFormatters";
 import CampoDeDestinatarios from "./CampoDeDestinatarios";
 import GerirContactosDialog from "./GerirContactosDialog";
+import AnexarDoPowerCellDialog from "./AnexarDoPowerCellDialog";
 
 /**
  * @param {object} props
@@ -61,6 +63,9 @@ import GerirContactosDialog from "./GerirContactosDialog";
  * @param {() => void} props.onCancel
  * @param {(ficheiros: File[]) => void} props.onUploadFiles
  * @param {(id: string) => void} props.onRemoveAttachment
+ * @param {(anexos: Array) => void} [props.onAttachDocuments] Anexos copiados
+ *   dos documentos do PowerCell (mesmo formato do upload). Sem ele, o botão
+ *   «Anexar do PowerCell» não aparece.
  * @param {boolean} [props.canUseGlobalAccounts] Só admin/CEO/diretor escolhem conta.
  * @param {string} [props.effectiveRole] Decide a frase mostrada a quem não escolhe.
  * @param {string} [props.resolvedSignature] Assinatura HTML da empresa activa.
@@ -81,12 +86,14 @@ const EmailComposer = ({
   onCancel,
   onUploadFiles,
   onRemoveAttachment,
+  onAttachDocuments,
   canUseGlobalAccounts = false,
   effectiveRole = "",
   resolvedSignature = "",
 }) => {
   const fileInputRef = useRef(null);
   const [contactosAberto, setContactosAberto] = useState(false);
+  const [documentosAberto, setDocumentosAberto] = useState(false);
 
   const aoClicarNaZona = () => fileInputRef.current?.click();
 
@@ -279,6 +286,26 @@ const EmailComposer = ({
               </div>
             )}
           </div>
+
+          {onAttachDocuments && (
+            <div className="flex justify-end -mt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setDocumentosAberto(true)}
+              >
+                <FolderOpen className="h-4 w-4 mr-2" />
+                Anexar do PowerCell
+              </Button>
+              <AnexarDoPowerCellDialog
+                open={documentosAberto}
+                onOpenChange={setDocumentosAberto}
+                processId={data.process_id || null}
+                onAnexados={onAttachDocuments}
+              />
+            </div>
+          )}
 
           {/* Uploaded files list — PACOTE 12 (Eixo 2): o upload devolve
               file_name/file_size (backend); chips aceitam ambos os

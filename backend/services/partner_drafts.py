@@ -162,7 +162,9 @@ async def comprovativo_do_caso(client_id: str, *, desde: Optional[str] = None) -
     `desde` (ISO) só conta os enviados depois dessa data — é o que impede o
     comprovativo que a equipa rejeitou de libertar a lead outra vez.
     """
-    consulta: dict[str, Any] = {"client_id": client_id, "comprovativo_de_pagamento": True}
+    consulta: dict[str, Any] = {
+        "client_id": client_id, "comprovativo_de_pagamento": True, "is_deleted": {"$ne": True},
+    }
     docs = await db.documents.find(consulta, {"_id": 0}).to_list(50)
 
     melhor: Optional[dict] = None

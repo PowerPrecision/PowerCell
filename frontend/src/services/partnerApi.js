@@ -103,6 +103,15 @@ export const obterUrlDeDescarga = (caseId, fileId) =>
     )
   );
 
+/** Anula um envio do próprio parceiro (enganou-se no ficheiro). O servidor não apaga nada:
+ *  guarda-o à parte e o pedido, se era o único ficheiro, volta a pendente. */
+export const anularEnvio = (caseId, fileId) =>
+  dados(
+    partnerHttp.post(
+      `/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(fileId)}/anular`
+    )
+  );
+
 /**
  * Os três passos de um envio: pedir o URL → `PUT` no S3 → confirmar.
  *

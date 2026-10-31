@@ -349,7 +349,9 @@ def _categoria_em_texto(doc: dict) -> str:
 
 
 async def _documentos_do_caso(caso: Caso) -> list[dict]:
-    docs = await db.documents.find(_consulta_de_pedidos(caso), {"_id": 0, "file_content": 0}).to_list(2000)
+    # Um envio anulado pelo parceiro (soft delete) não volta a aparecer.
+    consulta = {"$and": [_consulta_de_pedidos(caso), {"is_deleted": {"$ne": True}}]}
+    docs = await db.documents.find(consulta, {"_id": 0, "file_content": 0}).to_list(2000)
     return docs
 
 
@@ -414,6 +416,9 @@ def _ficheiros_de(doc: dict, partner_id: str) -> list[dict]:
             "category": _categoria_do_ficheiro(doc),
             "titular_marcado": entrada.get("titular") or doc.get("titular"),
             "client_id": doc.get("client_id"),
+            # Só para uso interno (anular): o registo onde o ficheiro vive.
+            "documento_id": pedido,
+            "e_anexo": True,
         })
     if not anexos and doc.get("s3_path") and ficheiro_e_visivel(doc.get("uploaded_by"), partner_id):
         encontrados.append({
@@ -428,6 +433,8 @@ def _ficheiros_de(doc: dict, partner_id: str) -> list[dict]:
             "category": _categoria_do_ficheiro(doc),
             "titular_marcado": doc.get("titular"),
             "client_id": doc.get("client_id"),
+            "documento_id": pedido,
+            "e_anexo": False,
         })
     return encontrados
 
