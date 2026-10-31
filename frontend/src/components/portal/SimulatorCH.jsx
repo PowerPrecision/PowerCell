@@ -44,6 +44,7 @@ import {
   AccordionTrigger,
 } from '../ui/accordion';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { obterEuribor } from '../../utils/euribor';
 
 // ====================================================================
 // CÁLCULO MATEMÁTICO — Sistema Francês de Amortização
@@ -298,8 +299,7 @@ export default function SimulatorCH({ clienteDataNascimento }) {
       return;
     }
     setEuriborLoading(true);
-    fetch('/api/public/euribor')
-      .then((r) => r.json())
+    obterEuribor()
       .then((data) => {
         if (cancelled) return;
         const eur = Number(data.euribor_12m);

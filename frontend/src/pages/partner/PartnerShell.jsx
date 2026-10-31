@@ -47,6 +47,7 @@ export default function PartnerShell() {
             <Link to="/parceiro" className="text-base font-semibold">Portal do Parceiro</Link>
             <nav aria-label="Navegação principal" className="flex items-center gap-1">
               <NavLink to="/parceiro" end className={ligacao}>Painel</NavLink>
+              <NavLink to="/parceiro/calculadoras" className={ligacao}>Calculadoras</NavLink>
               <NavLink to="/parceiro/conta" className={ligacao}>A minha conta</NavLink>
             </nav>
           </div>
