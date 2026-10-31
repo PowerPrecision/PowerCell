@@ -38,6 +38,7 @@ from services.partner_portal_read import (
 from services.index_conversa import MensagemDaConversa, run_enviar_do_parceiro, run_ler_conversa_do_parceiro
 from services.partner_notes import PartnerNoteIn, run_partner_add_note
 from services.partner_security import get_current_partner
+from services.partner_upload_cancel import run_partner_cancel_upload
 from services.partner_upload_ops import (
     PartnerConfirmUploadIn,
     PartnerUploadUrlIn,
@@ -160,6 +161,19 @@ async def partner_confirm_upload(
     partner: dict = Depends(get_current_partner),
 ):
     return await run_partner_confirm_upload(partner, case_id, data)
+
+
+# ── Anular um envio: o parceiro enganou-se no ficheiro (soft delete) ──
+@router.post("/cases/{case_id}/files/{file_id}/anular")
+@limiter.limit("30/minute")
+async def partner_cancel_upload(
+    request: Request,
+    response: Response,
+    case_id: str,
+    file_id: str,
+    partner: dict = Depends(get_current_partner),
+):
+    return await run_partner_cancel_upload(partner, case_id, file_id)
 
 
 # ── Notas: o parceiro escreve no seu processo ───────────────────────

@@ -2,12 +2,17 @@
  * P3 — cada ficheiro mostra o seu estado. «Recebido» é o de todos; o comprovativo de pagamento
  * segue a validação financeira. Um estado desconhecido cai em «Recebido» (nunca inventa rótulo).
  */
-import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render as renderCru, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/partnerApi", () => ({ obterUrlDeDescarga: vi.fn() }));
 
 import FicheiroDoCaso, { ROTULO_DO_ESTADO } from "../FicheiroDoCaso";
+
+// O botão «Anular envio» (ficheiros do próprio) usa o cliente do React Query.
+const Provider = ({ children }) => <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>;
+const render = (ui) => renderCru(ui, { wrapper: Provider });
 
 const base = { id: "f1", filename: "comprovativo.pdf", by: "eu", uploaded_at: "2026-10-05T10:00:00+00:00" };
 

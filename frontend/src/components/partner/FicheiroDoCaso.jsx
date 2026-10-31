@@ -1,5 +1,5 @@
 /**
- * Uma linha de ficheiro: nome, quem enviou, tamanho e descarga.
+ * Uma linha de ficheiro: nome, quem enviou, tamanho, descarga e (no que o próprio enviou) anular.
  *
  * O parceiro nunca nomeia uma chave S3: pede a descarga por `file_id` e o
  * servidor resolve-o entre os ficheiros que ele pode ver.
@@ -9,6 +9,7 @@ import { Download, File as FicheiroGenerico, FileImage, FileText, Loader2 } from
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import AnularEnvio from "@/components/partner/AnularEnvio";
 import { obterUrlDeDescarga } from "@/services/partnerApi";
 import { etiquetaDoTitular, formatarData, mensagemDeErro, podeDescarregar, rotuloDeAutoria, tamanhoLegivel, tipoDeFicheiro } from "@/utils/partnerPortal";
 
@@ -53,6 +54,8 @@ export default function FicheiroDoCaso({ caseId, ficheiro, dentroDoPedido = fals
   // O que o próprio parceiro submeteu não se descarrega de volta (o servidor
   // também o recusa; esconder o botão é só a cortesia).
   const comDescarga = podeDescarregar(ficheiro);
+  // O que o próprio enviou pode ser anulado (enganou-se no ficheiro); o servidor decide se ainda dá.
+  const comAnular = ficheiro.by === "eu";
 
   const estado = ROTULO_DO_ESTADO[ficheiro.estado] ? ficheiro.estado : "recebido";
   // Dentro de um pedido o cartão já diz «Recebido»: repetir o mesmo rótulo em cada ficheiro era
@@ -98,6 +101,7 @@ export default function FicheiroDoCaso({ caseId, ficheiro, dentroDoPedido = fals
           {aObter ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
         </Button>
       )}
+      {comAnular && <AnularEnvio caseId={caseId} ficheiro={ficheiro} onErro={setErro} />}
     </li>
   );
 }
