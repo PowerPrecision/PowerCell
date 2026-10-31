@@ -1609,6 +1609,21 @@ export const cancelEmailSend = (sendId) =>
 export const uploadEmailAttachment = (formData) =>
   api.post("/emails/attachments/upload", formData);
 
+// Anexar ficheiros que JÁ estão no PowerCell (documentos do processo e da
+// pasta do cliente). O servidor valida a posse de cada caminho e copia-os
+// para anexos temporários: a resposta tem o mesmo formato do upload.
+export const listDocumentsForEmailAttachment = (processId) =>
+  api.get(`/emails/attachments/documents/${encodeURIComponent(processId)}`, {
+    skipErrorToast: true,
+  });
+
+export const attachDocumentsToEmail = (processId, filePaths) =>
+  api.post(
+    "/emails/attachments/from-documents",
+    { process_id: processId, file_paths: filePaths },
+    { skipErrorToast: true },
+  );
+
 // `responseType: "blob"` faz o corpo de ERRO vir também como Blob — ler
 // com `readBlobErrorBody`, senão a mensagem do servidor desaparece.
 export const downloadWebmailAttachment = (attachmentId, params) =>

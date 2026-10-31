@@ -247,6 +247,37 @@ async def upload_attachments(
     return await run_upload_attachments(files, current_user)
 
 
+# Anexar ficheiros que JÁ estão no PowerCell (documentos do processo/cliente).
+# O process_id do POST vai no corpo e não no caminho: anexar um documento de
+# um processo fechado é leitura, não escrita no processo
+# (ver `services/email_document_attachments.py`).
+@router.get("/attachments/documents/{process_id}")
+async def list_documents_for_attachment(
+    process_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    from services.email_document_attachments import run_listar_documentos_para_anexar
+
+    await exigir_processo_legivel(process_id, current_user)
+    return await run_listar_documentos_para_anexar(process_id, request, current_user)
+
+
+@router.post("/attachments/from-documents")
+@limiter.limit("30/minute")
+async def attach_documents_from_process(
+    request: Request,
+    response: Response,
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    from services.email_document_attachments import run_anexar_documentos_do_processo
+
+    return await run_anexar_documentos_do_processo(
+        data.get("process_id"), data.get("file_paths"), current_user
+    )
+
+
 @router.get("/{email_id}/attachments/{file_id}/download")
 async def download_email_attachment(
     email_id: str,
