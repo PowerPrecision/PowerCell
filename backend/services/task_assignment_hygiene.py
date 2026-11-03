@@ -51,6 +51,7 @@ CAMPOS_DE_ATRIBUICAO_DO_PROCESSO: tuple[str, ...] = (
     "assigned_consultor_ids", "assigned_consultor_id", "consultor_id",
     "assigned_consultant_ids", "assigned_consultant_id", "consultant_id",
     "assigned_mediador_ids", "assigned_mediador_id", "mediador_id",
+    "assigned_direcao_ids",
     "assigned_indexacao_id", "assigned_parceiro_id",
     "assigned_to", "assigned_users", "manager_id",
 )

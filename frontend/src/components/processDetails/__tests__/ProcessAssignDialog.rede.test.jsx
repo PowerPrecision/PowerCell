@@ -29,10 +29,11 @@ const props = {
 };
 
 describe("ProcessAssignDialog — a regra de rede", () => {
-  it("diz que só aparecem pessoas da rede e aponta a Partilha Explícita", () => {
+  // Nov 2026: a fronteira passou a ser a EMPRESA (regras do Flavio).
+  it("diz que só aparecem pessoas da empresa e que a outra empresa não se altera", () => {
     render(<ProcessAssignDialog {...props} />);
 
-    expect(screen.getByText(/só aparecem\s+pessoas da sua rede/i)).toBeInTheDocument();
-    expect(screen.getByText(/Partilhar com Empresa/)).toBeInTheDocument();
+    expect(screen.getByText(/Só aparecem pessoas da empresa/i)).toBeInTheDocument();
+    expect(screen.getByText(/outra empresa/)).toBeInTheDocument();
   });
 });

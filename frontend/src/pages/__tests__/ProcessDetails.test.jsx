@@ -945,14 +945,20 @@ describe("ProcessDetails — sem acções cruzadas entre indexadores (Out 2026)"
     expect(screen.queryByTestId("detalhe-atribuir-a-mim")).not.toBeInTheDocument();
   });
 
-  it("o Index não muda atribuições: o cartão Atribuição não tem «Gerir»", async () => {
+  // Regras do Flavio (Nov 2026): o Index altera o campo Index (só esse — o diálogo e o servidor
+  // limitam-no); quem não altera (consultor) não tem «Gerir».
+  it("o Index tem «Gerir» (só para o Index); o consultor não", async () => {
     sessao.papel = "indexacao";
     comIndexador("u-rui");
     const { unmount } = montar();
+    expect(await screen.findByTestId("assign-users-btn")).toBeInTheDocument();
+    unmount();
+    sessao.papel = "consultor";
+    const segundo = montar();
     await screen.findByTestId("assignment-context-card");
     expect(screen.queryByTestId("assign-users-btn")).not.toBeInTheDocument();
-    unmount();
-    sessao.papel = "diretor";
+    segundo.unmount();
+    sessao.papel = "intermediario";
     montar();
     expect(await screen.findByTestId("assign-users-btn")).toBeInTheDocument();
   });

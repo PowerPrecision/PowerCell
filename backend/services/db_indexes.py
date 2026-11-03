@@ -344,6 +344,13 @@ _definir(
     ],
 )
 
+# Avisos de rotina já dados (processo parado, documento a expirar, lembrete mensal): uma marca
+# por chave, para nunca repetir o mesmo aviso (`services/avisos_de_rotina`).
+_definir(
+    "avisos_de_rotina",
+    [{"keys": [("chave", 1)], "name": "idx_avisos_de_rotina_chave", "unique": True}],
+)
+
 # Log da IA do processo: a única leitura é por `process_id`, mais recente primeiro.
 _definir(
     "process_ai_log",

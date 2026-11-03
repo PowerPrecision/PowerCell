@@ -165,6 +165,37 @@ async def anexar_permissao_de_documentos(process: dict, user: dict) -> None:
         process.pop("pode_ver_documentos", None)
 
 
+async def esconder_index_de_outra_rede(process: dict, user: dict) -> None:
+    """O nome do Index só aparece a quem é da REDE do Index (regras do Flavio, Nov 2026).
+
+    Os Index vivem na rede Power/Precision/Sistema. Num processo partilhado com outra rede, quem
+    é de lá vê o processo mas não fica a saber quem o indexa. O Master vê sempre. Falha FECHADA:
+    se não se consegue decidir, esconde-se.
+    """
+    idx = process.get("assigned_indexacao_id")
+    if not idx:
+        return
+    try:
+        from services.assignment_network_guard import redes_do_atribuido
+        from services.tenant_network import resolve_tenant_scope_completo
+
+        quem_ve = await resolve_tenant_scope_completo(user or {})
+        if quem_ve.sem_fronteira:
+            return
+        indexador = await db.users.find_one(
+            {"id": idx}, {"_id": 0, "id": 1, "role": 1, "company": 1},
+        )
+        if not indexador:
+            return
+        redes_do_index = await redes_do_atribuido(indexador)
+        if redes_do_index is None or (redes_do_index & set(quem_ve.network_ids)):
+            return
+    except Exception as exc:  # pragma: no cover — degradação: esconder
+        logger.warning("[INDEX] Não foi possível decidir a visibilidade do Index: %s", exc)
+    process["assigned_indexacao_id"] = None
+    process["indexacao_name"] = None
+
+
 async def run_get_process_detail(
     process_id: str,
     user: dict,
@@ -187,6 +218,7 @@ async def run_get_process_detail(
     from services.process_list_enrichment import enrich_processes_assignee_names
 
     await enrich_processes_assignee_names([process])
+    await esconder_index_de_outra_rede(process, user)
     # A empresa dona, para a etiqueta do cabeçalho (processos partilhados B2B).
     from services.process_owner import anexar_empresa_dona
 

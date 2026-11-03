@@ -146,7 +146,16 @@ async def _juntar_a_equipa_do_processo(ator: dict, users: list[dict], process_id
     if not em_falta:
         return users
     extra = await db.users.find({"id": {"$in": em_falta}}, {"_id": 0, "password": 0}).to_list(len(em_falta))
-    return [*users, *extra]
+    # Quem entra aqui NÃO está na equipa da empresa activa: foi outra empresa que o atribuiu
+    # (processo partilhado). Vê-se, mas não se altera (regras do Flavio, Nov 2026) — o servidor
+    # mantém-no sempre (`regras_de_atribuicao.aplicar_fronteira_de_empresa`).
+    from services.regras_de_atribuicao import ids_da_minha_empresa
+
+    minha = await ids_da_minha_empresa(ator, [u.get("id") for u in extra], db)
+    return [
+        *users,
+        *({**u, "so_leitura": minha is not None and str(u.get("id")) not in minha} for u in extra),
+    ]
 
 
 #: Os papéis do Index (o principal e o alias legado), os mesmos de `ASSIGNMENT_ALLOWED_ROLES`.

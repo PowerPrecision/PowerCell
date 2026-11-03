@@ -197,6 +197,7 @@ def escolher_novo_indexador(disponiveis: list[dict], anteriores: list[str]) -> O
 # ====================================================================
 PROJECCAO = {
     "_id": 0, "id": 1, "process_number": 1, "client_name": 1, "status": 1, "network_id": 1, "is_indexed": 1,
+    "company_id": 1, "company": 1, "company_name": 1,
     "skip_index": 1, "index_status": 1, "assigned_indexacao_id": 1, "indexacao_name": 1, "index_assigned_at": 1,
     "index_work_started_at": 1, "index_last_activity_at": 1, "index_stagnation_alerted_at": 1,
     "index_sla_anteriores": 1, "updated_at": 1, "created_at": 1,
@@ -303,7 +304,7 @@ async def _avisar(enviar, user_id: str, titulo: str, mensagem: str, process_id: 
 
 async def alertar_estagnados(agora: datetime, dias: int, condicao_activa: dict) -> dict[str, int]:
     """Nível 2. NÃO mexe na atribuição. Devolve `{estagnados, alertados, avisos}`."""
-    from services.alert_audience import gestao_da_rede_do_processo
+    from services.alert_audience import gestao_do_processo
     from services.realtime_notifications import send_realtime_notification
 
     resumo = {"estagnados": 0, "alertados": 0, "avisos": 0}
@@ -327,7 +328,7 @@ async def alertar_estagnados(agora: datetime, dias: int, condicao_activa: dict) 
             parado = max(dias, dias_uteis_parado(desde, agora)) if desde else dias
             numero = processo.get("process_number") or str(processo["id"])[:8]
             indexador = processo["assigned_indexacao_id"]
-            chefia = await gestao_da_rede_do_processo(processo, ROLES_DA_CHEFIA)
+            chefia = await gestao_do_processo(processo, ROLES_DA_CHEFIA)
             destinatarios = [indexador, *[c for c in chefia if c != indexador]]
             enviados = 0
             for uid in destinatarios:

@@ -67,8 +67,22 @@ def _is_stealth_user(user: dict) -> bool:
     return False
 
 
-async def log_history(process_id: str, user: dict, action: str, field: str = None, old_value: Any = None, new_value: Any = None):
-    """Log a change to process history"""
+async def log_history(
+    process_id: str,
+    user: dict,
+    action: str,
+    field: str = None,
+    old_value: Any = None,
+    new_value: Any = None,
+    *,
+    mesmo_em_modo_invisivel: bool = False,
+):
+    """Log a change to process history.
+
+    `mesmo_em_modo_invisivel` (Nov 2026): a ÚNICA excepção ao modo invisível do Index — quando o
+    Index muda a atribuição do Index, fica no histórico (controlo, decisão do Flavio). Só quem
+    grava essa acção o pede; tudo o resto do Index continua invisível.
+    """
     # ================================================================
     # PACOTE BJ — STEALTH MODE (early return de segurança)
     # ================================================================
@@ -77,7 +91,7 @@ async def log_history(process_id: str, user: dict, action: str, field: str = Non
     # Isto garante que ações do departamento de Indexação (e qualquer
     # utilizador silenciado) não poluam o histórico do cliente.
     # ================================================================
-    if _is_stealth_user(user):
+    if _is_stealth_user(user) and not mesmo_em_modo_invisivel:
         logger.debug(
             f"[HISTORY] Stealth mode — registo bloqueado: "
             f"action={action!r}, user={user.get('email') or user.get('id')}, "
@@ -107,6 +121,7 @@ async def log_history(process_id: str, user: dict, action: str, field: str = Non
     )
     if (
         user
+        and not mesmo_em_modo_invisivel
         and user.get("role") == "indexacao"
         and action
         and action.startswith(_DOCUMENT_ACTION_PREFIXES)

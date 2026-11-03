@@ -4,6 +4,7 @@ Extraído de `routes/chat.py`.
 """
 from __future__ import annotations
 
+import re
 import base64
 from datetime import datetime, timezone
 from typing import Optional
@@ -22,6 +23,18 @@ from services.chat_helpers import (
     _block_parceiro, MAX_ATTACHMENT_SIZE, ALLOWED_ATTACHMENT_TYPES
 )
 
+
+
+def menciona(texto: Optional[str], nome: Optional[str]) -> bool:
+    """O texto menciona a pessoa com @nome (nome completo ou primeiro nome; sem maiúsculas)?"""
+    if not texto or not nome or "@" not in texto:
+        return False
+    nome = " ".join(str(nome).split())
+    candidatos = {nome, nome.split(" ")[0]}
+    return any(
+        re.search(r"@" + re.escape(c) + r"(?![\w])", texto, flags=re.IGNORECASE)
+        for c in candidatos if c
+    )
 
 async def run_get_messages(
     conversation_id: str,
@@ -157,8 +170,10 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
         for member in group.get("members", []):
             member_id = member.get("user_id")
             if member_id and member_id != user_id:
+                # Num grupo só apita a quem é mencionado (@nome); o resto é «chat de grupo».
                 await agendar_telegram(
-                    member_id, "chat_message",
+                    member_id,
+                    "chat_message" if menciona(sanitized_content, member.get("user_name")) else "chat_group_message",
                     conversa=f"grupo:{message.group_id}", remetente=user.get("name", ""),
                 )
                 await entregar_a_utilizador(
@@ -299,8 +314,10 @@ async def run_upload_message_with_attachment(
         for member in group.get("members", []):
             member_id = member.get("user_id")
             if member_id and member_id != user_id:
+                # Num grupo só apita a quem é mencionado (@nome); o resto é «chat de grupo».
                 await agendar_telegram(
-                    member_id, "chat_message",
+                    member_id,
+                    "chat_message" if menciona(sanitized_content, member.get("user_name")) else "chat_group_message",
                     conversa=f"grupo:{group_id}", remetente=user.get("name", ""),
                 )
                 await entregar_a_utilizador(

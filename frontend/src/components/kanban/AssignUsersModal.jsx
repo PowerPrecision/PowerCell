@@ -36,9 +36,8 @@ import { toast } from 'sonner';
 import { filterByAnyRole, CONSULTOR_ASSIGNMENT_ROLES, INTERMEDIARIO_ASSIGNMENT_ROLES } from '../../utils/roleUtils';
 import { textoDaOpcaoDeUtilizador } from '../../utils/empresaDoUtilizador';
 import { safeString } from '../../utils/safeString';
-import { getStaffUsers } from '../../services/api';
+import { assignProcess, getStaffUsers } from '../../services/api';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const AssignUsersModal = memo(({
   open,
@@ -89,32 +88,22 @@ const AssignUsersModal = memo(({
 
     setIsSaving(true);
     try {
-      const params = new URLSearchParams();
-      params.append('consultor_id', selectedConsultor || '');
-      params.append('mediador_id', selectedMediador || '');
-
-      const response = await fetch(`${API_URL}/api/processes/${process.id}/assign?${params.toString()}`, {
-        method: 'POST',
-        headers: { 
-          Authorization: `Bearer ${token}`
-        }
+      // Axios e não `fetch`: o servidor decide pelo perfil ACTIVO e pela empresa escolhida
+      // (X-Active-Role / X-Company-Id), que só o interceptor envia.
+      await assignProcess(process.id, {
+        consultorId: selectedConsultor || '',
+        mediadorId: selectedMediador || '',
       });
-
-      if (response.ok) {
-        toast.success('Atribuições actualizadas com sucesso');
-        onOpenChange?.(false);
-        onSuccess?.();
-      } else {
-        const data = await response.json();
-        toast.error(extractErrorMessage(data.detail, 'Erro ao actualizar atribuições'));
-      }
+      toast.success('Atribuições actualizadas com sucesso');
+      onOpenChange?.(false);
+      onSuccess?.();
     } catch (error) {
       console.error('Erro ao guardar atribuições:', error);
-      toast.error('Erro ao guardar atribuições');
+      toast.error(extractErrorMessage(error?.response?.data?.detail, 'Erro ao guardar atribuições'));
     } finally {
       setIsSaving(false);
     }
-  }, [process, selectedConsultor, selectedMediador, token, onOpenChange, onSuccess]);
+  }, [process, selectedConsultor, selectedMediador, onOpenChange, onSuccess]);
 
   const handleClose = useCallback(() => {
     onOpenChange?.(false);

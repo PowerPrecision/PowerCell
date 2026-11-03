@@ -35,7 +35,7 @@ def test_a_reatribuicao_usa_o_mesmo_pool_e_a_mesma_carga_da_atribuicao_normal():
 
 def test_a_gestao_a_avisar_vem_da_rede_do_processo():
     src = codigo_sem_comentarios((SERVICOS / "index_sla.py").read_text(encoding="utf-8"))
-    assert "gestao_da_rede_do_processo" in src
+    assert "gestao_do_processo" in src
     assert "deep_role_in_filter" not in src and "db.users.find" not in src  # nunca uma audiência por cargo sem rede
 
 

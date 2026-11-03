@@ -202,7 +202,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, isValid } from "date-fns";
-import { hasRole, hasAnyRole, ROLE_LABELS } from "../utils/roleUtils";
+import { hasRole, hasAnyRole, ROLE_LABELS, PERFIS_QUE_ALTERAM_ATRIBUICOES } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
@@ -441,6 +441,8 @@ const ProcessDetails = () => {
   const [selectedConsultores, setSelectedConsultores] = useState([]);  // Array para múltiplos
   const [selectedMediadores, setSelectedMediadores] = useState([]);    // Array para múltiplos
   const [selectedIndexacao, setSelectedIndexacao] = useState("");
+  // Direção (Diretor/CEO): campo próprio desde Nov 2026.
+  const [selectedDirecao, setSelectedDirecao] = useState([]);
   const [selectedParceiro, setSelectedParceiro] = useState("");  // Parceiro (utilizador fantasma)
   const [savingAssignment, setSavingAssignment] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -708,6 +710,7 @@ const ProcessDetails = () => {
       setSelectedMediadores(Array.isArray(rawMediadorIds) ? rawMediadorIds : []);
       
       setSelectedIndexacao(process.assigned_indexacao_id || "");
+      setSelectedDirecao(Array.isArray(process.assigned_direcao_ids) ? process.assigned_direcao_ids : []);
       setSelectedParceiro(process.assigned_parceiro_id || "");  // Carregar parceiro atual
       
       // Abrir dialog e buscar utilizadores se necessário
@@ -722,12 +725,20 @@ const ProcessDetails = () => {
   const handleSaveAssignment = async () => {
     setSavingAssignment(true);
     try {
-      await processMutations.assignProcess.mutateAsync({
-        consultorIds: selectedConsultores.filter(Boolean),
-        mediadorIds: selectedMediadores.filter(Boolean),
-        indexacaoId: selectedIndexacao || "",
-        parceiroId: selectedParceiro || "",
-      });
+      // O Index só envia o campo Index (o servidor recusa o resto). O Index só segue se MUDOU:
+      // quem não vê o Index (outra rede) recebia-o vazio e, ao gravar, apagava-o.
+      const indexMudou = (selectedIndexacao || "") !== (process?.assigned_indexacao_id || "");
+      await processMutations.assignProcess.mutateAsync(
+        atribuicaoSoDoIndex
+          ? { indexacaoId: indexMudou ? selectedIndexacao || "" : undefined }
+          : {
+              consultorIds: selectedConsultores.filter(Boolean),
+              mediadorIds: selectedMediadores.filter(Boolean),
+              direcaoIds: selectedDirecao.filter(Boolean),
+              indexacaoId: indexMudou ? selectedIndexacao || "" : undefined,
+              parceiroId: selectedParceiro || "",
+            },
+      );
       toast.success("Atribuições actualizadas com sucesso");
       setShowAssignDialog(false);
       await fetchData();
@@ -1931,6 +1942,11 @@ const ProcessDetails = () => {
   // O Index vê o processo de um colega na vista normal; para trabalhar nele assume-o aqui, se ainda ninguém
   // o começou (o servidor decide: 409 se já está em tratamento) e segue para a bancada.
   const indexadorAtivo = (effectiveRole || userRole || "").toLowerCase() === "indexacao";
+  // Regras de atribuição (Flavio, Nov 2026): pelo perfil ACTIVO, a gestão e o Intermediário
+  // alteram a equipa; o Index só o campo Index. O servidor decide na mesma.
+  const perfilActivo = (effectiveRole || userRole || "").toLowerCase();
+  const atribuicaoSoDoIndex = indexadorAtivo;
+  const podeGerirAtribuicoes = PERFIS_QUE_ALTERAM_ATRIBUICOES.includes(perfilActivo) || atribuicaoSoDoIndex;
   const podeAssumirAqui =
     indexadorAtivo && !!process && process.assigned_indexacao_id !== user?.id &&
     process.is_indexed !== true && process.skip_index !== true && process.index_status !== "in_review";
@@ -3296,10 +3312,15 @@ const ProcessDetails = () => {
               )}
               deadlines={deadlines}
               onManageAssignment={openAssignDialog}
-              // o Index não muda atribuições (fica com um processo só pelo «Atribuir a mim»); o servidor também recusa
-              canManageAssignment={userRole !== "cliente" && !indexadorAtivo}
-              // ...mas pode pedir a alteração à chefia (com motivo opcional)
-              canRequestChange={indexadorAtivo}
+              direcaoNames={resolveAssignedNames(
+                process.direcao_names,
+                process.assigned_direcao_ids || [],
+                appUsersById,
+              )}
+              // gestão e Intermediário alteram; o Index só o campo Index (o servidor também decide)
+              canManageAssignment={podeGerirAtribuicoes}
+              // quem não altera pode pedir a alteração à chefia (com motivo opcional)
+              canRequestChange={!podeGerirAtribuicoes && userRole !== "cliente"}
               priority={process?.prioridade || "media"}
               onPriorityChange={(value) => {
                 setProcess(prev => ({ ...prev, prioridade: value }));
@@ -3435,6 +3456,9 @@ const ProcessDetails = () => {
         setSelectedMediadores={setSelectedMediadores}
         selectedIndexacao={selectedIndexacao}
         setSelectedIndexacao={setSelectedIndexacao}
+        selectedDirecao={selectedDirecao}
+        setSelectedDirecao={setSelectedDirecao}
+        soIndex={atribuicaoSoDoIndex}
         selectedParceiro={selectedParceiro}
         setSelectedParceiro={setSelectedParceiro}
         savingAssignment={savingAssignment}

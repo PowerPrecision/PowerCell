@@ -994,19 +994,29 @@ async def _nao_e_o_index(request: Request, user: dict = Depends(require_staff())
 
 @router.post("/{process_id}/assign")
 async def assign_process(
-    process_id: str, 
+    request: Request,
+    process_id: str,
     consultor_ids: Optional[str] = None,
     mediador_ids: Optional[str] = None,
     indexacao_id: Optional[str] = None,
     parceiro_id: Optional[str] = None,
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
-    user: dict = Depends(_nao_e_o_index)
+    direcao_ids: Optional[str] = None,
+    user: dict = Depends(require_staff()),
 ):
-    """Atribuir consultores/intermediários/indexação/parceiro (multi-assignee)."""
+    """Atribuir consultores/intermediários/direção/indexação/parceiro (multi-assignee).
+
+    Quem pode o quê (Nov 2026, `services/regras_de_atribuicao`): gestão e Intermediário alteram;
+    o Index altera só o campo Index (e fica no histórico); a empresa activa é a fronteira.
+    Decide o perfil EFECTIVO, nunca o `role` da conta.
+    """
+    papel = await get_effective_role_async(request, user)
     return await run_staff_assign_process(
         process_id,
         user,
+        direcao_ids=direcao_ids,
+        papel_efectivo=papel or "",
         consultor_ids=consultor_ids,
         mediador_ids=mediador_ids,
         indexacao_id=indexacao_id,

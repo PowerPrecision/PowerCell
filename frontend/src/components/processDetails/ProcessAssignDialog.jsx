@@ -20,11 +20,84 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
-import { Users, Loader2 } from "lucide-react";
-import { filterByAnyRole, filterByRole, CONSULTOR_ASSIGNMENT_ROLES, INTERMEDIARIO_ASSIGNMENT_ROLES, INDEXACAO_ASSIGNMENT_ROLES } from "../../utils/roleUtils";
+import { Users, Loader2, Lock } from "lucide-react";
+import {
+  filterByAnyRole,
+  filterByRole,
+  CONSULTOR_ASSIGNMENT_ROLES,
+  DIRECAO_ASSIGNMENT_ROLES,
+  INTERMEDIARIO_ASSIGNMENT_ROLES,
+  INDEXACAO_ASSIGNMENT_ROLES,
+} from "../../utils/roleUtils";
 import { safeString } from "../dashboard/DashboardShared";
 import EmpresaDoUtilizador from "../shared/EmpresaDoUtilizador";
 import { textoDaOpcaoDeUtilizador } from "../../utils/empresaDoUtilizador";
+
+/**
+ * Uma secção de escolha múltipla. Quem a OUTRA empresa atribuiu (`so_leitura`, vem do servidor)
+ * aparece com cadeado: vê-se, não se tira nem se põe (o servidor mantém-no na mesma).
+ */
+export function SeccaoDeEquipa({ titulo, vazio, papeis, appUsers, selected, setSelected, testId }) {
+  const opcoes = filterByAnyRole(appUsers, papeis).filter((u) => !u.so_leitura);
+  const porId = new Map((appUsers || []).map((u) => [u.id, u]));
+  return (
+    <div data-testid={`seccao-${testId}`}>
+      <Label className="text-sm font-medium mb-2 block">{titulo}</Label>
+      <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
+        {opcoes.map((u) => (
+          <label
+            key={u.id}
+            className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-muted px-2 rounded"
+          >
+            <input
+              type="checkbox"
+              checked={selected.includes(u.id)}
+              onChange={(e) =>
+                setSelected(
+                  e.target.checked ? [...selected, u.id] : selected.filter((id) => id !== u.id),
+                )
+              }
+              className="rounded border-input"
+            />
+            <span className="text-sm">{u.name}</span>
+            <EmpresaDoUtilizador utilizador={u} />
+            <Badge variant="outline" className="text-xs ml-auto">
+              {u.role}
+            </Badge>
+          </label>
+        ))}
+        {opcoes.length === 0 && (
+          <p className="text-sm text-muted-foreground text-center py-2">{vazio}</p>
+        )}
+      </div>
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {selected.map((id) => {
+            const u = porId.get(id);
+            if (!u) return null;
+            return (
+              <Badge key={id} variant="secondary" className="flex items-center gap-1">
+                {u.so_leitura && <Lock className="h-3 w-3" aria-label="Atribuído por outra empresa" />}
+                {u.name}
+                <EmpresaDoUtilizador utilizador={u} className="bg-transparent px-0" />
+                {!u.so_leitura && (
+                  <button
+                    type="button"
+                    onClick={() => setSelected(selected.filter((x) => x !== id))}
+                    className="ml-1 hover:text-destructive"
+                    aria-label={`Retirar ${u.name}`}
+                  >
+                    ×
+                  </button>
+                )}
+              </Badge>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ProcessAssignDialog({
   open,
@@ -39,6 +112,10 @@ export default function ProcessAssignDialog({
   setSelectedMediadores,
   selectedIndexacao,
   setSelectedIndexacao,
+  selectedDirecao = [],
+  setSelectedDirecao = () => {},
+  // Perfil Index activo: só o campo Index (regras do Flavio, Nov 2026).
+  soIndex = false,
   selectedParceiro,
   setSelectedParceiro,
   savingAssignment,
@@ -53,9 +130,9 @@ export default function ProcessAssignDialog({
             Gerir Atribuições
           </DialogTitle>
           <DialogDescription>
-            Seleccione os utilizadores a atribuir a este processo. Só aparecem
-            pessoas da sua rede; para passar o processo a outra empresa use
-            «Partilhar com Empresa…».
+            {soIndex
+              ? "Como Index, pode alterar só o Index deste processo. A alteração fica no histórico."
+              : "Só aparecem pessoas da empresa com que está a trabalhar. Quem foi atribuído por outra empresa (processo partilhado) aparece com cadeado e não se altera daqui."}
           </DialogDescription>
         </DialogHeader>
 
@@ -74,120 +151,37 @@ export default function ProcessAssignDialog({
             </div>
           ) : (
             <div className="space-y-4">
-              <div>
-                <Label className="text-sm font-medium mb-2 block">Consultores</Label>
-                <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {filterByAnyRole(appUsers, CONSULTOR_ASSIGNMENT_ROLES).map((u) => (
-                    <label
-                      key={u.id}
-                      className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedConsultores.includes(u.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedConsultores([...selectedConsultores, u.id]);
-                          } else {
-                            setSelectedConsultores(selectedConsultores.filter((id) => id !== u.id));
-                          }
-                        }}
-                        className="rounded border-gray-300"
-                      />
-                      <span className="text-sm">{u.name}</span>
-                      <EmpresaDoUtilizador utilizador={u} />
-                      <Badge variant="outline" className="text-xs ml-auto">
-                        {u.role}
-                      </Badge>
-                    </label>
-                  ))}
-                  {filterByAnyRole(appUsers, CONSULTOR_ASSIGNMENT_ROLES).length ===
-                    0 && (
-                    <p className="text-sm text-muted-foreground text-center py-2">
-                      Nenhum consultor disponível
-                    </p>
-                  )}
-                </div>
-                {selectedConsultores.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {selectedConsultores.map((cid) => {
-                      const u = appUsers.find((x) => x.id === cid);
-                      return u ? (
-                        <Badge key={cid} variant="secondary" className="flex items-center gap-1">
-                          {u.name}
-                          <EmpresaDoUtilizador utilizador={u} className="bg-transparent px-0" />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setSelectedConsultores(selectedConsultores.filter((id) => id !== cid))
-                            }
-                            className="ml-1 hover:text-destructive"
-                          >
-                            ×
-                          </button>
-                        </Badge>
-                      ) : null;
-                    })}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <Label className="text-sm font-medium mb-2 block">Intermediários</Label>
-                <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {filterByAnyRole(appUsers, INTERMEDIARIO_ASSIGNMENT_ROLES).map((u) => (
-                    <label
-                      key={u.id}
-                      className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedMediadores.includes(u.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedMediadores([...selectedMediadores, u.id]);
-                          } else {
-                            setSelectedMediadores(selectedMediadores.filter((id) => id !== u.id));
-                          }
-                        }}
-                        className="rounded border-gray-300"
-                      />
-                      <span className="text-sm">{u.name}</span>
-                      <EmpresaDoUtilizador utilizador={u} />
-                      <Badge variant="outline" className="text-xs ml-auto">
-                        {u.role}
-                      </Badge>
-                    </label>
-                  ))}
-                  {filterByAnyRole(appUsers, INTERMEDIARIO_ASSIGNMENT_ROLES).length === 0 && (
-                    <p className="text-sm text-muted-foreground text-center py-2">
-                      Nenhum intermediário disponível
-                    </p>
-                  )}
-                </div>
-                {selectedMediadores.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {selectedMediadores.map((mid) => {
-                      const u = appUsers.find((x) => x.id === mid);
-                      return u ? (
-                        <Badge key={mid} variant="secondary" className="flex items-center gap-1">
-                          {u.name}
-                          <EmpresaDoUtilizador utilizador={u} className="bg-transparent px-0" />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setSelectedMediadores(selectedMediadores.filter((id) => id !== mid))
-                            }
-                            className="ml-1 hover:text-destructive"
-                          >
-                            ×
-                          </button>
-                        </Badge>
-                      ) : null;
-                    })}
-                  </div>
-                )}
-              </div>
+              {!soIndex && (
+                <>
+                  <SeccaoDeEquipa
+                    titulo="Consultores"
+                    vazio="Nenhum consultor disponível"
+                    papeis={CONSULTOR_ASSIGNMENT_ROLES}
+                    appUsers={appUsers}
+                    selected={selectedConsultores}
+                    setSelected={setSelectedConsultores}
+                    testId="consultores"
+                  />
+                  <SeccaoDeEquipa
+                    titulo="Intermediários"
+                    vazio="Nenhum intermediário disponível"
+                    papeis={INTERMEDIARIO_ASSIGNMENT_ROLES}
+                    appUsers={appUsers}
+                    selected={selectedMediadores}
+                    setSelected={setSelectedMediadores}
+                    testId="intermediarios"
+                  />
+                  <SeccaoDeEquipa
+                    titulo="Direção"
+                    vazio="Nenhum diretor ou CEO disponível"
+                    papeis={DIRECAO_ASSIGNMENT_ROLES}
+                    appUsers={appUsers}
+                    selected={selectedDirecao}
+                    setSelected={setSelectedDirecao}
+                    testId="direcao"
+                  />
+                </>
+              )}
 
               <div>
                 <Label className="text-sm font-medium">Indexação (Documentos)</Label>
@@ -211,6 +205,7 @@ export default function ProcessAssignDialog({
                 </Select>
               </div>
 
+              {!soIndex && (
               <div>
                 <Label className="text-sm font-medium flex items-center gap-2">
                   Parceiro
@@ -235,6 +230,7 @@ export default function ProcessAssignDialog({
                   </SelectContent>
                 </Select>
               </div>
+              )}
             </div>
           )}
         </div>

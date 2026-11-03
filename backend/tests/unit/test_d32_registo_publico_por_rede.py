@@ -217,12 +217,14 @@ class TestOAvisoVaiSoAGestaoDaRede:
         assert destinos == {"ceo@domus.pt"}
 
     @pytest.mark.asyncio
-    async def test_um_registo_da_power_avisa_a_gestao_do_grupo_e_nunca_a_domus(self, mundo):
+    async def test_um_registo_da_power_avisa_a_gestao_da_power_e_nunca_a_domus(self, mundo):
+        """Desde Nov 2026 a gestão avisada é a da EMPRESA (Flavio): a Precision, do mesmo grupo,
+        já não recebe os registos da Power."""
         await mundo.pr.run_public_client_registration(_pedido(), _dados(empresa_id="cmp-power"))
         await _esperar_fundo(mundo)
 
         avisados = {c.kwargs["user_id"] for c in mundo.push.await_args_list}
-        assert avisados == {"g-power", "g-precision"}
+        assert avisados == {"g-power"}
         assert "g-domus" not in {n["user_id"] for n in mundo.bd.notifications.docs}
         # O email ao staff tem UM destinatário, da rede certa.
         destinos = {c.kwargs.get("staff_email") for c in mundo.email_ao_staff.await_args_list}
@@ -294,7 +296,7 @@ class TestGuardasDeFonte:
 
         codigo = inspect.getsource(pr)
         assert "deep_role_in_filter" not in codigo
-        assert "gestao_da_rede_do_processo" in codigo
+        assert "gestao_do_processo" in codigo
 
     def test_a_resposta_nao_tem_oraculo(self):
         import services.public_registration as pr

@@ -26,7 +26,7 @@ class _Contexto:
             patch.object(pedidos, "db", fake_db),
             patch.object(audit, "db", fake_db),
             patch("database.db", fake_db),
-            patch("services.alert_audience.gestao_da_rede_do_processo", AsyncMock(return_value=list(chefia))),
+            patch("services.alert_audience.gestao_do_processo", AsyncMock(return_value=list(chefia))),
             patch("services.tenant_network.resolve_vista_scope",
                   AsyncMock(return_value=TenantScope(network_ids=tuple(redes)))),
         ]

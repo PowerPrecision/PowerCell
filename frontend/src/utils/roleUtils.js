@@ -104,11 +104,19 @@ export const EXCLUDED_ASSIGNMENT_ROLES = [
   "parceiro",
 ];
 
-/** Cargos no Select de consultor dum processo. */
-export const CONSULTOR_ASSIGNMENT_ROLES = ["consultor", "diretor", "ceo"];
+/** Cargos no campo Consultores dum processo: só consultores (regras do Flavio, Nov 2026). */
+export const CONSULTOR_ASSIGNMENT_ROLES = ["consultor"];
 
-/** Cargos no Select de intermediário dum processo. */
-export const INTERMEDIARIO_ASSIGNMENT_ROLES = ["intermediario", "mediador", "diretor"];
+/** Cargos no campo Intermediários dum processo: só intermediários (incl. o legado «mediador»). */
+export const INTERMEDIARIO_ASSIGNMENT_ROLES = ["intermediario", "mediador"];
+
+/** Campo próprio da Direção (Diretor e CEO), Nov 2026. */
+export const DIRECAO_ASSIGNMENT_ROLES = ["diretor", "ceo"];
+
+/** Perfis (activos) que alteram a equipa de um processo; o Index só altera o campo Index. */
+export const PERFIS_QUE_ALTERAM_ATRIBUICOES = [
+  "master", "admin", "ceo", "diretor", "intermediario", "mediador",
+];
 
 /** Picker dedicado do campo Indexação (não é a lista geral de responsáveis). */
 export const INDEXACAO_ASSIGNMENT_ROLES = ["indexacao", "index"];

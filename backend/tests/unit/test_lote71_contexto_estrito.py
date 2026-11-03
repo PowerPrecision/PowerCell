@@ -154,6 +154,10 @@ AMBITO_COMPLETO_ESCRITO = {
         "combina a empresa escolhida com o alcance do processo (Master) e mede as redes de quem "
         "vai ser atribuído, que não são as do ator"
     ),
+    "process_detail.py": (
+        "o nome do Index só aparece a quem é da REDE do Index (regras do Flavio, Nov 2026): "
+        "pergunta-se a que redes o leitor pertence, não que empresa tem activa"
+    ),
 }
 
 

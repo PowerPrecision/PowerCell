@@ -143,7 +143,8 @@ async def send_realtime_notification(
     notification_type: str = "info",
     link: Optional[str] = None,
     process_id: Optional[str] = None,
-    save_to_db: bool = True
+    save_to_db: bool = True,
+    urgente: bool = False,
 ) -> dict:
     """
     Enviar notificação em tempo real para um utilizador.
@@ -166,7 +167,7 @@ async def send_realtime_notification(
     # antes do filtro in-app). Agrupa por processo e nunca levanta.
     from services.telegram_notifications import agendar as agendar_telegram
 
-    await agendar_telegram(user_id, notification_type, process_id=process_id, link=link)
+    await agendar_telegram(user_id, notification_type, process_id=process_id, link=link, urgente=urgente)
 
     # Ruído e avisos de processos de outros ficam de fora (ver `notification_policy`).
     from services.notification_policy import deve_notificar
@@ -179,13 +180,25 @@ async def send_realtime_notification(
         logger.info(f"Notificação in-app bloqueada para {user_id} (tipo: {notification_type})")
         return None
 
+    # Só apita (som, toast, push) o que também iria para o Telegram; o resto fica calado no sino.
+    from services.notification_policy import vai_apitar
+
+    alerta = await vai_apitar(user_id, notification_type, urgente=urgente, bd=db)
+
     # A rajada do mesmo processo junta-se ao aviso por ler que já lá está: um só
-    # aviso no sino, sem som/toast/push repetidos (o id não muda).
+    # aviso no sino, sem som/toast/push repetidos (o id não muda). Se o que chega é o
+    # primeiro aviso importante do grupo, o grupo apita uma vez (`apitar`).
     if save_to_db and process_id:
         agrupada = await _juntar_ao_aviso_do_processo(
             user_id, process_id, title, message, notification_type, link
         )
         if agrupada:
+            if alerta:
+                marcado = await db.notifications.update_one(
+                    {"id": agrupada["id"], "user_id": user_id, "alerta": {"$ne": True}},
+                    {"$set": {"alerta": True}},
+                )
+                agrupada = {**agrupada, "alerta": True, "apitar": marcado.modified_count == 1}
             await entregar_a_utilizador(user_id, WSEventType.NEW_NOTIFICATION, agrupada)
             return agrupada
 
@@ -199,6 +212,7 @@ async def send_realtime_notification(
         "link": link,
         "process_id": process_id,
         "read": False,
+        "alerta": alerta,
         "created_at": agora.isoformat()
     }
     if process_id:
@@ -236,7 +250,7 @@ async def send_realtime_notification(
     # nenhuma, ao contrário do que o comentário original afirmava.
     from services.presenca import esta_online
 
-    if not await esta_online(user_id):
+    if alerta and not await esta_online(user_id):
         logger.info(f"Utilizador {user_id} não conectado. Notificação guardada na DB.")
         # Enviar push notification quando o utilizador não está conectado via WebSocket
         await send_push_notification(

@@ -24,7 +24,7 @@ from database import db
 from services.notification_service import send_notification_with_preference_check, send_deadline_reminder
 from services.alert_audience import (
     destinatarios_do_alerta,
-    gestao_da_rede_do_processo,
+    gestao_do_processo,
     ids_atribuidos,
 )
 
@@ -437,7 +437,7 @@ async def notify_new_client_registration(
     # `resolve_tenant_stamp`), pelo que cai na rede de omissão — que é
     # exactamente onde a pilha por carimbar pertence, e que em produção
     # está definida.
-    ids_da_gestao = await gestao_da_rede_do_processo(process, ["admin", "ceo"])
+    ids_da_gestao = await gestao_do_processo(process, ["admin", "ceo"])
     admins = []
     if ids_da_gestao:
         admins = await db.users.find(

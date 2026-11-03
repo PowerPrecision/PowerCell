@@ -641,8 +641,12 @@ export const assignProcess = (id, {
   parceiroId,
   consultorId,
   mediadorId,
+  direcaoIds,
 } = {}) => {
   const params = {};
+  if (Array.isArray(direcaoIds)) {
+    params.direcao_ids = direcaoIds.filter(Boolean).join(",");
+  }
   if (Array.isArray(consultorIds)) {
     params.consultor_ids = consultorIds.filter(Boolean).join(",");
   } else if (consultorId) {

@@ -200,13 +200,19 @@ class TestOJobLeadMatchingFoiRetirado:
 class TestOWatchdogDeValidadeNaoEngoleOErro:
     """`strptime` devolve uma data sem fuso e `today` tem-no: a subtracção levantava TypeError, o
     `except` por documento engolia-o e NENHUM documento a expirar gerava alerta (visto nos logs
-    do Render de 2026-10-18: «[WATCHDOG] Erro ao processar documento … offset-naive»)."""
+    do Render de 2026-10-18: «[WATCHDOG] Erro ao processar documento … offset-naive»).
+
+    Desde Nov 2026 o watchdog é parte dos avisos de rotina (`services/avisos_de_rotina`): um aviso
+    por cliente aos 60, 7 e 0 dias. As regras estão provadas em
+    `tests/integration/test_regras_das_notificacoes_mongo.py`."""
 
     @pytest.mark.asyncio
     async def test_documento_a_expirar_gera_a_notificacao(self, fake_async_db):
+        from unittest.mock import patch as _patch
+
         expira = (datetime.now(timezone.utc) + timedelta(days=10)).strftime("%Y-%m-%d")
         await fake_async_db.processes.insert_one({
-            "id": "p1", "client_name": "Ana", "assigned_consultor_id": "u1",
+            "id": "p1", "client_name": "Ana", "assigned_consultor_id": "u1", "status": "em_curso",
         })
         await fake_async_db.document_metadata.insert_one({
             "id": "d1", "process_id": "p1", "expiry_date": expira, "ai_category": "Cartão de Cidadão",
@@ -214,11 +220,17 @@ class TestOWatchdogDeValidadeNaoEngoleOErro:
         servico = ScheduledTasksService()
         servico.db = fake_async_db
 
-        criadas = await servico.check_document_expirations_watchdog()
+        async def activos():
+            return ["em_curso"]
+
+        async def so_activos(processos):
+            return list(processos)
+
+        with _patch("services.workflow_phases.nomes_activos_de_todas_as_redes", activos), \
+                _patch("services.workflow_phases.so_processos_com_fase_activa", so_activos):
+            criadas = await servico.check_document_expirations_watchdog()
 
         assert criadas == 1
         aviso = await fake_async_db.notifications.find_one({"user_id": "u1"})
-        assert aviso["type"] == "document_expiry_watchdog"
-        assert "Ana" in aviso["message"]
-        marcado = await fake_async_db.document_metadata.find_one({"id": "d1"})
-        assert marcado["expiry_alert_sent"] is True
+        assert aviso["type"] == "documentos_a_expirar"
+        assert "Ana" in aviso["message"] and "Cartão de Cidadão" in aviso["message"]
