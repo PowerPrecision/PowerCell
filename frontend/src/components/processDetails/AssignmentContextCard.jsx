@@ -155,7 +155,9 @@ export default function AssignmentContextCard({
         </div>
         <TeamRow label="Consultor(es)" names={consultorNames} />
         <TeamRow label="Intermediário(s)" names={mediadorNames} />
-        {indexacaoName && <TeamRow label="Indexação" names={[indexacaoName]} />}
+        {/* Sempre à vista: «a que Index está este processo?» era a pergunta sem resposta
+            enquanto os ficheiros esperavam a Indexação. */}
+        <TeamRow label="Indexação" names={indexacaoName ? [indexacaoName] : []} />
         {parceiroName && <TeamRow label="Parceiro" names={[parceiroName]} />}
 
         <div className="pt-3 mt-2 border-t border-border">

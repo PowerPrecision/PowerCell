@@ -111,7 +111,7 @@ export const CONSULTOR_ASSIGNMENT_ROLES = ["consultor", "diretor", "ceo"];
 export const INTERMEDIARIO_ASSIGNMENT_ROLES = ["intermediario", "mediador", "diretor"];
 
 /** Picker dedicado do campo Indexação (não é a lista geral de responsáveis). */
-export const INDEXACAO_ASSIGNMENT_ROLES = ["indexacao"];
+export const INDEXACAO_ASSIGNMENT_ROLES = ["indexacao", "index"];
 
 /** Perfis que podem aceder ao Painel de Administração */
 export const ADMIN_PANEL_ROLES = ["master", "admin", "ceo"];
@@ -553,9 +553,20 @@ export const getRoleIcon = (role) => {
  * @param {string} role - Role a filtrar
  * @returns {Array}
  */
+/**
+ * Os cargos de alguém para as listas de atribuição: o principal, os adicionais e os dados POR
+ * EMPRESA (`company_roles`, os UCRs que o servidor junta). Só o `role` escondia quem tinha o
+ * Index na grelha de acessos (Nov 2026).
+ */
+const cargosDe = (u) => [
+  u?.role,
+  ...(Array.isArray(u?.additional_roles) ? u.additional_roles : []),
+  ...(Array.isArray(u?.company_roles) ? u.company_roles : []),
+];
+
 export const filterByRole = (users, role) => {
   if (!users || !role) return users || [];
-  return users.filter(u => u.role === role || (u.additional_roles && u.additional_roles.includes(role)));
+  return users.filter((u) => cargosDe(u).includes(role));
 };
 
 /**
@@ -568,13 +579,9 @@ export const filterByAnyRole = (users, roles) => {
   if (!users || !roles || roles.length === 0) return users || [];
   // Support single-user usage: filterByAnyRole(user, roles) inside .filter()
   if (!Array.isArray(users)) {
-    return roles.includes(users.role) ||
-      (users.additional_roles && users.additional_roles.some(r => roles.includes(r)));
+    return cargosDe(users).some((r) => roles.includes(r));
   }
-  return users.filter(u =>
-    roles.includes(u.role) ||
-    (u.additional_roles && u.additional_roles.some(r => roles.includes(r)))
-  );
+  return users.filter((u) => cargosDe(u).some((r) => roles.includes(r)));
 };
 
 /**

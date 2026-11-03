@@ -493,9 +493,11 @@ async def _count_active_processes_for_indexer(indexer_id: str) -> int:
 async def _indexadores_da_equipa(process: dict, network_id: Optional[str] = None) -> list[dict]:
     """Os indexadores activos que podem receber este processo: a EQUIPA do processo (ou a rede pedida), nunca o mundo."""
     from services import network_triage
-    from services.role_query import build_deep_role_query
+    from services.role_ucr import PAPEIS_DO_INDEX, filtro_de_papel
 
-    query = build_deep_role_query({"is_active": True}, role="indexacao")
+    # O Index dado POR EMPRESA (UCR) também é Index: sem isto quem o tinha só na grelha de acessos
+    # nunca recebia processos, e o processo ficava sem indexador (Nov 2026, `services/role_ucr`).
+    query = {"$and": [{"is_active": True}, await filtro_de_papel(PAPEIS_DO_INDEX)]}
     membros = await network_triage.user_ids_da_rede(
         network_id or network_triage.rede_da_equipa(process)
     )
@@ -1370,9 +1372,9 @@ async def check_waitlist_for_indexer(user_id: str) -> int:
         return 0
 
     user_role = user.get("role", "")
-    additional_roles = user.get("additional_roles") or []
+    from services.role_ucr import PAPEIS_DO_INDEX, tem_papel
 
-    is_indexer = user_role == "indexacao" or "indexacao" in additional_roles
+    is_indexer = await tem_papel(user_id, PAPEIS_DO_INDEX)
     if not is_indexer:
         logger.debug(f"[WAITLIST] Utilizador {user_id} não é indexador (role={user_role})")
         return 0
