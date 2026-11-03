@@ -13,7 +13,9 @@ REGRAS QUE NÃO SE PODEM PERDER
 2. **Um job activo por (processo, tipo)** — índice único parcial em
    `task_logs.index_job_key` (a lição do D-29: «um activo por processo» tem de ser
    atómico, não um `find_one` seguido de `insert`). A chave só existe enquanto o
-   job corre; um job morto a meio liberta-se sozinho passado `PRAZO_DO_JOB_MINUTOS`.
+   job corre. O job BATE (`index_job_heartbeat_at`) a cada `BATIMENTO_SEGUNDOS`: sem batimento há
+   `PRAZO_SEM_BATIMENTO_MINUTOS` está morto (o servidor reiniciou num deploy ou por falta de memória),
+   deixa de contar como activo e o vigia (`vigiar_jobs_do_index`) liberta-o e RETOMA-O.
 3. **Uma vez por ficheiro.** O ficheiro é lido do S3 (barato) e a impressão digital
    do CONTEÚDO decide se há chamada ao modelo (paga). Um ficheiro substituído no
    mesmo caminho volta a ser analisado; um idêntico, não — `force` ignora isto.
@@ -25,8 +27,11 @@ REGRAS QUE NÃO SE PODEM PERDER
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import uuid
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -53,10 +58,38 @@ from services.task_log_service import TASK_LOG_COLLECTION, TaskLogService
 
 logger = logging.getLogger(__name__)
 
-#: Um job «activo» há mais do que isto está morto (o worker caiu): liberta a chave.
+#: Um job «activo» SEM batimento (criado antes de haver batimento) há mais do que isto está morto.
 PRAZO_DO_JOB_MINUTOS = 30
+#: De quanto em quanto tempo um job vivo diz que está vivo.
+BATIMENTO_SEGUNDOS = 60
+#: Sem batimento há mais do que isto, o job morreu (o processo que o corria caiu): liberta-se e retoma-se.
+#: Antes só havia o prazo de 30 min a contar da CRIAÇÃO, e só se via ao pedir outro job: um job morto num
+#: deploy deixava o ecrã em «Já há uma análise a correr» (botões bloqueados) durante horas.
+PRAZO_SEM_BATIMENTO_MINUTOS = 5
+CAMPO_DO_BATIMENTO = "index_job_heartbeat_at"
+#: Um pedido de análise que chegou com outro job a correr (ex.: um upload a meio): o job repete no fim.
+CAMPO_DA_REPETICAO = "index_job_rerun"
+#: Quantas vezes um job morto se retoma sozinho. Um ficheiro que derruba o servidor (memória) não entra em ciclo.
+RETOMAS_MAXIMAS = 2
+#: De quanto em quanto tempo o vigia procura jobs mortos.
+VIGIA_SEGUNDOS = 120
 #: Acima disto o ficheiro não vai à IA (a leitura é para memória e o custo é por página).
 TAMANHO_MAXIMO = 20 * 1024 * 1024
+
+#: Quantos ficheiros do MESMO processo vão à IA ao mesmo tempo (`INDEX_FICHEIROS_EM_SIMULTANEO`).
+FICHEIROS_EM_SIMULTANEO = 3
+TECTO_DE_FICHEIROS_EM_SIMULTANEO = 6
+
+
+def ficheiros_em_simultaneo(ambiente=None) -> int:
+    """`INDEX_FICHEIROS_EM_SIMULTANEO`; inválido ou ≤ 0 → 3; nunca acima de 6 (memória do servidor web)."""
+    fonte = ambiente if ambiente is not None else os.environ
+    try:
+        n = int(str(fonte.get("INDEX_FICHEIROS_EM_SIMULTANEO", FICHEIROS_EM_SIMULTANEO)).strip())
+    except (TypeError, ValueError):
+        return FICHEIROS_EM_SIMULTANEO
+    return FICHEIROS_EM_SIMULTANEO if n <= 0 else min(n, TECTO_DE_FICHEIROS_EM_SIMULTANEO)
+
 
 TITULOS = {
     TaskType.INDEX_ANALYSIS: "Index — análise de documentos",
@@ -72,18 +105,66 @@ def chave_do_job(process_id: str, tipo: TaskType) -> str:
     return f"{process_id}:{tipo.value}"
 
 
+def _agora_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def condicao_de_morto(agora: Optional[datetime] = None) -> list[dict]:
+    """Os ramos (`$or`) de «este job morreu». Pura.
+
+    Com batimento: o último foi há mais de `PRAZO_SEM_BATIMENTO_MINUTOS`. Sem batimento (jobs de antes
+    desta versão): criado há mais de `PRAZO_DO_JOB_MINUTOS`.
+    """
+    agora = agora or datetime.now(timezone.utc)
+    sem_batimento = (agora - timedelta(minutes=PRAZO_SEM_BATIMENTO_MINUTOS)).isoformat()
+    legado = (agora - timedelta(minutes=PRAZO_DO_JOB_MINUTOS)).isoformat()
+    return [
+        {CAMPO_DO_BATIMENTO: {"$lt": sem_batimento}},
+        {CAMPO_DO_BATIMENTO: {"$exists": False}, "created_at": {"$lt": legado}},
+    ]
+
+
 async def job_activo(process_id: str, tipo: TaskType) -> Optional[dict]:
-    """O job em curso deste processo e tipo, ou `None`."""
+    """O job em curso (VIVO) deste processo e tipo, ou `None`. Um job morto não bloqueia o ecrã."""
     return await db[TASK_LOG_COLLECTION].find_one(
-        {"index_job_key": chave_do_job(process_id, tipo)}, {"_id": 0, "task_id": 1, "created_at": 1, "user_id": 1}
+        {"index_job_key": chave_do_job(process_id, tipo), "$nor": condicao_de_morto()},
+        {"_id": 0, "task_id": 1, "created_at": 1, "user_id": 1},
     )
 
 
-async def _libertar_mortos(chave: str) -> None:
-    limite = (datetime.now(timezone.utc) - timedelta(minutes=PRAZO_DO_JOB_MINUTOS)).isoformat()
-    await db[TASK_LOG_COLLECTION].update_many(
-        {"index_job_key": chave, "created_at": {"$lt": limite}}, {"$unset": {"index_job_key": ""}}
-    )
+MENSAGEM_DE_INTERROMPIDO = "A análise foi interrompida (o servidor reiniciou). Retomada automaticamente."
+
+
+async def _libertar_mortos(chave: Optional[str] = None) -> list[dict]:
+    """Liberta as chaves dos jobs mortos (de UMA chave, ou de todas). Devolve os que ESTA chamada libertou.
+
+    Cada libertação é atómica (filtro pela chave E pela condição de morto): com dois processos a vigiar,
+    só um liberta — e só esse retoma o job. O TaskLog morto passa a `failed` (o ecrã deixa de rodar).
+    """
+    filtro: dict[str, Any] = {"$or": condicao_de_morto()}
+    filtro["index_job_key"] = chave if chave else {"$type": "string"}
+    mortos = await db[TASK_LOG_COLLECTION].find(
+        filtro, {"_id": 0, "task_id": 1, "task_type": 1, "process_id": 1, "user_id": 1, "metadata": 1,
+                 "index_job_key": 1, "status": 1}
+    ).to_list(200)
+    libertados = []
+    for t in mortos:
+        r = await db[TASK_LOG_COLLECTION].update_one(
+            {"task_id": t["task_id"], "index_job_key": t.get("index_job_key"), "$or": condicao_de_morto()},
+            {"$unset": {"index_job_key": "", CAMPO_DA_REPETICAO: ""}},
+        )
+        if r.modified_count != 1:
+            continue
+        libertados.append(t)
+        if t.get("status") in (TaskStatus.PENDING.value, TaskStatus.PROCESSING.value):
+            try:
+                await TaskLogService.update_task(t["task_id"], status=TaskStatus.FAILED,
+                                                 error_message=MENSAGEM_DE_INTERROMPIDO)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[INDEX] TaskLog morto %s não fechado: %s", t["task_id"], type(exc).__name__)
+    if libertados:
+        logger.warning("[INDEX] %d job(s) morto(s) libertado(s)", len(libertados))
+    return libertados
 
 
 async def reivindicar_job(
@@ -105,7 +186,9 @@ async def reivindicar_job(
         acknowledge_required=False,
     )
     try:
-        await db[TASK_LOG_COLLECTION].update_one({"task_id": tarefa.task_id}, {"$set": {"index_job_key": chave}})
+        await db[TASK_LOG_COLLECTION].update_one(
+            {"task_id": tarefa.task_id}, {"$set": {"index_job_key": chave, CAMPO_DO_BATIMENTO: _agora_iso()}}
+        )
     except DuplicateKeyError:
         await TaskLogService.update_task(tarefa.task_id, status=TaskStatus.CANCELLED,
                                          progress_message="Já havia uma análise a correr.")
@@ -114,12 +197,53 @@ async def reivindicar_job(
     return tarefa.task_id, None
 
 
-async def libertar_job(task_id: str) -> None:
-    """Retira a chave: o job terminou (bem ou mal) e outro pode nascer. Nunca levanta."""
+async def libertar_job(task_id: str) -> bool:
+    """Retira a chave: o job terminou (bem ou mal) e outro pode nascer. Nunca levanta.
+
+    Devolve `True` se, entretanto, alguém pediu outra análise (`pedir_repeticao`) — quem chamou repete-a.
+    Ler e apagar o pedido é a MESMA operação que liberta a chave: um pedido nunca se perde entre os dois.
+    """
     try:
-        await db[TASK_LOG_COLLECTION].update_one({"task_id": task_id}, {"$unset": {"index_job_key": ""}})
+        antes = await db[TASK_LOG_COLLECTION].find_one_and_update(
+            {"task_id": task_id}, {"$unset": {"index_job_key": "", CAMPO_DA_REPETICAO: ""}},
+        )
+        return bool((antes or {}).get(CAMPO_DA_REPETICAO))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[INDEX] Chave do job %s não libertada: %s", task_id, type(exc).__name__)
+        return False
+
+
+async def pedir_repeticao(task_id: str, process_id: str, tipo: TaskType) -> bool:
+    """Marca o job em curso para repetir no fim. `False` se ele já terminou (quem pediu tenta de novo)."""
+    r = await db[TASK_LOG_COLLECTION].update_one(
+        {"task_id": task_id, "index_job_key": chave_do_job(process_id, tipo)},
+        {"$set": {CAMPO_DA_REPETICAO: True}},
+    )
+    return r.matched_count == 1
+
+
+async def _bater(task_id: str) -> None:
+    while True:
+        await asyncio.sleep(BATIMENTO_SEGUNDOS)
+        try:
+            await db[TASK_LOG_COLLECTION].update_one(
+                {"task_id": task_id, "index_job_key": {"$type": "string"}},
+                {"$set": {CAMPO_DO_BATIMENTO: _agora_iso()}},
+            )
+        except Exception as exc:  # noqa: BLE001 — um batimento perdido não pára o job
+            logger.warning("[INDEX] Batimento do job %s falhou: %s", task_id, type(exc).__name__)
+
+
+@asynccontextmanager
+async def batimento(task_id: str):
+    """Enquanto o bloco corre, o job diz que está vivo. Morto o processo, o batimento pára com ele."""
+    tarefa = asyncio.create_task(_bater(task_id), name=f"index-batimento-{task_id}")
+    try:
+        yield
+    finally:
+        tarefa.cancel()
+        with suppress(asyncio.CancelledError):
+            await tarefa
 
 
 # ====================================================================
@@ -236,9 +360,18 @@ async def analisar_ficheiros(
         resumo["falhados"].append(doc.get("id"))
         resumo["motivos"][doc.get("id")] = motivo
 
-    for n, (doc, tipo) in enumerate(candidatos, start=1):
+    feitos = 0
+    semaforo = asyncio.Semaphore(ficheiros_em_simultaneo())
+
+    async def tratar(doc: dict, tipo: Optional[str]) -> None:
+        nonlocal feitos
+        async with semaforo:
+            await _tratar_um(doc, tipo)
+        feitos += 1
         if progresso:
-            await progresso(int(100 * (n - 1) / max(1, len(candidatos))), f"A analisar {n} de {len(candidatos)}…")
+            await progresso(int(100 * feitos / max(1, len(candidatos))), f"Analisados {feitos} de {len(candidatos)}…")
+
+    async def _tratar_um(doc: dict, tipo: Optional[str]) -> None:
         nome = doc.get("filename")
         base = dict(process_id=process_id, accao="analisar", gatilho=gatilho, user=user,
                     ficheiro=nome, s3_path=doc.get("s3_path"), documento_id=doc.get("id"))
@@ -249,14 +382,14 @@ async def analisar_ficheiros(
             if conteudo is None and tipo is None and not documento_id:
                 # um ficheiro que o Index talvez nem leia (uma certidão): não se lê, não é falha de ninguém
                 resumo["ignorados"] += 1
-                continue
+                return
             if conteudo is None:
                 if motivo == "ilegivel":
                     falhou(doc, motivo)
                 else:
                     resumo["saltados"] += 1
                 await registar_accao_ia(estado="falha" if motivo == "ilegivel" else "saltado", motivo=motivo, **base)
-                continue
+                return
 
             impressao = impressao_digital(conteudo)
             if tipo is None:
@@ -268,12 +401,12 @@ async def analisar_ficheiros(
                         await registar_accao_ia(estado="falha", motivo="sem_tipo", **base)
                     else:
                         resumo["ignorados"] += 1
-                    continue
+                    return
 
             if not force and tem_a_impressao_atual(doc.get("analysis_fingerprint")) and doc["analysis_fingerprint"] == impressao:
                 resumo["saltados"] += 1
                 await registar_accao_ia(estado="saltado", motivo="ja_analisado", **base)
-                continue
+                return
 
             resultado = await analisar_documento(
                 tipo=tipo, conteudo=conteudo, filename=nome or "", mime=_mime(nome or ""), document_id=doc.get("id"),
@@ -282,7 +415,7 @@ async def analisar_ficheiros(
                 motivo = resultado.motivo or classificar_falha(None)
                 falhou(doc, motivo)
                 await registar_accao_ia(estado="falha", motivo=motivo, **base)
-                continue
+                return
 
             await store.registar_ficheiro(doc["id"], resultado, impressao)
             resumo["analisados"] += 1
@@ -295,6 +428,12 @@ async def analisar_ficheiros(
             logger.exception("[INDEX] Ficheiro %s do processo %s não analisado", doc.get("id"), process_id)
             falhou(doc, "erro_interno")
             await registar_accao_ia(estado="falha", motivo="erro_interno", **base)
+
+    if progresso and candidatos:
+        await progresso(1, f"A analisar {len(candidatos)} ficheiro(s)…")
+    # Vários ficheiros ao mesmo tempo: cada um espera pela IA (dezenas de segundos), e um a um um processo com
+    # 30 documentos levava mais de meia hora. O tecto protege a memória do servidor e o limite de pedidos da IA.
+    await asyncio.gather(*(tratar(doc, tipo) for doc, tipo in candidatos))
     return resumo
 
 
@@ -399,9 +538,10 @@ async def correr_analise(
         async def progresso(pct: int, msg: str) -> None:
             await TaskLogService.update_task(task_id, progress=max(1, min(95, pct)), progress_message=msg)
 
-        publico = await analisar_e_concluir(
-            process, force=force, gatilho=gatilho, user=user, progresso=progresso, documento_id=documento_id
-        )
+        async with batimento(task_id):
+            publico = await analisar_e_concluir(
+                process, force=force, gatilho=gatilho, user=user, progresso=progresso, documento_id=documento_id
+            )
         await TaskLogService.update_task(task_id, status=TaskStatus.COMPLETED, progress=100,
                                          progress_message="Análise concluída.", result_data=publico)
         await notificar_fim(process, (user or {}).get("id"), publico)
@@ -415,26 +555,106 @@ async def correr_analise(
             pass
         return {}
     finally:
-        await libertar_job(task_id)
+        if await libertar_job(task_id):
+            # chegou um ficheiro novo (ou outro pedido) a meio: esta corrida já não o via — outra corrida, já
+            await _repetir(process_id, user)
+
+
+async def _repetir(process_id: str, user: Optional[dict]) -> None:
+    try:
+        await iniciar_analise(process_id, user, force=False, gatilho="automatico")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX] Repetição da análise de %s não agendada: %s", process_id, type(exc).__name__)
 
 
 async def iniciar_analise(
     process_id: str, user: Optional[dict], *, force: bool = False, gatilho: str = "manual",
-    documento_id: Optional[str] = None,
+    documento_id: Optional[str] = None, retomas: int = 0,
 ) -> dict[str, Any]:
     """Cria o job e DEVOLVE JÁ. `{"task_id", "iniciado"}`; `iniciado=False` se já havia um a correr.
 
-    Com `documento_id` analisa só esse ficheiro (o mesmo job: um activo por processo, mesmo assim)."""
-    metadata = {"force": bool(force), "gatilho": gatilho}
+    Com `documento_id` analisa só esse ficheiro (o mesmo job: um activo por processo, mesmo assim).
+    Com outro job a correr, o pedido NÃO se perde: esse job repete a análise quando acabar (um ficheiro
+    carregado a meio de uma análise ficava «Por analisar» até alguém voltar a carregar em «Analisar»)."""
+    metadata: dict[str, Any] = {"force": bool(force), "gatilho": gatilho}
     if documento_id:
         metadata["documento_id"] = documento_id
-    task_id, existente = await reivindicar_job(
-        process_id, TaskType.INDEX_ANALYSIS, (user or {}).get("id") or "system", metadata=metadata,
-    )
-    if task_id is None:
+    if retomas:
+        metadata["retomas"] = int(retomas)
+    for _ in range(2):
+        task_id, existente = await reivindicar_job(
+            process_id, TaskType.INDEX_ANALYSIS, (user or {}).get("id") or "system", metadata=metadata,
+        )
+        if task_id is not None:
+            break
+        if not existente or await pedir_repeticao(existente, process_id, TaskType.INDEX_ANALYSIS):
+            return {"task_id": existente, "iniciado": False}
+        # o job acabou entre as duas leituras: tenta-se outra vez criar o nosso
+    else:
         return {"task_id": existente, "iniciado": False}
     spawn_background_task(
         correr_analise(task_id, process_id, user, force=force, gatilho=gatilho, documento_id=documento_id),
         name=f"index-analise-{process_id}",
     )
     return {"task_id": task_id, "iniciado": True}
+
+
+# ====================================================================
+# O VIGIA: jobs mortos (deploy, falta de memória) libertam-se e retomam-se
+# ====================================================================
+async def _utilizador(user_id: Optional[str]) -> Optional[dict]:
+    if not user_id or user_id == "system":
+        return None
+    try:
+        return await db.users.find_one(
+            {"id": user_id}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "network_id": 1}
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def retomar_jobs_mortos() -> dict[str, int]:
+    """Liberta os jobs do Index que morreram e retoma a análise/fecho. `{libertados, retomados}`. Nunca levanta.
+
+    O que já ficou analisado não se paga outra vez (a impressão digital salta-o): a retoma só lê o que faltou.
+    Cada job retoma-se no máximo `RETOMAS_MAXIMAS` vezes — um ficheiro que derruba o servidor não entra em ciclo.
+    """
+    contas = {"libertados": 0, "retomados": 0}
+    try:
+        mortos = await _libertar_mortos()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX] Vigia dos jobs falhou: %s", type(exc).__name__)
+        return contas
+    contas["libertados"] = len(mortos)
+    for t in mortos:
+        try:
+            meta = t.get("metadata") or {}
+            retomas = int(meta.get("retomas") or 0)
+            tipo, process_id = t.get("task_type"), t.get("process_id")
+            if retomas >= RETOMAS_MAXIMAS or not process_id:
+                continue
+            user = await _utilizador(t.get("user_id"))
+            if tipo == TaskType.INDEX_ANALYSIS.value:
+                r = await iniciar_analise(process_id, user, force=bool(meta.get("force")), gatilho="automatico",
+                                          documento_id=meta.get("documento_id"), retomas=retomas + 1)
+                contas["retomados"] += int(bool(r.get("iniciado")))
+            elif tipo == TaskType.INDEX_FINALIZE.value:
+                from services import index_finalize
+
+                process = await db.processes.find_one({"id": process_id, "is_deleted": {"$ne": True}}, {"_id": 0})
+                if process:
+                    r = await index_finalize.agendar_finalizacao(
+                        process, user, gatilho=meta.get("gatilho") or "automatico", retomas=retomas + 1)
+                    contas["retomados"] += int(bool(r.get("agendado")))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[INDEX] Job %s não retomado: %s", t.get("task_id"), type(exc).__name__)
+    if contas["retomados"]:
+        logger.warning("[INDEX] %d job(s) morto(s) retomado(s)", contas["retomados"])
+    return contas
+
+
+async def vigiar_jobs_do_index() -> None:
+    """Laço leve do servidor web: a cada `VIGIA_SEGUNDOS` liberta e retoma os jobs mortos."""
+    while True:
+        await asyncio.sleep(VIGIA_SEGUNDOS)
+        await retomar_jobs_mortos()

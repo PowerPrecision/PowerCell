@@ -57,13 +57,14 @@ async def correr_finalizacao(task_id: str, process_id: str, user: Optional[dict]
             await TaskLogService.update_task(task_id, progress=max(1, min(90, pct)), progress_message=msg)
 
         resumo: dict[str, Any] = {}
-        try:
-            resumo = await index_jobs.analisar_e_concluir(
-                process, force=False, gatilho=gatilho, user=user, progresso=progresso)
-        except Exception:  # noqa: BLE001 — a análise falhar não impede o resto
-            logger.exception("[INDEX] Análise do fecho falhou no processo %s", process_id)
+        async with index_jobs.batimento(task_id):
+            try:
+                resumo = await index_jobs.analisar_e_concluir(
+                    process, force=False, gatilho=gatilho, user=user, progresso=progresso)
+            except Exception:  # noqa: BLE001 — a análise falhar não impede o resto
+                logger.exception("[INDEX] Análise do fecho falhou no processo %s", process_id)
 
-        resumo.update(await _sanitizar_sem_falhar(process, user))
+            resumo.update(await _sanitizar_sem_falhar(process, user))
 
         await TaskLogService.update_task(task_id, status=TaskStatus.COMPLETED, progress=100,
                                          progress_message="Documentos tratados.", result_data=resumo)
@@ -94,14 +95,16 @@ async def _sanitizar_sem_falhar(process: dict, user: Optional[dict]) -> dict[str
         return {"sanitizacao_falhou": True}
 
 
-async def agendar_finalizacao(process: dict, user: Optional[dict], *, gatilho: str = "automatico") -> dict[str, Any]:
+async def agendar_finalizacao(
+    process: dict, user: Optional[dict], *, gatilho: str = "automatico", retomas: int = 0,
+) -> dict[str, Any]:
     """Cria o job do fecho e devolve JÁ. `{"agendado", "task_id"}`. Nunca levanta."""
     if not ia_da_entrada_ligada():
         return {"agendado": False, "task_id": None, "motivo": "ia_desligada"}
     try:
         task_id, existente = await index_jobs.reivindicar_job(
             process["id"], TaskType.INDEX_FINALIZE, (user or {}).get("id") or "system",
-            metadata={"gatilho": gatilho},
+            metadata={"gatilho": gatilho, **({"retomas": int(retomas)} if retomas else {})},
         )
         if task_id is None:
             return {"agendado": False, "task_id": existente, "motivo": "ja_a_correr"}
