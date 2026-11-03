@@ -68,7 +68,7 @@ async def principal(alvo: str) -> int:
             print(f"  análise IA: a correr ({p['index_job_key']}), último sinal {p.get('index_job_heartbeat_at')}"
                   f"{' — repetição pedida' if p.get('index_job_rerun') else ''}")
 
-    query = {"$and": [{"is_active": True}, await filtro_de_papel(PAPEIS_DO_INDEX)]}
+    query = {"$and": [{"is_active": True}, await filtro_de_papel(PAPEIS_DO_INDEX, db)]}
     indexadores = await db.users.find(
         query, {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1},
     ).to_list(200)

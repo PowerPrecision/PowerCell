@@ -23,9 +23,24 @@ Isto só decide QUEM ENTRA na lista. A fronteira de rede continua a ser a de
 """
 from __future__ import annotations
 
+import logging
 from typing import Iterable
 
-from database import db
+logger = logging.getLogger(__name__)
+
+
+def _base(base):
+    """A BD do CHAMADOR (a referência que o seu módulo tem), como `exigir_atribuidos_da_minha_rede`.
+
+    Um `from database import db` no topo deste módulo dava-lhe uma referência própria: os testes que
+    substituem só a do chamador (`patch.object(modulo, "db", fake)`) deixavam aqui falar com o proxy
+    real — «Event loop is closed». Sem `base`, lê-se `database.db` na hora (respeita o patch global).
+    """
+    if base is not None:
+        return base
+    import database
+
+    return database.db
 
 #: Os papéis do Index (o principal e o alias legado).
 PAPEIS_DO_INDEX = ("indexacao", "index")
@@ -54,18 +69,29 @@ def papeis_equivalentes(roles: Iterable[str]) -> list[str]:
     return saida
 
 
-async def ids_com_papel_numa_empresa(roles: Iterable[str]) -> list[str]:
+async def _ler_ucrs(base, filtro: dict, projeccao: dict) -> list[dict]:
+    """Lê UCRs; se a leitura falhar, nenhum (fica o comportamento antigo: só `users.role`).
+
+    Degradação graciosa: uma lista de atribuição sem os cargos por empresa é a de ontem; uma
+    lista que rebenta deixa a Gestão de Atribuições vazia.
+    """
+    try:
+        return await _base(base).user_company_roles.find(filtro, projeccao).to_list(_LIMITE)
+    except Exception as exc:
+        logger.warning("[role_ucr] Não foi possível ler os acessos por empresa: %s", exc)
+        return []
+
+
+async def ids_com_papel_numa_empresa(roles: Iterable[str], base=None) -> list[str]:
     """Ids de quem tem um destes papéis num UCR válido."""
     papeis = papeis_equivalentes(roles)
     if not papeis:
         return []
-    docs = await db.user_company_roles.find(
-        {**UCR_VALIDO, "role": {"$in": papeis}}, {"_id": 0, "user_id": 1},
-    ).to_list(_LIMITE)
+    docs = await _ler_ucrs(base, {**UCR_VALIDO, "role": {"$in": papeis}}, {"_id": 0, "user_id": 1})
     return sorted({str(d["user_id"]) for d in docs if d.get("user_id")})
 
 
-async def filtro_de_papel(roles: Iterable[str]) -> dict:
+async def filtro_de_papel(roles: Iterable[str], base=None) -> dict:
     """Filtro Mongo de `users`: o papel no `role`, nos `additional_roles` ou num UCR."""
     papeis = papeis_equivalentes(roles)
     if not papeis:
@@ -74,13 +100,13 @@ async def filtro_de_papel(roles: Iterable[str]) -> dict:
         {"role": {"$in": papeis}},
         {"additional_roles": {"$in": papeis}},
     ]
-    ids = await ids_com_papel_numa_empresa(papeis)
+    ids = await ids_com_papel_numa_empresa(papeis, base)
     if ids:
         ramos.append({"id": {"$in": ids}})
     return {"$or": ramos}
 
 
-async def filtro_de_atribuicao() -> dict:
+async def filtro_de_atribuicao(base=None) -> dict:
     """O filtro de `staff_assignment.assignment_staff_mongo_filter`, com os cargos dos UCRs.
 
     O cargo PRINCIPAL excluído (master/admin/cliente/parceiro) continua de fora: é a regra do
@@ -94,12 +120,12 @@ async def filtro_de_atribuicao() -> dict:
     return {
         "$and": [
             {"role": {"$nin": list(ASSIGNMENT_EXCLUDED_PRIMARY_ROLES)}},
-            await filtro_de_papel(ASSIGNMENT_ALLOWED_ROLES),
+            await filtro_de_papel(ASSIGNMENT_ALLOWED_ROLES, base),
         ]
     }
 
 
-async def anexar_papeis_das_empresas(users: list[dict]) -> list[dict]:
+async def anexar_papeis_das_empresas(users: list[dict], base=None) -> list[dict]:
     """Junta a cada utilizador `company_roles`: os papéis dos seus UCRs válidos.
 
     É o que a interface lê para pôr a pessoa no Select certo (consultor,
@@ -108,9 +134,9 @@ async def anexar_papeis_das_empresas(users: list[dict]) -> list[dict]:
     ids = [str(u.get("id")) for u in users or [] if u.get("id")]
     if not ids:
         return list(users or [])
-    docs = await db.user_company_roles.find(
-        {**UCR_VALIDO, "user_id": {"$in": ids}}, {"_id": 0, "user_id": 1, "role": 1},
-    ).to_list(_LIMITE)
+    docs = await _ler_ucrs(
+        base, {**UCR_VALIDO, "user_id": {"$in": ids}}, {"_id": 0, "user_id": 1, "role": 1},
+    )
     por_id: dict[str, set[str]] = {}
     for d in docs:
         papel = _norm(d.get("role"))
@@ -122,12 +148,13 @@ async def anexar_papeis_das_empresas(users: list[dict]) -> list[dict]:
     ]
 
 
-async def tem_papel(user_id: str, roles: Iterable[str]) -> bool:
+async def tem_papel(user_id: str, roles: Iterable[str], base=None) -> bool:
     """O utilizador tem um destes papéis (principal, adicional ou num UCR válido)?"""
     papeis = papeis_equivalentes(roles)
     if not user_id or not papeis:
         return False
-    user = await db.users.find_one(
+    bd = _base(base)
+    user = await bd.users.find_one(
         {"id": user_id}, {"_id": 0, "role": 1, "additional_roles": 1},
     )
     if not user:
@@ -135,8 +162,8 @@ async def tem_papel(user_id: str, roles: Iterable[str]) -> bool:
     proprios = {_norm(user.get("role")), *(_norm(r) for r in user.get("additional_roles") or [])}
     if proprios & set(papeis):
         return True
-    ucr = await db.user_company_roles.find_one(
-        {**UCR_VALIDO, "user_id": user_id, "role": {"$in": papeis}}, {"_id": 0, "user_id": 1},
+    ucr = await _ler_ucrs(
+        base, {**UCR_VALIDO, "user_id": user_id, "role": {"$in": papeis}}, {"_id": 0, "user_id": 1},
     )
     return bool(ucr)
 

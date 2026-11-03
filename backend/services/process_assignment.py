@@ -497,7 +497,7 @@ async def _indexadores_da_equipa(process: dict, network_id: Optional[str] = None
 
     # O Index dado POR EMPRESA (UCR) também é Index: sem isto quem o tinha só na grelha de acessos
     # nunca recebia processos, e o processo ficava sem indexador (Nov 2026, `services/role_ucr`).
-    query = {"$and": [{"is_active": True}, await filtro_de_papel(PAPEIS_DO_INDEX)]}
+    query = {"$and": [{"is_active": True}, await filtro_de_papel(PAPEIS_DO_INDEX, db)]}
     membros = await network_triage.user_ids_da_rede(
         network_id or network_triage.rede_da_equipa(process)
     )
@@ -1374,7 +1374,7 @@ async def check_waitlist_for_indexer(user_id: str) -> int:
     user_role = user.get("role", "")
     from services.role_ucr import PAPEIS_DO_INDEX, tem_papel
 
-    is_indexer = await tem_papel(user_id, PAPEIS_DO_INDEX)
+    is_indexer = await tem_papel(user_id, PAPEIS_DO_INDEX, db)
     if not is_indexer:
         logger.debug(f"[WAITLIST] Utilizador {user_id} não é indexador (role={user_role})")
         return 0

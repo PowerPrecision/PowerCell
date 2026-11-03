@@ -74,13 +74,12 @@ def _ctx(fake_db):
         assignment_network_guard,
         process_assignment,
         process_staff_assignment,
-        role_ucr,
         users_api_list,
     )
 
     return _tenant_db(
         fake_db, assignment_network_guard, process_staff_assignment,
-        admin_users_scope, role_ucr, users_api_list, process_assignment,
+        admin_users_scope, users_api_list, process_assignment,
     )
 
 

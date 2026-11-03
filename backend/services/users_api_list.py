@@ -39,9 +39,9 @@ async def run_get_users(
     # quem tinha o Index (ou outro cargo) na grelha de acessos (Nov 2026, `services/role_ucr`).
     query = {}
     if role:
-        query = await filtro_de_papel([role])
+        query = await filtro_de_papel([role], db)
     if for_assignment:
-        staff = await filtro_de_atribuicao()
+        staff = await filtro_de_atribuicao(db)
         query = {"$and": [query, staff]} if query else staff
 
     # FRONTEIRA DE REDE (Out 2026). Esta lista alimenta as dropdowns de
@@ -85,7 +85,7 @@ async def run_get_users(
             user or {}, users, process_id
         )
         users = await _juntar_a_equipa_do_processo(user or {}, users, process_id)
-    users = await anexar_papeis_das_empresas(users)
+    users = await anexar_papeis_das_empresas(users, db)
     if for_assignment:
         users = filter_assignment_staff(users)
 
@@ -179,7 +179,7 @@ async def _juntar_indexadores_da_rede(
     if rede == ambito:
         return users  # sem empresa escolhida: a lista já é a da rede
 
-    query = {"$and": [await filtro_de_papel(PAPEIS_DO_INDEX), await filtro_de_atribuicao()]}
+    query = {"$and": [await filtro_de_papel(PAPEIS_DO_INDEX, db), await filtro_de_atribuicao(db)]}
     scope_query = await build_users_scope_query(rede)
     if scope_query:
         query = {"$and": [query, scope_query]}
