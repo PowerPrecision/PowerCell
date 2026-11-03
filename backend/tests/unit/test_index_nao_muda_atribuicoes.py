@@ -1,4 +1,8 @@
-"""O Index não muda atribuições (decisão do Flavio, Out 2026).
+"""O Index não muda atribuições (decisão do Flavio, Out 2026) — REVISTA em Nov 2026.
+
+Nov 2026: o Index passou a poder alterar a atribuição do INDEX pelo «Gerir»
+(`POST /processes/{id}/assign`, só esse campo, e fica no histórico) — ver
+`test_regras_de_atribuicao.py`. «Atribuir-me / remover-me» continuam vedados.
 
 O perfil `indexacao` vê o processo de um colega na vista normal, mas não mexe na equipa do processo:
 nem pelo «Gerir» (`POST /processes/{id}/assign`), nem por «atribuir-me / remover-me». A única forma de
@@ -14,7 +18,16 @@ from fastapi import HTTPException
 
 from routes import processes as rotas
 
-ROTAS_DE_ATRIBUICAO = ["/{process_id}/assign", "/{process_id}/assign-me", "/{process_id}/unassign-me"]
+ROTAS_DE_ATRIBUICAO = ["/{process_id}/assign-me", "/{process_id}/unassign-me"]
+
+
+def test_o_gerir_decide_pelo_perfil_efectivo_e_pelas_regras():
+    """`/assign` já não barra o Index à porta: passa o perfil EFECTIVO às regras, que o limitam ao
+    campo Index."""
+    import inspect
+
+    fonte = inspect.getsource(rotas.assign_process)
+    assert "get_effective_role_async" in fonte and "papel_efectivo" in fonte
 
 
 def _dependencias(dependant):

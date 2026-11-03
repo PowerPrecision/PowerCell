@@ -301,7 +301,10 @@ class ProcessResponse(BaseModel):
     consultor_name: Optional[str] = None  
     mediador_name: Optional[str] = None  
     assigned_indexacao_id: Optional[str] = None  
-    indexacao_name: Optional[str] = None  
+    indexacao_name: Optional[str] = None
+    # Direção (Diretor/CEO), campo próprio desde Nov 2026.
+    assigned_direcao_ids: Optional[List[str]] = None
+    direcao_names: Optional[List[str]] = None  
     assigned_parceiro_id: Optional[str] = None  
     parceiro_name: Optional[str] = None  
     

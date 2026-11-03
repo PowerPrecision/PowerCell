@@ -256,6 +256,48 @@ def build_set_mediador_fields(ids: list[str], names: list[str]) -> dict[str, Any
     )
 
 
+# ────────────────────────────────────────────────────────────────────
+# DIREÇÃO (Nov 2026, decisão do Flavio): Diretor e CEO têm o seu campo,
+# separado de consultores e intermediários. Só dois campos — não há
+# singulares legados a manter.
+# ────────────────────────────────────────────────────────────────────
+CAMPO_DIRECAO_IDS = "assigned_direcao_ids"
+CAMPO_DIRECAO_NOMES = "direcao_names"
+
+
+def build_set_direcao_fields(ids: list[str], names: list[str]) -> dict[str, Any]:
+    return {CAMPO_DIRECAO_IDS: list(ids), CAMPO_DIRECAO_NOMES: list(names)}
+
+
+async def apply_direcao_ids_param(
+    *,
+    process_id: str,
+    user: dict,
+    update_data: dict,
+    direcao_ids: str,
+    old_direcao_ids: list,
+) -> None:
+    """Aplica o parâmetro direcao_ids (limpar ou definir) + histórico «de quem para quem»."""
+    from services.history import log_history
+
+    novos: list[str] = []
+    nomes: list[str] = []
+    if not is_clear_assignment_value(direcao_ids):
+        for did in parse_assignment_ids_csv(direcao_ids):
+            doc = await db.users.find_one({"id": did})
+            if doc:
+                novos.append(did)
+                nomes.append(doc.get("name", ""))
+    if list(old_direcao_ids or []) == novos:
+        return
+    update_data.update(build_set_direcao_fields(novos, nomes))
+    old_names = await fetch_user_names(list(old_direcao_ids or []))
+    await log_history(
+        process_id, user, "Actualizou direção", CAMPO_DIRECAO_IDS,
+        ", ".join(old_names) or None, ", ".join(nomes) or None,
+    )
+
+
 def detect_newly_assigned(
     *,
     old_consultor_ids: list,
@@ -263,14 +305,20 @@ def detect_newly_assigned(
     old_indexacao: Optional[str],
     old_parceiro: Optional[str],
     update_data: dict,
+    old_direcao_ids: Optional[list] = None,
 ) -> dict[str, list[str]]:
     """IDs recém-atribuídos (para email automático)."""
     newly: dict[str, list[str]] = {
         "consultores": [],
         "mediadores": [],
+        "direcao": [],
         "indexacao": [],
         "parceiro": [],
     }
+    nova_direcao = update_data.get(CAMPO_DIRECAO_IDS)
+    if nova_direcao:
+        antes = set(old_direcao_ids or [])
+        newly["direcao"] = [i for i in nova_direcao if i not in antes]
     new_consultor_list = update_data.get("assigned_consultor_ids")
     if new_consultor_list:
         old_set = set(old_consultor_ids or [])
@@ -393,9 +441,19 @@ async def apply_single_assignee_param(
     name_field: str,
     clear_action: str,
     set_action: str,
+    mesmo_em_modo_invisivel: bool = False,
 ) -> None:
-    """Aplica indexação/parceiro (single assignee) + histórico."""
+    """Aplica indexação/parceiro (single assignee) + histórico.
+
+    `mesmo_em_modo_invisivel`: o Index que muda a atribuição do Index fica no histórico (controlo,
+    decisão do Flavio de Nov 2026) — a única acção dele que não é invisível.
+    """
+    from functools import partial
+
     from services.history import log_history
+
+    if mesmo_em_modo_invisivel:
+        log_history = partial(log_history, mesmo_em_modo_invisivel=True)
 
     if is_clear_assignment_value(param_value):
         update_data[id_field] = None
@@ -411,6 +469,8 @@ async def apply_single_assignee_param(
     target = await db.users.find_one({"id": param_value})
     if not target:
         return
+    if param_value == old_id:
+        return  # sem mudança: nem escrita nem linha de histórico
     update_data[id_field] = param_value
     update_data[name_field] = target["name"]
     old_name = None
@@ -433,6 +493,8 @@ async def build_staff_assign_update(
     parceiro_id: Optional[str],
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
+    direcao_ids: Optional[str] = None,
+    historico_do_index: bool = False,
 ) -> tuple[dict, dict[str, list[str]]]:
     """
     Monta `$set` + mapa de recém-atribuídos para POST /assign.
@@ -447,6 +509,7 @@ async def build_staff_assign_update(
     old_mediador_ids = process.get("assigned_mediador_ids") or []
     old_indexacao = process.get("assigned_indexacao_id")
     old_parceiro = process.get("assigned_parceiro_id")
+    old_direcao_ids = process.get(CAMPO_DIRECAO_IDS) or []
 
     update_data: dict[str, Any] = {
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -479,6 +542,7 @@ async def build_staff_assign_update(
             name_field="indexacao_name",
             clear_action="Removeu indexação",
             set_action="Atribuiu indexação",
+            mesmo_em_modo_invisivel=historico_do_index,
         )
         if update_data.get("assigned_indexacao_id"):
             # o relógio do SLA do Index (nível 1) conta a partir da atribuição
@@ -496,12 +560,22 @@ async def build_staff_assign_update(
             set_action="Atribuiu parceiro",
         )
 
+    if direcao_ids is not None:
+        await apply_direcao_ids_param(
+            process_id=process_id,
+            user=user,
+            update_data=update_data,
+            direcao_ids=direcao_ids,
+            old_direcao_ids=old_direcao_ids,
+        )
+
     newly = detect_newly_assigned(
         old_consultor_ids=old_consultor_ids,
         old_mediador_ids=old_mediador_ids,
         old_indexacao=old_indexacao,
         old_parceiro=old_parceiro,
         update_data=update_data,
+        old_direcao_ids=old_direcao_ids,
     )
     return update_data, newly
 
@@ -616,6 +690,7 @@ def build_unassign_me_update(process: dict, user: dict) -> tuple[dict, list[str]
 ASSIGNMENT_EMAIL_ROLE_LABELS = (
     ("consultores", "Consultor"),
     ("mediadores", "Intermediário"),
+    ("direcao", "Direção"),
     ("indexacao", "Indexação"),
     ("parceiro", "Parceiro"),
 )
@@ -777,6 +852,7 @@ def ids_a_atribuir(
     parceiro_id: Optional[str] = None,
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
+    direcao_ids: Optional[str] = None,
 ) -> list[str]:
     """Os ids que um pedido de `/assign` quer PÔR (nunca os que limpa).
 
@@ -788,7 +864,7 @@ def ids_a_atribuir(
         consultor_ids, mediador_ids, consultor_id, mediador_id,
     )
     ids: list[str] = []
-    for csv in (consultores, mediadores):
+    for csv in (consultores, mediadores, direcao_ids):
         if csv is not None and not is_clear_assignment_value(csv):
             ids.extend(parse_assignment_ids_csv(csv))
     for unico in (indexacao_id, parceiro_id):
@@ -807,20 +883,55 @@ async def run_staff_assign_process(
     parceiro_id: Optional[str] = None,
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
+    direcao_ids: Optional[str] = None,
+    papel_efectivo: Optional[str] = None,
     inject_cdc_fn,
     invalidate_stats_fn,
     broadcast_fn,
 ) -> dict[str, Any]:
-    """Orquestra POST /assign: persist + cache + WS + emails."""
+    """Orquestra POST /assign: persist + cache + WS + emails.
+
+    `papel_efectivo` (Nov 2026): o perfil ACTIVO de quem pede. Com ele aplicam-se as regras de
+    `services/regras_de_atribuicao` (quem altera o quê, e de que empresa). Sem ele (chamadas
+    internas e testes antigos) vale o que valia.
+    """
     from fastapi import HTTPException
 
+    from services import regras_de_atribuicao as regras
     from services.websocket_manager import WSEventType
+
+    consultor_ids, mediador_ids = normalize_compat_assignment_params(
+        consultor_ids, mediador_ids, consultor_id, mediador_id,
+    )
+    consultor_id = mediador_id = None
+    if papel_efectivo is not None:
+        regras.exigir_quem_pode_alterar(
+            papel_efectivo,
+            consultor_ids=consultor_ids, mediador_ids=mediador_ids, direcao_ids=direcao_ids,
+            indexacao_id=indexacao_id, parceiro_id=parceiro_id,
+        )
 
     process = await db.processes.find_one({"id": process_id})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
     equipa_antes = ids_atribuidos_do_processo(process)
+
+    if papel_efectivo is not None:
+        # A EMPRESA é a fronteira: só se põe gente da empresa activa; quem outra empresa atribuiu
+        # (processo partilhado) fica sempre. Antes do `$set`, como a fronteira de rede abaixo.
+        ajustado = await regras.aplicar_fronteira_de_empresa(
+            user, process,
+            {
+                "assigned_consultor_ids": consultor_ids,
+                "assigned_mediador_ids": mediador_ids,
+                CAMPO_DIRECAO_IDS: direcao_ids,
+            },
+            db,
+        )
+        consultor_ids = ajustado["assigned_consultor_ids"]
+        mediador_ids = ajustado["assigned_mediador_ids"]
+        direcao_ids = ajustado[CAMPO_DIRECAO_IDS]
 
     # FRONTEIRA DE REDE (Out 2026): só se atribui directamente gente da
     # própria rede. Corre ANTES de montar o `$set`, porque os `apply_*`
@@ -832,6 +943,7 @@ async def run_staff_assign_process(
             consultor_ids=consultor_ids, mediador_ids=mediador_ids,
             indexacao_id=indexacao_id, parceiro_id=parceiro_id,
             consultor_id=consultor_id, mediador_id=mediador_id,
+            direcao_ids=direcao_ids,
         ),
         processo=process,
         ja_atribuidos=equipa_antes,
@@ -847,6 +959,8 @@ async def run_staff_assign_process(
         parceiro_id=parceiro_id,
         consultor_id=consultor_id,
         mediador_id=mediador_id,
+        direcao_ids=direcao_ids,
+        historico_do_index=regras.e_o_index(papel_efectivo),
     )
 
     inject_cdc_fn(update_data, user)

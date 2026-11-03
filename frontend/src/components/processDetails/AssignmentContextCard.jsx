@@ -95,6 +95,7 @@ export default function AssignmentContextCard({
   process,
   consultorNames = [],
   mediadorNames = [],
+  direcaoNames = [],
   deadlines = [],
   onManageAssignment,
   canManageAssignment,
@@ -155,6 +156,7 @@ export default function AssignmentContextCard({
         </div>
         <TeamRow label="Consultor(es)" names={consultorNames} />
         <TeamRow label="Intermediário(s)" names={mediadorNames} />
+        <TeamRow label="Direção" names={direcaoNames} />
         {/* Sempre à vista: «a que Index está este processo?» era a pergunta sem resposta
             enquanto os ficheiros esperavam a Indexação. */}
         <TeamRow label="Indexação" names={indexacaoName ? [indexacaoName] : []} />

@@ -206,6 +206,9 @@ class UserResponse(BaseModel):
     additional_roles: Optional[List[str]] = []
     # Cargos dados por empresa (UCRs válidos), para a interface pôr a pessoa no Select certo.
     company_roles: Optional[List[str]] = None
+    # Na lista de atribuição de um processo: atribuído por OUTRA empresa (processo partilhado) —
+    # vê-se, não se altera.
+    so_leitura: Optional[bool] = None
     base_salary: Optional[float] = 0.0  # Vencimento fixo mensal (€) — modelo híbrido
 
 
