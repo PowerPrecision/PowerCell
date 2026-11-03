@@ -211,7 +211,7 @@ class TestGuardaDeFonte:
     def test_chama_o_ponto_unico(self):
         codigo = self._codigo_dos_alertas()
         assert "destinatarios_do_alerta" in codigo
-        assert "gestao_da_rede_do_processo" in codigo
+        assert "gestao_do_processo" in codigo
         assert "ids_atribuidos" in codigo
 
     def test_nao_resta_nenhum_leque_de_gestao_sem_filtro_de_rede(self):

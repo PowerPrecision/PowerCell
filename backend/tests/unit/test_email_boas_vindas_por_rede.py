@@ -504,7 +504,7 @@ def registo_publico(fake_async_db, monkeypatch):
             patch.object(pr, "s3_service", s3), \
             patch.object(pr, "spawn_background_task", _recolher), \
             patch.object(pr, "notify_new_client_registration", AsyncMock()), \
-            patch.object(pr, "gestao_da_rede_do_processo", AsyncMock(return_value=[])), \
+            patch.object(pr, "gestao_do_processo", AsyncMock(return_value=[])), \
             patch.object(pr, "send_new_client_notification", AsyncMock()), \
             patch("services.push_notifications.send_push_notification", AsyncMock()), \
             patch("services.portal_documents_notify.generate_mandatory_document_requests", AsyncMock()), \

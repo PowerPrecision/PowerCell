@@ -13,7 +13,7 @@ REGRAS
 3. **Rede.** Cada pedido leva o `network_id` do processo e as listagens filtram pelo âmbito de
    PROCESSOS de quem pergunta (`build_tenant_process_condition`): a chefia da rede A nunca vê
    um pedido de um processo da rede B, e um id alheio resolve-se como 404.
-4. **A chefia avisada é a da rede do processo** (`gestao_da_rede_do_processo`), nunca toda.
+4. **A chefia avisada é a da empresa do processo** (`gestao_do_processo`), nunca toda.
 5. **Soft delete** e `update_one` com `$set`, como no resto da casa.
 """
 from __future__ import annotations
@@ -128,9 +128,9 @@ async def run_pedir_alteracao(user: dict, process_id: str, motivo: Optional[str]
     await db.index_assignment_requests.insert_one(dict(pedido))
     await _auditar(user, process_id, "Pedido de alteração de atribuição (Index)")
 
-    from services.alert_audience import gestao_da_rede_do_processo
+    from services.alert_audience import gestao_do_processo
 
-    chefia = [uid for uid in await gestao_da_rede_do_processo(proc, ROLES_DA_CHEFIA) if uid != meu_id]
+    chefia = [uid for uid in await gestao_do_processo(proc, ROLES_DA_CHEFIA) if uid != meu_id]
     numero = proc.get("process_number") or str(process_id)[:8]
     quem = (user or {}).get("name") or "Um indexador"
     mensagem = f"{quem} pede a alteração da atribuição do processo {numero}."

@@ -58,7 +58,6 @@ from services.email_sync_cadence import (  # noqa: F401
     get_email_auto_sync_interval_seconds,
     jitter_do_auto_sync,
 )
-from services.tenant_network import PROJECCAO_DO_CARIMBO
 
 
 
@@ -104,14 +103,21 @@ class ScheduledTasksService:
         notification_type: str,
         process_id: str = None,
         client_name: str = None,
-        link: str = None
+        link: str = None,
+        urgente: bool = False,
+        extra: Optional[dict] = None,
     ):
-        """Criar uma notificação na base de dados (se a política a deixar passar)."""
-        from services.notification_policy import deve_notificar
+        """Criar uma notificação na base de dados (se a política a deixar passar).
+
+        `urgente` marca um prazo a 1 hora (vai para «Prazos urgentes» no Telegram); `alerta`
+        diz à app se o aviso apita (som/toast) — o mesmo critério do Telegram.
+        """
+        from services.notification_policy import deve_notificar, vai_apitar
 
         if not await deve_notificar(user_id, notification_type, process_id, bd=self.db):
             return None
         notification = {
+            **(extra or {}),
             "id": str(uuid.uuid4()),
             "user_id": user_id,
             "message": message,
@@ -120,6 +126,8 @@ class ScheduledTasksService:
             "client_name": client_name,
             "link": link,
             "read": False,
+            "urgente": bool(urgente),
+            "alerta": await vai_apitar(user_id, notification_type, urgente=urgente, bd=self.db),
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         
@@ -130,70 +138,11 @@ class ScheduledTasksService:
         return notification
     
     async def check_expiring_documents(self) -> int:
-        """
-        Verificar documentos a expirar nos próximos 7 dias.
-        Criar notificações para os utilizadores responsáveis.
-        """
-        logger.info("A verificar documentos a expirar...")
-        
-        today = datetime.now(timezone.utc)
-        warning_date = today + timedelta(days=7)
-        
-        # Buscar processos com documentos
-        processes = await self.db.processes.find(
-            {"documents": {"$exists": True, "$ne": []}},
-            {"_id": 0}
-        ).to_list(1000)
-        
-        notifications_created = 0
-        
-        for process in processes:
-            documents = process.get("documents", [])
-            
-            for doc in documents:
-                expiry_date_str = doc.get("expiry_date")
-                if not expiry_date_str:
-                    continue
-                
-                try:
-                    expiry_date = _data_iso_com_fuso(expiry_date_str)
-                except (ValueError, TypeError):
-                    continue
-                
-                # Verificar se expira nos próximos 7 dias
-                if today <= expiry_date <= warning_date:
-                    days_until = (expiry_date - today).days
-                    
-                    # Notificar consultor e mediador
-                    users_to_notify = []
-                    if process.get("consultor_id"):
-                        users_to_notify.append(process["consultor_id"])
-                    if process.get("mediador_id"):
-                        users_to_notify.append(process["mediador_id"])
-                    
-                    for user_id in users_to_notify:
-                        # Verificar se já existe notificação similar recente
-                        existing = await self.db.notifications.find_one({
-                            "user_id": user_id,
-                            "process_id": process.get("id"),
-                            "type": "document_expiry",
-                            "created_at": {"$gte": (today - timedelta(days=1)).isoformat()}
-                        })
-                        
-                        if not existing:
-                            await self.create_notification(
-                                user_id=user_id,
-                                message=f"Documento '{doc.get('name', 'Sem nome')}' expira em {days_until} dias",
-                                notification_type="document_expiry",
-                                process_id=process.get("id"),
-                                client_name=process.get("client_name"),
-                                link=f"/process/{process.get('id')}"
-                            )
-                            notifications_created += 1
-        
-        logger.info(f"Documentos a expirar: {notifications_created} notificações criadas")
-        return notifications_created
-    
+        """Documentos a expirar: aos 60 dias, aos 7 e no dia, juntos por cliente (ver `avisos_de_rotina`)."""
+        from services.avisos_de_rotina import avisar_documentos_a_expirar
+
+        return await avisar_documentos_a_expirar(self)
+
     async def check_upcoming_deadlines(self) -> int:
         """
         PACOTE DH — Verificar prazos/eventos próximos e enviar lembretes.
@@ -315,6 +264,8 @@ class ScheduledTasksService:
                             notification_type=notif_type,
                             process_id=process_id,
                             link="/calendario",
+                            # Só o lembrete a 1 hora apita no telemóvel (Flavio, Nov 2026).
+                            urgente=(rt == "1h"),
                         )
                         notifications_created += 1
 
@@ -596,13 +547,16 @@ class ScheduledTasksService:
         # a contagem somava os processos de todas as redes e ia a toda a gestão do
         # sistema — a Domus era avisada de «7 clientes em espera» em que 5 eram da Power.
         # Sem rede determinável não se avisa ninguém (falha fechada, com aviso no log).
-        from services.alert_audience import (
-            gestao_da_rede_do_processo,
-            rede_resolvida_do_processo,
-        )
+        # Cada gestão só ouve falar dos clientes DA SUA EMPRESA (Flavio, Nov 2026; antes da
+        # rede, Lote 2): a Power, a Precision e a Sistema partilham a rede. Sem rede
+        # determinável não se avisa ninguém (falha fechada, com aviso no log).
+        from services.alert_audience import gestao_do_processo, rede_resolvida_do_processo
+        from services.tenant_network import CAMPOS_EMPRESA, VALORES_SEM_EMPRESA
 
-        por_rede: dict = {}
+        por_empresa: dict = {}
         for processo in processes:
+            if processo.get("is_deleted"):
+                continue
             rede = await rede_resolvida_do_processo(processo)
             if not rede:
                 logger.warning(
@@ -610,234 +564,91 @@ class ScheduledTasksService:
                     processo.get("id"),
                 )
                 continue
-            por_rede.setdefault(rede, []).append(processo)
+            empresa = next(
+                (str(processo[c]) for c in CAMPOS_EMPRESA
+                 if processo.get(c) not in VALORES_SEM_EMPRESA and str(processo.get(c) or "").strip()),
+                "",
+            )
+            por_empresa.setdefault((rede, empresa), []).append(processo)
+
+        em_espera_por_gestor: dict = {}
+        for processos_da_empresa in por_empresa.values():
+            for manager_id in await gestao_do_processo(processos_da_empresa[0], ["ceo", "diretor", "admin"]):
+                em_espera_por_gestor[manager_id] = em_espera_por_gestor.get(manager_id, 0) + len(processos_da_empresa)
 
         notifications_created = 0
+        for manager_id, total in em_espera_por_gestor.items():
+            # Verificar se já enviou notificação hoje
+            existing = await self.db.notifications.find_one({
+                "user_id": manager_id,
+                "type": "clients_waiting",
+                "created_at": {"$gte": (today - timedelta(hours=24)).isoformat()}
+            })
 
-        for rede, processos_da_rede in por_rede.items():
-            gestores = await gestao_da_rede_do_processo(
-                processos_da_rede[0], ["ceo", "diretor", "admin"],
-            )
-            for manager_id in gestores:
-                # Verificar se já enviou notificação hoje
-                existing = await self.db.notifications.find_one({
-                    "user_id": manager_id,
-                    "type": "clients_waiting",
-                    "created_at": {"$gte": (today - timedelta(hours=24)).isoformat()}
-                })
-
-                if not existing:
-                    await self.create_notification(
-                        user_id=manager_id,
-                        message=(
-                            f"⚠️ {len(processos_da_rede)} cliente(s) em espera há mais de "
-                            f"{days} dias. Requer atenção!"
-                        ),
-                        notification_type="clients_waiting",
-                        link="/admin?tab=overview"
-                    )
-                    notifications_created += 1
+            if not existing:
+                await self.create_notification(
+                    user_id=manager_id,
+                    message=(
+                        f"⚠️ {total} cliente(s) em espera há mais de "
+                        f"{days} dias. Requer atenção!"
+                    ),
+                    notification_type="clients_waiting",
+                    link="/admin?tab=overview"
+                )
+                notifications_created += 1
 
         logger.info(f"Clientes em espera: {notifications_created} notificações criadas para {len(processes)} clientes")
         return notifications_created
     
     async def check_document_expirations_watchdog(self, days_ahead: int = 60) -> int:
+        """O antigo watchdog (60 dias) faz hoje parte de `check_expiring_documents`.
+
+        Fica para quem o chama: as marcas de `avisos_de_rotina` fazem com que correr os dois não
+        repita nenhum aviso.
         """
-        WATCHDOG DE VALIDADE DE DOCUMENTOS
-        
-        Verifica documentos (da colecção document_metadata) que expiram nos próximos X dias.
-        Cria notificações para os consultores/intermediários responsáveis.
-        
-        Níveis de urgência:
-        - Vermelho: < 7 dias
-        - Laranja: 7-29 dias
-        - Amarelo: 30-60 dias
-        
-        Args:
-            days_ahead: Dias a verificar à frente (default 60)
-        
-        Returns:
-            Número de notificações criadas
-        """
-        logger.info(f"[WATCHDOG] A verificar documentos a expirar nos próximos {days_ahead} dias...")
-        
-        today = datetime.now(timezone.utc)
-        future_date = today + timedelta(days=days_ahead)
-        
-        # Buscar documentos com data de expiração dentro do período
-        # Que ainda não tiveram alerta enviado
-        expiring_docs = await self.db.document_metadata.find({
-            "expiry_date": {
-                "$ne": None,
-                "$gte": today.strftime("%Y-%m-%d"),
-                "$lte": future_date.strftime("%Y-%m-%d")
-            },
-            "expiry_alert_sent": {"$ne": True}
-        }, {"_id": 0}).to_list(500)
-        
-        logger.info(f"[WATCHDOG] Encontrados {len(expiring_docs)} documentos a expirar")
-        
-        notifications_created = 0
-        
-        for doc in expiring_docs:
-            try:
-                # `today` tem fuso e `strptime` devolve uma data sem ele: subtrair as duas levantava
-                # TypeError e o `except` engolia-o — NENHUM documento gerava alerta de validade.
-                expiry_date = datetime.strptime(doc["expiry_date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                days_until = (expiry_date - today).days
-                
-                # Determinar urgência visual
-                if days_until < 7:
-                    urgency_emoji = "🔴"
-                elif days_until < 30:
-                    urgency_emoji = "🟠"
-                else:
-                    urgency_emoji = "🟡"
-                
-                # Obter o processo para identificar os responsáveis
-                process = await self.db.processes.find_one(
-                    {"id": doc["process_id"]},
-                    {"_id": 0, "client_name": 1, "assigned_consultor_id": 1, 
-                     "consultor_id": 1, "assigned_mediador_id": 1, "mediador_id": 1}
-                )
-                
-                if not process:
-                    continue
-                
-                client_name = doc.get("client_name") or process.get("client_name", "Cliente")
-                doc_category = doc.get("ai_category") or doc.get("ai_subcategory") or "Documento"
-                
-                # Identificar utilizadores a notificar
-                users_to_notify = set()
-                if process.get("assigned_consultor_id"):
-                    users_to_notify.add(process["assigned_consultor_id"])
-                if process.get("consultor_id"):
-                    users_to_notify.add(process["consultor_id"])
-                if process.get("assigned_mediador_id"):
-                    users_to_notify.add(process["assigned_mediador_id"])
-                if process.get("mediador_id"):
-                    users_to_notify.add(process["mediador_id"])
-                
-                # Notificar cada utilizador
-                for user_id in users_to_notify:
-                    # Verificar se já existe notificação recente para este documento
-                    existing = await self.db.notifications.find_one({
-                        "user_id": user_id,
-                        "type": "document_expiry_watchdog",
-                        "message": {"$regex": doc.get("id", "")},
-                        "created_at": {"$gte": (today - timedelta(days=1)).isoformat()}
-                    })
-                    
-                    if not existing:
-                        message = f"{urgency_emoji} {doc_category} de {client_name} expira em {days_until} dias ({expiry_date.strftime('%d/%m/%Y')})"
-                        
-                        await self.create_notification(
-                            user_id=user_id,
-                            message=message,
-                            notification_type="document_expiry_watchdog",
-                            process_id=doc["process_id"],
-                            client_name=client_name,
-                            link=f"/process/{doc['process_id']}"
-                        )
-                        notifications_created += 1
-                
-                # Marcar documento como alerta enviado
-                await self.db.document_metadata.update_one(
-                    {"id": doc["id"]},
-                    {"$set": {"expiry_alert_sent": True, "expiry_alert_sent_at": today.isoformat()}}
-                )
-                
-            except Exception as e:
-                logger.error(f"[WATCHDOG] Erro ao processar documento {doc.get('id')}: {e}")
-                continue
-        
-        logger.info(f"[WATCHDOG] Documentos a expirar: {notifications_created} notificações criadas")
-        return notifications_created
-    
+        from services.avisos_de_rotina import avisar_documentos_a_expirar
+
+        return await avisar_documentos_a_expirar(self)
+
     async def send_monthly_document_reminder(self) -> int:
         """
-        No 1º dia de cada mês, enviar alerta para consultores e intermediários
-        para pedirem recibo e extrato de conta ao cliente.
-        Também envia email ao cliente.
+        Ao dia 25 de cada mês (Flavio, Nov 2026: já se pode pedir o recibo e o extrato do mês
+        corrente), um aviso por consultor/intermediário com quantos clientes activos tem, e
+        um email a cada cliente. Uma só vez por mês: o job corre de hora a hora.
         """
-        today = datetime.now(timezone.utc)
-        
-        # Verificar se é o 1º dia do mês
-        if today.day != 1:
-            logger.info("Não é o 1º dia do mês - ignorando alerta mensal")
-            return 0
-        
-        logger.info("A enviar lembretes mensais de documentação...")
-        
-        # Mês anterior
-        if today.month == 1:
-            prev_month = 12
-            prev_year = today.year - 1
-        else:
-            prev_month = today.month - 1
-            prev_year = today.year
-        
-        month_names = {
-            1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
-            5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
-            9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
-        }
-        prev_month_name = month_names[prev_month]
-        
-        # Processos activos, DITADOS PELO MOTOR (Épico 10, Parte 3).
-        #
-        # Viviam aqui doze nomes de fases escritos à mão. Uma fase nova
-        # criada pelo admin nunca entrava no relatório mensal e uma fase
-        # renomeada saía dele — em silêncio, porque um relatório com
-        # menos processos parece um mês calmo.
-        #
-        # Workflow POR REDE: pré-filtra-se pela união dos nomes activos e
-        # confirma-se, processo a processo, no workflow da rede dona.
-        from services.workflow_phases import (
-            nomes_activos_de_todas_as_redes,
-            so_processos_com_fase_activa,
+        from services.avisos_de_rotina import (
+            DIA_DO_LEMBRETE_MENSAL,
+            MESES,
+            consultores_e_intermediarios,
+            lembrete_mensal_ja_feito,
+            mensagem_do_lembrete_mensal,
+            processos_activos,
         )
 
-        active_statuses = await nomes_activos_de_todas_as_redes()
+        today = datetime.now(timezone.utc)
+        if today.day < DIA_DO_LEMBRETE_MENSAL:
+            logger.info("Ainda não é dia %s - ignorando alerta mensal", DIA_DO_LEMBRETE_MENSAL)
+            return 0
+        if await lembrete_mensal_ja_feito(self.db, today):
+            return 0
 
-        processes = await self.db.processes.find({
-            "status": {"$in": active_statuses}
-        }, {"_id": 0}).to_list(1000)
-        processes = await so_processos_com_fase_activa(processes)
+        logger.info("A enviar lembretes mensais de documentação...")
+        mes, ano = MESES[today.month], today.year
 
-        notifications_created = 0
+        # Processos activos, DITADOS PELO MOTOR (Épico 10, Parte 3), e nunca eliminados.
+        processes = await processos_activos(self.db, limite=1000)
+
+        clientes_por_pessoa: dict = {}
         #: Contexto de email por (rede, empresa): resolvê-lo é ler configuração, e a maioria
         #: dos processos partilha a mesma empresa.
         contextos_por_rede: dict = {}
 
         for process in processes:
-            users_to_notify = []
-            
-            # Consultor
-            if process.get("assigned_consultor_id"):
-                users_to_notify.append(process["assigned_consultor_id"])
-            elif process.get("consultor_id"):
-                users_to_notify.append(process["consultor_id"])
-            
-            # Intermediário
-            if process.get("assigned_mediador_id"):
-                users_to_notify.append(process["assigned_mediador_id"])
-            elif process.get("mediador_id"):
-                users_to_notify.append(process["mediador_id"])
-            
             client_name = process.get("client_name", "Cliente")
-            
-            for user_id in set(users_to_notify):
-                await self.create_notification(
-                    user_id=user_id,
-                    message=f"📄 Pedir recibo de vencimento e extrato bancário de {prev_month_name} ao cliente {client_name}",
-                    notification_type="monthly_document_reminder",
-                    process_id=process.get("id"),
-                    client_name=client_name,
-                    link=f"/process/{process.get('id')}"
-                )
-                notifications_created += 1
-            
+            cliente = process.get("client_id") or process.get("id")
+            for user_id in consultores_e_intermediarios(process):
+                clientes_por_pessoa.setdefault(user_id, set()).add(cliente)
+
             # Enviar email ao cliente — em nome da rede do PROCESSO dele (Lote 3).
             client_email = process.get("client_email")
             if client_email:
@@ -858,13 +669,23 @@ class ScheduledTasksService:
                     await self.send_monthly_reminder_email(
                         to_email=client_email,
                         client_name=client_name,
-                        month_name=prev_month_name,
-                        year=prev_year,
+                        month_name=mes,
+                        year=ano,
                         contexto=contextos_por_rede[chave_do_contexto],
                     )
                 except Exception as e:
                     logger.error(f"Erro ao enviar email para {client_email}: {e}")
-        
+
+        notifications_created = 0
+        for user_id, clientes in clientes_por_pessoa.items():
+            if await self.create_notification(
+                user_id=user_id,
+                message=mensagem_do_lembrete_mensal(mes, len(clientes)),
+                notification_type="monthly_document_reminder",
+                link="/processos",
+            ):
+                notifications_created += 1
+
         logger.info(f"Lembretes mensais: {notifications_created} notificações criadas")
         return notifications_created
     
@@ -1566,147 +1387,13 @@ class ScheduledTasksService:
             return f"⚠️ Taxa de sucesso baixa ({success_rate:.0f}%). Verifique a qualidade das imagens e PDFs enviados."
     
     async def check_stale_processes(self, stale_days: int = 14, urgent_days: int = 7) -> int:
-        """
-        Verificar processos sem atualização há mais de X dias.
-        
-        Cria notificações para os consultores/mediadores atribuídos quando um processo
-        não é atualizado há mais de `stale_days` dias.
-        
-        Níveis:
-        - > 14 dias sem atualização: Processo atrasado (notifica consultor + mediador + diretor)
-        - > 7 dias sem atualização: Processo urgente (notifica consultor + mediador)
-        
-        Args:
-            stale_days: Dias sem atualização para considerar atrasado (default 14)
-            urgent_days: Dias sem atualização para considerar urgente (default 7)
-        
-        Returns:
-            Número de notificações criadas
-        """
-        logger.info(f"A verificar processos sem atualização há mais de {urgent_days} dias...")
-        
-        today = datetime.now(timezone.utc)
-        stale_cutoff = (today - timedelta(days=stale_days)).isoformat()
-        urgent_cutoff = (today - timedelta(days=urgent_days)).isoformat()
-        
-        # Excluir processos em estados finais (concluídos, cancelados, etc.)
-        final_statuses = ["concluido", "cancelado", "recusado", "desistiu", "escritura_feita"]
-        
-        # Buscar processos com updated_at antigo (ou sem updated_at, usar created_at)
-        stale_processes = await self.db.processes.find({
-            "status": {"$nin": final_statuses},
-            "$or": [
-                {"updated_at": {"$lte": stale_cutoff}},
-                {"updated_at": {"$exists": False}, "created_at": {"$lte": stale_cutoff}}
-            ]
-        }, {"_id": 0, "id": 1, "client_name": 1, "status": 1, "consultor_id": 1,
-            "mediador_id": 1, "assigned_consultor_id": 1, "assigned_mediador_id": 1,
-            "updated_at": 1, "created_at": 1, **PROJECCAO_DO_CARIMBO}).to_list(500)
+        """Processos parados: um resumo por pessoa, só quando um processo passa os 7 ou os 14 dias;
+        a gestão da empresa recebe o seu aos 21. Só processos activos no motor e não eliminados.
+        Ver `services/avisos_de_rotina.py`."""
+        from services.avisos_de_rotina import avisar_processos_parados
 
-        urgent_processes = await self.db.processes.find({
-            "status": {"$nin": final_statuses},
-            "$or": [
-                {"updated_at": {"$lte": urgent_cutoff, "$gt": stale_cutoff}},
-                {"updated_at": {"$exists": False}, "created_at": {"$lte": urgent_cutoff, "$gt": stale_cutoff}}
-            ]
-        }, {"_id": 0, "id": 1, "client_name": 1, "status": 1, "consultor_id": 1, 
-            "mediador_id": 1, "assigned_consultor_id": 1, "assigned_mediador_id": 1,
-            "updated_at": 1, "created_at": 1}).to_list(500)
-        
-        notifications_created = 0
-        
-        # Processar processos atrasados (> stale_days)
-        for process in stale_processes:
-            last_update = process.get("updated_at") or process.get("created_at", "")
-            try:
-                last_date = _data_iso_com_fuso(last_update)
-                days_since = (today - last_date).days
-            except (ValueError, TypeError, AttributeError):
-                days_since = stale_days
-            
-            users_to_notify = set()
-            if process.get("consultor_id"):
-                users_to_notify.add(process["consultor_id"])
-            if process.get("assigned_consultor_id"):
-                users_to_notify.add(process["assigned_consultor_id"])
-            if process.get("mediador_id"):
-                users_to_notify.add(process["mediador_id"])
-            if process.get("assigned_mediador_id"):
-                users_to_notify.add(process["assigned_mediador_id"])
-            
-            # Também notificar a direcção para processos muito atrasados — a da REDE do
-            # processo (Lote 3, Out 2026): antes eram os diretores/CEO de TODAS as redes,
-            # com o nome do cliente na mensagem. Sem rede determinável não avisa ninguém.
-            if days_since > 21:
-                from services.alert_audience import gestao_da_rede_do_processo
+        return await avisar_processos_parados(self)
 
-                for gestor_id in await gestao_da_rede_do_processo(process, ["diretor", "ceo"]):
-                    users_to_notify.add(gestor_id)
-            
-            client_name = process.get("client_name", "Cliente")
-            
-            for user_id in users_to_notify:
-                existing = await self.db.notifications.find_one({
-                    "user_id": user_id,
-                    "process_id": process.get("id"),
-                    "type": "process_stale",
-                    "created_at": {"$gte": (today - timedelta(days=1)).isoformat()}
-                })
-                
-                if not existing:
-                    await self.create_notification(
-                        user_id=user_id,
-                        message=f"Processo de {client_name} sem atualização há {days_since} dias. Requer atenção!",
-                        notification_type="process_stale",
-                        process_id=process.get("id"),
-                        client_name=client_name,
-                        link=f"/process/{process.get('id')}"
-                    )
-                    notifications_created += 1
-        
-        # Processar processos urgentes (> urgent_days mas < stale_days)
-        for process in urgent_processes:
-            last_update = process.get("updated_at") or process.get("created_at", "")
-            try:
-                last_date = _data_iso_com_fuso(last_update)
-                days_since = (today - last_date).days
-            except (ValueError, TypeError, AttributeError):
-                days_since = urgent_days
-            
-            users_to_notify = set()
-            if process.get("consultor_id"):
-                users_to_notify.add(process["consultor_id"])
-            if process.get("assigned_consultor_id"):
-                users_to_notify.add(process["assigned_consultor_id"])
-            if process.get("mediador_id"):
-                users_to_notify.add(process["mediador_id"])
-            if process.get("assigned_mediador_id"):
-                users_to_notify.add(process["assigned_mediador_id"])
-            
-            client_name = process.get("client_name", "Cliente")
-            
-            for user_id in users_to_notify:
-                existing = await self.db.notifications.find_one({
-                    "user_id": user_id,
-                    "process_id": process.get("id"),
-                    "type": "process_urgent",
-                    "created_at": {"$gte": (today - timedelta(days=1)).isoformat()}
-                })
-                
-                if not existing:
-                    await self.create_notification(
-                        user_id=user_id,
-                        message=f"Processo de {client_name} sem atualização há {days_since} dias.",
-                        notification_type="process_urgent",
-                        process_id=process.get("id"),
-                        client_name=client_name,
-                        link=f"/process/{process.get('id')}"
-                    )
-                    notifications_created += 1
-        
-        logger.info(f"Processos atrasados: {len(stale_processes)} atrasados, {len(urgent_processes)} urgentes, {notifications_created} notificações criadas")
-        return notifications_created
-    
     async def run_index_sla(self) -> int:
         """SLA de inactividade do Index em dois níveis (ver `services/index_sla`).
 

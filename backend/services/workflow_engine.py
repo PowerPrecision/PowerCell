@@ -260,7 +260,7 @@ async def execute_action(rule: dict, context: dict) -> bool:
                 # leva o nome do cliente: sem este filtro, uma regra da Power notificava
                 # (com esse nome) quem tem o mesmo cargo na Domus (Lote 2, Out 2026).
                 # Sem rede determinável não se notifica ninguém (falha fechada).
-                from services.alert_audience import gestao_da_rede_do_processo
+                from services.alert_audience import gestao_do_processo
 
                 processo = None
                 if context.get("process_id"):
@@ -269,7 +269,7 @@ async def execute_action(rule: dict, context: dict) -> bool:
                         {"_id": 0, "id": 1, **PROJECCAO_DO_CARIMBO},
                     )
                 destinatarios = (
-                    await gestao_da_rede_do_processo(processo, [str(config["target_role"])])
+                    await gestao_do_processo(processo, [str(config["target_role"])])
                     if processo else []
                 )
                 if not destinatarios:

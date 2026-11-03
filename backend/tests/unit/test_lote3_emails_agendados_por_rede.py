@@ -293,50 +293,10 @@ class TestOEnvioRealDoRelatorioDeIA:
 # ════════════════════════════════════════════════════════════════════
 #  2. PROCESSOS PARADOS HÁ MAIS DE 21 DIAS
 # ════════════════════════════════════════════════════════════════════
-@pytest.mark.asyncio
-class TestProcessosParadosNaoAvisamOutraRede:
-    def _processo(self, pid, rede=None, empresa=None, dias=40, consultor=None):
-        doc = {
-            "id": pid, "client_name": f"Cliente {pid}", "status": "em_curso",
-            "updated_at": (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat(),
-            "assigned_consultor_id": consultor,
-        }
-        if rede:
-            doc["network_id"] = rede
-        if empresa:
-            doc["company_id"] = empresa
-        return doc
-
-    async def _destinatarios(self, mundo, pid):
-        return {n["user_id"] for n in mundo.notifications.docs if n.get("process_id") == pid}
-
-    async def test_a_direccao_avisada_e_a_da_rede_do_processo(self, servico, mundo):
-        mundo.processes.docs.append(self._processo("p-domus", REDE_DOMUS, "cmp-domus", consultor="u-cons-domus"))
-        await servico.check_stale_processes()
-        avisados = await self._destinatarios(mundo, "p-domus")
-        assert {"u-cons-domus", "u-ceo-domus", "u-dir-domus"} <= avisados
-        assert not avisados & {"u-ceo-power", "u-dir-power", "u-adm-prec"}, \
-            "a direcção da Power foi avisada de um cliente da Domus"
-
-    async def test_e_vice_versa(self, servico, mundo):
-        mundo.processes.docs.append(self._processo("p-power", REDE_INCUMBENTE, "cmp-power"))
-        await servico.check_stale_processes()
-        avisados = await self._destinatarios(mundo, "p-power")
-        assert {"u-ceo-power", "u-dir-power"} <= avisados
-        assert not avisados & {"u-ceo-domus", "u-dir-domus"}
-
-    async def test_o_atribuido_e_avisado_mesmo_sem_rede_mas_a_direccao_nao(self, servico, mundo):
-        """Falha fechada: sem rede determinável a direcção não é avisada, o atribuído sim."""
-        mundo.processes.docs.append(self._processo("p-orfao", consultor="u-cons-power"))
-        await servico.check_stale_processes()
-        assert await self._destinatarios(mundo, "p-orfao") == {"u-cons-power"}
-
-    async def test_abaixo_dos_21_dias_so_os_atribuidos(self, servico, mundo):
-        mundo.processes.docs.append(
-            self._processo("p-novo", REDE_DOMUS, "cmp-domus", dias=15, consultor="u-cons-domus")
-        )
-        await servico.check_stale_processes()
-        assert await self._destinatarios(mundo, "p-novo") == {"u-cons-domus"}
+# Desde Nov 2026 os processos parados geram um RESUMO por pessoa e a gestão avisada é a da
+# EMPRESA do processo (não a da rede inteira): as regras, incluindo «a direcção de outra empresa
+# não é avisada» e «sem rede determinável a gestão não é avisada», estão provadas contra um
+# MongoDB real em `tests/integration/test_regras_das_notificacoes_mongo.py`.
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -490,9 +450,11 @@ class TestJobsBloqueados:
 #  5. LEMBRETE MENSAL AO CLIENTE
 # ════════════════════════════════════════════════════════════════════
 class _PrimeiroDoMes(datetime):
+    """Dia do lembrete mensal: desde Nov 2026 é o dia 25 (`avisos_de_rotina`)."""
+
     @classmethod
     def now(cls, tz=None):
-        return datetime(2026, 10, 1, 8, 0, tzinfo=tz or timezone.utc)
+        return datetime(2026, 10, 25, 8, 0, tzinfo=tz or timezone.utc)
 
 
 @pytest.mark.asyncio

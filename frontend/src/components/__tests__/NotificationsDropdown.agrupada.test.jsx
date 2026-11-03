@@ -44,7 +44,7 @@ describe("aviso agrupado", () => {
     await waitFor(() => expect(getNotifications).toHaveBeenCalled());
 
     act(() => {
-      handlers.onNotification({ id: "n1", message: "Processo atribuído", read: false });
+      handlers.onNotification({ id: "n1", message: "Processo atribuído", read: false, alerta: true });
     });
     expect(await screen.findByText("1")).toBeTruthy();
     expect(toastInfo).toHaveBeenCalledTimes(1);
@@ -55,6 +55,29 @@ describe("aviso agrupado", () => {
     });
     expect(screen.getByText("1")).toBeTruthy();
     expect(screen.queryByText("3")).toBeNull();
+    expect(toastInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it("um aviso que não é importante conta no sino mas não apita", async () => {
+    render(
+      <MemoryRouter>
+        <NotificationsDropdown />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(getNotifications).toHaveBeenCalled());
+
+    act(() => {
+      handlers.onNotification({ id: "n2", message: "Mudança de estado", read: false, alerta: false });
+    });
+    expect(await screen.findByText("1")).toBeTruthy();
+    expect(toastInfo).not.toHaveBeenCalled();
+
+    // o primeiro aviso importante que se junta ao grupo apita uma vez
+    act(() => {
+      handlers.onNotification({ id: "n2", message: "2 novidades", read: false, agrupada: true, alerta: true, apitar: true });
+      handlers.onNotification({ id: "n2", message: "3 novidades", read: false, agrupada: true, alerta: true, apitar: true });
+    });
+    expect(screen.getByText("1")).toBeTruthy();
     expect(toastInfo).toHaveBeenCalledTimes(1);
   });
 });

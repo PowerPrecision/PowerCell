@@ -404,6 +404,12 @@ async def get_current_user(
         if not user.get("is_active", True):
             raise HTTPException(status_code=401, detail="Conta desativada")
 
+        # Quem faz a acção deste pedido: ninguém é avisado do que ele próprio fez
+        # (`notification_policy`, regra 5).
+        from services.notification_policy import definir_ator
+
+        definir_ator(user.get("id"))
+
         # Adicionar informação de impersonate se presente no token
         if payload.get("is_impersonated"):
             user["is_impersonated"] = True

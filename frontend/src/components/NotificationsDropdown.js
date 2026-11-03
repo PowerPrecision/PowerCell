@@ -39,6 +39,7 @@ import { getNotifications, markNotificationRead } from "../services/api";
 import { toast } from "sonner";
 import { safeDateStr } from "../lib/utils";
 import { playNotificationBeep } from "../utils/notificationSound";
+import { deveApitar } from "../utils/deveApitar";
 import {
   INTERVALO_BASE_MS,
   aplicarRecuoPorRateLimit,
@@ -157,6 +158,16 @@ const NotificationsDropdown = () => {
       // sem contar outra vez nem tocar som/toast (é o que tira o ruído).
       if (notification.agrupada && notification.id) {
         setNotifications(prev => [notification, ...prev.filter(n => n.id !== notification.id)].slice(0, 50));
+        // Só apita se o que se juntou foi o primeiro aviso importante do grupo.
+        if (notification.apitar && !shownToastIds.current.has(`${notification.id}:apitar`)) {
+          shownToastIds.current.add(`${notification.id}:apitar`);
+          playNotificationSound();
+          toast.info(notification.message || "Nova notificação", {
+            action: getNotificationAction(notification),
+            duration: 8000,
+            icon: <Bell className="h-4 w-4 text-primary" />,
+          });
+        }
         return;
       }
 
@@ -175,7 +186,8 @@ const NotificationsDropdown = () => {
       // Play sound + show toast for real-time push notifications
       // --- Deduplicação: não mostrar toast se já foi exibido ---
       const notifId = notification.id || notification._id;
-      if (!shownToastIds.current.has(notifId)) {
+      // Só apita (som + toast) o que é importante; o resto fica calado no sino.
+      if (deveApitar(notification) && !shownToastIds.current.has(notifId)) {
         playNotificationSound();
         toast.info(notification.message || "Nova notificação", {
           description: notification.client_name || notification.process_name || "Nova notificação",
@@ -266,7 +278,11 @@ const NotificationsDropdown = () => {
 
         // Skip toast if we already showed one via WebSocket for the same notification
         // (prevents duplicate toast when both WS push and polling detect the same event)
-        if (latestNotification && latestNotification.id !== lastNotifiedIdRef.current) {
+        if (
+          latestNotification
+          && latestNotification.id !== lastNotifiedIdRef.current
+          && deveApitar(latestNotification)
+        ) {
           playNotificationSound();
           
           toast.info(

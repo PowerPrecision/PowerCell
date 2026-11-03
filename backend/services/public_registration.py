@@ -21,7 +21,7 @@ from services.s3_storage import s3_service
 from models.process import PublicClientRegistration
 from fastapi import HTTPException
 from services.form_config_scope import rede_do_link_publico
-from services.alert_audience import gestao_da_rede_do_processo
+from services.alert_audience import gestao_do_processo
 from pymongo.errors import DuplicateKeyError
 
 from services.client_uniqueness import encontrar_cliente_duplicado, erro_publico_de_duplicado
@@ -465,7 +465,7 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         **({"company_id": _empresa.get("id")} if _empresa else {}),
     }
     await notify_new_client_registration(client_notification_data, has_property)
-    ids_da_gestao = await gestao_da_rede_do_processo(
+    ids_da_gestao = await gestao_do_processo(
         client_notification_data, PAPEIS_QUE_RECEBEM_O_AVISO_DE_REGISTO,
     )
     gestao = []

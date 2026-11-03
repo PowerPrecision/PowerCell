@@ -356,7 +356,8 @@ class TestAutomacaoNotificaSoARedeDoProcesso:
     async def test_a_exploracao_um_processo_da_power_nao_notifica_a_domus(self, regra_mundo):
         _, destinatarios = await self._correr(regra_mundo, "p-power")
         assert "u-bruno" not in destinatarios
-        assert set(destinatarios) == {"u-ana", "u-diretor-power-2"}
+        # Nov 2026: por EMPRESA — o diretor da Precision (mesma rede) já não recebe o da Power.
+        assert set(destinatarios) == {"u-ana"}
 
     async def test_um_processo_da_domus_so_notifica_a_domus(self, regra_mundo):
         _, destinatarios = await self._correr(regra_mundo, "p-domus")
@@ -392,7 +393,7 @@ class TestSemDifusaoPorCargoAoSistemaInteiro:
 
         fonte = codigo_sem_comentarios(inspect.getsource(workflow_engine))
         assert "deep_role_filter(config" not in fonte
-        assert "gestao_da_rede_do_processo" in fonte
+        assert "gestao_do_processo" in fonte
 
 
 @pytest.mark.asyncio

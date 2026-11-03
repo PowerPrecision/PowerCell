@@ -15,13 +15,18 @@ def test_categorias_e_omissao():
     assert tn.categoria_de("process_assigned") == "atribuicoes"
     assert tn.categoria_de("portal_message") == "portal"
     assert tn.categoria_de("chat_message") == "chat"
+    assert tn.categoria_de("chat_group_message") == "chat_grupo"
+    assert tn.categoria_de("deadline_missed") == "prazos_urgentes"
+    assert tn.categoria_de("event_reminder") == "prazos"
+    assert tn.categoria_de("event_reminder", urgente=True) == "prazos_urgentes"
     assert tn.categoria_de("tipo_que_ninguem_conhece") == "outros"
 
 
-def test_chave_do_grupo():
-    assert tn.chave_do_grupo("process_assigned", "p1", None) == "processo:p1"
-    assert tn.chave_do_grupo("chat_message", "p1", "direta:u2") == "chat:direta:u2"
-    assert tn.chave_do_grupo("task_assigned", None, None) == "tipo:task_assigned"
+def test_chave_do_grupo_e_uma_por_pessoa():
+    # Flavio, Nov 2026: no máximo uma mensagem a cada 15 minutos, com tudo o que chegou.
+    assert tn.chave_do_grupo("process_assigned", "p1", None) == "pessoa"
+    assert tn.chave_do_grupo("chat_message", "p1", "direta:u2") == "pessoa"
+    assert tn.chave_do_grupo("task_assigned", None, None) == "pessoa"
 
 
 def _db_com_processo(numero):
@@ -59,7 +64,7 @@ async def test_rajada_vira_uma_mensagem_geral(monkeypatch):
     with patch.object(tn, "db", _db_com_processo(12)):
         texto, url = await tn.compor(grupo)
     assert "3 novidades no processo nº 12" in texto
-    assert "Mudança de estado (×2)" in texto
+    assert "Mudança de estado — processo nº 12 (×2)" in texto
     assert url == ""  # sem FRONTEND_URL não há botão
 
 
@@ -68,6 +73,26 @@ async def test_remetente_do_chat_e_escapado():
     grupo = {"chave": "chat:direta:u2", "total": 1, "eventos": [{"tipo": "chat_message", "remetente": "<b>Ana</b>"}]}
     texto, _ = await tn.compor(grupo)
     assert "&lt;b&gt;Ana&lt;/b&gt;" in texto
+
+
+@pytest.mark.asyncio
+async def test_grupo_novo_com_varios_processos_e_chat(monkeypatch):
+    monkeypatch.setenv("FRONTEND_URL", "https://app.exemplo.pt")
+    grupo = {
+        "chave": "pessoa",
+        "total": 3,
+        "eventos": [
+            {"tipo": "process_assigned", "process_id": "p1"},
+            {"tipo": "chat_message", "conversa": "direta:u2", "remetente": "Ana"},
+            {"tipo": "chat_message", "conversa": "direta:u2", "remetente": "Ana"},
+        ],
+    }
+    with patch.object(tn, "db", _db_com_processo(12)):
+        texto, url = await tn.compor(grupo)
+    assert "3 novidades" in texto
+    assert "Processo atribuído a si — processo nº 12" in texto
+    assert "2 mensagens novas no chat de Ana" in texto
+    assert url == "https://app.exemplo.pt/"
 
 
 @pytest.mark.asyncio

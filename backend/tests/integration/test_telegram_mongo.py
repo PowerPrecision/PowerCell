@@ -1,7 +1,7 @@
 """Notificações no Telegram, provadas contra um MongoDB REAL.
 
-- A rajada de avisos de um processo (o Index marca como indexado → atribuição, mudança de
-  estado, documentos) sai numa SÓ mensagem geral.
+- Tudo o que chega a uma pessoa enquanto espera (a rajada de um processo indexado, outros
+  processos, o chat) sai numa SÓ mensagem; no máximo uma a cada 15 minutos (Nov 2026).
 - Dois avisos em simultâneo não abrem dois grupos (índice único parcial em `status: pendente`).
 - A ligação da conta por código de uso único: o código só serve uma vez.
 - A mensagem nunca leva o título da notificação (pode trazer o nome do cliente).
@@ -109,45 +109,44 @@ async def test_parar_desliga(bd):
 
 
 @pytest.mark.asyncio
-async def test_rajada_do_mesmo_processo_sai_numa_so_mensagem(bd):
+async def test_rajada_sai_numa_so_mensagem(bd):
     await _ligar(bd)
+    # quem quer as mudanças de estado e os documentos no Telegram liga-os (por omissão vêm desligados)
+    await telegram_link.run_atualizar_preferencias({"id": "u1"}, {"estados": True, "documentos": True}, None)
     bd.enviadas.clear()
     await bd.processes.update_one({"id": "p1"}, {"$set": {"process_number": 1234}})
 
     # o que nasce quando o Index marca o processo como indexado
     for tipo in ("process_assigned", "process_status_change", "process_status_change", "document_upload"):
         assert await telegram_notifications.agendar("u1", tipo, process_id="p1")
-    # um aviso de outro processo fica no seu próprio grupo
-    assert await telegram_notifications.agendar("u1", "process_assigned", process_id="p2")
 
-    assert await bd.telegram_outbox.count_documents({"status": "pendente"}) == 2
-    assert await telegram_notifications.enviar_pendentes() == 2
+    assert await bd.telegram_outbox.count_documents({"status": "pendente"}) == 1
+    assert await telegram_notifications.enviar_pendentes() == 1
 
-    textos = [m["texto"] for m in bd.enviadas]
-    geral = next(t for t in textos if "novidades" in t)
+    assert len(bd.enviadas) == 1
+    geral = bd.enviadas[0]["texto"]
     assert "4 novidades no processo nº 1234" in geral
-    assert "Mudança de estado (×2)" in geral
+    assert "Mudança de estado — processo nº 1234 (×2)" in geral
     assert "Processo atribuído a si" in geral
-    assert any("Processo atribuído a si" in t and "novidades" not in t for t in textos)
-    assert all(m["url"].startswith("https://app.exemplo.pt/process/") for m in bd.enviadas)
-    assert await bd.telegram_outbox.count_documents({"status": "enviado"}) == 2
+    assert bd.enviadas[0]["url"].startswith("https://app.exemplo.pt/process/")
+    assert await bd.telegram_outbox.count_documents({"status": "enviado"}) == 1
 
 
 @pytest.mark.asyncio
 async def test_avisos_em_simultaneo_nao_abrem_dois_grupos(bd):
     await _ligar(bd)
     resultados = await asyncio.gather(
-        *[telegram_notifications.agendar("u1", "process_status_change", process_id="p1") for _ in range(10)]
+        *[telegram_notifications.agendar("u1", "process_assigned", process_id="p1") for _ in range(10)]
     )
     assert all(resultados)
-    grupos = await bd.telegram_outbox.find({"chave": "processo:p1"}).to_list(10)
+    grupos = await bd.telegram_outbox.find({"chave": "pessoa"}).to_list(10)
     assert len(grupos) == 1 and grupos[0]["total"] == 10
     # A corrida do upsert é rara de reproduzir; quem a fecha é o índice: um segundo grupo
     # «pendente» para o mesmo (utilizador, assunto) é recusado pela base de dados.
     with pytest.raises(DuplicateKeyError):
-        await bd.telegram_outbox.insert_one({"user_id": "u1", "chave": "processo:p1", "status": "pendente"})
+        await bd.telegram_outbox.insert_one({"user_id": "u1", "chave": "pessoa", "status": "pendente"})
     # ...mas um grupo já a sair não bloqueia o seguinte
-    await bd.telegram_outbox.insert_one({"user_id": "u1", "chave": "processo:p1", "status": "enviado"})
+    await bd.telegram_outbox.insert_one({"user_id": "u1", "chave": "pessoa", "status": "enviado"})
 
 
 @pytest.mark.asyncio
@@ -167,8 +166,8 @@ async def test_aviso_novo_durante_o_envio_vai_na_mensagem_seguinte(bd):
     reclamado = await telegram_notifications._reclamar_proximo(telegram_notifications._agora())
     assert reclamado["status"] == "a_enviar"
     # chega outro aviso enquanto o primeiro grupo está a sair
-    assert await telegram_notifications.agendar("u1", "document_upload", process_id="p1")
-    assert await bd.telegram_outbox.count_documents({"chave": "processo:p1"}) == 2
+    assert await telegram_notifications.agendar("u1", "portal_message", process_id="p1")
+    assert await bd.telegram_outbox.count_documents({"chave": "pessoa"}) == 2
 
 
 @pytest.mark.asyncio
@@ -216,7 +215,7 @@ async def test_falha_temporaria_repete_mais_tarde(bd):
 
     with patch.object(telegram_bot, "enviar_mensagem", falha):
         await telegram_notifications.enviar_pendentes()
-    grupo = await bd.telegram_outbox.find_one({"chave": "processo:p1"})
+    grupo = await bd.telegram_outbox.find_one({"chave": "pessoa"})
     assert grupo["status"] == "a_repetir" and grupo["tentativas"] == 1
     assert grupo["enviar_apos"].replace(tzinfo=None) > (
         telegram_notifications._agora() + timedelta(seconds=30)
@@ -227,15 +226,15 @@ async def test_falha_temporaria_repete_mais_tarde(bd):
 async def test_so_recebe_avisos_dos_processos_atribuidos(bd):
     await _ligar(bd)
     # processo de outra pessoa (ex.: aviso à gestão da rede): fica só na app
-    assert await telegram_notifications.agendar("u1", "process_status_change", process_id="p3") is False
+    assert await telegram_notifications.agendar("u1", "process_assigned", process_id="p3") is False
     # processo que não existe ou foi eliminado
-    assert await telegram_notifications.agendar("u1", "process_status_change", process_id="nao-existe") is False
+    assert await telegram_notifications.agendar("u1", "process_assigned", process_id="nao-existe") is False
     await bd.processes.update_one({"id": "p2"}, {"$set": {"is_deleted": True}})
-    assert await telegram_notifications.agendar("u1", "document_upload", process_id="p2") is False
+    assert await telegram_notifications.agendar("u1", "portal_message", process_id="p2") is False
     # aviso de processo sem processo (ex.: automação por cargo) também não passa
     assert await telegram_notifications.agendar("u1", "automation") is False
     # o do seu processo passa
-    assert await telegram_notifications.agendar("u1", "process_status_change", process_id="p1") is True
+    assert await telegram_notifications.agendar("u1", "process_assigned", process_id="p1") is True
     assert await bd.telegram_outbox.count_documents({}) == 1
 
 
@@ -243,7 +242,7 @@ async def test_so_recebe_avisos_dos_processos_atribuidos(bd):
 async def test_avisos_pessoais_passam_mesmo_sem_atribuicao_ao_processo(bd):
     await _ligar(bd)
     assert await telegram_notifications.agendar("u1", "task_assigned", process_id="p3") is True
-    assert await telegram_notifications.agendar("u1", "deadline_reminder", process_id="p3") is True
+    assert await telegram_notifications.agendar("u1", "deadline_missed", process_id="p3") is True
 
 
 @pytest.mark.asyncio

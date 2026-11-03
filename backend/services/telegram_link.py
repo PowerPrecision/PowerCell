@@ -31,15 +31,24 @@ logger = logging.getLogger(__name__)
 VALIDADE_DO_CODIGO = timedelta(minutes=10)
 
 # Categorias que a pessoa escolhe receber. A ordem é a do ecrã.
+# Omissões (Flavio, Nov 2026): o telemóvel só apita com o que pede acção rápida —
+# processo ou tarefa atribuídos, o cliente no Portal, mensagens directas (chat e Index)
+# e prazos a 1 hora / ultrapassados. O resto fica na app; cada pessoa pode ligá-lo.
 CATEGORIAS: dict[str, dict] = {
     "atribuicoes": {"label": "Processos e tarefas atribuídos a mim", "defeito": True},
-    "estados": {"label": "Mudanças de estado nos meus processos", "defeito": True},
-    "documentos": {"label": "Documentos novos e indexação", "defeito": True},
-    "portal": {"label": "Mensagens e pedidos do Portal do Cliente", "defeito": True},
-    "prazos": {"label": "Prazos, escrituras e documentos a expirar", "defeito": True},
-    "chat": {"label": "Mensagens novas no chat", "defeito": True},
+    "portal": {"label": "Mensagens do cliente no Portal e pedidos de visita", "defeito": True},
+    "chat": {"label": "Mensagens directas no chat, do Index e quando me mencionam num grupo", "defeito": True},
+    "prazos_urgentes": {"label": "Prazos ultrapassados e prazos ou eventos daqui a 1 hora", "defeito": True},
+    "estados": {"label": "Mudanças de estado e outra actividade nos meus processos", "defeito": False},
+    "documentos": {"label": "Documentos novos e indexação", "defeito": False},
+    "prazos": {"label": "Prazos e eventos com dias de antecedência", "defeito": False},
+    "chat_grupo": {"label": "Todas as mensagens dos chats de grupo", "defeito": False},
     "outros": {"label": "Outros avisos do sistema", "defeito": False},
 }
+
+#: Versão das omissões. As escolhas gravadas com outra versão são esquecidas e valem as
+#: omissões actuais (Flavio, Nov 2026: as omissões novas aplicam-se a todos).
+VERSAO_DAS_PREFERENCIAS = 2
 
 TEXTO_DE_AJUDA = (
     "Este é o bot de avisos do PowerCell.\n\n"
@@ -51,6 +60,15 @@ TEXTO_DE_AJUDA = (
 
 def preferencias_por_defeito() -> dict:
     return {chave: info["defeito"] for chave, info in CATEGORIAS.items()}
+
+
+def preferencias_efectivas(ligacao: Optional[dict]) -> dict:
+    """As escolhas da pessoa sobre as omissões, só se foram feitas com a versão actual."""
+    ligacao = ligacao or {}
+    escolhas = ligacao.get("preferencias") or {}
+    if ligacao.get("preferencias_versao") != VERSAO_DAS_PREFERENCIAS:
+        escolhas = {}
+    return {**preferencias_por_defeito(), **{k: bool(v) for k, v in escolhas.items() if k in CATEGORIAS}}
 
 
 def _hash(codigo: str) -> str:
@@ -69,7 +87,7 @@ async def ligacao_ativa(user_id: str) -> Optional[dict]:
 
 async def run_estado(user: dict) -> dict:
     ligacao = await db.telegram_links.find_one({"user_id": user["id"]}, {"_id": 0}) or {}
-    preferencias = {**preferencias_por_defeito(), **(ligacao.get("preferencias") or {})}
+    preferencias = preferencias_efectivas(ligacao)
     return {
         "configurado": telegram_bot.telegram_configurado(),
         "ligado": bool(ligacao.get("ativo")),
@@ -113,9 +131,13 @@ async def run_desligar(user: dict) -> dict:
 
 async def run_atualizar_preferencias(user: dict, preferencias: dict, so_fora_da_app: Optional[bool]) -> dict:
     campos: dict = {}
-    for chave, valor in (preferencias or {}).items():
-        if chave in CATEGORIAS:
-            campos[f"preferencias.{chave}"] = bool(valor)
+    mudancas = {chave: bool(valor) for chave, valor in (preferencias or {}).items() if chave in CATEGORIAS}
+    if mudancas:
+        # Grava-se o conjunto inteiro com a versão actual: uma escolha antiga nunca se mistura
+        # com as omissões novas.
+        ligacao = await db.telegram_links.find_one({"user_id": user["id"]}, {"_id": 0})
+        campos["preferencias"] = {**preferencias_efectivas(ligacao), **mudancas}
+        campos["preferencias_versao"] = VERSAO_DAS_PREFERENCIAS
     if so_fora_da_app is not None:
         campos["so_fora_da_app"] = bool(so_fora_da_app)
     if campos:
@@ -149,7 +171,11 @@ async def _ligar(chat_id: int, codigo: str) -> str:
         {"user_id": user_id},
         {
             "$set": {"chat_id": chat_id, "ativo": True, "ligado_em": agora.isoformat()},
-            "$setOnInsert": {"preferencias": preferencias_por_defeito(), "so_fora_da_app": False},
+            "$setOnInsert": {
+                "preferencias": preferencias_por_defeito(),
+                "preferencias_versao": VERSAO_DAS_PREFERENCIAS,
+                "so_fora_da_app": False,
+            },
         },
         upsert=True,
     )

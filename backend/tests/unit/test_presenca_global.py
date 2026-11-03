@@ -358,13 +358,17 @@ class TestOPushNoTelemovel:
         async def _push(**kwargs):
             enviados.append(kwargs["user_id"])
 
+        import services.notification_policy as politica
+
         monkeypatch.setattr(rn, "db", fake_async_db)
+        monkeypatch.setattr(politica, "db", fake_async_db)
         monkeypatch.setattr(rn, "send_push_notification", _push)
         monkeypatch.setattr(rn, "entregar_a_utilizador", AsyncMock())
         no_worker(monkeypatch, ligado_em)
 
+        # Um aviso que apita (só esses fazem push desde Nov 2026).
         await rn.send_realtime_notification(
-            user_id="u-ana", title="T", message="M",
+            user_id="u-ana", title="T", message="M", notification_type="process_assigned",
         )
         return enviados
 

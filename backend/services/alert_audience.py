@@ -233,6 +233,67 @@ async def gestao_da_rede_do_processo(
     return vistos
 
 
+async def _empresa_do_processo(processo: Optional[dict]) -> list[str]:
+    """Identificadores (id e nome) da empresa do processo, ou `[]` se não tiver empresa."""
+    processo = processo or {}
+    for campo in CAMPOS_EMPRESA:
+        chave = _texto(processo.get(campo))
+        if not chave or processo.get(campo) in VALORES_SEM_EMPRESA:
+            continue
+        try:
+            empresa = await db.companies.find_one(
+                {"$or": [{"id": chave}, {"name": chave}]}, {"_id": 0, "id": 1, "name": 1},
+            )
+        except Exception as exc:
+            logger.warning("[alert_audience] Falha a ler a empresa %s (%s).", chave, exc)
+            empresa = None
+        ids = [_texto(empresa.get("id")), _texto(empresa.get("name"))] if empresa else [chave]
+        return [i for i in dict.fromkeys(ids) if i]
+    return []
+
+
+async def gestao_do_processo(
+    processo: Optional[dict],
+    papeis: Sequence[str],
+) -> list[str]:
+    """Ids da gestão da EMPRESA do processo (Flavio, Nov 2026: «as notificações são por empresa»).
+
+    A Power, a Precision e a Sistema vivem na mesma rede: avisar a rede inteira fazia a direcção
+    de uma empresa receber os processos das outras. O Master é global e continua a ser procurado
+    na rede. Um processo sem empresa cai na gestão da rede (`gestao_da_rede_do_processo`).
+    """
+    papeis_normalizados = [str(p).lower() for p in papeis if p]
+    empresa = await _empresa_do_processo(processo)
+    if not empresa:
+        return await gestao_da_rede_do_processo(processo, papeis_normalizados)
+
+    locais = [p for p in papeis_normalizados if p != "master"]
+    vistos: list[str] = []
+    if locais:
+        try:
+            ucrs = await db.user_company_roles.find(
+                {
+                    "company_id": {"$in": empresa},
+                    "role": {"$in": locais},
+                    "is_deleted": {"$ne": True},
+                    "is_active": {"$ne": False},
+                },
+                {"_id": 0, "user_id": 1},
+            ).to_list(MAX_UTILIZADORES)
+        except Exception as exc:
+            logger.warning("[alert_audience] Falha a listar os UCRs da empresa %s (%s).", empresa, exc)
+            ucrs = []
+        for ucr in ucrs:
+            uid = _texto(ucr.get("user_id"))
+            if uid and uid not in vistos:
+                vistos.append(uid)
+    if "master" in papeis_normalizados:
+        for uid in await gestao_da_rede_do_processo(processo, ["master"]):
+            if uid not in vistos:
+                vistos.append(uid)
+    return vistos
+
+
 def _email_utilizavel(valor: Any) -> bool:
     texto = _texto(valor)
     return "@" in texto and "placeholder.internal" not in texto
@@ -319,7 +380,7 @@ async def emails_da_gestao_da_rede_do_processo(
     (sem rede determinável não há gestão), com os Master a continuarem a
     receber — não têm fronteira de dados e não são «outra rede».
     """
-    ids = await gestao_da_rede_do_processo(processo, papeis)
+    ids = await gestao_do_processo(processo, papeis)
     emails = await emails_dos_utilizadores(ids)
     if incluir_master:
         for email in await emails_dos_master():
@@ -342,7 +403,7 @@ async def destinatarios_do_alerta(
     destinatarios = ids_atribuidos(processo)
 
     if papeis_de_gestao:
-        for uid in await gestao_da_rede_do_processo(processo, papeis_de_gestao):
+        for uid in await gestao_do_processo(processo, papeis_de_gestao):
             if uid not in destinatarios:
                 destinatarios.append(uid)
 
