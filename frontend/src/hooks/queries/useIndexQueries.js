@@ -23,6 +23,9 @@ import {
 import { chaveDaPesquisa, normalizarResultado } from "../../utils/pesquisaIndex";
 
 const INTERVALO_DE_RECUO_MS = 4000;
+// Com o WebSocket ligado também se confirma, devagar: um job que morreu (o servidor reiniciou) não envia
+// evento nenhum, e sem isto o ecrã ficava em «Já há uma análise a correr» até alguém recarregar a página.
+const INTERVALO_DE_CONFIRMACAO_MS = 60000;
 
 /**
  * `filtros.mine === true` pede só os processos atribuídos a quem pergunta («Os Meus Processos» do Index);
@@ -82,8 +85,11 @@ export function useIndexWorkstationQuery(processId, { enabled = true } = {}) {
     queryKey: chave,
     queryFn: async () => normalizarBancada((await getIndexWorkstation(processId)).data),
     enabled: enabled && Boolean(processId),
-    // recuo: só enquanto há um job a correr E o WebSocket não nos avisa
-    refetchInterval: (q) => (!isConnected && haJobActivo(q.state.data?.jobsActivos) ? INTERVALO_DE_RECUO_MS : false),
+    // recuo: só enquanto há um job a correr — depressa se o WebSocket não nos avisa, devagar se avisa
+    refetchInterval: (q) => {
+      if (!haJobActivo(q.state.data?.jobsActivos)) return false;
+      return isConnected ? INTERVALO_DE_CONFIRMACAO_MS : INTERVALO_DE_RECUO_MS;
+    },
   });
 
   return {

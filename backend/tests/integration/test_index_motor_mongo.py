@@ -403,9 +403,9 @@ class TestUmJobActivo:
 
     async def test_um_job_morto_a_meio_liberta_se_ao_fim_do_prazo(self, bd):
         task_id, _ = await jobs.reivindicar_job(PID, TaskType.INDEX_ANALYSIS, "u")
-        # o worker caiu: o job ficou «activo» há mais do que o prazo
-        antigo = (datetime.now(timezone.utc) - timedelta(minutes=jobs.PRAZO_DO_JOB_MINUTOS + 1)).isoformat()
-        await bd.task_logs.update_one({"task_id": task_id}, {"$set": {"created_at": antigo}})
+        # o servidor caiu: o job deixou de bater há mais do que o prazo
+        antigo = (datetime.now(timezone.utc) - timedelta(minutes=jobs.PRAZO_SEM_BATIMENTO_MINUTOS + 1)).isoformat()
+        await bd.task_logs.update_one({"task_id": task_id}, {"$set": {jobs.CAMPO_DO_BATIMENTO: antigo}})
         novo, existente = await jobs.reivindicar_job(PID, TaskType.INDEX_ANALYSIS, "u")
         assert novo and existente is None and novo != task_id
 
@@ -615,3 +615,142 @@ class TestAnalisarUmFicheiro:
         assert t["result_data"]["analisados"] == 2 and t["result_data"]["falhas"] == 1
         alerta = await bd.process_index_alerts.find_one({"code": "analise_falhou"})
         assert alerta["refs"][0]["document_id"] == e_id and alerta["detail"]
+
+
+
+# ── jobs mortos, repetição e paralelismo (análise que «demorava mais de 4h», Nov 2026) ─────────
+def _ha(minutos: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(minutes=minutos)).isoformat()
+
+
+async def _matar(bd, task_id, minutos=None):
+    """O processo que corria o job morreu: o TaskLog fica `processing` e deixa de bater."""
+    minutos = jobs.PRAZO_SEM_BATIMENTO_MINUTOS + 1 if minutos is None else minutos
+    await bd.task_logs.update_one({"task_id": task_id},
+                                  {"$set": {"status": "processing", jobs.CAMPO_DO_BATIMENTO: _ha(minutos)}})
+
+
+class TestJobsMortos:
+    async def test_um_job_que_ainda_bate_continua_activo(self, bd):
+        task_id, _ = await jobs.reivindicar_job(PID, TaskType.INDEX_ANALYSIS, "u")
+        await bd.task_logs.update_one({"task_id": task_id}, {"$set": {"created_at": _ha(240)}})  # longo mas vivo
+        assert (await jobs.job_activo(PID, TaskType.INDEX_ANALYSIS))["task_id"] == task_id
+        novo, existente = await jobs.reivindicar_job(PID, TaskType.INDEX_ANALYSIS, "u")
+        assert novo is None and existente == task_id
+
+    async def test_um_job_morto_deixa_de_bloquear_o_ecra(self, bd):
+        """O bug: o ecrã dizia «Já há uma análise a correr» (botões bloqueados) enquanto a chave existisse."""
+        task_id, _ = await jobs.reivindicar_job(PID, TaskType.INDEX_ANALYSIS, "u")
+        await _matar(bd, task_id)
+        assert await jobs.job_activo(PID, TaskType.INDEX_ANALYSIS) is None
+
+    async def test_um_job_antigo_sem_batimento_conta_pelo_prazo_da_criacao(self, bd):
+        task_id, _ = await jobs.reivindicar_job(PID, TaskType.INDEX_ANALYSIS, "u")
+        await bd.task_logs.update_one({"task_id": task_id}, {"$unset": {jobs.CAMPO_DO_BATIMENTO: ""}})
+        assert await jobs.job_activo(PID, TaskType.INDEX_ANALYSIS)          # recente: vivo
+        await bd.task_logs.update_one({"task_id": task_id},
+                                      {"$set": {"created_at": _ha(jobs.PRAZO_DO_JOB_MINUTOS + 1)}})
+        assert await jobs.job_activo(PID, TaskType.INDEX_ANALYSIS) is None
+
+    async def test_o_vigia_liberta_fecha_e_retoma_a_analise(self, bd):
+        await bd.users.insert_one({"id": USER["id"], "name": USER["name"], "role": "indexacao"})
+        await tres_documentos(bd)
+        task_id, _ = await jobs.reivindicar_job(PID, TaskType.INDEX_ANALYSIS, USER["id"],
+                                                metadata={"force": False, "gatilho": "manual"})
+        await _matar(bd, task_id)
+        contas = await jobs.retomar_jobs_mortos()
+        await aguardar_tarefas_pendentes()
+        assert contas == {"libertados": 1, "retomados": 1}
+        morto = await tarefa(bd, task_id)
+        assert morto["status"] == "failed" and "index_job_key" not in morto
+        retoma = await bd.task_logs.find_one({"task_id": {"$ne": task_id}}, {"_id": 0})
+        assert retoma["status"] == "completed" and retoma["result_data"]["analisados"] == 3
+        assert retoma["metadata"]["retomas"] == 1 and retoma["user_id"] == USER["id"]
+
+    async def test_um_job_que_morre_sempre_nao_entra_em_ciclo(self, bd):
+        task_id, _ = await jobs.reivindicar_job(PID, TaskType.INDEX_ANALYSIS, "u",
+                                                metadata={"retomas": jobs.RETOMAS_MAXIMAS})
+        await _matar(bd, task_id)
+        assert await jobs.retomar_jobs_mortos() == {"libertados": 1, "retomados": 0}
+        assert await bd.task_logs.count_documents({}) == 1
+
+    async def test_dois_vigias_ao_mesmo_tempo_retomam_uma_vez(self, bd):
+        task_id, _ = await jobs.reivindicar_job(PID, TaskType.INDEX_ANALYSIS, "u")
+        await _matar(bd, task_id)
+        a, b = await asyncio.gather(jobs.retomar_jobs_mortos(), jobs.retomar_jobs_mortos())
+        await aguardar_tarefas_pendentes()
+        assert a["libertados"] + b["libertados"] == 1 and a["retomados"] + b["retomados"] == 1
+
+    async def test_um_job_vivo_nao_e_tocado_pelo_vigia(self, bd):
+        task_id, _ = await jobs.reivindicar_job(PID, TaskType.INDEX_ANALYSIS, "u")
+        assert await jobs.retomar_jobs_mortos() == {"libertados": 0, "retomados": 0}
+        assert (await tarefa(bd, task_id))["index_job_key"]
+
+    async def test_o_batimento_actualiza_enquanto_o_job_corre(self, bd, monkeypatch):
+        task_id, _ = await jobs.reivindicar_job(PID, TaskType.INDEX_ANALYSIS, "u")
+        await bd.task_logs.update_one({"task_id": task_id}, {"$set": {jobs.CAMPO_DO_BATIMENTO: _ha(60)}})
+        monkeypatch.setattr(jobs, "BATIMENTO_SEGUNDOS", 0.01)
+        async with jobs.batimento(task_id):
+            await asyncio.sleep(0.05)
+        assert (await tarefa(bd, task_id))[jobs.CAMPO_DO_BATIMENTO] > _ha(1)
+
+
+class TestPedidoAMeioDeUmaAnalise:
+    async def test_um_ficheiro_carregado_a_meio_e_analisado_no_fim(self, bd):
+        """O bug: o upload a meio dava «já a correr» e o ficheiro novo ficava «Por analisar» indefinidamente."""
+        await doc(bd, "recibo_vencimento_agosto.pdf", categoria="Rendimentos", sub="Recibo de Vencimento")
+        real = ia.analisar_documento
+        entrou, solta = asyncio.Event(), asyncio.Event()
+
+        async def lento(**kw):
+            entrou.set()
+            await solta.wait()
+            return await real(**kw)
+
+        with patch.object(jobs, "analisar_documento", lento):
+            primeiro = await jobs.iniciar_analise(PID, USER)
+            await entrou.wait()
+            novo = await doc(bd, "recibo_vencimento_setembro.pdf", categoria="Rendimentos", sub="Recibo de Vencimento")
+            pedido = await jobs.iniciar_analise(PID, USER, gatilho="automatico")   # o upload
+            assert pedido == {"task_id": primeiro["task_id"], "iniciado": False}
+            solta.set()
+            await aguardar_tarefas_pendentes()
+            await aguardar_tarefas_pendentes()
+        d = await bd.document_metadata.find_one({"id": novo})
+        assert ia.tem_a_impressao_atual(d.get("analysis_fingerprint"))
+        assert await bd.task_logs.count_documents({"status": "completed"}) == 2
+        assert await bd.task_logs.count_documents({"index_job_key": {"$exists": True}}) == 0
+
+    async def test_sem_pedidos_a_meio_nao_ha_segunda_corrida(self, bd):
+        await tres_documentos(bd)
+        await correr()
+        await aguardar_tarefas_pendentes()
+        assert await bd.task_logs.count_documents({}) == 1
+
+
+class TestFicheirosEmParalelo:
+    async def test_os_ficheiros_vao_a_ia_varios_de_cada_vez_com_tecto(self, bd, monkeypatch):
+        for n in range(7):
+            await doc(bd, f"recibo_vencimento_{n}.pdf", categoria="Rendimentos", sub="Recibo de Vencimento")
+        monkeypatch.setenv("INDEX_FICHEIROS_EM_SIMULTANEO", "3")
+        real = ia.analisar_documento
+        agora = maximo = 0
+
+        async def conta(**kw):
+            nonlocal agora, maximo
+            agora += 1
+            maximo = max(maximo, agora)
+            await asyncio.sleep(0.02)
+            agora -= 1
+            return await real(**kw)
+
+        with patch.object(jobs, "analisar_documento", conta):
+            r = await correr()
+        t = await tarefa(bd, r["task_id"])
+        assert t["status"] == "completed" and t["result_data"]["analisados"] == 7
+        assert maximo == 3
+
+    @pytest.mark.parametrize("valor,esperado", [(None, 3), ("1", 1), ("5", 5), ("99", 6), ("0", 3), ("x", 3)])
+    async def test_a_configuracao(self, valor, esperado):
+        ambiente = {} if valor is None else {"INDEX_FICHEIROS_EM_SIMULTANEO": valor}
+        assert jobs.ficheiros_em_simultaneo(ambiente) == esperado

@@ -1072,6 +1072,14 @@ async def startup():
     _background_tasks.add(monitor_task)
     monitor_task.add_done_callback(_background_tasks.discard)
 
+    # Jobs do Index mortos (deploy / falta de memória a meio de uma análise): libertam-se e retomam-se.
+    # Leve e em todos os workers — a libertação é atómica, só um retoma cada job.
+    if _os.environ.get("TESTING") != "true":
+        from services.index_jobs import vigiar_jobs_do_index
+        index_vigia_task = asyncio.create_task(vigiar_jobs_do_index())
+        _background_tasks.add(index_vigia_task)
+        index_vigia_task.add_done_callback(_background_tasks.discard)
+
     # Avisos no Telegram (leve — corre em todos os workers; cada grupo da
     # fila é reclamado de forma atómica, por isso não há envios a dobrar).
     from services.telegram_bot import configurar_webhook, telegram_configurado

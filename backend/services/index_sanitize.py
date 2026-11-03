@@ -551,7 +551,8 @@ async def correr_sanitizacao(task_id: str, process_id: str, user: Optional[dict]
     try:
         await TaskLogService.update_task(task_id, status=TaskStatus.PROCESSING, progress=1,
                                          progress_message="A gerar os PDFs limpos…")
-        resumo = await sanitizar_processo(process_id, user, gatilho="manual")
+        async with index_jobs.batimento(task_id):
+            resumo = await sanitizar_processo(process_id, user, gatilho="manual")
         await TaskLogService.update_task(task_id, status=TaskStatus.COMPLETED, progress=100,
                                          progress_message="PDFs limpos gerados.", result_data=resumo)
         await _notificar(process_id, user, resumo)
