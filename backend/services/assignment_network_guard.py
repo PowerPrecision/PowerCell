@@ -49,6 +49,7 @@ from services.tenant_network import (
     CAMPO_REDES_PARCEIRAS,
     TenantScope,
     redes_parceiras,
+    rede_de_omissao,
     resolve_tenant_scope,
     resolve_tenant_scope_completo,
     resolve_vista_scope,
@@ -85,7 +86,11 @@ def redes_permitidas(
         return {r for r in ator.network_ids if r}
     if processo is None:
         return None
-    alcance = {_texto(processo.get(CAMPO_REDE))} | set(redes_parceiras(processo))
+    # Um processo SEM carimbo de rede pertence à rede de omissão — é assim que o âmbito de
+    # processos o lê (`build_network_scope_condition`). Sem isto o alcance de um processo legado
+    # era vazio e o Master não via NINGUÉM na Gestão de Atribuições além de quem já lá estava.
+    dono = _texto(processo.get(CAMPO_REDE)) or (rede_de_omissao() or "")
+    alcance = {dono} | set(redes_parceiras(processo))
     return {r for r in alcance if r}
 
 

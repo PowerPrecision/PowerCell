@@ -182,6 +182,11 @@ async def run_get_process_detail(
     ensure_client_id_default(process)
     await attach_latest_activity(process, process_id)
     await attach_portal_access(process, process_id)
+    # Os nomes da equipa a partir dos ids, como na listagem: um processo com o Index atribuído mas
+    # sem `indexacao_name` gravado mostrava «Indexação» em branco — ninguém sabia a quem estava.
+    from services.process_list_enrichment import enrich_processes_assignee_names
+
+    await enrich_processes_assignee_names([process])
     # A empresa dona, para a etiqueta do cabeçalho (processos partilhados B2B).
     from services.process_owner import anexar_empresa_dona
 

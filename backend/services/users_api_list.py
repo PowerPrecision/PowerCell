@@ -5,10 +5,7 @@ Extraído de `routes/users.py`.
 from __future__ import annotations
 
 from database import db
-from services.staff_assignment import (
-    apply_assignment_staff_filter,
-    filter_assignment_staff,
-)
+from services.staff_assignment import filter_assignment_staff
 
 # Pacote EB — lista global sem paginação curta (alinhado com /admin/users).
 USERS_LIST_LIMIT = 10000
@@ -31,12 +28,21 @@ async def run_get_users(
     que passa a ver apenas quem o processo já alcança (dono + convidadas),
     ou seja, exactamente o que o servidor aceitaria ao gravar.
     """
-    from services.role_query import build_deep_role_query
+    from services.role_ucr import (
+        anexar_papeis_das_empresas,
+        filtro_de_atribuicao,
+        filtro_de_papel,
+    )
 
+    # O cargo conta também quando foi dado POR EMPRESA (UCR) — é por aí que a pessoa entra e
+    # trabalha (perfil efectivo). Perguntar só ao `users.role` escondia da Gestão de Atribuições
+    # quem tinha o Index (ou outro cargo) na grelha de acessos (Nov 2026, `services/role_ucr`).
     query = {}
     if role:
-        query = build_deep_role_query(query, role=role)
-    query = apply_assignment_staff_filter(query, for_assignment)
+        query = await filtro_de_papel([role], db)
+    if for_assignment:
+        staff = await filtro_de_atribuicao(db)
+        query = {"$and": [query, staff]} if query else staff
 
     # FRONTEIRA DE REDE (Out 2026). Esta lista alimenta as dropdowns de
     # atribuição, e não tinha filtro nenhum — só `/admin/users` o tinha.
@@ -79,6 +85,7 @@ async def run_get_users(
             user or {}, users, process_id
         )
         users = await _juntar_a_equipa_do_processo(user or {}, users, process_id)
+    users = await anexar_papeis_das_empresas(users, db)
     if for_assignment:
         users = filter_assignment_staff(users)
 
@@ -166,14 +173,13 @@ async def _juntar_indexadores_da_rede(
 
     from services.admin_users_scope import build_users_scope_query, empresas_do_ambito
     from services.assignment_network_guard import ids_atribuiveis
-    from services.role_query import deep_role_in_filter
-    from services.staff_assignment import apply_assignment_staff_filter
+    from services.role_ucr import filtro_de_atribuicao, filtro_de_papel
 
     rede = await empresas_do_ambito(ator)
     if rede == ambito:
         return users  # sem empresa escolhida: a lista já é a da rede
 
-    query = apply_assignment_staff_filter(deep_role_in_filter(list(PAPEIS_DO_INDEX)), True)
+    query = {"$and": [await filtro_de_papel(PAPEIS_DO_INDEX, db), await filtro_de_atribuicao(db)]}
     scope_query = await build_users_scope_query(rede)
     if scope_query:
         query = {"$and": [query, scope_query]}

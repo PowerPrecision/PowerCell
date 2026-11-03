@@ -70,9 +70,11 @@ def is_assignment_eligible_user(user: Optional[dict]) -> bool:
         or user.get("extra_roles")
         or []
     )
-    if isinstance(extra, Iterable):
-        for item in extra:
-            roles.add(_norm_role(item))
+    # Os cargos dados POR EMPRESA (UCR) — `services/role_ucr.anexar_papeis_das_empresas`.
+    for lista in (extra, user.get("company_roles") or []):
+        if isinstance(lista, Iterable) and not isinstance(lista, str):
+            for item in lista:
+                roles.add(_norm_role(item))
     return bool(roles & set(ASSIGNMENT_ALLOWED_ROLES))
 
 
