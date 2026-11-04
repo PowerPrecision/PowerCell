@@ -3,6 +3,28 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-11-04] — Atribuições por empresa, Index (15 dias, reabrir), IA de reserva, email, painel de administração e notificações
+
+### Adicionado
+- **Reabrir processos já indexados.** Separador **Indexados** (Supervisão do Index) e **Indexados por mim** (Os Meus Processos do Index); botão **Reabrir** na bancada, com motivo opcional. O Index reabre para si (limite de 15 ativos); a gestão devolve à fila. A fase não muda e voltar a marcar não repete a automação da fase.
+- **Campo «Direção»** nas atribuições (Diretor/CEO que acompanha o processo).
+- **IA de reserva:** quando a OpenAI fica sem créditos, a análise passa para Gemini e depois Claude (se houver chave). Só com todas sem créditos é que «Analisar»/«Extrair dados» ficam desligados; «Marcar como Indexado» nunca.
+- **«Eliminar» documento na bancada do Index** (apagar lógico; os bytes vão para `Eliminados/`).
+- **Email do processo pré-preenchido:** **Novo** no separador Emails traz o assunto «Processo #n.º — Nome» e o bloco «Dados do cliente»; o compositor tem **De:** (caixa pessoal ou Caixa Geral, para quem tem direito) e **Modelo**.
+- **Guias de utilizador ligados:** os quatro guias (.docx), as apresentações (.pptx) e os vídeos têm a mesma numeração de secções, com marcas de tempo do vídeo e número do diapositivo em cada secção, e capítulos no MP4.
+
+### Alterado
+- **Regras de atribuição (por empresa):** alteram Master, Admin, CEO, Diretor e Intermediário (perfil efectivo); o Index só o campo Indexação, com registo no histórico. Só se põem pessoas da empresa ativa; quem a outra empresa atribuiu aparece com cadeado. O nome do Index só aparece a quem é da mesma empresa.
+- **Index:** um processo atribuído e nunca aberto só é reatribuído ao fim de **15 dias** (eram 48 h). Ficheiros sem tipo vão para **Outros** ao indexar.
+- **PDF limpo** fica com o nome do original; o original passa a «… (original).pdf», nunca é apagado e deixa de aparecer a consultores e intermediários.
+- **Painel de Administração:** um só painel **Administração** em cinco grupos (Equipa, A empresa, Operação, Conformidade, Sistema); CEO gere tudo da empresa, Admin a Equipa, a Operação e a Conformidade, Diretor consulta. O email geral configura-se na ficha da empresa. `/admin` chama-se «Dashboard».
+- **Notificações:** resumos de processos parados (7 e 14 dias; gestão da empresa aos 21), documentos a expirar aos 7 dias e no dia, lembrete mensal no dia 25; avisos de gestão pela empresa do processo; ninguém é avisado do que fez; chat de grupo só com @menção. **Telegram** por omissão só com o urgente e no máximo uma mensagem por pessoa a cada 15 min.
+- **Separador Emails:** sem «Eliminar»; «Sync» sincroniza a caixa de quem carrega; «Responder» abre o compositor do Webmail; etiqueta curta `[Ref: #n.º]`.
+
+### Corrigido
+- Listas de atribuição e atribuição automática do Index contam os cargos por empresa (UCR); processos sem rede deixam de esconder a equipa.
+- Lembrete mensal repetia-se em cada passagem horária do dia 1.
+
 ## [2026-10-29] — Index: comunicação, análise por ficheiro e recibos estrangeiros; emails com formatação; Telegram
 
 ### Adicionado

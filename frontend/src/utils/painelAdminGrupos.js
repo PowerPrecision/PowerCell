@@ -51,11 +51,12 @@ export const GRUPOS_DO_PAINEL = [
   {
     id: "operacao",
     rotulo: "Operação",
-    descricao: "Partilhado por todas as empresas da rede: quem altera fica registado e as outras empresas são avisadas.",
+    descricao: "Workflow, formulário e automações são partilhados por todas as empresas da rede: quem altera fica registado e as outras empresas são avisadas. As minutas são os modelos de documentos dos processos.",
     seccoes: [
       { id: "workflow", rotulo: "Workflow", edita: GESTAO_LOCAL, consulta: ["diretor"] },
       { id: "formulario", rotulo: "Formulário público", edita: GESTAO_LOCAL },
       { id: "automacoes", rotulo: "Automações", edita: GESTAO_LOCAL },
+      { id: "minutas", rotulo: "Minutas", edita: GESTAO_LOCAL },
     ],
   },
   {
@@ -143,6 +144,7 @@ export const DESTINOS_ANTIGOS = {
   financas: { grupo: "empresa", seccao: "financas" },
   automation: { grupo: "operacao", seccao: "automacoes" },
   workflow: { grupo: "operacao", seccao: "workflow" },
+  templates: { grupo: "operacao", seccao: "minutas" },
   compliance: { grupo: "conformidade", seccao: "rgpd" },
   comunicacoes: { grupo: "sistema", seccao: "contas-email" },
   tecnico: { grupo: "sistema", seccao: "backups" },

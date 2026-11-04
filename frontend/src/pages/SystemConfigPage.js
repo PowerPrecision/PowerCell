@@ -234,9 +234,12 @@ const SystemConfigPage = ({ embedded = false, ambito }) => {
   const [empresas, setEmpresas] = useState([]);
   const [listaPronta, setListaPronta] = useState(false);
   const [empresaEscolhida, setEmpresaEscolhida] = useState(null);
-  // «A empresa» nunca oferece a global; «Sistema» é SÓ a global.
+  // «A empresa» só oferece a global (os valores por omissão que as empresas herdam) à
+  // conta Master, que é a única que os grava; «Sistema» é SÓ a global.
   const empresasDoAmbito =
-    ambito === AMBITO_EMPRESA ? empresas.filter((e) => e.company_id !== "default") : empresas;
+    ambito === AMBITO_EMPRESA && !contaMaster(user)
+      ? empresas.filter((e) => e.company_id !== "default")
+      : empresas;
   const empresaDoAmbito = empresaEmVigor({
     escolhida: empresaEscolhida,
     activa: effectiveCompanyId,

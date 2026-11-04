@@ -43,6 +43,7 @@ vi.mock("../AutomationPage", () => marcador("automacoes"));
 vi.mock("../SystemConfigPage", () => marcador("config"));
 vi.mock("../WorkflowStatusesPage", () => marcador("workflow"));
 vi.mock("../FormManagementPage", () => marcador("formulario"));
+vi.mock("../TemplatesPage", () => marcador("minutas"));
 vi.mock("../EmailAccountsPage", () => marcador("contas-email"));
 vi.mock("../NotificationSettingsPage", () => marcador("notificacoes"));
 vi.mock("../RGPDAdminPage", () => marcador("rgpd"));
@@ -197,5 +198,17 @@ describe("Administração — secções e conteúdo", () => {
   it("o grupo Sistema avisa que vale para todas as empresas", () => {
     montar("/system-admin?grupo=sistema");
     expect(screen.getByTestId("descricao-do-grupo")).toHaveTextContent(/TODAS as empresas/);
+  });
+});
+
+describe("Administração — nada ficou para trás (Flavio, Nov 2026)", () => {
+  it("as minutas (antes em Customização › Templates) estão em Operação", async () => {
+    montar("/system-admin?grupo=operacao&seccao=minutas");
+    expect(await screen.findByTestId("conteudo-minutas")).toBeInTheDocument();
+  });
+
+  it("o link antigo `?tab=templates` leva às minutas", async () => {
+    montar("/system-admin?tab=templates");
+    expect(await screen.findByTestId("conteudo-minutas")).toBeInTheDocument();
   });
 });

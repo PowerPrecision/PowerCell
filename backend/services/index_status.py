@@ -243,7 +243,7 @@ async def assumir(process_id: str, anterior: Optional[str], novo: dict) -> bool:
     """«Atribuir a mim» (Out 2026): passa o processo ao indexador `novo` SÓ se o dono e o estado são os lidos.
 
     Condicional a `anterior` (ou a nenhum) e a ninguém ter começado (`in_review`, indexado, Via Verde):
-    se o colega abrir a bancada entretanto, ganha quem trabalha (`False`). O relógio das 48 h recomeça.
+    se o colega abrir a bancada entretanto, ganha quem trabalha (`False`). O relógio do nível 1 (15 dias) recomeça.
     """
     agora = _agora()
     r = await db.processes.update_one(

@@ -221,7 +221,7 @@ const DiagnosticsPage = ({ embedded = false }) => {
   }, [token]);
 
   const handleConfigure = () => {
-    navigate("/configuracoes");
+    navigate("/system-admin?grupo=sistema&seccao=configuracao&tab=storage");
   };
 
   if (loading && !diagnostics) {

@@ -175,9 +175,19 @@ def _listagem():
 
 @pytest.mark.asyncio
 class TestAListagem:
-    async def _aplicar(self, papel, incluir=False, substituidos=frozenset({"c1"})):
-        with patch.object(sub, "ids_substituidos", AsyncMock(return_value=set(substituidos))):
+    async def _aplicar(self, papel, incluir=False, substituidos=frozenset({"c1"}), sanitizados=frozenset()):
+        with patch.object(sub, "ids_substituidos", AsyncMock(return_value=set(substituidos))), \
+             patch.object(sub, "ids_de_originais_com_pdf_limpo", AsyncMock(return_value=set(sanitizados))):
             return await sub.aplicar_a_listagem(_listagem(), "p1", papel, incluir)
+
+    async def test_o_original_com_pdf_limpo_so_o_index_o_ve(self):
+        # Nov 2026: depois do PDF limpo, o consultor/intermediário só vê o limpo (o original espera a purga)
+        for papel in ("consultor", "intermediario"):
+            r = await self._aplicar(papel, substituidos=frozenset(), sanitizados={"i1"})
+            assert "i1" not in [f["doc_id"] for f in r["files"]["Financeiros"]]
+        for papel in ("indexacao", "diretor"):
+            r = await self._aplicar(papel, substituidos=frozenset(), sanitizados={"i1"})
+            assert "i1" in [f["doc_id"] for f in r["files"]["Financeiros"]]
 
     async def test_ninguem_ve_o_substituido_por_omissao(self):
         for papel in ("consultor", "intermediario", "indexacao", "diretor"):

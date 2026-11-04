@@ -370,8 +370,8 @@ async def run_assumir_processo(user: dict, process_id: str) -> dict[str, Any]:
     O Index vê a rede inteira em «Todos os Processos» para trabalhar de forma proactiva. Regra da direcção:
     só se assume o que está «Por indexar» (de um colega que ainda não o abriu, ou sem ninguém); o que já está
     «Em tratamento» fica com quem o começou. A escrita é CONDICIONAL ao dono e ao estado lidos: se o colega
-    abrir a bancada entre a leitura e a escrita, ganha quem trabalha (409) — como no SLA das 48 h.
-    Stealth: sem histórico do processo, só auditoria. Assumir não é começar: o relógio das 48 h recomeça e
+    abrir a bancada entre a leitura e a escrita, ganha quem trabalha (409) — como no SLA do nível 1.
+    Stealth: sem histórico do processo, só auditoria. Assumir não é começar: o relógio do nível 1 (15 dias) recomeça e
     o estado passa a «Em tratamento» quando o novo dono abrir a bancada.
     """
     proc = await _carregar_processo(process_id, user)

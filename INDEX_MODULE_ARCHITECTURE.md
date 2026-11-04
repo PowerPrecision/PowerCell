@@ -544,7 +544,7 @@ Detalhe e lições no `AGENTS.md` («Index: fusão de menus, atribuição autom�
 3. **Atribuição à entrada:** indexador por carga (`assign_to_indexer`, já existia) **e** intermediário por carga
    (`auto_assign_intermediario_on_entry`, só se estiver vazio). Os dois carimbam/derivam do pool da rede do processo.
 4. **SLA em dois níveis** (`services/index_sla.py`, no job horário `scheduled_tasks`): nível 1 reatribui o processo atribuído
-   que ninguém começou em `INDEX_SLA_UNTOUCHED_HOURS` (48 h); nível 2 NÃO retira a atribuição de um processo em tratamento sem
+   que ninguém começou em `INDEX_SLA_UNTOUCHED_HOURS` (360 h = 15 dias de calendário desde Nov 2026; eram 48 h); nível 2 NÃO retira a atribuição de um processo em tratamento sem
    actividade há `INDEX_SLA_STALE_DAYS` (5 dias ÚTEIS: as horas de sábado e domingo, hora de Lisboa, não contam; feriados
    contam como úteis): avisa o indexador e a chefia da rede, repetindo de 5 em 5 dias úteis. O nível 1 continua em horas de calendário.
    `INDEX_SLA_ENABLED=false` desliga os dois.

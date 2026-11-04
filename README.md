@@ -155,6 +155,8 @@ PowerCell/
 - **Rascunhos de emails IA**: Geração automática de emails quando faltam documentos
 - **DSTI automático**: Cálculo da taxa de esforço a partir de dados financeiros extraídos
 - **Conformidade PII**: Opt-out de treino de dados OpenAI habilitado
+- **IA de reserva (Nov 2026)**: `services/ai_fornecedores.py` — OpenAI → Gemini → Claude (Anthropic), entra quem tem chave (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`); `AI_FALLBACK_PROVIDERS` muda a ordem ou desliga (`none`). Só troca por falta de créditos; um limite de pedidos espera e repete. Com todas sem créditos, a bancada do Index desliga «Analisar»/«Extrair dados» (estado em `system_flags`, sonda a cada 3 min); «Marcar como Indexado» nunca bloqueia
+- **PDF limpo (Index)**: fica com o nome do documento original; o original passa a «… (original).pdf», nunca é apagado (`INDEX_PURGE_ENABLED` desligado) e só o Index, a Direção e a gestão o vêem
 
 ### Formulário Público Dinâmico
 - Formulário multi-step (6 passos) com validação
@@ -222,13 +224,9 @@ PowerCell/
 - **Alerta de processos sem atualização**: Exclui processos concluídos, desistências e arquivados
 
 ### Administração
-- **Dashboard operacional** (`/admin`): KPIs, funil, calendário, documentos, leads — dia-a-dia da operação (admin/CEO)
-- **Área de configuração de plataforma** (`/admin/organizacao`): Empresas (`is_active` / soft-delete) + Utilizadores e acessos UCR (vários cargos por empresa, proteção do último acesso, cargos oficiais Parceiro e Indexação). Exclusiva para perfil activo `admin` ou `ceo`
-- **Gestão de Perfis e Permissões** (`/configuracoes-perfis`): Controlo granular de páginas e ações por utilizador
-- **Gestão do Formulário** (`/gestao-formulario`): Ativar/desativar campos, criar campos personalizados, gerir templates
-- **Motor de Automação** (`/automation`): Regras "Se X, Então Y" sem código
-- **Gestão de Estados do Workflow** (`/workflow-estados`): Cores, labels, ordem
-- **Configurações do Sistema** (`/configuracoes` / `/system-admin`): RGPD, DSTI, emails, backups, notificações, **Integrações (SMTP Sistema, Storage Provider, Webmail Partilhado)**
+- **Dashboard** (`/admin`): KPIs, funil, calendário, documentos, leads — dia-a-dia da operação (admin/CEO). Deixou de se chamar «Painel de Administração» (Nov 2026).
+- **Administração** (`/system-admin`, Nov 2026): o único painel, em cinco grupos — **Equipa** (Utilizadores, Parceiros, Permissões), **A empresa** (Dados da empresa com o email geral, Definições, Honorários e comissões), **Operação** (Workflow, Formulário público, Automações, Minutas), **Conformidade** (RGPD, Registo de auditoria, Anonimização, Registo de histórico) e **Sistema** (só Master: configuração global, contas de email do sistema, notificações, backups, logs, diagnósticos, IA, processos em background). Grupo e secção vivem no URL (`?grupo=&seccao=`); registo em `frontend/src/utils/painelAdminGrupos.js`. Decide-se pelo perfil efectivo: CEO gere tudo da empresa; Admin só Equipa, Operação e Conformidade; Diretor consulta Utilizadores, Workflow e Honorários. `/admin/organizacao` e os links antigos redirigem para o painel.
+- Workflow, formulário e automações são por rede: cada alteração fica no registo de auditoria e a gestão das outras empresas é avisada.
 
 ### RGPD
 - **Página pública de consentimento** (`/rgpd/:token`): Assinatura digital do cliente
@@ -253,9 +251,10 @@ PowerCell/
 - **Metadados de rastreabilidade**: Cada documento recebe `_sanitized_at`, `_sanitized_source` e flags de anonimização
 - **Disponível via API** e **CLI standalone** com suporte a `PROD_MONGO_URL`, `PROD_DB_NAME`, `DEV_MONGO_URL`, `DEV_DB_NAME`
 
-### Notificações no Telegram (Out 2026)
+### Notificações no Telegram (Out 2026, regras de Nov 2026)
 - Um bot por empresa (`services/telegram_bot.py`); cada utilizador liga a conta na **Área Pessoal** (Conta Global) ou em **Definições › Notificações** com um código de uso único de 10 min (`t.me/<bot>?start=<código>`); `/parar` ou «Desligar Telegram» desligam.
-- Mensagens mínimas: tipo de aviso + nº do processo, nunca dados do cliente. Fila `telegram_outbox` agrupada por processo/conversa numa janela fixa de 90 s (`TELEGRAM_JANELA_SEGUNDOS`); preferências por categoria e «Só quando não estou na aplicação».
+- Mensagens mínimas: tipo de aviso + nº do processo, nunca dados do cliente. Fila `telegram_outbox`, **no máximo uma mensagem por pessoa a cada 15 min** (`TELEGRAM_INTERVALO_MINIMO_SEGUNDOS`, janela de 90 s `TELEGRAM_JANELA_SEGUNDOS`).
+- Por omissão só o urgente (`services/telegram_link.CATEGORIAS`): atribuições, Portal do Cliente, chat directo/Index/@menção, prazos ultrapassados ou daqui a 1 h. Os resumos de rotina (`services/avisos_de_rotina.py`: processos parados aos 7/14 dias e da empresa aos 21, documentos a expirar, lembrete do dia 25) nunca vão ao Telegram. Ninguém é avisado do que ele próprio fez.
 - Sem `TELEGRAM_BOT_TOKEN` o canal fica desligado. Configuração em `DEPLOY_RUNBOOK.md`, Parte F.
 
 ### Webmail (Email IMAP)

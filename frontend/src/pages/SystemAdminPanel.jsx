@@ -44,6 +44,7 @@ import AutomationPage from "./AutomationPage";
 const SystemConfigPage = lazy(() => import("./SystemConfigPage"));
 const WorkflowStatusesPage = lazy(() => import("./WorkflowStatusesPage"));
 const FormManagementPage = lazy(() => import("./FormManagementPage"));
+const TemplatesPage = lazy(() => import("./TemplatesPage"));
 const EmailAccountsPage = lazy(() => import("./EmailAccountsPage"));
 const NotificationSettingsPage = lazy(() => import("./NotificationSettingsPage"));
 const RGPDAdminPage = lazy(() => import("./RGPDAdminPage"));
@@ -99,6 +100,8 @@ function ConteudoDaSeccao({ id, soLeitura, contaMaster }) {
       return lazyPage(FormManagementPage);
     case "automacoes":
       return <AutomationPage embedded />;
+    case "minutas":
+      return lazyPage(TemplatesPage);
     case "rgpd":
       return lazyPage(RGPDAdminPage);
     case "auditoria":

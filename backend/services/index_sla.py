@@ -5,7 +5,8 @@ atribuído a pegar no processo, e um processo parado numa pessoa ausente é um c
 saber. Mas nem todo o processo parado é igual, e tratá-los da mesma maneira seria punir quem trabalha:
 
 * **Nível 1 — intocado.** Atribuído, ainda `pending` (a pessoa nunca lhe mexeu) e passadas
-  `INDEX_SLA_UNTOUCHED_HOURS` horas (48) desde a atribuição → **retira-se a atribuição e reatribui-se** a
+  `INDEX_SLA_UNTOUCHED_HOURS` horas (360 = 15 dias; eram 48 h até Nov 2026, mudado a pedido do Flavio)
+  desde a atribuição → **retira-se a atribuição e reatribui-se** a
   outro indexador da equipa (a mesma regra de carga da atribuição normal). Nada se perde: não há trabalho
   em curso.
 * **Nível 2 — estagnado.** O indexador já começou (`in_review`) e o processo não tem actividade há mais de
@@ -36,7 +37,7 @@ REGRAS QUE NÃO SE PODEM PERDER
    domingo (hora de Lisboa) não contam. Um processo com a última actividade à sexta às 17:00 só está
    estagnado à sexta seguinte às 17:00, e nunca por causa de um fim-de-semana. **Os feriados não contam como
    não úteis** (não há calendário de feriados no sistema): um feriado a meio da semana conta como dia útil.
-   O nível 1 (48 h sem pegar) continua em horas de calendário — não foi pedido mudá-lo.
+   O nível 1 (15 dias sem pegar) conta dias de CALENDÁRIO (fins-de-semana incluídos).
 8. **Tudo se pode desligar** (`INDEX_SLA_ENABLED=false`) e todos os limiares são configuráveis; um valor
    inválido ou ≤ 0 cai na omissão (nunca desliga um limiar). O ciclo nunca levanta por causa de um processo.
 """
@@ -53,7 +54,7 @@ from services import index_status as estado_do_index
 
 logger = logging.getLogger(__name__)
 
-HORAS_SEM_PEGAR_POR_OMISSAO = 48
+HORAS_SEM_PEGAR_POR_OMISSAO = 15 * 24  # 15 dias (Flavio, 2026-11-04); eram 48 h
 DIAS_SEM_ACTIVIDADE_POR_OMISSAO = 5
 TECTO_POR_CICLO = 200
 CATEGORIA_DO_ALERTA = "index_stagnation"
@@ -85,6 +86,14 @@ def horas_sem_pegar(ambiente=None) -> int:
 def dias_sem_actividade(ambiente=None) -> int:
     fonte = ambiente if ambiente is not None else os.environ
     return _positivo(fonte.get("INDEX_SLA_STALE_DAYS"), DIAS_SEM_ACTIVIDADE_POR_OMISSAO)
+
+
+def prazo_legivel(horas: int) -> str:
+    """«15 dias» para múltiplos de 24 h, «36h» para o resto (texto do histórico e dos avisos). Pura."""
+    if horas % 24 == 0:
+        dias = horas // 24
+        return "1 dia" if dias == 1 else f"{dias} dias"
+    return f"{horas}h"
 
 
 def _para_datetime(valor: Any) -> Optional[datetime]:
@@ -272,14 +281,14 @@ async def reatribuir_intocados(agora: datetime, horas: int, condicao_activa: dic
             try:
                 await log_history(
                     process_id=processo["id"], user={"id": "system", "name": "Sistema", "role": "admin"},
-                    action=f"Reatribuído automaticamente a {novo['name']}: o indexador anterior não começou em {horas}h",
+                    action=f"Reatribuído automaticamente a {novo['name']}: o indexador anterior não começou em {prazo_legivel(horas)}",
                     field="assigned_indexacao_id", old_value=processo.get("indexacao_name") or actual, new_value=novo["name"],
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[INDEX-SLA] Histórico do processo %s não gravado: %s", processo["id"], type(exc).__name__)
             await _avisar(
                 send_realtime_notification, actual, "Processo retirado por inactividade",
-                f"O processo {numero} foi reatribuído: não foi iniciado em {horas}h.", processo["id"], "process_unassigned",
+                f"O processo {numero} foi reatribuído: não foi iniciado em {prazo_legivel(horas)}.", processo["id"], "process_unassigned",
             )
             await _avisar(
                 send_realtime_notification, novo["id"], "Novo Processo Atribuído",

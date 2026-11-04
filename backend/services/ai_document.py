@@ -309,12 +309,17 @@ class SemCreditosError(Exception):
 
 
 #: Pistas (minúsculas) de uma conta sem saldo, no texto do erro da OpenAI.
-_PISTAS_SEM_CREDITOS = ("insufficient_quota", "credit_balance_exhausted", "no credits remaining", "exceeded your current quota")
+_PISTAS_SEM_CREDITOS = (
+    "insufficient_quota", "credit_balance_exhausted", "no credits remaining", "exceeded your current quota",
+    "credit balance is too low",  # Anthropic
+)
 
 #: Depois de um «sem créditos», os pedidos seguintes falham logo durante este tempo (segundos), em vez de
 #: irem um a um bater na mesma parede (uma análise de extratos lança vários pedidos em paralelo).
 PAUSA_SEM_CREDITOS = 120.0
-_sem_creditos_desde: Optional[float] = None
+#: Por fornecedor (`ai_fornecedores`): quando a OpenAI fica sem créditos, a análise passa ao seguinte e só
+#: volta a tentar a OpenAI passada a pausa.
+_sem_creditos_desde: Dict[str, float] = {}
 
 
 def e_falta_de_creditos(erro: Any) -> bool:
@@ -1242,6 +1247,55 @@ def resize_image_base64(base64_content: str, mime_type: str, max_size: int = MAX
         return base64_content, mime_type
 
 
+def _sem_fences(texto: str) -> str:
+    """Alguns fornecedores devolvem o JSON entre ```json … ``` mesmo com `response_format`."""
+    t = texto.strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else ""
+        if t.rstrip().endswith("```"):
+            t = t.rstrip()[:-3]
+    return t.strip()
+
+
+async def _pedir_ao_fornecedor(fornecedor, messages: list, tool_definition: Optional[dict], timeout: float,
+                               model_id: str, max_tokens: int):
+    """UM pedido a UM fornecedor. Levanta `SemCreditosError`, `RateLimitError` ou o erro do pedido."""
+    from services import ai_fornecedores
+
+    client = ai_fornecedores.cliente(fornecedor)
+    kwargs = {
+        "model": model_id,
+        "messages": messages,
+        "temperature": 0.1,
+        "max_tokens": max_tokens,
+    }
+    if tool_definition:
+        kwargs["tools"] = [tool_definition]
+        if fornecedor.nome == ai_fornecedores.OPENAI:
+            kwargs["tool_choice"] = {"type": "function", "function": {"name": tool_definition["function"]["name"]}}
+        else:
+            # os endpoints compatíveis aceitam «required»; com UMA só ferramenta é o mesmo que nomeá-la
+            kwargs["tool_choice"] = "required"
+    else:
+        # Fallback: usar response_format para modo JSON
+        kwargs["response_format"] = {"type": "json_object"}
+
+    try:
+        return await asyncio.wait_for(client.chat.completions.create(**kwargs), timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout ({timeout}s) ao chamar a IA ({fornecedor.nome})")
+        raise Exception(f"Timeout na chamada à API ({timeout}s)")
+    except Exception as e:
+        error_msg = str(e).lower()
+        if e_falta_de_creditos(error_msg):
+            raise SemCreditosError(f"insufficient_quota: a conta de IA ({fornecedor.nome}) está sem créditos") from e
+        if "rate" in error_msg or "429" in error_msg or "limit" in error_msg:
+            logger.warning(f"Rate limit detectado ({fornecedor.nome}): {e}")
+            raise RateLimitError(f"Rate limit: {e}")
+        logger.error(f"Erro ao chamar a IA ({fornecedor.nome}): {e}")
+        raise
+
+
 @retry(
     stop=stop_after_attempt(RETRY_MAX_ATTEMPTS),
     wait=wait_exponential(multiplier=1, min=RETRY_MIN_WAIT, max=RETRY_MAX_WAIT),
@@ -1280,54 +1334,39 @@ async def call_openai_api(
         SemCreditosError: Conta sem créditos (429 `insufficient_quota`) — sem novas tentativas
         Exception: Outros erros
     """
-    global _sem_creditos_desde
     from services import ai_disponibilidade  # tardio: o estado partilhado vive na base de dados
+    from services import ai_fornecedores
 
-    pausa = _sem_creditos_desde is not None and time.monotonic() - _sem_creditos_desde < PAUSA_SEM_CREDITOS
-    if pausa and not ignorar_pausa:
-        raise SemCreditosError("insufficient_quota: a conta de IA está sem créditos (pedido não enviado)")
-    client = get_openai_client()
-    model_id = model or await resolve_ai_model()
+    lista = ai_fornecedores.fornecedores()
+    response, model_id, recusou_agora = None, None, False
+    for i, fornecedor in enumerate(lista):
+        desde = _sem_creditos_desde.get(fornecedor.nome)
+        if desde is not None and time.monotonic() - desde < PAUSA_SEM_CREDITOS and not ignorar_pausa:
+            continue  # sem créditos há pouco: nem se tenta
+        model_id = fornecedor.modelo or model or await resolve_ai_model()
+        try:
+            response = await _pedir_ao_fornecedor(
+                fornecedor, messages, tool_definition, timeout, model_id, max_tokens,
+            )
+            _sem_creditos_desde.pop(fornecedor.nome, None)
+            break
+        except SemCreditosError:
+            recusou_agora = True
+            _sem_creditos_desde[fornecedor.nome] = time.monotonic()
+            seguinte = next((f.nome for f in lista[i + 1:]), None)
+            logger.error(
+                "IA %s sem créditos: é preciso carregar créditos na conta. %s",
+                ai_fornecedores.NOME_PARA_O_ECRA.get(fornecedor.nome, fornecedor.nome),
+                f"A passar para {ai_fornecedores.NOME_PARA_O_ECRA.get(seguinte, seguinte)}." if seguinte
+                else "Não há outra IA configurada.",
+            )
+            continue
+    if response is None:
+        # todos sem créditos (ou em pausa): a bancada do Index bloqueia Analisar/Extrair
+        if recusou_agora:  # em pausa já ficou registado; não se escreve a cada pedido
+            await ai_disponibilidade.registar_sem_creditos()
+        raise SemCreditosError("insufficient_quota: todas as contas de IA estão sem créditos")
 
-    kwargs = {
-        "model": model_id,
-        "messages": messages,
-        "temperature": 0.1,
-        "max_tokens": max_tokens,
-    }
-    
-    if tool_definition:
-        kwargs["tools"] = [tool_definition]
-        kwargs["tool_choice"] = {
-            "type": "function",
-            "function": {"name": tool_definition["function"]["name"]}
-        }
-    else:
-        # Fallback: usar response_format para modo JSON
-        kwargs["response_format"] = {"type": "json_object"}
-    
-    try:
-        response = await asyncio.wait_for(
-            client.chat.completions.create(**kwargs),
-            timeout=timeout
-        )
-    except asyncio.TimeoutError:
-        logger.error(f"Timeout ({timeout}s) ao chamar OpenAI API")
-        raise Exception(f"Timeout na chamada à API ({timeout}s)")
-    except Exception as e:
-        error_msg = str(e).lower()
-        if e_falta_de_creditos(error_msg):
-            _sem_creditos_desde = time.monotonic()
-            await ai_disponibilidade.registar_sem_creditos()  # a bancada do Index bloqueia Analisar/Extrair
-            logger.error("OpenAI sem créditos (insufficient_quota): é preciso carregar créditos na conta. Sem novas tentativas.")
-            raise SemCreditosError("insufficient_quota: a conta de IA está sem créditos") from e
-        if "rate" in error_msg or "429" in error_msg or "limit" in error_msg:
-            logger.warning(f"Rate limit detectado: {e}")
-            raise RateLimitError(f"Rate limit: {e}")
-        logger.error(f"Erro ao chamar OpenAI API: {e}")
-        raise
-    
-    _sem_creditos_desde = None  # a conta voltou a responder
     await ai_disponibilidade.registar_resposta_ok()
     # Extrair dados da chamada de ferramenta ou do conteúdo
     choice = response.choices[0]
@@ -1351,7 +1390,7 @@ async def call_openai_api(
             return {"data": {}, "method": "function_calling", "model": model_id, "error": str(e)}
     elif message.content:
         # Fallback: JSON no conteúdo
-        content = message.content.strip()
+        content = _sem_fences(message.content)
         return {"data": json.loads(content), "method": "json_content", "model": model_id}
     else:
         logger.error("Sem tool calls e sem conteúdo na resposta")

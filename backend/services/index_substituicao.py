@@ -238,6 +238,19 @@ async def ids_substituidos(process_id: str, processo: Optional[dict] = None) -> 
     return (await titulares_e_substituidos(process_id, processo))[1]
 
 
+async def ids_de_originais_com_pdf_limpo(process_id: str) -> set[str]:
+    """Os `id` dos originais já sanitizados (o PDF limpo existe) que ainda esperam pela purga. Nunca levanta."""
+    try:
+        docs = await db.document_metadata.find(
+            {"process_id": process_id, "file_state": "sanitizado", "clean_pdf_path": {"$nin": [None, ""]}},
+            {"_id": 0, "id": 1},
+        ).to_list(500)
+    except Exception as exc:  # noqa: BLE001 — sem isto mostra-se a mais, nunca a menos
+        logger.warning("[INDEX] Originais sanitizados de %s não lidos: %s", process_id, type(exc).__name__)
+        return set()
+    return {d["id"] for d in docs if d.get("id")}
+
+
 def pode_ver_os_substituidos(papel: Optional[str]) -> bool:
     return _texto(papel).lower() in PAPEIS_QUE_VEEM_OS_SUBSTITUIDOS
 
@@ -252,6 +265,10 @@ async def aplicar_a_listagem(listagem: Any, process_id: Optional[str], papel: Op
         return listagem
     substituidos = await ids_substituidos(process_id)
     pode_ver = pode_ver_os_substituidos(papel)
+    if not pode_ver:
+        # O original de um documento que já tem PDF LIMPO (Nov 2026): até à purga os dois estão na pasta, e
+        # o consultor/intermediário via-os aos dois. Só o limpo conta; o original fica para o Index.
+        substituidos = substituidos | await ids_de_originais_com_pdf_limpo(process_id)
     if not substituidos:
         return {**listagem, "superseded_count": 0} if pode_ver else listagem
     mostrar = pode_ver and incluir

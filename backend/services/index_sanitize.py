@@ -181,19 +181,38 @@ def _slug(texto: str) -> str:
     return base[:80] or "documento"
 
 
+def _nome_seguro(texto: str) -> str:
+    """O nome do ficheiro como o utilizador o deu (espaços e acentos ficam), sem o que parte uma chave S3."""
+    base = re.sub(r"[\\/\x00-\x1f]+", " ", str(texto or ""))
+    base = re.sub(r"\.{2,}", ".", base)
+    base = re.sub(r"\s+", " ", base).strip(" .")
+    return base[:120].strip(" .") or "documento"
+
+
 def nome_do_pdf_limpo(grupo: list[dict]) -> str:
-    """Nome legível e estável do PDF limpo (nunca o nome de um ficheiro de outro documento)."""
+    """Nome do PDF limpo: o do documento ORIGINAL, sem sufixos (Nov 2026 — «não quero o _limpo»).
+
+    Um ficheiro só: o nome dele com `.pdf` («Recibo Setembro.jpg» → «Recibo Setembro.pdf»). Vários fundidos
+    num (frente+verso do CC, páginas de um extrato): um nome que diz o que é. Nunca o nome de um ficheiro de
+    OUTRO documento.
+    """
     primeiro = grupo[0]
     if len(grupo) > 1:
         tipo = _tipo(primeiro)
         if tipo == TIPO_EXTRATO:
             chave = chave_de_extrato(primeiro)
-            return f"extrato_bancario_{chave[2]}_limpo.pdf"
+            return f"extrato_bancario_{chave[2]}.pdf"
         if tipo == TIPO_IDENTIFICACAO:
             subtipo = primeiro.get("ai_subtype") or _factos(primeiro).get("subtype") or "documento"
-            return f"identificacao_{_slug(str(subtipo))}_limpo.pdf"
+            return f"identificacao_{_slug(str(subtipo))}.pdf"
     stem = os.path.splitext(str(primeiro.get("filename") or "documento"))[0]
-    return f"{_slug(stem)}_limpo.pdf"
+    return f"{_nome_seguro(stem)}.pdf"
+
+
+def nome_do_original_guardado(nome: str) -> str:
+    """Quando o PDF limpo fica com o nome do original, o original (que só espera pela purga) muda de nome."""
+    base, ext = os.path.splitext(nome)
+    return f"{base} (original){ext}"
 
 
 # ====================================================================
@@ -397,6 +416,35 @@ async def _falhar(process_id: str, grupo: list[dict], motivo: str, user: Optiona
         )
 
 
+async def _dar_o_nome_do_original(grupo: list[dict], pasta: str, nome: str, chave: str) -> str:
+    """Troca de nomes: o original sai de `pasta/nome` e o PDF limpo entra. Devolve a chave final do limpo.
+
+    Qualquer falha deixa como estava (o limpo fica com o nome livre que tinha, ex. «recibo_2.pdf»): é só
+    um nome, e o original nunca se perde — metadados e Portal acompanham-no em cada passo.
+    """
+    from services.index_release import _repontar_pedidos_do_portal
+
+    alvo = f"{pasta}/{nome}"
+    original = next((d for d in grupo if d.get("s3_path") == alvo), None)
+    if chave == alvo or original is None:
+        return chave
+    try:
+        guardado = await _chave_livre(pasta, nome_do_original_guardado(nome))
+        if not guardado or not await asyncio.to_thread(s3_service.rename_file, alvo, guardado):
+            return chave
+        if not await asyncio.to_thread(s3_service.rename_file, chave, alvo):
+            await asyncio.to_thread(s3_service.rename_file, guardado, alvo)  # repõe o original
+            return chave
+        novo_nome = guardado.rsplit("/", 1)[-1]
+        await db.document_metadata.update_one({"id": original["id"]}, {"$set": {"s3_path": guardado, "filename": novo_nome}})
+        await _repontar_pedidos_do_portal(alvo, guardado)
+        original["s3_path"], original["filename"] = guardado, novo_nome
+        return alvo
+    except Exception:  # noqa: BLE001 — um nome nunca derruba a limpeza
+        logger.exception("[INDEX] Troca de nomes do PDF limpo falhou em %s", alvo)
+        return chave
+
+
 async def _sanitizar_grupo(
     process: dict, grupo: list[dict], user: Optional[dict], gatilho: str, agora: datetime,
     ler_ficheiro,
@@ -428,7 +476,8 @@ async def _sanitizar_grupo(
         return None
 
     pasta = grupo[0]["s3_path"].rsplit("/", 1)[0]
-    chave = await _chave_livre(pasta, nome_do_pdf_limpo(grupo))
+    nome = nome_do_pdf_limpo(grupo)
+    chave = await _chave_livre(pasta, nome)
     if not chave:
         await _falhar(process_id, grupo, "armazenamento_indisponivel", user, gatilho)
         return None
@@ -442,6 +491,10 @@ async def _sanitizar_grupo(
         await asyncio.to_thread(s3_service.delete_file, chave)  # a cópia má não fica
         await _falhar(process_id, grupo, "pdf_limpo_invalido", user, gatilho)
         return None
+
+    # O PDF limpo fica com o NOME do original (Nov 2026). Se esse nome é o do próprio original (um PDF),
+    # só agora — com a cópia limpa gravada e confirmada — o original passa a «… (original).pdf» até à purga.
+    chave = await _dar_o_nome_do_original(grupo, pasta, nome, chave)
 
     sha = _sha256(lido)
     limite = (agora + timedelta(days=graca_em_dias())).isoformat()
