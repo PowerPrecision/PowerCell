@@ -190,19 +190,22 @@ class TestAgrupar:
 
 class TestNomes:
     def test_individual_usa_o_nome_do_proprio_ficheiro(self):
-        assert sz.nome_do_pdf_limpo([recibo("r1", "Recibo Setembro (final).pdf")]) == "Recibo_Setembro_final_limpo.pdf"
+        assert sz.nome_do_pdf_limpo([recibo("r1", "Recibo Setembro (final).pdf")]) == "Recibo Setembro (final).pdf"
 
     def test_extrato_fundido_leva_o_mes(self):
         g = [extrato("e1", "a.jpg", inicio="2026-01-01"), extrato("e2", "b.jpg", inicio="2026-01-01")]
-        assert sz.nome_do_pdf_limpo(g) == "extrato_bancario_2026-01_limpo.pdf"
+        assert sz.nome_do_pdf_limpo(g) == "extrato_bancario_2026-01.pdf"
 
     def test_identificacao_fundida_leva_o_tipo(self):
         g = [identificacao("i1", "f.jpg", "frente"), identificacao("i2", "v.jpg", "verso")]
-        assert sz.nome_do_pdf_limpo(g) == "identificacao_cc_limpo.pdf"
+        assert sz.nome_do_pdf_limpo(g) == "identificacao_cc.pdf"
 
     def test_nome_sem_caracteres_perigosos(self):
         nome = sz.nome_do_pdf_limpo([doc("x", "../../etc/passwd ação.jpg")])
-        assert "/" not in nome and ".." not in nome and nome.endswith("_limpo.pdf")
+        assert "/" not in nome and ".." not in nome and nome.endswith(".pdf") and "_limpo" not in nome
+
+    def test_uma_imagem_fica_com_o_nome_dela_em_pdf(self):
+        assert sz.nome_do_pdf_limpo([recibo("r1", "Recibo Outubro.jpg")]) == "Recibo Outubro.pdf"
 
 
 # ====================================================================
@@ -431,6 +434,12 @@ class S3Falso:
         dados = self.objectos[chave]
         return "ok", (dados + b"\x00corrompido" if self.corromper_leitura else dados)
 
+    def rename_file(self, origem, destino):
+        if origem not in self.objectos or destino in self.objectos:
+            return False
+        self.objectos[destino] = self.objectos.pop(origem)
+        return True
+
     def delete_file(self, chave):
         if self.apagar_falha:
             return False
@@ -497,11 +506,11 @@ class TestSanitizarUmProcesso:
         await ctx.semear([recibo("r1", "recibo.pdf")], {caminho("recibo.pdf"): pdf_sujo()})
         r = await ctx.correr()
         assert r == {"candidatos": 1, "grupos": 1, "sanitizados": 1, "falhas": 0}
-        limpo = caminho("recibo_limpo.pdf")
+        limpo = caminho("recibo.pdf")
         assert limpo in ctx.fake_s3.objectos
         assert not tem_sentinela(ctx.fake_s3.objectos[limpo])
         # o original NÃO foi tocado
-        assert tem_sentinela(ctx.fake_s3.objectos[caminho("recibo.pdf")])
+        assert tem_sentinela(ctx.fake_s3.objectos[caminho("recibo (original).pdf")])
         assert ctx.fake_s3.apagados == []
 
     @pytest.mark.asyncio
@@ -510,10 +519,10 @@ class TestSanitizarUmProcesso:
         await ctx.correr()
         original = await ctx.doc("r1")
         assert original["file_state"] == "sanitizado"
-        assert original["clean_pdf_path"] == caminho("recibo_limpo.pdf")
-        assert original["clean_pdf_sha256"] == hashlib.sha256(ctx.fake_s3.objectos[caminho("recibo_limpo.pdf")]).hexdigest()
+        assert original["clean_pdf_path"] == caminho("recibo.pdf")
+        assert original["clean_pdf_sha256"] == hashlib.sha256(ctx.fake_s3.objectos[caminho("recibo.pdf")]).hexdigest()
         assert original["purge_after"] == (AGORA + timedelta(days=30)).isoformat()
-        assert original["s3_path"] == caminho("recibo.pdf")  # nada se repontou ainda
+        assert original["s3_path"] == caminho("recibo (original).pdf")  # nada se repontou ainda
 
     @pytest.mark.asyncio
     async def test_o_pdf_limpo_tem_registo_proprio_que_nao_se_analisa(self, ctx):
@@ -523,7 +532,7 @@ class TestSanitizarUmProcesso:
         assert len(limpos) == 1
         assert limpos[0]["clean_of"] == ["r1"] and limpos[0]["uploaded_by_index"] is False
         assert limpos[0]["ai_category"] == "Rendimentos"
-        assert limpos[0]["s3_path"] == caminho("recibo_limpo.pdf")
+        assert limpos[0]["s3_path"] == caminho("recibo.pdf")
 
     @pytest.mark.asyncio
     async def test_so_o_que_o_index_carregou(self, ctx):
@@ -549,7 +558,7 @@ class TestSanitizarUmProcesso:
         await ctx.semear(fotos, {caminho(f"p{i}.jpg"): jpeg_com_exif() for i in (1, 2, 3)})
         r = await ctx.correr()
         assert r["grupos"] == 1 and r["sanitizados"] == 3
-        limpo = caminho("extrato_bancario_2026-09_limpo.pdf")
+        limpo = caminho("extrato_bancario_2026-09.pdf")
         assert sz.verificar_pdf_limpo(ctx.fake_s3.objectos[limpo], 3)[0]
         for i in (1, 2, 3):
             assert (await ctx.doc(f"e{i}"))["clean_pdf_path"] == limpo
@@ -560,15 +569,15 @@ class TestSanitizarUmProcesso:
         await ctx.semear([recibo("r1", "set.jpg"), recibo("r2", "out.jpg")],
                          {caminho("set.jpg"): jpeg_com_exif(), caminho("out.jpg"): jpeg_com_exif("red")})
         await ctx.correr()
-        novos = sorted(k for k in ctx.fake_s3.objectos if k.endswith("_limpo.pdf"))
-        assert novos == [caminho("out_limpo.pdf"), caminho("set_limpo.pdf")]
+        novos = sorted(k for k in ctx.fake_s3.objectos if k.endswith(".pdf"))
+        assert novos == [caminho("out.pdf"), caminho("set.pdf")]
 
     @pytest.mark.asyncio
     async def test_frente_e_verso_dao_um_pdf_de_duas_paginas(self, ctx):
         await ctx.semear([identificacao("i1", "f.jpg", "frente"), identificacao("i2", "v.jpg", "verso")],
                          {caminho("f.jpg"): jpeg_com_exif(), caminho("v.jpg"): jpeg_com_exif("gray")})
         await ctx.correr()
-        assert sz.verificar_pdf_limpo(ctx.fake_s3.objectos[caminho("identificacao_cc_limpo.pdf")], 2)[0]
+        assert sz.verificar_pdf_limpo(ctx.fake_s3.objectos[caminho("identificacao_cc.pdf")], 2)[0]
 
     @pytest.mark.asyncio
     async def test_e_idempotente(self, ctx):
@@ -576,15 +585,38 @@ class TestSanitizarUmProcesso:
         await ctx.correr()
         segunda = await ctx.correr()
         assert segunda["candidatos"] == 0
-        assert len([k for k in ctx.fake_s3.objectos if k.endswith("_limpo.pdf")]) == 1
+        assert len([k for k in ctx.fake_s3.objectos if k.endswith("recibo.pdf")]) == 1
 
     @pytest.mark.asyncio
     async def test_nunca_sobrescreve_um_nome_que_ja_existe(self, ctx):
-        await ctx.semear([recibo("r1", "recibo.pdf")],
-                         {caminho("recibo.pdf"): pdf_sujo(), caminho("recibo_limpo.pdf"): b"de outro documento"})
+        # o nome que o PDF limpo queria é de OUTRO ficheiro (não do original): fica com o seguinte livre
+        await ctx.semear([recibo("r1", "recibo.jpg")],
+                         {caminho("recibo.jpg"): jpeg_com_exif(), caminho("recibo.pdf"): b"de outro documento"})
         await ctx.correr()
-        assert ctx.fake_s3.objectos[caminho("recibo_limpo.pdf")] == b"de outro documento"
-        assert (await ctx.doc("r1"))["clean_pdf_path"] == caminho("recibo_limpo_2.pdf")
+        assert ctx.fake_s3.objectos[caminho("recibo.pdf")] == b"de outro documento"
+        assert (await ctx.doc("r1"))["clean_pdf_path"] == caminho("recibo_2.pdf")
+
+    @pytest.mark.asyncio
+    async def test_o_pdf_limpo_fica_com_o_nome_do_original_e_o_original_muda_ate_a_purga(self, ctx):
+        await ctx.db.documents.insert_one({"id": "pedido-1", "process_id": PID, "s3_path": caminho("recibo.pdf")})
+        await ctx.semear([recibo("r1", "recibo.pdf")], {caminho("recibo.pdf"): pdf_sujo()})
+        await ctx.correr()
+        assert not tem_sentinela(ctx.fake_s3.objectos[caminho("recibo.pdf")])  # o limpo, com o nome de sempre
+        assert tem_sentinela(ctx.fake_s3.objectos[caminho("recibo (original).pdf")])
+        original = await ctx.doc("r1")
+        assert original["s3_path"] == caminho("recibo (original).pdf") and original["filename"] == "recibo (original).pdf"
+        assert (await ctx.db.documents.find_one({"id": "pedido-1"}))["s3_path"] == caminho("recibo (original).pdf")
+        limpo = await ctx.db.document_metadata.find_one({"is_clean_pdf": True})
+        assert limpo["filename"] == "recibo.pdf"
+
+    @pytest.mark.asyncio
+    async def test_se_a_troca_de_nomes_falha_o_original_fica_onde_estava(self, ctx):
+        await ctx.semear([recibo("r1", "recibo.pdf")], {caminho("recibo.pdf"): pdf_sujo()})
+        ctx.fake_s3.rename_file = lambda origem, destino: False
+        r = await ctx.correr()
+        assert r["sanitizados"] == 1
+        assert tem_sentinela(ctx.fake_s3.objectos[caminho("recibo.pdf")])
+        assert (await ctx.doc("r1"))["clean_pdf_path"] == caminho("recibo_2.pdf")
 
     @pytest.mark.asyncio
     async def test_um_processo_inexistente_ou_eliminado_nao_faz_nada(self, ctx):
@@ -600,7 +632,7 @@ class TestAVerificacaoAntesDeGravar:
         with patch.object(sz, "construir_pdf_limpo", return_value=(pdf_sujo(), 1)):
             r = await ctx.correr()
         assert r["falhas"] == 1 and r["sanitizados"] == 0
-        assert caminho("recibo_limpo.pdf") not in ctx.fake_s3.objectos
+        assert caminho("recibo_2.pdf") not in ctx.fake_s3.objectos
         assert (await ctx.doc("r1")).get("file_state") in (None, "original")
         linhas = await ctx.db.process_ai_log.find({"accao": "sanitizar"}).to_list(None)
         assert linhas[0]["motivo"] == "pdf_limpo_invalido"
@@ -614,7 +646,8 @@ class TestSanitizarFalhaSemEstragar:
         assert d.get("file_state") in (None, "original")
         assert not d.get("clean_pdf_path") and not d.get("purge_after")
         assert await ctx.db.document_metadata.find_one({"is_clean_pdf": True}) is None
-        assert ctx.fake_s3.apagados == [] or all(not a.endswith(".pdf") or "_limpo" in a for a in ctx.fake_s3.apagados)
+        # só pode ter sido apagada a cópia má (nunca o original)
+        assert caminho("recibo.pdf") not in ctx.fake_s3.apagados
 
     async def _alerta(self, ctx):
         alertas = await ctx.db.process_index_alerts.find({"process_id": PID}).to_list(None)
@@ -629,7 +662,7 @@ class TestSanitizarFalhaSemEstragar:
         assert r["sanitizados"] == 0 and r["falhas"] == 1
         await self._intacto(ctx)
         await self._alerta(ctx)
-        assert caminho("recibo_limpo.pdf") not in ctx.fake_s3.objectos  # a cópia má não fica
+        assert caminho("recibo_2.pdf") not in ctx.fake_s3.objectos  # a cópia má não fica
         assert tem_sentinela(ctx.fake_s3.objectos[caminho("recibo.pdf")])
 
     @pytest.mark.asyncio
@@ -754,27 +787,27 @@ class TestPurga:
         await preparar_sanitizado(ctx)
         r = await sz.purgar_originais_vencidos(DEPOIS_DA_GRACA)
         assert r["ligada"] is False and r["purgados"] == 0
-        assert caminho("recibo.pdf") in ctx.fake_s3.objectos and ctx.fake_s3.apagados == []
+        assert caminho("recibo (original).pdf") in ctx.fake_s3.objectos and ctx.fake_s3.apagados == []
 
     @pytest.mark.asyncio
     async def test_dentro_da_graca_nao_apaga(self, ctx, purga_ligada):
         await preparar_sanitizado(ctx)
         r = await sz.purgar_originais_vencidos(AGORA + timedelta(days=29, hours=23))
         assert r["purgados"] == 0 and ctx.fake_s3.apagados == []
-        assert caminho("recibo.pdf") in ctx.fake_s3.objectos
+        assert caminho("recibo (original).pdf") in ctx.fake_s3.objectos
 
     @pytest.mark.asyncio
     async def test_passada_a_graca_apaga_o_original_e_repoe_as_referencias(self, ctx, purga_ligada):
         await preparar_sanitizado(ctx)
-        limpo = caminho("recibo_limpo.pdf")
-        await ctx.db.documents.insert_one({"id": "pedido-1", "process_id": PID, "s3_path": caminho("recibo.pdf"),
-                                           "attached_files": [{"s3_path": caminho("recibo.pdf"), "filename": "recibo.pdf"}]})
+        limpo = caminho("recibo.pdf")
+        await ctx.db.documents.insert_one({"id": "pedido-1", "process_id": PID, "s3_path": caminho("recibo (original).pdf"),
+                                           "attached_files": [{"s3_path": caminho("recibo (original).pdf"), "filename": "recibo (original).pdf"}]})
         r = await sz.purgar_originais_vencidos(DEPOIS_DA_GRACA)
         assert r["purgados"] == 1
-        assert caminho("recibo.pdf") not in ctx.fake_s3.objectos and limpo in ctx.fake_s3.objectos
+        assert caminho("recibo (original).pdf") not in ctx.fake_s3.objectos and limpo in ctx.fake_s3.objectos
         original = await ctx.doc("r1")
         assert original["file_state"] == "purgado" and original["s3_path"] == limpo
-        assert original["s3_path_original"] == caminho("recibo.pdf") and original["original_deleted"] is True
+        assert original["s3_path_original"] == caminho("recibo (original).pdf") and original["original_deleted"] is True
         pedido = await ctx.db.documents.find_one({"id": "pedido-1"})
         assert pedido["s3_path"] == limpo and pedido["attached_files"][0]["s3_path"] == limpo
 
@@ -782,32 +815,32 @@ class TestPurga:
     async def test_a_copia_limpa_corrompida_adia_e_o_original_fica(self, ctx, purga_ligada):
         """A mutação que remove a verificação da cópia limpa tem de morrer AQUI."""
         await preparar_sanitizado(ctx)
-        ctx.fake_s3.objectos[caminho("recibo_limpo.pdf")] = b"%PDF-1.4 outra coisa qualquer"
+        ctx.fake_s3.objectos[caminho("recibo.pdf")] = b"%PDF-1.4 outra coisa qualquer"
         r = await sz.purgar_originais_vencidos(DEPOIS_DA_GRACA)
         assert r["purgados"] == 0 and r["adiados"] == 1
-        assert caminho("recibo.pdf") in ctx.fake_s3.objectos and ctx.fake_s3.apagados == []
+        assert caminho("recibo (original).pdf") in ctx.fake_s3.objectos and ctx.fake_s3.apagados == []
         assert (await ctx.doc("r1"))["file_state"] == "sanitizado"
 
     @pytest.mark.asyncio
     async def test_a_copia_limpa_desaparecida_adia(self, ctx, purga_ligada):
         await preparar_sanitizado(ctx)
-        del ctx.fake_s3.objectos[caminho("recibo_limpo.pdf")]
+        del ctx.fake_s3.objectos[caminho("recibo.pdf")]
         assert (await sz.purgar_originais_vencidos(DEPOIS_DA_GRACA))["purgados"] == 0
-        assert caminho("recibo.pdf") in ctx.fake_s3.objectos
+        assert caminho("recibo (original).pdf") in ctx.fake_s3.objectos
 
     @pytest.mark.asyncio
     async def test_a_copia_limpa_com_o_hash_trocado_adia(self, ctx, purga_ligada):
         """Um PDF limpo VÁLIDO mas diferente do que se gravou (alguém o substituiu) não serve de prova."""
         await preparar_sanitizado(ctx)
         outro, _ = sz.construir_pdf_limpo([("x.pdf", pdf_sujo("Outro documento"))])
-        ctx.fake_s3.objectos[caminho("recibo_limpo.pdf")] = outro
+        ctx.fake_s3.objectos[caminho("recibo.pdf")] = outro
         assert (await sz.purgar_originais_vencidos(DEPOIS_DA_GRACA))["purgados"] == 0
-        assert caminho("recibo.pdf") in ctx.fake_s3.objectos
+        assert caminho("recibo (original).pdf") in ctx.fake_s3.objectos
 
     @pytest.mark.asyncio
     async def test_a_falha_de_verificacao_fica_no_log_da_ia(self, ctx, purga_ligada):
         await preparar_sanitizado(ctx)
-        del ctx.fake_s3.objectos[caminho("recibo_limpo.pdf")]
+        del ctx.fake_s3.objectos[caminho("recibo.pdf")]
         await sz.purgar_originais_vencidos(DEPOIS_DA_GRACA)
         linhas = await ctx.db.process_ai_log.find({"accao": "purgar"}).to_list(None)
         assert [(l["estado"], l["motivo"]) for l in linhas] == [("falha", "purga_adiada")]
@@ -825,7 +858,7 @@ class TestPurga:
     @pytest.mark.asyncio
     async def test_grupo_vencido_apaga_todas_as_partes_e_o_portal_fica_sem_duplicados(self, ctx, purga_ligada):
         await preparar_sanitizado(ctx, fotos=3)
-        limpo = caminho("extrato_bancario_2026-09_limpo.pdf")
+        limpo = caminho("extrato_bancario_2026-09.pdf")
         await ctx.db.documents.insert_one({"id": "pedido-1", "process_id": PID, "attached_files": [
             {"s3_path": caminho(f"p{i}.jpg"), "filename": f"p{i}.jpg"} for i in (1, 2, 3)]})
         r = await sz.purgar_originais_vencidos(DEPOIS_DA_GRACA)
@@ -838,7 +871,7 @@ class TestPurga:
     @pytest.mark.asyncio
     async def test_nunca_apaga_a_chave_do_pdf_limpo(self, ctx, purga_ligada):
         await preparar_sanitizado(ctx)
-        limpo = caminho("recibo_limpo.pdf")
+        limpo = caminho("recibo.pdf")
         await ctx.db.document_metadata.update_one({"id": "r1"}, {"$set": {"s3_path": limpo}})  # dados corrompidos
         await sz.purgar_originais_vencidos(DEPOIS_DA_GRACA)
         assert limpo in ctx.fake_s3.objectos and limpo not in ctx.fake_s3.apagados
@@ -857,11 +890,11 @@ class TestPurga:
         await preparar_sanitizado(ctx)
         ctx.fake_s3.apagar_falha = True
         r1 = await sz.purgar_originais_vencidos(DEPOIS_DA_GRACA)
-        assert r1["purgados"] == 1 and caminho("recibo.pdf") in ctx.fake_s3.objectos
+        assert r1["purgados"] == 1 and caminho("recibo (original).pdf") in ctx.fake_s3.objectos
         assert (await ctx.doc("r1"))["original_deleted"] is False
         ctx.fake_s3.apagar_falha = False
         r2 = await sz.purgar_originais_vencidos(DEPOIS_DA_GRACA)
-        assert r2["reapagados"] == 1 and caminho("recibo.pdf") not in ctx.fake_s3.objectos
+        assert r2["reapagados"] == 1 and caminho("recibo (original).pdf") not in ctx.fake_s3.objectos
         assert (await ctx.doc("r1"))["original_deleted"] is True
 
     @pytest.mark.asyncio
