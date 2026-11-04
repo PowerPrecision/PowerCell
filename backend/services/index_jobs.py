@@ -258,6 +258,8 @@ def mensagem_do_resumo(process: dict, resumo: dict) -> tuple[str, str]:
         partes.append(f"{resumo['saltados']} já analisado(s)")
     if resumo.get("falhas"):
         partes.append(f"{resumo['falhas']} com falha")
+    if resumo.get("sem_creditos"):
+        partes.append("a IA está sem créditos (avise o administrador para carregar créditos na conta OpenAI)")
     if resumo.get("alertas"):
         partes.append(f"{resumo['alertas']} alerta(s)")
     if resumo.get("campos_a_rever"):
@@ -338,7 +340,8 @@ async def analisar_ficheiros(
     process_id = process["id"]
     # Só se analisa o que tem BYTES para ler: nem os originais já eliminados (`purgado`) nem o PDF
     # limpo (`is_clean_pdf`, cujos factos vivem nos originais — contá-los duas vezes duplicava tudo).
-    filtro = {"process_id": process_id, "file_state": {"$ne": "purgado"}, "is_clean_pdf": {"$ne": True}}
+    filtro = {"process_id": process_id, "file_state": {"$ne": "purgado"}, "is_clean_pdf": {"$ne": True},
+              "is_deleted": {"$ne": True}}
     if documento_id:
         filtro["id"] = documento_id
     docs = await db.document_metadata.find(filtro, {"_id": 0}).to_list(500)
@@ -518,6 +521,8 @@ async def analisar_e_concluir(
         process, force=force, gatilho=gatilho, user=user, progresso=progresso, documento_id=documento_id
     )
     resumo["documento_id"] = documento_id
+    if "sem_creditos" in (resumo.get("motivos") or {}).values():
+        resumo["sem_creditos"] = True  # o resumo público não leva os motivos; isto diz-se na notificação
     resumo.update(await concluir_resultados(process, resumo))
     return {k: v for k, v in resumo.items() if k not in ("falhados", "motivos", "documento_id")}
 

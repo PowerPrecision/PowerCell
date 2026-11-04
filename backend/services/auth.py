@@ -462,6 +462,15 @@ async def get_current_user(
                 "user=%s: %s. O histórico fica activo.", user.get("id"), exc,
             )
 
+        # Para o log de pedidos (`LoggingMiddleware`), que até aqui escrevia «[User: anónimo]» em TODOS os
+        # pedidos: ninguém preenchia o `request.state.user`. Só o id e o perfil efectivo — o email é dado
+        # pessoal e não vai para os logs do Render.
+        try:
+            if request is not None:
+                request.state.user = {"id": user.get("id"), "role": user.get("effective_role") or user.get("role")}
+        except Exception:  # noqa: BLE001 - o log nunca derruba a autenticação
+            pass
+
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expirado")

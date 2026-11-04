@@ -11,10 +11,16 @@ AS REGRAS (cada uma tem teste)
    ai_category`) ou pelo indexador. Esta função só MOVE. Chamar o modelo de
    novo seria pagar duas vezes pelo mesmo ficheiro, que é precisamente o que
    o desvio inteligente existe para evitar.
-2. **Sem categoria, fica.** Um ficheiro cuja IA falhou (ou ainda não correu)
-   não tem para onde ir: continua na `Index` e vem no relatório
-   (`sem_categoria`). Mandá-lo para «Outros» às cegas esconderia da fila de
-   quem o devia tratar um documento que ninguém olhou.
+2. **Sem categoria da IA, decide o Index; sem nada, vai para «Outros».**
+   (Mudou em Nov 2026: com a OpenAI sem créditos nenhum ficheiro tinha
+   `ai_category`, o processo foi marcado como indexado e os documentos
+   ficaram todos na `Index` — a pasta que só o Index vê, ou seja,
+   escondidos de quem trata o processo a seguir.) Primeiro usa-se o tipo
+   que o Index já conhece (o «Analisar como…», o nome do ficheiro —
+   «Extrato…», «CC…» — ou a classificação pelo conteúdo); se nem isso,
+   o ficheiro vai para `Outros`, fica marcado (`released_without_category`)
+   e vem contado no relatório (`sem_categoria`). A `Index` só fica com o
+   que não se conseguiu mover.
 3. **Só depois de indexado.** Lê o processo da base de dados (a fonte da
    verdade, não o dicionário que o chamador traz — esse é o de ANTES da
    escrita) e recusa se não passou a indexação.
@@ -55,6 +61,8 @@ logger = logging.getLogger(__name__)
 MAXIMO_POR_LIBERTACAO = 200
 #: Tentativas de sufixo `_N` antes de desistir de um nome.
 MAXIMO_DE_SUFIXOS = 50
+#: Para onde vai o que ninguém conseguiu classificar (regra 2): uma pasta que a equipa vê.
+PASTA_SEM_CATEGORIA = "Outros"
 
 
 def _relatorio_vazio() -> dict[str, Any]:
@@ -76,6 +84,14 @@ def _pasta_de_destino(categoria: Any) -> Optional[str]:
     if not pasta or pasta.lower() in (CATEGORIA_INDEX.lower(), "cliente"):
         return None
     return pasta
+
+
+def _pasta_pelo_tipo_do_index(meta: Optional[dict], nome: str) -> Optional[str]:
+    """A pasta pelo tipo que o Index conhece (escolha manual, nome do ficheiro, conteúdo). Sem IA."""
+    from services.index_ai import CATEGORIA_DO_TIPO, tipo_do_documento  # tardio: o index_ai é pesado
+
+    tipo = tipo_do_documento(meta or {"filename": nome})
+    return _pasta_de_destino(CATEGORIA_DO_TIPO.get(tipo)) if tipo else None
 
 
 def _com_sufixo(nome: str, n: int) -> str:
@@ -176,16 +192,16 @@ async def _libertar(process_id: str, user: Optional[dict], relatorio: dict) -> d
             relatorio["adiados"] += 1
             continue
 
-        meta = await db.document_metadata.find_one({"s3_path": origem}, {"_id": 0})
-        destino_pasta = _pasta_de_destino((meta or {}).get("ai_category"))
-        if not destino_pasta:
-            relatorio["sem_categoria"] += 1
-            relatorio["detalhe"].append({"ficheiro": ficheiro.get("name"), "resultado": "sem_categoria"})
-            continue
-
         segmentos = [s for s in origem.split("/") if s]
         base = "/".join(segmentos[:-2])
         nome = segmentos[-1]
+
+        meta = await db.document_metadata.find_one({"s3_path": origem}, {"_id": 0})
+        destino_pasta = _pasta_de_destino((meta or {}).get("ai_category")) or _pasta_pelo_tipo_do_index(meta, nome)
+        sem_categoria = not destino_pasta
+        if sem_categoria:
+            destino_pasta = PASTA_SEM_CATEGORIA
+
         destino = await asyncio.to_thread(_mover_sincrono, origem, base, destino_pasta, nome)
         if not destino:
             relatorio["falhados"] += 1
@@ -201,12 +217,17 @@ async def _libertar(process_id: str, user: Optional[dict], relatorio: dict) -> d
                     "filename": novo_nome,
                     "in_index_queue": False,
                     "released_from_index_at": agora,
+                    "released_without_category": sem_categoria,
                     "updated_at": agora,
                 }},
             )
         await _repontar_pedidos_do_portal(origem, destino)
         relatorio["movidos"] += 1
-        relatorio["detalhe"].append({"ficheiro": nome, "resultado": "movido", "para": destino_pasta})
+        if sem_categoria:
+            relatorio["sem_categoria"] += 1
+        relatorio["detalhe"].append({
+            "ficheiro": nome, "resultado": "sem_categoria" if sem_categoria else "movido", "para": destino_pasta,
+        })
 
     if relatorio["movidos"]:
         try:
@@ -217,7 +238,7 @@ async def _libertar(process_id: str, user: Optional[dict], relatorio: dict) -> d
                 field="documento",
                 new_value=(
                     f"{relatorio['movidos']} movido(s) para as pastas finais"
-                    + (f"; {relatorio['sem_categoria']} por categorizar" if relatorio["sem_categoria"] else "")
+                    + (f"; {relatorio['sem_categoria']} sem categoria (em {PASTA_SEM_CATEGORIA})" if relatorio["sem_categoria"] else "")
                 ),
             )
         except Exception as exc:

@@ -25,6 +25,7 @@ from services.index_document_content import run_conteudo_do_documento, run_conte
 from services.index_api import (
     run_assumir_processo,
     run_analyze_document,
+    run_delete_document,
     run_analyze_process,
     run_dismiss_alert,
     run_edit_professional_job,
@@ -273,6 +274,20 @@ async def analyze_process(
 ):
     """«Analisar»: corre em segundo plano e devolve já; o resultado chega como notificação."""
     return await run_analyze_process(user, process_id, force=data.force)
+
+
+@router.delete("/processes/{process_id}/files/{document_id}")
+@limiter.limit("30/minute")
+async def delete_document(
+    request: Request,
+    response: Response,
+    process_id: str,
+    document_id: str,
+    user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
+):
+    """«Eliminar» na linha de um ficheiro da bancada: soft delete (o registo fica marcado, os bytes vão
+    para `Eliminados/`)."""
+    return await run_delete_document(user, process_id, document_id)
 
 
 @router.post("/processes/{process_id}/files/{document_id}/analyze", status_code=202)

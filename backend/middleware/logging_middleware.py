@@ -7,10 +7,10 @@ Interceta TODOS os pedidos HTTP e regista:
   - Falha:   logger.error com traceback completo e contexto do utilizador
 
 Formato de saída (sucesso):
-  [Method: GET] [Path: /api/processos/123] [Status: 200] [Duration: 45ms] [User: admin@powercell.pt (5)]
+  [Method: GET] [Path: /api/processos/123] [Status: 200] [Duration: 45ms] [User: 5 role=admin]
 
 Formato de saída (erro):
-  [Method: POST] [Path: /api/processos] [Status: 500] [Duration: 1230ms] [User: admin@powercell.pt (5)]
+  [Method: POST] [Path: /api/processos] [Status: 500] [Duration: 1230ms] [User: 5 role=admin]
   Traceback: ...
 
 NOTA: Rotas de health check (/health, /health/ready) são ignoradas
@@ -110,15 +110,14 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         request.state.user com o dict do utilizador.
 
         Returns:
-            String formatada: "[User: email (id)]" ou "[User: anónimo]"
+            String formatada: "[User: id role=perfil]" ou "[User: anónimo]" (sem email: dado pessoal)
         """
         try:
             user = getattr(request.state, "user", None)
             if user and isinstance(user, dict):
                 user_id = user.get("id", "?")
-                email = user.get("email", "?")
                 role = user.get("role", "")
-                return f"[User: {email} ({user_id}) role={role}]"
+                return f"[User: {user_id} role={role}]"
         except Exception:
             pass
 

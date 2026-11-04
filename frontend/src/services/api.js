@@ -1367,6 +1367,9 @@ export const analyzeIndexFile = (processId, documentId, tipo = null) =>
   );
 export const extractIndexProcess = (processId) =>
   api.post(`/index/processes/${processId}/extract`, null, { skipErrorToast: true });
+// «Eliminar» um ficheiro na bancada do Index (soft delete no servidor)
+export const deleteIndexFile = (processId, documentId) =>
+  api.delete(`/index/processes/${processId}/files/${documentId}`, { skipErrorToast: true });
 export const sanitizeIndexProcess = (processId) =>
   api.post(`/index/processes/${processId}/sanitize`, null, { skipErrorToast: true });
 export const editIndexJob = (processId, jobId, fields) =>

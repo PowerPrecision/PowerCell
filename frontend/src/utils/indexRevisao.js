@@ -363,6 +363,11 @@ export function normalizarBancada(dados) {
       finalize: jobs.finalize || null,
       sanitize: jobs.sanitize || null,
     },
+    // IA sem créditos (Nov 2026): só `false` explícito do servidor bloqueia — sem campo, está disponível
+    ia: {
+      disponivel: dados?.ai_status?.disponivel !== false,
+      mensagem: typeof dados?.ai_status?.mensagem === "string" ? dados.ai_status.mensagem : null,
+    },
   };
 }
 

@@ -283,7 +283,8 @@ async def run_get_index_queue(
 async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, Any]:
     proc = await _carregar_processo(process_id, user)
     docs = await db.document_metadata.find(
-        {"process_id": process_id, "file_state": {"$ne": "purgado"}}, PROJECCAO_DOS_FICHEIROS
+        {"process_id": process_id, "file_state": {"$ne": "purgado"}, "is_deleted": {"$ne": True}},
+        PROJECCAO_DOS_FICHEIROS,
     ).to_list(500)
     # a lista é a MESMA da aba Documentos (a pasta S3); os registos do processo fora dela não se perdem
     da_pasta = await registos_da_pasta_do_processo(proc, PROJECCAO_DOS_FICHEIROS)
@@ -329,6 +330,8 @@ async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, An
             for a in alertas
         ],
         "active_jobs": jobs,
+        # IA sem créditos (Nov 2026): o ecrã desliga «Analisar»/«Extrair dados» e diz porquê
+        "ai_status": await _estado_da_ia(),
     }
 
 
@@ -399,9 +402,23 @@ async def _trabalhou(user: dict, process_id: str) -> None:
     await estado_do_index.registar_trabalho(process_id, (user or {}).get("id"))
 
 
+async def _estado_da_ia() -> dict[str, Any]:
+    from services.ai_disponibilidade import estado_da_ia
+
+    return await estado_da_ia(db)
+
+
+async def _exigir_ia_disponivel() -> None:
+    """IA sem créditos → 503 com o motivo (o ecrã já desliga os botões; isto é para quem chama à mão)."""
+    estado = await _estado_da_ia()
+    if not estado["disponivel"]:
+        raise HTTPException(status_code=503, detail=estado["mensagem"])
+
+
 async def run_analyze_process(user: dict, process_id: str, *, force: bool = False) -> dict[str, Any]:
     """«Analisar» (`force=False`: só o que é novo ou mudou) e «Extrair dados» (`force=True`: tudo)."""
     await _carregar_processo(process_id, user)
+    await _exigir_ia_disponivel()
     resultado = await index_jobs.iniciar_analise(process_id, user, force=force, gatilho="manual")
     await _trabalhou(user, process_id)
     return {
@@ -432,6 +449,7 @@ async def run_analyze_document(
         raise HTTPException(status_code=422, detail="O original deste documento já foi eliminado: não há o que ler.")
     if doc.get("is_clean_pdf"):
         raise HTTPException(status_code=422, detail="O PDF limpo não se analisa: analise o documento original.")
+    await _exigir_ia_disponivel()
     if tipo is not None:
         await db.document_metadata.update_one({"id": document_id}, {"$set": {"index_type_override": tipo}})
     resultado = await index_jobs.iniciar_analise(
@@ -447,6 +465,82 @@ async def run_analyze_document(
             if resultado["iniciado"] else "Já há uma análise a correr neste processo. Tente quando terminar."
         ),
     }
+
+
+#: Para onde vão os BYTES de um documento eliminado pelo Index (Nov 2026). Fora da raiz documental
+#: («Documentação Clientes/…»): nenhum ecrã nem endpoint de cliente lá chega
+#: (`assert_path_within_document_root`), mas um administrador recupera-o se for preciso.
+PREFIXO_DOS_ELIMINADOS = "Eliminados"
+
+
+def _mover_para_os_eliminados(origem: str) -> Optional[str]:
+    """Síncrono (corre numa thread). `None` se o S3 não está configurado ou o ficheiro já lá não está."""
+    from services.s3_storage import s3_service
+
+    if not s3_service.is_configured() or not s3_service.file_exists(origem):
+        return None
+    destino = f"{PREFIXO_DOS_ELIMINADOS}/{origem}"
+    return destino if s3_service.rename_file(origem, destino) else ""
+
+
+async def run_delete_document(user: dict, process_id: str, document_id: str) -> dict[str, Any]:
+    """«Eliminar» na linha de um ficheiro da bancada (Nov 2026). SOFT DELETE: o registo fica marcado
+    (`is_deleted`, `status: eliminado`) e os bytes vão para `Eliminados/…`; nada se apaga fisicamente.
+
+    Ordem: posse do ficheiro (o caminho é o da BASE DE DADOS, nunca do cliente, e mesmo assim tem de estar
+    na pasta do processo) → mover → marcar → refazer metadados e matriz sem ele.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+
+    from services.document_portal_revoke import revoke_portal_files_on_delete
+    from services.document_process_resolve import assert_s3_file_belongs_to_process
+    from services.history import log_history
+
+    proc = await _carregar_processo(process_id, user)
+    doc = await db.document_metadata.find_one(
+        {"id": document_id, "process_id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0, "id": 1, "s3_path": 1, "filename": 1, "file_state": 1},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento não encontrado neste processo.")
+    origem = doc.get("s3_path") or ""
+    if origem:
+        assert_s3_file_belongs_to_process(origem, proc)
+        destino = await asyncio.to_thread(_mover_para_os_eliminados, origem)
+        if destino == "":
+            raise HTTPException(status_code=500, detail="Não foi possível eliminar o ficheiro no armazenamento. Tente de novo.")
+    else:
+        destino = None
+
+    agora = datetime.now(timezone.utc).isoformat()
+    campos: dict[str, Any] = {
+        "is_deleted": True, "status": "eliminado", "deleted_at": agora,
+        "deleted_by": (user or {}).get("id"), "in_index_queue": False, "updated_at": agora,
+    }
+    if destino:
+        campos.update({"s3_path": destino, "deleted_from_s3_path": origem})
+    await db.document_metadata.update_one({"id": document_id}, {"$set": campos})
+
+    if origem:
+        try:
+            await revoke_portal_files_on_delete(process_id, [origem])
+        except Exception as exc:  # noqa: BLE001 — o documento já está eliminado
+            logger.warning("[INDEX] Portal não actualizado após eliminar %s: %s", document_id, type(exc).__name__)
+    try:
+        # o perfil Indexação é «stealth»: o `log_history` não deixa rasto no mural para ele
+        await log_history(process_id=process_id, user=user, action="Eliminou documento", field="documento",
+                          old_value=doc.get("filename") or origem.rsplit("/", 1)[-1])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX] Histórico da eliminação não registado: %s", type(exc).__name__)
+    try:
+        # os dados lidos deste ficheiro deixam de contar: metadados profissionais e matriz sem ele
+        # `documento_id`: as falhas de análise dos OUTROS ficheiros mantêm-se (ver `_alertas_de_falha`)
+        await index_jobs.concluir_resultados(proc, {"falhados": [], "motivos": {}, "documento_id": document_id})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX] Matriz não recalculada após eliminar %s: %s", document_id, type(exc).__name__)
+    await _trabalhou(user, process_id)
+    return {"success": True, "message": "Documento eliminado."}
 
 
 async def run_sanitize_process(user: dict, process_id: str) -> dict[str, Any]:

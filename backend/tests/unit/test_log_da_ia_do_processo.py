@@ -60,9 +60,14 @@ class TestClassificarFalha:
         # «rate limit … api key» tem as duas pistas; mandar rever uma chave certa é pior.
         assert log.classificar_falha("Rate limit reached for key api key abc") == "limite_do_fornecedor"
 
-    @pytest.mark.parametrize("texto", ["429 Too Many Requests", "insufficient_quota", "quota exceeded"])
+    @pytest.mark.parametrize("texto", ["429 Too Many Requests", "quota exceeded"])
     def test_limites(self, texto):
         assert log.classificar_falha(texto) == "limite_do_fornecedor"
+
+    @pytest.mark.parametrize("texto", ["insufficient_quota", "code: credit_balance_exhausted", "You have no credits remaining"])
+    def test_sem_creditos_nao_e_limite(self, texto):
+        # «tente mais tarde» não resolve uma conta sem saldo
+        assert log.classificar_falha(texto) == "sem_creditos"
 
     def test_tempo_excedido(self):
         assert log.classificar_falha("Request timed out") == "tempo_excedido"
