@@ -186,6 +186,15 @@ class TestAParedeNasListagensSemList_files:
             "Documentação Clientes/Indexador/y.pdf",
         ]
 
+    def test_o_original_com_pdf_limpo_sai_para_quem_nao_ve_o_index(self):
+        docs = [
+            {"s3_path": "Documentação Clientes/c/Financeiros/recibo (original).pdf", "file_state": "sanitizado",
+             "clean_pdf_path": "Documentação Clientes/c/Financeiros/recibo.pdf"},
+            {"s3_path": "Documentação Clientes/c/Financeiros/recibo.pdf", "is_clean_pdf": True},
+        ]
+        res = intake.retirar_documentos_da_index(docs, {"role": "intermediario"})
+        assert [d["s3_path"] for d in res] == ["Documentação Clientes/c/Financeiros/recibo.pdf"]
+
     def test_quem_vê_recebe_tudo(self):
         assert intake.retirar_documentos_da_index(self.DOCS, {"role": "diretor"}) == self.DOCS
 

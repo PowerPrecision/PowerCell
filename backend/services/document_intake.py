@@ -181,7 +181,12 @@ def retirar_documentos_da_index(documentos: Any, user: Optional[dict], *, campo:
         d for d in documentos
         if not (
             isinstance(d, dict)
-            and (chave_esta_na_index(d.get(campo)) or d.get("in_index_queue") is True)
+            and (
+                chave_esta_na_index(d.get(campo))
+                or d.get("in_index_queue") is True
+                # o original de um documento com PDF limpo: só o limpo se mostra (até à purga)
+                or (d.get("file_state") == "sanitizado" and bool(d.get("clean_pdf_path")))
+            )
         )
     ]
 
