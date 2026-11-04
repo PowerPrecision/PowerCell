@@ -8,20 +8,13 @@
  * - Resposta rápida com templates
  * - Navegação por setas
  */
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "./ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
-import { Textarea } from "./ui/textarea";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-// PACOTE 9 — Undo Send: parse da resposta {queued, send_id, undo_window_seconds}
-import { parseSendResponse } from "../utils/webmailSendQueue";
 import {
-  sendWebmailEmail,
-  cancelEmailSend,
   downloadEmailAttachment,
   getEmailAttachmentPreview,
   archiveEmailAttachment,
@@ -39,7 +32,7 @@ import {
   Mail, Send, Inbox, Clock, X, ChevronLeft, ChevronRight,
   Paperclip, User, Star,
   AlertCircle, CheckCircle, Download, Eye, EyeOff, Reply,
-  Forward, Archive, MoreVertical, Image, FileText, FileSpreadsheet, Copy, Tag, Loader2, FolderInput
+  ReplyAll, Archive, MoreVertical, Image, FileText, FileSpreadsheet, Copy, Tag, Loader2, FolderInput
 } from "lucide-react";
 import { pt } from "date-fns/locale";
 import { sanitizeEmailHtml } from "../utils/sanitize";
@@ -97,6 +90,8 @@ const EmailViewerModal = ({
   token,
   clientName,
   processId = null,
+  // Sem `onReply` (ex.: Index, que só consulta) não há botões de responder.
+  onReply = null,
 }) => {
   const auth = useAuthOpcional();
   // «Guardar nos Documentos do Processo»: só no contexto de um processo e para quem trata documentos
@@ -105,16 +100,7 @@ const EmailViewerModal = ({
   const [aGuardar, setAGuardar] = useState(null);
   const [currentEmail, setCurrentEmail] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [showReplyBox, setShowReplyBox] = useState(false);
-  const [replySubject, setReplySubject] = useState("");
-  const [replyBody, setReplyBody] = useState("");
-  const [sendingReply, setSendingReply] = useState(false);
 
-  // PACOTE 12 (Eixo 1) — timer do toast de confirmação "Resposta enviada
-  // com sucesso" (disparado após a janela de Desfazer): guardado em ref para
-  // que o cancelamento (Desfazer) o possa limpar — um envio cancelado nunca
-  // deve mostrar o toast de sucesso.
-  const sendConfirmTimerRef = useRef(null);
 
   // Memorizar o HTML sanitizado (PACOTE 11 — o corpo em texto simples é
   // convertido em parágrafos HTML para tipografia consistente e espaçada)
@@ -141,7 +127,6 @@ const EmailViewerModal = ({
     if (onSelectEmail) {
       onSelectEmail(email.id);
     }
-    setShowReplyBox(false);
   };
 
   const handlePrevious = () => {
@@ -220,96 +205,12 @@ const EmailViewerModal = ({
     downloadAttachment(attachment);
   };
 
-  // Resposta rápida
-  const handleReply = () => {
-    const originalSubject = currentEmail?.subject || "";
-    setReplySubject(originalSubject.startsWith("RE:") ? originalSubject : `RE: ${originalSubject}`);
-    setReplyBody("");
-    setShowReplyBox(true);
-  };
-
-  const sendReply = async () => {
-    if (!replyBody.trim()) return;
-
-    setSendingReply(true);
-    try {
-      // Pelo cliente Axios: é o interceptor que acrescenta `X-Company-Id` e
-      // `X-Active-Role`, de que o servidor depende para escolher a conta de
-      // envio e a assinatura da empresa activa. Um `fetch` cru só levava o
-      // que lhe escrevessem à mão (e perdia o perfil activo).
-      let resposta;
-      try {
-        resposta = await sendWebmailEmail({
-          to_emails: [currentEmail.from_email],
-          subject: replySubject,
-          body: replyBody,
-          process_id: currentEmail.process_id,
-          from_box: "personal",
-        }, "personal");
-      } catch (erroDeEnvio) {
-        // Preservar a mensagem útil do backend (ex.: 403 "Configuração de
-        // email pessoal não encontrada. Vá ao seu Perfil > Configuração de
-        // Webmail para configurar o seu email antes de enviar.").
-        const dados = erroDeEnvio?.response?.data || {};
-        throw new Error(dados.detail || dados.message || dados.error || "Erro ao enviar resposta");
-      }
-
-      // PACOTE 9 — UNDO SEND: o backend agenda o envio após a janela de
-      // "Desfazer" (10s por defeito). Mostramos o toast com a acção de undo;
-      // cancelar chama /emails/{send_id}/cancel-send e repõe a caixa de
-      // resposta com o texto intacto.
-      const sendResult = parseSendResponse(resposta?.data ?? null);
-
-      if (sendResult.queued && sendResult.sendId && sendResult.undoWindowMs > 0) {
-        setShowReplyBox(false); // fecha a caixa de resposta (estilo Gmail)
-
-        const cancelReplySend = async () => {
-          try {
-            await cancelEmailSend(sendResult.sendId);
-            // Envio abortado no backend — regressar ao modo de edição
-            // PACOTE 12 (Eixo 1) — cancelar o toast de sucesso agendado
-            // para o fim da janela de Desfazer (envio desfeito ≠ enviado).
-            if (sendConfirmTimerRef.current) {
-              clearTimeout(sendConfirmTimerRef.current);
-              sendConfirmTimerRef.current = null;
-            }
-            setShowReplyBox(true);
-            toast.success("Envio cancelado — pode continuar a editar a resposta.");
-          } catch (erroDoCancelamento) {
-            toast.error(
-              erroDoCancelamento?.response?.data?.detail || "Não foi possível cancelar o envio.",
-              { duration: 8000 },
-            );
-          }
-        };
-
-        toast.success("Email a ser enviado...", {
-          duration: sendResult.undoWindowMs,
-          action: {
-            label: "Desfazer",
-            onClick: cancelReplySend,
-          },
-        });
-
-        // Após a janela (sem undo): confirmar visualmente
-        // PACOTE 12 (Eixo 1) — o id do timer fica guardado em ref para que
-        // o "Desfazer" o possa cancelar no cancelReplySend acima.
-        sendConfirmTimerRef.current = setTimeout(() => {
-          toast.success("Resposta enviada com sucesso");
-        }, sendResult.undoWindowMs + 250);
-        return;
-      }
-
-      // Caminho legacy (envio imediato — janela desligada no backend)
-      toast.success("Resposta enviada com sucesso");
-      setShowReplyBox(false);
-      // TODO: Actualizar lista de emails
-    } catch (error) {
-      console.error("Erro ao enviar resposta:", error);
-      toast.error(error.message || "Erro ao enviar resposta", { duration: 8000 });
-    } finally {
-      setSendingReply(false);
-    }
+  // Responder (pergunta 10a): abre o compositor do Webmail — com a conversa
+  // (In-Reply-To), Cc, anexos e assinatura. A caixa pequena que existia aqui partia
+  // o fio e respondia ao próprio remetente quando o email tinha sido enviado por nós.
+  const handleReply = (modo = "reply") => {
+    if (!currentEmail || !onReply) return;
+    onReply(modo, currentEmail);
   };
 
   // Envia o anexo directamente para a pasta do processo aberto (o mesmo caminho do «Arquivar no
@@ -368,8 +269,8 @@ const EmailViewerModal = ({
                     <div className="flex items-start gap-2">
                       <div className={`mt-0.5 p-1 rounded shrink-0 ${
                         email.direction === "sent" 
-                          ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300" 
-                          : "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-300"
+                          ? "bg-primary/10 text-primary" 
+                          : "bg-muted text-muted-foreground"
                       }`}>
                         {email.direction === "sent" ? (
                           <Send className="h-3 w-3" />
@@ -382,8 +283,8 @@ const EmailViewerModal = ({
                           <p className={`text-xs truncate flex-1 ${!email.is_read ? "font-semibold" : ""}`}>
                             {email.subject}
                           </p>
-                          {email.is_important && <AlertCircle className="h-3 w-3 text-amber-500 shrink-0" />}
-                          {email.is_starred && <Star className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0" />}
+                          {email.is_important && <AlertCircle className="h-3 w-3 text-primary shrink-0" />}
+                          {email.is_starred && <Star className="h-3 w-3 text-primary fill-primary shrink-0" />}
                         </div>
                         <p className="text-[10px] text-muted-foreground truncate">
                           {email.direction === "sent" ? email.to_emails?.[0] : email.from_email}
@@ -396,7 +297,7 @@ const EmailViewerModal = ({
                             <Paperclip className="h-3 w-3 text-muted-foreground" />
                           )}
                           {!email.is_read && (
-                            <div className="h-2 w-2 rounded-full bg-amber-500" />
+                            <div className="h-2 w-2 rounded-full bg-primary" />
                           )}
                         </div>
                       </div>
@@ -461,7 +362,7 @@ const EmailViewerModal = ({
                   }
                   title={currentEmail.is_important ? "Remover importante" : "Marcar importante"}
                 >
-                  <AlertCircle className={`h-4 w-4 ${currentEmail.is_important ? "text-amber-500" : ""}`} />
+                  <AlertCircle className={`h-4 w-4 ${currentEmail.is_important ? "text-primary" : ""}`} />
                 </Button>
                 <Button
                   variant="ghost"
@@ -473,7 +374,7 @@ const EmailViewerModal = ({
                   title={currentEmail.is_starred ? "Remover estrela" : "Marcar estrela"}
                 >
                   {currentEmail.is_starred ? (
-                    <Star className="h-4 w-4 text-amber-500 fill-amber-500" />
+                    <Star className="h-4 w-4 text-primary fill-primary" />
                   ) : (
                     <Star className="h-4 w-4" />
                   )}
@@ -496,13 +397,17 @@ const EmailViewerModal = ({
                         <EyeOff className="h-4 w-4 mr-2" /> Marcar não lido
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={handleReply}>
-                      <Reply className="h-4 w-4 mr-2" /> Responder
-                    </DropdownMenuItem>
-                    <DropdownMenuItem>
-                      <Forward className="h-4 w-4 mr-2" /> Encaminhar
-                    </DropdownMenuItem>
+                    {onReply && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => handleReply("reply")}>
+                          <Reply className="h-4 w-4 mr-2" /> Responder
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleReply("reply_all")}>
+                          <ReplyAll className="h-4 w-4 mr-2" /> Responder a todos
+                        </DropdownMenuItem>
+                      </>
+                    )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => onMarkEmail?.(currentEmail.id, "archived")}>
                       <Archive className="h-4 w-4 mr-2" /> Arquivar
@@ -521,8 +426,8 @@ const EmailViewerModal = ({
               <div className="flex items-start gap-3">
                 <div className={`p-2 rounded-full shrink-0 ${
                   currentEmail.direction === "sent" 
-                    ? "bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300" 
-                    : "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-300"
+                    ? "bg-primary/10 text-primary" 
+                    : "bg-muted text-muted-foreground"
                 }`}>
                   {currentEmail.direction === "sent" ? (
                     <Send className="h-5 w-5" />
@@ -537,7 +442,7 @@ const EmailViewerModal = ({
                     </h2>
                     <div className="flex items-center gap-1 shrink-0">
                       {currentEmail.is_important && (
-                        <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-300 text-xs">
+                        <Badge variant="outline" className="bg-accent text-accent-foreground border-border text-xs">
                           <AlertCircle className="h-3 w-3 mr-1" /> Importante
                         </Badge>
                       )}
@@ -559,9 +464,9 @@ const EmailViewerModal = ({
                     </div>
                     {currentEmail.cc_emails?.length > 0 && (
                       <div className="flex items-center gap-2">
-                        <Copy className="h-4 w-4 text-amber-500 shrink-0" />
-                        <span className="text-amber-600 w-8 font-medium">CC:</span>
-                        <span className="break-all text-amber-600">{currentEmail.cc_emails.join(", ")}</span>
+                        <Copy className="h-4 w-4 text-primary shrink-0" />
+                        <span className="text-primary w-8 font-medium">CC:</span>
+                        <span className="break-all text-primary">{currentEmail.cc_emails.join(", ")}</span>
                       </div>
                     )}
                     <div className="flex items-center gap-2">
@@ -676,48 +581,6 @@ const EmailViewerModal = ({
               )}
             </div>
 
-            {/* Caixa de resposta */}
-            {showReplyBox && (
-              <div className="border-t p-4 bg-muted/30 shrink-0">
-                <div className="space-y-3">
-                  <div>
-                    <Label className="text-xs">Assunto</Label>
-                    <Input
-                      value={replySubject}
-                      onChange={(e) => setReplySubject(e.target.value)}
-                      className="h-8 mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Resposta</Label>
-                    <Textarea
-                      value={replyBody}
-                      onChange={(e) => setReplyBody(e.target.value)}
-                      placeholder="Escreva a sua resposta..."
-                      rows={4}
-                      className="mt-1"
-                    />
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setShowReplyBox(false)}>
-                      Cancelar
-                    </Button>
-                    <Button size="sm" onClick={sendReply} disabled={sendingReply}>
-                      {sendingReply ? (
-                        <span className="flex items-center gap-1">
-                          <span className="animate-spin">⏳</span> A enviar...
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1">
-                          <Send className="h-4 w-4" /> Enviar
-                        </span>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Footer com notas e ações */}
             <div className="border-t bg-muted/30 shrink-0">
               {currentEmail.notes && (
@@ -741,10 +604,15 @@ const EmailViewerModal = ({
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {!showReplyBox && (
-                    <Button size="sm" onClick={handleReply}>
-                      <Reply className="h-4 w-4 mr-1" /> Responder
-                    </Button>
+                  {onReply && (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => handleReply("reply_all")}>
+                        <ReplyAll className="h-4 w-4 mr-1" /> Responder a todos
+                      </Button>
+                      <Button size="sm" onClick={() => handleReply("reply")}>
+                        <Reply className="h-4 w-4 mr-1" /> Responder
+                      </Button>
+                    </>
                   )}
                 </div>
               </div>

@@ -1374,10 +1374,11 @@ async def send_email(
         # Se o email está associado a um processo e o assunto ainda não tem a tag
         # Skip se skip_proc_tag=True (ex: envio de documentação para bancos)
         if process_id and not skip_proc_tag:
-            from services.email_process_link import assunto_tem_a_etiqueta, etiqueta_do_processo
+            from services.email_process_link import assunto_tem_a_etiqueta, etiqueta_curta_do_processo
 
-            tag = etiqueta_do_processo(process_id)
-            if not assunto_tem_a_etiqueta(subject, process_id):
+            # Etiqueta curta `[Ref: #<n.º>]` (pergunta 11a); sem número, a do uuid.
+            tag = await etiqueta_curta_do_processo(db, process_id)
+            if not assunto_tem_a_etiqueta(subject, process_id, tag.strip("[]").split("#")[-1]):
                 subject = f"{subject} {tag}"
                 logger.info(f"[Tag Mágica] Injetada tag {tag} no assunto do email")
         
@@ -2243,9 +2244,9 @@ async def sync_webmail_emails(
                     # === TAG MÁGICA: `[Ref: #id]` (ou o legado `[Proc-id]`) no assunto ===
                     subject = em.get("subject", "")
                     if not resolved_process_id and subject:
-                        from services.email_process_link import processo_da_etiqueta
+                        from services.email_process_link import enderecos_de, processo_da_etiqueta
 
-                        tag_process_id = await processo_da_etiqueta(db, subject)
+                        tag_process_id = await processo_da_etiqueta(db, subject, enderecos_de(em))
                         if tag_process_id:
                             resolved_process_id = tag_process_id
                             logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id} via tag no assunto")
@@ -2594,9 +2595,9 @@ async def sync_user_emails(
                     # === TAG MÁGICA: `[Ref: #id]` (ou o legado `[Proc-id]`) no assunto ===
                     subject = em.get("subject", "")
                     if not resolved_process_id and subject:
-                        from services.email_process_link import processo_da_etiqueta
+                        from services.email_process_link import enderecos_de, processo_da_etiqueta
 
-                        tag_process_id = await processo_da_etiqueta(db, subject)
+                        tag_process_id = await processo_da_etiqueta(db, subject, enderecos_de(em))
                         if tag_process_id:
                             resolved_process_id = tag_process_id
                             logger.info(f"[Tag Mágica] Email {msg_id[:30]} associado ao processo {tag_process_id}")
@@ -2972,9 +2973,9 @@ async def sync_shared_role_emails(
                 # Tag mágica: `[Ref: #id]` (ou o legado `[Proc-id]`)
                 subject = email_data.get("subject", "")
                 if not resolved_process_id and subject:
-                    from services.email_process_link import processo_da_etiqueta
+                    from services.email_process_link import enderecos_de, processo_da_etiqueta
 
-                    resolved_process_id = await processo_da_etiqueta(db, subject)
+                    resolved_process_id = await processo_da_etiqueta(db, subject, enderecos_de(email_data))
 
                 email_doc = {
                     "id": str(uuid.uuid4()),
@@ -3062,9 +3063,9 @@ async def sync_shared_role_emails(
                 # Tag mágica: `[Ref: #id]` (ou o legado `[Proc-id]`)
                 subject = email_data.get("subject", "")
                 if not resolved_process_id and subject:
-                    from services.email_process_link import processo_da_etiqueta
+                    from services.email_process_link import enderecos_de, processo_da_etiqueta
 
-                    resolved_process_id = await processo_da_etiqueta(db, subject)
+                    resolved_process_id = await processo_da_etiqueta(db, subject, enderecos_de(email_data))
 
                 email_doc = {
                     "id": str(uuid.uuid4()),

@@ -124,26 +124,31 @@ describe("EmailComposer — envio", () => {
   });
 });
 
-describe("EmailComposer — conta de envio", () => {
-  it("quem não pode escolher conta vê a explicação, não o seletor", () => {
-    render(<EmailComposer {...props({ canUseGlobalAccounts: false })} />);
+describe("EmailComposer — de que caixa sai (perguntas 6 e 14)", () => {
+  it("quem não tem Caixa Geral vê a explicação da conta pessoal, não o seletor", () => {
+    render(<EmailComposer {...props({ podeUsarCaixaGeral: false })} />);
 
-    expect(screen.queryByText("Conta:")).not.toBeInTheDocument();
+    expect(screen.queryByText("De:")).not.toBeInTheDocument();
     expect(screen.getByText(/conta pessoal/i)).toBeInTheDocument();
   });
 
-  it("o perfil de indexação vê a frase da conta partilhada", () => {
-    render(
-      <EmailComposer {...props({ canUseGlobalAccounts: false, effectiveRole: "indexacao" })} />,
-    );
+  it("o perfil Index é avisado de que não envia", () => {
+    render(<EmailComposer {...props({ podeUsarCaixaGeral: false, effectiveRole: "indexacao" })} />);
 
-    expect(screen.getByText(/conta partilhada de Indexação/i)).toBeInTheDocument();
+    expect(screen.getByText(/Index não envia/i)).toBeInTheDocument();
   });
 
-  it("admin/CEO/diretor vêem o seletor de conta", () => {
-    render(<EmailComposer {...props({ canUseGlobalAccounts: true })} />);
+  it("quem tem Caixa Geral escolhe «De:» e a pessoal é a de omissão", () => {
+    render(<EmailComposer {...props({ podeUsarCaixaGeral: true })} />);
 
-    expect(screen.getByText("Conta:")).toBeInTheDocument();
+    expect(screen.getByText("De:")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Enviar de" })).toHaveTextContent("A minha caixa pessoal");
+  });
+
+  it("os nomes de empresas fixos («Precision», «Power») já não aparecem", () => {
+    render(<EmailComposer {...props({ podeUsarCaixaGeral: true })} />);
+
+    expect(screen.queryByText(/Precision Crédito|Power Real Estate/)).not.toBeInTheDocument();
   });
 });
 

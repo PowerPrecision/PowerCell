@@ -8,8 +8,6 @@ import axios from 'axios';
 import { 
   FileText, 
   Download, 
-  ExternalLink, 
-  Mail, 
   AlertTriangle,
   FileSignature,
   Bell,
@@ -32,12 +30,6 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert.jsx';
 import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
-
-// URLs dos webmails
-const WEBMAIL_URLS = {
-  precision: "http://webmail.precisioncredito.pt/",
-  power: "https://webmail2.hcpro.pt/Mondo/lang/sys/login.aspx"
-};
 
 const TemplatesPanel = ({ processId, token }) => {
   const [loading, setLoading] = useState(null);
@@ -171,11 +163,6 @@ const TemplatesPanel = ({ processId, token }) => {
     }
   };
 
-  // Abrir webmail
-  const openWebmail = (webmail) => {
-    window.open(WEBMAIL_URLS[webmail], '_blank');
-  };
-
   // Verificar se há processo selecionado para templates que precisam de dados
   const hasProcess = !!processId;
 
@@ -214,35 +201,6 @@ const TemplatesPanel = ({ processId, token }) => {
               </AlertDescription>
             </Alert>
           )}
-
-          {/* Botões de Webmail */}
-          <div className="pb-3 border-b">
-            <p className="text-sm text-muted-foreground mb-2">Abrir Webmail:</p>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => openWebmail('precision')}
-                className="flex-1"
-                data-testid="webmail-precision-btn"
-              >
-                <Mail className="h-4 w-4 mr-2" />
-                Precision
-                <ExternalLink className="h-3 w-3 ml-1" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => openWebmail('power')}
-                className="flex-1"
-                data-testid="webmail-power-btn"
-              >
-                <Mail className="h-4 w-4 mr-2" />
-                Power
-                <ExternalLink className="h-3 w-3 ml-1" />
-              </Button>
-            </div>
-          </div>
 
           {/* Lista de Templates */}
           {!hasProcess && (
@@ -343,23 +301,7 @@ const TemplatesPanel = ({ processId, token }) => {
             </pre>
           </div>
 
-          <div className="flex justify-between pt-4 border-t">
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={() => openWebmail('precision')}
-              >
-                <Mail className="h-4 w-4 mr-2" />
-                Abrir Webmail Precision
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => openWebmail('power')}
-              >
-                <Mail className="h-4 w-4 mr-2" />
-                Abrir Webmail Power
-              </Button>
-            </div>
+          <div className="flex justify-end pt-4 border-t">
             <Button variant="ghost" onClick={() => setShowPreview(false)}>
               Fechar
             </Button>

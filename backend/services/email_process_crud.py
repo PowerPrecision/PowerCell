@@ -323,28 +323,19 @@ async def run_get_process_emails(process_id: str, current_user: dict, direction:
     Se force_refresh=True, limpa emails sincronizados em cache e
     dispara sincronização global (smart threading + tags aplicam-se automaticamente).
     """
-    if force_refresh:
-        # Limpar cache: apagar emails sincronizados (marcados com "Sincronizado de" nas notes)
-        delete_result = await db.emails.delete_many({
-            "process_id": process_id,
-            "notes": {"$regex": "^Sincronizado de", "$options": "i"}
-        })
-        logger.info(f"Cache limpa para processo {process_id}: {delete_result.deleted_count} emails removidos")
-        
-        # Re-sincronizar do IMAP
-        user_email = current_user.get("email")
-        try:
-            sync_result = await sync_emails_for_process(process_id, days=30, user_email=user_email)
-            logger.info(f"Re-sync após limpeza de cache: {sync_result}")
-        except Exception as e:
-            logger.error(f"Erro na re-sync após limpeza de cache: {e}")
+    # `force_refresh` APAGAVA fisicamente os emails sincronizados do processo e depois chamava a
+    # sincronização por processo, que está desactivada: os emails não voltavam (P10). Fica sem
+    # efeito; o parâmetro mantém-se para não partir clientes antigos.
     
     # ── PACOTE 12: filtro ESTRITO por process_id (sem agregação por endereço) ──
     base_conditions = build_process_emails_base_conditions(process_id)
     query = {"$or": base_conditions} if len(base_conditions) > 1 else base_conditions[0]
 
+    # Regra da casa: as listagens nunca mostram registos apagados.
+    query = {"$and": [query, {"is_deleted": {"$ne": True}}]}
+
     if direction:
-        query = {"$and": [query, {"direction": direction.value}]}
+        query["$and"].append({"direction": direction.value})
 
     if not include_archived:
         if "$and" in query:
@@ -393,7 +384,9 @@ async def run_get_email_stats(process_id: str, current_user: dict):
     """
     base_conditions = build_process_emails_base_conditions(process_id)
     stats_query = {"$or": base_conditions} if len(base_conditions) > 1 else base_conditions[0]
+    stats_query = dict(stats_query)
     stats_query["is_archived"] = {"$ne": True}
+    stats_query["is_deleted"] = {"$ne": True}
 
     pipeline = [
         {"$match": stats_query},
@@ -547,6 +540,30 @@ async def run_associate_email_to_client(data: dict, current_user: dict):
     }
 
 
+def exigir_que_nao_e_index(current_user: dict) -> None:
+    """O Index lê a tab Emails do processo, mas não escreve nela (Flavio, 2026-11-04, 12a)."""
+    from services.role_scope import papel_concreto_do_utilizador
+
+    if (papel_concreto_do_utilizador(current_user) or current_user.get("role")) == "indexacao":
+        raise HTTPException(status_code=403, detail="O perfil Index só consulta os emails do processo.")
+
+
+def exigir_email_da_propria_caixa(email: dict, current_user: dict) -> None:
+    """Apagar correio só na PRÓPRIA caixa (Flavio, 2026-11-04, 7a).
+
+    Apagar move o email para o Lixo da caixa IMAP de quem o sincronizou. Quem só vê o processo
+    (um colega, a Direção) apagava assim o correio de outra pessoa. A caixa de outra pessoa é
+    `synced_for_user` diferente do utilizador; as caixas partilhadas não têm esse campo e seguem
+    as regras de acesso de sempre.
+    """
+    dono = (email or {}).get("synced_for_user")
+    if dono and dono != current_user.get("id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Este email é da caixa de outro utilizador. Só o dono da caixa o pode apagar.",
+        )
+
+
 async def run_disassociate_email(data: dict, current_user: dict):
     """Retira um email de um processo a que foi ligado por engano (QA-8, ponto 8).
 
@@ -556,6 +573,9 @@ async def run_disassociate_email(data: dict, current_user: dict):
     """
     from services.email_access import exigir_leitura_do_email, exigir_processo_legivel
     from services.process_closed_guard import exigir_processo_aberto_por_id
+
+    # Pergunta 12a: o Index LÊ os emails do processo, mas não os desassocia.
+    exigir_que_nao_e_index(current_user)
 
     email_id = (data or {}).get("email_id")
     if not email_id or not isinstance(email_id, str):
@@ -1074,6 +1094,7 @@ async def run_delete_email(email_id: str, current_user: dict):
     
     if not email:
         raise HTTPException(status_code=404, detail="Email não encontrado")
+    exigir_email_da_propria_caixa(email, current_user)
     
     # === IMAP BIDIRECTIONAL SYNC: Move to Trash on IMAP server (instead of permanent delete) ===
     message_id = email.get("message_id")
@@ -1114,6 +1135,7 @@ async def run_permanently_delete_email(email_id: str, current_user: dict):
     if not email:
         raise HTTPException(status_code=404, detail="Email não encontrado")
     
+    exigir_email_da_propria_caixa(email, current_user)
     if not email.get("is_archived"):
         raise HTTPException(status_code=400, detail="Apenas emails no Lixo podem ser eliminados permanentemente")
     

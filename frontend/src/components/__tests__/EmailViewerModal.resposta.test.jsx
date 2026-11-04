@@ -1,25 +1,23 @@
 /**
- * Responder a um email pelo visualizador (Lote 7.2): a resposta vai pelo cliente Axios.
+ * Responder a partir do visualizador do processo (Flavio, 2026-11-04, pergunta 10a).
  *
- * Era um `fetch` cru que só levava o `X-Company-Id` lido à mão do sessionStorage e perdia o
- * `X-Active-Role`: o servidor escolhia conta e assinatura sem saber o perfil activo — a
- * família do incidente de 2026-09-21. O teste monta o componente REAL e afirma os parâmetros
- * que SAEM (o que o `sendWebmailEmail` recebe), não o resultado.
+ * Havia aqui uma caixa de resposta própria: texto simples, sem anexos nem Cc, sem
+ * In-Reply-To (o fio partia-se) e a responder ao remetente mesmo quando o email tinha
+ * sido enviado por nós. Agora «Responder» e «Responder a todos» entregam o email a quem
+ * monta o visualizador, que abre o compositor do Webmail.
  */
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import fs from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
-  sendWebmailEmail: vi.fn(),
-  cancelEmailSend: vi.fn(),
   downloadEmailAttachment: vi.fn(),
   getEmailAttachmentPreview: vi.fn(),
+  archiveEmailAttachment: vi.fn(),
 }));
 vi.mock("../../services/api", () => api);
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
-vi.mock("sonner", () => ({ toast }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import EmailViewerModal from "../EmailViewerModal";
 
@@ -28,97 +26,41 @@ const EMAIL = {
   body: "Olá", direction: "received", process_id: "p-7", sent_at: "2026-10-01T10:00:00Z", attachments: [],
 };
 
-const montar = () => render(
-  <EmailViewerModal isOpen onClose={() => {}} emails={[EMAIL]} selectedEmailId="e1" token="t" clientName="Joana" />,
+const montar = (extra = {}) => render(
+  <EmailViewerModal isOpen onClose={() => {}} emails={[EMAIL]} selectedEmailId="e1" token="t" clientName="Joana" {...extra} />,
 );
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  globalThis.fetch = vi.fn(() => { throw new Error("fetch cru não devia ser usado para enviar"); });
-});
+beforeEach(() => vi.clearAllMocks());
 
-describe("EmailViewerModal — responder", () => {
-  async function responder(texto = "Obrigado!") {
+describe("EmailViewerModal — responder abre o compositor do Webmail", () => {
+  it("«Responder» entrega o email com o modo reply", async () => {
+    const onReply = vi.fn();
+    montar({ onReply });
+    fireEvent.click(await screen.findByRole("button", { name: /^responder$/i }));
+    expect(onReply).toHaveBeenCalledWith("reply", expect.objectContaining({ id: "e1" }));
+  });
+
+  it("«Responder a todos» entrega o modo reply_all", async () => {
+    const onReply = vi.fn();
+    montar({ onReply });
+    fireEvent.click(await screen.findByRole("button", { name: /responder a todos/i }));
+    expect(onReply).toHaveBeenCalledWith("reply_all", expect.objectContaining({ id: "e1" }));
+  });
+
+  it("não há caixa de resposta própria", async () => {
+    montar({ onReply: vi.fn() });
+    fireEvent.click(await screen.findByRole("button", { name: /^responder$/i }));
+    expect(screen.queryByPlaceholderText(/escreva a sua resposta/i)).not.toBeInTheDocument();
+  });
+
+  it("sem `onReply` (Index) não há botões de responder", async () => {
     montar();
-    fireEvent.click((await screen.findAllByRole("button", { name: /responder/i }))[0]);
-    fireEvent.change(await screen.findByPlaceholderText(/escreva a sua resposta/i), { target: { value: texto } });
-    fireEvent.click(screen.getByRole("button", { name: /enviar/i }));
-  }
-
-  it("envia pelo cliente Axios, com o processo e a conta pessoal", async () => {
-    api.sendWebmailEmail.mockResolvedValue({ data: { success: true } });
-    await responder();
-
-    await waitFor(() => expect(api.sendWebmailEmail).toHaveBeenCalledTimes(1));
-    const [payload, conta] = api.sendWebmailEmail.mock.calls[0];
-    expect(conta).toBe("personal");
-    expect(payload).toMatchObject({
-      to_emails: ["cliente@x.pt"], body: "Obrigado!", process_id: "p-7", from_box: "personal",
-    });
-    expect(payload.subject).toMatch(/^RE: Documentos/);
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    await screen.findAllByText("Documentos");
+    expect(screen.queryByRole("button", { name: /responder/i })).not.toBeInTheDocument();
   });
 
-  it("o motivo do servidor chega ao utilizador (403 de configuração em falta)", async () => {
-    api.sendWebmailEmail.mockRejectedValue({ response: { data: { detail: "Configuração de email pessoal não encontrada." } } });
-    await responder();
-
-    await waitFor(() => expect(toast.error).toHaveBeenCalled());
-    expect(toast.error.mock.calls[0][0]).toBe("Configuração de email pessoal não encontrada.");
-  });
-
-  it("«Desfazer» cancela pelo cliente Axios e repõe a caixa de resposta", async () => {
-    api.sendWebmailEmail.mockResolvedValue({ data: { queued: true, send_id: "s-1", undo_window_seconds: 10 } });
-    api.cancelEmailSend.mockResolvedValue({ data: {} });
-    await responder();
-
-    await waitFor(() => expect(toast.success).toHaveBeenCalled());
-    const desfazer = toast.success.mock.calls[0][1].action.onClick;
-    await act(async () => { await desfazer(); });
-
-    expect(api.cancelEmailSend).toHaveBeenCalledWith("s-1");
-    await waitFor(() => expect(toast.success.mock.calls.at(-1)[0]).toMatch(/envio cancelado/i));
-    expect(globalThis.fetch).not.toHaveBeenCalled();
-  });
-});
-
-describe("EmailViewerModal — anexos pelo Axios (Lote 7.3)", () => {
-  const COM_ANEXO = { ...EMAIL, attachments: [{ id: "a1", filename: "irs.pdf", content_type: "application/pdf", size: 2048 }] };
-  const montarComAnexo = () => render(
-    <EmailViewerModal isOpen onClose={() => {}} emails={[COM_ANEXO]} selectedEmailId="e1" token="t" clientName="Joana" />,
-  );
-
-  it("descarregar um anexo usa `downloadEmailAttachment` e nunca o `fetch` cru", async () => {
-    api.downloadEmailAttachment.mockResolvedValue({ data: new Blob(["x"]) });
-    window.URL.createObjectURL = vi.fn(() => "blob:x");
-    window.URL.revokeObjectURL = vi.fn();
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    montarComAnexo();
-
-    fireEvent.click(await screen.findByRole("button", { name: /descarregar|download/i }));
-
-    await waitFor(() => expect(api.downloadEmailAttachment).toHaveBeenCalledWith("e1", "a1"));
-    expect(globalThis.fetch).not.toHaveBeenCalled();
-  });
-
-  it("um erro ao descarregar diz-se (antes era engolido)", async () => {
-    api.downloadEmailAttachment.mockRejectedValue({ response: { status: 403 } });
-    montarComAnexo();
-
-    fireEvent.click(await screen.findByRole("button", { name: /descarregar|download/i }));
-
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/descarregar o anexo/i)));
-  });
-});
-
-describe("EmailViewerModal — transporte do envio", () => {
-  it("nenhum `fetch` para /emails/send nem /cancel-send", () => {
-    const fonte = fs.readFileSync(path.resolve(process.cwd(), "src/components/EmailViewerModal.js"), "utf-8")
-      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    expect(fonte).not.toMatch(/emails\/send/);
-    expect(fonte).not.toMatch(/cancel-send/);
-    expect(fonte).toContain("sendWebmailEmail(");
-    expect(fonte).not.toMatch(/\bfetch\(/);
-    expect(fonte).not.toMatch(/API_URL/);
+  it("o visualizador já não envia nada sozinho", () => {
+    const fonte = fs.readFileSync(path.resolve(process.cwd(), "src/components/EmailViewerModal.js"), "utf8");
+    expect(fonte).not.toMatch(/sendWebmailEmail|cancelEmailSend|fetch\(/);
   });
 });

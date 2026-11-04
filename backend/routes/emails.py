@@ -437,27 +437,30 @@ async def create_email_template(
 async def update_email_template(
     template_id: str,
     template: EmailTemplateCreate,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    return await run_update_email_template(template_id, template, current_user)
+    return await run_update_email_template(template_id, template, current_user, request=request)
 
 
 @router.delete("/templates/{template_id}")
 async def delete_email_template(
     template_id: str,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    return await run_delete_email_template(template_id, current_user)
+    return await run_delete_email_template(template_id, current_user, request=request)
 
 
 @router.post("/templates/{template_id}/use")
 async def use_template(
     template_id: str,
+    request: Request,
     process_id: str = Body(..., embed=True),
     current_user: dict = Depends(get_current_user)
 ):
     await exigir_processo_legivel(process_id, current_user)
-    return await run_use_template(template_id, process_id, current_user)
+    return await run_use_template(template_id, process_id, current_user, request=request)
 
 
 # ==== NOTIFICAÇÕES ====
@@ -577,6 +580,18 @@ async def get_email_job_status(
     current_user: dict = Depends(get_current_user)
 ):
     return await run_get_email_job_status(job_id, current_user)
+
+
+@router.get("/compose-prefill/{process_id}")
+async def get_compose_prefill(
+    process_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Assunto e dados do cliente para o email novo criado na tab Emails do processo."""
+    from services.email_compose_prefill import run_compose_prefill
+
+    await exigir_processo_legivel(process_id, current_user)
+    return await run_compose_prefill(process_id, current_user)
 
 
 @router.get("/process/{process_id}", response_model=List[EmailResponse])

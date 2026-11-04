@@ -48,8 +48,8 @@ import {
 import { Checkbox } from "./ui/checkbox";
 import { 
   Mail, Send, Inbox, Plus, Loader2, Clock, 
-  Paperclip, MoreVertical, Trash2, Eye, RefreshCw,
-  Settings, X, AtSign, ExternalLink, Unlink, Search,
+  Paperclip, MoreVertical, Eye, RefreshCw,
+  Settings, X, AtSign, Unlink, Search,
   Star, StarOff,
   Filter, Calendar, FileText, Download,
   AlertCircle, CheckCircle, Copy,
@@ -59,10 +59,10 @@ import { toast } from "sonner";
 import { isAfter, isBefore, startOfDay, endOfDay } from "date-fns";
 import { pt } from "date-fns/locale";
 import {
-  getProcessEmails, deleteEmail, syncProcessEmails, getMonitoredEmails,
+  getProcessEmails, getMonitoredEmails, syncWebmail, syncWebmailUser, getEmailJobStatus,
   addMonitoredEmail, removeMonitoredEmail, getEmailStats,
   markEmail as markEmailRequest, unmarkEmail as unmarkEmailRequest,
-  disassociateEmailFromProcess, getProcessEmailSyncStatus,
+  disassociateEmailFromProcess,
   downloadWebmailAttachment, readBlobErrorBody,
 } from "../services/api";
 import EmailViewerModal from "./EmailViewerModal";
@@ -79,7 +79,11 @@ const EmailHistoryPanel = ({
   clientName,
   compact = false,
   maxHeight = "400px",
-  token
+  token,
+  // Pergunta 12a: o Index só consulta (sem desassociar nem responder).
+  somenteLeitura = false,
+  // Pergunta 10a: «Responder» abre o compositor do Webmail (quem monta decide como).
+  onReply = null,
 }) => {
   const [emails, setEmails] = useState([]);
   const [stats, setStats] = useState({ total: 0, sent: 0, received: 0, unread: 0, important: 0, starred: 0 });
@@ -122,16 +126,6 @@ const EmailHistoryPanel = ({
   // Timeline mode
   const [timelineMode, setTimelineMode] = useState(false);
   const [emailTimeline, setEmailTimeline] = useState([]);
-  
-  // URLs dos webmails
-  const WEBMAIL_URLS = {
-    precision: "http://webmail.precisioncredito.pt/",
-    power: "https://webmail2.hcpro.pt/Mondo/lang/sys/login.aspx"
-  };
-  
-  const openWebmail = (webmail) => {
-    window.open(WEBMAIL_URLS[webmail], '_blank');
-  };
   
   const openEmailViewer = (emailId) => {
     setSelectedEmailId(emailId);
@@ -390,60 +384,69 @@ const EmailHistoryPanel = ({
     }
   };
 
+  // Pergunta 8a: sincroniza DE FACTO as caixas de quem carrega (a mesma sincronização do
+  // Webmail; quem tem direito à Caixa Geral e não tem caixa pessoal sincroniza a geral) e
+  // diz quantos emails novos entraram NESTE processo. Antes chamava uma função
+  // desactivada que não fazia nada e respondia «0 novos emails».
   const handleSyncEmails = async () => {
-    if (!clientEmail && monitoredEmails.length === 0) {
-      toast.error("Adicione pelo menos um email para monitorizar");
-      return;
-    }
-
-    try {
-      setSyncing(true);
-      toast.info("A iniciar sincronização...");
-      
-      const response = await syncProcessEmails(processId, 60);
-      
-      if (response.data.status === "started") {
-        toast.success("Sincronização iniciada em background");
-        const checkStatus = async () => {
-          try {
-            const { data: status } = await getProcessEmailSyncStatus(processId);
-            
-            if (status.status === "completed") {
-              toast.success(`Sincronização concluída: ${status.result?.new_imported || 0} novos emails`);
-              fetchData();
-              setSyncing(false);
-            } else if (status.status === "error") {
-              toast.error(`Erro: ${status.error}`);
-              setSyncing(false);
-            } else if (status.status === "running") {
-              setTimeout(checkStatus, 5000);
-            } else {
-              setSyncing(false);
-            }
-          } catch {
-            setSyncing(false);
-          }
-        };
-        setTimeout(checkStatus, 3000);
-      } else {
-        toast.success(`Sincronização concluída: ${response.data.new_imported} novos emails`);
-        fetchData();
+    if (syncing) return;
+    setSyncing(true);
+    const antes = emails.length;
+    const terminar = async () => {
+      try {
+        const { data } = await getProcessEmails(processId, filter === "all" ? null : filter, { skipErrorToast: true });
+        const lista = Array.isArray(data) ? data : [];
+        setEmails(lista);
+        const novos = Math.max(0, lista.length - antes);
+        toast.success(novos > 0
+          ? `Sincronização concluída: ${novos} email(s) novo(s) neste processo.`
+          : "Sincronização concluída. Sem emails novos neste processo.");
+      } catch {
+        toast.success("Sincronização concluída.");
+      } finally {
         setSyncing(false);
       }
-    } catch {
-      toast.error("Erro ao sincronizar emails");
-      setSyncing(false);
-    }
-  };
-
-  const handleDeleteEmail = async (emailId) => {
-    if (!window.confirm("Tem a certeza que deseja eliminar este email?")) return;
+    };
     try {
-      await deleteEmail(emailId);
-      toast.success("Email eliminado");
-      fetchData();
-    } catch {
-      toast.error("Erro ao eliminar email");
+      let { data } = await syncWebmailUser({ days: 7 });
+      if (data?.success === false) {
+        try {
+          ({ data } = await syncWebmail({ days: 7 }));
+        } catch {
+          /* sem Caixa Geral: fica o erro da pessoal */
+        }
+      }
+      if (!data?.job_id) {
+        toast.error(data?.error || "Não foi possível sincronizar a sua caixa de email.");
+        setSyncing(false);
+        return;
+      }
+      toast.info("A sincronizar a sua caixa de email...");
+      let tentativas = 0;
+      const verificar = async () => {
+        tentativas += 1;
+        try {
+          const { data: job } = await getEmailJobStatus(data.job_id);
+          if (job?.status === "completed") return terminar();
+          if (job?.status === "failed") {
+            toast.error(`Erro na sincronização: ${job.error || "desconhecido"}`);
+            setSyncing(false);
+            return;
+          }
+        } catch {
+          /* tenta outra vez */
+        }
+        if (tentativas >= 20) {
+          toast.info("A sincronização está a demorar — os emails aparecem quando terminar.");
+          setSyncing(false);
+          return;
+        }
+        setTimeout(verificar, 3000);
+      };
+      setTimeout(verificar, 2000);
+    } catch (error) {
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao sincronizar emails"));
+      setSyncing(false);
     }
   };
 
@@ -504,7 +507,7 @@ const EmailHistoryPanel = ({
                 variant="ghost"
                 size="sm"
                 onClick={() => setTimelineMode(!timelineMode)}
-                className={timelineMode ? "bg-amber-100 text-amber-700" : ""}
+                className={timelineMode ? "bg-accent text-accent-foreground" : ""}
               >
                 <Clock className="h-4 w-4" />
               </Button>
@@ -515,32 +518,9 @@ const EmailHistoryPanel = ({
               <Button 
                 size="sm" 
                 variant="outline"
-                onClick={() => openWebmail('precision')}
-                title="Abrir Webmail Precision"
-                className="px-2 sm:px-3"
-              >
-                <Mail className="h-4 w-4 sm:mr-1" />
-                <span className="text-xs hidden sm:inline">Precision</span>
-                <ExternalLink className="h-3 w-3 ml-1 hidden sm:inline" />
-              </Button>
-              <Button 
-                size="sm" 
-                variant="outline"
-                onClick={() => openWebmail('power')}
-                title="Abrir Webmail Power"
-                className="px-2 sm:px-3"
-              >
-                <Mail className="h-4 w-4 sm:mr-1" />
-                <span className="text-xs hidden sm:inline">Power</span>
-                <ExternalLink className="h-3 w-3 ml-1 hidden sm:inline" />
-              </Button>
-              
-              <Button 
-                size="sm" 
-                variant="outline"
                 onClick={() => setIsSettingsOpen(true)}
                 title="Configurações de emails"
-                className="bg-amber-50 hover:bg-amber-100 border-amber-200 px-2 sm:px-3"
+                className="px-2 sm:px-3"
               >
                 <Settings className="h-4 w-4 sm:mr-1" />
                 <span className="text-xs hidden sm:inline">Emails</span>
@@ -550,7 +530,7 @@ const EmailHistoryPanel = ({
                 size="sm" 
                 variant="outline"
                 onClick={handleSyncEmails}
-                disabled={syncing || (!clientEmail && monitoredEmails.length === 0)}
+                disabled={syncing}
                 title="Sincronizar emails"
                 className="px-2 sm:px-3"
               >
@@ -602,7 +582,7 @@ const EmailHistoryPanel = ({
                 <Button 
                   variant="outline" 
                   size="sm"
-                  className={hasActiveFilters() ? "bg-amber-100 border-amber-300" : ""}
+                  className={hasActiveFilters() ? "bg-accent border-primary/40" : ""}
                 >
                   <Filter className="h-4 w-4" />
                   {hasActiveFilters() && (
@@ -753,15 +733,15 @@ const EmailHistoryPanel = ({
                           key={email.id}
                           className={`flex items-center gap-2 p-2 rounded border cursor-pointer hover:bg-muted/50 ${
                             email.direction === "sent" 
-                              ? "bg-blue-50/30 border-blue-200/50" 
-                              : "bg-emerald-50/30 border-emerald-200/50"
+                              ? "bg-primary/5 border-primary/20" 
+                              : "bg-muted/30 border-border"
                           }`}
                           onClick={() => openEmailViewer(email.id)}
                         >
                           <div className={`p-1 rounded ${
                             email.direction === "sent" 
-                              ? "bg-blue-100 text-blue-600" 
-                              : "bg-emerald-100 text-emerald-600"
+                              ? "bg-primary/10 text-primary" 
+                              : "bg-muted text-muted-foreground"
                           }`}>
                             {email.direction === "sent" ? <Send className="h-3 w-3" /> : <Inbox className="h-3 w-3" />}
                           </div>
@@ -773,9 +753,9 @@ const EmailHistoryPanel = ({
                             </p>
                           </div>
                           <div className="flex items-center gap-1">
-                            {email.is_important && <AlertCircle className="h-3 w-3 text-amber-500" />}
-                            {email.is_starred && <Star className="h-3 w-3 text-amber-500 fill-amber-500" />}
-                            {!email.is_read && <div className="h-2 w-2 rounded-full bg-amber-500" />}
+                            {email.is_important && <AlertCircle className="h-3 w-3 text-primary" />}
+                            {email.is_starred && <Star className="h-3 w-3 text-primary fill-primary" />}
+                            {!email.is_read && <div className="h-2 w-2 rounded-full bg-primary" />}
                           </div>
                         </div>
                       ))}
@@ -811,16 +791,16 @@ const EmailHistoryPanel = ({
                       key={email.id}
                       className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors ${
                         email.direction === "sent" 
-                          ? "bg-blue-50/30 dark:bg-blue-950/10 border-blue-200/50 dark:border-blue-800/50" 
-                          : "bg-emerald-50/30 dark:bg-emerald-950/10 border-emerald-200/50 dark:border-emerald-800/50"
-                      } ${!email.is_read ? "border-l-4 border-l-amber-500" : ""}`}
+                          ? "bg-primary/5 border-primary/20" 
+                          : "bg-muted/30 border-border"
+                      } ${!email.is_read ? "border-l-4 border-l-primary" : ""}`}
                       onClick={() => openEmailViewer(email.id)}
                     >
                       {/* Ícone de direção */}
                       <div className={`p-1.5 rounded shrink-0 ${
                         email.direction === "sent" 
-                          ? "bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-300" 
-                          : "bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-300"
+                          ? "bg-primary/10 text-primary" 
+                          : "bg-muted text-muted-foreground"
                       }`}>
                         {email.direction === "sent" ? <Send className="h-3 w-3" /> : <Inbox className="h-3 w-3" />}
                       </div>
@@ -833,8 +813,8 @@ const EmailHistoryPanel = ({
                           </p>
                           {/* Marcações */}
                           <div className="flex items-center gap-1 shrink-0">
-                            {email.is_important && <AlertCircle className="h-3 w-3 text-amber-500" />}
-                            {email.is_starred && <Star className="h-3 w-3 text-amber-500 fill-amber-500" />}
+                            {email.is_important && <AlertCircle className="h-3 w-3 text-primary" />}
+                            {email.is_starred && <Star className="h-3 w-3 text-primary fill-primary" />}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -851,8 +831,8 @@ const EmailHistoryPanel = ({
                         </div>
                         {/* CC */}
                         {email.cc_emails?.length > 0 && (
-                          <p className="text-xs text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
-                            <span className="text-[10px] bg-amber-100 dark:bg-amber-900/50 px-1 rounded">CC</span>
+                          <p className="text-xs text-primary font-medium flex items-center gap-1">
+                            <span className="text-[10px] bg-primary/10 px-1 rounded">CC</span>
                             <span className="truncate">{email.cc_emails.join(", ")}</span>
                           </p>
                         )}
@@ -887,7 +867,7 @@ const EmailHistoryPanel = ({
                             )}
                             {!email.is_important ? (
                               <DropdownMenuItem onClick={(e) => { e.stopPropagation(); markEmail(email.id, "important"); }}>
-                                <AlertCircle className="h-4 w-4 mr-2 text-amber-500" /> Importante
+                                <AlertCircle className="h-4 w-4 mr-2 text-primary" /> Importante
                               </DropdownMenuItem>
                             ) : (
                               <DropdownMenuItem onClick={(e) => { e.stopPropagation(); unmarkEmail(email.id, "important"); }}>
@@ -896,20 +876,23 @@ const EmailHistoryPanel = ({
                             )}
                             {!email.is_starred ? (
                               <DropdownMenuItem onClick={(e) => { e.stopPropagation(); markEmail(email.id, "starred"); }}>
-                                <Star className="h-4 w-4 mr-2 text-amber-500" /> Estrela
+                                <Star className="h-4 w-4 mr-2 text-primary" /> Estrela
                               </DropdownMenuItem>
                             ) : (
                               <DropdownMenuItem onClick={(e) => { e.stopPropagation(); unmarkEmail(email.id, "starred"); }}>
                                 <StarOff className="h-4 w-4 mr-2" /> Tirar estrela
                               </DropdownMenuItem>
                             )}
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDisassociateEmail(email.id); }}>
-                              <Unlink className="h-4 w-4 mr-2" /> Desassociar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteEmail(email.id); }} className="text-red-600">
-                              <Trash2 className="h-4 w-4 mr-2" /> Eliminar
-                            </DropdownMenuItem>
+                            {/* Pergunta 7a: aqui não se apaga correio (fica só no Webmail,
+                                na própria caixa); desassociar tira-o do processo e não apaga nada. */}
+                            {!somenteLeitura && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDisassociateEmail(email.id); }}>
+                                  <Unlink className="h-4 w-4 mr-2" /> Desassociar do processo
+                                </DropdownMenuItem>
+                              </>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
@@ -934,6 +917,7 @@ const EmailHistoryPanel = ({
         token={token}
         clientName={clientName}
         processId={processId}
+        onReply={somenteLeitura ? null : onReply}
       />
 
       {/* Modal de Configurações */}
@@ -1015,7 +999,7 @@ const EmailHistoryPanel = ({
             <Button variant="outline" onClick={() => setIsSettingsOpen(false)}>
               Fechar
             </Button>
-            <Button onClick={() => { setIsSettingsOpen(false); handleSyncEmails(); }} className="bg-teal-600 hover:bg-teal-700">
+            <Button onClick={() => { setIsSettingsOpen(false); handleSyncEmails(); }}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Sincronizar
             </Button>

@@ -25,27 +25,81 @@ from utils.input_sanitization import sanitize_string, sanitize_email, sanitize_m
 
 logger = logging.getLogger(__name__)
 
-async def run_get_email_templates(request: Request, current_user: dict, category: Optional[str] = None):
-    """Listar templates de resposta rápida filtrados pela empresa ativa."""
+# ==== MODELOS DE EMAIL (Flavio, 2026-11-04, pergunta 5a) ====
+# Os modelos são POR EMPRESA: cada um vê os da empresa activa e os modelos gerais antigos (sem
+# empresa). Só Master, Admin, CEO e Diretor criam, alteram ou apagam, e só os da empresa activa
+# (o Master, global, qualquer um). Apagar é lógico (`is_deleted`), nunca físico. Antes não havia
+# filtro nem permissão: qualquer utilizador alterava ou apagava os modelos de outra empresa, e
+# sem empresa activa a listagem devolvia os de todas.
+
+#: Quem altera modelos.
+PAPEIS_QUE_GEREM_MODELOS = frozenset({"master", "admin", "ceo", "diretor"})
+
+#: O que conta como «modelo geral» (sem empresa) — os antigos e os criados sem empresa activa.
+_SEM_EMPRESA = [
+    {"company_id": {"$exists": False}},
+    {"company_id": None},
+    {"company_id": ""},
+    {"company_id": "default"},
+]
+
+
+def condicao_dos_modelos_visiveis(company_id: Optional[str]) -> dict:
+    """A consulta dos modelos que se vêem com esta empresa activa. PURA."""
+    ramos = list(_SEM_EMPRESA)
+    if company_id:
+        ramos.insert(0, {"company_id": company_id})
+    return {"$and": [{"is_deleted": {"$ne": True}}, {"$or": ramos}]}
+
+
+def _papel(current_user: dict) -> str:
+    from services.role_scope import papel_concreto_do_utilizador
+
+    return papel_concreto_do_utilizador(current_user) or ""
+
+
+def exigir_quem_gere_modelos(current_user: dict) -> None:
+    if _papel(current_user) not in PAPEIS_QUE_GEREM_MODELOS:
+        raise HTTPException(
+            status_code=403,
+            detail="Só Master, Admin, CEO e Diretor podem alterar modelos de email.",
+        )
+
+
+async def _empresa_activa(request: Optional[Request], current_user: dict) -> Optional[str]:
+    if request is None:
+        return None
     from services.auth import get_active_company_id_async
 
-    query = {}
-    if category:
-        query["category"] = category
-
-    # MULTI-EMPRESA: filtrar templates por empresa ativa
-    # Mostrar: templates da empresa ativa + templates globais (sem company_id)
     try:
-        active_company_id = await get_active_company_id_async(request, current_user)
-        if active_company_id:
-            query["$or"] = [
-                {"company_id": active_company_id},
-                {"company_id": {"$exists": False}},
-                {"company_id": None},
-                {"company_id": ""},
-            ]
+        return await get_active_company_id_async(request, current_user)
     except Exception:
-        pass  # Fallback: mostrar todos se não houver contexto
+        return None
+
+
+async def _modelo_alteravel(template_id: str, request: Optional[Request], current_user: dict) -> dict:
+    """O modelo, se existe, não está apagado e é da empresa activa (Master: qualquer). Senão 404."""
+    exigir_quem_gere_modelos(current_user)
+    existente = await db.email_templates.find_one(
+        {"id": template_id, "is_deleted": {"$ne": True}}, {"_id": 0}
+    )
+    if not existente:
+        raise HTTPException(status_code=404, detail="Template não encontrado")
+    if _papel(current_user) == "master":
+        return existente
+    company_id = await _empresa_activa(request, current_user)
+    if not company_id or existente.get("company_id") != company_id:
+        # A mesma resposta de «não existe»: não se confirma o modelo de outra empresa.
+        raise HTTPException(status_code=404, detail="Template não encontrado")
+    return existente
+
+
+async def run_get_email_templates(request: Request, current_user: dict, category: Optional[str] = None):
+    """Listar modelos: os da empresa activa + os gerais (sem empresa)."""
+    company_id = await _empresa_activa(request, current_user)
+    query = condicao_dos_modelos_visiveis(company_id)
+    if category:
+        query["$and"].append({"category": category})
 
     templates = await db.email_templates.find(
         query,
@@ -56,20 +110,13 @@ async def run_get_email_templates(request: Request, current_user: dict, category
 
 
 async def run_create_email_template(template: EmailTemplateCreate, request: Request, current_user: dict):
-    """Criar novo template de resposta."""
-    from services.auth import get_active_company_id_async
+    """Criar novo modelo (na empresa activa)."""
+    exigir_quem_gere_modelos(current_user)
 
     template_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
-    # MULTI-EMPRESA: determinar company_id para este template
-    company_id = "default"
-    try:
-        active_company_id = await get_active_company_id_async(request, current_user)
-        if active_company_id:
-            company_id = active_company_id
-    except Exception:
-        pass
+    company_id = await _empresa_activa(request, current_user) or "default"
 
     template_doc = {
         "id": template_id,
@@ -83,25 +130,23 @@ async def run_create_email_template(template: EmailTemplateCreate, request: Requ
         "created_at": now,
         "usage_count": 0
     }
-    
-    # Se for default, remover default de outros
+
+    # Se for default, remover default dos outros DA MESMA EMPRESA
     if template.is_default:
         await db.email_templates.update_many(
-            {"category": template.category},
+            {"category": template.category, "company_id": company_id},
             {"$set": {"is_default": False}}
         )
-    
+
     await db.email_templates.insert_one(template_doc)
-    
+
     return EmailTemplateResponse(**template_doc)
 
 
-async def run_update_email_template(template_id: str, template: EmailTemplateCreate, current_user: dict):
-    """Actualizar template de resposta."""
-    existing = await db.email_templates.find_one({"id": template_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Template não encontrado")
-    
+async def run_update_email_template(template_id: str, template: EmailTemplateCreate, current_user: dict, request: Optional[Request] = None):
+    """Actualizar modelo (só quem gere modelos, só da empresa activa)."""
+    await _modelo_alteravel(template_id, request, current_user)
+
     update_data = {
         "name": sanitize_string(template.name, max_length=200),
         "subject": sanitize_single_line_text(template.subject, max_length=300),
@@ -110,48 +155,72 @@ async def run_update_email_template(template_id: str, template: EmailTemplateCre
         "is_default": template.is_default,
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
-    
+
     await db.email_templates.update_one(
         {"id": template_id},
         {"$set": update_data}
     )
-    
+
     updated = await db.email_templates.find_one({"id": template_id}, {"_id": 0})
     return EmailTemplateResponse(**updated)
 
 
-async def run_delete_email_template(template_id: str, current_user: dict):
-    """Eliminar template de resposta."""
-    result = await db.email_templates.delete_one({"id": template_id})
-    
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Template não encontrado")
-    
+async def run_delete_email_template(template_id: str, current_user: dict, request: Optional[Request] = None):
+    """Apagar modelo — lógico (`is_deleted`), só quem gere modelos, só da empresa activa."""
+    await _modelo_alteravel(template_id, request, current_user)
+    await db.email_templates.update_one(
+        {"id": template_id},
+        {"$set": {
+            "is_deleted": True,
+            "status": "eliminado",
+            "deleted_at": datetime.now(timezone.utc).isoformat(),
+            "deleted_by": current_user.get("id"),
+        }},
+    )
     return {"success": True}
 
 
-async def run_use_template(template_id: str, process_id: str, current_user: dict):
-    """Incrementar contador de uso de template."""
+def preencher_modelo(texto: str, variaveis: dict) -> str:
+    """Substitui `{variavel}` pelos dados do processo. PURA.
+
+    Aceita `{cliente}`/`{email_cliente}` (os nomes antigos) e qualquer chave de
+    `_extract_email_variables` (`{p1_nif}`, `{banco_atual}`, `{process_number}`...). Uma chave
+    desconhecida fica como está (o utilizador vê que falta e corrige).
+    """
+    texto = str(texto or "")
+    for chave, valor in variaveis.items():
+        texto = texto.replace("{" + str(chave) + "}", "" if valor is None else str(valor))
+    return texto
+
+
+async def run_use_template(template_id: str, process_id: str, current_user: dict, request: Optional[Request] = None):
+    """Aplicar um modelo a um processo: devolve assunto e corpo preenchidos."""
+    from services.email_template_vars import _extract_email_variables
+
+    company_id = await _empresa_activa(request, current_user)
+    template = await db.email_templates.find_one(
+        {"$and": [{"id": template_id}, condicao_dos_modelos_visiveis(company_id)]},
+        {"_id": 0},
+    )
+    if not template:
+        raise HTTPException(status_code=404, detail="Template não encontrado")
+
     await db.email_templates.update_one(
         {"id": template_id},
         {"$inc": {"usage_count": 1}}
     )
-    
-    # Obter template
-    template = await db.email_templates.find_one({"id": template_id}, {"_id": 0})
-    
-    # Obter dados do processo para personalizar
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    
-    # Substituir variáveis
+
     body = template.get("body", "")
     subject = template.get("subject", "")
-    
+
+    process = await db.processes.find_one({"id": process_id, "is_deleted": {"$ne": True}}, {"_id": 0})
     if process:
-        body = body.replace("{cliente}", process.get("client_name", ""))
-        body = body.replace("{email_cliente}", process.get("client_email", ""))
-        subject = subject.replace("{cliente}", process.get("client_name", ""))
-    
+        variaveis = _extract_email_variables(process, current_user, "")
+        variaveis["cliente"] = variaveis.get("client_name") or ""
+        variaveis["email_cliente"] = variaveis.get("p1_email") or ""
+        body = preencher_modelo(body, variaveis)
+        subject = preencher_modelo(subject, variaveis)
+
     return {
         "subject": subject,
         "body": body
