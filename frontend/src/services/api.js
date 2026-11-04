@@ -1482,6 +1482,10 @@ export const getEmailStats = (processId, options = {}) =>
 // crus, sem `X-Company-Id` nem `X-Active-Role` — o servidor decidia o acesso
 // pelo cargo do JWT e não pelo perfil activo (incidente 2026-09-21).
 export const getEmailTemplates = () => api.get("/emails/templates");
+// «+ Novo» da tab Emails do processo: assunto + bloco «Dados do cliente» (decifrados no
+// servidor — por isso nunca viajam no URL).
+export const getComposePrefill = (processId, options = {}) =>
+  api.get(`/emails/compose-prefill/${encodeURIComponent(processId)}`, options);
 export const applyEmailTemplate = (templateId, processId) =>
   api.post(`/emails/templates/${templateId}/use`, { process_id: processId });
 export const unmarkEmail = (emailId, markType) =>

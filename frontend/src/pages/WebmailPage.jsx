@@ -88,6 +88,9 @@ import {
   syncWebmailUser,
   getProcesses,
   readBlobErrorBody,
+  getComposePrefill,
+  getEmailTemplates,
+  applyEmailTemplate,
 } from "../services/api";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -153,6 +156,9 @@ const WebmailPage = () => {
   const composeFromUrl = searchParams.get("compose");
   const composeToFromUrl = (searchParams.get("to") || "").trim();
   const composeProcessIdFromUrl = searchParams.get("process_id");
+  // «Responder» a partir da tab do processo (pergunta 10a):
+  // /webmail?compose=reply|reply_all&email_id=<id> abre o compositor do Webmail.
+  const composeEmailIdFromUrl = (searchParams.get("email_id") || "").trim();
 
   // ============================================================
   // PONTO 8, FASE 3 — a empresa é o SEPARADOR, não o Context Switcher
@@ -162,8 +168,15 @@ const WebmailPage = () => {
   // sítio onde se está. Fica no URL (`?company_id=`) para o separador
   // sobreviver a um F5 e para um link levar alguém à caixa certa.
   const { empresas: empresasDoWebmail } = useWebmailCompaniesQuery();
+  // A empresa do URL só vale se o utilizador a tiver no Webmail; senão, a activa
+  // (o «+ Novo» de um processo de outra empresa não pode abrir a primeira da lista).
+  const empresaDoUrl = (searchParams.get("company_id") || "").trim();
   const empresaPedida =
-    (searchParams.get("company_id") || "").trim() || activeCompanyId || "";
+    (empresaDoUrl &&
+      (empresasDoWebmail || []).some((e) => e?.company_id === empresaDoUrl) &&
+      empresaDoUrl) ||
+    activeCompanyId ||
+    "";
   const empresaActiva = useMemo(
     () => resolverEmpresaActiva(empresasDoWebmail, empresaPedida),
     [empresasDoWebmail, empresaPedida],
@@ -1021,6 +1034,9 @@ const WebmailPage = () => {
   // - prefill opcional (to_emails/process_id) — usado pelo ?compose=new
   //   da tab Emails do processo (botão "+ Novo").
   const openComposer = useCallback((mode, email = null, prefill = null) => {
+    // Perguntas 6 e 14: sai da caixa pessoal; na Caixa Geral só quando se está
+    // a trabalhar nela (responder a um email que lá chegou sai de lá).
+    const caixaDeOmissao = activeBox === "general" ? "general" : "personal";
     let nextData;
     if ((mode === "reply" || mode === "reply_all") && email) {
       // "Responder a Todos" mantém os restantes intervenientes em Cc;
@@ -1036,7 +1052,9 @@ const WebmailPage = () => {
         body: `\n\n---------- Mensagem original ----------\nDe: ${email.from_email}\nData: ${formatFullDate(email.sent_at)}\nAssunto: ${email.subject || ""}\n\n${email.body || ""}`,
         account: email.account || "precision",
         process_id: email.process_id || null,
+        from_box: caixaDeOmissao,
         ...buildReplyThreadHeaders(email),
+        ...(prefill || {}),
       };
     } else if (mode === "forward" && email) {
       nextData = {
@@ -1047,6 +1065,7 @@ const WebmailPage = () => {
         body: `\n\n---------- Mensagem encaminhada ----------\nDe: ${email.from_email}\nData: ${formatFullDate(email.sent_at)}\nAssunto: ${email.subject || ""}\n\n${email.body || ""}`,
         account: email.account || "precision",
         process_id: null,
+        from_box: caixaDeOmissao,
       };
     } else if (mode === "draft" && email) {
       const toList = Array.isArray(email.to_emails)
@@ -1060,6 +1079,7 @@ const WebmailPage = () => {
         body: email.body || email.body_html || "",
         account: email.account || account,
         process_id: email.process_id || null,
+        from_box: email.from_box || caixaDeOmissao,
       };
     } else {
       nextData = {
@@ -1070,6 +1090,7 @@ const WebmailPage = () => {
         body: "",
         account: account,
         process_id: null,
+        from_box: caixaDeOmissao,
         // PACOTE 12 — pré-preenchimento ("+ Novo" da tab Emails)
         ...(prefill || {}),
       };
@@ -1079,7 +1100,7 @@ const WebmailPage = () => {
     setBccExpanded(Boolean(nextData.bcc_emails));
     setUploadAttachments([]);
     setComposerOpen(true);
-  }, [account, user?.email]);
+  }, [account, user?.email, activeBox]);
 
   // PACOTE DM: abrir compositor de rascunho quando o Dashboard envia ?folder=drafts&id=
   // PACOTE 8: ?id= numa pasta normal abre o email no PAINEL DE LEITÃO
@@ -1124,9 +1145,69 @@ const WebmailPage = () => {
     openedUrlComposeRef.current = true;
     const prefill = {};
     if (composeToFromUrl) prefill.to_emails = composeToFromUrl;
-    if (composeProcessIdFromUrl) prefill.process_id = composeProcessIdFromUrl;
-    openComposer("new", null, Object.keys(prefill).length > 0 ? prefill : null);
+    if (composeProcessIdFromUrl) {
+      prefill.process_id = composeProcessIdFromUrl;
+      // Pergunta 6: a partir do processo sai SEMPRE da conta do utilizador.
+      prefill.from_box = "personal";
+    }
+    if (!composeProcessIdFromUrl) {
+      openComposer("new", null, Object.keys(prefill).length > 0 ? prefill : null);
+      return;
+    }
+    // Perguntas 1–4: assunto «Processo #n.º — Nome» e o bloco «Dados do cliente»
+    // no topo. Vêm do servidor (dados decifrados; nunca no URL). Se falhar, o
+    // compositor abre na mesma, só com o «Para».
+    getComposePrefill(composeProcessIdFromUrl, { skipErrorToast: true })
+      .then(({ data }) => {
+        if (data?.subject) prefill.subject = data.subject;
+        if (data?.body) prefill.body = data.body;
+      })
+      .catch(() => {})
+      .finally(() => openComposer("new", null, prefill));
   }, [composeFromUrl, composeToFromUrl, composeProcessIdFromUrl, draftIdFromUrl, openComposer]);
+
+  // Pergunta 10a — «Responder» / «Responder a todos» a partir da tab do processo
+  // abrem ESTE compositor (conversa, Cc, anexos e assinatura), não uma caixa à parte.
+  useEffect(() => {
+    if (openedUrlComposeRef.current) return;
+    if (!["reply", "reply_all"].includes(composeFromUrl) || !composeEmailIdFromUrl) return;
+    openedUrlComposeRef.current = true;
+    getWebmailEmail(composeEmailIdFromUrl)
+      .then(({ data }) => {
+        if (data) openComposer(composeFromUrl, data, { from_box: "personal" });
+      })
+      .catch(() => toast.error("Não foi possível abrir o email para responder."));
+  }, [composeFromUrl, composeEmailIdFromUrl, openComposer]);
+
+  // Pergunta 5a — modelos da empresa activa, só quando o rascunho tem processo.
+  const [modelosDeEmail, setModelosDeEmail] = useState([]);
+  const processoDoRascunho = composerOpen ? composerData.process_id : null;
+  useEffect(() => {
+    if (!processoDoRascunho) return;
+    let vivo = true;
+    getEmailTemplates()
+      .then(({ data }) => { if (vivo) setModelosDeEmail(Array.isArray(data) ? data : []); })
+      .catch(() => { if (vivo) setModelosDeEmail([]); });
+    return () => { vivo = false; };
+  }, [processoDoRascunho, companyId]);
+
+  const handleApplyTemplate = useCallback(async (templateId) => {
+    if (!composerData.process_id) return;
+    try {
+      const { data } = await applyEmailTemplate(templateId, composerData.process_id);
+      setComposerData((d) => {
+        const atual = (d.body || "").replace(/\s+$/, "");
+        return {
+          ...d,
+          subject: data?.subject || d.subject,
+          // O modelo entra DEPOIS do bloco «Dados do cliente» (que fica no topo).
+          body: atual ? `${atual}\n\n${data?.body || ""}` : (data?.body || ""),
+        };
+      });
+    } catch (erro) {
+      toast.error(extractErrorMessage(erro?.response?.data?.detail, "Não foi possível aplicar o modelo"));
+    }
+  }, [composerData.process_id]);
 
   const handleSendEmail = useCallback(async () => {
     if (!composerData.to_emails.trim()) {
@@ -1162,7 +1243,7 @@ const WebmailPage = () => {
         cc_emails: ccList.length > 0 ? ccList : null,
         bcc_emails: bccList.length > 0 ? bccList : null,
         process_id: composerData.process_id || null,
-        from_box: activeBox || null,
+        from_box: composerData.from_box || activeBox || null,
         // Threading (RFC 5322): sem estes, a resposta nasce fora da
         // conversa — no nosso Webmail e no cliente do destinatário.
         in_reply_to: composerData.in_reply_to || null,
@@ -2067,7 +2148,9 @@ const WebmailPage = () => {
           bccExpanded={bccExpanded}
           attachments={uploadAttachments}
           uploading={uploadingFiles}
-          canUseGlobalAccounts={canUseGlobalAccounts}
+          podeUsarCaixaGeral={showTabs}
+          modelos={modelosDeEmail}
+          onApplyTemplate={handleApplyTemplate}
           effectiveRole={effectiveRole}
           resolvedSignature={resolvedSignature}
           onOpenChange={handleComposerOpenChange}

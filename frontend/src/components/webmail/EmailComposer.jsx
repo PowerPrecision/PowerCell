@@ -66,7 +66,9 @@ import AnexarDoPowerCellDialog from "./AnexarDoPowerCellDialog";
  * @param {(anexos: Array) => void} [props.onAttachDocuments] Anexos copiados
  *   dos documentos do PowerCell (mesmo formato do upload). Sem ele, o botão
  *   «Anexar do PowerCell» não aparece.
- * @param {boolean} [props.canUseGlobalAccounts] Só admin/CEO/diretor escolhem conta.
+ * @param {boolean} [props.podeUsarCaixaGeral] Quem tem direito à Caixa Geral escolhe «De:».
+ * @param {Array} [props.modelos] Modelos de email da empresa activa.
+ * @param {(id: string) => void} [props.onApplyTemplate] Aplica um modelo ao processo do rascunho.
  * @param {string} [props.effectiveRole] Decide a frase mostrada a quem não escolhe.
  * @param {string} [props.resolvedSignature] Assinatura HTML da empresa activa.
  */
@@ -87,7 +89,9 @@ const EmailComposer = ({
   onUploadFiles,
   onRemoveAttachment,
   onAttachDocuments,
-  canUseGlobalAccounts = false,
+  podeUsarCaixaGeral = false,
+  modelos = [],
+  onApplyTemplate,
   effectiveRole = "",
   resolvedSignature = "",
 }) => {
@@ -218,25 +222,38 @@ const EmailComposer = ({
             />
           </div>
 
-          {/* Account — só visível para perfis que podem usar contas globais
-              (admin/CEO/diretor). Os restantes perfis enviam sempre pela sua
-              conta pessoal (o backend força "personal"), pelo que o seletor
-              não deve aparecer — o utilizador só tem uma conta útil. */}
-          {canUseGlobalAccounts ? (
+          {/* Modelo (pergunta 5a) — só com processo: as variáveis vêm dele. */}
+          {data.process_id && modelos.length > 0 && onApplyTemplate && (
             <div className="flex items-center gap-2">
-              <label className="text-sm font-medium w-12 shrink-0">Conta:</label>
+              <label className="text-sm font-medium w-12 shrink-0">Modelo:</label>
+              <Select value="" onValueChange={(id) => onApplyTemplate(id)}>
+                <SelectTrigger className="flex-1" aria-label="Modelo">
+                  <SelectValue placeholder="Escolher um modelo (opcional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  {modelos.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Enviar de (perguntas 6 e 14) — a caixa pessoal é a de omissão; a Caixa
+              Geral da empresa só aparece a quem tem direito a ela. O Index não envia. */}
+          {podeUsarCaixaGeral ? (
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium w-12 shrink-0">De:</label>
               <Select
-                value={data.account}
-                onValueChange={(v) =>
-                  onFieldChange("account", v)
-                }
+                value={data.from_box === "general" ? "general" : "personal"}
+                onValueChange={(v) => onFieldChange("from_box", v)}
               >
-                <SelectTrigger className="flex-1">
+                <SelectTrigger className="flex-1" aria-label="Enviar de">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="precision">Precision Crédito</SelectItem>
-                  <SelectItem value="power">Power Real Estate</SelectItem>
+                  <SelectItem value="personal">A minha caixa pessoal</SelectItem>
+                  <SelectItem value="general">Caixa Geral da empresa</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -245,7 +262,7 @@ const EmailComposer = ({
               <Mail className="h-3.5 w-3.5 shrink-0" />
               <span>
                 {effectiveRole === 'indexacao'
-                  ? 'Envio pela conta partilhada de Indexação.'
+                  ? 'O perfil Index não envia emails.'
                   : 'Envio pela sua conta pessoal — configure em Perfil > Configuração de Webmail.'}
               </span>
             </div>

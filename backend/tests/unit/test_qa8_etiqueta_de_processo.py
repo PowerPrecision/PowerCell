@@ -53,7 +53,7 @@ class TestEnvio:
         from tests.unit.helpers_fonte import codigo_sem_comentarios
 
         fonte = codigo_sem_comentarios(Path(mod.__file__).read_text())
-        assert "etiqueta_do_processo(process_id)" in fonte
+        assert "etiqueta_curta_do_processo(db, process_id)" in fonte
         assert "'process_id': ligado_ao_processo" in fonte
         # e o formato antigo já não é ESCRITO por ninguém
         assert "f'[Proc-{process_id}]'" not in fonte

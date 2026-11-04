@@ -112,6 +112,9 @@ vi.mock("../../services/api", () => {
     getEmailContacts: registar("getEmailContacts"),
     saveEmailContact: registar("saveEmailContact"),
     hideEmailContact: registar("hideEmailContact"),
+    getComposePrefill: registar("getComposePrefill"),
+    getEmailTemplates: registar("getEmailTemplates"),
+    applyEmailTemplate: registar("applyEmailTemplate"),
     readBlobErrorBody: vi.fn(async () => ({})),
   };
 });
@@ -605,5 +608,80 @@ describe("WebmailPage — abrir um rascunho a partir do Dashboard (Bloco 4, pont
       expect(apiFalsa.chamadas.filter((c) => c.nome === "getWebmailEmail").length).toBeGreaterThan(0),
     );
     expect(screen.queryByPlaceholderText("Assunto do email")).not.toBeInTheDocument();
+  });
+});
+
+
+// ── Regras do email com o Flavio (2026-11-04) ─────────────────────────
+describe("WebmailPage — email novo a partir do processo (perguntas 1–6)", () => {
+  const ROTA = "/webmail?compose=new&process_id=p-1&to=ana%40exemplo.pt";
+
+  it("o assunto e o bloco «Dados do cliente» vêm do servidor e preenchem o compositor", async () => {
+    apiFalsa.getComposePrefill = () => Promise.resolve({
+      data: { subject: "Processo #1234 — Ana Silva", body: "Dados do cliente:\nNIF: 123456789\n\n\n" },
+    });
+    montar(ROTA);
+
+    expect(await screen.findByDisplayValue("Processo #1234 — Ana Silva")).toBeInTheDocument();
+    const corpo = await screen.findByPlaceholderText("Escreva a sua mensagem...");
+    expect(corpo.value).toMatch(/^Dados do cliente:/);
+    expect(corpo.value).toContain("NIF: 123456789");
+    const pedido = apiFalsa.chamadas.find((c) => c.nome === "getComposePrefill");
+    expect(pedido.args[0]).toBe("p-1");
+  });
+
+  it("os dados do cliente nunca viajam no URL", () => {
+    expect(ROTA).not.toMatch(/nif|subject|body/i);
+  });
+
+  it("se o servidor falhar, o compositor abre na mesma com o «Para»", async () => {
+    apiFalsa.getComposePrefill = () => Promise.reject(new Error("rede"));
+    montar(ROTA);
+    expect(await screen.findByPlaceholderText("Assunto do email")).toHaveValue("");
+  });
+
+  it("sai da conta pessoal do utilizador, com o processo", async () => {
+    const utilizador = userEvent.setup();
+    apiFalsa.getComposePrefill = () => Promise.resolve({
+      data: { subject: "Processo #1234 — Ana Silva", body: "Dados do cliente:\n" },
+    });
+    apiFalsa.sendWebmailEmail = () => Promise.resolve({ data: { success: true, queued: false } });
+    montar(ROTA);
+
+    await screen.findByDisplayValue("Processo #1234 — Ana Silva");
+    await utilizador.click(screen.getByRole("button", { name: /^Enviar$/ }));
+    await waitFor(() =>
+      expect(apiFalsa.chamadas.some((c) => c.nome === "sendWebmailEmail")).toBe(true),
+    );
+    const [payload] = apiFalsa.chamadas.find((c) => c.nome === "sendWebmailEmail").args;
+    expect(payload).toMatchObject({ process_id: "p-1", from_box: "personal" });
+  });
+
+  it("com modelos da empresa aparece o seletor «Modelo»", async () => {
+    apiFalsa.getComposePrefill = () => Promise.resolve({ data: { subject: "Processo #1 — Ana", body: "" } });
+    apiFalsa.getEmailTemplates = () => Promise.resolve({ data: [{ id: "t-1", name: "Pedido de IRS" }] });
+    montar(ROTA);
+    expect(await screen.findByRole("combobox", { name: "Modelo" })).toBeInTheDocument();
+  });
+
+  it("contraprova: sem processo não há seletor de modelo", async () => {
+    const utilizador = userEvent.setup();
+    apiFalsa.getEmailTemplates = () => Promise.resolve({ data: [{ id: "t-1", name: "Pedido de IRS" }] });
+    montar();
+    await utilizador.click(await screen.findByRole("button", { name: /Nova Mensagem/ }));
+    await screen.findByPlaceholderText("Assunto do email");
+    expect(screen.queryByRole("combobox", { name: "Modelo" })).not.toBeInTheDocument();
+  });
+});
+
+describe("WebmailPage — responder a partir da tab do processo (pergunta 10a)", () => {
+  it("?compose=reply&email_id= abre ESTE compositor, em resposta, com a conversa", async () => {
+    apiFalsa.getWebmailEmail = () => Promise.resolve({
+      data: email({ id: "e9", subject: "Documentos [Ref: #1234]", process_id: "p-1", message_id: "<m@x>" }),
+    });
+    montar("/webmail?compose=reply&email_id=e9");
+    const assunto = await screen.findByPlaceholderText("Assunto do email");
+    await waitFor(() => expect(assunto.value).toMatch(/^Re: Documentos/));
+    expect(apiFalsa.chamadas.find((c) => c.nome === "getWebmailEmail").args[0]).toBe("e9");
   });
 });

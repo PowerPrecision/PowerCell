@@ -30,6 +30,9 @@ const api = vi.hoisted(() => ({
   disassociateEmailFromProcess: vi.fn(),
   getProcessEmailSyncStatus: vi.fn(),
   downloadWebmailAttachment: vi.fn(),
+  syncWebmail: vi.fn(),
+  syncWebmailUser: vi.fn(),
+  getEmailJobStatus: vi.fn(),
   readBlobErrorBody: vi.fn(async () => ({})),
 }));
 vi.mock("../../services/api", () => api);
@@ -46,7 +49,7 @@ const EMAILS = [
 ];
 const STATS = { total: 41, sent: 10, received: 31, unread: 4, important: 2, starred: 1 };
 
-const montar = () => render(<EmailHistoryPanel processId="p-1" clientEmail="joana@x.pt" clientName="Joana" token="t" />);
+const montar = (extra = {}) => render(<EmailHistoryPanel processId="p-1" clientEmail="joana@x.pt" clientName="Joana" token="t" {...extra} />);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -197,5 +200,62 @@ describe("EmailHistoryPanel — Desassociar (QA-8)", () => {
 
     await waitFor(() => expect(api.disassociateEmailFromProcess).toHaveBeenCalled());
     expect(api.getProcessEmails.mock.calls.length).toBe(chamadasAntes);
+  });
+});
+
+
+// ── Regras do email com o Flavio (2026-11-04) ─────────────────────────
+describe("EmailHistoryPanel — regras de 2026-11-04", () => {
+  async function abrirMenu(extra) {
+    montar(extra);
+    await screen.findByText("Documentos do crédito");
+    await userEvent.click(screen.getByRole("button", { name: /acções do email/i }));
+    await screen.findByRole("menuitem", { name: /ver completo/i });
+  }
+
+  it("7a: o menu já não tem «Eliminar» (apagar é no Webmail, na própria caixa)", async () => {
+    await abrirMenu();
+    expect(screen.queryByRole("menuitem", { name: /eliminar/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /desassociar/i })).toBeInTheDocument();
+  });
+
+  it("12a: o Index vê os emails mas não desassocia", async () => {
+    await abrirMenu({ somenteLeitura: true });
+    expect(screen.queryByRole("menuitem", { name: /desassociar/i })).not.toBeInTheDocument();
+  });
+
+  it("9a: sem botões para webmails externos com endereços fixos", async () => {
+    montar();
+    await screen.findByText("Documentos do crédito");
+    expect(screen.queryByRole("button", { name: /precision|power/i })).not.toBeInTheDocument();
+    const fonte = fs.readFileSync(path.resolve(process.cwd(), "src/components/EmailHistoryPanel.js"), "utf8");
+    expect(fonte).not.toMatch(/webmail\.precisioncredito|hcpro\.pt/);
+  });
+
+  it("8a: «Sync» sincroniza de facto a caixa de quem carrega e conta os novos do processo", async () => {
+    api.syncWebmailUser.mockResolvedValue({ data: { success: true, job_id: "j-1" } });
+    api.getEmailJobStatus.mockResolvedValue({ data: { status: "completed" } });
+    montar();
+    await screen.findByText("Documentos do crédito");
+    api.getProcessEmails.mockResolvedValue({ data: [...EMAILS, { ...EMAILS[0], id: "e2", subject: "Novo" }] });
+
+    await userEvent.click(screen.getByRole("button", { name: /sync/i }));
+    await waitFor(() => expect(api.syncWebmailUser).toHaveBeenCalledWith({ days: 7 }));
+    const { toast } = await import("sonner");
+    await waitFor(
+      () => expect(toast.success).toHaveBeenCalledWith("Sincronização concluída: 1 email(s) novo(s) neste processo."),
+      { timeout: 4000 },
+    );
+    expect(api.syncProcessEmails).not.toHaveBeenCalled();
+  });
+
+  it("8a: sem caixa pessoal, quem tem Caixa Geral sincroniza a geral", async () => {
+    api.syncWebmailUser.mockResolvedValue({ data: { success: false, error: "sem config" } });
+    api.syncWebmail.mockResolvedValue({ data: { success: true, job_id: "j-2" } });
+    api.getEmailJobStatus.mockResolvedValue({ data: { status: "running" } });
+    montar();
+    await screen.findByText("Documentos do crédito");
+    await userEvent.click(screen.getByRole("button", { name: /sync/i }));
+    await waitFor(() => expect(api.syncWebmail).toHaveBeenCalledWith({ days: 7 }));
   });
 });

@@ -14,9 +14,14 @@ import { Plus, Send } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { getUsers } from "../../../services/api";
 import { destinatariosDoProcesso } from "../../../utils/destinatariosDoProcesso";
+import { useAuthOpcional } from "../../../contexts/AuthContext";
 
 export default function EmailsTab({ id, savedProcessRef, process, token }) {
   const navigate = useNavigate();
+  const auth = useAuthOpcional();
+  // Pergunta 12a: o Index consulta os emails do processo, mas não escreve, não
+  // responde nem desassocia (o servidor repete a regra).
+  const somenteLeitura = auth?.effectiveRole === "indexacao";
   const clientEmail = savedProcessRef.current?.client_email || process?.client_email;
 
   // PACOTE 12 — abre o Webmail com o compositor pré-preenchido (destinatário
@@ -42,6 +47,13 @@ export default function EmailsTab({ id, savedProcessRef, process, token }) {
     navigate(`/webmail?${params.toString()}`);
   };
 
+  // Pergunta 10a: responder abre o compositor do Webmail (conversa, Cc, anexos, assinatura).
+  const handleReply = (modo, email) => {
+    if (!email?.id) return;
+    const params = new URLSearchParams({ compose: modo === "reply_all" ? "reply_all" : "reply", email_id: email.id });
+    navigate(`/webmail?${params.toString()}`);
+  };
+
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-border bg-muted/40 p-4">
@@ -56,14 +68,16 @@ export default function EmailsTab({ id, savedProcessRef, process, token }) {
               Clique numa linha para ler.
             </p>
           </div>
-          <Button
-            size="sm"
-            className="h-8 text-xs gap-1.5 ml-auto shrink-0"
-            onClick={handleNewEmail}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Novo
-          </Button>
+          {!somenteLeitura && (
+            <Button
+              size="sm"
+              className="h-8 text-xs gap-1.5 ml-auto shrink-0"
+              onClick={handleNewEmail}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Novo
+            </Button>
+          )}
         </div>
       </div>
 
@@ -76,6 +90,8 @@ export default function EmailsTab({ id, savedProcessRef, process, token }) {
             compact={false}
             maxHeight="500px"
             token={token}
+            somenteLeitura={somenteLeitura}
+            onReply={handleReply}
           />
         </CardContent>
       </Card>

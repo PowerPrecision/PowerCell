@@ -92,7 +92,7 @@ async def test_template_de_email_guarda_o_corpo_com_as_quebras_de_linha(fake_asy
     template = EmailTemplateCreate(name="T", subject="S", body=CORPO)
     with patch.object(mod, "db", fake_async_db), \
          patch("services.auth.get_active_company_id_async", AsyncMock(return_value=None)):
-        await mod.run_create_email_template(template, MagicMock(), {"id": "u1"})
+        await mod.run_create_email_template(template, MagicMock(), {"id": "u1", "role": "admin", "effective_role": "admin"})  # 5a: só a Direção cria modelos
 
     stored = await fake_async_db.email_templates.find_one({"name": "T"})
     assert stored["body"] == CORPO
