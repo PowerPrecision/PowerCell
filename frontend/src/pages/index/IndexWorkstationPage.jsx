@@ -10,10 +10,20 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, ExternalLink, Eye, FileText, Loader2, PenLine, ScanSearch, UserPlus } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Eye, FileText, Loader2, PenLine, ScanSearch, Trash2, UserPlus } from "lucide-react";
 
 import DashboardLayout from "../../layouts/DashboardLayout";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../../components/ui/alert-dialog";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
@@ -32,6 +42,7 @@ import { ConversaDoProcesso } from "../../components/index/ConversaDoProcesso";
 import { EmployerNifDialog } from "../../components/index/EmployerNifDialog";
 import { IndexActionsBar } from "../../components/index/IndexActionsBar";
 import { PedirAlteracaoDeAtribuicao } from "../../components/index/PedirAlteracaoDeAtribuicao";
+import { ReabrirProcesso } from "../../components/index/ReabrirProcesso";
 import { ProfessionalReviewPanel } from "../../components/index/ProfessionalReviewPanel";
 import { UploadNaBancada } from "../../components/index/UploadNaBancada";
 import VisualizadorDeDocumento from "../../components/index/VisualizadorDeDocumento";
@@ -75,6 +86,65 @@ function LigacaoAoProcesso({ processoId, children, ...resto }) {
       <ExternalLink className="ml-1 inline h-3.5 w-3.5 align-baseline opacity-60" aria-hidden="true" />
       <span className="sr-only"> (abre num novo separador)</span>
     </Link>
+  );
+}
+
+/**
+ * Metadados profissionais (Nov 2026): o cartão ficava ao lado dos documentos, com meio ecrã, e quase
+ * sempre vazio. Sem empregos lidos é UMA linha discreta (e sem «Rever», que não teria nada para rever);
+ * com dados, os empregos ficam numa grelha compacta para o cartão não crescer em altura.
+ */
+function MetadadosProfissionais({ trabalhos, aRever, somenteLeitura, motivoSomenteLeitura, onRever }) {
+  if (trabalhos.length === 0) {
+    return (
+      <div
+        data-testid="metadados-profissionais"
+        className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-dashed border-border px-4 py-2 text-sm"
+      >
+        <span className="font-medium">Metadados profissionais</span>
+        <span className="text-muted-foreground">
+          Ainda sem dados extraídos. Use «Analisar» para ler os recibos de vencimento.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <Card data-testid="metadados-profissionais">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 py-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          Metadados profissionais
+          {aRever > 0 && <Badge variant="secondary">{aRever} campo(s) a rever</Badge>}
+        </CardTitle>
+        <span title={motivoSomenteLeitura}>
+          <Button size="sm" variant="outline" disabled={somenteLeitura} onClick={onRever} title={motivoSomenteLeitura}>
+            <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+            Rever
+          </Button>
+        </span>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {trabalhos.map((t) => (
+            <li key={t.job_id} className="rounded-md border border-border px-3 py-2 text-sm">
+              <span className="font-medium">{valorDoCampo(t.employer_name) || "Entidade por identificar"}</span>
+              {ROTULO_DO_TITULAR[t.titular] && (
+                <Badge variant="outline" className="ml-2" data-testid="emprego-titular">
+                  {ROTULO_DO_TITULAR[t.titular]}
+                </Badge>
+              )}
+              {NOME_DO_PAIS[t.country] && (
+                <Badge variant="outline" className="ml-2" data-testid="emprego-pais">
+                  {NOME_DO_PAIS[t.country]}
+                </Badge>
+              )}
+              <span className="ml-2 text-muted-foreground">
+                {formatarDinheiro(valorDoCampo(t.net_salary), t.currency)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -140,7 +210,11 @@ function ListaDeFicheiros({
   onAnalisar,
   aAnalisarId,
   motivoSemAnalise,
+  onEliminar,
+  aEliminarId,
 }) {
+  // «Eliminar» pede confirmação (Nov 2026): o ficheiro sai da bancada e os dados lidos dele deixam de contar
+  const [aConfirmar, setAConfirmar] = useState(null);
   // os comprovativos do cliente que o Index já voltou a carregar não contam: escondidos, mas a um clique
   const [verSubstituidos, setVerSubstituidos] = useState(false);
   const substituidos = ficheiros.filter((f) => f.superseded === true).length;
@@ -259,6 +333,27 @@ function ListaDeFicheiros({
                 )}
                 Download
               </Button>
+              {onEliminar && (
+                <span title={motivoSomenteLeitura}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 gap-1 text-destructive hover:text-destructive"
+                    disabled={Boolean(motivoSomenteLeitura) || aEliminarId === f.id}
+                    onClick={() => setAConfirmar({ id: f.id, nome })}
+                    aria-label={`Eliminar — ${nome}`}
+                    data-testid="ficheiro-eliminar"
+                  >
+                    {aEliminarId === f.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    Eliminar
+                  </Button>
+                </span>
+              )}
             </span>
             {estadoDoFicheiroEmTexto(f) && (
               <span className="basis-full pl-6 text-xs text-muted-foreground" data-testid="estado-do-ficheiro">
@@ -269,6 +364,30 @@ function ListaDeFicheiros({
         );
       })}
     </ul>
+      <AlertDialog open={aConfirmar !== null} onOpenChange={(aberto) => !aberto && setAConfirmar(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar este documento?</AlertDialogTitle>
+            <AlertDialogDescription>
+              «{aConfirmar?.nome}» sai da lista de documentos do processo e os dados lidos dele deixam de contar
+              nos metadados e na matriz. O ficheiro fica guardado e um administrador pode recuperá-lo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                onEliminar?.(aConfirmar.id);
+                setAConfirmar(null);
+              }}
+              data-testid="confirmar-eliminar"
+            >
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -296,6 +415,8 @@ export default function IndexWorkstationPage() {
   // A equipa do Index trabalha a partir de «Os Meus Processos»; a gestão supervisiona a partir da fila.
   const papel = auth?.effectiveRole || auth?.user?.role;
   const daEquipa = papel === "indexacao";
+  // «Reabrir» um processo indexado (Nov 2026): quem o pode marcar como indexado (o Diretor não); o servidor decide.
+  const podeReabrirPeloPapel = ["indexacao", "master", "admin", "ceo"].includes(papel);
   // «Voltar à fila» foi extinto com a fila-pool: quem trabalha como Index regressa a «Os meus processos»;
   // os outros perfis voltam pelo menu (ou pelo «Voltar» do browser, que devolve a lista como estava).
   const irParaOsMeus = () => navigate("/processos");
@@ -338,7 +459,8 @@ export default function IndexWorkstationPage() {
     );
   }
 
-  const { processo, ficheiros, trabalhos, alertas, jobsActivos } = bancada;
+  const { processo, ficheiros, trabalhos, alertas, jobsActivos, ia } = bancada;
+  const iaIndisponivel = ia?.disponivel === false;
   const aRever = totalDeCamposARever(trabalhos);
   const semNif = trabalhosSemNifConfirmado(trabalhos);
   const ocupado = haJobActivo(jobsActivos);
@@ -394,6 +516,7 @@ export default function IndexWorkstationPage() {
           actions={
             daEquipa ? (
               <span className="flex flex-wrap items-center gap-2">
+                <ReabrirProcesso processo={processo} daEquipa reabrir={m.reabrir} />
                 {podeAssumir && (
                   <Button
                     onClick={() => m.assumir.mutate()}
@@ -412,6 +535,8 @@ export default function IndexWorkstationPage() {
                   Os meus processos
                 </Button>
               </span>
+            ) : podeReabrirPeloPapel ? (
+              <ReabrirProcesso processo={processo} daEquipa={false} reabrir={m.reabrir} />
             ) : undefined
           }
         />
@@ -419,6 +544,8 @@ export default function IndexWorkstationPage() {
         <IndexActionsBar
           somenteLeitura={deOutro}
           motivoSomenteLeitura={motivoDeOutro}
+          iaIndisponivel={iaIndisponivel}
+          motivoIaIndisponivel={ia?.mensagem}
           processo={processo}
           jobsActivos={jobsActivos}
           aAnalisar={m.analisar.isPending}
@@ -432,6 +559,15 @@ export default function IndexWorkstationPage() {
           onMarcar={aoMarcar}
         />
 
+        {iaIndisponivel && (
+          <Alert variant="destructive" data-testid="index-ia-indisponivel">
+            <AlertTitle>A IA não está disponível</AlertTitle>
+            <AlertDescription>
+              {ia?.mensagem || "«Analisar» e «Extrair dados» voltam a ficar activos quando a IA responder."}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {ocupado && (
           <Alert data-testid="index-job-activo">
             <AlertTitle className="flex items-center gap-2">
@@ -443,77 +579,50 @@ export default function IndexWorkstationPage() {
           </Alert>
         )}
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Documentos</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <UploadNaBancada
-                processId={processo.id}
-                nomesExistentes={ficheiros.map((f) => f.filename)}
-                titulares={processo.titulares || []}
-                onConcluido={aoAdicionar}
-              />
-              <ListaDeFicheiros
-                ficheiros={ficheiros}
-                processoId={processo.id}
-                onVer={(documentos, titulo) => setAVer({ documentos, titulo })}
-                onDescarregar={descarregar}
-                emCurso={emCurso}
-                titulares={processo.titulares || []}
-                onMudarTitular={(documentId, titular) => m.mudarTitular.mutate({ documentId, titular })}
-                motivoSomenteLeitura={motivoDeOutro}
-                onAnalisar={(documentId, tipo) => m.analisarFicheiro.mutate({ documentId, tipo })}
-                aAnalisarId={m.analisarFicheiro.isPending ? m.analisarFicheiro.variables?.documentId : null}
-                motivoSemAnalise={ocupado ? "Já há uma análise a correr neste processo." : undefined}
-              />
-            </CardContent>
-          </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Documentos</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <UploadNaBancada
+              processId={processo.id}
+              nomesExistentes={ficheiros.map((f) => f.filename)}
+              titulares={processo.titulares || []}
+              onConcluido={aoAdicionar}
+            />
+            <ListaDeFicheiros
+              ficheiros={ficheiros}
+              processoId={processo.id}
+              onVer={(documentos, titulo) => setAVer({ documentos, titulo })}
+              onDescarregar={descarregar}
+              emCurso={emCurso}
+              titulares={processo.titulares || []}
+              onMudarTitular={(documentId, titular) => m.mudarTitular.mutate({ documentId, titular })}
+              motivoSomenteLeitura={motivoDeOutro}
+              onAnalisar={(documentId, tipo) => m.analisarFicheiro.mutate({ documentId, tipo })}
+              aAnalisarId={m.analisarFicheiro.isPending ? m.analisarFicheiro.variables?.documentId : null}
+              onEliminar={(documentId) => m.eliminarFicheiro.mutate({ documentId })}
+              aEliminarId={m.eliminarFicheiro.isPending ? m.eliminarFicheiro.variables?.documentId : null}
+              motivoSemAnalise={
+                iaIndisponivel
+                  ? ia?.mensagem || "A IA não está disponível de momento."
+                  : ocupado
+                    ? "Já há uma análise a correr neste processo."
+                    : undefined
+              }
+            />
+          </CardContent>
+        </Card>
 
-          <Card data-testid="metadados-profissionais">
-            <CardHeader className="flex flex-row items-center justify-between pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                Metadados profissionais
-                {aRever > 0 && <Badge variant="secondary">{aRever} campo(s) a rever</Badge>}
-              </CardTitle>
-              <span title={motivoDeOutro}>
-                <Button size="sm" variant="outline" disabled={deOutro} onClick={() => setPainelAberto(true)} title={motivoDeOutro}>
-                  <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-                  Rever
-                </Button>
-              </span>
-            </CardHeader>
-            <CardContent>
-              {trabalhos.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Ainda sem dados extraídos. Use «Analisar» para ler os recibos de vencimento.
-                </p>
-              ) : (
-                <ul className="divide-y divide-border">
-                  {trabalhos.map((t) => (
-                    <li key={t.job_id} className="py-2 text-sm">
-                      <span className="font-medium">{valorDoCampo(t.employer_name) || "Entidade por identificar"}</span>
-                      {ROTULO_DO_TITULAR[t.titular] && (
-                        <Badge variant="outline" className="ml-2" data-testid="emprego-titular">
-                          {ROTULO_DO_TITULAR[t.titular]}
-                        </Badge>
-                      )}
-                      {NOME_DO_PAIS[t.country] && (
-                        <Badge variant="outline" className="ml-2" data-testid="emprego-pais">
-                          {NOME_DO_PAIS[t.country]}
-                        </Badge>
-                      )}
-                      <span className="ml-2 text-muted-foreground">
-                        {formatarDinheiro(valorDoCampo(t.net_salary), t.currency)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        {/* Metadados profissionais (Nov 2026): raramente há dados, por isso deixou de ocupar meio ecrã ao
+            lado dos documentos. Sem dados é uma linha; com dados, uma grelha compacta. */}
+        <MetadadosProfissionais
+          trabalhos={trabalhos}
+          aRever={aRever}
+          somenteLeitura={deOutro}
+          motivoSomenteLeitura={motivoDeOutro}
+          onRever={() => setPainelAberto(true)}
+        />
 
         <AlertMatrix
           alertas={alertas}

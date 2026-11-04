@@ -1,90 +1,49 @@
 /**
- * SystemAdminPanel — Painel de Administração do Sistema (separado do dashboard operacional).
+ * SystemAdminPanel — «Administração»: o ÚNICO painel de administração.
  *
- * PORQUÊ: O AdminDashboard misturava tabs de negócio (Visão Geral, Calendário, etc.)
- * com tabs de administração/configuração do sistema (Utilizadores, Configurações, Backups, etc.).
- * Esta separação cria um painel dedicado à gestão administrativa e técnica, enquanto
- * o AdminDashboard mantém apenas as funcionalidades operacionais de negócio.
+ * REVISÃO DO PAINEL (Flavio, Nov 2026)
+ * ====================================
+ * Antes havia três ecrãs com o mesmo nome (`/admin`, `/admin/organizacao` e este),
+ * Empresas e Utilizadores repetidos e definições globais misturadas com as da
+ * empresa. Agora é um painel em cinco grupos — Equipa, A empresa, Operação,
+ * Conformidade e Sistema — e cada definição aparece num só sítio. O registo dos
+ * grupos, das secções e de quem vê cada uma está em `utils/painelAdminGrupos.js`.
  *
- * DECISÕES ARQUITECTURAIS:
- * - Tabs organizadas em categorias visuais:
- *   1. GESTÃO (amber/gold): Utilizadores, Permissões, Configurações, Automações, Empresas —
- *      visíveis para admin e CEO.
- *   2. CUSTOMIZAÇÃO (emerald/green): Formulários, Templates (visíveis para master,
- *      admin e CEO); Estados de Workflow só para o MASTER (são globais).
- *   3. COMUNICAÇÕES (sky/blue): Contas de Email do sistema, Notificações —
- *      visíveis APENAS para o MASTER (configuração global).
- *   4. COMPLIANCE (violet/purple): RGPD, Auditoria —
- *      visíveis para master, admin e CEO (cada um só vê a sua rede);
- *      o Registo de Histórico só para o MASTER.
- *   5. TÉCNICO (red): Backups, Logs & Diagnósticos, Inteligência Artificial, Processos BG —
- *      visíveis APENAS para o role "master" (o único perfil global). Admin e
- *      CEO são perfis LOCAIS e nunca vêem infraestrutura.
- * - Sub-tabs nas tabs "Customização", "Comunicações", "Compliance" e "Técnico"
- *   para organizar as páginas órfãs que ficaram inacessíveis após a refatoração
- *   da Sidebar do DashboardLayout.
- * - Botão "Voltar ao Dashboard" para navegação de regresso ao AdminDashboard operacional.
- * - Todas as páginas integradas usam o modo `embedded={true}` para não renderizar
- *   o DashboardLayout interno.
+ * * O grupo e a secção vivem no URL (`?grupo=&seccao=`): sobrevivem a um refresh e
+ *   partilham-se. Links antigos (`?tab=` e `/admin/organizacao`) são traduzidos.
+ * * Decide-se pelo PERFIL EFECTIVO (o do seletor), nunca pelo `user.role`; a conta
+ *   Master vê tudo (como o servidor, `conta_master_passa`).
+ * * Divulgação progressiva: primeiro escolhe-se o grupo, depois a secção.
  *
- * @context {AuthContext} — Consome user para verificar permissões (role admin)
- *
- * @route /system-admin — Rota do painel de administração do sistema
- *
- * @example
- * <SystemAdminPanel />
- * // Acesso via layout protegido — visível para roles admin e CEO
- * // Tabs técnicas exclusivas do admin
+ * @route /system-admin
  */
-import { useState, lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { Button } from "../components/ui/button";
 import { useAuth } from "../contexts/AuthContext";
+import { isMaster as eContaMaster } from "../utils/roleUtils";
 import {
-  Users, Settings, Zap, Lock, ArrowLeft,
-  // Customização
-  Palette, GitBranch, FileText, LayoutTemplate,
-  // Comunicações
-  MessageSquare, Mail, Bell,
-  // Compliance
-  ShieldCheck, Scale, ClipboardList,
-  // Técnico
-  Shield, AlertTriangle, Database, Brain, Activity,
-  // Finanças
-  Landmark,
-  // Gestão de Empresas
-  Building2
-} from "lucide-react";
-import { useNavigate } from "react-router-dom";
-import { hasRole } from "../utils/roleUtils";
-import {
-  AMBITO_EMPRESA,
-  AMBITO_SISTEMA,
-  ROTULOS_DOS_AMBITOS,
-  ambitoDaSeccao,
-  ambitoEmVigor,
-  ambitosVisiveis,
-  avisoDoAmbito,
-  nomeDaEmpresaActiva,
-  primeiraSeccaoDoAmbito,
-} from "../utils/painelAdminAmbitos";
+  DESTINOS_ANTIGOS,
+  gruposVisiveis,
+  seccaoEmVigor,
+} from "../utils/painelAdminGrupos";
+import { nomeDaEmpresaActiva } from "../utils/painelAdminAmbitos";
+import { Building2, Cog, ShieldCheck, Users, Workflow } from "lucide-react";
 
-// Embedded pages — Gestão (eager: leves)
 import UsersAccessAdminTab from "../components/admin/UsersAccessAdminTab";
 import CompaniesAdminTab from "../components/admin/CompaniesAdminTab";
-import AutomationPage from "./AutomationPage";
+import PartnersAdminTab from "../components/admin/PartnersAdminTab";
 import PermissionsTab from "../components/admin/PermissionsTab";
 import HistoryTrackingPanel from "../components/admin/HistoryTrackingPanel";
 import RgpdAnonimizacaoPanel from "../components/admin/RgpdAnonimizacaoPanel";
+import WorkflowSoLeitura from "../components/admin/WorkflowSoLeitura";
+import AutomationPage from "./AutomationPage";
 
-// PACOTE AZ: Lazy loading para páginas pesadas que causam TDZ
-// (Cannot access 'd' before initialization) devido a dependências
-// circulares indiretas no bundle do Vite.
+// PACOTE AZ: páginas pesadas em lazy (dependências circulares do bundle do Vite).
 const SystemConfigPage = lazy(() => import("./SystemConfigPage"));
 const WorkflowStatusesPage = lazy(() => import("./WorkflowStatusesPage"));
 const FormManagementPage = lazy(() => import("./FormManagementPage"));
-const TemplatesPage = lazy(() => import("./TemplatesPage"));
 const EmailAccountsPage = lazy(() => import("./EmailAccountsPage"));
 const NotificationSettingsPage = lazy(() => import("./NotificationSettingsPage"));
 const RGPDAdminPage = lazy(() => import("./RGPDAdminPage"));
@@ -96,483 +55,198 @@ const AIConfigPage = lazy(() => import("./AIConfigPage"));
 const BackgroundJobsPage = lazy(() => import("./BackgroundJobsPage"));
 const FinanceTab = lazy(() => import("../components/admin/FinanceTab"));
 
-// PACOTE BG: SystemEmailsSectionWrapper e IntegrationsConfigSectionWrapper
-// removidos — as sub-tabs 'Emails de Sistema' e 'Integrações' foram
-// eliminadas. As configurações estão cobertas em EmailAccountsPage e
-// no detalhe de cada Empresa (Pacote BF).
+const ICONES_DOS_GRUPOS = {
+  equipa: Users,
+  empresa: Building2,
+  operacao: Workflow,
+  conformidade: ShieldCheck,
+  sistema: Cog,
+};
 
-// Loader para Suspense
 const TabLoader = () => (
   <div className="flex items-center justify-center py-12">
     <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
   </div>
 );
 
+/** O conteúdo de cada secção. `soLeitura` é o acesso «consulta» (Diretor). */
+function ConteudoDaSeccao({ id, soLeitura, contaMaster }) {
+  const lazyPage = (Pagina, props = {}) => (
+    <Suspense fallback={<TabLoader />}>
+      <Pagina embedded {...props} />
+    </Suspense>
+  );
+  switch (id) {
+    case "utilizadores":
+      return <UsersAccessAdminTab isMaster={contaMaster} soLeitura={soLeitura} />;
+    case "parceiros":
+      return <PartnersAdminTab isMaster={contaMaster} />;
+    case "permissoes":
+      return <PermissionsTab />;
+    case "dados":
+      return <CompaniesAdminTab isMaster={contaMaster} />;
+    case "definicoes":
+      return lazyPage(SystemConfigPage, { ambito: "empresa" });
+    case "financas":
+      return (
+        <Suspense fallback={<TabLoader />}>
+          <FinanceTab soLeitura={soLeitura} podeGravarGlobal={contaMaster} />
+        </Suspense>
+      );
+    case "workflow":
+      return soLeitura ? <WorkflowSoLeitura /> : lazyPage(WorkflowStatusesPage);
+    case "formulario":
+      return lazyPage(FormManagementPage);
+    case "automacoes":
+      return <AutomationPage embedded />;
+    case "rgpd":
+      return lazyPage(RGPDAdminPage);
+    case "auditoria":
+      return lazyPage(AuditTrailPage);
+    case "anonimizacao":
+      return <RgpdAnonimizacaoPanel isMaster={contaMaster} />;
+    case "historico":
+      return <HistoryTrackingPanel />;
+    case "configuracao":
+      return lazyPage(SystemConfigPage, { ambito: "sistema" });
+    case "contas-email":
+      return lazyPage(EmailAccountsPage);
+    case "notificacoes":
+      return lazyPage(NotificationSettingsPage);
+    case "backups":
+      return lazyPage(BackupsPage);
+    case "logs":
+      return lazyPage(UnifiedLogsPage);
+    case "diagnosticos":
+      return lazyPage(DiagnosticsPage);
+    case "ia":
+      return lazyPage(AIConfigPage);
+    case "processos-bg":
+      return lazyPage(BackgroundJobsPage);
+    default:
+      return null;
+  }
+}
+
 const SystemAdminPanel = () => {
-  const navigate = useNavigate();
-  const { user, activeCompanyId } = useAuth();
+  const { user, effectiveRole, activeCompanyId } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const contaMaster = eContaMaster(user);
+  const grupos = useMemo(
+    () => gruposVisiveis({ perfil: effectiveRole || user?.role, contaMaster }),
+    [effectiveRole, user?.role, contaMaster],
+  );
 
-  // Perfil MASTER: o único global. As tabs técnicas e a configuração global do
-  // sistema (workflow, contas de email do sistema, notificações, histórico)
-  // são exclusivas dele — Admin e CEO são perfis LOCAIS (adenda de RBAC).
-  const isMaster = hasRole(user, "master");
-  // O WORKFLOW é a exceção: é POR REDE (cada empresa tem a sua operação), logo
-  // o Admin e o CEO editam o da rede em contexto e o Master o de qualquer uma.
-  const podeEditarWorkflow = isMaster || hasRole(user, "admin") || hasRole(user, "ceo");
-  // A anonimização RGPD de UM processo é do Master, do Admin e do CEO (na sua rede); o LOTE é só do
-  // Master (o painel decide pelo `isMaster`, e o servidor responde 403 a quem não o for).
-  const podeAnonimizar = isMaster || hasRole(user, "admin") || hasRole(user, "ceo");
+  // Links antigos (`?tab=` do painel antigo e de `/admin/organizacao`).
+  const antigo = DESTINOS_ANTIGOS[searchParams.get("tab")];
+  const grupoPedido = searchParams.get("grupo") || antigo?.grupo;
+  const seccaoPedida = searchParams.get("seccao") || antigo?.seccao;
+  const { grupo, seccao } = seccaoEmVigor(grupos, grupoPedido, seccaoPedida);
 
-  const [activeTab, setActiveTab] = useState("users-mgmt");
-  const [ambitoPedido, setAmbitoPedido] = useState(AMBITO_EMPRESA);
-  // Lote 4, ponto 6: dois âmbitos, que não se misturam numa só fila. O
-  // global é do Master; quem é local nunca o vê (ver `utils/painelAdminAmbitos`).
-  const ambito = ambitoEmVigor(ambitoPedido, { isMaster });
-  const ambitos = ambitosVisiveis({ isMaster });
-  const nomeDaEmpresa = nomeDaEmpresaActiva(user, activeCompanyId);
-  // Cada separador declara o seu âmbito no registo; um que lá não esteja
-  // não se desenha em nenhum (e o teste da página falha).
-  const mostra = (valor) => ambitoDaSeccao(valor) === ambito;
+  useEffect(() => {
+    if (!antigo) return;
+    const novo = new URLSearchParams(searchParams);
+    novo.delete("tab");
+    novo.set("grupo", antigo.grupo);
+    novo.set("seccao", antigo.seccao);
+    setSearchParams(novo, { replace: true });
+  }, [antigo, searchParams, setSearchParams]);
 
-  const mudarAmbito = (novo) => {
-    setAmbitoPedido(novo);
-    setActiveTab(primeiraSeccaoDoAmbito(novo));
+  const irPara = (grupoId, seccaoId) => {
+    // `tab` é o sub-separador de algumas secções (Definições): não passa de uma para outra.
+    setSearchParams(seccaoId ? { grupo: grupoId, seccao: seccaoId } : { grupo: grupoId }, { replace: true });
   };
+
+  const nomeDaEmpresa = nomeDaEmpresaActiva(user, activeCompanyId);
 
   return (
     <DashboardLayout>
       <div className="space-y-6" data-testid="system-admin-panel">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">
-              Painel de Administração do Sistema
-            </h1>
-            <p className="text-muted-foreground">
-              Configurações, gestão de utilizadores e ferramentas técnicas
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2 shrink-0"
-            onClick={() => navigate("/admin")}
-            data-testid="back-to-dashboard-btn"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Voltar ao Dashboard
-          </Button>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Administração</h1>
+          <p className="text-muted-foreground">
+            {nomeDaEmpresa
+              ? `A configurar: ${nomeDaEmpresa}. Muda a empresa no seletor do topo.`
+              : "Escolha o que quer configurar."}
+          </p>
         </div>
 
-        {/* Âmbito: empresa em contexto vs sistema global (Lote 4, ponto 6) */}
-        {ambitos.length > 1 && (
-          <div
-            role="tablist"
-            aria-label="Âmbito das configurações"
-            className="grid gap-2 sm:grid-cols-2"
-            data-testid="seletor-de-ambito"
-          >
-            {ambitos.map((a) => (
-              <button
-                key={a}
-                type="button"
-                role="tab"
-                aria-selected={ambito === a}
-                onClick={() => mudarAmbito(a)}
-                data-testid={`ambito-${a}`}
-                className={`rounded-lg border px-4 py-3 text-left text-sm transition-colors ${
-                  ambito === a
-                    ? "border-primary bg-primary/10 font-semibold text-foreground"
-                    : "border-border text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                {ROTULOS_DOS_AMBITOS[a]}
-              </button>
-            ))}
-          </div>
-        )}
-        <p
-          className={`rounded-md border px-3 py-2 text-xs ${
-            ambito === AMBITO_SISTEMA
-              ? "border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100"
-              : "border-border bg-muted/40 text-muted-foreground"
-          }`}
-          data-testid="aviso-do-ambito"
-        >
-          <strong>{ROTULOS_DOS_AMBITOS[ambito]}</strong> — {avisoDoAmbito(ambito, nomeDaEmpresa)}
-        </p>
-
-        {/* Main Tabs — Administração do Sistema */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">
-            <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
-              {/* === TABS DE GESTÃO (amber/gold) === */}
-              {mostra("users-mgmt") && (
-              <TabsTrigger
-                value="users-mgmt"
-                className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
-                data-testid="tab-users-mgmt"
-              >
-                <Users className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Utilizadores</span>
-                <span className="sm:hidden">Users</span>
-              </TabsTrigger>
-              )}
-              {mostra("permissions") && (
-              <TabsTrigger
-                value="permissions"
-                className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
-                data-testid="tab-permissions"
-              >
-                <Lock className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Permissões</span>
-                <span className="sm:hidden">Perms</span>
-              </TabsTrigger>
-              )}
-              {mostra("config") && (
-              <TabsTrigger
-                value="config"
-                className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
-                data-testid="tab-config"
-              >
-                <Settings className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Configurações</span>
-                <span className="sm:hidden">Config</span>
-              </TabsTrigger>
-              )}
-              {mostra("automation") && (
-              <TabsTrigger
-                value="automation"
-                className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
-                data-testid="tab-automation"
-              >
-                <Zap className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Automações</span>
-                <span className="sm:hidden">Auto</span>
-              </TabsTrigger>
-              )}
-              {mostra("empresas") && (
-              <TabsTrigger
-                value="empresas"
-                className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
-                data-testid="tab-empresas"
-              >
-                <Building2 className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Empresas</span>
-                <span className="sm:hidden">Emp</span>
-              </TabsTrigger>
-              )}
-
-              {/* Separador visual */}
-              {ambito === AMBITO_EMPRESA && <div className="w-px h-6 bg-border mx-1 self-center" />}
-
-              {/* === TAB FINANÇAS (amber/gold) === */}
-              {mostra("financas") && (
-              <TabsTrigger
-                value="financas"
-                className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
-                data-testid="tab-financas"
-              >
-                <Landmark className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Finanças</span>
-                <span className="sm:hidden">Fin</span>
-              </TabsTrigger>
-              )}
-
-              {/* Separador visual */}
-              {ambito === AMBITO_EMPRESA && <div className="w-px h-6 bg-border mx-1 self-center" />}
-
-              {/* === TAB CUSTOMIZAÇÃO (emerald/green) === */}
-              {mostra("customizacao") && (
-              <TabsTrigger
-                value="customizacao"
-                className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-emerald-600 dark:text-emerald-400"
-                data-testid="tab-customizacao"
-              >
-                <Palette className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Customização</span>
-                <span className="sm:hidden">Custom</span>
-              </TabsTrigger>
-              )}
-
-              {/* === TAB COMUNICAÇÕES (sky/blue) === */}
-              {isMaster && mostra("comunicacoes") && (
-                <TabsTrigger
-                  value="comunicacoes"
-                  className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-sky-600 dark:text-sky-400"
-                  data-testid="tab-comunicacoes"
-                >
-                  <MessageSquare className="h-4 w-4 shrink-0" />
-                  <span className="hidden sm:inline">Comunicações</span>
-                  <span className="sm:hidden">Comms</span>
-                </TabsTrigger>
-              )}
-
-              {/* === TAB COMPLIANCE (violet/purple) === */}
-              {mostra("compliance") && (
-              <TabsTrigger
-                value="compliance"
-                className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-violet-600 dark:text-violet-400"
-                data-testid="tab-compliance"
-              >
-                <ShieldCheck className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Compliance</span>
-                <span className="sm:hidden">Compl</span>
-              </TabsTrigger>
-              )}
-
-              {/* === TAB TÉCNICO (red, exclusiva do Master) === */}
-              {isMaster && mostra("tecnico") && (
-                <>
-                  <TabsTrigger
-                    value="tecnico"
-                    className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-red-600 dark:text-red-400"
-                    data-testid="tab-tecnico"
+        {!grupo ? (
+          <p className="rounded-md border border-border bg-muted/40 px-3 py-6 text-center text-sm text-muted-foreground" data-testid="painel-sem-acesso">
+            O seu perfil não tem nada para configurar aqui.
+          </p>
+        ) : (
+          <>
+            {/* 1.º passo — o grupo (divulgação progressiva) */}
+            <nav
+              aria-label="Grupos da administração"
+              className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5"
+              data-testid="grupos-do-painel"
+            >
+              {grupos.map((g) => {
+                const Icone = ICONES_DOS_GRUPOS[g.id] || Cog;
+                const activo = g.id === grupo.id;
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => irPara(g.id)}
+                    aria-current={activo ? "page" : undefined}
+                    data-testid={`grupo-${g.id}`}
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                      activo
+                        ? "border-primary bg-primary/10 font-semibold text-foreground"
+                        : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
                   >
-                    <Shield className="h-4 w-4 shrink-0" />
-                    <span className="hidden sm:inline">Técnico</span>
-                    <span className="sm:hidden">Tech</span>
-                  </TabsTrigger>
-                </>
-              )}
-            </TabsList>
-          </div>
+                    <Icone className={`h-4 w-4 shrink-0 ${activo ? "text-primary" : ""}`} />
+                    <span className="truncate">{g.rotulo}</span>
+                  </button>
+                );
+              })}
+            </nav>
 
-          {/* ================================================================ */}
-          {/* === CONTEÚDO DAS TABS DE GESTÃO (amber/gold) === */}
-          {/* ================================================================ */}
+            <p
+              className={`rounded-md border px-3 py-2 text-xs ${
+                grupo.id === "sistema"
+                  ? "border-destructive/40 bg-destructive/10 text-foreground"
+                  : "border-border bg-muted/40 text-muted-foreground"
+              }`}
+              data-testid="descricao-do-grupo"
+            >
+              <strong>{grupo.rotulo}</strong> — {grupo.descricao}
+            </p>
 
-          {/* Utilizadores — contas + UCR (tab consolidada, Pacote DY) */}
-          <TabsContent value="users-mgmt" className="mt-6">
-            <UsersAccessAdminTab isMaster={isMaster} />
-          </TabsContent>
-
-          {/* Permissões Granulares — PermissionsTab */}
-          <TabsContent value="permissions" className="mt-6">
-            <PermissionsTab />
-          </TabsContent>
-
-          {/* Configurações Gerais — SystemConfigPage em modo embedded */}
-          <TabsContent value="config" className="mt-6">
-            <Suspense fallback={<TabLoader />}><SystemConfigPage embedded={true} /></Suspense>
-          </TabsContent>
-
-          {/* Automações — AutomationPage em modo embedded */}
-          <TabsContent value="automation" className="mt-6">
-            <AutomationPage embedded={true} />
-          </TabsContent>
-
-          {/* Empresas — CompaniesAdminTab */}
-          <TabsContent value="empresas" className="mt-6">
-            <CompaniesAdminTab isMaster={isMaster} />
-          </TabsContent>
-
-          {/* ================================================================ */}
-          {/* === TAB FINANÇAS — FinanceTab (amber/gold) === */}
-          {/* ================================================================ */}
-          <TabsContent value="financas" className="mt-6">
-            <Suspense fallback={<TabLoader />}><FinanceTab /></Suspense>
-          </TabsContent>
-
-          {/* ================================================================ */}
-          {/* === TAB CUSTOMIZAÇÃO — Sub-tabs (emerald/green) === */}
-          {/* ================================================================ */}
-          <TabsContent value="customizacao" className="mt-6">
-            <Tabs defaultValue={podeEditarWorkflow ? "workflow-statuses" : "form-management"} className="w-full">
-              <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">
+            {/* 2.º passo — a secção */}
+            <Tabs value={seccao.id} onValueChange={(v) => irPara(grupo.id, v)}>
+              <div className="w-full overflow-x-auto -mx-1 px-1">
                 <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
-                  {podeEditarWorkflow && (
-                    <TabsTrigger value="workflow-statuses" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                      <GitBranch className="h-4 w-4" />
-                      <span className="hidden sm:inline">Estados de Workflow</span>
-                      <span className="sm:hidden">Workflow</span>
+                  {grupo.seccoes.map((s) => (
+                    <TabsTrigger
+                      key={s.id}
+                      value={s.id}
+                      className="text-xs sm:text-sm whitespace-nowrap"
+                      data-testid={`seccao-${s.id}`}
+                    >
+                      {s.rotulo}
+                      {s.acesso === "consulta" && (
+                        <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">(consulta)</span>
+                      )}
                     </TabsTrigger>
-                  )}
-                  <TabsTrigger value="form-management" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <FileText className="h-4 w-4" />
-                    <span className="hidden sm:inline">Formulários</span>
-                    <span className="sm:hidden">Forms</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="templates" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <LayoutTemplate className="h-4 w-4" />
-                    <span className="hidden sm:inline">Templates</span>
-                    <span className="sm:hidden">Tmpl</span>
-                  </TabsTrigger>
-
+                  ))}
                 </TabsList>
               </div>
-              {podeEditarWorkflow && (
-                <TabsContent value="workflow-statuses" className="mt-4">
-                  <Suspense fallback={<TabLoader />}><WorkflowStatusesPage embedded={true} /></Suspense>
-                </TabsContent>
-              )}
-              <TabsContent value="form-management" className="mt-4">
-                <Suspense fallback={<TabLoader />}><FormManagementPage embedded={true} /></Suspense>
-              </TabsContent>
-              <TabsContent value="templates" className="mt-4">
-                <Suspense fallback={<TabLoader />}><TemplatesPage embedded={true} /></Suspense>
-              </TabsContent>
-
-            </Tabs>
-          </TabsContent>
-
-          {/* ================================================================ */}
-          {/* === TAB COMUNICAÇÕES — Sub-tabs (sky/blue) === */}
-          {/* ================================================================ */}
-          {isMaster && (
-            <TabsContent value="comunicacoes" className="mt-6">
-              <Tabs defaultValue="email-accounts" className="w-full">
-                <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">
-                  <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
-                    <TabsTrigger value="email-accounts" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                      <Mail className="h-4 w-4" />
-                      <span className="hidden sm:inline">Contas de Email</span>
-                      <span className="sm:hidden">Email</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="notifications" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                      <Bell className="h-4 w-4" />
-                      <span className="hidden sm:inline">Notificações</span>
-                      <span className="sm:hidden">Notif</span>
-                    </TabsTrigger>
-
-                    {/* PACOTE BG: Sub-separadores 'Emails de Sistema' e 'Integrações'
-                        removidos — estas configurações estão cobertas no
-                        EmailAccountsPage (SystemSmtpCard, IndexationImapCard) e
-                        no detalhe de cada Empresa (Pacote BF). */}
-                  </TabsList>
-                </div>
-                <TabsContent value="email-accounts" className="mt-4">
-                  <Suspense fallback={<TabLoader />}><EmailAccountsPage embedded={true} /></Suspense>
-                </TabsContent>
-                <TabsContent value="notifications" className="mt-4">
-                  <Suspense fallback={<TabLoader />}><NotificationSettingsPage embedded={true} /></Suspense>
-                </TabsContent>
-              </Tabs>
-            </TabsContent>
-          )}
-
-          {/* ================================================================ */}
-          {/* === TAB COMPLIANCE — Sub-tabs (violet/purple) === */}
-          {/* ================================================================ */}
-          <TabsContent value="compliance" className="mt-6">
-            <Tabs defaultValue="rgpd" className="w-full">
-              <TabsList>
-                <TabsTrigger value="rgpd" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                  <Scale className="h-4 w-4" />
-                  <span className="hidden sm:inline">RGPD</span>
-                  <span className="sm:hidden">RGPD</span>
-                </TabsTrigger>
-                <TabsTrigger value="audit" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                  <ClipboardList className="h-4 w-4" />
-                  <span className="hidden sm:inline">Auditoria</span>
-                  <span className="sm:hidden">Audit</span>
-                </TabsTrigger>
-                {podeAnonimizar && (
-                  <TabsTrigger value="anonimizacao" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap" data-testid="subtab-anonimizacao">
-                    <ShieldCheck className="h-4 w-4" />
-                    <span className="hidden sm:inline">Anonimização</span>
-                    <span className="sm:hidden">Anon.</span>
-                  </TabsTrigger>
+              <TabsContent value={seccao.id} className="mt-4">
+                {seccao.acesso === "consulta" && (
+                  <p className="mb-3 text-xs text-muted-foreground" data-testid="aviso-so-consulta">
+                    Só consulta: o seu perfil vê, mas não altera.
+                  </p>
                 )}
-                {/* Controlo de histórico (Bloco 1, ponto 4) — só o Master */}
-                {isMaster && (
-                  <TabsTrigger value="history-tracking" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <ClipboardList className="h-4 w-4" />
-                    <span className="hidden sm:inline">Registo de Histórico</span>
-                    <span className="sm:hidden">Histórico</span>
-                  </TabsTrigger>
-                )}
-              </TabsList>
-              <TabsContent value="rgpd" className="mt-4">
-                <Suspense fallback={<TabLoader />}><RGPDAdminPage embedded={true} /></Suspense>
+                <ConteudoDaSeccao id={seccao.id} soLeitura={seccao.acesso === "consulta"} contaMaster={contaMaster} />
               </TabsContent>
-              <TabsContent value="audit" className="mt-4">
-                <Suspense fallback={<TabLoader />}><AuditTrailPage embedded={true} /></Suspense>
-              </TabsContent>
-              {podeAnonimizar && (
-                <TabsContent value="anonimizacao" className="mt-4">
-                  <RgpdAnonimizacaoPanel isMaster={isMaster} />
-                </TabsContent>
-              )}
-              {isMaster && (
-                <TabsContent value="history-tracking" className="mt-4">
-                  <HistoryTrackingPanel />
-                </TabsContent>
-              )}
             </Tabs>
-          </TabsContent>
-
-          {/* ================================================================ */}
-          {/* === TAB TÉCNICO — Sub-tabs (red, exclusivas do Master) === */}
-          {/* ================================================================ */}
-          {isMaster && (
-            <TabsContent value="tecnico" className="mt-6">
-              <Tabs defaultValue="backups" className="w-full">
-                <div className="w-full overflow-x-auto scrollbar-hide -mx-1 px-1">
-                  <TabsList className="inline-flex w-max min-w-full h-auto p-1 gap-1">
-                    <TabsTrigger value="backups" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                      <Shield className="h-4 w-4" />
-                      <span className="hidden sm:inline">Backups</span>
-                      <span className="sm:hidden">Backup</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="logs" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                      <AlertTriangle className="h-4 w-4" />
-                      <span className="hidden sm:inline">Logs</span>
-                      <span className="sm:hidden">Logs</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="ai-config" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                      <Brain className="h-4 w-4" />
-                      <span className="hidden sm:inline">Inteligência Artificial</span>
-                      <span className="sm:hidden">AI</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="bg-jobs" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                      <Activity className="h-4 w-4" />
-                      <span className="hidden sm:inline">Processos BG</span>
-                      <span className="sm:hidden">BG Jobs</span>
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-
-                {/* Backups — BackupsPage em modo embedded */}
-                <TabsContent value="backups" className="mt-4">
-                  <Suspense fallback={<TabLoader />}><BackupsPage embedded={true} /></Suspense>
-                </TabsContent>
-
-                {/* Logs — Sub-tabs com UnifiedLogsPage e DiagnosticsPage */}
-                <TabsContent value="logs" className="mt-4">
-                  <Tabs defaultValue="system-logs" className="w-full">
-                    <TabsList>
-                      <TabsTrigger value="system-logs" className="gap-1.5">
-                        <AlertTriangle className="h-4 w-4" />
-                        Logs do Sistema
-                      </TabsTrigger>
-                      <TabsTrigger value="diagnostics" className="gap-1.5">
-                        <Database className="h-4 w-4" />
-                        Diagnósticos
-                      </TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="system-logs" className="mt-4">
-                      <Suspense fallback={<TabLoader />}><UnifiedLogsPage embedded={true} /></Suspense>
-                    </TabsContent>
-                    <TabsContent value="diagnostics" className="mt-4">
-                      <Suspense fallback={<TabLoader />}><DiagnosticsPage embedded={true} /></Suspense>
-                    </TabsContent>
-                  </Tabs>
-                </TabsContent>
-
-                {/* Inteligência Artificial — AIConfigPage em modo embedded */}
-                <TabsContent value="ai-config" className="mt-4">
-                  <Suspense fallback={<TabLoader />}><AIConfigPage embedded={true} /></Suspense>
-                </TabsContent>
-
-                {/* Processos BG — BackgroundJobsPage em modo embedded */}
-                <TabsContent value="bg-jobs" className="mt-4">
-                  <Suspense fallback={<TabLoader />}><BackgroundJobsPage embedded={true} /></Suspense>
-                </TabsContent>
-              </Tabs>
-            </TabsContent>
-          )}
-        </Tabs>
+          </>
+        )}
       </div>
     </DashboardLayout>
   );

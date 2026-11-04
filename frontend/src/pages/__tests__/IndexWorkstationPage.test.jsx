@@ -39,6 +39,7 @@ vi.mock("../../services/api", () => ({
   readBlobErrorBody: vi.fn(async () => null),
   analyzeIndexProcess: vi.fn(),
   analyzeIndexFile: vi.fn(),
+  deleteIndexFile: vi.fn(),
   extractIndexProcess: vi.fn(),
   editIndexJob: vi.fn(),
   dismissIndexAlert: vi.fn(),
@@ -892,5 +893,42 @@ describe("«Analisar» na linha de cada ficheiro (QA Index, Out 2026)", () => {
 
   it("a chamada passa pelo Axios (nunca um fetch cru)", () => {
     expect(apiFonte).toMatch(/export const analyzeIndexFile[\s\S]{0,200}api\.post\(/);
+  });
+});
+
+
+describe("ecrã do Index reorganizado e IA sem créditos (Nov 2026)", () => {
+  const semJobs = { ...BANCADA, active_jobs: { analysis: null, finalize: null, sanitize: null } };
+
+  it("sem metadados profissionais é uma linha, sem «Rever»", async () => {
+    montar({ ...semJobs, professional_metadata: { jobs: [], has_pending_review: false } });
+    const linha = await screen.findByTestId("metadados-profissionais");
+    expect(linha).toHaveTextContent(/Ainda sem dados extraídos/);
+    expect(screen.queryByRole("button", { name: /Rever/ })).not.toBeInTheDocument();
+  });
+
+  it("IA indisponível: «Analisar» e «Extrair dados» desligados, com o motivo", async () => {
+    const mensagem = "A IA está sem créditos: carregar créditos na conta OpenAI.";
+    montar({ ...semJobs, ai_status: { disponivel: false, motivo: "sem_creditos", mensagem } });
+    expect(await screen.findByTestId("index-ia-indisponivel")).toHaveTextContent(mensagem);
+    expect(screen.getByRole("button", { name: "Analisar" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Extrair dados" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Marcar como Indexado" })).toBeEnabled();
+  });
+
+  it("IA disponível: os botões ficam activos e não há aviso", async () => {
+    montar({ ...semJobs, ai_status: { disponivel: true } });
+    expect(await screen.findByRole("button", { name: "Analisar" })).toBeEnabled();
+    expect(screen.queryByTestId("index-ia-indisponivel")).not.toBeInTheDocument();
+  });
+
+  it("«Eliminar» pede confirmação e só então chama o servidor", async () => {
+    api.deleteIndexFile.mockResolvedValue({ data: { success: true, message: "Documento eliminado." } });
+    montar(semJobs);
+    await userEvent.click(await screen.findByRole("button", { name: "Eliminar — foto.jpg" }));
+    expect(api.deleteIndexFile).not.toHaveBeenCalled();
+    await userEvent.click(await screen.findByTestId("confirmar-eliminar"));
+    await waitFor(() => expect(api.deleteIndexFile).toHaveBeenCalledWith("proc-1", "d3"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Documento eliminado."));
   });
 });

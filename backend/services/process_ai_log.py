@@ -70,6 +70,7 @@ MOTIVOS = {
     "demasiado_grande": "Ficheiro demasiado grande para a IA (limite de 20 MB).",
     "ilegivel": "Não foi possível ler o ficheiro no armazenamento.",
     "sem_contexto": "Sem texto extraível: só foi possível usar o nome do ficheiro.",
+    "sem_creditos": "O serviço de IA está sem créditos: a análise só volta a funcionar depois de o administrador carregar créditos na conta OpenAI.",
     "limite_do_fornecedor": "O serviço de IA recusou por limite de utilização. Tente mais tarde.",
     "ia_nao_configurada": "O serviço de IA não está configurado ou recusou as credenciais.",
     "tempo_excedido": "O serviço de IA demorou demasiado a responder.",
@@ -88,7 +89,10 @@ MOTIVOS = {
 #: credencial, porque «rate limit … api key» tem as duas e mandar rever uma chave
 #: que está certa é pior do que dizer «tente mais tarde».
 _PISTAS_DE_FALHA = (
-    ("limite_do_fornecedor", ("rate limit", "rate_limit", "quota", "429", "too many requests", "insufficient_quota")),
+    # «sem créditos» é um 429 como o limite, mas «tente mais tarde» não o resolve: vem ANTES do limite
+    ("sem_creditos", ("insufficient_quota", "credit_balance_exhausted", "no credits remaining",
+                      "exceeded your current quota")),
+    ("limite_do_fornecedor", ("rate limit", "rate_limit", "quota", "429", "too many requests")),
     ("tempo_excedido", ("timeout", "timed out", "tempo excedido")),
     ("ia_nao_configurada", ("api key", "api_key", "apikey", "unauthorized", "401", "403", "not configured", "não configurad", "chave")),
     ("formato_nao_suportado", ("unsupported", "formato", "mime", "not supported", "não suportad")),
@@ -99,6 +103,13 @@ MAXIMO_POR_PAGINA = 100
 
 def classificar_falha(erro: Any) -> str:
     """Reduz o texto de uma falha a um CÓDIGO de ``MOTIVOS``. Nunca devolve o texto."""
+    # um `tenacity.RetryError` esconde o erro verdadeiro: «RetryError[<Future … raised …>]»
+    ultima = getattr(erro, "last_attempt", None)
+    if ultima is not None:
+        try:
+            erro = ultima.exception() or erro
+        except Exception:  # noqa: BLE001 — classificar nunca levanta
+            pass
     texto = str(erro or "").lower()
     for codigo, pistas in _PISTAS_DE_FALHA:
         if any(pista in texto for pista in pistas):

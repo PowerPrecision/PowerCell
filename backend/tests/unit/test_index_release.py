@@ -102,22 +102,46 @@ class TestLibertacao:
         assert s3.list_files_args == ("p-1", BASE)
 
     @pytest.mark.parametrize("categoria", [None, "", "  ", "Index", "index"])
-    async def test_sem_categoria_utilizavel_o_ficheiro_fica_e_conta(self, fake_async_db, ambiente, categoria):
+    async def test_sem_categoria_nenhuma_vai_para_outros_e_conta(self, fake_async_db, ambiente, categoria):
+        # Nov 2026: ficar na Index (que só o Index vê) escondia-o de quem trata o processo a seguir
         await _semear(fake_async_db, categorias={"x.pdf": categoria})
         s3 = S3Falso(["x.pdf"])
         _, patches = ambiente(s3)
         rep = await _correr(patches)
-        assert s3.renomeados == []
-        assert rep["sem_categoria"] == 1 and rep["movidos"] == 0
+        assert s3.renomeados == [(f"{INDEX}/x.pdf", f"{BASE}/Outros/x.pdf")]
+        assert rep["sem_categoria"] == 1 and rep["movidos"] == 1
         meta = await fake_async_db.document_metadata.find_one({"id": "m-x.pdf"})
-        assert meta["in_index_queue"] is True
+        assert meta["in_index_queue"] is False and meta["released_without_category"] is True
 
-    async def test_ficheiro_sem_registo_de_metadados_fica(self, fake_async_db, ambiente):
+    @pytest.mark.parametrize("nome, pasta", [
+        ("Extrato ago 2026.pdf", "Bancários"),
+        ("CC FRENTE.pdf", "Identificação"),
+        ("recibo de vencimento outubro.pdf", "Financeiros"),
+    ])
+    async def test_sem_ia_a_pasta_vem_do_tipo_que_o_index_conhece(self, fake_async_db, ambiente, nome, pasta):
+        # a OpenAI sem créditos: nenhum ficheiro tem `ai_category`, mas o nome diz o que é
+        await _semear(fake_async_db, categorias={nome: None})
+        s3 = S3Falso([nome])
+        _, patches = ambiente(s3)
+        rep = await _correr(patches)
+        assert s3.renomeados == [(f"{INDEX}/{nome}", f"{BASE}/{pasta}/{nome}")]
+        assert rep["movidos"] == 1 and rep["sem_categoria"] == 0
+
+    async def test_a_escolha_do_index_conta_como_categoria(self, fake_async_db, ambiente):
+        await _semear(fake_async_db, categorias={"07-Julho.pdf": None})
+        await fake_async_db.document_metadata.update_one(
+            {"id": "m-07-Julho.pdf"}, {"$set": {"index_type_override": "recibo_vencimento"}})
+        s3 = S3Falso(["07-Julho.pdf"])
+        _, patches = ambiente(s3)
+        await _correr(patches)
+        assert s3.renomeados == [(f"{INDEX}/07-Julho.pdf", f"{BASE}/Financeiros/07-Julho.pdf")]
+
+    async def test_ficheiro_sem_registo_de_metadados_vai_para_outros(self, fake_async_db, ambiente):
         await _semear(fake_async_db)
         s3 = S3Falso(["orfao.pdf"])
         _, patches = ambiente(s3)
         rep = await _correr(patches)
-        assert s3.renomeados == [] and rep["sem_categoria"] == 1
+        assert s3.renomeados == [(f"{INDEX}/orfao.pdf", f"{BASE}/Outros/orfao.pdf")] and rep["sem_categoria"] == 1
 
     async def test_processo_por_indexar_nao_move_nada(self, fake_async_db, ambiente):
         await _semear(fake_async_db, indexado=False, categorias={"cc.pdf": "Identificação"})

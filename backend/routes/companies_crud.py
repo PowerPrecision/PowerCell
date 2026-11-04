@@ -29,6 +29,7 @@ from services.companies_crud_api_list import (
     run_get_company,
 )
 from services.companies_crud_api_mutate import (
+    exigir_quem_grava_a_empresa,
     run_create_company,
     run_update_company,
     run_delete_company,
@@ -87,10 +88,10 @@ async def test_email_connection(data: CompanyEmailConnectionTest):
 
 @router.put("/{company_id}", response_model=CompanyResponse)
 async def update_company(
-    company_id: str, data: CompanyUpdate, user: dict = Depends(get_current_user),
+    company_id: str, data: CompanyUpdate, request: Request, user: dict = Depends(get_current_user),
 ):
-    """Atualiza os dados de uma empresa (a própria; a rede só o Master)."""
-    return await run_update_company(company_id, data, actor=user)
+    """Atualiza os dados de uma empresa (a própria, só CEO; a rede só o Master)."""
+    return await run_update_company(company_id, data, actor=user, request=request)
 
 
 @router.delete("/{company_id}")
@@ -109,8 +110,10 @@ async def delete_company(
 @router.post("/{company_id}/logo")
 async def upload_company_logo(
     company_id: str,
+    request: Request,
     file: UploadFile = File(...),
     user: dict = Depends(get_current_user),
 ):
-    """Faz upload do logótipo da empresa para o S3."""
+    """Faz upload do logótipo da empresa para o S3 (Master ou CEO)."""
+    await exigir_quem_grava_a_empresa(user, request)
     return await run_upload_company_logo(company_id, file, actor=user)

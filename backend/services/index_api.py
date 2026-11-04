@@ -47,13 +47,16 @@ from services.workflow_phases import carregar_fases, nomes_terminais, redes_com_
 
 logger = logging.getLogger(__name__)
 
-ABAS = ("pending", "reviews")
+ABAS = ("pending", "reviews", "indexed")
+#: As abas do que já foi indexado: «os meus» também é quem o indexou (ao indexar o processo deixa de ter Index).
+ABAS_DE_INDEXADOS = ("reviews", "indexed")
 
 PROJECCAO_DA_FILA = {
     "_id": 0, "id": 1, "process_number": 1, "client_name": 1, "status": 1, "created_at": 1,
     "updated_at": 1, "index_status": 1, "index_skipped": 1, "is_indexed": 1, "skip_index": 1,
     "assigned_indexacao_id": 1, "has_pending_review": 1, "index_alerts_open": 1,
     "indexed_at": 1, "indexed_by_name": 1, "index_stagnation_alerted_at": 1,
+    "index_reaberto": 1, "index_reopened_at": 1, "index_reopened_by_name": 1,
     "company_id": 1, "company_name": 1, CAMPO_REDE: 1,
     # quem carregou o processo (coluna «Carregado por»)
     **{campo: 1 for campo in CAMPOS_DE_QUEM_CARREGOU},
@@ -106,6 +109,10 @@ def _processo_dto(proc: dict, ficheiros: Optional[list[dict]] = None) -> dict[st
         "index_alerts_open": int(proc.get("index_alerts_open") or 0),
         "indexed_at": proc.get("indexed_at"),
         "indexed_by_name": proc.get("indexed_by_name"),
+        # reaberto (Nov 2026): já esteve indexado e voltou ao Index (novos recibos/extratos, por exemplo)
+        "reopened": proc.get("index_reaberto") is True,
+        "reopened_at": proc.get("index_reopened_at"),
+        "reopened_by_name": proc.get("index_reopened_by_name"),
         # o SLA do Index avisou que este processo estagnou (sem actividade); limpa-se quando o indexador volta a mexer
         "stagnant": bool(proc.get("index_stagnation_alerted_at")) and estado["index_status"] == estado_do_index.IN_REVIEW,
     }
@@ -125,6 +132,7 @@ async def _carregar_processo(process_id: str, user: dict) -> dict:
             "id", "process_number", "client_name", "status", "created_at", "updated_at", "index_status",
             "index_skipped", "is_indexed", "skip_index", "assigned_indexacao_id", "indexacao_name", "has_pending_review",
             "index_alerts_open", "indexed_at", "indexed_by_name", "network_id", "index_stagnation_alerted_at",
+            "index_reaberto", "index_reopened_at", "index_reopened_by_name", "indexed_by",
             "second_client_id", "second_client_name", "titular2_data.name", "titular2_data.nome", "s3_folder")}},
     )
     if not proc:
@@ -208,18 +216,24 @@ async def run_get_index_queue(
     # o âmbito resolve-se UMA vez: serve a condição da fila e o «é de outra rede» de cada linha
     scope = await tenant_network.resolve_vista_scope(user)
     rede = build_process_scope_condition(scope)
-    base = com_isolamento(rede, {
-        "$and": [
-            {"is_deleted": {"$ne": True}},
-            estado_do_index.condicao_da_fila(tab),
-            await condicao_de_processo_activo(),
-        ],
-    })
+    condicoes = [{"is_deleted": {"$ne": True}}, estado_do_index.condicao_da_fila(tab)]
+    # «Indexados» mostra também os processos já fechados no workflow: é para os voltar a VER (a reabertura de um
+    # processo fechado continua barrada pela guarda do router). As outras abas são trabalho: só os activos.
+    if tab != "indexed":
+        condicoes.append(await condicao_de_processo_activo())
+    base = com_isolamento(rede, {"$and": condicoes})
     if mine:
         # «Os Meus Processos»: só o que está atribuído a quem pergunta. Sem id de utilizador a condição NUNCA
         # casa (`assigned_indexacao_id: None` casaria com todos os processos por atribuir — a lista de outra pessoa).
+        # Nas abas do que já está indexado conta também quem o INDEXOU: ao indexar, o processo fica sem Index.
         meu = (user or {}).get("id")
-        base = {"$and": [base, {"assigned_indexacao_id": meu} if meu else {"id": {"$in": []}}]}
+        if not meu:
+            minha = {"id": {"$in": []}}
+        elif tab in ABAS_DE_INDEXADOS:
+            minha = {"$or": [{"assigned_indexacao_id": meu}, {"indexed_by": meu}]}
+        else:
+            minha = {"assigned_indexacao_id": meu}
+        base = {"$and": [base, minha]}
     consulta = base
     dos_filtros = consulta_da_fila.condicao_dos_filtros(tab, filtros, scope)
     if dos_filtros:
@@ -283,7 +297,8 @@ async def run_get_index_queue(
 async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, Any]:
     proc = await _carregar_processo(process_id, user)
     docs = await db.document_metadata.find(
-        {"process_id": process_id, "file_state": {"$ne": "purgado"}}, PROJECCAO_DOS_FICHEIROS
+        {"process_id": process_id, "file_state": {"$ne": "purgado"}, "is_deleted": {"$ne": True}},
+        PROJECCAO_DOS_FICHEIROS,
     ).to_list(500)
     # a lista é a MESMA da aba Documentos (a pasta S3); os registos do processo fora dela não se perdem
     da_pasta = await registos_da_pasta_do_processo(proc, PROJECCAO_DOS_FICHEIROS)
@@ -329,6 +344,8 @@ async def run_get_index_workstation(user: dict, process_id: str) -> dict[str, An
             for a in alertas
         ],
         "active_jobs": jobs,
+        # IA sem créditos (Nov 2026): o ecrã desliga «Analisar»/«Extrair dados» e diz porquê
+        "ai_status": await _estado_da_ia(),
     }
 
 
@@ -389,6 +406,110 @@ async def run_assumir_processo(user: dict, process_id: str) -> dict[str, Any]:
     return {"success": True, "assigned_indexacao_id": meu_id}
 
 
+MAX_MOTIVO_DA_REABERTURA = 500
+
+
+async def run_reabrir_processo(
+    user: dict, process_id: str, *, papel: str, all_roles: list, motivo: Optional[str] = None, broadcast_fn=None,
+) -> dict[str, Any]:
+    """«Reabrir» (Nov 2026): um processo já indexado volta ao trabalho do Index.
+
+    O pedido do Flavio: «posso ter terminado um processo hoje mas daqui a 2 meses pedem-me para analisar os
+    recibos e extratos desses 2 meses». Regras:
+
+    * quem pode: quem pode marcar como indexado (Index, Master, Admin, CEO) — o perfil EFECTIVO;
+    * o Index reabre PARA SI: fica atribuído a quem reabriu e já «Em tratamento». Conta para o limite de
+      15 processos activos (409 se já estiver no limite — o mesmo tecto da atribuição automática);
+    * a gestão reabre para a FILA: «Por indexar», sem dono, e a atribuição automática trata do resto;
+    * a fase do workflow NÃO muda (o processo já seguiu o seu caminho) e, ao voltar a marcar como indexado,
+      também não volta a saltar (`index_reaberto`, lido em `process_indexing`);
+    * o Index é invisível: sem histórico do processo, mas SEMPRE no `audit_trail` (com o motivo);
+    * escrita condicional (`is_indexed: True`): dois a reabrir ao mesmo tempo não se pisam (o segundo leva 409).
+    """
+    from services.process_indexing import assert_mark_indexed_permission
+
+    assert_mark_indexed_permission(papel, all_roles)
+    proc = await db.processes.find_one({"id": process_id, "is_deleted": {"$ne": True}}, {"_id": 0})
+    if not proc:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    if proc.get("is_indexed") is not True:
+        raise HTTPException(status_code=409, detail="Este processo não está indexado: não há nada para reabrir.")
+
+    do_index = (papel or "").lower() == "indexacao"
+    meu_id = (user or {}).get("id")
+    if do_index:
+        from services.process_assignment import MAX_ACTIVE_PROCESSES_PER_INDEXER, _count_active_processes_for_indexer
+
+        if await _count_active_processes_for_indexer(meu_id) >= MAX_ACTIVE_PROCESSES_PER_INDEXER:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Já tem {MAX_ACTIVE_PROCESSES_PER_INDEXER} processos activos. Termine um deles antes de "
+                    "reabrir este (ou peça à chefia que o atribua a outro indexador)."
+                ),
+            )
+
+    texto = (motivo or "").strip()[:MAX_MOTIVO_DA_REABERTURA] or None
+    campos = await estado_do_index.reabrir(process_id, proc, user, para_mim=do_index, motivo=texto)
+    if campos is None:
+        raise HTTPException(status_code=409, detail="O processo mudou entretanto (já foi reaberto). Actualize a página.")
+
+    # o rasto: SEMPRE no audit_trail (o Index é invisível no histórico, não na auditoria)
+    try:
+        from services.audit_trail_service import log_audit_event
+
+        await log_audit_event(
+            process_id=process_id, user=user, action="Indexação reaberta", field="is_indexed",
+            old_value="true", new_value="false", audit_reason=texto,
+            metadata={"origem": "index", "para_mim": do_index, "indexado_em": proc.get("indexed_at"),
+                      "indexado_por": proc.get("indexed_by_name")},
+        )
+    except Exception as exc:  # noqa: BLE001 — a auditoria nunca desfaz a reabertura
+        logger.warning("[INDEX] Auditoria da reabertura não gravada: %s", type(exc).__name__)
+    # a gestão não é invisível: fica também no histórico do processo (para o Index, `log_history` é mudo)
+    try:
+        from services.history import log_history
+
+        await log_history(
+            process_id, user=user, action="INDEXACAO_REABERTA", field="is_indexed", old_value="true", new_value="false",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX] Histórico da reabertura não gravado: %s", type(exc).__name__)
+
+    if not do_index:
+        # de volta à fila: a atribuição automática (menor carga, limite de 15) escolhe o indexador
+        try:
+            from services.process_assignment import assign_to_indexer
+
+            await assign_to_indexer(process_id, update_status=False)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[INDEX] Atribuição automática após reabertura falhou: %s", type(exc).__name__)
+
+    if broadcast_fn is not None:
+        try:
+            from services.websocket_manager import WSEventType
+
+            await broadcast_fn(
+                event_type=WSEventType.PROCESS_UPDATED, process_id=process_id,
+                client_name=proc.get("client_name", ""), status=proc.get("status"), old_status=proc.get("status"),
+                updated_at=campos.get("updated_at"), process=proc,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[INDEX] Broadcast da reabertura falhou: %s", type(exc).__name__)
+
+    return {
+        "success": True,
+        "process_id": process_id,
+        "is_indexed": False,
+        "index_status": campos["index_status"],
+        "assigned_indexacao_id": campos.get("assigned_indexacao_id"),
+        "message": (
+            "Processo reaberto: está atribuído a si e pronto a tratar."
+            if do_index else "Processo reaberto: voltou à fila do Index."
+        ),
+    }
+
+
 async def run_exigir_titularidade(user: dict, process_id: str, papel: str) -> None:
     """Guarda das escritas da bancada: o Index só age no que é seu (ver `index_status.exigir_titularidade`)."""
     estado_do_index.exigir_titularidade(await _carregar_processo(process_id, user), user, papel)
@@ -399,9 +520,23 @@ async def _trabalhou(user: dict, process_id: str) -> None:
     await estado_do_index.registar_trabalho(process_id, (user or {}).get("id"))
 
 
+async def _estado_da_ia() -> dict[str, Any]:
+    from services.ai_disponibilidade import estado_da_ia
+
+    return await estado_da_ia(db)
+
+
+async def _exigir_ia_disponivel() -> None:
+    """IA sem créditos → 503 com o motivo (o ecrã já desliga os botões; isto é para quem chama à mão)."""
+    estado = await _estado_da_ia()
+    if not estado["disponivel"]:
+        raise HTTPException(status_code=503, detail=estado["mensagem"])
+
+
 async def run_analyze_process(user: dict, process_id: str, *, force: bool = False) -> dict[str, Any]:
     """«Analisar» (`force=False`: só o que é novo ou mudou) e «Extrair dados» (`force=True`: tudo)."""
     await _carregar_processo(process_id, user)
+    await _exigir_ia_disponivel()
     resultado = await index_jobs.iniciar_analise(process_id, user, force=force, gatilho="manual")
     await _trabalhou(user, process_id)
     return {
@@ -432,6 +567,7 @@ async def run_analyze_document(
         raise HTTPException(status_code=422, detail="O original deste documento já foi eliminado: não há o que ler.")
     if doc.get("is_clean_pdf"):
         raise HTTPException(status_code=422, detail="O PDF limpo não se analisa: analise o documento original.")
+    await _exigir_ia_disponivel()
     if tipo is not None:
         await db.document_metadata.update_one({"id": document_id}, {"$set": {"index_type_override": tipo}})
     resultado = await index_jobs.iniciar_analise(
@@ -447,6 +583,82 @@ async def run_analyze_document(
             if resultado["iniciado"] else "Já há uma análise a correr neste processo. Tente quando terminar."
         ),
     }
+
+
+#: Para onde vão os BYTES de um documento eliminado pelo Index (Nov 2026). Fora da raiz documental
+#: («Documentação Clientes/…»): nenhum ecrã nem endpoint de cliente lá chega
+#: (`assert_path_within_document_root`), mas um administrador recupera-o se for preciso.
+PREFIXO_DOS_ELIMINADOS = "Eliminados"
+
+
+def _mover_para_os_eliminados(origem: str) -> Optional[str]:
+    """Síncrono (corre numa thread). `None` se o S3 não está configurado ou o ficheiro já lá não está."""
+    from services.s3_storage import s3_service
+
+    if not s3_service.is_configured() or not s3_service.file_exists(origem):
+        return None
+    destino = f"{PREFIXO_DOS_ELIMINADOS}/{origem}"
+    return destino if s3_service.rename_file(origem, destino) else ""
+
+
+async def run_delete_document(user: dict, process_id: str, document_id: str) -> dict[str, Any]:
+    """«Eliminar» na linha de um ficheiro da bancada (Nov 2026). SOFT DELETE: o registo fica marcado
+    (`is_deleted`, `status: eliminado`) e os bytes vão para `Eliminados/…`; nada se apaga fisicamente.
+
+    Ordem: posse do ficheiro (o caminho é o da BASE DE DADOS, nunca do cliente, e mesmo assim tem de estar
+    na pasta do processo) → mover → marcar → refazer metadados e matriz sem ele.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+
+    from services.document_portal_revoke import revoke_portal_files_on_delete
+    from services.document_process_resolve import assert_s3_file_belongs_to_process
+    from services.history import log_history
+
+    proc = await _carregar_processo(process_id, user)
+    doc = await db.document_metadata.find_one(
+        {"id": document_id, "process_id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0, "id": 1, "s3_path": 1, "filename": 1, "file_state": 1},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento não encontrado neste processo.")
+    origem = doc.get("s3_path") or ""
+    if origem:
+        assert_s3_file_belongs_to_process(origem, proc)
+        destino = await asyncio.to_thread(_mover_para_os_eliminados, origem)
+        if destino == "":
+            raise HTTPException(status_code=500, detail="Não foi possível eliminar o ficheiro no armazenamento. Tente de novo.")
+    else:
+        destino = None
+
+    agora = datetime.now(timezone.utc).isoformat()
+    campos: dict[str, Any] = {
+        "is_deleted": True, "status": "eliminado", "deleted_at": agora,
+        "deleted_by": (user or {}).get("id"), "in_index_queue": False, "updated_at": agora,
+    }
+    if destino:
+        campos.update({"s3_path": destino, "deleted_from_s3_path": origem})
+    await db.document_metadata.update_one({"id": document_id}, {"$set": campos})
+
+    if origem:
+        try:
+            await revoke_portal_files_on_delete(process_id, [origem])
+        except Exception as exc:  # noqa: BLE001 — o documento já está eliminado
+            logger.warning("[INDEX] Portal não actualizado após eliminar %s: %s", document_id, type(exc).__name__)
+    try:
+        # o perfil Indexação é «stealth»: o `log_history` não deixa rasto no mural para ele
+        await log_history(process_id=process_id, user=user, action="Eliminou documento", field="documento",
+                          old_value=doc.get("filename") or origem.rsplit("/", 1)[-1])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX] Histórico da eliminação não registado: %s", type(exc).__name__)
+    try:
+        # os dados lidos deste ficheiro deixam de contar: metadados profissionais e matriz sem ele
+        # `documento_id`: as falhas de análise dos OUTROS ficheiros mantêm-se (ver `_alertas_de_falha`)
+        await index_jobs.concluir_resultados(proc, {"falhados": [], "motivos": {}, "documento_id": document_id})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[INDEX] Matriz não recalculada após eliminar %s: %s", document_id, type(exc).__name__)
+    await _trabalhou(user, process_id)
+    return {"success": True, "message": "Documento eliminado."}
 
 
 async def run_sanitize_process(user: dict, process_id: str) -> dict[str, Any]:

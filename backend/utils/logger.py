@@ -21,6 +21,7 @@ módulo que crie loggers.
 import sys
 import logging
 import os
+import re
 
 
 # ── Formato do Log ──
@@ -100,6 +101,50 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
+# ── Segredos fora dos logs (Nov 2026) ──
+# O uvicorn regista cada handshake de WebSocket com a query string inteira:
+#   "WebSocket /api/ws/notifications?token=eyJhbGciOi…" [accepted]
+# e o JWT completo (válido durante horas) ficava nos logs do Render, ao alcance de quem os lê.
+_PARAMETRO_SECRETO = re.compile(
+    r"(?i)\b((?:access_|refresh_|magic_|reset_)?token|api_key|apikey|password|secret)=([^&\s\"']+)"
+)
+
+
+def ocultar_segredos(texto: str) -> str:
+    """`?token=eyJ…` → `?token=[oculto]` (e afins). Pura; usada pelo filtro e pelos testes."""
+    return _PARAMETRO_SECRETO.sub(lambda m: f"{m.group(1)}=[oculto]", texto)
+
+
+class FiltroDeSegredos(logging.Filter):
+    """Reescreve a mensagem de um registo que leve um segredo numa query string. Nunca descarta registos."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            mensagem = record.getMessage()
+        except Exception:  # noqa: BLE001 - um registo mal formado segue como está
+            return True
+        if "=" in mensagem:
+            limpa = ocultar_segredos(mensagem)
+            if limpa != mensagem:
+                record.msg, record.args = limpa, None
+        return True
+
+
+_FILTRO_DE_SEGREDOS = FiltroDeSegredos()
+
+
+def _instalar_filtro_de_segredos() -> None:
+    """Idempotente. Nos loggers do uvicorn (têm handlers próprios e não propagam até ao root) e no root."""
+    for nome in ("uvicorn.error", "uvicorn.access", "uvicorn", ""):
+        alvo = logging.getLogger(nome)
+        if _FILTRO_DE_SEGREDOS not in alvo.filters:
+            alvo.addFilter(_FILTRO_DE_SEGREDOS)
+    for handler in logging.getLogger().handlers:
+        if _FILTRO_DE_SEGREDOS not in handler.filters:
+            handler.addFilter(_FILTRO_DE_SEGREDOS)
+
+
 # ── Auto-configuração na importação ──
 # Quando este módulo é importado, configura o root logger automaticamente.
 _configure_root_logger()
+_instalar_filtro_de_segredos()

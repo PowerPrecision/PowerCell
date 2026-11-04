@@ -38,7 +38,6 @@ import {
   User,
   Building2,
   BarChart3,
-  Cog,
   Home,
   LayoutGrid,
   Search,
@@ -470,7 +469,7 @@ const DashboardLayout = ({ children, title }) => {
     // ====================================================================
     // MENU PARA DIRETOR
     // — Vê Gestão e Operações (Estatísticas, Rascunhos)
-    // — Sem acesso ao Painel de Administração
+    // — Administração só para consulta (Utilizadores, Workflow, Finanças)
     // ====================================================================
     if (userRole === "diretor") {
       const diretorGroups = [
@@ -482,8 +481,9 @@ const DashboardLayout = ({ children, title }) => {
       if (gestaoOperacoesItems.length > 0) {
         diretorGroups.push(gestaoOperacoesGroup);
       }
+      // Flavio, Nov 2026 (3a): o Diretor vê a Administração da sua empresa só para consulta.
       return {
-        main: [dashboardItem],
+        main: [dashboardItem, { label: "Administração", icon: KeyRound, href: "/system-admin" }],
         groups: diretorGroups,
         showAdminButton: false,
       };
@@ -524,7 +524,7 @@ const DashboardLayout = ({ children, title }) => {
     // ====================================================================
     // MENU PARA CEO e ADMIN
     // — Vêem Gestão e Operações
-    // — Vêem o botão "Painel de Administração" no fundo
+    // — Vêem a entrada «Administração» (o painel único, /system-admin)
     // — Gestão Financeira está na Tab "Finanças" do Painel de Administração
     // — SEM Configurações de Sistema espalhadas (tudo no Painel)
     // ====================================================================
@@ -552,10 +552,12 @@ const DashboardLayout = ({ children, title }) => {
         ],
       };
 
+      // Uma só entrada (Flavio, Nov 2026, 1a): o antigo botão dourado «Painel de
+      // Administração» e o «Administração» de `/admin/organizacao` são agora o mesmo painel.
       const organizacaoItem = {
         label: "Administração",
         icon: KeyRound,
-        href: "/admin/organizacao",
+        href: "/system-admin",
       };
 
       const adminGroups = [
@@ -571,7 +573,7 @@ const DashboardLayout = ({ children, title }) => {
       return {
         main: [dashboardItem, organizacaoItem],
         groups: adminGroups,
-        showAdminButton: true,
+        showAdminButton: false,
       };
     }
 
@@ -715,28 +717,6 @@ const DashboardLayout = ({ children, title }) => {
               ))}
             </nav>
           </ScrollArea>
-
-          {/* Painel de Administração do Sistema — apenas visível para admin e CEO */}
-          {navData.showAdminButton && (
-            <div className="px-3 pb-2">
-              <Link
-                to="/system-admin"
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
-                  location.pathname === "/system-admin"
-                    ? "bg-amber-600 text-white"
-                    : "text-amber-400 hover:bg-slate-800 hover:text-amber-300"
-                }`}
-                onClick={() => {
-                  if (window.innerWidth < 1024) {
-                    setSidebarOpen(false);
-                  }
-                }}
-              >
-                <Cog className="h-5 w-5" />
-                Painel de Administração
-              </Link>
-            </div>
-          )}
 
           {/* User section */}
           <div className="p-4 border-t border-slate-700">

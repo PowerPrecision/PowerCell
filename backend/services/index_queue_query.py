@@ -39,8 +39,8 @@ CAMPOS_DE_ORDENACAO: dict[str, tuple[str, bool]] = {
     "alerts": ("index_alerts_open", False),
 }
 SENTIDOS = {"asc": 1, "desc": -1}
-ORDEM_POR_OMISSAO = {"pending": "created_asc", "reviews": "indexed_desc"}
-ESTADOS_POR_ABA = {"pending": ("pending", "in_review"), "reviews": ("indexed",)}
+ORDEM_POR_OMISSAO = {"pending": "created_asc", "reviews": "indexed_desc", "indexed": "indexed_desc"}
+ESTADOS_POR_ABA = {"pending": ("pending", "in_review"), "reviews": ("indexed",), "indexed": ("indexed",)}
 ORIGENS = ("own", "shared")
 TAMANHO_MAXIMO_DO_ID = 64
 COLACAO = {"locale": "pt", "strength": 2, "numericOrdering": True}
@@ -61,8 +61,8 @@ def validar_ordenacao(aba: str, sort_by: Optional[str]) -> tuple[str, int, bool,
         raise _recusar(
             "Ordenação inválida. Use «<campo>_<asc|desc>» com campo em: " + ", ".join(sorted(CAMPOS_DE_ORDENACAO)) + "."
         )
-    if chave == "indexed" and aba != "reviews":
-        raise _recusar("Só as Revisões Pendentes se ordenam pela data de indexação.")
+    if chave == "indexed" and aba not in ("reviews", "indexed"):
+        raise _recusar("Só os processos já indexados se ordenam pela data de indexação.")
     campo, texto = CAMPOS_DE_ORDENACAO[chave]
     return campo, SENTIDOS[sentido], texto, f"{chave}_{sentido}"
 

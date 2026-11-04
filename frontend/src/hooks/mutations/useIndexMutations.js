@@ -16,10 +16,12 @@ import {
   analyzeIndexFile,
   analyzeIndexProcess,
   assumirIndexProcess,
+  deleteIndexFile,
   dismissIndexAlert,
   editIndexJob,
   extractIndexProcess,
   markIndexProcessIndexed,
+  reabrirIndexProcess,
   sanitizeIndexProcess,
   setIndexFileTitular,
 } from "../../services/api";
@@ -57,6 +59,15 @@ export function useIndexMutations(processId) {
     mutationFn: () => extractIndexProcess(processId),
     onSuccess: (resposta) => {
       toast.info(resposta?.data?.message || "A extracção está a correr em segundo plano.");
+      return refrescar();
+    },
+    onError: falhou,
+  });
+  // «Eliminar» um ficheiro (Nov 2026): soft delete; os dados lidos dele deixam de contar
+  const eliminarFicheiro = useMutation({
+    mutationFn: ({ documentId }) => deleteIndexFile(processId, documentId),
+    onSuccess: (resposta) => {
+      toast.success(resposta?.data?.message || "Documento eliminado.");
       return refrescar();
     },
     onError: falhou,
@@ -116,5 +127,15 @@ export function useIndexMutations(processId) {
     onError: falhou,
   });
 
-  return { analisar, analisarFicheiro, extrair, sanitizar, editar, dispensar, marcarIndexado, assumir, mudarTitular };
+  // «Reabrir» um processo já indexado (Nov 2026): a mensagem diz para onde foi (para si ou para a fila).
+  const reabrir = useMutation({
+    mutationFn: (motivo) => reabrirIndexProcess(processId, motivo),
+    onSuccess: (resposta) => {
+      toast.success(resposta?.data?.message || "Processo reaberto.");
+      return refrescar();
+    },
+    onError: falhou,
+  });
+
+  return { analisar, analisarFicheiro, eliminarFicheiro, extrair, sanitizar, editar, dispensar, marcarIndexado, assumir, mudarTitular, reabrir };
 }

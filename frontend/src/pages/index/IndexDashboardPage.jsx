@@ -103,7 +103,7 @@ export default function IndexDashboardPage() {
         <PageHeader
           icon={ClipboardCheck}
           title="Indexação"
-          description="Processos à espera de indexação e indexações com campos por rever."
+          description="Processos à espera de indexação, indexações com campos por rever e os já indexados (para reabrir)."
           onRefresh={() => fila.refetch()}
           actions={
             <Button asChild variant="outline">

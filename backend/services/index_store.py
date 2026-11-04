@@ -301,7 +301,9 @@ async def _fora_os_substituidos(process_id: str) -> dict[str, Any]:
     from services.index_substituicao import ids_substituidos  # import tardio: index_substituicao lê o index_ai
 
     ids = await ids_substituidos(process_id)
-    return {"id": {"$nin": sorted(ids)}} if ids else {}
+    # um documento eliminado na bancada (soft delete, Nov 2026) também deixa de contar
+    fora = {"is_deleted": {"$ne": True}}
+    return {**fora, "id": {"$nin": sorted(ids)}} if ids else fora
 
 
 async def recalcular_metadados(process_id: str, network_id: Optional[str], impressao: Optional[str]) -> ProfessionalMetadata:

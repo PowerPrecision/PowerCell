@@ -63,6 +63,8 @@ export function useIndexQueueQuery({ tab = "pending", page = 1, q = "", ordem = 
   };
 }
 
+const INTERVALO_COM_IA_INDISPONIVEL_MS = 60_000;
+
 export function useIndexWorkstationQuery(processId, { enabled = true } = {}) {
   const queryClient = useQueryClient();
   const chave = queryKeys.index.workstation(processId);
@@ -87,6 +89,10 @@ export function useIndexWorkstationQuery(processId, { enabled = true } = {}) {
     enabled: enabled && Boolean(processId),
     // recuo: só enquanto há um job a correr — depressa se o WebSocket não nos avisa, devagar se avisa
     refetchInterval: (q) => {
+      // IA sem créditos: volta a perguntar de vez em quando, para os botões se desbloquearem sozinhos
+      if (q.state.data?.ia?.disponivel === false && !haJobActivo(q.state.data?.jobsActivos)) {
+        return INTERVALO_COM_IA_INDISPONIVEL_MS;
+      }
       if (!haJobActivo(q.state.data?.jobsActivos)) return false;
       return isConnected ? INTERVALO_DE_CONFIRMACAO_MS : INTERVALO_DE_RECUO_MS;
     },

@@ -10,12 +10,14 @@ tinha `company_id`: devolvia sempre as chaves da configuração GLOBAL.
 
 A REGRA (decisão do dono do produto, Out 2026)
 ==============================================
-* **ADMIN** (o «master»: não existe um perfil `master` à parte, é o perfil
-  de topo do sistema) — todas as empresas do CRM **e** a configuração
-  global;
+* **MASTER** (o único perfil global) — todas as empresas do CRM **e** a
+  configuração global;
 * **CEO** — só as empresas dele (UCR). A mesma rede NÃO chega: o CEO da
   Power não configura a Precision. **Nunca a global**, nem o CEO da rede
   principal;
+* **ADMIN** — desde Nov 2026 (Flavio, pergunta 4b) já NÃO grava as
+  definições da empresa: gere a Equipa e a Operação. Ver
+  `exigir_pode_gravar_seccao`;
 * os restantes perfis não configuram nada (ler a lista devolve-lhes só
   as empresas onde trabalham, para o ecrã não mostrar o que não podem
   usar).
@@ -194,6 +196,59 @@ async def exigir_empresa_configuravel(
         )
 
     raise HTTPException(status_code=404, detail=ERRO_EMPRESA_NAO_ENCONTRADA)
+
+
+# =====================================================================
+# QUEM GRAVA CADA SECÇÃO (Flavio, Nov 2026 — revisão do painel)
+# =====================================================================
+#: Infraestrutura partilhada por TODAS as empresas: só existe no documento
+#: global e só o Master a altera (perguntas 5a, 8a). Gravar uma destas «para
+#: uma empresa» gravava um valor que nenhum leitor lê.
+SECCOES_SO_GLOBAIS = frozenset({
+    "storage", "ai", "audit_trail", "dashboard_slas", "system_smtp", "system_webmail",
+})
+
+#: Campos que vivem numa secção da empresa mas são globais (pergunta 9a: os
+#: backups automáticos são do sistema). Numa gravação por empresa são ignorados.
+CAMPOS_SO_GLOBAIS = {"settings": frozenset({"auto_backup_enabled"})}
+
+#: «A empresa» (dados, email geral, serviços de crédito, DSTI, rascunhos,
+#: balcões…) é do CEO e do Master. O Admin gere só a Equipa e a Operação
+#: (pergunta 4b). O Diretor só consulta (3a).
+PAPEIS_QUE_GRAVAM_A_EMPRESA = frozenset({"ceo"})
+
+ERRO_SECCAO_GLOBAL = (
+    "Esta definição é global (vale para todas as empresas) e só o Master a "
+    "altera, em Administração → Sistema."
+)
+ERRO_SO_O_CEO = (
+    "As definições da empresa são do CEO. O Admin gere a Equipa e a Operação."
+)
+
+
+def exigir_pode_gravar_seccao(ambito: AmbitoDeConfiguracao, section: str, company_id: str) -> None:
+    """A regra de quem grava o quê, depois de validada a empresa."""
+    if section in SECCOES_SO_GLOBAIS and not e_empresa_global(company_id):
+        raise HTTPException(status_code=400, detail=ERRO_SECCAO_GLOBAL)
+    if e_empresa_global(company_id) or ambito.e_master:
+        return  # a global já exigiu o Master em `exigir_empresa_configuravel`
+    if _texto(ambito.papel).lower() not in PAPEIS_QUE_GRAVAM_A_EMPRESA:
+        raise HTTPException(status_code=403, detail=ERRO_SO_O_CEO)
+
+
+def tirar_campos_so_globais(section: str, data: dict, company_id: str) -> dict:
+    """Numa gravação por empresa, deixa cair os campos que só a global tem."""
+    if e_empresa_global(company_id):
+        return data
+    proibidos = CAMPOS_SO_GLOBAIS.get(section)
+    if not proibidos:
+        return data
+    return {k: v for k, v in (data or {}).items() if k not in proibidos}
+
+
+def pode_gravar_a_empresa(ambito: AmbitoDeConfiguracao) -> bool:
+    """Para o ecrã: o perfil activo grava as definições da empresa?"""
+    return ambito.e_master or _texto(ambito.papel).lower() in PAPEIS_QUE_GRAVAM_A_EMPRESA
 
 
 async def resolver_empresa_pedida(

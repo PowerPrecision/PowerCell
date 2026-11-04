@@ -452,7 +452,7 @@ CONFIG_FIELDS = {
             ),
             ConfigField(
                 key="allow_excel_export",
-                label="Permitir Exportação para Excel (Global)",
+                label="Permitir Exportação para Excel",
                 type="boolean",
                 help_text="Quando desativado, os botões de exportação para Excel ficam ocultos para todos os utilizadores excepto Admin e CEO",
             ),

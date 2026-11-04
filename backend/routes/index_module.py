@@ -25,12 +25,14 @@ from services.index_document_content import run_conteudo_do_documento, run_conte
 from services.index_api import (
     run_assumir_processo,
     run_analyze_document,
+    run_delete_document,
     run_analyze_process,
     run_dismiss_alert,
     run_edit_professional_job,
     run_exigir_titularidade,
     run_get_index_queue,
     run_get_index_workstation,
+    run_reabrir_processo,
     run_start_work,
     run_sanitize_process,
     run_search_employers,
@@ -111,6 +113,14 @@ class ResolverPedidoBody(BaseModel):
 
     decisao: str = Field(pattern=r"^(concluido|recusado)$")
     nota: Optional[str] = Field(None, max_length=pedidos_de_atribuicao.MAX_MOTIVO)
+
+
+class ReabrirBody(BaseModel):
+    """O motivo é opcional (ex.: «o banco pediu os recibos de setembro e outubro»); fica na auditoria."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    motivo: Optional[str] = Field(None, max_length=500)
 
 
 class MarkIndexedBody(BaseModel):
@@ -275,6 +285,20 @@ async def analyze_process(
     return await run_analyze_process(user, process_id, force=data.force)
 
 
+@router.delete("/processes/{process_id}/files/{document_id}")
+@limiter.limit("30/minute")
+async def delete_document(
+    request: Request,
+    response: Response,
+    process_id: str,
+    document_id: str,
+    user: dict = Depends(_acesso), _titular: None = Depends(_so_o_titular),
+):
+    """«Eliminar» na linha de um ficheiro da bancada: soft delete (o registo fica marcado, os bytes vão
+    para `Eliminados/`)."""
+    return await run_delete_document(user, process_id, document_id)
+
+
 @router.post("/processes/{process_id}/files/{document_id}/analyze", status_code=202)
 @limiter.limit("30/minute")
 async def analyze_document(
@@ -359,6 +383,26 @@ async def mark_indexed(
         all_roles=get_all_user_roles(user),
         broadcast_fn=broadcast_process_delta,
         employers=[e.model_dump() for e in data.employers],
+    )
+
+
+@router.post("/processes/{process_id}/reabrir")
+@limiter.limit("20/minute")
+async def reabrir_processo(
+    request: Request,
+    response: Response,
+    process_id: str,
+    data: ReabrirBody = Body(default_factory=ReabrirBody),
+    user: dict = Depends(_acesso),
+):
+    """«Reabrir» um processo já indexado (Nov 2026): o Index reabre-o para si; a gestão devolve-o à fila.
+
+    Sem a guarda de titularidade: um processo indexado não tem Index atribuído. A guarda do processo fechado
+    (dependência do router) continua a valer."""
+    papel = (await get_effective_role_async(request, user)).lower()
+    return await run_reabrir_processo(
+        user, process_id, papel=papel, all_roles=get_all_user_roles(user), motivo=data.motivo,
+        broadcast_fn=broadcast_process_delta,
     )
 
 

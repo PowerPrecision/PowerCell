@@ -486,9 +486,12 @@ async def run_mark_indexed_side_effects(
     next_status: Optional[str],
     now: str,
     broadcast_fn,
+    reabertura: bool = False,
 ) -> dict[str, Any]:
     """
     Pós-persist: histórico, notificações, WS, waitlist, auto-assign + response.
+
+    `reabertura`: o processo tinha sido reaberto — a automação da fase NÃO volta a correr.
     """
     from services.websocket_manager import WSEventType
 
@@ -553,10 +556,13 @@ async def run_mark_indexed_side_effects(
                 f"processo {process_id}: {automation_err}"
             )
 
-    consultant_result, is_pre_registo = await auto_assign_after_indexacao(
-        process, process_id, user, current_status, process_ref,
-        fase_nova=next_status or current_status,
-    )
+    if reabertura:
+        consultant_result, is_pre_registo = None, False
+    else:
+        consultant_result, is_pre_registo = await auto_assign_after_indexacao(
+            process, process_id, user, current_status, process_ref,
+            fase_nova=next_status or current_status,
+        )
 
     # BUGFIX (reatividade do cartão de Atribuição) — SEGUNDO broadcast.
     # O broadcast acima corre ANTES da auto-atribuição, pelo que só
@@ -639,9 +645,17 @@ async def run_mark_process_indexed(
     if current_status is None and status_pipeline:
         current_status = status_pipeline[0]
     next_status = compute_next_workflow_status(current_status, status_pipeline)
+    # REABERTO (Nov 2026): o processo já foi indexado uma vez e já seguiu o seu caminho no workflow. Voltar a
+    # marcá-lo (novos recibos/extratos meses depois) NÃO o empurra outra fase nem volta a correr a automação
+    # da fase (consultor/intermediário/tarefas de arranque) — só fecha o trabalho do Index.
+    reabertura = process.get("index_reaberto") is True
+    if reabertura:
+        next_status = None
 
     now = datetime.now(timezone.utc).isoformat()
     update_set = build_indexacao_update_set(user, now, next_status)
+    if reabertura:
+        update_set["index_reaberto"] = False
 
     # RELÓGIO DE FASES (Camada 1) — o salto dinâmico da indexação.
     #
@@ -684,6 +698,7 @@ async def run_mark_process_indexed(
         next_status=next_status,
         now=now,
         broadcast_fn=broadcast_fn,
+        reabertura=reabertura,
     )
 
 
@@ -711,6 +726,8 @@ def build_unindex_update_set(
     """
     return {
         **campos_ao_reverter(process or {}, user, now),
+        # voltar a indexar não volta a saltar a fase nem a correr a automação dela (ver `run_mark_process_indexed`)
+        "index_reaberto": True,
         "updated_at": now,
     }
 
@@ -790,6 +807,16 @@ async def run_set_process_indexed_flag(
         )
     except Exception as e:
         logger.warning(f"Erro ao registar histórico de reversão de indexação: {e}")
+    # o histórico é mudo para o Index (Stealth); a auditoria nunca é (Nov 2026: reabrir deixa rasto)
+    try:
+        from services.audit_trail_service import log_audit_event
+
+        await log_audit_event(
+            process_id=process_id, user=user, action="Indexação reaberta", field="is_indexed",
+            old_value="true", new_value="false", metadata={"origem": "interruptor_indexado"},
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao registar auditoria de reversão de indexação: {type(e).__name__}")
 
     try:
         from services.websocket_manager import WSEventType

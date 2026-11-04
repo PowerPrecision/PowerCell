@@ -7,6 +7,8 @@
  * enquanto há um job activo ficam desligados (o servidor também só deixa correr um).
  * «Apagar metadados» gera o PDF limpo dos ficheiros que o Index carregou; o original só é
  * eliminado passada a margem de segurança, e só se houver algo por limpar o botão está activo.
+ * Sem IA (`iaIndisponivel`, ex.: conta sem créditos — Nov 2026) Analisar/Extrair ficam desligados com o
+ * motivo em tooltip; voltam sozinhos quando o servidor disser que a IA respondeu.
  */
 import { Bot, CheckCircle2, Eraser, Loader2, ScanText } from "lucide-react";
 
@@ -27,20 +29,33 @@ export function IndexActionsBar({
   onMarcar,
   somenteLeitura = false,
   motivoSomenteLeitura,
+  iaIndisponivel = false,
+  motivoIaIndisponivel,
 }) {
   const ocupado = haJobActivo(jobsActivos);
   const indexado = processo?.index_status === "indexed";
   // só-leitura (ex.: processo de outro indexador): o motivo vai como tooltip; num botão desligado o
   // browser pode não mostrar o `title`, por isso também vai no contentor da barra
   const motivo = somenteLeitura ? motivoSomenteLeitura : undefined;
+  const motivoDaIA = motivo || (iaIndisponivel ? motivoIaIndisponivel || "A IA não está disponível de momento." : undefined);
 
   return (
     <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Acções do Index" title={motivo}>
-      <Button variant="outline" disabled={somenteLeitura || ocupado || aAnalisar} onClick={onAnalisar} title={motivo}>
+      <Button
+        variant="outline"
+        disabled={somenteLeitura || iaIndisponivel || ocupado || aAnalisar}
+        onClick={onAnalisar}
+        title={motivoDaIA}
+      >
         {aAnalisar ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <Bot className="mr-1.5 h-4 w-4" aria-hidden="true" />}
         Analisar
       </Button>
-      <Button variant="outline" disabled={somenteLeitura || ocupado || aExtrair} onClick={onExtrair} title={motivo}>
+      <Button
+        variant="outline"
+        disabled={somenteLeitura || iaIndisponivel || ocupado || aExtrair}
+        onClick={onExtrair}
+        title={motivoDaIA}
+      >
         {aExtrair ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <ScanText className="mr-1.5 h-4 w-4" aria-hidden="true" />}
         Extrair dados
       </Button>

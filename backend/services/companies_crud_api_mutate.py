@@ -82,7 +82,77 @@ async def _registar_rasto(actor: dict, acao: str, empresa_id: str, detalhes: dic
         logger.warning("[COMPANIES] Falha a registar %s: %s", acao, exc)
 
 
-async def run_update_company(company_id: str, data: CompanyUpdate, *, actor: dict):
+ERRO_DADOS_DA_EMPRESA = (
+    "Os dados da empresa são do CEO. O Admin gere a Equipa e a Operação."
+)
+
+#: Campos do email geral (Caixa Geral) da ficha → campos de `system_config.email`
+#: da empresa, que é o que o Webmail lê. Flavio, Nov 2026 (10a): o email geral
+#: configura-se SÓ na ficha da empresa; o pessoal, na área pessoal de cada um.
+CAMPOS_DO_EMAIL_GERAL = {
+    "smtp_email": "smtp_user",
+    "smtp_password": "smtp_password",
+    "smtp_host": "smtp_server",
+    "smtp_port": "smtp_port",
+    "imap_email": "imap_user",
+    "imap_password": "imap_password",
+    "imap_host": "imap_server",
+    "imap_port": "imap_port",
+}
+
+
+async def exigir_quem_grava_a_empresa(actor: dict, request=None) -> None:
+    """Master ou CEO (perfil efectivo). O Admin já não (pergunta 4b)."""
+    if utilizador_e_global(actor):
+        return
+    from services.tenant_access_context import resolver_papel_efectivo
+
+    papel = await resolver_papel_efectivo(
+        actor, request, traduzir_todos_os_perfis=lambda p: str(p or "").lower() in {"master", "ceo"},
+    )
+    if str(papel or "").lower() not in {"master", "ceo"}:
+        raise HTTPException(status_code=403, detail=ERRO_DADOS_DA_EMPRESA)
+
+
+def email_geral_da_ficha(campos: dict) -> dict:
+    """O que a ficha mudou no email geral, já com os nomes de `system_config.email`.
+
+    Password vazia = manter a que lá está (o formulário nunca recebe a real).
+    """
+    resultado = {}
+    for origem, destino in CAMPOS_DO_EMAIL_GERAL.items():
+        if origem not in campos:
+            continue
+        valor = campos[origem]
+        if "password" in origem and not valor:
+            continue
+        if origem.endswith("_port"):
+            try:
+                valor = int(valor) if valor not in (None, "") else None
+            except (TypeError, ValueError):
+                continue
+            if valor is None:
+                continue
+        resultado[destino] = valor
+    return resultado
+
+
+async def espelhar_email_geral(company_id: str, campos: dict) -> None:
+    """Grava o email geral da ficha na configuração da empresa (a que o Webmail lê)."""
+    email = email_geral_da_ficha(campos)
+    if not email:
+        return
+    from services.system_config import update_config_section
+
+    if email.get("smtp_server") or email.get("imap_server"):
+        email.setdefault("provider", "smtp")
+    try:
+        await update_config_section("email", email, company_id)
+    except Exception as exc:  # noqa: BLE001 — a ficha já ficou gravada
+        logger.warning("[COMPANIES] Falha a espelhar o email geral de %s (%s).", company_id, exc)
+
+
+async def run_update_company(company_id: str, data: CompanyUpdate, *, actor: dict, request=None):
     """Atualiza os dados de uma empresa.
 
     Um perfil local só actualiza a SUA empresa e **nunca muda a rede**: o
@@ -101,6 +171,7 @@ async def run_update_company(company_id: str, data: CompanyUpdate, *, actor: dic
     real_id = existing.get("id", company_id)
 
     await exigir_empresas_concediveis(actor, [real_id])
+    await exigir_quem_grava_a_empresa(actor, request)
     if data.network_id is not None and not utilizador_e_global(actor):
         raise HTTPException(
             status_code=403,
@@ -146,6 +217,14 @@ async def run_update_company(company_id: str, data: CompanyUpdate, *, actor: dic
     await db.companies.update_one(
         {"id": real_id},
         {"$set": update_fields},
+    )
+    await espelhar_email_geral(real_id, update_fields)
+    from services.registo_do_painel import registar_alteracao
+
+    await registar_alteracao(
+        actor, request, area="Dados da empresa", company_id=real_id,
+        antes={k: existing.get(k) for k in update_fields if k != "updated_at"},
+        depois={k: v for k, v in update_fields.items() if k != "updated_at"},
     )
 
     updated = await db.companies.find_one({"id": real_id}, {"_id": 0})

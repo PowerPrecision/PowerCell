@@ -41,6 +41,7 @@ import json
 import logging
 import base64
 import asyncio
+import time
 import httpx
 from typing import Optional, Dict, Any, Tuple, List
 from datetime import datetime, timezone
@@ -294,6 +295,31 @@ RETRY_MAX_WAIT = 32  # segundos
 class RateLimitError(Exception):
     """Excepção para erros de rate limit (429)."""
     pass
+
+
+class SemCreditosError(Exception):
+    """A conta do fornecedor de IA ficou sem créditos (429 `insufficient_quota`).
+
+    NÃO é um `RateLimitError` de propósito (Nov 2026, logs do Render): a OpenAI responde 429 tanto
+    a «demasiados pedidos» como a «sem saldo». O primeiro passa com espera; o segundo só passa quando
+    alguém carregar créditos — repetir com backoff era só atrasar a falha (5 tentativas × N documentos)
+    e acabar em `erro_da_ia` em vez de dizer o que se passa.
+    """
+    pass
+
+
+#: Pistas (minúsculas) de uma conta sem saldo, no texto do erro da OpenAI.
+_PISTAS_SEM_CREDITOS = ("insufficient_quota", "credit_balance_exhausted", "no credits remaining", "exceeded your current quota")
+
+#: Depois de um «sem créditos», os pedidos seguintes falham logo durante este tempo (segundos), em vez de
+#: irem um a um bater na mesma parede (uma análise de extratos lança vários pedidos em paralelo).
+PAUSA_SEM_CREDITOS = 120.0
+_sem_creditos_desde: Optional[float] = None
+
+
+def e_falta_de_creditos(erro: Any) -> bool:
+    texto = str(erro or "").lower()
+    return any(p in texto for p in _PISTAS_SEM_CREDITOS)
 
 
 def get_document_tool_definition(document_type: str) -> dict:
@@ -1220,7 +1246,10 @@ def resize_image_base64(base64_content: str, mime_type: str, max_size: int = MAX
     stop=stop_after_attempt(RETRY_MAX_ATTEMPTS),
     wait=wait_exponential(multiplier=1, min=RETRY_MIN_WAIT, max=RETRY_MAX_WAIT),
     retry=retry_if_exception_type(RateLimitError),
-    before_sleep=before_sleep_log(logger, logging.WARNING)
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    # no fim levanta o ÚLTIMO erro (RateLimitError), não um `RetryError` opaco: quem chama
+    # classifica a falha pelo texto, e «RetryError[<Future …>]» virava sempre `erro_da_ia`.
+    reraise=True,
 )
 async def call_openai_api(
     messages: list,
@@ -1228,6 +1257,7 @@ async def call_openai_api(
     timeout: float = 60.0,
     model: Optional[str] = None,
     max_tokens: int = 4096,
+    ignorar_pausa: bool = False,
 ) -> dict:
     """
     Chamar API OpenAI usando SDK oficial com suporte a Function Calling.
@@ -1247,8 +1277,15 @@ async def call_openai_api(
     
     Raises:
         RateLimitError: Em caso de rate limit (429)
+        SemCreditosError: Conta sem créditos (429 `insufficient_quota`) — sem novas tentativas
         Exception: Outros erros
     """
+    global _sem_creditos_desde
+    from services import ai_disponibilidade  # tardio: o estado partilhado vive na base de dados
+
+    pausa = _sem_creditos_desde is not None and time.monotonic() - _sem_creditos_desde < PAUSA_SEM_CREDITOS
+    if pausa and not ignorar_pausa:
+        raise SemCreditosError("insufficient_quota: a conta de IA está sem créditos (pedido não enviado)")
     client = get_openai_client()
     model_id = model or await resolve_ai_model()
 
@@ -1279,12 +1316,19 @@ async def call_openai_api(
         raise Exception(f"Timeout na chamada à API ({timeout}s)")
     except Exception as e:
         error_msg = str(e).lower()
+        if e_falta_de_creditos(error_msg):
+            _sem_creditos_desde = time.monotonic()
+            await ai_disponibilidade.registar_sem_creditos()  # a bancada do Index bloqueia Analisar/Extrair
+            logger.error("OpenAI sem créditos (insufficient_quota): é preciso carregar créditos na conta. Sem novas tentativas.")
+            raise SemCreditosError("insufficient_quota: a conta de IA está sem créditos") from e
         if "rate" in error_msg or "429" in error_msg or "limit" in error_msg:
             logger.warning(f"Rate limit detectado: {e}")
             raise RateLimitError(f"Rate limit: {e}")
         logger.error(f"Erro ao chamar OpenAI API: {e}")
         raise
     
+    _sem_creditos_desde = None  # a conta voltou a responder
+    await ai_disponibilidade.registar_resposta_ok()
     # Extrair dados da chamada de ferramenta ou do conteúdo
     choice = response.choices[0]
     message = choice.message
@@ -1358,6 +1402,12 @@ async def analyze_with_text(text: str, document_type: str) -> Dict[str, Any]:
             "raw_response": json.dumps(extracted_data, ensure_ascii=False)
         }
         
+    except SemCreditosError:
+        return {
+            "success": False,
+            "error": "O serviço de IA está sem créditos. Avise o administrador para carregar créditos na conta OpenAI.",
+            "extracted_data": {}
+        }
     except RateLimitError as e:
         logger.error(f"Rate limit excedido após {RETRY_MAX_ATTEMPTS} tentativas: {e}")
         return {
@@ -1435,6 +1485,12 @@ async def analyze_with_vision(base64_content: str, mime_type: str, document_type
             "raw_response": json.dumps(extracted_data, ensure_ascii=False)
         }
         
+    except SemCreditosError:
+        return {
+            "success": False,
+            "error": "O serviço de IA está sem créditos. Avise o administrador para carregar créditos na conta OpenAI.",
+            "extracted_data": {}
+        }
     except RateLimitError as e:
         logger.error(f"Rate limit excedido após {RETRY_MAX_ATTEMPTS} tentativas: {e}")
         return {

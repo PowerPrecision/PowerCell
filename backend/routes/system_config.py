@@ -15,26 +15,27 @@ from fastapi import APIRouter, Depends, Query, Request
 from services.auth import get_current_user, require_roles
 from models.auth import UserRole
 
+from services.system_config_painel import (
+    run_get_config_do_painel,
+    run_reveal_secrets_do_painel,
+    run_update_config_do_painel,
+)
 from services.system_config_scope import (
     carregar_ambito_de_configuracao,
     listar_empresas_configuraveis,
     resolver_configuracao_global,
     resolver_empresa_para_leitura,
-    resolver_empresa_pedida,
 )
 from services.system_config_api import (
-    run_get_config,
     run_get_excel_export_permission,
     run_get_config_fields,
     run_get_available_companies,
-    run_update_config,
 )
 from services.system_config_connections import run_test_service_connection
 from services.system_config_admin_ops import (
     run_complete_setup,
     run_get_storage_info,
     run_reset_cache,
-    run_reveal_secrets,
 )
 from services.system_config_system_emails import (
     SystemEmailConfigCreate,
@@ -65,8 +66,8 @@ async def get_config(
 
     ÂMBITO: ver `services/system_config_scope.py` (ADMIN todas; CEO as dele).
     """
-    company_id = await resolver_empresa_pedida(user, request, company_id)
-    return await run_get_config(company_id=company_id)
+    ambito = await carregar_ambito_de_configuracao(user, request)
+    return await run_get_config_do_painel(ambito, company_id)
 
 
 @router.get("/public/export-permission")
@@ -126,8 +127,8 @@ async def update_config(
     MULTI-EMPRESA: Use o parâmetro company_id para actualizar a config de uma empresa específica.
     A validação do `company_id` vem ANTES de qualquer escrita (ver `get_config`).
     """
-    company_id = await resolver_empresa_pedida(user, request, company_id)
-    return await run_update_config(section=section, data=data, company_id=company_id, user=user)
+    ambito = await carregar_ambito_de_configuracao(user, request)
+    return await run_update_config_do_painel(ambito, user, request, section, data, company_id)
 
 
 @router.post("/test-connection/{service}")
@@ -187,8 +188,8 @@ async def reveal_secrets(
     Revelar valores sensíveis (passwords, API keys) de uma secção de configuração.
     Só da empresa (ou global) que pertence ao utilizador.
     """
-    company_id = await resolver_empresa_pedida(user, request, company_id)
-    return await run_reveal_secrets(section=section, company_id=company_id)
+    ambito = await carregar_ambito_de_configuracao(user, request)
+    return await run_reveal_secrets_do_painel(ambito, section, company_id)
 
 
 # =====================================================================

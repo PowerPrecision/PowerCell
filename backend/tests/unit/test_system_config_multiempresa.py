@@ -250,12 +250,27 @@ class TestAContraprova:
         from routes.system_config import update_config
 
         res = await update_config(
-            section="storage", data={"provider": "none"},
+            section="dsti_analysis", data={"enabled": False},
             request=None, company_id="cmp-domus", user=MASTER,
         )
         assert res["success"] is True
         doc = next(d for d in mundo.system_config.docs if d["_id"] == "company:cmp-domus")
-        assert doc["storage"]["provider"] == "none"
+        assert doc["dsti_analysis"]["enabled"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("seccao", ["storage", "ai", "audit_trail"])
+    async def test_o_que_e_global_nao_se_grava_para_uma_empresa(self, mundo, rede_de_omissao_incumbente, seccao):
+        """Flavio, Nov 2026 (5a, 8a): armazenamento, IA e auditoria são globais — nem o Master as
+        grava «para uma empresa» (nenhum leitor as lê por empresa)."""
+        from routes.system_config import update_config
+
+        antes = _ids_de_config(mundo)
+        with pytest.raises(HTTPException) as exc:
+            await update_config(
+                section=seccao, data={}, request=None, company_id="cmp-domus", user=MASTER,
+            )
+        assert exc.value.status_code == 400
+        assert _ids_de_config(mundo) == antes
 
     @pytest.mark.asyncio
     async def test_o_MASTER_tambem_nao_inventa_empresas(self, mundo, rede_de_omissao_incumbente):
@@ -287,16 +302,35 @@ class TestAContraprova:
         assert "config" in res
 
     @pytest.mark.asyncio
-    async def test_o_ADMIN_e_LOCAL_le_e_escreve_na_PROPRIA_empresa(self, mundo, rede_de_omissao_incumbente):
-        """Adenda de RBAC: o Admin deixou de ser o perfil global."""
+    async def test_o_ADMIN_le_mas_ja_NAO_escreve_na_PROPRIA_empresa(self, mundo, rede_de_omissao_incumbente):
+        """Adenda de RBAC: o Admin deixou de ser o perfil global. Flavio, Nov 2026 (4b): as
+        definições da empresa são do CEO; o Admin gere a Equipa e a Operação."""
         from routes.system_config import get_config, update_config
 
-        assert "config" in await get_config(request=None, company_id="cmp-power", user=ADMIN)
-        res = await update_config(
-            section="settings", data={"company_name": "Power SA"},
-            request=None, company_id="cmp-power", user=ADMIN,
+        res = await get_config(request=None, company_id="cmp-power", user=ADMIN)
+        assert "config" in res
+        assert res["permissoes"]["pode_gravar"] is False
+        antes = _ids_de_config(mundo)
+        with pytest.raises(HTTPException) as exc:
+            await update_config(
+                section="settings", data={"company_name": "Power SA"},
+                request=None, company_id="cmp-power", user=ADMIN,
+            )
+        assert exc.value.status_code == 403
+        assert _ids_de_config(mundo) == antes
+
+    @pytest.mark.asyncio
+    async def test_o_CEO_nao_liga_os_backups_por_empresa(self, mundo, rede_de_omissao_incumbente):
+        """Flavio, Nov 2026 (9a): os backups automáticos são do Sistema (só Master)."""
+        from routes.system_config import update_config
+
+        await update_config(
+            section="settings", data={"company_subtitle": "x", "auto_backup_enabled": True},
+            request=None, company_id="cmp-power", user=CEO_POWER,
         )
-        assert res["success"] is True
+        doc = next(d for d in mundo.system_config.docs if d["_id"] == "company:cmp-power")
+        assert doc["settings"]["company_subtitle"] == "x"
+        assert doc["settings"].get("auto_backup_enabled") is not True
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("empresa", ["cmp-domus", "cmp-precision"])

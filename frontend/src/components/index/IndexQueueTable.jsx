@@ -24,7 +24,7 @@ import { Button } from "../ui/button";
 import { EmptyState } from "../ui/EmptyState";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { formatDateTime } from "../../lib/utils";
-import { rotuloDoEstado, sentidoDaColuna } from "../../utils/indexRevisao";
+import { abaDeIndexados, rotuloDoEstado, sentidoDaColuna } from "../../utils/indexRevisao";
 
 const ICONE_DO_SENTIDO = { ascending: ArrowUp, descending: ArrowDown, none: ArrowUpDown };
 
@@ -59,6 +59,8 @@ export function IndexQueueTable({ itens, separador, onAbrir, mensagemVazia, orde
             ? "Experimente tirar um filtro ou limpar a pesquisa."
             : separador === "reviews"
               ? "Quando um processo indexado ficar com campos por rever, aparece aqui."
+              : separador === "indexed"
+                ? "Os processos que já indexou aparecem aqui; abra um para o reabrir."
               : "Os processos que esperam indexação aparecem aqui."
         }
       />
@@ -77,7 +79,7 @@ export function IndexQueueTable({ itens, separador, onAbrir, mensagemVazia, orde
           <ColunaOrdenavel coluna="alertas" rotulo="Alertas" separador={separador} ordem={ordem} onOrdenar={onOrdenar} className="text-right" />
           <ColunaOrdenavel
             coluna="data"
-            rotulo={separador === "reviews" ? "Indexado em" : "Entrada"}
+            rotulo={abaDeIndexados(separador) ? "Indexado em" : "Entrada"}
             separador={separador}
             ordem={ordem}
             onOrdenar={onOrdenar}
@@ -154,7 +156,7 @@ export function IndexQueueTable({ itens, separador, onAbrir, mensagemVazia, orde
               )}
             </TableCell>
             <TableCell className="text-sm text-muted-foreground">
-              {formatDateTime(separador === "reviews" ? p.indexed_at : p.created_at) || "—"}
+              {formatDateTime(abaDeIndexados(separador) ? p.indexed_at : p.created_at) || "—"}
             </TableCell>
             <TableCell className="text-right">
               <Button size="sm" variant="outline" onClick={() => onAbrir(p.id)}>

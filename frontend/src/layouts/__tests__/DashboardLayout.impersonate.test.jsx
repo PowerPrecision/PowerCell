@@ -143,7 +143,7 @@ describe("impersonate espelha o menu do alvo", () => {
     expect(emImpersonate).toEqual(proprio);
   });
 
-  it.each(["consultor", "intermediario", "diretor", "administrativo", "indexacao"])(
+  it.each(["consultor", "intermediario", "administrativo", "indexacao"])(
     "um admin a ver como %s não vê NENHUM menu de administração",
     async (perfil) => {
       const ligacoes = await menuEmImpersonate(perfil);
@@ -152,6 +152,14 @@ describe("impersonate espelha o menu do alvo", () => {
       expect(screen.queryByText("Painel de Administração")).toBeNull();
     },
   );
+
+  it("um admin a ver como diretor só vê a «Administração» (para consulta), nada do /admin", async () => {
+    // Revisão do painel (Flavio, Nov 2026, 3a): o Diretor consulta Utilizadores,
+    // Workflow e Finanças da sua empresa no painel único.
+    const ligacoes = await menuEmImpersonate("diretor");
+    expect(ligacoes.filter((h) => h.startsWith("/admin"))).toEqual([]);
+    expect(ligacoes).toContain("/system-admin");
+  });
 
   it("contraprova: o mesmo admin SEM impersonate vê os menus de administração", async () => {
     // Sem isto, "nenhuma ligação /admin" passava com um menu sempre vazio.

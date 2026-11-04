@@ -69,6 +69,11 @@ router = APIRouter(tags=["Finance"])
 # CONFIG ENDPOINTS
 # ====================================================================
 
+#: Honorários e comissões são «A empresa»: o CEO (e o Master). O Admin gere só a
+#: Equipa e a Operação (Flavio, Nov 2026, pergunta 4b).
+PAPEIS_QUE_GRAVAM_HONORARIOS = [UserRole.MASTER, UserRole.CEO]
+
+
 @router.get("/finance/config")
 async def get_finance_config(
     user: dict = Depends(require_roles(FINANCE_READ_ROLES))
@@ -149,7 +154,7 @@ async def get_finance_performance(
 @router.post("/finance/configs")
 async def create_finance_config(
     body: FinanceConfigCreateSchema,
-    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles(PAPEIS_QUE_GRAVAM_HONORARIOS))
 ):
     return await run_create_finance_config(body, user)
 
@@ -174,7 +179,7 @@ async def get_finance_config_by_id(
 async def update_finance_config_by_id(
     config_id: str,
     body: FinanceConfigUpdateSchema,
-    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles(PAPEIS_QUE_GRAVAM_HONORARIOS))
 ):
     return await run_update_finance_config_by_id(config_id, body, user)
 
@@ -182,7 +187,7 @@ async def update_finance_config_by_id(
 @router.delete("/finance/configs/{config_id}")
 async def delete_finance_config(
     config_id: str,
-    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
+    user: dict = Depends(require_roles(PAPEIS_QUE_GRAVAM_HONORARIOS))
 ):
     return await run_delete_finance_config(config_id, user)
 

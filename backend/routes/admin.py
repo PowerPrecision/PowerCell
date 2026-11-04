@@ -9,6 +9,7 @@ from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from models.email_config import EmailConfigCreate, EmailConfigResponse
 from services.auth import require_roles, get_current_user
+from services.registo_do_painel import run_com_rasto_da_rede
 from middleware.rate_limit import limiter
 from services import executive_report_api as exec_api
 from services.admin_helpers import _safe_float, _audit_log  # re-export if needed
@@ -199,17 +200,17 @@ async def get_workflow_editor(request: Request, network_id: Optional[str] = Quer
 
 @router.post("/workflow-statuses", response_model=WorkflowStatusResponse)
 async def create_workflow_status(data: WorkflowStatusCreate, request: Request, user: dict = Depends(require_roles(PAPEIS_QUE_EDITAM_O_WORKFLOW))):
-    return await run_create_workflow_status(data, user, request)
+    return await run_com_rasto_da_rede(run_create_workflow_status(data, user, request), user, request, area="o Workflow", descricao=f"nova fase «{getattr(data, 'label', None) or getattr(data, 'name', '')}»")
 
 
 @router.put("/workflow-statuses/{status_id}", response_model=WorkflowStatusResponse)
 async def update_workflow_status(status_id: str, data: WorkflowStatusUpdate, request: Request, user: dict = Depends(require_roles(PAPEIS_QUE_EDITAM_O_WORKFLOW))):
-    return await run_update_workflow_status(status_id, data, user, request)
+    return await run_com_rasto_da_rede(run_update_workflow_status(status_id, data, user, request), user, request, area="o Workflow", descricao=lambda r: f"fase «{(r.get('label') if isinstance(r, dict) else getattr(r, 'label', None)) or status_id}» alterada")
 
 
 @router.delete("/workflow-statuses/{status_id}")
 async def delete_workflow_status(status_id: str, request: Request, user: dict = Depends(require_roles(PAPEIS_QUE_EDITAM_O_WORKFLOW))):
-    return await run_delete_workflow_status(status_id, user, request)
+    return await run_com_rasto_da_rede(run_delete_workflow_status(status_id, user, request), user, request, area="o Workflow", descricao=f"fase {status_id} eliminada")
 
 
 @router.post("/workflow-statuses/fix-duplicates")
@@ -253,7 +254,7 @@ async def get_users_paginated(
     company_id: Optional[str] = Query(None, description="Filtrar por empresa"),
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=100),
-    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO])),
+    user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),  # Diretor só consulta (3a)
 ):
     """Painel de administração: utilizadores paginados e com pesquisa.
 

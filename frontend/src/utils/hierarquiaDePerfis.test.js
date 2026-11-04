@@ -142,40 +142,55 @@ describe("inventário: nenhuma lista de papéis com `admin` esquece o `master`",
 
 describe("as rotas de infraestrutura são só do Master", () => {
   const APP = readFileSync(join(SRC, "App.js"), "utf8");
-  const papeisDaRota = (caminho) => {
+  // O bloco da rota vai do seu `path=` até à rota seguinte (nunca invade a vizinha).
+  const blocoDaRota = (caminho) => {
     const i = APP.indexOf(`path="${caminho}"`);
-    const bloco = APP.slice(i, i + 700);
-    return [...bloco.match(/allowedRoles=\{\[([\s\S]*?)\]\}/)[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]);
+    expect(i, caminho).toBeGreaterThan(-1);
+    const fim = APP.indexOf("<Route", i);
+    return APP.slice(i, fim === -1 ? undefined : fim);
+  };
+  const papeisDaRota = (caminho) => {
+    const m = blocoDaRota(caminho).match(/allowedRoles=\{\[([\s\S]*?)\]\}/);
+    return m ? [...m[1].matchAll(/"([a-z_]+)"/g)].map((x) => x[1]) : null;
   };
 
+  // Revisão do painel (Flavio, Nov 2026): as páginas de infraestrutura passaram para
+  // «Administração › Sistema», que só a conta Master vê (`painelAdminGrupos.js`).
   it.each([
-    "/configuracoes/ia", "/configuracoes/treino-ia", "/admin/processos-background",
+    "/configuracoes/ia", "/admin/processos-background",
     "/configuracoes/notificacoes", "/admin/logs", "/admin/backups",
     "/diagnosticos", "/contas-email",
   ])("%s", (rota) => {
-    expect(papeisDaRota(rota)).toEqual(["master"]);
+    const bloco = blocoDaRota(rota);
+    const vaiParaSistema = /<IrParaPainel grupo="sistema"/.test(bloco);
+    expect(vaiParaSistema || JSON.stringify(papeisDaRota(rota)) === JSON.stringify(["master"]), rota).toBe(true);
   });
 
-  it.each(["/admin", "/admin/organizacao", "/admin/desempenho", "/admin/relatorio-semanal", "/workflow-estados"])(
-    "%s é de master, admin e ceo",
-    (rota) => {
-      const p = papeisDaRota(rota);
-      expect(p).toContain("master");
-      expect(p).toContain("admin");
-      expect(p).toContain("ceo");
-    },
-  );
+  it("/configuracoes/treino-ia é só do Master", () => {
+    const p = papeisDaRota("/configuracoes/treino-ia");
+    if (p) expect(p).toEqual(["master"]);
+    else expect(blocoDaRota("/configuracoes/treino-ia")).toMatch(/<IrParaPainel grupo="sistema"/);
+  });
+
+  it.each(["/admin", "/admin/desempenho", "/admin/relatorio-semanal"])("%s é de master, admin e ceo", (rota) => {
+    const p = papeisDaRota(rota);
+    expect(p).toContain("master");
+    expect(p).toContain("admin");
+    expect(p).toContain("ceo");
+  });
+
+  it.each(["/admin/organizacao", "/workflow-estados"])("%s leva ao painel único", (rota) => {
+    expect(blocoDaRota(rota)).toMatch(/<IrParaPainel /);
+  });
 });
 
 describe("a ligação do isMaster aos ecrãs de gestão", () => {
   const ler = (...partes) => semComentarios(readFileSync(join(SRC, ...partes), "utf8"));
 
-  it("as duas páginas que montam o separador Empresas e Utilizadores passam o isMaster", () => {
-    for (const pagina of ["pages/SystemAdminPanel.jsx", "pages/OrganizationAdminPage.jsx"]) {
-      const fonte = ler(pagina);
-      expect(fonte, pagina).toMatch(/<CompaniesAdminTab isMaster=\{/);
-      expect(fonte, pagina).toMatch(/<UsersAccessAdminTab isMaster=\{/);
-    }
+  it("o painel único monta Empresas e Utilizadores com o isMaster", () => {
+    const fonte = ler("pages/SystemAdminPanel.jsx");
+    expect(fonte).toMatch(/<CompaniesAdminTab isMaster=\{/);
+    expect(fonte).toMatch(/<UsersAccessAdminTab isMaster=\{/);
   });
 
   it("o separador de utilizadores passa o isMaster ao diálogo de criação", () => {
@@ -189,17 +204,18 @@ describe("a ligação do isMaster aos ecrãs de gestão", () => {
     expect(fonte).not.toMatch(/PRIMARY_ROLE_OPTIONS\.map/);
   });
 
-  it("o separador Técnico, o Histórico e as Comunicações usam o isMaster; o Workflow é por rede (Master, Admin e CEO)", () => {
+  it("o painel decide pela CONTA Master e pelo perfil efectivo; o Sistema é só do Master", () => {
     const fonte = ler("pages/SystemAdminPanel.jsx");
-    expect(fonte).toMatch(/const isMaster = hasRole\(user, "master"\)/);
+    expect(fonte).toMatch(/const contaMaster = eContaMaster\(user\)/);
+    expect(fonte).toMatch(/gruposVisiveis\(\{ perfil: effectiveRole/);
     expect(fonte).not.toMatch(/isAdmin/);
-    // O workflow é POR REDE: já não é infraestrutura global.
-    expect(fonte).toMatch(/const podeEditarWorkflow = isMaster \|\| hasRole\(user, "admin"\) \|\| hasRole\(user, "ceo"\)/);
-    expect(fonte).not.toMatch(/isMaster && \(\s*<TabsTrigger value="workflow-statuses"/);
+    const registo = ler("utils/painelAdminGrupos.js");
+    const sistema = registo.slice(registo.indexOf('id: "sistema"'));
+    expect(sistema).not.toMatch(/edita:/);
   });
 
   it("a configuração global de sistema decide pelo Master", () => {
-    expect(ler("pages/SystemConfigPage.js")).toMatch(/const isMaster = hasRole\(user, "master"\)/);
+    expect(ler("pages/SystemConfigPage.js")).toMatch(/const isMaster = contaMaster\(user\)/);
     expect(ler("pages/systemConfig/MaintenanceSection.js")).toMatch(/hasRole\(user, "master"\) && <S3RelinkPanel/);
   });
 });
