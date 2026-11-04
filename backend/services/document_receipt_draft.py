@@ -280,7 +280,7 @@ def resolver_provider(ambiente=None) -> str:
     return PROVIDER_OPENAI if producao and tem_chave else PROVIDER_MOCK
 
 
-async def esta_activo(ambiente=None) -> bool:
+async def esta_activo(ambiente=None, company_id: str = "default") -> bool:
     """O interruptor. Na dúvida (configuração ilegível), desligado."""
     declarado = _env(ambiente, "RECEIPT_DRAFT_ENABLED")
     if declarado in _FALSO:
@@ -293,7 +293,8 @@ async def esta_activo(ambiente=None) -> bool:
     try:
         from services.system_config import get_system_config
 
-        config = await get_system_config()
+        # Por EMPRESA (Flavio, Nov 2026, pergunta 7a): sem configuração própria herda a global.
+        config = await get_system_config(company_id or "default")
         return bool(getattr(config.auto_draft, "receipt_enabled", True))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[RASCUNHO-RECEÇÃO] Configuração ilegível (%s): rascunho não gerado.", exc)
@@ -432,9 +433,8 @@ async def criar_rascunho_de_rececao(
     """
     base = db_handle if db_handle is not None else db
     try:
-        if not await esta_activo(ambiente):
-            return {"success": False, "reason": "disabled"}
-
+        # O interruptor é o da EMPRESA do processo (Flavio, Nov 2026, 7a): decide-se abaixo,
+        # depois de ler o processo — o global não pode desligar uma empresa que o ligou.
         pendente = await base.emails.find_one({
             "process_id": process_id, "auto_draft_kind": KIND_DO_RASCUNHO,
             "auto_draft_doc_type": documento.tipo, "status": "draft",
@@ -449,6 +449,12 @@ async def criar_rascunho_de_rececao(
         )
         if not processo:
             return {"success": False, "reason": "process_not_found"}
+
+        # O interruptor da EMPRESA do processo (o de cima é o global/ambiente).
+        from services.config_da_empresa import empresa_do_processo
+
+        if not await esta_activo(ambiente, await empresa_do_processo(processo, bd=base)):
+            return {"success": False, "reason": "disabled"}
 
         contexto = {
             "nome_destinatario": destinatario.nome,

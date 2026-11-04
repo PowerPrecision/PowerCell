@@ -6,6 +6,7 @@ Logic in services/form_config_*.py.
 from fastapi import APIRouter, Depends, Request
 
 from services.auth import require_roles, require_management
+from services.registo_do_painel import run_com_rasto_da_rede
 from models.auth import UserRole
 
 # Re-export defaults for callers (e.g. routes.public)
@@ -48,7 +49,10 @@ async def update_form_config(
     user: dict = Depends(require_management())
 ):
     """Actualizar configuração do formulário."""
-    return await run_update_form_config(data, user, request)
+    return await run_com_rasto_da_rede(
+        run_update_form_config(data, user, request), user, request,
+        area="o Formulário público", descricao="campos do formulário alterados",
+    )
 
 
 @router.post("/custom-field")
@@ -58,7 +62,10 @@ async def create_custom_field(
     user: dict = Depends(require_management())
 ):
     """Criar um campo personalizado no formulário."""
-    return await run_create_custom_field(data, user, request)
+    return await run_com_rasto_da_rede(
+        run_create_custom_field(data, user, request), user, request,
+        area="o Formulário público", descricao="campo personalizado criado",
+    )
 
 
 @router.delete("/custom-field/{field_key}")
@@ -68,13 +75,19 @@ async def delete_custom_field(
     user: dict = Depends(require_management())
 ):
     """Eliminar campo personalizado do formulário."""
-    return await run_delete_custom_field(field_key, user, request)
+    return await run_com_rasto_da_rede(
+        run_delete_custom_field(field_key, user, request), user, request,
+        area="o Formulário público", descricao=f"campo personalizado «{field_key}» eliminado",
+    )
 
 
 @router.post("/reset")
 async def reset_form_config(request: Request, user: dict = Depends(require_roles([UserRole.MASTER]))):
     """Repor configuração padrão do formulário (remove campos personalizados)."""
-    return await run_reset_form_config(user, request)
+    return await run_com_rasto_da_rede(
+        run_reset_form_config(user, request), user, request,
+        area="o Formulário público", descricao="formulário reposto no padrão",
+    )
 
 
 @router.get("/templates")

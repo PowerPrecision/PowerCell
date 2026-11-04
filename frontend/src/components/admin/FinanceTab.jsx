@@ -61,7 +61,11 @@ const formatCurrency = (value) => formatCurrencyShared(value, { fallback: "0,00 
 // MAIN COMPONENT
 // ====================================================================
 
-const FinanceTab = () => {
+/**
+ * `soLeitura` — Admin e Diretor só consultam os honorários da empresa (Flavio, Nov 2026, 3a/4b).
+ * `podeGravarGlobal` — as percentagens por área são GLOBAIS (`PUT /finance/config` só Master).
+ */
+const FinanceTab = ({ soLeitura = false, podeGravarGlobal = false }) => {
   const { user } = useAuth();
   const companyId = user?.company || "default";
 
@@ -258,6 +262,8 @@ const FinanceTab = () => {
       {/* ============================================================ */}
       {/* SECÇÃO A: Configuração de Honorários                         */}
       {/* ============================================================ */}
+      <fieldset disabled={soLeitura} className="min-w-0 space-y-2 disabled:opacity-80">
+      {soLeitura && <p className="text-xs text-muted-foreground">Só consulta: os honorários e comissões da empresa são alterados pelo CEO.</p>}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
@@ -405,10 +411,12 @@ const FinanceTab = () => {
           </div>
         </CardContent>
       </Card>
+      </fieldset>
 
       {/* ============================================================ */}
       {/* SECÇÃO B: Modelo de Distribuição                             */}
       {/* ============================================================ */}
+      <fieldset disabled={soLeitura} className="min-w-0 space-y-2 disabled:opacity-80">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
@@ -529,10 +537,13 @@ const FinanceTab = () => {
           </div>
         </CardContent>
       </Card>
+      </fieldset>
 
       {/* ============================================================ */}
       {/* SECÇÃO C: Percentagens por Área (Legacy Dashboard Config)    */}
       {/* ============================================================ */}
+      <fieldset disabled={!podeGravarGlobal} className="min-w-0 space-y-2 disabled:opacity-80">
+      {!podeGravarGlobal && <p className="text-xs text-muted-foreground">Estas percentagens são globais (todas as empresas): só o Master as altera.</p>}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
@@ -640,6 +651,7 @@ const FinanceTab = () => {
           </div>
         </CardContent>
       </Card>
+      </fieldset>
     </div>
   );
 };

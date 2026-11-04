@@ -7,6 +7,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const apiMock = vi.hoisted(() => ({ revealSystemConfigSecrets: vi.fn() }));
+vi.mock("../../../services/api", () => apiMock);
+
 import { ConfigFieldInput } from "../configFormHelpers";
 
 const CAMPO = { key: "aws_secret_access_key", label: "Chave secreta", type: "password" };
@@ -16,13 +19,11 @@ describe("ConfigFieldInput — revelar um segredo", () => {
 
   beforeEach(() => {
     pedidos = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url) => {
-        pedidos.push(String(url));
-        return { ok: true, json: async () => ({ secrets: { aws_secret_access_key: "SEGREDO-REAL" } }) };
-      }),
-    );
+    // Pelo cliente Axios (leva `X-Company-Id`/`X-Active-Role`); a URL equivalente regista-se para as asserções.
+    apiMock.revealSystemConfigSecrets.mockImplementation(async (section, companyId) => {
+      pedidos.push(`/system-config/reveal-secrets?section=${section}&company_id=${companyId}`);
+      return { data: { secrets: { aws_secret_access_key: "SEGREDO-REAL" } } };
+    });
   });
 
   const montar = (companyId) =>

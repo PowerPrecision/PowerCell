@@ -218,7 +218,7 @@ const SendDocumentationModal = ({
     try {
       // Carregar configuração de destinatários (um erro aqui não impede os documentos)
       try {
-        const { data: configData } = await getDocumentRecipients();
+        const { data: configData } = await getDocumentRecipients(processId);
         setConfig(configData);
         setRecipients(configData.recipients || []);
         setEmailTemplate(configData.email_template || "");

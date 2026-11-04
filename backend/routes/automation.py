@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from middleware.rate_limit import limiter
 from models.auth import UserRole
 from services.auth import require_roles
+from services.registo_do_painel import run_com_rasto_da_rede
 from services.automation_api_rules import (
     RuleCreate,
     RuleUpdate,
@@ -91,29 +92,41 @@ async def get_rule_by_id(
 @router.post("/rules")
 async def create_rule_endpoint(
     data: RuleCreate,
+    request: Request,
     user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """Criar nova regra de automação."""
-    return await run_create_rule(data, user)
+    return await run_com_rasto_da_rede(
+        run_create_rule(data, user), user, request,
+        area="as Automações", descricao=f"regra «{getattr(data, 'name', '')}» criada",
+    )
 
 
 @router.put("/rules/{rule_id}")
 async def update_rule_endpoint(
     rule_id: str,
     data: RuleUpdate,
+    request: Request,
     user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """Actualizar uma regra."""
-    return await run_update_rule(rule_id, data, user)
+    return await run_com_rasto_da_rede(
+        run_update_rule(rule_id, data, user), user, request,
+        area="as Automações", descricao=f"regra {rule_id} alterada",
+    )
 
 
 @router.delete("/rules/{rule_id}")
 async def delete_rule_endpoint(
     rule_id: str,
+    request: Request,
     user: dict = Depends(require_roles([UserRole.MASTER, UserRole.ADMIN, UserRole.CEO]))
 ):
     """Eliminar uma regra."""
-    return await run_delete_rule(rule_id, user)
+    return await run_com_rasto_da_rede(
+        run_delete_rule(rule_id, user), user, request,
+        area="as Automações", descricao=f"regra {rule_id} eliminada",
+    )
 
 
 @router.get("/triggers")

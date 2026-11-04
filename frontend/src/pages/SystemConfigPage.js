@@ -45,7 +45,12 @@ import MandatoryDocumentsSection from "./systemConfig/MandatoryDocumentsSection"
 import ChangelogSection from "./systemConfig/ChangelogSection";
 import SlaThresholdsSection from "./systemConfig/SlaThresholdsSection";
 import EmpresaConfigSelector from "./systemConfig/EmpresaConfigSelector";
-import { getSystemConfigCompanies } from "../services/api";
+import {
+  getSystemConfig,
+  getSystemConfigCompanies,
+  testSystemConfigConnection,
+  updateSystemConfigSection,
+} from "../services/api";
 import {
   deveMostrarSeletorDeEmpresa,
   empresaEmVigor,
@@ -61,7 +66,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { hasAnyRole, hasRole } from "../utils/roleUtils";
+import { hasAnyRole, isMaster as contaMaster } from "../utils/roleUtils";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
 import {
@@ -73,9 +78,9 @@ import {
   MessageSquare,
   Gauge,
   Megaphone,
+  Mail,
 } from "lucide-react";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 /**
  * Separadores com ecrã PRÓPRIO — ponto único.
@@ -153,13 +158,73 @@ export const seccoesDaNavegacao = (isAdmin) =>
 /** Compatibilidade: a lista completa (o que o administrador vê). */
 export const SECCOES_NA_NAVEGACAO = SECCOES_NA_NAVEGACAO_COMPLETAS;
 
-const SystemConfigPage = ({ embedded = false }) => {
+/**
+ * ÂMBITOS (Flavio, Nov 2026 — revisão do painel). O Painel abre este ecrã em
+ * dois sítios, e cada um mostra SÓ o que lhe pertence:
+ *
+ * * `empresa` (Administração → A empresa) — as definições que se lêem por
+ *   empresa: dados legais e aparência, serviços de crédito, DSTI, rascunhos e
+ *   balcões. Grava-as o CEO (e o Master); o Admin já não (pergunta 4b).
+ * * `sistema` (Administração → Sistema, só Master) — a configuração GLOBAL:
+ *   armazenamento, IA, auditoria, backups automáticos e as secções dedicadas.
+ *
+ * Sem `ambito` (rota antiga) o ecrã comporta-se como sempre.
+ */
+export const AMBITO_EMPRESA = "empresa";
+export const AMBITO_SISTEMA = "sistema";
+
+/** O que só existe na configuração global (espelho de `SECCOES_SO_GLOBAIS` do servidor). */
+export const SECCOES_SO_GLOBAIS = ["storage", "ai", "audit_trail", "dashboard_slas", "system_smtp", "system_webmail"];
+
+/** Campos da secção `settings` que são globais (os backups automáticos: pergunta 9a). */
+export const CAMPOS_GLOBAIS_DAS_DEFINICOES = ["_divider_backup", "auto_backup_enabled"];
+
+/** Secções dedicadas que são da EMPRESA (lêem-se por empresa). */
+export const SECCOES_DEDICADAS_DA_EMPRESA = [
+  { key: "document_recipients", label: "Balcões (destinatários)", Icon: Mail },
+];
+
+/** Secções genéricas que o ecrã oferece, por âmbito. O email geral vive na ficha da empresa (10a). */
+export const seccoesGenericasDoAmbito = (ambito, chaves) => {
+  const todas = (chaves || []).filter((k) => k !== "email" && k !== "document_recipients");
+  if (ambito === AMBITO_EMPRESA) return todas.filter((k) => !SECCOES_SO_GLOBAIS.includes(k));
+  if (ambito === AMBITO_SISTEMA) {
+    const globais = todas.filter((k) => SECCOES_SO_GLOBAIS.includes(k));
+    return todas.includes("settings") ? [...globais, "settings"] : globais;
+  }
+  return todas;
+};
+
+/** Os campos de uma secção que este âmbito mostra (as Definições partem-se em duas). */
+export const camposDoAmbito = (ambito, sectionKey, campos) => {
+  if (sectionKey !== "settings" || !ambito) return campos || [];
+  const globais = (c) => CAMPOS_GLOBAIS_DAS_DEFINICOES.includes(c.key);
+  return (campos || []).filter((c) => (ambito === AMBITO_SISTEMA ? globais(c) : !globais(c)));
+};
+
+const SystemConfigPage = ({ embedded = false, ambito }) => {
   const { token, user, effectiveCompanyId } = useAuth();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [config, setConfig] = useState(null);
   const [fields, setFields] = useState({});
+  const [permissoes, setPermissoes] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState(() => searchParams.get("tab") || "storage");
+  // O separador vive no URL (`?tab=`), para sobreviver a um refresh e poder partilhar-se.
+  const separadorPorOmissao = ambito === AMBITO_EMPRESA ? "settings" : "storage";
+  const activeTab = searchParams.get("tab") || separadorPorOmissao;
+  const setActiveTab = useCallback(
+    (tab) => {
+      setSearchParams(
+        (atual) => {
+          const novo = new URLSearchParams(atual);
+          novo.set("tab", tab);
+          return novo;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   // MULTI-EMPRESA: por omissão reagimos à empresa activa do selector global
   // (ContextSwitcher). Mas esse selector só lista os UCR de quem pergunta, e
@@ -169,11 +234,15 @@ const SystemConfigPage = ({ embedded = false }) => {
   const [empresas, setEmpresas] = useState([]);
   const [listaPronta, setListaPronta] = useState(false);
   const [empresaEscolhida, setEmpresaEscolhida] = useState(null);
-  const selectedCompanyId = empresaEmVigor({
+  // «A empresa» nunca oferece a global; «Sistema» é SÓ a global.
+  const empresasDoAmbito =
+    ambito === AMBITO_EMPRESA ? empresas.filter((e) => e.company_id !== "default") : empresas;
+  const empresaDoAmbito = empresaEmVigor({
     escolhida: empresaEscolhida,
     activa: effectiveCompanyId,
-    empresas,
+    empresas: empresasDoAmbito,
   });
+  const selectedCompanyId = ambito === AMBITO_SISTEMA ? "default" : empresaDoAmbito;
 
   useEffect(() => {
     let cancelado = false;
@@ -199,12 +268,12 @@ const SystemConfigPage = ({ embedded = false }) => {
 
   const fetchConfig = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/system-config?company_id=${encodeURIComponent(selectedCompanyId)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      // Axios: leva `X-Company-Id`/`X-Active-Role` (um `fetch` cru perdia-os e o
+      // servidor resolvia o perfil sem o contexto activo).
+      const response = await getSystemConfig(selectedCompanyId).catch((erro) => erro?.response || null);
 
-      if (response.ok) {
-        const data = await response.json();
+      if (response?.data && !(response.status >= 400)) {
+        const data = response.data;
         // Converter arrays para string separada por vírgulas em campos de texto
         if (data.config?.auto_draft?.eligible_doc_types != null) {
           const docTypes = data.config.auto_draft.eligible_doc_types;
@@ -213,7 +282,8 @@ const SystemConfigPage = ({ embedded = false }) => {
             : String(docTypes);
         }
         setConfig(data.config);
-        setFields(data.fields);
+        setFields(data.fields || {});
+        setPermissoes(data.permissoes || null);
       } else {
         toast.error("Erro ao carregar configurações");
       }
@@ -223,7 +293,7 @@ const SystemConfigPage = ({ embedded = false }) => {
     } finally {
       setLoading(false);
     }
-  }, [token, selectedCompanyId]);
+  }, [selectedCompanyId]);
 
   // Só pede depois de saber que empresas se oferecem: um CEO de uma ilha
   // não tem a global, e abrir o ecrã a pedi-la daria um 403 e um toast.
@@ -284,18 +354,7 @@ const SystemConfigPage = ({ embedded = false }) => {
       }
     }
 
-    const response = await fetch(`${API_URL}/api/system-config/${section}?company_id=${encodeURIComponent(selectedCompanyId)}`, {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(processedData),
-    });
-
-    if (!response.ok) {
-      throw new Error("Erro ao guardar");
-    }
+    await updateSystemConfigSection(section, processedData, selectedCompanyId);
 
     // Recarregar config
     await fetchConfig();
@@ -305,19 +364,15 @@ const SystemConfigPage = ({ embedded = false }) => {
   // ligação cortada diziam-se «Erro ao testar», como se a configuração estivesse errada.
   const handleTest = async (service) => {
     try {
-      const response = await fetch(
-        `${API_URL}/api/system-config/test-connection/${service}`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      const corpo = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        return { success: false, message: mensagemDeResposta(response.status, corpo, "Falha no teste de ligação") };
-      }
-      return corpo;
+      const { data } = await testSystemConfigConnection(service);
+      return data || {};
     } catch (erro) {
+      if (erro?.response) {
+        return {
+          success: false,
+          message: mensagemDeResposta(erro.response.status, erro.response.data || {}, "Falha no teste de ligação"),
+        };
+      }
       return { success: false, message: mensagemDeFalha(erro, "Falha no teste de ligação") };
     }
   };
@@ -333,10 +388,10 @@ const SystemConfigPage = ({ embedded = false }) => {
     );
     return embedded ? loadingContent : <DashboardLayout>{loadingContent}</DashboardLayout>;
   }
-  if (!hasAnyRole(user, ["master", "admin", "ceo"])) {
+  if (!hasAnyRole(user, ["master", "admin", "ceo"]) && !permissoes) {
     const accessDeniedContent = (
       <div className="text-center py-12">
-        <XCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+        <XCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
         <h2 className="text-xl font-semibold">Acesso Restrito</h2>
         <p className="text-muted-foreground">
           Apenas administradores podem aceder às configurações do sistema.
@@ -346,21 +401,32 @@ const SystemConfigPage = ({ embedded = false }) => {
     return embedded ? accessDeniedContent : <DashboardLayout>{accessDeniedContent}</DashboardLayout>;
   }
 
-  const sections = Object.keys(fields).filter(key => key !== "email");
+  const sections = seccoesGenericasDoAmbito(ambito, Object.keys(fields));
   // Qual secção o separador activo pede. Deriva do registo — ver
   // `SECCOES_DEDICADAS`: é o que garante que nunca se renderizam as duas.
   // A configuração GLOBAL é exclusiva do MASTER (o único perfil global): o
   // Admin e o CEO só vêem as secções genéricas da(s) sua(s) empresa(s). Um
   // `?tab=` antigo que aponte para uma dedicada diz-se, em vez de abrir um
   // ecrã de erros 403.
-  const isMaster = hasRole(user, "master");
-  const navegacao = seccoesDaNavegacao(isMaster);
-  const SeccaoDedicada = isMaster ? SECCOES_DEDICADAS[activeTab] : undefined;
-  const seccaoReservada = !isMaster && Boolean(SECCOES_DEDICADAS[activeTab]);
+  // O Master é a CONTA (o servidor deixa passar a conta Master com qualquer perfil activo).
+  const isMaster = contaMaster(user);
+  const navegacao = ambito === AMBITO_EMPRESA ? [] : seccoesDaNavegacao(isMaster);
+  const dedicadasDaEmpresa = ambito === AMBITO_EMPRESA ? SECCOES_DEDICADAS_DA_EMPRESA : [];
+  const eDedicadaDaEmpresa = dedicadasDaEmpresa.some((d) => d.key === activeTab);
+  const SeccaoDedicada =
+    ambito === AMBITO_EMPRESA
+      ? eDedicadaDaEmpresa ? SECCOES_DEDICADAS[activeTab] : undefined
+      : isMaster ? SECCOES_DEDICADAS[activeTab] : undefined;
+  const seccaoReservada = !SeccaoDedicada && Boolean(SECCOES_DEDICADAS[activeTab]);
+  // O servidor diz se este perfil grava (o Admin e o Diretor só consultam a empresa).
+  const soLeitura = ambito === AMBITO_EMPRESA && permissoes && permissoes.pode_gravar === false;
   // O ecrã diz QUE âmbito está a mostrar (QA-6): as categorias genéricas são da empresa em
   // vigor; as secções com ecrã próprio são globais (só o Master chega a elas).
   const nomeDaEmpresaEmVigor = rotuloDaEmpresaEmVigor(selectedCompanyId, empresas);
-  const ambitoGlobalAtivo = Boolean(SeccaoDedicada);
+  // No Sistema, as «Definições» são só os backups automáticos (o resto é da empresa).
+  const rotuloDaSeccao = (key) =>
+    ambito === AMBITO_SISTEMA && key === "settings" ? "Backups automáticos" : getSectionNavLabel(key, fields);
+  const ambitoGlobalAtivo = ambito === AMBITO_SISTEMA || (Boolean(SeccaoDedicada) && !eDedicadaDaEmpresa);
 
 
   const pageContent = (
@@ -370,16 +436,24 @@ const SystemConfigPage = ({ embedded = false }) => {
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <Settings className="h-6 w-6" />
-              Configurações do Sistema
+              {ambito === AMBITO_EMPRESA
+                ? "Definições da empresa"
+                : ambito === AMBITO_SISTEMA
+                  ? "Configuração global"
+                  : "Configurações do Sistema"}
             </h1>
             <p className="text-muted-foreground">
-              Configure as integrações e definições da aplicação
+              {ambito === AMBITO_EMPRESA
+                ? "O que vale só para a empresa escolhida."
+                : ambito === AMBITO_SISTEMA
+                  ? "Vale para todas as empresas do sistema."
+                  : "Configure as integrações e definições da aplicação"}
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {deveMostrarSeletorDeEmpresa(empresas) && (
+            {ambito !== AMBITO_SISTEMA && deveMostrarSeletorDeEmpresa(empresasDoAmbito) && (
               <EmpresaConfigSelector
-                empresas={empresas}
+                empresas={empresasDoAmbito}
                 valor={selectedCompanyId}
                 onChange={setEmpresaEscolhida}
               />
@@ -403,11 +477,13 @@ const SystemConfigPage = ({ embedded = false }) => {
                     className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2 mb-2"
                     data-testid="grupo-empresa"
                   >
-                    Definições da empresa
+                    {ambito === AMBITO_SISTEMA ? "Infraestrutura (global)" : "Definições da empresa"}
                   </p>
-                  <p className="text-[11px] text-muted-foreground px-2 -mt-1 mb-2 truncate" title={nomeDaEmpresaEmVigor}>
-                    {nomeDaEmpresaEmVigor}
-                  </p>
+                  {ambito !== AMBITO_SISTEMA && (
+                    <p className="text-[11px] text-muted-foreground px-2 -mt-1 mb-2 truncate" title={nomeDaEmpresaEmVigor}>
+                      {nomeDaEmpresaEmVigor}
+                    </p>
+                  )}
                   <nav className="space-y-1">
                     {sections.map((key) => {
                       const Icon = SECTION_ICONS[key] || Settings;
@@ -424,11 +500,27 @@ const SystemConfigPage = ({ embedded = false }) => {
                           }`}
                         >
                           <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
-                          <span className="truncate">{getSectionNavLabel(key, fields)}</span>
+                          <span className="truncate">{rotuloDaSeccao(key)}</span>
                           {isActive && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
                         </button>
                       );
                     })}
+                    {dedicadasDaEmpresa.map(({ key, label, Icon }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setActiveTab(key)}
+                        className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
+                          activeTab === key
+                            ? "bg-primary/10 text-primary font-medium"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                        }`}
+                        data-testid={`nav-${key.replace(/_/g, "-")}`}
+                      >
+                        <Icon className={`h-4 w-4 shrink-0 ${activeTab === key ? "text-primary" : ""}`} />
+                        <span className="truncate">{label}</span>
+                      </button>
+                    ))}
                   </nav>
                   {/* Nota: "RGPD" foi removido daqui — vive apenas no tab Compliance do Painel de Administração (evita duplicação).
                       "Integrações" e "Emails Sistema" foram movidos para o tab Comunicações no Painel de Administração */}
@@ -484,11 +576,19 @@ const SystemConfigPage = ({ embedded = false }) => {
                         <SelectItem key={key} value={key}>
                           <span className="flex items-center gap-2">
                             <Icon className="h-4 w-4" />
-                            {getSectionNavLabel(key, fields)}
+                            {rotuloDaSeccao(key)}
                           </span>
                         </SelectItem>
                       );
                     })}
+                    {dedicadasDaEmpresa.map(({ key, label, Icon }) => (
+                      <SelectItem key={key} value={key}>
+                        <span className="flex items-center gap-2">
+                          <Icon className="h-4 w-4" />
+                          {label}
+                        </span>
+                      </SelectItem>
+                    ))}
                   </SelectGroup>
                   {/* Nota: RGPD removido (vive só em Compliance); Integrações e Emails Sistema movidos para Comunicações */}
                   {navegacao.length > 0 && (
@@ -530,10 +630,26 @@ const SystemConfigPage = ({ embedded = false }) => {
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" />
-                      {getSectionNavLabel(key, fields)}
+                      {rotuloDaSeccao(key)}
                     </button>
                   );
                 })}
+                {dedicadasDaEmpresa.map(({ key, label, Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setActiveTab(key)}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
+                      activeTab === key
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-muted text-muted-foreground hover:border-muted-foreground/50"
+                    }`}
+                    data-testid={`chip-${key.replace(/_/g, "-")}`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                  </button>
+                ))}
               </div>
               {navegacao.length > 0 && (
                 <div className="space-y-1.5 rounded-lg border border-dashed border-border bg-muted/40 p-2" data-testid="chips-globais">
@@ -573,7 +689,7 @@ const SystemConfigPage = ({ embedded = false }) => {
               >
                 Definição <strong>global do sistema</strong>: aplica-se a todas as empresas.
               </p>
-            ) : fields[activeTab] ? (
+            ) : fields[activeTab] || eDedicadaDaEmpresa ? (
               <p
                 className="mb-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
                 data-testid="ambito-empresa"
@@ -581,14 +697,23 @@ const SystemConfigPage = ({ embedded = false }) => {
                 A editar as definições de: <strong>{nomeDaEmpresaEmVigor}</strong>
               </p>
             ) : null}
-            {SeccaoDedicada ? <SeccaoDedicada token={token} user={user} /> : null}
+            {soLeitura && (
+              <p
+                className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+                data-testid="config-so-leitura"
+              >
+                Só consulta: as definições da empresa são alteradas pelo CEO.
+              </p>
+            )}
+            {SeccaoDedicada ? <SeccaoDedicada token={token} user={user} companyId={selectedCompanyId} /> : null}
             {!SeccaoDedicada && fields[activeTab] && (
               <ConfigSection
                 section={fields[activeTab]}
                 sectionKey={activeTab}
                 companyId={selectedCompanyId}
                 config={config?.[activeTab]}
-                fields={fields[activeTab]?.fields || []}
+                fields={camposDoAmbito(ambito, activeTab, fields[activeTab]?.fields)}
+                readOnly={Boolean(soLeitura)}
                 onSave={handleSave}
                 onTest={handleTest}
               />

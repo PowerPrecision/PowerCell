@@ -43,6 +43,7 @@ vi.mock("../../services/api", () => ({
   updateSystemConfigSection: vi.fn(async () => ({ data: {} })),
 }));
 
+import * as api from "../../services/api";
 import SystemConfigPage, {
   SECCOES_DEDICADAS,
   SECCOES_NA_NAVEGACAO,
@@ -76,13 +77,8 @@ function montar(tab) {
 describe("SystemConfigPage — o separador activo escolhe UMA secção", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => RESPOSTA_REAL,
-      })),
-    );
+    // A página e a secção dos SLAs lêem ambas `getSystemConfig` (Axios).
+    api.getSystemConfig.mockImplementation(async () => ({ data: RESPOSTA_REAL }));
   });
 
   it("o separador dos SLAs mostra a secção dedicada", async () => {
@@ -141,9 +137,9 @@ describe("SystemConfigPage — o separador activo escolhe UMA secção", () => {
     // Terceiro defeito: a secção lia `res.data.dashboard_slas` em vez de
     // `res.data.config.dashboard_slas`, logo mostrava sempre 7/15/30 fossem
     // quais fossem os valores gravados.
-    const api = await import("../../services/api");
     api.getSystemConfig.mockResolvedValue({
       data: {
+        ...RESPOSTA_REAL,
         config: { dashboard_slas: { enabled: false, novo: 3, analise: 21, aprovado: 45 } },
       },
     });

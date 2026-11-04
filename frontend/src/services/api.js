@@ -805,6 +805,17 @@ export const updateSystemConfigSection = (section, data, companyId) =>
     params: { ...(companyId ? { company_id: companyId } : {}) },
   });
 
+// Revelar um segredo de uma secção (só quem grava a empresa, ou o Master na global).
+export const revealSystemConfigSecrets = (section, companyId) =>
+  api.get("/system-config/reveal-secrets", {
+    params: { section, ...(companyId ? { company_id: companyId } : {}) },
+    skipErrorToast: true,
+  });
+
+// Testar a ligação de um serviço da configuração GLOBAL (só Master).
+export const testSystemConfigConnection = (service) =>
+  api.post(`/system-config/test-connection/${encodeURIComponent(service)}`, null, { skipErrorToast: true });
+
 // «Este cliente já tem um processo activo?» — alimenta o aviso de duplicação ao
 // adicionar um cliente a um processo. `excludeProcessId` é o processo a que o
 // cliente está a ser adicionado (esse não conta).
@@ -1650,8 +1661,12 @@ export const downloadWebmailAttachment = (attachmentId, params) =>
 // ── Envio de documentação aos balcões + anexos de um email ──
 // Tudo pelo cliente Axios: um `fetch` cru perdia `X-Company-Id` e `X-Active-Role`
 // (Lote 7.3) e o servidor decidia a empresa e a conta de envio sem o contexto activo.
-export const getDocumentRecipients = () =>
-  api.get("/emails/document-recipients", { skipErrorToast: true });
+// Com `processId`, os balcões são os da EMPRESA do processo (Flavio, Nov 2026); sem ele, os da empresa activa.
+export const getDocumentRecipients = (processId) =>
+  api.get("/emails/document-recipients", {
+    skipErrorToast: true,
+    ...(processId ? { params: { process_id: processId } } : {}),
+  });
 export const getProcessDocumentsForSending = (processId) =>
   api.get(`/documents/process/${encodeURIComponent(processId)}`, { skipErrorToast: true });
 export const previewDocumentRecipientsTemplate = (emailTemplate) =>

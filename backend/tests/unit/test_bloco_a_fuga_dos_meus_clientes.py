@@ -257,7 +257,7 @@ class TestListagensDeDocumentosENotificacoes:
                 enabled = True
                 high_risk_threshold = 0
 
-        async def _cfg():
+        async def _cfg(*_a, **_k):
             return _Cfg()
 
         with tenant_db(db, dsti), patch.object(dsti, "db", db), \

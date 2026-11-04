@@ -26,6 +26,7 @@ vi.mock("../../services/api", () => ({
   updateSystemConfigSection: vi.fn(async () => ({ data: {} })),
 }));
 
+import * as api from "../../services/api";
 import SystemConfigPage from "../SystemConfigPage";
 
 const RESPOSTA = {
@@ -44,7 +45,7 @@ const montar = (tab = "storage") =>
 
 beforeEach(() => {
   papel = "master";
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => RESPOSTA })));
+  api.getSystemConfig.mockImplementation(async () => ({ data: RESPOSTA }));
 });
 
 describe("Definições: empresa vs. sistema", () => {

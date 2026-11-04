@@ -114,10 +114,23 @@ doc_router = None  # compat server.py
 
 @router.get("/document-recipients")
 async def get_document_recipients(
+    request: Request,
+    process_id: Optional[str] = Query(None, description="Processo: usa os balcões da empresa dele"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Obter lista de destinatários disponíveis para envio de documentação."""
-    return await run_get_document_recipients(current_user)
+    """Obter lista de destinatários (balcões) — da empresa do processo, ou da empresa activa."""
+    empresa = None
+    if process_id:
+        from services.config_da_empresa import empresa_do_processo
+
+        processo = await exigir_processo_legivel(process_id, current_user)
+        empresa = await empresa_do_processo(processo)
+    if not empresa or empresa == "default":
+        try:
+            empresa = await get_active_company_id_async(request, current_user)
+        except Exception:  # noqa: BLE001 — sem empresa activa vale a do utilizador
+            empresa = None
+    return await run_get_document_recipients(current_user, empresa)
 
 
 @router.post("/preview-template")

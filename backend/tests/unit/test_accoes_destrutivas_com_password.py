@@ -157,7 +157,8 @@ class TestAlterarARede:
             await mut.run_update_company(
                 "cmp-power", CompanyUpdate(network_id="outra", confirm_password=SENHA), actor=ADMIN,
             )
-        assert erro.value.status_code == 403 and "Master" in erro.value.detail
+        # Revisão do painel (Flavio, Nov 2026, 4b): o Admin já nem grava a ficha da empresa.
+        assert erro.value.status_code == 403 and "CEO" in erro.value.detail
         assert _empresa(bd, "cmp-power")["network_id"] == REDE_INCUMBENTE
 
     async def test_o_travao_conta_as_falhas_e_bloqueia_com_429(self, mundo):
@@ -570,7 +571,7 @@ class TestInventario:
     def test_as_rotas_levam_o_corpo_e_passam_a_password(self):
         rota = (RAIZ / "routes/companies_crud.py").read_text(encoding="utf-8")
         assert "ConfirmacaoPorPassword" in rota and "data.password if data else None" in rota
-        assert "run_update_company(company_id, data, actor=user)" in rota
+        assert "run_update_company(company_id, data, actor=user, request=request)" in rota
 
     def test_o_delete_e_o_batch_estao_limitados_e_declaram_response(self):
         """`@limiter.limit` sem `response: Response` rebenta o SUCESSO com 500."""

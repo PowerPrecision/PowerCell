@@ -47,6 +47,7 @@ import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { podeGerirConfiguracao } from "../utils/roleUtils";
 import {
   getDocumentRecipients,
+  getSystemConfig,
   previewDocumentRecipientsTemplate,
   updateSystemConfigSection,
 } from "../services/api";
@@ -97,7 +98,22 @@ import { toast } from "sonner";
 import ReactQuill from 'react-quill-new';
 
 
-const DocumentRecipientsManager = ({ token, user }) => {
+/** Lê uma lista guardada como texto JSON (ou já lista); o que não se lê é lista vazia. */
+const lerLista = (valor) => {
+  if (Array.isArray(valor)) return valor;
+  try {
+    const lida = JSON.parse(valor || "[]");
+    return Array.isArray(lida) ? lida : [];
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * `companyId` — a empresa escolhida no Painel (Flavio, Nov 2026: os balcões são POR EMPRESA).
+ * Sem ele, lê e grava os da empresa activa / global, como antes.
+ */
+const DocumentRecipientsManager = ({ token, user, companyId }) => {
   // Estado
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -130,17 +146,28 @@ const DocumentRecipientsManager = ({ token, user }) => {
   // Carregar dados
   useEffect(() => {
     loadConfig();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  const lerDaEmpresa = async () => {
+    const { data: resposta } = await getSystemConfig(companyId);
+    const seccao = resposta?.config?.document_recipients || {};
+    return {
+      ...seccao,
+      recipients: lerLista(seccao.recipients),
+      default_to_emails: lerLista(seccao.default_to_emails),
+    };
+  };
 
   const loadConfig = async () => {
     setLoading(true);
     try {
-      const { data } = await getDocumentRecipients();
+      const data = companyId ? await lerDaEmpresa() : (await getDocumentRecipients()).data;
       setEnabled(data.enabled || false);
       setRecipients(data.recipients || []);
       setEmailTemplate(data.email_template || "");
-      setDefaultTo(data.default_to || "geral@powerealestate.pt");
-      setDefaultToName(data.default_to_name || "Power Real Estate");
+      setDefaultTo(data.default_to || "");
+      setDefaultToName(data.default_to_name || "");
       setDefaultToEmails(data.default_to_emails || []);
     } catch (error) {
       console.error("Erro ao carregar configuração:", error);
@@ -161,7 +188,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         default_to: defaultTo,
         default_to_name: defaultToName,
         default_to_emails: JSON.stringify(defaultToEmails.filter((e) => e && e.includes("@"))),
-      });
+      }, companyId);
       return { ok: true };
     } catch (erro) {
       return { ok: false, detail: erro?.response?.data?.detail };

@@ -50,7 +50,6 @@ const IndexSearchPage = React.lazy(() => import("./pages/index/IndexSearchPage")
 // PÁGINAS COM CODE SPLITTING (lazy loading)
 // ====================================================================
 const AdminDashboard = React.lazy(() => import("./pages/AdminDashboard"));
-const OrganizationAdminPage = React.lazy(() => import("./pages/OrganizationAdminPage"));
 const SystemAdminPanel = React.lazy(() => import("./pages/SystemAdminPanel"));
 const RGPDAdminPage = React.lazy(() => import("./pages/RGPDAdminPage"));
 const StatisticsPage = React.lazy(() => import("./pages/StatisticsPage"));
@@ -227,6 +226,7 @@ class LazyChunkErrorBoundary extends Component {
 
 // IdealistaImportPage movido para modal na página de Leads
 import "./App.css";
+import { DESTINOS_ANTIGOS } from "./utils/painelAdminGrupos";
 
 // Admin roles for automation and system config
 const ADMIN_ROLES = ["master", "admin", "ceo"];
@@ -305,6 +305,22 @@ function RootRedirect() {
       <PublicClientForm />
     </ErrorBoundary>
   );
+}
+
+/**
+ * Rotas antigas da administração → o painel único (Flavio, Nov 2026, revisão do painel).
+ * Os links guardados continuam a funcionar; o `?tab=` antigo vai com eles (o painel traduz).
+ */
+function IrParaPainel({ grupo, seccao }) {
+  const location = useLocation();
+  const tab = new URLSearchParams(location.search).get("tab");
+  // `/admin/organizacao?tab=parceiros` → Equipa › Parceiros; nas outras, o `?tab=` é o
+  // sub-separador da página (ex.: `/configuracoes?tab=dsti_analysis`) e segue com ela.
+  const antigo = !seccao && tab ? DESTINOS_ANTIGOS[tab] : null;
+  const destino = new URLSearchParams({ grupo: antigo?.grupo || grupo });
+  if (antigo?.seccao || seccao) destino.set("seccao", antigo?.seccao || seccao);
+  if (tab && seccao) destino.set("tab", tab);
+  return <Navigate to={`/system-admin?${destino.toString()}`} replace />;
 }
 
 function App() {
@@ -398,13 +414,7 @@ function App() {
           {/* Pacote DW — Administração de Empresas e acessos UCR (perfil activo admin/ceo) */}
           <Route
             path="/admin/organizacao"
-            element={
-              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
-                <RouteBoundary name="Administração — Empresas e Acessos">
-                  <OrganizationAdminPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="equipa" />}
           />
           
           {/* Team Performance Dashboard - Executivo (admin + CEO) */}
@@ -435,8 +445,8 @@ function App() {
           <Route
             path="/system-admin"
             element={
-              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
-                <RouteBoundary name="Painel de Administração do Sistema">
+              <ProtectedRoute allowedRoles={["master", "admin", "ceo", "diretor"]}>
+                <RouteBoundary name="Administração">
                   <SystemAdminPanel />
                 </RouteBoundary>
               </ProtectedRoute>
@@ -482,8 +492,8 @@ function App() {
           {/* Finance Settings — REDIRECT to SystemAdminPanel > Tab Finanças */}
           <Route path="/finance/settings" element={<Navigate to="/system-admin" replace />} />
 
-          {/* Pacote DY — gestão de utilizadores consolidada em /admin/organizacao */}
-          <Route path="/utilizadores" element={<Navigate to="/admin/organizacao?tab=utilizadores" replace />} />
+          {/* Pacote DY — gestão de utilizadores consolidada na Administração (Equipa) */}
+          <Route path="/utilizadores" element={<Navigate to="/system-admin?grupo=equipa&seccao=utilizadores" replace />} />
           
           {/* Processes Page - Staff and Admin */}
           <Route
@@ -683,33 +693,15 @@ function App() {
           {/* Workflow Statuses - POR REDE: Master, Admin e CEO editam o da rede em contexto */}
           <Route
             path="/workflow-estados"
-            element={
-              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
-                <RouteBoundary name="Estados de Workflow">
-                  <WorkflowStatusesPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="operacao" seccao="workflow" />}
           />
-          <Route path="/automation" element={
-              <ProtectedRoute allowedRoles={ADMIN_ROLES}>
-                <RouteBoundary name="Automação">
-                  <AutomationPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+          <Route path="/automation" element={<IrParaPainel grupo="operacao" seccao="automacoes" />}
           />
           
           {/* Form Management - Admin and CEO */}
           <Route
             path="/gestao-formulario"
-            element={
-              <ProtectedRoute allowedRoles={ADMIN_ROLES}>
-                <RouteBoundary name="Gestão de Formulário">
-                  <FormManagementPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="operacao" seccao="formulario" />}
           />
 
           {/* Templates / Destinatarios - Admin, CEO, Administrativo */}
@@ -751,37 +743,19 @@ function App() {
           {/* System Configuration - Admin and CEO only */}
           <Route
             path="/configuracoes"
-            element={
-              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
-                <RouteBoundary name="Configurações do Sistema">
-                  <SystemConfigPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="empresa" seccao="definicoes" />}
           />
           
           {/* Email Accounts Management - Admin and CEO only */}
           <Route
             path="/contas-email"
-            element={
-              <ProtectedRoute allowedRoles={["master"]}>
-                <RouteBoundary name="Contas de Email">
-                  <EmailAccountsPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="sistema" seccao="contas-email" />}
           />
           
           {/* AI Configuration - Admin only */}
           <Route
             path="/configuracoes/ia"
-            element={
-              <ProtectedRoute allowedRoles={["master"]}>
-                <RouteBoundary name="Configuração IA">
-                  <AIConfigPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="sistema" seccao="ia" />}
           />
           
           {/* AI Training - Admin only */}
@@ -799,25 +773,13 @@ function App() {
           {/* Background Jobs - Admin only */}
           <Route
             path="/admin/processos-background"
-            element={
-              <ProtectedRoute allowedRoles={["master"]}>
-                <RouteBoundary name="Processos em Background">
-                  <BackgroundJobsPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="sistema" seccao="processos-bg" />}
           />
           
           {/* Notification Settings - Admin only */}
           <Route
             path="/configuracoes/notificacoes"
-            element={
-              <ProtectedRoute allowedRoles={["master"]}>
-                <RouteBoundary name="Configurações de Notificações">
-                  <NotificationSettingsPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="sistema" seccao="notificacoes" />}
           />
           
           {/* Notifications Page - All staff */}
@@ -835,13 +797,7 @@ function App() {
           {/* System Logs (Unified) - Admin only */}
           <Route
             path="/admin/logs"
-            element={
-              <ProtectedRoute allowedRoles={["master"]}>
-                <RouteBoundary name="Logs do Sistema">
-                  <UnifiedLogsPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="sistema" seccao="logs" />}
           />
           
           {/* Redirect old import logs route to unified logs */}
@@ -853,25 +809,13 @@ function App() {
           {/* Backups Management - Admin only */}
           <Route
             path="/admin/backups"
-            element={
-              <ProtectedRoute allowedRoles={["master"]}>
-                <RouteBoundary name="Backups">
-                  <BackupsPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="sistema" seccao="backups" />}
           />
           
           {/* Diagnósticos - Admin only */}
           <Route
             path="/diagnosticos"
-            element={
-              <ProtectedRoute allowedRoles={["master"]}>
-                <RouteBoundary name="Diagnósticos">
-                  <DiagnosticsPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="sistema" seccao="diagnosticos" />}
           />
           
           {/* Minutas - Staff excepto indexacao */}
@@ -944,13 +888,7 @@ function App() {
           {/* Audit Trail - Admin and CEO */}
           <Route
             path="/auditoria"
-            element={
-              <ProtectedRoute allowedRoles={["master", "admin", "ceo"]}>
-                <RouteBoundary name="Auditoria">
-                  <AuditTrailPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
+            element={<IrParaPainel grupo="conformidade" seccao="auditoria" />}
           />
 
           {/* RGPD Admin - Página dedicada de RGPD */}

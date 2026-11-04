@@ -35,10 +35,8 @@ import {
   EyeOff,
   Mail,
   Phone,
-  Building2,
   Shield,
 } from "lucide-react";
-import WorkflowEditor from "../components/WorkflowEditor";
 import NotificationSettings from "../components/NotificationSettings";
 import TelegramSettings from "../components/TelegramSettings";
 import BulkDocumentUpload from "../components/BulkDocumentUpload";
@@ -253,9 +251,9 @@ const SettingsPage = () => {
               Notificações
             </TabsTrigger>
             {hasAnyRole(user, ["master", "admin", "ceo"]) && (
-              <TabsTrigger value="sistema" className="data-[state=active]:bg-teal-600 data-[state=active]:text-white">
+              <TabsTrigger value="sistema" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
                 <Settings className="h-4 w-4 mr-2" />
-                Sistema
+                Ferramentas
               </TabsTrigger>
             )}
           </TabsList>
@@ -542,7 +540,7 @@ const SettingsPage = () => {
             </div>
           </TabsContent>
 
-          {/* Tab Sistema (Admin e CEO) */}
+          {/* Tab Ferramentas (Admin e CEO): o upload massivo com IA */}
           {hasAnyRole(user, ["master", "admin", "ceo"]) && (
             <TabsContent value="sistema">
               <div className="space-y-6">
@@ -570,41 +568,8 @@ const SettingsPage = () => {
                   </CardContent>
                 </Card>
 
-                {/* Editor de Workflow */}
-                <WorkflowEditor />
-                
-                {/* Informação do Sistema */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Building2 className="h-5 w-5 text-primary" />
-                      Informação do Sistema
-                    </CardTitle>
-                    <CardDescription>
-                      Detalhes técnicos
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                      <div className="p-4 bg-muted/30 rounded-lg">
-                        <p className="text-sm text-muted-foreground">Versão</p>
-                        <p className="font-semibold text-lg">2.2.0</p>
-                      </div>
-                      <div className="p-4 bg-muted/30 rounded-lg">
-                        <p className="text-sm text-muted-foreground">Ambiente</p>
-                        <p className="font-semibold text-lg">Produção</p>
-                      </div>
-                      <div className="p-4 bg-muted/30 rounded-lg">
-                        <p className="text-sm text-muted-foreground">Base de Dados</p>
-                        <p className="font-semibold text-lg">MongoDB</p>
-                      </div>
-                      <div className="p-4 bg-muted/30 rounded-lg">
-                        <p className="text-sm text-muted-foreground">Última Atualização</p>
-                        <p className="font-semibold text-lg">Janeiro 2026</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                {/* O editor de Workflow e as configurações vivem em Administração (Flavio, Nov 2026):
+                    aqui era uma segunda cópia. */}
               </div>
             </TabsContent>
           )}

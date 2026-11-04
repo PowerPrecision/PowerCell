@@ -29,15 +29,16 @@ logger = logging.getLogger(__name__)
 
 # ==== DOCUMENT RECIPIENTS & SEND DOCUMENTATION (antes de /{email_id} para evitar conflito) ====
 
-async def run_get_document_recipients(current_user: dict):
+async def run_get_document_recipients(current_user: dict, company_id: Optional[str] = None):
     """
     Obter lista de destinatários disponíveis para envio de documentação.
-    Retorna balcões globais (sistema) + balcões personalizados do utilizador.
+    Retorna balcões da EMPRESA (activa de quem pede; sem configuração própria,
+    os globais) + balcões personalizados do utilizador.
     Os personalizados são identificados com is_custom: true.
     """
-    from services.system_config import get_system_config
-    
-    config = await get_system_config()
+    from services.config_da_empresa import config_da_empresa
+
+    config = await config_da_empresa(company_id or (current_user or {}).get("company"), bd=db)
     doc_config = config.document_recipients
     
     if not doc_config.enabled:
@@ -96,7 +97,7 @@ async def run_get_document_recipients(current_user: dict):
         "default_to": doc_config.default_to,
         "default_to_name": doc_config.default_to_name,
         "default_to_emails": default_to_emails,
-        "can_edit": current_user["role"] in ["master", "admin", "ceo"]
+        "can_edit": current_user.get("role") in ["master", "ceo"]
     }
 
 
@@ -129,7 +130,9 @@ async def run_preview_email_template(data: dict, current_user: dict):
     email_template = data.get("email_template")
 
     if not email_template:
-        config = await get_system_config()
+        from services.config_da_empresa import config_da_empresa
+
+        config = await config_da_empresa(data.get("company_id") or (current_user or {}).get("company"), bd=db)
         doc_config = config.document_recipients
         email_template = doc_config.email_template
 
@@ -261,8 +264,10 @@ async def run_preview_documentation_email(process_id: str, current_user: dict):
     # ── Desencriptar dados sensíveis para o preview ──
     process = decrypt_sensitive_data(process)
     
-    # Obter configuração
-    config = await get_system_config()
+    # Configuração da EMPRESA do processo (Flavio, Nov 2026, pergunta 7a)
+    from services.config_da_empresa import config_do_processo
+
+    config = await config_do_processo(process, bd=db)
     doc_config = config.document_recipients
     
     # NOTA: O preview deve funcionar mesmo que o envio de documentação esteja
@@ -422,8 +427,10 @@ async def _send_documentation_email_impl(
     # como texto legível (nunca ENC:xxx)
     process = decrypt_sensitive_data(process)
     
-    # Obter configuração
-    config = await get_system_config()
+    # Configuração da EMPRESA do processo (Flavio, Nov 2026, pergunta 7a)
+    from services.config_da_empresa import config_do_processo
+
+    config = await config_do_processo(process, bd=db)
     doc_config = config.document_recipients
     
     if not doc_config.enabled:

@@ -495,7 +495,13 @@ export default function CompaniesAdminTab({ isMaster = false }) {
                 />
               </div>
               <div className="space-y-4 pt-2 border-t border-border">
-                <p className="text-sm font-medium text-foreground">SMTP (opcional)</p>
+                <div>
+                  <p className="text-sm font-medium text-foreground">Caixa Geral da empresa — envio (SMTP)</p>
+                  <p className="text-xs text-muted-foreground">
+                    É aqui que se configura o email geral da empresa (o Webmail usa-o). O email
+                    pessoal de cada um configura-se no Perfil de cada utilizador.
+                  </p>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="company-smtp-email">Email SMTP</Label>
                   <Input
@@ -552,7 +558,7 @@ export default function CompaniesAdminTab({ isMaster = false }) {
                 </div>
               </div>
               <div className="space-y-4 pt-2 border-t border-border">
-                <p className="text-sm font-medium text-foreground">IMAP (opcional — Webmail)</p>
+                <p className="text-sm font-medium text-foreground">Caixa Geral da empresa — receção (IMAP)</p>
                 <div className="space-y-2">
                   <Label htmlFor="company-imap-email">Email IMAP</Label>
                   <Input

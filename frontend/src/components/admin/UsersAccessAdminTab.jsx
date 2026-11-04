@@ -119,7 +119,11 @@ const LAST_UCR_TOAST = LAST_UCR_DELETE_MESSAGE;
  *   `false`: esquecer a prop esconde uma opção em vez de a mostrar a quem não
  *   a pode usar.
  */
-export default function UsersAccessAdminTab({ isMaster = false }) {
+/**
+ * `soLeitura` — o Diretor CONSULTA a equipa da sua empresa (Flavio, Nov 2026, pergunta 3a):
+ * vê a lista, mas sem criar, editar, suspender nem eliminar.
+ */
+export default function UsersAccessAdminTab({ isMaster = false, soLeitura = false }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState(null);
@@ -533,15 +537,17 @@ export default function UsersAccessAdminTab({ isMaster = false }) {
             data-testid="org-admin-users-search"
           />
         </div>
-        <Button
-          size="sm"
-          className="gap-1.5 shrink-0"
-          onClick={() => setCreateOpen(true)}
-          data-testid="btn-new-user"
-        >
-          <UserPlus className="h-4 w-4" />
-          Novo Utilizador
-        </Button>
+        {!soLeitura && (
+          <Button
+            size="sm"
+            className="gap-1.5 shrink-0"
+            onClick={() => setCreateOpen(true)}
+            data-testid="btn-new-user"
+          >
+            <UserPlus className="h-4 w-4" />
+            Novo Utilizador
+          </Button>
+        )}
       </div>
 
       {usersLoading && users.length === 0 ? (
@@ -603,6 +609,7 @@ export default function UsersAccessAdminTab({ isMaster = false }) {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
+                      {!soLeitura && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -661,6 +668,7 @@ export default function UsersAccessAdminTab({ isMaster = false }) {
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

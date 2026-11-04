@@ -17,6 +17,7 @@ import {
 } from "../../components/ui/select";
 import RichTextEditor from "../../components/ui/RichTextEditor";
 import { safeString } from "../../utils/safeString";
+import { revealSystemConfigSecrets } from "../../services/api";
 import { toast } from "sonner";
 import {
   Settings,
@@ -38,7 +39,6 @@ import {
   MailCheck,
 } from "lucide-react";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 /** Ícones por secção dinâmica do system-config. */
 export const SECTION_ICONS = {
@@ -67,6 +67,13 @@ export const SECTION_ICONS = {
  */
 export const SECTION_LABELS = {
   document_recipients: "Envio para Balcões",
+  settings: "Dados legais e aparência",
+  credit_services: "Serviços de crédito",
+  dsti_analysis: "Análise DSTI",
+  auto_draft: "Rascunhos automáticos",
+  audit_trail: "Auditoria",
+  storage: "Armazenamento",
+  ai: "Inteligência Artificial",
 };
 
 /** Obtém o rótulo a mostrar na navegação lateral para uma secção. */
@@ -81,17 +88,12 @@ export const ConfigFieldInput = ({ field, value, onChange, allValues, sectionNam
   const handleRevealSecret = async () => {
     setLoadingReveal(true);
     try {
-      const token = localStorage.getItem("token");
-      const res = await fetch(`${API_URL}/api/system-config/reveal-secrets?section=${sectionName}&company_id=${encodeURIComponent(companyId)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const secretVal = data.secrets?.[field.key];
-        if (secretVal) {
-          setRevealedValue(secretVal);
-          setShowPassword(true);
-        }
+      // Axios: leva `X-Company-Id`/`X-Active-Role` (um `fetch` cru perdia-os).
+      const { data } = await revealSystemConfigSecrets(sectionName, companyId);
+      const secretVal = data?.secrets?.[field.key];
+      if (secretVal) {
+        setRevealedValue(secretVal);
+        setShowPassword(true);
       }
     } catch (err) {
       console.error("Erro ao revelar password:", err);
@@ -271,7 +273,7 @@ export const ConfigFieldInput = ({ field, value, onChange, allValues, sectionNam
 };
 
 // Componente para secção de configuração
-export const ConfigSection = ({ section, sectionKey, companyId = "default", config, fields, onSave, onTest }) => {
+export const ConfigSection = ({ section, sectionKey, companyId = "default", config, fields, onSave, onTest, readOnly = false }) => {
   const [localConfig, setLocalConfig] = useState(config || {});
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -344,7 +346,7 @@ export const ConfigSection = ({ section, sectionKey, companyId = "default", conf
             </div>
           </div>
           {hasChanges && (
-            <Badge variant="outline" className="bg-yellow-50 text-yellow-700">
+            <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">
               Alterações por guardar
             </Badge>
           )}
@@ -352,6 +354,8 @@ export const ConfigSection = ({ section, sectionKey, companyId = "default", conf
       </CardHeader>
 
       <CardContent className="space-y-4">
+        {/* Só consulta (Admin/Diretor na «A empresa»): os campos ficam visíveis mas desligados. */}
+        <fieldset disabled={readOnly} className="space-y-4 disabled:opacity-80" data-testid="config-campos">
         {fields.map((field) => (
           <ConfigFieldInput
             key={field.key}
@@ -363,14 +367,15 @@ export const ConfigSection = ({ section, sectionKey, companyId = "default", conf
             companyId={companyId}
           />
         ))}
+        </fieldset>
 
         {/* Test result */}
         {testResult && (
           <div
             className={`flex items-center gap-2 p-3 rounded-lg ${
               testResult.success
-                ? "bg-green-50 text-green-700"
-                : "bg-red-50 text-red-700"
+                ? "bg-primary/10 text-primary"
+                : "bg-destructive/10 text-destructive"
             }`}
           >
             {testResult.success ? (
@@ -383,6 +388,7 @@ export const ConfigSection = ({ section, sectionKey, companyId = "default", conf
         )}
 
         {/* Actions */}
+        {!readOnly && (
         <div className="flex items-center gap-2 pt-4 border-t">
           <Button onClick={handleSave} disabled={saving || !hasChanges}>
             {saving ? (
@@ -393,7 +399,7 @@ export const ConfigSection = ({ section, sectionKey, companyId = "default", conf
             Guardar
           </Button>
 
-          {["storage", "email", "ai"].includes(sectionKey) && (
+          {["storage", "email", "ai"].includes(sectionKey) && companyId === "default" && (
             <Button variant="outline" onClick={handleTest} disabled={testing}>
               {testing ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -404,6 +410,7 @@ export const ConfigSection = ({ section, sectionKey, companyId = "default", conf
             </Button>
           )}
         </div>
+        )}
       </CardContent>
     </Card>
   );

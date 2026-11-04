@@ -105,10 +105,14 @@ DOC_TYPE_LABELS = {
 }
 
 
-async def get_auto_draft_config() -> Dict[str, Any]:
-    """Obter configuração de rascunhos automáticos."""
-    from services.system_config import get_system_config
-    config = await get_system_config()
+async def get_auto_draft_config(process_id: Optional[str] = None) -> Dict[str, Any]:
+    """Obter configuração de rascunhos automáticos — da EMPRESA do processo.
+
+    Flavio (Nov 2026, pergunta 7a): os rascunhos são da casa. Sem processo (ou
+    sem empresa) vale a global.
+    """
+    from services.config_da_empresa import config_do_processo
+    config = await config_do_processo(process_id=process_id, bd=db)
 
     # Verificar se a secção auto_draft existe na config
     auto_draft = getattr(config, "auto_draft", None)
@@ -148,7 +152,7 @@ async def create_missing_doc_draft(
     """
     try:
         # 1. Verificar se a funcionalidade está activa
-        config = await get_auto_draft_config()
+        config = await get_auto_draft_config(process_id)
         if not config["enabled"]:
             logger.debug("Auto-draft desactivado nas configurações")
             return {"success": False, "reason": "disabled"}

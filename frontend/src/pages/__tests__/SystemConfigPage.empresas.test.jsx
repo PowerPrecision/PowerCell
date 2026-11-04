@@ -62,13 +62,11 @@ describe("SystemConfigPage — a empresa cuja configuração se mostra", () => {
     urlsPedidos = [];
     auth.effectiveCompanyId = null;
     auth.user = { id: "u1", name: "A", role: "master" };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url) => {
-        urlsPedidos.push(String(url));
-        return { ok: true, json: async () => RESPOSTA };
-      }),
-    );
+    // A página pede a configuração por Axios (`getSystemConfig(companyId)`).
+    apiMock.getSystemConfig.mockImplementation(async (cid) => {
+      urlsPedidos.push(`/api/system-config?company_id=${cid}`);
+      return { data: RESPOSTA };
+    });
   });
 
   const pedidosDeConfig = () => urlsPedidos.filter((u) => /\/api\/system-config\?company_id=/.test(u));
