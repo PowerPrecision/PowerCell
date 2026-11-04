@@ -385,8 +385,8 @@ class TestNivel2Estagnado:
         r = await sla.correr_sla_do_index(agora=AGORA + _depois_uteis(5, depois) + timedelta(minutes=1))
         assert r["nivel2"]["alertados"] == 1  # parou outra vez: alerta novo, sem esperar pelo lembrete
 
-    async def test_um_processo_so_atribuido_e_parado_ha_dez_dias_e_nivel_1_nao_e_alerta_de_estagnacao(self, bd):
-        await _processo(bd, index_assigned_at=_d(10))
+    async def test_um_processo_so_atribuido_e_parado_ha_dezasseis_dias_e_nivel_1_nao_e_alerta_de_estagnacao(self, bd):
+        await _processo(bd, index_assigned_at=_d(16))  # passou o limiar do nível 1 (15 dias)
         r = await sla.correr_sla_do_index(agora=AGORA)
         assert r["nivel2"]["estagnados"] == 0 and r["nivel1"]["reatribuidos"] == 1
         assert await _avisos(bd, type="index_stagnation") == []
