@@ -1348,6 +1348,9 @@ export const startIndexWork = (processId) =>
 // «Atribuir a mim» (Out 2026): o indexador assume um processo «Por indexar» que ninguém começou.
 export const assumirIndexProcess = (processId) =>
   api.post(`/index/processes/${processId}/assumir`, null, { skipErrorToast: true });
+// «Reabrir» (Nov 2026): um processo já indexado volta ao Index (o Index reabre para si; a gestão, para a fila).
+export const reabrirIndexProcess = (processId, motivo) =>
+  api.post(`/index/processes/${processId}/reabrir`, { motivo: motivo || null }, { skipErrorToast: true });
 // Pedido de alteração de atribuição (Out 2026): o Index PEDE à chefia (motivo opcional); a chefia trata-o
 // pelo «Gerir» do processo e fecha o pedido («concluido» | «recusado»). O Index só vê os seus pedidos.
 export const pedirAlteracaoDeAtribuicao = (processId, motivo) =>

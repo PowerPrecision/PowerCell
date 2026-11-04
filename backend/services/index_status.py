@@ -144,6 +144,41 @@ def campos_ao_reverter(doc_atual: dict, user: dict, now: str) -> dict[str, Any]:
     }
 
 
+def campos_ao_reabrir(doc_atual: dict, user: dict, now: str, *, para_mim: bool, motivo: Optional[str]) -> dict[str, Any]:
+    """`$set` de «Reabrir» (Nov 2026): um processo já indexado volta ao trabalho do Index.
+
+    O caso do Flavio: indexado hoje, daqui a dois meses o banco pede os recibos e os extratos desses meses.
+    É o «desligar indexado» com três diferenças:
+
+    * `index_reaberto=True` — ao voltar a marcar como indexado, a fase do workflow NÃO salta outra vez nem a
+      automação da fase corre de novo (o processo já seguiu o seu caminho; ver `process_indexing`);
+    * `para_mim` (o Index reabre para si) — fica atribuído a quem reabriu e já «Em tratamento»;
+      sem isso (a gestão reabre) volta à fila «Por indexar», sem dono;
+    * o carimbo e o motivo da reabertura ficam no processo (`index_reopened_*`).
+    """
+    campos = {
+        **campos_ao_reverter(doc_atual, user, now),
+        "index_reaberto": True,
+        "index_reopened_at": now,
+        "index_reopened_by": (user or {}).get("id"),
+        "index_reopened_by_name": (user or {}).get("name", ""),
+        "index_reopen_reason": (motivo or "").strip() or None,
+        "updated_at": now,
+    }
+    if para_mim and campos.get("index_status") == PENDING:
+        campos.update({
+            "index_status": IN_REVIEW,
+            "assigned_indexacao_id": (user or {}).get("id"),
+            "indexacao_name": (user or {}).get("name"),
+            "index_assigned_at": now,
+            "index_work_started_at": now,
+            "index_last_activity_at": now,
+        })
+    else:
+        campos.update({"assigned_indexacao_id": None, "indexacao_name": None})
+    return campos
+
+
 # ====================================================================
 # A FILA (condições Mongo)
 # ====================================================================
@@ -170,6 +205,10 @@ def condicao_da_fila(aba: str) -> dict:
         }
     if aba == "reviews":
         return {"is_indexed": True, "has_pending_review": True}
+    if aba == "indexed":
+        # «Indexados» (Nov 2026): o que uma PESSOA já indexou — para o voltar a ver e, se for preciso, reabrir.
+        # Os dispensados (Via Verde / rede sem Index) não entram: nunca passaram pelo Index.
+        return {"is_indexed": True}
     return {"id": {"$in": []}}
 
 
@@ -219,6 +258,19 @@ async def assumir(process_id: str, anterior: Optional[str], novo: dict) -> bool:
         }},
     )
     return bool(r.modified_count)
+
+
+async def reabrir(
+    process_id: str, doc_atual: dict, user: dict, *, para_mim: bool, motivo: Optional[str]
+) -> Optional[dict[str, Any]]:
+    """Grava a reabertura (`campos_ao_reabrir`) SÓ se o processo ainda está indexado; `None` se já não está
+    (outro reabriu entretanto). Devolve os campos gravados."""
+    campos = campos_ao_reabrir(doc_atual, user, _agora(), para_mim=para_mim, motivo=motivo)
+    r = await db.processes.update_one(
+        {"id": process_id, "is_deleted": {"$ne": True}, "is_indexed": True},
+        {"$set": campos, "$inc": {"index_reopen_count": 1}},
+    )
+    return campos if r.matched_count else None
 
 
 async def registar_trabalho(process_id: str, user_id: Optional[str]) -> dict[str, Any]:

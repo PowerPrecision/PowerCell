@@ -36,6 +36,8 @@ import { ORDENACAO_POR_OMISSAO, ordenacaoValida, proximaOrdenacao, separadorVali
 const SEPARADORES_PESSOAIS = Object.freeze([
   { valor: "pending", rotulo: "Por tratar" },
   { valor: "reviews", rotulo: "Indexados a rever" },
+  // Nov 2026: os que já indexou — para os voltar a ver e, se for preciso, reabrir
+  { valor: "indexed", rotulo: "Indexados por mim" },
 ]);
 
 /** Só estes filtros chegam ao servidor: a posse (`mine`) é fixa e não se escolhe no ecrã. */
@@ -70,7 +72,7 @@ export default function OsMeusProcessosDoIndex() {
         <PageHeader
           icon={ClipboardCheck}
           title="Os Meus Processos"
-          description="Os processos que lhe estão atribuídos para indexar: de onde vêm, em que estado estão, quantos documentos e avisos têm."
+          description="Os processos que lhe estão atribuídos para indexar e os que já indexou: de onde vêm, em que estado estão, quantos documentos e avisos têm."
           onRefresh={() => fila.refetch()}
           actions={
             <BotaoComPermissao

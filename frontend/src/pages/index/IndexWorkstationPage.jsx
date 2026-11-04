@@ -42,6 +42,7 @@ import { ConversaDoProcesso } from "../../components/index/ConversaDoProcesso";
 import { EmployerNifDialog } from "../../components/index/EmployerNifDialog";
 import { IndexActionsBar } from "../../components/index/IndexActionsBar";
 import { PedirAlteracaoDeAtribuicao } from "../../components/index/PedirAlteracaoDeAtribuicao";
+import { ReabrirProcesso } from "../../components/index/ReabrirProcesso";
 import { ProfessionalReviewPanel } from "../../components/index/ProfessionalReviewPanel";
 import { UploadNaBancada } from "../../components/index/UploadNaBancada";
 import VisualizadorDeDocumento from "../../components/index/VisualizadorDeDocumento";
@@ -414,6 +415,8 @@ export default function IndexWorkstationPage() {
   // A equipa do Index trabalha a partir de «Os Meus Processos»; a gestão supervisiona a partir da fila.
   const papel = auth?.effectiveRole || auth?.user?.role;
   const daEquipa = papel === "indexacao";
+  // «Reabrir» um processo indexado (Nov 2026): quem o pode marcar como indexado (o Diretor não); o servidor decide.
+  const podeReabrirPeloPapel = ["indexacao", "master", "admin", "ceo"].includes(papel);
   // «Voltar à fila» foi extinto com a fila-pool: quem trabalha como Index regressa a «Os meus processos»;
   // os outros perfis voltam pelo menu (ou pelo «Voltar» do browser, que devolve a lista como estava).
   const irParaOsMeus = () => navigate("/processos");
@@ -513,6 +516,7 @@ export default function IndexWorkstationPage() {
           actions={
             daEquipa ? (
               <span className="flex flex-wrap items-center gap-2">
+                <ReabrirProcesso processo={processo} daEquipa reabrir={m.reabrir} />
                 {podeAssumir && (
                   <Button
                     onClick={() => m.assumir.mutate()}
@@ -531,6 +535,8 @@ export default function IndexWorkstationPage() {
                   Os meus processos
                 </Button>
               </span>
+            ) : podeReabrirPeloPapel ? (
+              <ReabrirProcesso processo={processo} daEquipa={false} reabrir={m.reabrir} />
             ) : undefined
           }
         />

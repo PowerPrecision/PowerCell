@@ -21,6 +21,7 @@ import {
   editIndexJob,
   extractIndexProcess,
   markIndexProcessIndexed,
+  reabrirIndexProcess,
   sanitizeIndexProcess,
   setIndexFileTitular,
 } from "../../services/api";
@@ -126,5 +127,15 @@ export function useIndexMutations(processId) {
     onError: falhou,
   });
 
-  return { analisar, analisarFicheiro, eliminarFicheiro, extrair, sanitizar, editar, dispensar, marcarIndexado, assumir, mudarTitular };
+  // «Reabrir» um processo já indexado (Nov 2026): a mensagem diz para onde foi (para si ou para a fila).
+  const reabrir = useMutation({
+    mutationFn: (motivo) => reabrirIndexProcess(processId, motivo),
+    onSuccess: (resposta) => {
+      toast.success(resposta?.data?.message || "Processo reaberto.");
+      return refrescar();
+    },
+    onError: falhou,
+  });
+
+  return { analisar, analisarFicheiro, eliminarFicheiro, extrair, sanitizar, editar, dispensar, marcarIndexado, assumir, mudarTitular, reabrir };
 }

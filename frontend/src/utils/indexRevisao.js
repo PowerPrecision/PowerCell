@@ -17,7 +17,14 @@
 export const SEPARADORES = Object.freeze([
   { valor: "pending", rotulo: "Fila de Espera" },
   { valor: "reviews", rotulo: "Revisões Pendentes" },
+  // Nov 2026: o que já foi indexado, para o voltar a ver e, se for preciso, reabrir
+  { valor: "indexed", rotulo: "Indexados" },
 ]);
+
+/** As abas do que já está indexado: ordenam e datam pela indexação, não pela entrada. */
+export function abaDeIndexados(aba) {
+  return aba === "reviews" || aba === "indexed";
+}
 
 export const SEPARADOR_OMISSAO = "pending";
 
@@ -238,7 +245,7 @@ export function rotuloDoTipoDeAnalise(tipo) {
 // ORDENAÇÃO E FILTROS DA FILA (Out 2026) — iguais às listas fechadas do servidor (`index_queue_query`)
 // ====================================================================
 /** Ordem por omissão de cada aba: o que o ecrã mostrava antes de haver ordenação. */
-export const ORDENACAO_POR_OMISSAO = Object.freeze({ pending: "created_asc", reviews: "indexed_desc" });
+export const ORDENACAO_POR_OMISSAO = Object.freeze({ pending: "created_asc", reviews: "indexed_desc", indexed: "indexed_desc" });
 
 const ROTULOS_DA_ORDENACAO = Object.freeze({
   created: ["Entrada · mais antigos primeiro", "Entrada · mais recentes primeiro"],
@@ -253,7 +260,7 @@ const ROTULOS_DA_ORDENACAO = Object.freeze({
 /** `indexed` só existe nas Revisões (os processos por indexar não têm data de indexação). */
 function camposDaAba(aba) {
   const comuns = ["client", "number", "company", "status", "alerts"];
-  return aba === "reviews" ? ["indexed", ...comuns] : ["created", ...comuns];
+  return abaDeIndexados(aba) ? ["indexed", ...comuns] : ["created", ...comuns];
 }
 
 /** As opções do seletor «Ordenar por»: `[{valor: "client_asc", rotulo}]`. */
@@ -272,7 +279,7 @@ export function ordenacaoValida(aba, valor) {
 
 /** A coluna → o campo de ordenação (a coluna da data muda de campo com a aba). */
 export function campoDaColuna(aba, coluna) {
-  if (coluna === "data") return aba === "reviews" ? "indexed" : "created";
+  if (coluna === "data") return abaDeIndexados(aba) ? "indexed" : "created";
   return { processo: "client", empresa: "company", estado: "status", alertas: "alerts" }[coluna] || null;
 }
 
@@ -297,7 +304,7 @@ export function proximaOrdenacao(aba, ordem, coluna) {
 }
 
 /** Estados que cada aba pode ter (o servidor recusa os outros com 422). */
-export const ESTADOS_DA_ABA = Object.freeze({ pending: ["pending", "in_review"], reviews: ["indexed"] });
+export const ESTADOS_DA_ABA = Object.freeze({ pending: ["pending", "in_review"], reviews: ["indexed"], indexed: ["indexed"] });
 export const ORIGENS_DA_FILA = Object.freeze([
   { valor: "own", rotulo: "Da minha rede" },
   { valor: "shared", rotulo: "Partilhados por outra" },
