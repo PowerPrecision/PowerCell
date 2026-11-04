@@ -419,7 +419,7 @@ const FilesExplorerPage = () => {
             </h3>
             <p className="text-sm text-amber-700 dark:text-amber-300 mt-1 max-w-md">
               O Explorador de Ficheiros necessita de credenciais S3 (Amazon S3, MinIO ou compatível) para funcionar.
-              Configure o acesso nas Definições Gerais do sistema.
+              Configure o acesso em Administração › Sistema.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -435,7 +435,7 @@ const FilesExplorerPage = () => {
                 </Button>
                 <Button
                   variant="ghost"
-                  onClick={() => navigate("/configuracoes")}
+                  onClick={() => navigate("/system-admin?grupo=sistema&seccao=configuracao&tab=storage")}
                   className="gap-2"
                 >
                   Ir para Configurações
@@ -649,7 +649,7 @@ const FilesExplorerPage = () => {
                 <div>
                   <p className="font-medium text-muted-foreground">Nenhum ficheiro encontrado</p>
                   <p className="text-sm text-muted-foreground/70 mt-1">
-                    Verifique as configurações de armazenamento nas Definições Gerais.<br />
+                    Verifique as configurações de armazenamento em Administração › Sistema.<br />
                     {!currentPath && "Certifique-se de que o caminho base (Base Path) está correto."}
                   </p>
                 </div>
@@ -950,10 +950,10 @@ const FilesExplorerPage = () => {
               <p className="text-sm text-muted-foreground">
                 As credenciais S3 também podem ser configuradas na página de{" "}
                 <button
-                  onClick={() => { setConfigDialog({ open: false }); navigate("/configuracoes"); }}
+                  onClick={() => { setConfigDialog({ open: false }); navigate("/system-admin?grupo=sistema&seccao=configuracao&tab=storage"); }}
                   className="text-primary underline hover:no-underline"
                 >
-                  Definições Gerais
+                  Administração › Sistema
                 </button>.
               </p>
             </div>
@@ -982,9 +982,9 @@ const FilesExplorerPage = () => {
             <Button variant="outline" onClick={() => setConfigDialog({ open: false })}>
               Cancelar
             </Button>
-            <Button onClick={() => navigate("/configuracoes")} className="gap-2">
+            <Button onClick={() => navigate("/system-admin?grupo=sistema&seccao=configuracao&tab=storage")} className="gap-2">
               <Settings className="h-4 w-4" />
-              Ir para Definições Gerais
+              Ir para Administração › Sistema
             </Button>
           </DialogFooter>
         </DialogContent>
