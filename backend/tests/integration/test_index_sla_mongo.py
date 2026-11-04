@@ -23,6 +23,10 @@ pytestmark = pytest.mark.asyncio
 AGORA = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
 
 
+#: Nível 1 por omissão: 15 dias (360 h) sem pegar — pedido do Flavio, Nov 2026.
+LIMIAR_H = 15 * 24
+
+
 def _h(horas: float) -> str:
     return (AGORA - timedelta(hours=horas)).isoformat()
 
@@ -110,7 +114,7 @@ async def bd(monkeypatch):
 async def _processo(bd, pid="p1", **extra):
     doc = {"id": pid, "process_number": 100, "client_name": "Cliente Segredo", "network_id": "rede-A", "status": "novo",
            "is_deleted": False, "is_indexed": False, "index_status": "pending", "assigned_indexacao_id": "ix1",
-           "indexacao_name": "Ana Index", "index_assigned_at": _h(49), "created_at": _d(10), "updated_at": _d(10), **extra}
+           "indexacao_name": "Ana Index", "index_assigned_at": _h(LIMIAR_H + 1), "created_at": _d(10), "updated_at": _d(10), **extra}
     await bd.processes.insert_one(doc)
     return doc
 
@@ -128,11 +132,11 @@ async def _avisos(bd, **filtro):
 # ====================================================================
 class TestConfiguracao:
     def test_omissoes(self):
-        assert sla.horas_sem_pegar({}) == 48 and sla.dias_sem_actividade({}) == 5 and sla.sla_activo({}) is True
+        assert sla.horas_sem_pegar({}) == LIMIAR_H and sla.dias_sem_actividade({}) == 5 and sla.sla_activo({}) is True
 
     @pytest.mark.parametrize("valor", ["0", "-3", "x", "", None])
     def test_valor_invalido_cai_na_omissao_e_nunca_desliga_o_limiar(self, valor):
-        assert sla.horas_sem_pegar({"INDEX_SLA_UNTOUCHED_HOURS": valor}) == 48
+        assert sla.horas_sem_pegar({"INDEX_SLA_UNTOUCHED_HOURS": valor}) == LIMIAR_H
         assert sla.dias_sem_actividade({"INDEX_SLA_STALE_DAYS": valor}) == 5
 
     def test_valores_validos_e_interruptor(self):
@@ -187,7 +191,7 @@ class TestPredicados:
 # NÍVEL 1 — INTOCADO
 # ====================================================================
 class TestNivel1Intocado:
-    async def test_passadas_48h_sem_pegar_retira_e_reatribui_a_outro(self, bd):
+    async def test_passados_15_dias_sem_pegar_retira_e_reatribui_a_outro(self, bd):
         await _processo(bd)
         r = await sla.correr_sla_do_index(agora=AGORA)
         assert r["nivel1"]["reatribuidos"] == 1
@@ -203,15 +207,15 @@ class TestNivel1Intocado:
         await sla.correr_sla_do_index(agora=AGORA)
         novo = (await _doc(bd))["assigned_indexacao_id"]
         antigo = await _avisos(bd, user_id="ix1")
-        assert len(antigo) == 1 and antigo[0]["type"] == "process_unassigned" and "48h" in antigo[0]["message"]
+        assert len(antigo) == 1 and antigo[0]["type"] == "process_unassigned" and "15 dias" in antigo[0]["message"]
         recebido = await _avisos(bd, user_id=novo)
         assert len(recebido) == 1 and recebido[0]["type"] == "process_assigned"
         assert recebido[0]["link"] == "/index/p1"
         hist = await bd.history.find({"process_id": "p1"}, {"_id": 0}).to_list(10)
         assert hist and "Reatribuído automaticamente" in hist[0]["action"]
 
-    async def test_antes_das_48h_nao_toca(self, bd):
-        await _processo(bd, index_assigned_at=_h(47))
+    async def test_antes_dos_15_dias_nao_toca(self, bd):
+        await _processo(bd, index_assigned_at=_h(LIMIAR_H - 1))
         r = await sla.correr_sla_do_index(agora=AGORA)
         assert r["nivel1"]["reatribuidos"] == 0
         assert (await _doc(bd))["assigned_indexacao_id"] == "ix1"
@@ -236,7 +240,7 @@ class TestNivel1Intocado:
         r = await sla.correr_sla_do_index(agora=AGORA)
         assert r["nivel1"]["sem_candidato"] == 1 and r["nivel1"]["reatribuidos"] == 0
         doc = await _doc(bd)
-        assert doc["assigned_indexacao_id"] == "ix1" and doc["index_assigned_at"] == _h(49)  # o relógio não foi reposto
+        assert doc["assigned_indexacao_id"] == "ix1" and doc["index_assigned_at"] == _h(LIMIAR_H + 1)  # o relógio não foi reposto
 
     async def test_um_indexador_sem_vaga_nao_recebe(self, bd):
         await bd.users.update_one({"id": "ix3"}, {"$set": {"is_active": False}})
@@ -287,11 +291,11 @@ class TestNivel1Intocado:
         r2 = await sla.correr_sla_do_index(agora=AGORA + timedelta(hours=1))
         assert r2["nivel1"]["reatribuidos"] == 0 and (await _doc(bd))["assigned_indexacao_id"] == primeiro
 
-    async def test_passadas_mais_48h_passa_para_o_terceiro_e_nao_volta_ao_primeiro(self, bd):
+    async def test_passados_mais_15_dias_passa_para_o_terceiro_e_nao_volta_ao_primeiro(self, bd):
         await _processo(bd)
         await sla.correr_sla_do_index(agora=AGORA)
         segundo = (await _doc(bd))["assigned_indexacao_id"]
-        await sla.correr_sla_do_index(agora=AGORA + timedelta(hours=49))
+        await sla.correr_sla_do_index(agora=AGORA + timedelta(hours=LIMIAR_H + 1))
         doc = await _doc(bd)
         assert doc["assigned_indexacao_id"] not in ("ix1", segundo)
         assert doc["index_sla_anteriores"] == ["ix1", segundo]
@@ -302,7 +306,7 @@ class TestNivel1Intocado:
         r = await sla.correr_sla_do_index(agora=AGORA)
         assert r["legados_carimbados"] == 1 and r["nivel1"]["reatribuidos"] == 0
         assert (await _doc(bd))["index_assigned_at"] == AGORA.isoformat()
-        r2 = await sla.correr_sla_do_index(agora=AGORA + timedelta(hours=49))
+        r2 = await sla.correr_sla_do_index(agora=AGORA + timedelta(hours=LIMIAR_H + 1))
         assert r2["nivel1"]["reatribuidos"] == 1 and doc
 
     async def test_desligado_nao_faz_nada(self, bd, monkeypatch):
@@ -435,3 +439,10 @@ class TestOsDoisNiveisJuntos:
         tarefas = ScheduledTasksService.__new__(ScheduledTasksService)
         with patch.object(sla, "_agora", lambda: AGORA):
             assert await tarefas.run_index_sla() == 2
+
+
+class TestPrazoLegivel:
+    def test_dias_inteiros_e_horas_soltas(self):
+        assert sla.prazo_legivel(360) == "15 dias"
+        assert sla.prazo_legivel(24) == "1 dia"
+        assert sla.prazo_legivel(36) == "36h"
